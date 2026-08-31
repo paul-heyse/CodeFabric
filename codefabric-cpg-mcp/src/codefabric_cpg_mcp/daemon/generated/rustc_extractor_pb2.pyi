@@ -291,30 +291,50 @@ class CompilationEnd(_message.Message):
     def __init__(self, provider_run_id: _Optional[str] = ..., compilation_unit_id: _Optional[str] = ..., sequence: _Optional[int] = ..., compiler_exit_status: _Optional[int] = ..., closed_owner_set_digest: _Optional[str] = ..., capability_outcomes: _Optional[_Iterable[_Union[_provider_control_pb2.CapabilityOutcome, _Mapping]]] = ..., diagnostic_summary: _Optional[_Union[DiagnosticSummary, _Mapping]] = ..., overall_stream_digest: _Optional[str] = ..., terminal_state: _Optional[_Union[_provider_control_pb2.ProviderRunState, str]] = ..., rejection_error: _Optional[_Union[RejectionRuleErrorCode, str]] = ...) -> None: ...
 
 class ExtractorCommand(_message.Message):
-    __slots__ = ("compilation_accepted", "chunk_accepted", "chunk_rejected", "cancel")
+    __slots__ = ("compilation_accepted", "chunk_accepted", "chunk_rejected", "cancel", "relation_ipc_ack")
     COMPILATION_ACCEPTED_FIELD_NUMBER: _ClassVar[int]
     CHUNK_ACCEPTED_FIELD_NUMBER: _ClassVar[int]
     CHUNK_REJECTED_FIELD_NUMBER: _ClassVar[int]
     CANCEL_FIELD_NUMBER: _ClassVar[int]
+    RELATION_IPC_ACK_FIELD_NUMBER: _ClassVar[int]
     compilation_accepted: CompilationAccepted
     chunk_accepted: _provider_control_pb2.ChunkAccepted
     chunk_rejected: _provider_control_pb2.ChunkRejected
     cancel: CancelCompilationRequest
-    def __init__(self, compilation_accepted: _Optional[_Union[CompilationAccepted, _Mapping]] = ..., chunk_accepted: _Optional[_Union[_provider_control_pb2.ChunkAccepted, _Mapping]] = ..., chunk_rejected: _Optional[_Union[_provider_control_pb2.ChunkRejected, _Mapping]] = ..., cancel: _Optional[_Union[CancelCompilationRequest, _Mapping]] = ...) -> None: ...
+    relation_ipc_ack: _provider_control_pb2.RelationIpcFrame
+    def __init__(self, compilation_accepted: _Optional[_Union[CompilationAccepted, _Mapping]] = ..., chunk_accepted: _Optional[_Union[_provider_control_pb2.ChunkAccepted, _Mapping]] = ..., chunk_rejected: _Optional[_Union[_provider_control_pb2.ChunkRejected, _Mapping]] = ..., cancel: _Optional[_Union[CancelCompilationRequest, _Mapping]] = ..., relation_ipc_ack: _Optional[_Union[_provider_control_pb2.RelationIpcFrame, _Mapping]] = ...) -> None: ...
+
+class OwnerRelationIpcFrame(_message.Message):
+    __slots__ = ("provider_run_id", "compilation_unit_id", "sequence", "owner_id", "observation_family_code", "frame")
+    PROVIDER_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    COMPILATION_UNIT_ID_FIELD_NUMBER: _ClassVar[int]
+    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    OWNER_ID_FIELD_NUMBER: _ClassVar[int]
+    OBSERVATION_FAMILY_CODE_FIELD_NUMBER: _ClassVar[int]
+    FRAME_FIELD_NUMBER: _ClassVar[int]
+    provider_run_id: str
+    compilation_unit_id: str
+    sequence: int
+    owner_id: str
+    observation_family_code: int
+    frame: _provider_control_pb2.RelationIpcFrame
+    def __init__(self, provider_run_id: _Optional[str] = ..., compilation_unit_id: _Optional[str] = ..., sequence: _Optional[int] = ..., owner_id: _Optional[str] = ..., observation_family_code: _Optional[int] = ..., frame: _Optional[_Union[_provider_control_pb2.RelationIpcFrame, _Mapping]] = ...) -> None: ...
 
 class ExtractionEvent(_message.Message):
-    __slots__ = ("compilation_begin", "owner_begin", "owner_observation_chunk", "owner_end", "compilation_end")
+    __slots__ = ("compilation_begin", "owner_begin", "owner_observation_chunk", "owner_end", "compilation_end", "owner_relation_ipc_frame")
     COMPILATION_BEGIN_FIELD_NUMBER: _ClassVar[int]
     OWNER_BEGIN_FIELD_NUMBER: _ClassVar[int]
     OWNER_OBSERVATION_CHUNK_FIELD_NUMBER: _ClassVar[int]
     OWNER_END_FIELD_NUMBER: _ClassVar[int]
     COMPILATION_END_FIELD_NUMBER: _ClassVar[int]
+    OWNER_RELATION_IPC_FRAME_FIELD_NUMBER: _ClassVar[int]
     compilation_begin: CompilationBegin
     owner_begin: OwnerBegin
     owner_observation_chunk: OwnerObservationChunk
     owner_end: OwnerEnd
     compilation_end: CompilationEnd
-    def __init__(self, compilation_begin: _Optional[_Union[CompilationBegin, _Mapping]] = ..., owner_begin: _Optional[_Union[OwnerBegin, _Mapping]] = ..., owner_observation_chunk: _Optional[_Union[OwnerObservationChunk, _Mapping]] = ..., owner_end: _Optional[_Union[OwnerEnd, _Mapping]] = ..., compilation_end: _Optional[_Union[CompilationEnd, _Mapping]] = ...) -> None: ...
+    owner_relation_ipc_frame: OwnerRelationIpcFrame
+    def __init__(self, compilation_begin: _Optional[_Union[CompilationBegin, _Mapping]] = ..., owner_begin: _Optional[_Union[OwnerBegin, _Mapping]] = ..., owner_observation_chunk: _Optional[_Union[OwnerObservationChunk, _Mapping]] = ..., owner_end: _Optional[_Union[OwnerEnd, _Mapping]] = ..., compilation_end: _Optional[_Union[CompilationEnd, _Mapping]] = ..., owner_relation_ipc_frame: _Optional[_Union[OwnerRelationIpcFrame, _Mapping]] = ...) -> None: ...
 
 class CancelCompilationRequest(_message.Message):
     __slots__ = ("provider_run_id", "compilation_unit_id", "reason")

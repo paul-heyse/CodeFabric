@@ -4,5 +4,41 @@
     "rustc-extractor/Cargo.toml",
     "pyrefly-sidecar/Cargo.toml"
   ],
+
+  // AGENTS.md section 6 "One continuous checker" assigns the persistent `cargo check` job
+  // to Bacon, not to editor check-on-save: "Do not configure editor check-on-save, Bacon,
+  // and Watchexec to run the same `cargo check`."
+  //
+  // Measured 2026-08-30 before this change: rust-analyzer was initiating
+  // `cargo check --workspace --message-format=json-diagnostic-rendered-ansi` itself
+  // (confirmed by PPID chain, not inference), once per linked project per trigger --
+  // three concurrent cargo processes, one of them on the dated nightly, each running
+  // `--all-targets` over a 281k-line crate. Checking is now on demand: agents and gates
+  // invoke it explicitly, and "rust-analyzer: Run flycheck" triggers it by hand.
+  //
+  // Retained live: type inference, unresolved names/imports/methods, missing match arms
+  // and fields, argument counts, macro expansion errors, navigation and rename.
+  // Deferred to an explicit check: borrow-check and lifetime errors, rustc lints
+  // (unused_imports, dead_code, unused_variables), and clippy.
+  "rust-analyzer.checkOnSave": false,
+
+  // rust-analyzer still runs `cargo metadata` plus build-script and proc-macro builds, so
+  // it still needs a target directory. Its own schema states the reason for isolating it:
+  // this "prevents rust-analyzer's `cargo check` and initial build-script and proc-macro
+  // building from locking the `Cargo.lock` at the expense of duplicating build artifacts."
+  // Without it, rust-analyzer contends with the CLI and with agent shells for the lock on
+  // the shared repository `target/`.
+  "rust-analyzer.cargo.targetDir": true,
+
+  // Applies to manually triggered flycheck. Same policy as scripts/cargo-check-mode.sh:
+  // ordinary check units omit `link` from `--emit` and are outside sccache's Rust
+  // cacheable surface (sccache_for_Rust_Advanced_Configuration.md section 3.3), so the
+  // wrapper can only add per-invocation cost; rustc incremental is the reuse mechanism
+  // that does apply here.
+  "rust-analyzer.check.extraEnv": {
+    "CARGO_INCREMENTAL": "1",
+    "RUSTC_WRAPPER": ""
+  },
+
   "python.defaultInterpreterPath": "${workspaceFolder}/codefabric-cpg-mcp/.venv/bin/python"
 }

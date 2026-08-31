@@ -175,7 +175,20 @@ message ExtractorCommand {
     codefabric.provider.v1.ChunkAccepted chunk_accepted = 2;
     codefabric.provider.v1.ChunkRejected chunk_rejected = 3;
     CancelCompilationRequest cancel = 4;
+    // Only the flow_control_ack variant is valid in the daemon-to-wrapper direction.
+    codefabric.provider.v1.RelationIpcFrame relation_ipc_ack = 5;
   }
+}
+
+message OwnerRelationIpcFrame {
+  string provider_run_id = 1;
+  string compilation_unit_id = 2;
+  // Compilation-wide event order; independent from the per-relation frame sequence.
+  uint64 sequence = 3;
+  string owner_id = 4;
+  uint32 observation_family_code = 5;
+  // Only open/payload/ipc_end/coverage_trailer/terminal are valid in this direction.
+  codefabric.provider.v1.RelationIpcFrame frame = 6;
 }
 
 message ExtractionEvent {
@@ -187,6 +200,7 @@ message ExtractionEvent {
     OwnerObservationChunk owner_observation_chunk = 4;
     OwnerEnd owner_end = 5;
     CompilationEnd compilation_end = 6;
+    OwnerRelationIpcFrame owner_relation_ipc_frame = 7;
   }
 }
 

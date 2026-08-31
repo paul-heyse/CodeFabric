@@ -146,6 +146,85 @@ def test_wp10_structural_acceptance_is_closed_and_registry_aligned() -> None:
     assert resource_profile_id.type == resource_profile_id.TYPE_STRING
 
 
+def test_relation_ipc_frame_contract_has_exact_cross_process_directions() -> None:
+    relation_frame = provider.RelationIpcFrame.DESCRIPTOR.oneofs_by_name["frame"]
+    assert [(field.name, field.number) for field in relation_frame.fields] == [
+        ("open", 1),
+        ("payload", 2),
+        ("flow_control_ack", 3),
+        ("ipc_end", 4),
+        ("coverage_trailer", 5),
+        ("terminal", 6),
+    ]
+    assert provider.ARROW_IPC_METADATA_VERSION_V5 == 5
+    assert provider.RELATION_IPC_TERMINAL_STATUS_COMPLETE == 1
+
+    pyrefly_command = pyrefly.AnalyzeCommand.DESCRIPTOR.oneofs_by_name["command"]
+    pyrefly_event = pyrefly.AnalyzeEvent.DESCRIPTOR.oneofs_by_name["event"]
+    pyrefly_command_fields = {field.name: field for field in pyrefly_command.fields}
+    pyrefly_event_fields = {field.name: field for field in pyrefly_event.fields}
+    assert pyrefly_command_fields["relation_ipc_ack"].number == 5
+    assert pyrefly_event_fields["relation_ipc_frame"].number == 7
+    assert (
+        pyrefly_command_fields["relation_ipc_ack"].message_type.full_name
+        == "codefabric.provider.v1.RelationIpcFrame"
+    )
+
+    rustc_command = rustc.ExtractorCommand.DESCRIPTOR.oneofs_by_name["command"]
+    rustc_event = rustc.ExtractionEvent.DESCRIPTOR.oneofs_by_name["event"]
+    rustc_command_fields = {field.name: field for field in rustc_command.fields}
+    rustc_event_fields = {field.name: field for field in rustc_event.fields}
+    assert rustc_command_fields["relation_ipc_ack"].number == 5
+    assert rustc_event_fields["owner_relation_ipc_frame"].number == 7
+    assert (
+        rustc_command_fields["relation_ipc_ack"].message_type.full_name
+        == "codefabric.provider.v1.RelationIpcFrame"
+    )
+
+
+def test_relation_ipc_binary_round_trip_keeps_arrow_bytes_payload_only() -> None:
+    identity = provider.RelationIpcStreamIdentity(
+        relation_id=b"r" * 16,
+        stream_id=b"s" * 16,
+        schema_fingerprint=b"f" * 32,
+        source_pin=b"i" * 32,
+        context_pin=b"c" * 32,
+    )
+    header = provider.RelationIpcFrameHeader(
+        protocol_version=1,
+        identity=identity,
+        sequence=1,
+    )
+    arrow_fragment = b"ARROW1\x00typed-semantic-bytes"
+    original = provider.RelationIpcFrame(
+        payload=provider.RelationIpcPayload(
+            header=header,
+            arrow_ipc_fragment=arrow_fragment,
+        )
+    )
+
+    encoded = original.SerializeToString(deterministic=True)
+    decoded = provider.RelationIpcFrame.FromString(encoded)
+    assert decoded.WhichOneof("frame") == "payload"
+    assert decoded.payload.arrow_ipc_fragment == arrow_fragment
+    assert decoded.payload.header.identity == identity
+    assert type(original).FromString(encoded).SerializeToString(deterministic=True) == encoded
+
+    decoded.open.CopyFrom(
+        provider.RelationIpcOpen(
+            header=header,
+            requested_units=1,
+            arrow_type_universe=(
+                "arrow-array@59.2.0|arrow-schema@59.2.0|arrow-ipc@59.2.0|metadata-v5"
+            ),
+            metadata_version=provider.ARROW_IPC_METADATA_VERSION_V5,
+            semantic_encoding="typed-arrow-relation-stream",
+        )
+    )
+    assert decoded.WhichOneof("frame") == "open"
+    assert not decoded.HasField("payload")
+
+
 def test_wp67_structural_acceptance_admin_protocol_schema_examples() -> None:
     schema = json.loads(
         (ROOT / "contracts/rpc/admin-line-protocol.schema.json").read_text(encoding="utf-8")

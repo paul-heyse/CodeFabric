@@ -3,12 +3,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::future::Future;
+use std::io::Cursor;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use arrow_ipc::reader::StreamReader;
 use futures::{Stream, stream};
 use prost::Message;
 use tokio::sync::{Mutex, mpsc};
@@ -19,8 +21,7 @@ use tonic::{Request, Response, Status};
 use crate::registries::RustcFeatureMask;
 use crate::registries::{PROVIDER_ENTRIES, PROVIDER_RESOURCE_PROFILES};
 use crate::rpc::generated::codefabric::provider::v1::{
-    CancelAcknowledgement, CancelAcknowledgementState, ChunkAccepted, ChunkRejected,
-    ProviderRunState,
+    CancelAcknowledgement, CancelAcknowledgementState, ChunkRejected, ProviderRunState,
 };
 use crate::rpc::generated::codefabric::rustc::v1::extraction_event::Event;
 use crate::rpc::generated::codefabric::rustc::v1::extractor_command::Command;
@@ -29,9 +30,19 @@ use crate::rpc::generated::codefabric::rustc::v1::rustc_extractor_server::RustcE
 use crate::rpc::generated::codefabric::rustc::v1::{
     CancelCompilationRequest, CompilationBegin, CompilationEnd, ExtractionEvent, ExtractorCommand,
     ExtractorHello, ExtractorHelloAck, OwnerBegin, OwnerEnd, OwnerObservationChunk,
-    RejectionRuleErrorCode,
+    OwnerRelationIpcFrame, RejectionRuleErrorCode,
 };
 use crate::rpc::{AuthorizedUnixStream, SameUserInterceptor, negotiate_feature_bits};
+
+use crate::relation_ipc::{
+    FlowControlAck, FrameHeader, RelationIpcAssembler, RelationIpcFrame, RelationIpcLimits,
+    StreamId, TerminalStatus,
+};
+use crate::relation_ipc_wire::{
+    decode_relation_frame, encode_relation_frame, relation_stream_contract,
+};
+use crate::rust_compilation_trust::RustCompilationCancellationSignal;
+use crate::rustc_relation_schema::{RustcRelation, schema_bundle_digest};
 
 include!("generated/digest_frames.rs");
 
@@ -39,7 +50,9 @@ include!("generated/digest_frames.rs");
 pub const MAX_OUTSTANDING_CHUNKS: u32 = 4;
 /// AC-G-31 maximum unacknowledged payload bytes per compilation.
 pub const MAX_UNACKNOWLEDGED_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_DECODED_MESSAGE_BYTES: usize = 17 * 1024 * 1024;
+const MAX_DECODED_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_RELATION_ROWS: u64 = 1_000_000;
+const IPC_STREAM_EOS: [u8; 8] = [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0];
 
 type CommandStream = Pin<Box<dyn Stream<Item = Result<ExtractorCommand, Status>> + Send>>;
 
@@ -63,6 +76,18 @@ fn valid_digest(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn valid_sandbox_profile_digest(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .or_else(|| value.strip_prefix("b3:"))
+        .is_some_and(|payload| {
+            payload.len() == 64
+                && payload
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+}
+
 fn valid_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 1_024
@@ -75,6 +100,57 @@ fn valid_identifier(value: &str) -> bool {
 #[must_use]
 pub fn arrow_chunk_digest(bytes: &[u8]) -> String {
     digest(bytes)
+}
+
+fn validate_typed_relation_chunk(chunk: &OwnerObservationChunk) -> Result<(), Status> {
+    let relation =
+        RustcRelation::from_family_code(chunk.observation_family_code).ok_or_else(|| {
+            Status::invalid_argument(
+                "rustc observation family is not a pinned typed relation contract",
+            )
+        })?;
+    if chunk.payload_reference.is_some()
+        || chunk.arrow_ipc.is_empty()
+        || chunk.arrow_ipc.len() as u64 > MAX_UNACKNOWLEDGED_BYTES
+        || chunk.row_count > MAX_RELATION_ROWS
+        || !chunk.arrow_ipc.ends_with(&IPC_STREAM_EOS)
+        || chunk.schema_digest != relation.schema_digest()
+    {
+        return Err(Status::invalid_argument(
+            "rustc relation violates its inline Arrow stream contract",
+        ));
+    }
+    crate::relation_ipc::validate_arrow_ipc_profile(&chunk.arrow_ipc).map_err(|error| {
+        Status::invalid_argument(format!(
+            "rustc relation differs from the pinned Arrow IPC profile: {error}"
+        ))
+    })?;
+    let mut reader =
+        StreamReader::try_new(Cursor::new(&chunk.arrow_ipc), None).map_err(|error| {
+            Status::invalid_argument(format!("invalid rustc Arrow stream: {error}"))
+        })?;
+    if reader.schema().as_ref() != relation.schema().as_ref() {
+        return Err(Status::invalid_argument(
+            "rustc relation schema differs from the application-owned contract",
+        ));
+    }
+    let batch = reader
+        .next()
+        .transpose()
+        .map_err(|error| Status::invalid_argument(format!("invalid rustc Arrow batch: {error}")))?
+        .ok_or_else(|| Status::invalid_argument("rustc relation contains no Arrow batch"))?;
+    if reader
+        .next()
+        .transpose()
+        .map_err(|error| Status::invalid_argument(format!("invalid rustc Arrow batch: {error}")))?
+        .is_some()
+        || u64::try_from(batch.num_rows()).unwrap_or(u64::MAX) != chunk.row_count
+    {
+        return Err(Status::invalid_argument(
+            "rustc relation must contain exactly one declared-size Arrow batch",
+        ));
+    }
+    Ok(())
 }
 
 /// Compute the governed owner-content digest from a begin record and ordered chunks.
@@ -104,19 +180,36 @@ pub fn closed_owner_set_digest(owners: &[AcceptedRustcOwner]) -> String {
     digest_frames(b"codefabric.rustc.closed-owner-set.v1\0", fields)
 }
 
+fn canonical_event_bytes(event: &ExtractionEvent) -> Vec<u8> {
+    let mut normalized = event.clone();
+    let mut family_counts = Vec::new();
+    match normalized.event.as_mut() {
+        Some(Event::OwnerEnd(end)) => {
+            family_counts = end
+                .family_counts
+                .iter()
+                .map(|(family, count)| (*family, *count))
+                .collect::<Vec<_>>();
+            family_counts.sort_unstable();
+            end.family_counts.clear();
+        }
+        Some(Event::CompilationEnd(end)) => end.overall_stream_digest.clear(),
+        _ => {}
+    }
+    let fields = std::iter::once(normalized.encode_to_vec()).chain(family_counts.into_iter().map(
+        |(family, count)| {
+            let mut bytes = family.to_be_bytes().to_vec();
+            bytes.extend_from_slice(&count.to_be_bytes());
+            bytes
+        },
+    ));
+    digest_frames(b"codefabric.rustc.canonical-event.v1\0", fields).into_bytes()
+}
+
 /// Compute the stream digest with the terminal digest field cleared.
 #[must_use]
 pub fn overall_stream_digest(events: &[ExtractionEvent]) -> String {
-    let fields = events
-        .iter()
-        .map(|event| {
-            let mut normalized = event.clone();
-            if let Some(Event::CompilationEnd(end)) = normalized.event.as_mut() {
-                end.overall_stream_digest.clear();
-            }
-            normalized.encode_to_vec()
-        })
-        .collect::<Vec<_>>();
+    let fields = events.iter().map(canonical_event_bytes).collect::<Vec<_>>();
     digest_frames(b"codefabric.rustc.observation-stream.v1\0", fields)
 }
 
@@ -154,8 +247,8 @@ impl RustcProtocolPolicy {
             || !valid_identifier(&self.extractor_build)
             || !valid_identifier(&self.rustc_version)
             || !valid_identifier(&self.rustc_commit)
-            || !valid_digest(&self.output_schema_bundle_digest)
-            || !valid_digest(&self.sandbox_profile_digest)
+            || self.output_schema_bundle_digest != schema_bundle_digest()
+            || !valid_sandbox_profile_digest(&self.sandbox_profile_digest)
             || !valid_digest(&self.toolchain_identity_digest)
             || self.provider_deadline_unix_ms <= now_millis()
         {
@@ -198,6 +291,10 @@ struct OpenOwner {
     expected_families: BTreeSet<u32>,
     observed_counts: BTreeMap<u32, u64>,
     chunks: Vec<OwnerObservationChunk>,
+    relation_by_stream: BTreeMap<StreamId, RustcRelation>,
+    logical_sequence_by_stream: BTreeMap<StreamId, u64>,
+    next_ack_sequence: BTreeMap<StreamId, u64>,
+    assembler: RelationIpcAssembler,
 }
 
 #[derive(Debug)]
@@ -266,13 +363,57 @@ impl RunValidator {
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
+        if expected_families.contains(&0)
+            || expected_families
+                .iter()
+                .any(|family| RustcRelation::from_family_code(*family).is_none())
+        {
+            return Err(Status::invalid_argument(
+                "compiler owner declares an unpinned observation family",
+            ));
+        }
         if expected_families.len() != begin.expected_observation_family_codes.len()
-            || expected_families.contains(&0)
             || !self.owner_ids.insert(owner.owner_id.clone())
         {
             return Err(Status::already_exists(
                 "compiler owner or observation family is duplicated",
             ));
+        }
+        let limits = RelationIpcLimits {
+            max_registered_streams: expected_families.len(),
+            max_frames_per_stream: 64,
+            max_payload_bytes_per_frame: crate::relation_ipc_contract::RELATION_IPC_FRAGMENT_BYTES,
+            max_payload_bytes_per_stream: usize::try_from(MAX_UNACKNOWLEDGED_BYTES)
+                .unwrap_or(usize::MAX),
+            max_total_payload_bytes: 256 * 1024 * 1024,
+            initial_credit_bytes: usize::try_from(MAX_UNACKNOWLEDGED_BYTES).unwrap_or(usize::MAX),
+            max_credit_bytes: usize::try_from(MAX_UNACKNOWLEDGED_BYTES).unwrap_or(usize::MAX),
+            max_batches_per_stream: 1,
+            max_rows_per_stream: usize::try_from(MAX_RELATION_ROWS).unwrap_or(usize::MAX),
+            max_remainders_per_stream: 64,
+        };
+        let mut assembler = RelationIpcAssembler::new(limits)
+            .map_err(|error| Status::internal(format!("invalid relation limits: {error}")))?;
+        let mut relation_by_stream = BTreeMap::new();
+        let mut next_ack_sequence = BTreeMap::new();
+        for family in &expected_families {
+            let relation = RustcRelation::from_family_code(*family)
+                .expect("expected family registry checked above");
+            let contract = relation_stream_contract(
+                relation.relation_id(),
+                relation.schema(),
+                &self.admission.provider_run_id,
+                &owner.owner_id,
+                &self.admission.source_snapshot_manifest_digest,
+                &self.admission.context_manifest_digest,
+                1,
+            )
+            .map_err(Status::invalid_argument)?;
+            relation_by_stream.insert(contract.identity.stream_id, relation);
+            next_ack_sequence.insert(contract.identity.stream_id, 0);
+            assembler.register_contract(contract).map_err(|error| {
+                Status::invalid_argument(format!("invalid relation contract: {error}"))
+            })?;
         }
         self.next_sequence += 1;
         self.events.push(event);
@@ -281,84 +422,199 @@ impl RunValidator {
             expected_families,
             observed_counts: BTreeMap::new(),
             chunks: Vec::new(),
+            relation_by_stream,
+            logical_sequence_by_stream: BTreeMap::new(),
+            next_ack_sequence,
+            assembler,
         });
         Ok(())
     }
 
-    fn accept_chunk(
+    fn accept_relation_frame(
         &mut self,
-        chunk: OwnerObservationChunk,
+        relation_frame: OwnerRelationIpcFrame,
         event: ExtractionEvent,
-    ) -> Result<ExtractorCommand, Status> {
+        cancelled: bool,
+    ) -> Result<Option<ExtractorCommand>, Status> {
         self.validate_header(
-            &chunk.provider_run_id,
-            &chunk.compilation_unit_id,
-            chunk.sequence,
+            &relation_frame.provider_run_id,
+            &relation_frame.compilation_unit_id,
+            relation_frame.sequence,
         )?;
         let owner = self
             .open_owner
             .as_mut()
-            .ok_or_else(|| Status::failed_precondition("observation chunk has no open owner"))?;
+            .ok_or_else(|| Status::failed_precondition("relation frame has no open owner"))?;
         let owner_id = owner
             .begin
             .owner
             .as_ref()
             .map(|key| key.owner_id.as_str())
             .unwrap_or_default();
-        if chunk.owner_id != owner_id
+        let relation = RustcRelation::from_family_code(relation_frame.observation_family_code)
+            .ok_or_else(|| Status::invalid_argument("relation frame family is unregistered"))?;
+        if relation_frame.owner_id != owner_id
             || !owner
                 .expected_families
-                .contains(&chunk.observation_family_code)
-            || chunk.row_count == 0
-            || !valid_digest(&chunk.schema_digest)
-            || !valid_digest(&chunk.chunk_digest)
+                .contains(&relation_frame.observation_family_code)
         {
             return Err(Status::invalid_argument(
-                "observation chunk identity or family is invalid",
+                "relation frame owner or family differs",
             ));
         }
-        let payload_bytes = match (&chunk.arrow_ipc[..], chunk.payload_reference.as_ref()) {
-            (bytes, None) if !bytes.is_empty() => {
-                if bytes.len() as u64 > MAX_UNACKNOWLEDGED_BYTES
-                    || arrow_chunk_digest(bytes) != chunk.chunk_digest
-                {
-                    return Err(Status::resource_exhausted(
-                        "inline Arrow chunk exceeds credit or differs from its digest",
+        let frame = decode_relation_frame(
+            relation_frame
+                .frame
+                .ok_or_else(|| Status::invalid_argument("relation frame is absent"))?,
+        )
+        .map_err(|error| Status::invalid_argument(format!("invalid relation frame: {error}")))?;
+        if matches!(frame, RelationIpcFrame::FlowControlAck(_)) {
+            return Err(Status::invalid_argument(
+                "provider sent a receiver-direction acknowledgement",
+            ));
+        }
+        let frame_header = frame.header();
+        let stream_id = frame_header.identity.stream_id;
+        if owner.relation_by_stream.get(&stream_id) != Some(&relation) {
+            return Err(Status::failed_precondition(
+                "relation frame differs from the model-derived contract",
+            ));
+        }
+        if matches!(frame, RelationIpcFrame::Open(_))
+            && owner
+                .logical_sequence_by_stream
+                .insert(stream_id, relation_frame.sequence)
+                .is_some()
+        {
+            return Err(Status::already_exists("relation stream open is duplicated"));
+        }
+        let payload = match &frame {
+            RelationIpcFrame::Payload(payload) => Some((
+                payload.header.identity,
+                payload.header.sequence,
+                payload.payload.len(),
+            )),
+            _ => None,
+        };
+        let assembled = owner.assembler.push(frame).map_err(|error| {
+            Status::data_loss(format!("relation stream failed closed: {error}"))
+        })?;
+        let acknowledgement = if let Some((identity, payload_sequence, payload_bytes)) = payload {
+            let ack_sequence = owner
+                .next_ack_sequence
+                .get(&stream_id)
+                .copied()
+                .ok_or_else(|| Status::internal("relation acknowledgement state is absent"))?;
+            let acknowledgement = if cancelled {
+                RelationIpcFrame::FlowControlAck(FlowControlAck {
+                    header: FrameHeader::current(identity, ack_sequence),
+                    acknowledged_sequence: None,
+                    released_bytes: 0,
+                    cancelled: true,
+                })
+            } else {
+                RelationIpcFrame::FlowControlAck(FlowControlAck {
+                    header: FrameHeader::current(identity, ack_sequence),
+                    acknowledged_sequence: Some(payload_sequence),
+                    released_bytes: u64::try_from(payload_bytes).unwrap_or(u64::MAX),
+                    cancelled: false,
+                })
+            };
+            match owner.assembler.push(acknowledgement.clone()) {
+                Ok(_) if !cancelled => {}
+                Err(error)
+                    if cancelled
+                        && error.kind == crate::relation_ipc::RelationIpcErrorKind::Cancelled => {}
+                Ok(_) => {
+                    return Err(Status::internal(
+                        "local cancellation proof did not terminate the relation stream",
                     ));
                 }
-                bytes.len() as u64
-            }
-            ([], Some(reference)) => {
-                if reference.byte_length == 0
-                    || reference.byte_length > MAX_UNACKNOWLEDGED_BYTES
-                    || reference.content_digest != chunk.chunk_digest
-                    || !valid_identifier(&reference.blob_id)
-                    || !valid_identifier(&reference.read_only_uri)
-                {
-                    return Err(Status::invalid_argument("payload reference is invalid"));
+                Err(error) => {
+                    return Err(Status::internal(format!(
+                        "local relation credit proof failed: {error}"
+                    )));
                 }
-                reference.byte_length
             }
-            _ => {
-                return Err(Status::invalid_argument(
-                    "exactly one chunk payload representation is required",
+            if !cancelled {
+                *owner
+                    .next_ack_sequence
+                    .get_mut(&stream_id)
+                    .expect("registered stream has acknowledgement state") += 1;
+            }
+            Some(ExtractorCommand {
+                command: Some(Command::RelationIpcAck(
+                    encode_relation_frame(&acknowledgement).map_err(Status::internal)?,
+                )),
+            })
+        } else {
+            None
+        };
+        if let Some(assembled) = assembled {
+            if assembled.trailer.status != TerminalStatus::Complete || assembled.batches.len() != 1
+            {
+                return Err(Status::failed_precondition(
+                    "successful rustc relation is not complete or single-batch",
                 ));
             }
-        };
-        *owner
-            .observed_counts
-            .entry(chunk.observation_family_code)
-            .or_default() += chunk.row_count;
-        let sequence = chunk.sequence;
-        owner.chunks.push(chunk);
-        self.next_sequence += 1;
+            let logical_sequence = owner
+                .logical_sequence_by_stream
+                .remove(&stream_id)
+                .ok_or_else(|| Status::failed_precondition("relation terminal lacks its open"))?;
+            let row_count = u64::try_from(assembled.batches[0].num_rows()).unwrap_or(u64::MAX);
+            let arrow_ipc = assembled.ipc_bytes;
+            let chunk = OwnerObservationChunk {
+                provider_run_id: relation_frame.provider_run_id,
+                compilation_unit_id: relation_frame.compilation_unit_id,
+                sequence: logical_sequence,
+                owner_id: relation_frame.owner_id,
+                observation_family_code: relation_frame.observation_family_code,
+                chunk_digest: arrow_chunk_digest(&arrow_ipc),
+                arrow_ipc,
+                payload_reference: None,
+                schema_digest: relation.schema_digest(),
+                row_count,
+            };
+            validate_typed_relation_chunk(&chunk)?;
+            if owner
+                .observed_counts
+                .insert(chunk.observation_family_code, chunk.row_count)
+                .is_some()
+            {
+                return Err(Status::already_exists("relation terminal is duplicated"));
+            }
+            owner.chunks.push(chunk);
+        }
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or_else(|| Status::resource_exhausted("compiler event sequence is exhausted"))?;
         self.events.push(event);
-        Ok(ExtractorCommand {
-            command: Some(Command::ChunkAccepted(ChunkAccepted {
-                sequence,
-                next_credit_bytes: MAX_UNACKNOWLEDGED_BYTES.saturating_sub(payload_bytes),
-                next_credit_chunks: MAX_OUTSTANDING_CHUNKS.saturating_sub(1),
-            })),
+        Ok(acknowledgement)
+    }
+
+    fn cancellation_ack_for_relation(
+        &self,
+        relation_frame: &OwnerRelationIpcFrame,
+    ) -> Option<ExtractorCommand> {
+        let frame = decode_relation_frame(relation_frame.frame.clone()?).ok()?;
+        let identity = frame.header().identity;
+        let ack_sequence = self
+            .open_owner
+            .as_ref()?
+            .next_ack_sequence
+            .get(&identity.stream_id)
+            .copied()?;
+        let cancellation = RelationIpcFrame::FlowControlAck(FlowControlAck {
+            header: FrameHeader::current(identity, ack_sequence),
+            acknowledged_sequence: None,
+            released_bytes: 0,
+            cancelled: true,
+        });
+        Some(ExtractorCommand {
+            command: Some(Command::RelationIpcAck(
+                encode_relation_frame(&cancellation).ok()?,
+            )),
         })
     }
 
@@ -368,6 +624,11 @@ impl RunValidator {
             .open_owner
             .take()
             .ok_or_else(|| Status::failed_precondition("owner end has no open owner"))?;
+        owner.assembler.finish().map_err(|error| {
+            Status::data_loss(format!(
+                "owner ended before every relation terminal: {error}"
+            ))
+        })?;
         let owner_id = owner
             .begin
             .owner
@@ -404,10 +665,13 @@ impl RunValidator {
         cancelled: bool,
     ) -> Result<AcceptedRustcCompilation, Status> {
         self.validate_header(&end.provider_run_id, &end.compilation_unit_id, end.sequence)?;
-        if self.open_owner.is_some() {
+        if self.open_owner.is_some() && !cancelled {
             return Err(Status::failed_precondition(
                 "compilation ended with an open owner",
             ));
+        }
+        if cancelled {
+            self.open_owner.take();
         }
         let terminal_state = ProviderRunState::try_from(end.terminal_state)
             .map_err(|_| Status::invalid_argument("unknown provider terminal state"))?;
@@ -538,6 +802,7 @@ pub struct RustcObservationService {
     admission: RustcRunAdmission,
     active: Arc<Mutex<BTreeMap<String, ActiveRun>>>,
     accepted: mpsc::Sender<AcceptedRustcCompilation>,
+    supervisor_cancellation: RustCompilationCancellationSignal,
 }
 
 impl RustcObservationService {
@@ -585,29 +850,36 @@ impl RustcObservationService {
                 admission,
                 active: Arc::new(Mutex::new(BTreeMap::new())),
                 accepted,
+                supervisor_cancellation: RustCompilationCancellationSignal::default(),
             },
             receiver,
         ))
     }
 
+    /// Run-wide cancellation edge consumed by the Cargo process-group supervisor.
+    #[must_use]
+    pub fn supervisor_cancellation_signal(&self) -> RustCompilationCancellationSignal {
+        self.supervisor_cancellation.clone()
+    }
+
     /// Request cancellation through the existing reverse command stream.
     pub async fn request_cancel(&self, request: CancelCompilationRequest) -> CancelAcknowledgement {
+        if request.provider_run_id != self.admission.provider_run_id {
+            return cancellation_ack(
+                request.provider_run_id,
+                CancelAcknowledgementState::NotFound,
+                None,
+            );
+        }
         let command_sender = {
             let mut active = self.active.lock().await;
-            let Some(run) = active.get_mut(&request.provider_run_id) else {
+            let Some(run) = active.get_mut(&request.compilation_unit_id) else {
                 return cancellation_ack(
                     request.provider_run_id,
                     CancelAcknowledgementState::NotFound,
                     None,
                 );
             };
-            if run.compilation_unit_id != request.compilation_unit_id {
-                return cancellation_ack(
-                    request.provider_run_id,
-                    CancelAcknowledgementState::NotFound,
-                    None,
-                );
-            }
             if let Some(terminal) = run.terminal_state {
                 return cancellation_ack(
                     request.provider_run_id,
@@ -636,21 +908,72 @@ impl RustcObservationService {
         )
     }
 
-    async fn run_cancelled(&self) -> bool {
+    /// Request cooperative cancellation for every active compilation unit in one provider run.
+    ///
+    /// The launcher still owns process-group escalation. This method first exercises the existing
+    /// reverse command stream so each wrapper can close its protocol stream deliberately.
+    pub async fn request_cancel_run(&self, provider_run_id: &str) -> usize {
+        if provider_run_id != self.admission.provider_run_id {
+            return 0;
+        }
+        let commands = {
+            let mut active = self.active.lock().await;
+            active
+                .values_mut()
+                .filter_map(|run| {
+                    if run.terminal_state.is_some() || run.cancelled {
+                        return None;
+                    }
+                    run.cancelled = true;
+                    run.commands.clone().map(|sender| {
+                        (
+                            sender,
+                            CancelCompilationRequest {
+                                provider_run_id: provider_run_id.to_owned(),
+                                compilation_unit_id: run.compilation_unit_id.clone(),
+                                reason: "provider-run-cancelled".to_owned(),
+                            },
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let requested = commands.len();
+        for (sender, request) in commands {
+            let _ = sender
+                .send(Ok(ExtractorCommand {
+                    command: Some(Command::Cancel(request)),
+                }))
+                .await;
+        }
+        // The reverse stream is cooperative and unit-scoped. Publish the shared signal only
+        // after every active unit has received its command; the supervisor then owns bounded
+        // escalation for the complete Cargo process group.
+        self.supervisor_cancellation.request();
+        requested
+    }
+
+    /// Snapshot terminal state by compilation-unit identity.
+    #[must_use]
+    pub async fn terminal_states(&self) -> BTreeMap<String, ProviderRunState> {
         self.active
             .lock()
             .await
-            .get(&self.admission.provider_run_id)
+            .iter()
+            .filter_map(|(unit_id, run)| run.terminal_state.map(|state| (unit_id.clone(), state)))
+            .collect()
+    }
+
+    async fn run_cancelled(&self, compilation_unit_id: &str) -> bool {
+        self.active
+            .lock()
+            .await
+            .get(compilation_unit_id)
             .is_some_and(|run| run.cancelled)
     }
 
-    async fn mark_terminal(&self, state: ProviderRunState) {
-        if let Some(run) = self
-            .active
-            .lock()
-            .await
-            .get_mut(&self.admission.provider_run_id)
-        {
+    async fn mark_terminal(&self, compilation_unit_id: &str, state: ProviderRunState) {
+        if let Some(run) = self.active.lock().await.get_mut(compilation_unit_id) {
             run.terminal_state = Some(state);
             run.commands.take();
         }
@@ -693,6 +1016,7 @@ impl RustcObservationService {
             ));
         };
         let begin = begin.clone();
+        let compilation_unit_id = begin.compilation_unit_id.clone();
         let mut validator = RunValidator::new(
             self.admission.clone(),
             self.policy.clone(),
@@ -701,7 +1025,7 @@ impl RustcObservationService {
         )?;
         {
             let mut active = self.active.lock().await;
-            match active.entry(begin.provider_run_id.clone()) {
+            match active.entry(compilation_unit_id.clone()) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
                     entry.insert(ActiveRun {
                         compilation_unit_id: begin.compilation_unit_id.clone(),
@@ -730,67 +1054,76 @@ impl RustcObservationService {
             .await
             .map_err(|_| Status::cancelled("compiler command stream closed"))?;
 
-        while let Some(event) = self.next_event(&mut input).await? {
-            let cancelled = self.run_cancelled().await;
-            match event.event.clone() {
-                Some(Event::OwnerBegin(begin)) if !cancelled => {
-                    validator.accept_owner_begin(begin, event)?;
-                }
-                Some(Event::OwnerObservationChunk(chunk)) if !cancelled => {
-                    let sequence = chunk.sequence;
-                    match validator.accept_chunk(chunk, event) {
-                        Ok(command) => output
-                            .send(Ok(command))
-                            .await
-                            .map_err(|_| Status::cancelled("compiler command stream closed"))?,
-                        Err(error) => {
-                            let _ = output
-                                .send(Ok(ExtractorCommand {
-                                    command: Some(Command::ChunkRejected(ChunkRejected {
-                                        sequence,
-                                        error_code: error.code().to_string(),
-                                    })),
-                                }))
-                                .await;
-                            return Err(error);
+        let result = async {
+            while let Some(event) = self.next_event(&mut input).await? {
+                let cancelled = self.run_cancelled(&compilation_unit_id).await;
+                match event.event.clone() {
+                    Some(Event::OwnerBegin(begin)) => {
+                        validator.accept_owner_begin(begin, event)?;
+                    }
+                    Some(Event::OwnerRelationIpcFrame(frame)) => {
+                        match validator.accept_relation_frame(frame.clone(), event, cancelled) {
+                            Ok(Some(command)) => output
+                                .send(Ok(command))
+                                .await
+                                .map_err(|_| Status::cancelled("compiler command stream closed"))?,
+                            Ok(None) => {}
+                            Err(error) => {
+                                if let Some(command) =
+                                    validator.cancellation_ack_for_relation(&frame)
+                                {
+                                    let _ = output.send(Ok(command)).await;
+                                }
+                                return Err(error);
+                            }
                         }
                     }
-                }
-                Some(Event::OwnerEnd(end)) if !cancelled => {
-                    validator.accept_owner_end(end, event)?;
-                }
-                Some(Event::CompilationEnd(end)) => {
-                    let completed = validator.finish(end, event, cancelled)?;
-                    let terminal = ProviderRunState::try_from(completed.end.terminal_state)
-                        .unwrap_or(ProviderRunState::ProtocolError);
-                    if terminal == ProviderRunState::Succeeded {
-                        self.accepted
-                            .send(completed)
-                            .await
-                            .map_err(|_| Status::unavailable("canonical ingest sink is closed"))?;
+                    Some(Event::OwnerObservationChunk(chunk)) => {
+                        let _ = output
+                            .send(Ok(ExtractorCommand {
+                                command: Some(Command::ChunkRejected(ChunkRejected {
+                                    sequence: chunk.sequence,
+                                    error_code: "LEGACY_WHOLE_RELATION_CHUNK_REJECTED".to_owned(),
+                                })),
+                            }))
+                            .await;
+                        return Err(Status::failed_precondition(
+                            "legacy whole-relation Arrow chunks are no longer admitted",
+                        ));
                     }
-                    self.mark_terminal(terminal).await;
-                    return Ok(());
-                }
-                Some(Event::CompilationBegin(_)) => {
-                    return Err(Status::failed_precondition(
-                        "CompilationBegin may appear only once",
-                    ));
-                }
-                Some(_) if cancelled => {
-                    // Output after cancellation acknowledgement is intentionally ignored.
-                }
-                None => return Err(Status::invalid_argument("compiler event is empty")),
-                Some(_) => {
-                    return Err(Status::failed_precondition(
-                        "compiler event is out of order",
-                    ));
+                    Some(Event::OwnerEnd(end)) => {
+                        validator.accept_owner_end(end, event)?;
+                    }
+                    Some(Event::CompilationEnd(end)) => {
+                        let completed = validator.finish(end, event, cancelled)?;
+                        let terminal = ProviderRunState::try_from(completed.end.terminal_state)
+                            .unwrap_or(ProviderRunState::ProtocolError);
+                        if terminal == ProviderRunState::Succeeded {
+                            self.accepted.send(completed).await.map_err(|_| {
+                                Status::unavailable("canonical ingest sink is closed")
+                            })?;
+                        }
+                        self.mark_terminal(&compilation_unit_id, terminal).await;
+                        return Ok(());
+                    }
+                    Some(Event::CompilationBegin(_)) => {
+                        return Err(Status::failed_precondition(
+                            "CompilationBegin may appear only once",
+                        ));
+                    }
+                    None => return Err(Status::invalid_argument("compiler event is empty")),
                 }
             }
+            Err(Status::data_loss(
+                "compiler stream ended before CompilationEnd",
+            ))
         }
-        Err(Status::data_loss(
-            "compiler stream ended before CompilationEnd",
-        ))
+        .await;
+        if result.is_err() {
+            self.mark_terminal(&compilation_unit_id, ProviderRunState::ProtocolError)
+                .await;
+        }
+        result
     }
 }
 
@@ -924,7 +1257,6 @@ impl RustcExtractor for RustcObservationService {
                 .process_stream(request.into_inner(), sender.clone())
                 .await
             {
-                service.mark_terminal(ProviderRunState::ProtocolError).await;
                 let _ = sender.send(Err(error)).await;
             }
         });
@@ -938,9 +1270,12 @@ impl RustcExtractor for RustcObservationService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rpc::generated::codefabric::provider::v1::BlobReference;
     use crate::rpc::generated::codefabric::rustc::v1::{
         CompilerOwnerKey, DiagnosticSummary, PackageTargetIdentity,
     };
+    use arrow_array::RecordBatch;
+    use arrow_ipc::writer::StreamWriter;
 
     fn b3(value: &str) -> String {
         digest(value.as_bytes())
@@ -949,7 +1284,7 @@ mod tests {
     fn fixture() -> (RustcProtocolPolicy, RustcRunAdmission, CompilationBegin) {
         let policy = RustcProtocolPolicy {
             daemon_build: "codefabricd-test".to_owned(),
-            output_schema_bundle_digest: b3("schema"),
+            output_schema_bundle_digest: schema_bundle_digest(),
             sandbox_profile_digest: b3("sandbox"),
             extractor_build: "codefabric-rustc-extractor 0.1.0".to_owned(),
             rustc_version: "1.100.0-nightly".to_owned(),
@@ -1005,11 +1340,31 @@ mod tests {
         ExtractionEvent { event: Some(event) }
     }
 
-    fn accepted_stream() -> (RunValidator, CompilationEnd) {
-        let (policy, admission, begin) = fixture();
-        let first = event(Event::CompilationBegin(begin.clone()));
-        let mut validator = RunValidator::new(admission, policy, begin, first).unwrap();
-        let owner_begin = OwnerBegin {
+    fn typed_relation_chunk(relation: RustcRelation) -> OwnerObservationChunk {
+        let schema = relation.schema();
+        let batch = RecordBatch::new_empty(Arc::clone(&schema));
+        let mut arrow_ipc = Vec::new();
+        {
+            let mut writer = StreamWriter::try_new(&mut arrow_ipc, &schema).unwrap();
+            writer.write(&batch).unwrap();
+            writer.finish().unwrap();
+        }
+        OwnerObservationChunk {
+            provider_run_id: "run:test".to_owned(),
+            compilation_unit_id: "unit:test".to_owned(),
+            sequence: 2,
+            owner_id: "owner:test".to_owned(),
+            observation_family_code: relation.family_code(),
+            schema_digest: relation.schema_digest(),
+            row_count: 0,
+            chunk_digest: arrow_chunk_digest(&arrow_ipc),
+            arrow_ipc,
+            payload_reference: None,
+        }
+    }
+
+    fn owner_begin(family_code: u32) -> OwnerBegin {
+        OwnerBegin {
             provider_run_id: "run:test".to_owned(),
             compilation_unit_id: "unit:test".to_owned(),
             sequence: 1,
@@ -1020,39 +1375,80 @@ mod tests {
                 source_start: 0,
                 source_end: 8,
             }),
-            expected_observation_family_codes: vec![70],
-        };
+            expected_observation_family_codes: vec![family_code],
+        }
+    }
+
+    fn accepted_stream() -> (RunValidator, CompilationEnd) {
+        let (policy, admission, begin) = fixture();
+        let first = event(Event::CompilationBegin(begin.clone()));
+        let mut validator = RunValidator::new(admission, policy, begin, first).unwrap();
+        let relation = RustcRelation::MirBody;
+        let owner_begin = owner_begin(relation.family_code());
         validator
             .accept_owner_begin(
                 owner_begin.clone(),
                 event(Event::OwnerBegin(owner_begin.clone())),
             )
             .unwrap();
-        let payload = b"arrow-ipc".to_vec();
-        let chunk = OwnerObservationChunk {
-            provider_run_id: "run:test".to_owned(),
-            compilation_unit_id: "unit:test".to_owned(),
-            sequence: 2,
-            owner_id: "owner:test".to_owned(),
-            observation_family_code: 70,
-            arrow_ipc: payload.clone(),
-            payload_reference: None,
-            schema_digest: b3("mir-schema"),
-            row_count: 1,
-            chunk_digest: arrow_chunk_digest(&payload),
-        };
-        validator
-            .accept_chunk(
-                chunk.clone(),
-                event(Event::OwnerObservationChunk(chunk.clone())),
-            )
-            .unwrap();
+        let chunk = typed_relation_chunk(relation);
+        let identity = crate::relation_ipc_contract::relation_wire_identity(
+            relation.relation_id(),
+            &relation.schema_digest(),
+            &validator.admission.provider_run_id,
+            "owner:test",
+            &validator.admission.source_snapshot_manifest_digest,
+            &validator.admission.context_manifest_digest,
+        )
+        .unwrap();
+        let frames = crate::relation_ipc_proto::encode_relation_frames(
+            identity,
+            &chunk.arrow_ipc,
+            1,
+            chunk.row_count,
+            &crate::relation_ipc_proto::RelationCoverage::complete(1),
+        )
+        .unwrap();
+        for (offset, frame) in frames.into_iter().enumerate() {
+            let relation_frame = OwnerRelationIpcFrame {
+                provider_run_id: "run:test".to_owned(),
+                compilation_unit_id: "unit:test".to_owned(),
+                sequence: 2 + u64::try_from(offset).unwrap(),
+                owner_id: "owner:test".to_owned(),
+                observation_family_code: relation.family_code(),
+                frame: Some(frame),
+            };
+            let command = validator
+                .accept_relation_frame(
+                    relation_frame.clone(),
+                    event(Event::OwnerRelationIpcFrame(relation_frame)),
+                    false,
+                )
+                .unwrap();
+            if let Some(command) = command {
+                let Some(Command::RelationIpcAck(acknowledgement)) = command.command else {
+                    panic!("payload credit uses the relation acknowledgement surface")
+                };
+                let acknowledgement =
+                    crate::relation_ipc_proto::decode_flow_control_ack(&acknowledgement).unwrap();
+                assert_eq!(acknowledgement.header.identity, identity);
+                assert!(!acknowledgement.cancelled);
+            }
+        }
+        let chunk = validator
+            .open_owner
+            .as_ref()
+            .unwrap()
+            .chunks
+            .first()
+            .unwrap()
+            .clone();
         let owner_end = OwnerEnd {
             provider_run_id: "run:test".to_owned(),
             compilation_unit_id: "unit:test".to_owned(),
-            sequence: 3,
+            sequence: validator.next_sequence,
             owner_id: "owner:test".to_owned(),
-            family_counts: [(70, 1)].into_iter().collect(),
+            family_counts: [(relation.family_code(), 0)].into_iter().collect(),
             owner_content_digest: owner_content_digest(&owner_begin, &[chunk]),
         };
         validator
@@ -1061,7 +1457,7 @@ mod tests {
         let compilation_end = CompilationEnd {
             provider_run_id: "run:test".to_owned(),
             compilation_unit_id: "unit:test".to_owned(),
-            sequence: 4,
+            sequence: validator.next_sequence,
             compiler_exit_status: 0,
             closed_owner_set_digest: closed_owner_set_digest(&validator.owners),
             capability_outcomes: Vec::new(),
@@ -1088,6 +1484,102 @@ mod tests {
             .unwrap();
         assert_eq!(completed.owners.len(), 1);
         assert_eq!(completed.owners[0].chunks.len(), 1);
+    }
+
+    #[test]
+    fn relation_payload_cancellation_is_acknowledged_and_never_reconciled() {
+        let (policy, admission, begin) = fixture();
+        let first = event(Event::CompilationBegin(begin.clone()));
+        let mut validator = RunValidator::new(admission, policy, begin, first).unwrap();
+        let relation = RustcRelation::MirBody;
+        let owner_begin = owner_begin(relation.family_code());
+        validator
+            .accept_owner_begin(owner_begin.clone(), event(Event::OwnerBegin(owner_begin)))
+            .unwrap();
+        let chunk = typed_relation_chunk(relation);
+        let identity = crate::relation_ipc_contract::relation_wire_identity(
+            relation.relation_id(),
+            &relation.schema_digest(),
+            &validator.admission.provider_run_id,
+            "owner:test",
+            &validator.admission.source_snapshot_manifest_digest,
+            &validator.admission.context_manifest_digest,
+        )
+        .unwrap();
+        let frames = crate::relation_ipc_proto::encode_relation_frames(
+            identity,
+            &chunk.arrow_ipc,
+            1,
+            0,
+            &crate::relation_ipc_proto::RelationCoverage::complete(1),
+        )
+        .unwrap();
+        let mut frames = frames.into_iter();
+        let open = OwnerRelationIpcFrame {
+            provider_run_id: "run:test".to_owned(),
+            compilation_unit_id: "unit:test".to_owned(),
+            sequence: 2,
+            owner_id: "owner:test".to_owned(),
+            observation_family_code: relation.family_code(),
+            frame: Some(frames.next().unwrap()),
+        };
+        assert!(
+            validator
+                .accept_relation_frame(
+                    open.clone(),
+                    event(Event::OwnerRelationIpcFrame(open)),
+                    true,
+                )
+                .unwrap()
+                .is_none()
+        );
+        let payload = OwnerRelationIpcFrame {
+            provider_run_id: "run:test".to_owned(),
+            compilation_unit_id: "unit:test".to_owned(),
+            sequence: 3,
+            owner_id: "owner:test".to_owned(),
+            observation_family_code: relation.family_code(),
+            frame: Some(frames.next().unwrap()),
+        };
+        let acknowledgement = validator
+            .accept_relation_frame(
+                payload.clone(),
+                event(Event::OwnerRelationIpcFrame(payload)),
+                true,
+            )
+            .unwrap()
+            .unwrap();
+        let Some(Command::RelationIpcAck(acknowledgement)) = acknowledgement.command else {
+            panic!("cancelled payload uses a relation cancellation acknowledgement")
+        };
+        let acknowledgement =
+            crate::relation_ipc_proto::decode_flow_control_ack(&acknowledgement).unwrap();
+        assert_eq!(acknowledgement.header.identity, identity);
+        assert!(acknowledgement.cancelled);
+
+        let mut end = CompilationEnd {
+            provider_run_id: "run:test".to_owned(),
+            compilation_unit_id: "unit:test".to_owned(),
+            sequence: validator.next_sequence,
+            compiler_exit_status: 0,
+            closed_owner_set_digest: closed_owner_set_digest(&[]),
+            capability_outcomes: Vec::new(),
+            diagnostic_summary: Some(DiagnosticSummary {
+                error_count: 0,
+                warning_count: 0,
+                diagnostics_digest: b3("cancelled"),
+            }),
+            overall_stream_digest: String::new(),
+            terminal_state: ProviderRunState::Cancelled as i32,
+            rejection_error: None,
+        };
+        let mut events = validator.events.clone();
+        events.push(event(Event::CompilationEnd(end.clone())));
+        end.overall_stream_digest = overall_stream_digest(&events);
+        let completed = validator
+            .finish(end.clone(), event(Event::CompilationEnd(end)), true)
+            .unwrap();
+        assert!(completed.owners.is_empty());
     }
 
     #[test]
@@ -1120,6 +1612,46 @@ mod tests {
         );
     }
 
+    #[test]
+    fn typed_relation_ingress_rejects_unknown_and_opaque_referenced_payloads() {
+        let (policy, admission, begin) = fixture();
+        let first = event(Event::CompilationBegin(begin.clone()));
+        let mut validator = RunValidator::new(admission, policy, begin, first).unwrap();
+        let unknown_begin = owner_begin(70);
+        assert_eq!(
+            validator
+                .accept_owner_begin(
+                    unknown_begin.clone(),
+                    event(Event::OwnerBegin(unknown_begin)),
+                )
+                .unwrap_err()
+                .code(),
+            tonic::Code::InvalidArgument
+        );
+
+        let mut unknown = typed_relation_chunk(RustcRelation::MirBody);
+        unknown.observation_family_code = 70;
+        assert_eq!(
+            validate_typed_relation_chunk(&unknown).unwrap_err().code(),
+            tonic::Code::InvalidArgument
+        );
+
+        let mut referenced = typed_relation_chunk(RustcRelation::MirBody);
+        referenced.arrow_ipc.clear();
+        referenced.payload_reference = Some(BlobReference {
+            blob_id: "opaque-payload".to_owned(),
+            content_digest: referenced.chunk_digest.clone(),
+            byte_length: 1,
+            read_only_uri: "file:opaque-payload".to_owned(),
+        });
+        assert_eq!(
+            validate_typed_relation_chunk(&referenced)
+                .unwrap_err()
+                .code(),
+            tonic::Code::InvalidArgument
+        );
+    }
+
     #[tokio::test]
     async fn wp35_operational_acceptance_handshake_and_cancel_are_single_authority() {
         let (policy, admission, begin) = fixture();
@@ -1149,7 +1681,7 @@ mod tests {
 
         let (commands, _receiver) = mpsc::channel(2);
         service.active.lock().await.insert(
-            admission.provider_run_id.clone(),
+            begin.compilation_unit_id.clone(),
             ActiveRun {
                 compilation_unit_id: begin.compilation_unit_id.clone(),
                 commands: Some(commands),
@@ -1167,6 +1699,64 @@ mod tests {
         assert_eq!(
             cancellation.state,
             CancelAcknowledgementState::CancellationRequested as i32
+        );
+    }
+
+    #[tokio::test]
+    async fn cargo_run_tracks_and_cancels_multiple_compilation_units_independently() {
+        let (mut policy, admission, _) = fixture();
+        policy.sandbox_profile_digest = format!("sha256:{}", "ab".repeat(32));
+        let (service, _accepted) = RustcObservationService::new(policy, admission.clone()).unwrap();
+        let (first_sender, mut first_commands) = mpsc::channel(2);
+        let (second_sender, mut second_commands) = mpsc::channel(2);
+        {
+            let mut active = service.active.lock().await;
+            for (unit_id, commands) in
+                [("unit:first", first_sender), ("unit:second", second_sender)]
+            {
+                active.insert(
+                    unit_id.to_owned(),
+                    ActiveRun {
+                        compilation_unit_id: unit_id.to_owned(),
+                        commands: Some(commands),
+                        cancelled: false,
+                        terminal_state: None,
+                    },
+                );
+            }
+        }
+
+        assert_eq!(
+            service.request_cancel_run(&admission.provider_run_id).await,
+            2
+        );
+        assert!(service.supervisor_cancellation_signal().is_requested());
+        for (expected_unit, receiver) in [
+            ("unit:first", &mut first_commands),
+            ("unit:second", &mut second_commands),
+        ] {
+            let command = receiver.recv().await.unwrap().unwrap();
+            let Some(Command::Cancel(request)) = command.command else {
+                panic!("run cancellation must use the reverse compiler command stream");
+            };
+            assert_eq!(request.provider_run_id, admission.provider_run_id);
+            assert_eq!(request.compilation_unit_id, expected_unit);
+        }
+        assert!(service.run_cancelled("unit:first").await);
+        assert!(service.run_cancelled("unit:second").await);
+
+        service
+            .mark_terminal("unit:first", ProviderRunState::Cancelled)
+            .await;
+        service
+            .mark_terminal("unit:second", ProviderRunState::Succeeded)
+            .await;
+        assert_eq!(
+            service.terminal_states().await,
+            BTreeMap::from([
+                ("unit:first".to_owned(), ProviderRunState::Cancelled),
+                ("unit:second".to_owned(), ProviderRunState::Succeeded),
+            ])
         );
     }
 }

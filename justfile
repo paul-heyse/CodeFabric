@@ -115,6 +115,35 @@ spec-outline *args:
 authoritative-design-conformance-check:
     PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_authoritative_design_conformance.py
 
+[doc("Prove the v2 design suite is the sole current authority and v1.3 is byte-identical history")]
+[group('gate')]
+v2-authority-cutover-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_relational_fabric_transition.py -k 'authority_selection'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_transition.py authority-cutover-check
+
+[doc("Reject selection of any historical v1.3 master as current design authority")]
+[group('gate')]
+legacy-suite-current-authority-zero-state-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_transition.py legacy-suite-current-authority-zero-state-check
+
+[doc("Prove the hidden, parsed, Cargo, installed, wheel, and sdist legacy inventory union")]
+[group('gate')]
+legacy-inventory-universe-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_relational_fabric_transition.py -k 'inventory or archive'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_transition.py legacy-inventory-universe-check
+
+[doc("Prove every bounded legacy surface has one fresh design-bound disposition")]
+[group('gate')]
+legacy-disposition-coverage-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_relational_fabric_transition.py -k 'selector or disposition or mixed_file'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_transition.py legacy-disposition-coverage-check
+
+[doc("Reject additions or modifications to the frozen predecessor authority surface")]
+[group('gate')]
+legacy-authority-freeze-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_relational_fabric_transition.py -k 'freeze'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_transition.py legacy-authority-freeze-check
+
 [doc("Compile every authored ontology operation into the normalized Arrow program package")]
 [group('contracts')]
 ontology-program-compiler-check:
@@ -176,6 +205,36 @@ ontology-activation-recovery-check:
     cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_restart_idempotency|activation_recovery_rejects_missing_snapshot|activation_concurrency_forward_rollback)/)' --no-tests=fail
     cargo nextest run --locked --test integration -E 'test(ontology_datafabric_end_to_end_cutover)' --no-tests=fail
 
+[doc("Reconstruct identical programmatic epochs from activation-selected exact Delta versions")]
+[group('gate')]
+delta-exact-version-reconstruction-check:
+    cargo nextest run --locked --lib -E 'test(/(stable_delta_histories_reopen_exactly_and_expose_only_the_current_epoch|exact_delta_append_readback_and_marker_reconciliation_round_trip)/)' --no-tests=fail
+
+[doc("Prove durable activation append, exact readback, marker recovery, and cold epoch reconstruction")]
+[group('gate')]
+fabric-activation-recovery-check:
+    cargo nextest run --locked --lib -E 'test(/(exact_delta_append_readback_and_marker_reconciliation_round_trip|unknown_commit_recovers_only_from_exact_operation_marker_and_chain|recovery_rejects_a_reversible_version_vector_substitution|exact_delta_evidence_reconstructs_event_and_chain_without_attempt_token)/)' --no-tests=fail
+
+[doc("Prove control recovery derives selection or nonselection from exact Delta evidence without retry")]
+[group('gate')]
+fabric-control-recovery-check:
+    cargo nextest run --locked --lib -E 'test(/(exact_delta_append_readback_and_marker_reconciliation_round_trip|explicit_nonselection_marker_is_the_only_recovery_abort_path|exact_readback_knowledge_cannot_regress_to_marker_nonselection|unknown_marker_keeps_restart_admission_closed_and_requires_reconciliation)/)' --no-tests=fail
+
+[doc("Reject invalid activation forks, predecessors, generations, pins, and reversible version vectors")]
+[group('gate')]
+activation-chain-validity-check:
+    cargo nextest run --locked --lib -E 'test(/(derives_one_head_from_unordered_events|rollback_reselects_an_epoch_without_cycling_event_history|fork_missing_predecessor_and_generation_regression_fail_closed|command_target_proof_and_pin_disagreement_are_rejected|recovery_rejects_a_reversible_version_vector_substitution)/)' --no-tests=fail
+
+[doc("Exercise activation boundary faults and competing writers without promoting partial progress")]
+[group('gate')]
+activation-fault-matrix-check:
+    cargo nextest run --locked --lib -E 'test(/(fault_matrix_never_promotes_partial_progress_to_success|competing_activator_cannot_cross_the_same_admission_barrier|forward_retry_writes_the_active_execution_fence_not_the_admitted_fence)/)' --no-tests=fail
+
+[doc("Hold predecessor leases across activation and keep restart admission closed until reconciliation")]
+[group('gate')]
+fabric-epoch-pinning-check:
+    cargo nextest run --locked --lib -E 'test(/(leases_pin_predecessor_across_closed_atomic_swap|restart_recovery_keeps_admission_closed_until_marker_and_cache_reconciliation|recovery_requires_the_exact_durable_head)/)' --no-tests=fail
+
 [doc("Prove the sole authenticated workspace admin route compiles, proves, stages, decides, and atomically activates a submission")]
 [group('gate')]
 ontology-activation-route-check:
@@ -224,6 +283,25 @@ root-fmt:
 root-check:
     ./scripts/cargo-check-mode.sh cargo check --all-targets
     ./scripts/cargo-check-mode.sh cargo check --all-targets --no-default-features
+
+# Edit-loop check, not a gate. Measured 2026-08-30 against the repository target/, warm,
+# after a one-line edit to a private fn: this recipe ~7.5s against `root-check` ~15s
+# (n=3). `root-check` costs double because it checks two surfaces. When nothing has
+# changed both are ~1s, so the win is only in the edit loop.
+#
+# Scope is the whole reason: `--all-targets` compiles this crate ten times -- lib,
+# lib-as-test, and a bin plus a bin-test for each of codefabricd,
+# codefabric-gate-b-candidate, and codefabric-model-schema-consumer. Isolated-tree
+# control, n=5 hyperfine 1.20.0: `--lib` 6.22s +/- 0.31, `--all-targets` 10.23s +/- 0.96.
+#
+# The trade is diagnostic reach: this surface does not type-check #[cfg(test)] modules,
+# the bins, or tests/integration.rs. `root-check` remains the gate and must still pass
+# before a change is done; this only shortens the inner loop.
+
+[doc("Fast library-only type-check for the edit loop -- root-check remains the gate")]
+[group('static')]
+root-check-fast:
+    ./scripts/cargo-check-mode.sh cargo check --lib
 
 [doc("Clippy on default local and featureless stable-domain surfaces")]
 [group('static')]
@@ -785,8 +863,8 @@ oracle-substance-check:
 
 [doc("Validate the active packet DAG and disposition every unordered known-touch overlap")]
 [group('gate')]
-plan-dependency-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py dependency-check
+plan-dependency-check *args:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py dependency-check "$@"
 
 [doc("Validate committed name-coupled nextest selectors and zero-selection failure semantics")]
 [group('gate')]
@@ -874,7 +952,7 @@ model-handoff-check:
 
 [doc("Run model-derived structural, artifact, provenance, and zero-state governance")]
 [group('gate')]
-governance: governance-scan model-design-contract-check model-assurance-check model-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check released-fixture-check oracle-substance-check plan-dependency-check design-principle-traceability-check alignment-detector-check
+governance: governance-scan model-design-contract-check model-assurance-check model-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check released-fixture-check oracle-substance-check plan-dependency-check design-principle-traceability-check alignment-detector-check v2-authority-cutover-check legacy-authority-freeze-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]

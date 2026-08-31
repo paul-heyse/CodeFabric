@@ -13,6 +13,8 @@
 ))]
 pub mod analysis_context;
 pub mod cancellation;
+#[cfg(feature = "daemon")]
+pub mod common_derived_analysis;
 #[cfg(feature = "compatibility-probes")]
 pub mod compatibility;
 #[cfg(feature = "data-fabric")]
@@ -100,6 +102,14 @@ pub mod ontology_relational_program;
 pub mod ontology_rules;
 #[cfg(feature = "data-fabric")]
 pub mod operational_store;
+#[cfg(feature = "daemon")]
+pub mod provider_admission;
+#[cfg(feature = "data-fabric")]
+pub mod provider_boundary;
+#[cfg(feature = "daemon")]
+pub mod provider_capability;
+#[cfg(all(feature = "data-fabric", feature = "fact-generation"))]
+pub mod provider_native_syntax;
 #[cfg(feature = "fact-generation")]
 pub mod provider_raw_kinds;
 #[cfg(feature = "daemon")]
@@ -112,6 +122,8 @@ pub mod provider_types;
 pub mod pyrefly_service;
 #[cfg(feature = "daemon")]
 pub mod python_context;
+#[cfg(feature = "daemon")]
+pub mod python_derived_analysis;
 #[cfg(feature = "daemon")]
 pub mod python_semantic;
 #[cfg(feature = "daemon")]
@@ -127,12 +139,36 @@ pub mod query_service;
     feature = "rpc"
 ))]
 pub mod registries;
+#[cfg(feature = "data-fabric")]
+pub mod relation_ipc;
+#[cfg(feature = "data-fabric")]
+pub(crate) mod relation_ipc_contract;
+#[cfg(feature = "daemon")]
+pub(crate) use rpc::generated::codefabric::provider::v1 as relation_ipc_proto_types;
+#[cfg(feature = "daemon")]
+pub(crate) mod relation_ipc_proto;
+#[cfg(feature = "daemon")]
+pub(crate) mod relation_ipc_wire;
+#[cfg(feature = "data-fabric")]
+pub mod relational_model;
+#[cfg(feature = "data-fabric")]
+pub mod relational_program;
+#[cfg(feature = "daemon")]
+pub mod relational_semantic_query;
 #[cfg(feature = "rpc")]
 pub mod rpc;
 #[cfg(feature = "fact-generation")]
 pub mod ruff_adapter;
 #[cfg(feature = "daemon")]
+pub mod rust_compilation_trust;
+#[cfg(feature = "daemon")]
+pub mod rust_mir_derived_analysis;
+#[cfg(feature = "daemon")]
+pub(crate) mod rustc_relation_schema;
+#[cfg(feature = "daemon")]
 pub mod rustc_service;
+#[cfg(feature = "data-fabric")]
+pub mod schema_contract;
 #[cfg(feature = "data-fabric")]
 pub mod schema_registry;
 #[cfg(feature = "daemon")]

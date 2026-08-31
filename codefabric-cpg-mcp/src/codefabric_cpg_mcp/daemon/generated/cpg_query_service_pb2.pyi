@@ -451,7 +451,7 @@ class ResponseChunkEvent(_message.Message):
     def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., offset: _Optional[int] = ..., uncompressed_length: _Optional[int] = ..., payload: _Optional[bytes] = ..., payload_checksum: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., final_chunk: _Optional[bool] = ...) -> None: ...
 
 class ArtifactReadyEvent(_message.Message):
-    __slots__ = ("header", "artifact_id", "artifact_checksum", "content_type", "encoding", "lease_expires_at_unix_ms", "lease_token")
+    __slots__ = ("header", "artifact_id", "artifact_checksum", "content_type", "encoding", "lease_expires_at_unix_ms", "lease_token", "canonical_result_descriptor_json", "result_descriptor_checksum", "result_contract_version", "arrow_release")
     HEADER_FIELD_NUMBER: _ClassVar[int]
     ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
     ARTIFACT_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
@@ -459,6 +459,10 @@ class ArtifactReadyEvent(_message.Message):
     ENCODING_FIELD_NUMBER: _ClassVar[int]
     LEASE_EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    CANONICAL_RESULT_DESCRIPTOR_JSON_FIELD_NUMBER: _ClassVar[int]
+    RESULT_DESCRIPTOR_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
+    RESULT_CONTRACT_VERSION_FIELD_NUMBER: _ClassVar[int]
+    ARROW_RELEASE_FIELD_NUMBER: _ClassVar[int]
     header: QueryEventHeader
     artifact_id: str
     artifact_checksum: str
@@ -466,7 +470,11 @@ class ArtifactReadyEvent(_message.Message):
     encoding: PayloadCompression
     lease_expires_at_unix_ms: int
     lease_token: str
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., artifact_id: _Optional[str] = ..., artifact_checksum: _Optional[str] = ..., content_type: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., lease_expires_at_unix_ms: _Optional[int] = ..., lease_token: _Optional[str] = ...) -> None: ...
+    canonical_result_descriptor_json: bytes
+    result_descriptor_checksum: str
+    result_contract_version: str
+    arrow_release: str
+    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., artifact_id: _Optional[str] = ..., artifact_checksum: _Optional[str] = ..., content_type: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., lease_expires_at_unix_ms: _Optional[int] = ..., lease_token: _Optional[str] = ..., canonical_result_descriptor_json: _Optional[bytes] = ..., result_descriptor_checksum: _Optional[str] = ..., result_contract_version: _Optional[str] = ..., arrow_release: _Optional[str] = ...) -> None: ...
 
 class TerminalEvent(_message.Message):
     __slots__ = ("header", "execution_state", "availability_state", "freshness_state", "limit_state", "dependency_state", "canonical_response_checksum", "canonical_error_record_json", "artifact_id", "result_row_count", "result_byte_count", "cleanup_state", "semantic_execution_state", "completeness_state", "truncated", "query_statuses", "notices")
@@ -563,21 +571,33 @@ class CancelQueryResponse(_message.Message):
     def __init__(self, daemon_query_id: _Optional[str] = ..., state: _Optional[_Union[CancellationState, str]] = ..., acknowledged_at_unix_ms: _Optional[int] = ..., terminal_state: _Optional[_Union[QueryExecutionState, str]] = ..., cleaning_up_components: _Optional[_Iterable[str]] = ..., forced_termination: _Optional[bool] = ...) -> None: ...
 
 class ReadResultRequest(_message.Message):
-    __slots__ = ("artifact_id", "offset", "maximum_bytes", "lease_token", "accepted_compression")
+    __slots__ = ("artifact_id", "offset", "maximum_bytes", "lease_token", "accepted_compression", "authorization_resource_id", "owner")
     ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
     MAXIMUM_BYTES_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     ACCEPTED_COMPRESSION_FIELD_NUMBER: _ClassVar[int]
+    AUTHORIZATION_RESOURCE_ID_FIELD_NUMBER: _ClassVar[int]
+    OWNER_FIELD_NUMBER: _ClassVar[int]
     artifact_id: str
     offset: int
     maximum_bytes: int
     lease_token: str
     accepted_compression: PayloadCompression
-    def __init__(self, artifact_id: _Optional[str] = ..., offset: _Optional[int] = ..., maximum_bytes: _Optional[int] = ..., lease_token: _Optional[str] = ..., accepted_compression: _Optional[_Union[PayloadCompression, str]] = ...) -> None: ...
+    authorization_resource_id: str
+    owner: ResultOwner
+    def __init__(self, artifact_id: _Optional[str] = ..., offset: _Optional[int] = ..., maximum_bytes: _Optional[int] = ..., lease_token: _Optional[str] = ..., accepted_compression: _Optional[_Union[PayloadCompression, str]] = ..., authorization_resource_id: _Optional[str] = ..., owner: _Optional[_Union[ResultOwner, _Mapping]] = ...) -> None: ...
+
+class ResultOwner(_message.Message):
+    __slots__ = ("workspace_id", "agent_id")
+    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    workspace_id: str
+    agent_id: str
+    def __init__(self, workspace_id: _Optional[str] = ..., agent_id: _Optional[str] = ...) -> None: ...
 
 class ResultChunk(_message.Message):
-    __slots__ = ("artifact_id", "offset", "uncompressed_length", "payload", "payload_checksum", "artifact_checksum", "content_type", "encoding", "final_chunk", "lease_expires_at_unix_ms")
+    __slots__ = ("artifact_id", "offset", "uncompressed_length", "payload", "payload_checksum", "artifact_checksum", "content_type", "encoding", "final_chunk", "lease_expires_at_unix_ms", "authorization_resource_id", "next_offset", "total_length", "content_checksum")
     ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
     UNCOMPRESSED_LENGTH_FIELD_NUMBER: _ClassVar[int]
@@ -588,6 +608,10 @@ class ResultChunk(_message.Message):
     ENCODING_FIELD_NUMBER: _ClassVar[int]
     FINAL_CHUNK_FIELD_NUMBER: _ClassVar[int]
     LEASE_EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    AUTHORIZATION_RESOURCE_ID_FIELD_NUMBER: _ClassVar[int]
+    NEXT_OFFSET_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_LENGTH_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
     artifact_id: str
     offset: int
     uncompressed_length: int
@@ -598,22 +622,30 @@ class ResultChunk(_message.Message):
     encoding: PayloadCompression
     final_chunk: bool
     lease_expires_at_unix_ms: int
-    def __init__(self, artifact_id: _Optional[str] = ..., offset: _Optional[int] = ..., uncompressed_length: _Optional[int] = ..., payload: _Optional[bytes] = ..., payload_checksum: _Optional[str] = ..., artifact_checksum: _Optional[str] = ..., content_type: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., final_chunk: _Optional[bool] = ..., lease_expires_at_unix_ms: _Optional[int] = ...) -> None: ...
+    authorization_resource_id: str
+    next_offset: int
+    total_length: int
+    content_checksum: str
+    def __init__(self, artifact_id: _Optional[str] = ..., offset: _Optional[int] = ..., uncompressed_length: _Optional[int] = ..., payload: _Optional[bytes] = ..., payload_checksum: _Optional[str] = ..., artifact_checksum: _Optional[str] = ..., content_type: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., final_chunk: _Optional[bool] = ..., lease_expires_at_unix_ms: _Optional[int] = ..., authorization_resource_id: _Optional[str] = ..., next_offset: _Optional[int] = ..., total_length: _Optional[int] = ..., content_checksum: _Optional[str] = ...) -> None: ...
 
 class ReleaseResultRequest(_message.Message):
-    __slots__ = ("artifact_id", "lease_token")
+    __slots__ = ("artifact_id", "lease_token", "owner")
     ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    OWNER_FIELD_NUMBER: _ClassVar[int]
     artifact_id: str
     lease_token: str
-    def __init__(self, artifact_id: _Optional[str] = ..., lease_token: _Optional[str] = ...) -> None: ...
+    owner: ResultOwner
+    def __init__(self, artifact_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., owner: _Optional[_Union[ResultOwner, _Mapping]] = ...) -> None: ...
 
 class ReleaseResultResponse(_message.Message):
-    __slots__ = ("artifact_id", "released", "remaining_lease_expires_at_unix_ms")
+    __slots__ = ("artifact_id", "released", "remaining_lease_expires_at_unix_ms", "release_state")
     ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
     RELEASED_FIELD_NUMBER: _ClassVar[int]
     REMAINING_LEASE_EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    RELEASE_STATE_FIELD_NUMBER: _ClassVar[int]
     artifact_id: str
     released: bool
     remaining_lease_expires_at_unix_ms: int
-    def __init__(self, artifact_id: _Optional[str] = ..., released: _Optional[bool] = ..., remaining_lease_expires_at_unix_ms: _Optional[int] = ...) -> None: ...
+    release_state: str
+    def __init__(self, artifact_id: _Optional[str] = ..., released: _Optional[bool] = ..., remaining_lease_expires_at_unix_ms: _Optional[int] = ..., release_state: _Optional[str] = ...) -> None: ...

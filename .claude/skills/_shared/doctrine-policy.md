@@ -1,8 +1,9 @@
 # Doctrine and Project-Policy Application
 
 The project doctrine at
-`docs/library_ref/semantic_design_principles_holistic.md` is authoritative when
-present. Do not reproduce all principles in every skill or artifact.
+`docs/library_ref/full_data_fabric_design_principles_v2.md` is authoritative.
+The v1 principles and holistic predecessor documents remain historical only.
+Do not reproduce all principles in every skill or artifact.
 
 ## When a full doctrine read is mandatory
 

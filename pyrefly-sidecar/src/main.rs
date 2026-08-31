@@ -2,6 +2,11 @@
 
 mod protocol;
 mod pyrefly_link;
+#[path = "../../src/relation_ipc_contract.rs"]
+mod relation_ipc_contract;
+pub(crate) use protocol::generated::codefabric::provider::v1 as relation_ipc_proto_types;
+#[path = "../../src/relation_ipc_proto.rs"]
+mod relation_ipc_proto;
 mod server;
 
 use std::ffi::OsString;

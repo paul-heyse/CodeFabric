@@ -1,0 +1,230 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v3_2026-08-30.md",
+  "design_path": "docs/designs/codefabric_execution_proved_relational_data_fabric_design_v3_2026-08-30.md",
+  "baseline_commit": "db67f7cbbd1ce96e7d7a98a790a0a5ef246fbc34",
+  "status": "executing",
+  "current_packet": "WP29",
+  "packets": {
+    "WP28": {
+      "status": "invalidated",
+      "proving_commit": null,
+      "deviations": [
+        "The owner explicitly waived WP28's successor-ledger and process-governance work so implementation can begin directly from the accepted v3 design and current v2.1 suite. This is an execution-scope deletion, not completion evidence; downstream packets use first-principles runtime behavior and exact typed authority directly."
+      ],
+      "failed_approaches": [],
+      "blockers": [
+        "WP28 will not receive a proving commit or packet oracles under the owner-approved scope. Final certification must exclude WP28 rather than report it complete."
+      ]
+    },
+    "WP29": {
+      "status": "in_progress",
+      "proving_commit": null,
+      "deviations": [
+        "WP28 is owner-waived. WP29 begins directly from accepted design v3, exact current library pins, current-tree implementation, and first-principles behavior rather than generated transition ledgers."
+      ],
+      "failed_approaches": [],
+      "blockers": [
+        "Production programmatic workspace composition, concrete daemon routing, and focused lifecycle proof are not yet complete."
+      ]
+    },
+    "WP30": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP31": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP32": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP33": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP34": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP35": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP36": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP37": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP38": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP39": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP40": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP41": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP42": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "milestones": {
+    "M01": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M02": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M03": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M04": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M05": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M06": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "decommission_batches": {
+    "DB09": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB10": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB11": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB12": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB13": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB14": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "baseline_failures": [],
+  "discovered_obligations": [
+    {
+      "kind": "runtime_native_durability_classification",
+      "summary": "Without WP28's standalone ledger, durable-versus-transient decisions must remain explicit in typed runtime contracts and executable tests: exact-version Delta histories and epoch-selected immutable Arrow segments carry proof-bearing state, while bounded DataFusion caches and execution buffers remain rebuildable non-authority."
+    }
+  ],
+  "plan_deviations": [
+    {
+      "kind": "owner_waived_wp28_and_accounting_prerequisite",
+      "summary": "The owner explicitly directed execution to ignore WP28 and prioritize the functioning programmatic DataFusion, Arrow, and Delta fabric over successor-ledger and legacy-comparison ceremony. WP28 is invalidated, not complete; its dependency edges are treated as removed for execution readiness, while the accepted design, exact APIs, runtime contracts, and first-principles tests remain binding."
+    },
+    {
+      "kind": "activation_design_digest_reconciliation",
+      "summary": "The separately authored approved plan recorded a stale digest for its accepted design file. Activation rebound the declared digest to the current accepted design v3 bytes after confirming the plan and design describe the same programmatic-authority target; no design behavior or packet content was changed."
+    }
+  ],
+  "next_action": "Implement WP29 production composition directly from ProgrammaticFabricEpoch authority, then delete the bootstrap and dual-epoch production route under WP30.",
+  "updated_at": "2026-08-30T23:58:22Z"
+}

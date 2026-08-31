@@ -287,6 +287,13 @@ message ArtifactReadyEvent {
   PayloadCompression encoding = 5;
   int64 lease_expires_at_unix_ms = 6;
   string lease_token = 7;
+  // Present for the Arrow-native result route. The bytes are the RFC 8785
+  // control projection emitted by the Rust result registry; they contain
+  // identities, schemas, coverage, bounds, and checksums but no semantic rows.
+  bytes canonical_result_descriptor_json = 8;
+  string result_descriptor_checksum = 9;
+  string result_contract_version = 10;
+  string arrow_release = 11;
 }
 
 message TerminalEvent {
@@ -352,6 +359,17 @@ message ReadResultRequest {
   optional uint64 maximum_bytes = 3;
   string lease_token = 4;
   PayloadCompression accepted_compression = 5;
+  // Non-empty only for the Arrow-native route. This is the owner-bound
+  // authorization handle from the descriptor, never the content identity.
+  string authorization_resource_id = 6;
+  ResultOwner owner = 7;
+}
+
+message ResultOwner {
+  // Lowercase fixed-width identities projected by the Rust daemon. They are
+  // deliberately distinct from display/public workspace identifiers.
+  string workspace_id = 1;
+  string agent_id = 2;
 }
 
 message ResultChunk {
@@ -365,15 +383,22 @@ message ResultChunk {
   PayloadCompression encoding = 8;
   bool final_chunk = 9;
   int64 lease_expires_at_unix_ms = 10;
+  string authorization_resource_id = 11;
+  uint64 next_offset = 12;
+  uint64 total_length = 13;
+  string content_checksum = 14;
 }
 
 message ReleaseResultRequest {
   string artifact_id = 1;
   string lease_token = 2;
+  ResultOwner owner = 3;
 }
 
 message ReleaseResultResponse {
   string artifact_id = 1;
   bool released = 2;
   optional int64 remaining_lease_expires_at_unix_ms = 3;
+  // "released" or "already_released" for the Arrow-native tombstone route.
+  string release_state = 4;
 }

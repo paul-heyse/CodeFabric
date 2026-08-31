@@ -38,13 +38,74 @@ use crate::schema_registry::{
 };
 use crate::workspace_registry::WorkspaceRecord;
 
+pub mod activation;
+#[cfg(feature = "daemon")]
+pub mod activation_command_effect;
+#[cfg(feature = "daemon")]
+pub mod activation_control_delta;
+#[cfg(feature = "daemon")]
+pub mod activation_transaction;
+#[cfg(feature = "daemon")]
+pub mod administration_command_effect;
+#[cfg(feature = "daemon")]
+pub mod admission;
+pub mod arrow_result_resource;
+pub mod child_session;
+pub mod command;
+#[cfg(feature = "daemon")]
+pub mod command_actor;
+pub mod command_delta;
+#[cfg(feature = "daemon")]
+pub(crate) mod command_effect_contract;
+#[cfg(feature = "daemon")]
+pub mod command_effect_router;
+#[cfg(feature = "daemon")]
+pub mod command_record_sqlite;
+#[cfg(feature = "daemon")]
+pub mod command_runtime;
+#[cfg(feature = "daemon")]
+pub mod command_runtime_manager;
+#[cfg(feature = "daemon")]
+pub mod command_runtime_ports;
+#[cfg(feature = "daemon")]
+pub mod compaction_command_effect;
+pub mod datafusion_cache;
+pub mod delta_exact;
+pub mod delta_write;
+pub mod derived_producer_closure;
+pub mod effective_view;
+pub mod epoch;
+pub mod graph_program;
+#[cfg(feature = "daemon")]
+pub mod model_migration_command_effect;
 mod mutation;
 mod overlay;
+pub mod programmatic_epoch;
+pub mod programmatic_observation_delta;
+pub mod programmatic_schema;
+pub mod proof;
+pub mod provider;
 mod publication;
+#[cfg(feature = "daemon")]
+pub mod published_arrow_result;
+#[cfg(feature = "daemon")]
+pub mod relation_publication_command_effect;
+#[cfg(feature = "daemon")]
+pub mod relational_query_runtime;
 mod result_checksum;
+#[cfg(feature = "daemon")]
+pub mod retention_command_effect;
+#[cfg(feature = "daemon")]
+pub mod rollback_command_effect;
 #[cfg(feature = "daemon")]
 mod serving;
 mod snapshot_catalog;
+#[cfg(feature = "daemon")]
+pub mod source_wave_command_effect;
+#[cfg(feature = "daemon")]
+pub mod writer_generation_sqlite;
+#[cfg(feature = "daemon")]
+pub mod writer_lease;
 pub use mutation::{
     MutationFaultPoint, MutationJournal, MutationPhase, MutationPhaseSpec, MutationResult,
     OwnerMutationRequest, PreparedMutation, batch_checksum,

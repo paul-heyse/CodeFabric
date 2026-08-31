@@ -88,6 +88,29 @@ enum CreditControlLimit {
   CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB = 16;
 }
 
+// Only Arrow IPC metadata V5 is admitted by the released relation protocol.
+enum ArrowIpcMetadataVersion {
+  ARROW_IPC_METADATA_VERSION_UNSPECIFIED = 0;
+  ARROW_IPC_METADATA_VERSION_V5 = 5;
+}
+
+enum RelationIpcRemainderReason {
+  RELATION_IPC_REMAINDER_REASON_UNSPECIFIED = 0;
+  RELATION_IPC_REMAINDER_REASON_UNSUPPORTED = 1;
+  RELATION_IPC_REMAINDER_REASON_PROVIDER_UNAVAILABLE = 2;
+  RELATION_IPC_REMAINDER_REASON_RESOURCE_LIMIT = 3;
+  RELATION_IPC_REMAINDER_REASON_INVALID_SOURCE = 4;
+  RELATION_IPC_REMAINDER_REASON_CANCELLED = 5;
+  RELATION_IPC_REMAINDER_REASON_UNKNOWN = 6;
+}
+
+enum RelationIpcTerminalStatus {
+  RELATION_IPC_TERMINAL_STATUS_UNSPECIFIED = 0;
+  RELATION_IPC_TERMINAL_STATUS_COMPLETE = 1;
+  RELATION_IPC_TERMINAL_STATUS_PARTIAL = 2;
+  RELATION_IPC_TERMINAL_STATUS_UNKNOWN = 3;
+}
+
 message BlobReference {
   string blob_id = 1;
   string content_digest = 2;
@@ -250,4 +273,82 @@ message ChunkAccepted {
 message ChunkRejected {
   uint64 sequence = 1;
   string error_code = 2;
+}
+
+// Fixed-width application identities. Protobuf carries the bytes; each process
+// boundary validates the exact 16/16/32/32/32-byte widths before admitting a frame.
+message RelationIpcStreamIdentity {
+  bytes relation_id = 1;
+  bytes stream_id = 2;
+  bytes schema_fingerprint = 3;
+  bytes source_pin = 4;
+  bytes context_pin = 5;
+}
+
+message RelationIpcFrameHeader {
+  uint32 protocol_version = 1;
+  RelationIpcStreamIdentity identity = 2;
+  // Data frames and acknowledgements have independent monotonically increasing
+  // sequence spaces. Direction determines which sequence space this field uses.
+  uint64 sequence = 3;
+}
+
+message RelationIpcOpen {
+  RelationIpcFrameHeader header = 1;
+  uint64 requested_units = 2;
+  string arrow_type_universe = 3;
+  ArrowIpcMetadataVersion metadata_version = 4;
+  string semantic_encoding = 5;
+}
+
+message RelationIpcPayload {
+  RelationIpcFrameHeader header = 1;
+  // The sole semantic byte carrier: one bounded fragment of one Arrow IPC stream.
+  bytes arrow_ipc_fragment = 2;
+}
+
+message RelationIpcFlowControlAck {
+  RelationIpcFrameHeader header = 1;
+  optional uint64 acknowledged_sequence = 2;
+  uint64 released_bytes = 3;
+  bool cancelled = 4;
+}
+
+message RelationIpcEnd {
+  RelationIpcFrameHeader header = 1;
+  uint64 declared_ipc_bytes = 2;
+  uint64 declared_batches = 3;
+  uint64 declared_rows = 4;
+}
+
+message RelationIpcCoverageRemainder {
+  bytes scope = 1;
+  uint64 unit_count = 2;
+  RelationIpcRemainderReason reason = 3;
+}
+
+message RelationIpcCoverageTrailer {
+  RelationIpcFrameHeader header = 1;
+  RelationIpcTerminalStatus status = 2;
+  uint64 requested_units = 3;
+  uint64 completed_units = 4;
+  repeated RelationIpcCoverageRemainder remainders = 5;
+}
+
+message RelationIpcTerminal {
+  RelationIpcFrameHeader header = 1;
+  RelationIpcTerminalStatus status = 2;
+}
+
+// The typed outer control plane. Semantic rows occur only inside
+// RelationIpcPayload.arrow_ipc_fragment as one exact Arrow IPC V5 stream.
+message RelationIpcFrame {
+  oneof frame {
+    RelationIpcOpen open = 1;
+    RelationIpcPayload payload = 2;
+    RelationIpcFlowControlAck flow_control_ack = 3;
+    RelationIpcEnd ipc_end = 4;
+    RelationIpcCoverageTrailer coverage_trailer = 5;
+    RelationIpcTerminal terminal = 6;
+  }
 }

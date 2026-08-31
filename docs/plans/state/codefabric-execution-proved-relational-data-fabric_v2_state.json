@@ -3,309 +3,496 @@
   "plan_path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v2_2026-08-29.md",
   "design_path": "docs/designs/codefabric_execution_proved_relational_data_fabric_design_v2_2026-08-29.md",
   "baseline_commit": "7184b86dc80adedc8a2b8d081179fa52d3dfee20",
-  "status": "executing",
-  "current_packet": "WP01",
+  "status": "invalidated",
+  "current_packet": null,
   "packets": {
     "WP01": {
+      "status": "invalidated",
+      "proving_commit": null,
+      "deviations": [
+        "Status-reconciliation correction: the selector/freeze inputs and WP01 transition recipes now exist and the v2 authority-cutover check passes, but they select a suite whose replayed-bootstrap premise has been superseded. A successor authority reset must select the programmatic-session design before this boundary can be proved."
+      ],
+      "failed_approaches": [],
+      "blockers": [
+        "No proving commit exists; the required legacy selector/freeze inputs and complete WP01 oracle wiring are not yet installed.",
+        "The selected v2.0 suite still declares replayed model/bootstrap authority, so the packet target is no longer the owner-approved target."
+      ]
+    },
+    "WP02": {
+      "status": "invalidated",
+      "proving_commit": null,
+      "deviations": [
+        "The owner rejected BootstrapMetamodel, ModelMigration replay, and FabricCompilerRelease-driven schema authority as target foundations. Existing WP02 code is now legacy/decommission evidence, not provisional target implementation."
+      ],
+      "failed_approaches": [],
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted.",
+        "WP02's outcome and acceptance oracles prove a superseded bootstrap/replay architecture and must be replaced rather than completed."
+      ]
+    },
+    "WP03": {
+      "status": "invalidated",
+      "proving_commit": null,
+      "deviations": [
+        "The one-time legacy importer and accepted initial ModelMigration corpus are no longer prerequisites. The current importer implementation is a purge target; retained public IDs and governance decisions must enter as ordinary explicit typed inputs where they are not derivable from code facts."
+      ],
+      "failed_approaches": [],
+      "blockers": [
+        "WP03's dependency and outcome assume the superseded replayed-model authority and require successor-plan replacement."
+      ]
+    },
+    "WP04": {
       "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
-    },
-    "WP02": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
-    },
-    "WP03": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
-    },
-    "WP04": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP05": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Owner-directed cache adaptation makes DataFusion metadata, Parquet file-statistics, object-list, and logical-plan cache limits explicit epoch/runtime inputs rather than hidden library defaults."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation now installs bounded proportional DataFusion metadata, file-statistics, and finite-TTL object-list caches and exposes their limits through runtime/resource observations. Closure still requires the complete named acceptance-oracle set, predecessor/evidence acceptance, and a proving commit."
+      ]
     },
     "WP06": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Owner-directed cache adaptation retains compiled and optimized native logical plans in a bounded epoch-owned LRU keyed by the complete typed program and exact execution authorities; physical plans and results remain deliberately uncached.",
+        "The typed RelationalProgram compiler and logical-plan cache are reusable, but WP06's model-owned compiler inputs and model-causality contract have been superseded by provider-fact, explicit-input, and transformation relations assembled in the candidate session."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation now reuses collision-safe compiled/optimized logical plans across exact-policy child sessions while rebuilding and optimizing a physical plan for every task. Closure still requires full semantic-plan acceptance oracles, predecessor/evidence acceptance, and a proving commit.",
+        "WP06's outcome and several named oracles still require a replayed model and therefore cannot prove the successor compiler boundary."
+      ]
     },
     "WP07": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP08": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP09": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP10": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP11": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP12": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP13": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP14": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP15": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP16": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP17": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
+      "deviations": [
+        "Owner-directed Delta adaptation confirms the five observation families as stable append-only histories with exact-version providers, change data feed enabled as transport, and statistics parsing explicitly retained for query pruning."
+      ],
+      "failed_approaches": [
+        "A digest-only table-version reference was insufficient for restart because it could prove equality but could not reconstruct relation-to-Delta-root/version selections; the activation row now stores the typed canonical vector and its digest together.",
+        "Formatting nested Arrow DataType values with Rust Debug output produced nondeterministic schema identities because nested metadata uses unordered maps; activation-control schema identity now hashes a canonical JCS descriptor instead."
+      ],
+      "blockers": [
+        "Current-tree implementation now has stable append-only observation histories, a typed reversible relation-to-Delta-version vector, exact statistics-enabled providers, append/readback, marker recovery, canonical chain reconstruction, and a fenced Delta command/activation authority adapter. Closure still requires production daemon factory composition, accepted predecessor/evidence dependencies, the complete acceptance-oracle set, and a proving commit."
+      ]
     },
     "WP18": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
+      "deviations": [
+        "The process-local activation cache is explicitly named and constrained as ActivationReconciliationReceiptCache so it cannot be mistaken for cached fabric data or semantic authority."
+      ],
+      "failed_approaches": [
+        "Restart admission originally required a prebuilt process-local candidate before durable marker reconciliation, making the cache an implicit bootstrap authority; recovery now starts admission closed and unmaterialized, then installs a freshly rebuilt DataFusion epoch from the marker-selected exact Delta vector."
+      ],
+      "blockers": [
+        "Current-tree implementation now reconstructs and installs a fresh sealed DataFusion epoch from activation-selected exact Delta versions while restart admission begins closed with no cached candidate; the reconstructible receipt cache and idempotent acknowledgement are concrete and focused-test proved. Closure still requires daemon factory composition, accepted predecessor/evidence dependencies, the complete acceptance-oracle set, and a proving commit."
+      ]
     },
     "WP19": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP20": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Final semantic, causal, security, and performance evidence remains required, but WP20's mandatory frozen-predecessor comparison dependency is superseded. Acceptance must be first-principles and independently authored; predecessor comparison is optional explanatory migration evidence."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP20 must be replaced after the successor design defines the durable proof relations and first-principles evidence transaction."
+      ]
     },
     "WP21": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "One serving and mutation authority plus total legacy removal remain required, but the exact frozen-comparator/old-binary bridge ceremony and predecessor-grounded ordering are no longer accepted as the implementation program."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "A successor plan must define the smallest executable cutover that proves sole programmatic-epoch authority without restoring predecessor comparison as a prerequisite."
+      ]
     },
     "WP22": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Independent expectations and causal faults remain required, but the before-implementation freeze order, mandatory comparator reconstruction, and bootstrap-model expectation category are superseded. Existing non-bootstrap expectations are salvageable only after independent review against the successor design."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "The current evidence corpus encodes bootstrap_model_semantics and a mandatory WP01/comparator DAG, so it cannot accept the programmatic-session target without a successor evidence transaction."
+      ]
     },
     "WP23": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP24": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP25": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP26": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted."
+      ]
     },
     "WP27": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "SchemaContract phase validation and physical adaptation remain reusable, but a ModelEpoch-to-SchemaContract projection is explicitly no longer a target. Programmatic provider facts and transformation outputs define schemas in the candidate SessionContext and are themselves observed and historicized."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current-tree implementation is provisional: no proving commit or complete named acceptance-oracle set exists, and predecessor/evidence dependencies are not accepted.",
+        "WP27's model-derived authority and acceptance wording must be replaced while retaining its generic logical/storage/scan/stream/write validation machinery."
+      ]
     }
   },
   "milestones": {
     "M01": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The replayed-model foundation milestone is not a target milestone after the programmatic-session pivot."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Replace M01 with a programmatic schema/session foundation milestone whose proof begins from provider facts, explicit typed inputs, transformations, and exact Delta histories."
+      ]
     },
     "M02": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Exact provider and derived-analysis implementations exist, but successor dependencies, production composition, named acceptance checks, and proving commits remain."
+      ]
     },
     "M03": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Authorized child sessions, relational query execution, Arrow result resources, and framed provider IPC exist, but the production daemon still uses the predecessor query backend and no end-to-end successor vertical is proved."
+      ]
     },
     "M04": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Exact Delta observation histories, activation control, cold reconstruction, receipt-only caching, and focused recovery proofs exist; production workspace runtime composition and complete durable proof-history coverage remain."
+      ]
     },
     "M05": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The predecessor-comparator and exact-old-binary ceremony is no longer the required release-evidence foundation; successor acceptance is first-principles with optional comparison."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Replace this milestone after the successor evidence and cutover packets are defined."
+      ]
     },
     "M06": {
       "status": "not_started",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Total legacy purge remains required, but its inventory and prerequisites must be rebound to the successor design before execution."
+      ]
     }
   },
   "decommission_batches": {
     "DB01": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "A one-time ModelMigration importer should not become a successor prerequisite. Delete the current importer and live bootstrap/replay readers as direct legacy purge work instead."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Replace this batch with direct bootstrap/model/importer zero-state proof under the successor plan."
+      ]
     },
     "DB02": {
       "status": "not_started",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "The target provider and analysis modules coexist with predecessor consumers; successor-plan dependency mapping is required before deletion."
+      ]
     },
     "DB03": {
       "status": "not_started",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "The daemon still serves through the predecessor query backend and old epoch/catalog routes remain compiled; production cutover must precede this zero-state batch."
+      ]
     },
     "DB04": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The batch correctly removes generated/model authorities but incorrectly preserves a minimal bootstrap. The successor batch must remove schema/model bootstrap authority entirely while retaining only genuinely static wire primitives."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Replace DB04 with a stricter bootstrap/model/generated-authority purge contract."
+      ]
     },
     "DB05": {
       "status": "not_started",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Current governance and the selected v2.0 suite encode the superseded model authority; successor suite publication and consumer cutover must precede removal."
+      ]
     },
     "DB06": {
       "status": "not_started",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Retired feature/package/dependency edges can be removed only after successor runtime and decommission consumers are proved."
+      ]
     },
     "DB07": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "A live-read prohibition remains useful, but a mandatory comparator archive is no longer a successor prerequisite. Any retained comparison evidence is optional, isolated history."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Successor planning must disposition existing comparator artifacts without making them semantic or acceptance authority."
+      ]
     },
     "DB08": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Final total purge remains required, but expiry of a mandatory comparator archive is not a distinct target phase after the first-principles evidence pivot."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Fold any optional comparison-artifact disposition into the successor final purge milestone."
+      ]
     }
   },
   "baseline_failures": [],
-  "discovered_obligations": [],
+  "discovered_obligations": [
+    {
+      "kind": "semantic_governance_input_and_runtime_composition_closure",
+      "summary": "Any semantic or governance policy that is not derivable from provider facts remains an explicit typed transformation input inside the candidate DataFusion session. Production composition must supply and prove those inputs directly; neither a bootstrap metamodel nor a ModelEpoch-to-schema projection is a target prerequisite."
+    },
+    {
+      "kind": "activation_control_relation_closure",
+      "summary": "The current tree implements a programmatically provisioned append-only Delta activation-control table, typed exact version vectors, canonical transaction-marker mapping, decodable durable rows, exact commit evidence, workspace-scoped DataFusion readback, cold epoch reconstruction, and a composite semantic-chain/independent-writer-fence authority port. WP17-WP18 still require concrete cache/acknowledgement/factory composition and complete named acceptance evidence."
+    },
+    {
+      "kind": "production_runtime_composition_closure",
+      "summary": "The daemon still needs concrete workspace command-runtime factories which install the existing Delta activation event/marker/authority adapters with cache and acknowledgement ports, semantic-context and remaining durable effect backends, relational query-runtime wiring, and lifecycle/source-wave composition; tested isolated adapters are not production cutover evidence."
+    },
+    {
+      "kind": "programmatic_session_schema_authority_closure",
+      "summary": "The current tree constructs and proves programmatic catalog/schema/dependency/provenance observations in a candidate DataFusion session, historicizes them as exact Delta versions, and reconstructs a fresh sealed session from an activation-selected vector. Remaining work is to migrate production epoch/program/query/lifecycle consumers to this authority and delete BootstrapMetamodel, replayed schema registries, model-to-schema DTO projections, and model-digest schema authority."
+    },
+    {
+      "kind": "measured_cache_policy_closure",
+      "summary": "The current bounded proportional cache profile is a safe explicit release input, not a performance claim. Later workload evidence must feed cache-hit, planning-latency, memory-pressure, and update-amplification relations before changing metadata, statistics, listing, logical-plan, materialization, or clustering policy."
+    },
+    {
+      "kind": "successor_design_and_suite_authority_closure",
+      "summary": "Design v2, the selected v2.0 authoritative suite, and plan v2 still declare replayed model/bootstrap authority. A versioned successor design and suite must make provider facts, explicit typed governance inputs, programmatic transformations, candidate-session catalog construction, and exact Delta history the sole target before another implementation packet is accepted."
+    },
+    {
+      "kind": "durable_intermediate_proof_history_closure",
+      "summary": "The five catalog-observation families and activation control are historicized today. The successor design must classify every proof-bearing intermediate relation that activation, restart, audit, incremental recomputation, or provenance closure needs as a stable append-only Delta history with exact version pins, while leaving purely reconstructible execution buffers transient Arrow state."
+    },
+    {
+      "kind": "successor_first_principles_evidence_closure",
+      "summary": "The existing independent evidence corpus contains a bootstrap-model expectation and a mandatory WP01/comparator dependency. Preserve independently authored non-bootstrap semantic expectations only after review; replace bootstrap/comparator authority with first-principles invariants, exact pinned API facts, released public contracts, causal faults, and direct end-to-end proof of the final implementation."
+    },
+    {
+      "kind": "bootstrap_and_dual_epoch_zero_state_closure",
+      "summary": "BootstrapMetamodel, ModelMigration replay, FabricCompilerRelease schema authority, the legacy importer, ModelEpoch-to-schema projection, the old FabricEpoch builder, and exported relational_model surfaces remain compiled beside ProgrammaticFabricEpoch. The successor plan must route production consumers first and then prove their complete structural, textual, package, feature, test, and compiler-level absence."
+    }
+  ],
   "plan_deviations": [
     {
       "kind": "owner_directed_activation_override",
       "summary": "The owner explicitly approved plan v2, waived its separately governed candidate-readiness prerequisite as impractical for this redesign, and then directed the repository active-plan pointer to select v2. The repository activation transaction created this state and changed the pointer; the waived prerequisite is not treated as packet-completion evidence."
+    },
+    {
+      "kind": "implementation_ahead_of_independent_evidence",
+      "summary": "Owner-directed rapid redesign work began across later packets before WP22 independently accepted its expectations and before predecessor packets obtained proving commits. Acceptance will therefore use a successor first-principles evidence transaction authored from the v2 design, exact pinned provider APIs, released public contracts, and independently specified executable invariants without target-output authority. A predecessor comparator is optional comparison/migration evidence only; its absence cannot block target acceptance. Every dependent packet remains subject to current-tree revalidation before completion."
+    },
+    {
+      "kind": "owner_corrected_programmatic_session_schema_authority",
+      "summary": "The owner rejected the replayed bootstrap as unnecessary duplication of Arrow/DataFusion capabilities and clarified that schemas and downstream CPG data are constructed programmatically from exact provider facts and transformations within the candidate session context. The newly added bootstrap/replay assurance recipes were removed; affected replay/model projection work is now a decommission target, while explicit semantic/governance inputs remain ordinary typed transformation inputs rather than bootstrap declarations."
+    },
+    {
+      "kind": "owner_directed_delta_and_datafusion_cache_adaptation",
+      "summary": "The owner directed exact-version Delta historicization plus caching of repeated DataFusion planning and runtime file work. The implementation keeps Delta table versions authoritative, caches compiled and optimized logical plans only under complete epoch/version/program/runtime/policy keys, retains DataFusion metadata/statistics/listing caches under explicit finite bounds, and intentionally rebuilds physical plans and query results."
+    },
+    {
+      "kind": "status_audit_major_replan",
+      "summary": "Current-tree evidence confirms that owner-approved design changes invalidate the bootstrap/model foundation, model-derived schema authority, mandatory predecessor evidence ordering, and related cutover/decommission packets. Plan v2 is preserved as immutable history and marked invalidated; reusable Arrow IPC, provider, relational-program, authorization, Delta, activation, cache, query, and analysis work must be remapped into a successor design and plan."
+    },
+    {
+      "kind": "historical_predecessor_blocker_correction",
+      "summary": "Earlier per-packet blocker text requiring predecessor/evidence acceptance is historical. Successor completion requires independently authored first-principles evidence and causal proof; a predecessor comparator is optional migration/rationalization evidence and cannot block target acceptance."
+    },
+    {
+      "kind": "selected_suite_semantic_drift",
+      "summary": "The v2 authority-cutover machinery is executable and currently selects exactly one v2.0 suite, but that suite still declares replayed model/bootstrap authority. Structural authority-selection success therefore proves routing only and cannot validate the now-approved semantic target."
     }
   ],
-  "next_action": "Run WP01 current-tree preflight, reconcile predecessor authority and dirty-tree overlap, then implement the bounded transition without editing the immutable plan body.",
-  "updated_at": "2026-08-30T03:46:45Z"
+  "next_action": "Create a versioned successor target design and authoritative suite that make programmatic candidate-session schemas, exact provider facts plus typed transformations, stable Delta histories for proof-bearing intermediate relations, exact-version activation/recovery, bounded DataFusion caches, and first-principles evidence normative; then derive a successor implementation plan that remaps reusable packets and makes bootstrap/model/dual-epoch purge an early dependency-closed cutover.",
+  "updated_at": "2026-08-30T20:29:41Z"
 }

@@ -714,7 +714,7 @@ Rules 1-14 are semantic. **Rules 15-18 are meta-rules about navigating these fou
 
 ### Spec anchors
 
-`present_state_cpg_fact_generation_specification_python_rust_v1.3.md` is the governing spec. Its §2 source basis names five library references — these four plus `petgraph.md`, routed by the `petgraph-ref` sibling — alongside the ontology specification as a companion artifact:
+`present_state_cpg_fact_generation_specification_python_rust_v2.0.md` is the current governing spec. Its §2 source basis names these exact provider references plus `petgraph.md`, routed by the `petgraph-ref` sibling; the v1.3 master is historical:
 
 | Spec section | What it fixes | Mirrored here |
 |---|---|---|

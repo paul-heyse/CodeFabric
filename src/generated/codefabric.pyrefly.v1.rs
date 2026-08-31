@@ -129,7 +129,7 @@ pub struct AnalyzeModulesRequest {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnalyzeCommand {
-    #[prost(oneof = "analyze_command::Command", tags = "1, 2, 3, 4")]
+    #[prost(oneof = "analyze_command::Command", tags = "1, 2, 3, 4, 5")]
     pub command: ::core::option::Option<analyze_command::Command>,
 }
 /// Nested message and enum types in `AnalyzeCommand`.
@@ -144,6 +144,8 @@ pub mod analyze_command {
         ChunkRejected(super::super::super::provider::v1::ChunkRejected),
         #[prost(message, tag = "4")]
         Cancel(super::CancelRunRequest),
+        #[prost(message, tag = "5")]
+        RelationIpcAck(super::super::super::provider::v1::RelationIpcFrame),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -208,6 +210,17 @@ pub struct ObservationBatchChunk {
     pub chunk_digest: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RelationIpcFrameEvent {
+    #[prost(message, optional, tag = "1")]
+    pub header: ::core::option::Option<AnalyzeEventHeader>,
+    #[prost(string, tag = "2")]
+    pub module_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "3")]
+    pub observation_family_code: u32,
+    #[prost(message, optional, tag = "4")]
+    pub frame: ::core::option::Option<super::super::provider::v1::RelationIpcFrame>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ModuleEnd {
     #[prost(message, optional, tag = "1")]
     pub header: ::core::option::Option<AnalyzeEventHeader>,
@@ -243,7 +256,7 @@ pub struct RunTerminal {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnalyzeEvent {
-    #[prost(oneof = "analyze_event::Event", tags = "1, 2, 3, 4, 5, 6")]
+    #[prost(oneof = "analyze_event::Event", tags = "1, 2, 3, 4, 5, 6, 7")]
     pub event: ::core::option::Option<analyze_event::Event>,
 }
 /// Nested message and enum types in `AnalyzeEvent`.
@@ -262,6 +275,8 @@ pub mod analyze_event {
         ModuleEnd(super::ModuleEnd),
         #[prost(message, tag = "6")]
         RunTerminal(super::RunTerminal),
+        #[prost(message, tag = "7")]
+        RelationIpcFrame(super::RelationIpcFrameEvent),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

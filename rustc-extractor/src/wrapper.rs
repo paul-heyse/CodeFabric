@@ -1,5 +1,6 @@
 //! Short-lived `RUSTC_WORKSPACE_WRAPPER` client for one Cargo compilation unit.
 
+use std::collections::HashMap;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt as _;
@@ -10,10 +11,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use arrow_array::builder::{ListBuilder, StringBuilder};
-use arrow_array::{ArrayRef, BooleanArray, RecordBatch, StringArray, UInt64Array};
-use arrow_ipc::writer::StreamWriter;
-use arrow_schema::{DataType, Field, Schema};
+use arrow_array::builder::{BooleanBuilder, FixedSizeBinaryBuilder, StringBuilder, UInt64Builder};
+use arrow_array::{ArrayRef, RecordBatch};
+use arrow_ipc::MetadataVersion;
+use arrow_ipc::writer::{IpcWriteOptions, StreamWriter};
+use arrow_schema::DataType;
 use hyper_util::rt::TokioIo;
 use prost::Message;
 use tokio::net::UnixStream;
@@ -29,18 +31,21 @@ use crate::protocol::generated::codefabric::rustc::v1::extractor_command::Comman
 use crate::protocol::generated::codefabric::rustc::v1::rustc_extractor_client::RustcExtractorClient;
 use crate::protocol::generated::codefabric::rustc::v1::{
     CompilationBegin, CompilationEnd, CompilerOwnerKey, DiagnosticSummary, ExtractionEvent,
-    ExtractorHello, OwnerBegin, OwnerEnd, OwnerObservationChunk, PackageTargetIdentity,
-    RejectionRuleErrorCode,
-};
-use crate::protocol::generated::observation_schema::{
-    PROVIDER_OBSERVATION_SCHEMAS, ProviderObservationLogicalType, ProviderObservationSchema,
+    ExtractorHello, OwnerBegin, OwnerEnd, OwnerObservationChunk, OwnerRelationIpcFrame,
+    PackageTargetIdentity, RejectionRuleErrorCode,
 };
 use crate::protocol::generated::registries::{CAPABILITY_CODES, CAPABILITY_IDS};
-use crate::rustc_link::OwnedMirItem;
+use crate::relation_ipc_contract::relation_wire_identity;
+use crate::relation_ipc_proto::{
+    RelationCoverage, decode_flow_control_ack, encode_relation_frames,
+};
+use crate::rustc_link::{OwnedCell, OwnedRow, OwnedRustcOwner, OwnedRustcRelation};
+use crate::rustc_relation_schema::{RustcRelation, schema_bundle_digest};
 
 include!("generated/digest_frames.rs");
 
-const MAX_CHUNK_BYTES: usize = 16 * 1024 * 1024;
+const MAX_RELATION_IPC_BYTES: usize = 16 * 1024 * 1024;
+const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 /// Typed failure at the compiler-wrapper process boundary.
 #[derive(Debug)]
@@ -78,13 +83,6 @@ fn rust_mir_capability_code() -> Result<u32, String> {
         .zip(CAPABILITY_CODES)
         .find_map(|(candidate, code)| (*candidate == "RUST_MIR").then_some(u32::from(*code)))
         .ok_or_else(|| "generated RUST_MIR capability allocation is absent".to_owned())
-}
-
-fn rust_mir_observation_contract() -> Result<&'static ProviderObservationSchema, String> {
-    PROVIDER_OBSERVATION_SCHEMAS
-        .iter()
-        .find(|schema| schema.provider_id == "rustc-mir")
-        .ok_or_else(|| "generated rustc MIR observation schema is absent".to_owned())
 }
 
 #[derive(Clone, Debug)]
@@ -126,6 +124,18 @@ fn valid_digest(value: &str) -> bool {
         && value[3..]
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_sandbox_profile_digest(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .or_else(|| value.strip_prefix("b3:"))
+        .is_some_and(|payload| {
+            payload.len() == 64
+                && payload
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
 }
 
 fn environment_value(name: &str) -> Result<String, String> {
@@ -256,6 +266,16 @@ fn short_identity(domain: &[u8], fields: &[&str]) -> String {
     digest[3..35].to_owned()
 }
 
+fn fixed16_hex(value: [u8; 16]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(32);
+    for byte in value {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
 fn target_identity(arguments: &[String], invocation_digest: &str) -> PackageTargetIdentity {
     let crate_name =
         argument_value(arguments, "--crate-name").unwrap_or_else(|| "unknown_crate".to_owned());
@@ -279,63 +299,157 @@ fn target_identity(arguments: &[String], invocation_digest: &str) -> PackageTarg
     }
 }
 
-fn mir_schema() -> Result<Arc<Schema>, String> {
-    let contract = rust_mir_observation_contract()?;
-    let fields = contract
-        .fields
-        .iter()
-        .map(|field| {
-            let data_type = match field.logical_type {
-                ProviderObservationLogicalType::Utf8 => DataType::Utf8,
-                ProviderObservationLogicalType::Binary => DataType::Binary,
-                ProviderObservationLogicalType::Boolean => DataType::Boolean,
-                ProviderObservationLogicalType::UInt64 => DataType::UInt64,
-                ProviderObservationLogicalType::Utf8List => {
-                    DataType::List(Arc::new(Field::new_list_field(DataType::Utf8, false)))
-                }
-            };
-            Field::new(field.name, data_type, field.nullable)
-        })
-        .collect::<Vec<_>>();
-    Ok(Arc::new(Schema::new(fields)))
+struct RelationContext<'a> {
+    provider_run_id: &'a str,
+    compilation_unit_id: &'a str,
+    owner_id: &'a str,
+    source_generation: u64,
+    source_file_id: &'a str,
+    source_content_digest: [u8; 32],
 }
 
-fn string_list(values: &[String]) -> ArrayRef {
-    let mut builder = ListBuilder::new(StringBuilder::new())
-        .with_field(Field::new_list_field(DataType::Utf8, false));
-    for value in values {
-        builder.values().append_value(value);
+fn relation_cell(
+    row: &OwnedRow,
+    owner: &OwnedRustcOwner,
+    context: &RelationContext<'_>,
+    field: &str,
+) -> Option<OwnedCell> {
+    match field {
+        "provider_run_id" => Some(OwnedCell::Utf8(context.provider_run_id.to_owned())),
+        "compilation_unit_id" => Some(OwnedCell::Utf8(context.compilation_unit_id.to_owned())),
+        "owner_id" => Some(OwnedCell::Utf8(context.owner_id.to_owned())),
+        "source_generation" => Some(OwnedCell::UInt64(context.source_generation)),
+        "source_file_id" => Some(OwnedCell::Utf8(context.source_file_id.to_owned())),
+        "source_content_digest" => Some(OwnedCell::Fixed32(context.source_content_digest)),
+        "stable_crate_id" => owner
+            .compiler_key
+            .map(|key| OwnedCell::UInt64(key.stable_crate_id)),
+        "def_path_hash" => owner
+            .compiler_key
+            .map(|key| OwnedCell::Fixed16(key.def_path_hash)),
+        _ => row.0.get(field).cloned(),
     }
-    builder.append(true);
-    Arc::new(builder.finish())
 }
 
-fn encode_mir_item(item: &OwnedMirItem) -> Result<Vec<u8>, String> {
-    let schema = mir_schema()?;
-    let columns: Vec<ArrayRef> = vec![
-        Arc::new(StringArray::from(vec![item.name.as_str()])),
-        Arc::new(StringArray::from(vec![item.item_kind.as_str()])),
-        Arc::new(StringArray::from(vec![item.type_description.as_str()])),
-        Arc::new(BooleanArray::from(vec![item.requires_monomorphization])),
-        Arc::new(UInt64Array::from(vec![item.basic_block_count as u64])),
-        Arc::new(UInt64Array::from(vec![item.local_count as u64])),
-        string_list(&item.statement_kinds),
-        string_list(&item.terminator_kinds),
-        Arc::new(UInt64Array::from(vec![item.successor_count as u64])),
-    ];
+#[allow(
+    clippy::too_many_lines,
+    reason = "the closed scalar set is checked against each Arrow physical type in one encoder"
+)]
+fn encode_relation(
+    owner: &OwnedRustcOwner,
+    relation: &OwnedRustcRelation,
+    context: &RelationContext<'_>,
+) -> Result<Vec<u8>, String> {
+    if RustcRelation::from_family_code(relation.relation.family_code()) != Some(relation.relation) {
+        return Err("rustc relation is outside the shared family registry".to_owned());
+    }
+    let schema = relation.relation.schema();
+    let mut columns = Vec::<ArrayRef>::with_capacity(schema.fields().len());
+    for field in schema.fields() {
+        let values = relation
+            .rows
+            .iter()
+            .map(|row| relation_cell(row, owner, context, field.name()))
+            .collect::<Vec<_>>();
+        let array: ArrayRef = match field.data_type() {
+            DataType::Utf8 => {
+                let mut builder = StringBuilder::with_capacity(values.len(), values.len() * 16);
+                for value in values {
+                    match value {
+                        Some(OwnedCell::Utf8(value)) => builder.append_value(value),
+                        None if field.is_nullable() => builder.append_null(),
+                        _ => {
+                            return Err(format!(
+                                "{} field {} differs from utf8/nullability contract",
+                                relation.relation.relation_id(),
+                                field.name()
+                            ));
+                        }
+                    }
+                }
+                Arc::new(builder.finish())
+            }
+            DataType::UInt64 => {
+                let mut builder = UInt64Builder::with_capacity(values.len());
+                for value in values {
+                    match value {
+                        Some(OwnedCell::UInt64(value)) => builder.append_value(value),
+                        None if field.is_nullable() => builder.append_null(),
+                        _ => {
+                            return Err(format!(
+                                "{} field {} differs from uint64/nullability contract",
+                                relation.relation.relation_id(),
+                                field.name()
+                            ));
+                        }
+                    }
+                }
+                Arc::new(builder.finish())
+            }
+            DataType::Boolean => {
+                let mut builder = BooleanBuilder::with_capacity(values.len());
+                for value in values {
+                    match value {
+                        Some(OwnedCell::Boolean(value)) => builder.append_value(value),
+                        None if field.is_nullable() => builder.append_null(),
+                        _ => {
+                            return Err(format!(
+                                "{} field {} differs from boolean/nullability contract",
+                                relation.relation.relation_id(),
+                                field.name()
+                            ));
+                        }
+                    }
+                }
+                Arc::new(builder.finish())
+            }
+            DataType::FixedSizeBinary(width @ (16 | 32)) => {
+                let mut builder = FixedSizeBinaryBuilder::with_capacity(values.len(), *width);
+                for value in values {
+                    match value {
+                        Some(OwnedCell::Fixed16(value)) if *width == 16 => builder
+                            .append_value(value)
+                            .map_err(|error| error.to_string())?,
+                        Some(OwnedCell::Fixed32(value)) if *width == 32 => builder
+                            .append_value(value)
+                            .map_err(|error| error.to_string())?,
+                        None if field.is_nullable() => builder.append_null(),
+                        _ => {
+                            return Err(format!(
+                                "{} field {} differs from fixed-binary/nullability contract",
+                                relation.relation.relation_id(),
+                                field.name()
+                            ));
+                        }
+                    }
+                }
+                Arc::new(builder.finish())
+            }
+            _ => {
+                return Err(format!(
+                    "{} uses unsupported Arrow field {}",
+                    relation.relation.relation_id(),
+                    field.name()
+                ));
+            }
+        };
+        columns.push(array);
+    }
     let batch = RecordBatch::try_new(schema.clone(), columns)
-        .map_err(|error| format!("failed to build MIR Arrow batch: {error}"))?;
+        .map_err(|error| format!("failed to build rustc relation batch: {error}"))?;
     let mut bytes = Vec::new();
     {
-        let mut writer = StreamWriter::try_new(&mut bytes, &schema)
-            .map_err(|error| format!("failed to create MIR IPC writer: {error}"))?;
+        let options = IpcWriteOptions::try_new(64, false, MetadataVersion::V5)
+            .map_err(|error| format!("failed to configure rustc Arrow IPC V5 writer: {error}"))?;
+        let mut writer = StreamWriter::try_new_with_options(&mut bytes, &schema, options)
+            .map_err(|error| format!("failed to create rustc IPC writer: {error}"))?;
         writer
             .write(&batch)
             .and_then(|()| writer.finish())
-            .map_err(|error| format!("failed to encode MIR Arrow IPC: {error}"))?;
+            .map_err(|error| format!("failed to encode rustc Arrow IPC: {error}"))?;
     }
-    if bytes.len() > MAX_CHUNK_BYTES {
-        return Err("MIR Arrow IPC chunk exceeds the protocol credit limit".to_owned());
+    if bytes.len() > MAX_RELATION_IPC_BYTES {
+        return Err("rustc Arrow IPC chunk exceeds the protocol credit limit".to_owned());
     }
     Ok(bytes)
 }
@@ -362,17 +476,34 @@ fn closed_owner_set_digest(owners: &[(OwnerBegin, OwnerEnd)]) -> String {
     digest_frames(b"codefabric.rustc.closed-owner-set.v1\0", fields)
 }
 
+fn canonical_event_bytes(event: &ExtractionEvent) -> Vec<u8> {
+    let mut normalized = event.clone();
+    let mut family_counts = Vec::new();
+    match normalized.event.as_mut() {
+        Some(Event::OwnerEnd(end)) => {
+            family_counts = end
+                .family_counts
+                .iter()
+                .map(|(family, count)| (*family, *count))
+                .collect::<Vec<_>>();
+            family_counts.sort_unstable();
+            end.family_counts.clear();
+        }
+        Some(Event::CompilationEnd(end)) => end.overall_stream_digest.clear(),
+        _ => {}
+    }
+    let fields = std::iter::once(normalized.encode_to_vec()).chain(family_counts.into_iter().map(
+        |(family, count)| {
+            let mut bytes = family.to_be_bytes().to_vec();
+            bytes.extend_from_slice(&count.to_be_bytes());
+            bytes
+        },
+    ));
+    digest_frames(b"codefabric.rustc.canonical-event.v1\0", fields).into_bytes()
+}
+
 fn overall_stream_digest(events: &[ExtractionEvent]) -> String {
-    let fields = events
-        .iter()
-        .map(|event| {
-            let mut normalized = event.clone();
-            if let Some(Event::CompilationEnd(end)) = normalized.event.as_mut() {
-                end.overall_stream_digest.clear();
-            }
-            normalized.encode_to_vec()
-        })
-        .collect::<Vec<_>>();
+    let fields = events.iter().map(canonical_event_bytes).collect::<Vec<_>>();
     digest_frames(b"codefabric.rustc.observation-stream.v1\0", fields)
 }
 
@@ -458,8 +589,6 @@ fn run_protocol(
     let invocation_digest =
         normalized_invocation_digest(real_rustc, arguments, &source, &source_bytes);
     let rust_mir_capability_code = rust_mir_capability_code()?;
-    let rust_mir_observation = rust_mir_observation_contract()?;
-    let rust_mir_observation_family_code = u32::from(rust_mir_observation.observation_family_code);
     let target = target_identity(&argument_strings, &invocation_digest);
     let compilation_unit_id = format!(
         "unit:{}",
@@ -512,7 +641,7 @@ fn run_protocol(
             .map_err(|error| format!("failed to connect extractor endpoint: {error}"))?;
         let mut client = RustcExtractorClient::new(channel)
             .max_decoding_message_size(4 * 1024 * 1024)
-            .max_encoding_message_size(MAX_CHUNK_BYTES + 1024 * 1024);
+            .max_encoding_message_size(MAX_FRAME_BYTES);
         let hello = ExtractorHello {
             protocol_major: 1,
             protocol_minor: 0,
@@ -531,13 +660,11 @@ fn run_protocol(
             .into_inner();
         if acknowledgement.protocol_major != 1
             || acknowledgement.protocol_minor != 0
-            || !valid_digest(&acknowledgement.output_schema_bundle_digest)
-            || !valid_digest(&acknowledgement.sandbox_profile_digest)
+            || acknowledgement.output_schema_bundle_digest != schema_bundle_digest()
+            || !valid_sandbox_profile_digest(&acknowledgement.sandbox_profile_digest)
             || acknowledgement.accepted_resource_profile_id != environment.resource_profile_id
-            || acknowledgement.maximum_outstanding_chunks == 0
-            || acknowledgement.maximum_outstanding_chunks > 4
-            || acknowledgement.maximum_unacknowledged_bytes == 0
-            || acknowledgement.maximum_unacknowledged_bytes > MAX_CHUNK_BYTES as u64
+            || acknowledgement.maximum_outstanding_chunks != 4
+            || acknowledgement.maximum_unacknowledged_bytes != MAX_RELATION_IPC_BYTES as u64
         {
             return Err(
                 "daemon handshake acknowledgement is outside the accepted profile".to_owned(),
@@ -594,7 +721,9 @@ fn run_protocol(
         Command::CompilationAccepted(accepted)
             if accepted.provider_run_id == environment.provider_run_id
                 && accepted.compilation_unit_id == compilation_unit_id
-                && accepted.accepted_generation == environment.source_generation => {}
+                && accepted.accepted_generation == environment.source_generation
+                && accepted.granted_chunk_credits == 4
+                && accepted.granted_credit_bytes == MAX_RELATION_IPC_BYTES as u64 => {}
         Command::Cancel(_) => cancelled.store(true, Ordering::Release),
         _ => return Err("daemon did not accept the compilation begin".to_owned()),
     }
@@ -604,30 +733,47 @@ fn run_protocol(
     rustc_arguments.extend(argument_strings);
     let extracted = crate::rustc_link::extract_owned(&rustc_arguments);
     let compiler_exit_status = i32::from(extracted.is_err());
-    let items = extracted.unwrap_or_default();
+    let owners = extracted.map_or_else(|_| Vec::new(), |extraction| extraction.owners);
     let mut sequence = 1_u64;
     let mut closed_owners = Vec::new();
+    let source_file_id = format!("file:{}", &b3(&source_bytes)[3..35]);
+    let source_content_digest = *blake3::hash(&source_bytes).as_bytes();
     if !cancelled.load(Ordering::Acquire) && compiler_exit_status == 0 {
-        for item in &items {
+        for owner in &owners {
+            let stable_identity = owner.compiler_key.map_or_else(
+                || owner.qualified_name.clone(),
+                |key| {
+                    format!(
+                        "{:016x}:{}",
+                        key.stable_crate_id,
+                        fixed16_hex(key.def_path_hash)
+                    )
+                },
+            );
             let owner_id = format!(
                 "owner:{}",
                 short_identity(
                     b"codefabric.rustc.owner.v1\0",
-                    &[&compilation_unit_id, &item.name]
+                    &[&compilation_unit_id, &stable_identity]
                 )
             );
+            let expected_observation_family_codes = owner
+                .relations
+                .iter()
+                .map(|relation| relation.relation.family_code())
+                .collect::<Vec<_>>();
             let owner_begin = OwnerBegin {
                 provider_run_id: environment.provider_run_id.clone(),
                 compilation_unit_id: compilation_unit_id.clone(),
                 sequence,
                 owner: Some(CompilerOwnerKey {
                     owner_id: owner_id.clone(),
-                    owner_kind: "MIR_BODY".to_owned(),
-                    file_id: format!("file:{}", &b3(&source_bytes)[3..35]),
+                    owner_kind: owner.owner_kind.clone(),
+                    file_id: source_file_id.clone(),
                     source_start: 0,
                     source_end: u32::try_from(source_bytes.len()).unwrap_or(u32::MAX),
                 }),
-                expected_observation_family_codes: vec![rust_mir_observation_family_code],
+                expected_observation_family_codes,
             };
             send_event(
                 &event_sender,
@@ -635,48 +781,141 @@ fn run_protocol(
                 &mut events,
             )?;
             sequence += 1;
-            let arrow_ipc = encode_mir_item(item)?;
-            let chunk = OwnerObservationChunk {
-                provider_run_id: environment.provider_run_id.clone(),
-                compilation_unit_id: compilation_unit_id.clone(),
-                sequence,
-                owner_id: owner_id.clone(),
-                observation_family_code: rust_mir_observation_family_code,
-                chunk_digest: b3(&arrow_ipc),
-                arrow_ipc,
-                payload_reference: None,
-                schema_digest: rust_mir_observation.schema_digest.to_owned(),
-                row_count: 1,
+            let context = RelationContext {
+                provider_run_id: &environment.provider_run_id,
+                compilation_unit_id: &compilation_unit_id,
+                owner_id: &owner_id,
+                source_generation: environment.source_generation,
+                source_file_id: &source_file_id,
+                source_content_digest,
             };
-            send_event(
-                &event_sender,
-                Event::OwnerObservationChunk(chunk.clone()),
-                &mut events,
-            )?;
-            match receive_command(&monitor_receiver, deadline)? {
-                Command::ChunkAccepted(accepted) if accepted.sequence == sequence => {}
-                Command::ChunkRejected(rejected) if rejected.sequence == sequence => {
-                    return Err(format!(
-                        "daemon rejected MIR chunk: {}",
-                        rejected.error_code
-                    ));
+            let mut chunks = Vec::with_capacity(owner.relations.len());
+            let mut family_counts = HashMap::new();
+            for relation in &owner.relations {
+                let arrow_ipc = encode_relation(owner, relation, &context)?;
+                let row_count = u64::try_from(relation.rows.len()).unwrap_or(u64::MAX);
+                let logical_sequence = sequence;
+                let chunk = OwnerObservationChunk {
+                    provider_run_id: environment.provider_run_id.clone(),
+                    compilation_unit_id: compilation_unit_id.clone(),
+                    sequence: logical_sequence,
+                    owner_id: owner_id.clone(),
+                    observation_family_code: relation.relation.family_code(),
+                    chunk_digest: b3(&arrow_ipc),
+                    arrow_ipc: arrow_ipc.clone(),
+                    payload_reference: None,
+                    schema_digest: relation.relation.schema_digest(),
+                    row_count,
+                };
+                let relation_identity = relation_wire_identity(
+                    relation.relation.relation_id(),
+                    &relation.relation.schema_digest(),
+                    &environment.provider_run_id,
+                    &owner_id,
+                    &environment.source_snapshot_manifest_digest,
+                    &environment.context_manifest_digest,
+                )?;
+                let frames = encode_relation_frames(
+                    relation_identity,
+                    &arrow_ipc,
+                    1,
+                    row_count,
+                    &RelationCoverage::complete(1),
+                )?;
+                let mut next_ack_sequence = 0_u64;
+                for frame in frames {
+                    let payload = match frame.frame.as_ref() {
+                        Some(
+                            crate::relation_ipc_proto_types::relation_ipc_frame::Frame::Payload(
+                                payload,
+                            ),
+                        ) => Some((
+                            payload
+                                .header
+                                .as_ref()
+                                .map_or(u64::MAX, |header| header.sequence),
+                            u64::try_from(payload.arrow_ipc_fragment.len()).unwrap_or(u64::MAX),
+                        )),
+                        _ => None,
+                    };
+                    send_event(
+                        &event_sender,
+                        Event::OwnerRelationIpcFrame(OwnerRelationIpcFrame {
+                            provider_run_id: environment.provider_run_id.clone(),
+                            compilation_unit_id: compilation_unit_id.clone(),
+                            sequence,
+                            owner_id: owner_id.clone(),
+                            observation_family_code: relation.relation.family_code(),
+                            frame: Some(frame),
+                        }),
+                        &mut events,
+                    )?;
+                    sequence = sequence
+                        .checked_add(1)
+                        .ok_or_else(|| "compiler event sequence space is exhausted".to_owned())?;
+                    if let Some((payload_sequence, payload_bytes)) = payload {
+                        match receive_command(&monitor_receiver, deadline)? {
+                            Command::RelationIpcAck(frame) => {
+                                let acknowledgement = decode_flow_control_ack(&frame)?;
+                                if acknowledgement.header.identity != relation_identity
+                                    || acknowledgement.header.sequence != next_ack_sequence
+                                {
+                                    return Err(
+                                        "daemon returned a mismatched relation acknowledgement"
+                                            .to_owned(),
+                                    );
+                                }
+                                if acknowledgement.cancelled {
+                                    cancelled.store(true, Ordering::Release);
+                                    break;
+                                }
+                                if acknowledgement.acknowledged_sequence != Some(payload_sequence)
+                                    || acknowledgement.released_bytes != payload_bytes
+                                {
+                                    return Err(
+                                        "daemon returned a mismatched relation acknowledgement"
+                                            .to_owned(),
+                                    );
+                                }
+                                next_ack_sequence =
+                                    next_ack_sequence.checked_add(1).ok_or_else(|| {
+                                        "relation acknowledgement sequence space is exhausted"
+                                            .to_owned()
+                                    })?;
+                            }
+                            Command::Cancel(_) => {
+                                cancelled.store(true, Ordering::Release);
+                                break;
+                            }
+                            Command::ChunkAccepted(_) | Command::ChunkRejected(_) => {
+                                return Err("daemon returned legacy whole-relation chunk control"
+                                    .to_owned());
+                            }
+                            _ => {
+                                return Err(
+                                    "daemon returned an invalid rustc relation acknowledgement"
+                                        .to_owned(),
+                                );
+                            }
+                        }
+                    }
                 }
-                Command::Cancel(_) => {
-                    cancelled.store(true, Ordering::Release);
+                if cancelled.load(Ordering::Acquire) {
                     break;
                 }
-                _ => return Err("daemon returned an invalid chunk acknowledgement".to_owned()),
+                family_counts.insert(relation.relation.family_code(), row_count);
+                chunks.push(chunk);
             }
-            sequence += 1;
+            if cancelled.load(Ordering::Acquire) {
+                break;
+            }
             let owner_end = OwnerEnd {
                 provider_run_id: environment.provider_run_id.clone(),
                 compilation_unit_id: compilation_unit_id.clone(),
                 sequence,
                 owner_id,
-                family_counts: [(rust_mir_observation_family_code, 1)]
-                    .into_iter()
-                    .collect(),
-                owner_content_digest: owner_content_digest(&owner_begin, &[chunk]),
+                family_counts,
+                owner_content_digest: owner_content_digest(&owner_begin, &chunks),
             };
             send_event(
                 &event_sender,
@@ -717,7 +956,7 @@ fn run_protocol(
             reason_code: if was_cancelled {
                 "CANCELLED".to_owned()
             } else if compiler_exit_status == 0 {
-                "COMPILER_BODY_CENSUS_COMPLETE".to_owned()
+                "COMPILER_RELATION_CENSUS_COMPLETE".to_owned()
             } else {
                 "UNAVAILABLE_COMPILE".to_owned()
             },
@@ -776,6 +1015,7 @@ pub(crate) fn run(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
     use std::io::Cursor;
     use std::pin::Pin;
     use std::sync::Mutex as StdMutex;
@@ -791,6 +1031,7 @@ mod tests {
     use crate::protocol::generated::codefabric::rustc::v1::rustc_extractor_server::{
         RustcExtractor, RustcExtractorServer,
     };
+    use crate::rustc_relation_schema::RustcRelation;
 
     use super::*;
 
@@ -832,6 +1073,118 @@ mod tests {
         deadline_unix_ms: i64,
     }
 
+    #[derive(Debug, Eq, PartialEq)]
+    struct DecodedRelation {
+        family_code: u32,
+        schema_fingerprint: [u8; 32],
+        row_count: u64,
+        arrow_ipc: Vec<u8>,
+    }
+
+    struct OpenRelation {
+        decoded: DecodedRelation,
+        identity: crate::relation_ipc_contract::RelationWireIdentity,
+        next_sequence: u64,
+        saw_ipc_end: bool,
+        saw_coverage: bool,
+    }
+
+    fn decode_relation_events(events: &[ExtractionEvent]) -> Vec<DecodedRelation> {
+        use crate::relation_ipc_proto_types::RelationIpcTerminalStatus;
+        use crate::relation_ipc_proto_types::relation_ipc_frame::Frame;
+
+        let mut relations = Vec::new();
+        let mut open: Option<OpenRelation> = None;
+        for event in events {
+            let Some(Event::OwnerRelationIpcFrame(event)) = event.event.as_ref() else {
+                continue;
+            };
+            let frame = event.frame.as_ref().expect("relation frame is present");
+            match frame
+                .frame
+                .as_ref()
+                .expect("relation frame variant is present")
+            {
+                Frame::Open(frame) => {
+                    assert!(open.is_none());
+                    crate::relation_ipc_proto::validate_open_profile(frame).unwrap();
+                    let header =
+                        crate::relation_ipc_proto::parse_header(frame.header.as_ref()).unwrap();
+                    assert_eq!(header.sequence, 0);
+                    open = Some(OpenRelation {
+                        decoded: DecodedRelation {
+                            family_code: event.observation_family_code,
+                            schema_fingerprint: header.identity.schema_fingerprint,
+                            row_count: 0,
+                            arrow_ipc: Vec::new(),
+                        },
+                        identity: header.identity,
+                        next_sequence: 1,
+                        saw_ipc_end: false,
+                        saw_coverage: false,
+                    });
+                }
+                Frame::Payload(frame) => {
+                    let header =
+                        crate::relation_ipc_proto::parse_header(frame.header.as_ref()).unwrap();
+                    let relation = open.as_mut().expect("payload follows open");
+                    assert_eq!(event.observation_family_code, relation.decoded.family_code);
+                    assert_eq!(header.identity, relation.identity);
+                    assert_eq!(header.sequence, relation.next_sequence);
+                    relation.next_sequence += 1;
+                    relation
+                        .decoded
+                        .arrow_ipc
+                        .extend_from_slice(&frame.arrow_ipc_fragment);
+                }
+                Frame::IpcEnd(frame) => {
+                    let header =
+                        crate::relation_ipc_proto::parse_header(frame.header.as_ref()).unwrap();
+                    let relation = open.as_mut().expect("IPC end follows open");
+                    assert_eq!(header.identity, relation.identity);
+                    assert_eq!(header.sequence, relation.next_sequence);
+                    relation.next_sequence += 1;
+                    assert_eq!(frame.declared_batches, 1);
+                    assert_eq!(
+                        frame.declared_ipc_bytes,
+                        u64::try_from(relation.decoded.arrow_ipc.len()).unwrap()
+                    );
+                    relation.decoded.row_count = frame.declared_rows;
+                    relation.saw_ipc_end = true;
+                }
+                Frame::CoverageTrailer(frame) => {
+                    let header =
+                        crate::relation_ipc_proto::parse_header(frame.header.as_ref()).unwrap();
+                    let relation = open.as_mut().expect("coverage follows open");
+                    assert_eq!(header.identity, relation.identity);
+                    assert_eq!(header.sequence, relation.next_sequence);
+                    relation.next_sequence += 1;
+                    assert!(relation.saw_ipc_end);
+                    assert_eq!(frame.status, RelationIpcTerminalStatus::Complete as i32);
+                    assert_eq!(frame.requested_units, 1);
+                    assert_eq!(frame.completed_units, 1);
+                    assert!(frame.remainders.is_empty());
+                    relation.saw_coverage = true;
+                }
+                Frame::Terminal(frame) => {
+                    let header =
+                        crate::relation_ipc_proto::parse_header(frame.header.as_ref()).unwrap();
+                    let relation = open.as_ref().expect("terminal follows open");
+                    assert_eq!(header.identity, relation.identity);
+                    assert_eq!(header.sequence, relation.next_sequence);
+                    assert!(relation.saw_coverage);
+                    assert_eq!(frame.status, RelationIpcTerminalStatus::Complete as i32);
+                    relations.push(open.take().unwrap().decoded);
+                }
+                Frame::FlowControlAck(_) => {
+                    panic!("extractor emitted a receiver-direction acknowledgement")
+                }
+            }
+        }
+        assert!(open.is_none());
+        relations
+    }
+
     #[tonic::async_trait]
     impl RustcExtractor for MockDaemon {
         async fn handshake(
@@ -851,10 +1204,10 @@ mod tests {
                     protocol_minor: 0,
                     negotiated_feature_bits: 0,
                     daemon_build: "codefabricd-test".to_owned(),
-                    output_schema_bundle_digest: b3(b"schema"),
+                    output_schema_bundle_digest: schema_bundle_digest(),
                     sandbox_profile_digest: b3(b"sandbox"),
                     maximum_outstanding_chunks: 4,
-                    maximum_unacknowledged_bytes: MAX_CHUNK_BYTES as u64,
+                    maximum_unacknowledged_bytes: MAX_RELATION_IPC_BYTES as u64,
                     accepted_resource_profile_id: hello.resource_profile_id,
                     provider_deadline_unix_ms: self.deadline_unix_ms,
                 },
@@ -871,6 +1224,7 @@ mod tests {
             let events = Arc::clone(&self.events);
             let (sender, receiver) = mpsc::channel(8);
             tokio::spawn(async move {
+                let mut next_ack_sequence = BTreeMap::<Vec<u8>, u64>::new();
                 while let Ok(Some(event)) = input.message().await {
                     events.lock().unwrap().push(event.clone());
                     match event.event {
@@ -883,24 +1237,44 @@ mod tests {
                                             compilation_unit_id: begin.compilation_unit_id,
                                             accepted_generation: begin.source_generation,
                                             granted_chunk_credits: 4,
-                                            granted_credit_bytes: MAX_CHUNK_BYTES as u64,
+                                            granted_credit_bytes: MAX_RELATION_IPC_BYTES as u64,
                                         },
                                     )),
                                 }))
                                 .await;
                         }
-                        Some(Event::OwnerObservationChunk(chunk)) => {
-                            let _ = sender
-                                .send(Ok(ExtractorCommand {
-                                    command: Some(Command::ChunkAccepted(
-                                        crate::protocol::generated::codefabric::provider::v1::ChunkAccepted {
-                                            sequence: chunk.sequence,
-                                            next_credit_bytes: MAX_CHUNK_BYTES as u64,
-                                            next_credit_chunks: 4,
-                                        },
-                                    )),
-                                }))
-                                .await;
+                        Some(Event::OwnerRelationIpcFrame(event)) => {
+                            if let Some(frame) = event.frame
+                                && let Some(
+                                    crate::relation_ipc_proto_types::relation_ipc_frame::Frame::Payload(
+                                        payload,
+                                    ),
+                                ) = frame.frame
+                            {
+                                let parsed = crate::relation_ipc_proto::parse_header(
+                                    payload.header.as_ref(),
+                                )
+                                .unwrap();
+                                let acknowledgement_sequence = next_ack_sequence
+                                    .entry(parsed.identity.stream_id.to_vec())
+                                    .or_default();
+                                let acknowledgement =
+                                    crate::relation_ipc_proto::flow_control_ack_frame(
+                                        parsed.identity,
+                                        *acknowledgement_sequence,
+                                        Some(parsed.sequence),
+                                        u64::try_from(payload.arrow_ipc_fragment.len())
+                                            .unwrap_or(u64::MAX),
+                                        false,
+                                    )
+                                    .unwrap();
+                                *acknowledgement_sequence += 1;
+                                let _ = sender
+                                    .send(Ok(ExtractorCommand {
+                                        command: Some(Command::RelationIpcAck(acknowledgement)),
+                                    }))
+                                    .await;
+                            }
                         }
                         Some(Event::CompilationEnd(_)) => break,
                         _ => {}
@@ -913,21 +1287,83 @@ mod tests {
 
     #[test]
     fn wp35_structural_acceptance() {
-        let item = OwnedMirItem {
-            name: "fixture::answer".to_owned(),
-            item_kind: "function".to_owned(),
-            type_description: "fn() -> u8".to_owned(),
-            requires_monomorphization: false,
-            basic_block_count: 1,
-            local_count: 1,
-            statement_kinds: vec!["assign".to_owned()],
-            terminator_kinds: vec!["return".to_owned()],
-            successor_count: 0,
+        let owner = OwnedRustcOwner {
+            qualified_name: "fixture".to_owned(),
+            owner_kind: "COMPILATION".to_owned(),
+            compiler_key: None,
+            relations: Vec::new(),
         };
-        let first = encode_mir_item(&item).unwrap();
-        let second = encode_mir_item(&item).unwrap();
+        let relation = OwnedRustcRelation {
+            relation: RustcRelation::Compilation,
+            rows: vec![OwnedRow(BTreeMap::from([
+                ("crate_name", OwnedCell::Utf8("fixture".to_owned())),
+                ("is_local_crate", OwnedCell::Boolean(true)),
+                ("local_item_count", OwnedCell::UInt64(3)),
+                ("body_owner_count", OwnedCell::UInt64(1)),
+                (
+                    "rustc_release",
+                    OwnedCell::Utf8(crate::rustc_relation_schema::RUSTC_PUBLIC_RELEASE.to_owned()),
+                ),
+                (
+                    "rustc_toolchain",
+                    OwnedCell::Utf8(crate::rustc_relation_schema::RUSTC_TOOLCHAIN.to_owned()),
+                ),
+                (
+                    "stable_identity_authority",
+                    OwnedCell::Utf8("StableCrateId+DefPathHash".to_owned()),
+                ),
+                (
+                    "source_hygiene_authority",
+                    OwnedCell::Utf8("rustc Span".to_owned()),
+                ),
+            ]))],
+        };
+        let context = RelationContext {
+            provider_run_id: "run:test",
+            compilation_unit_id: "unit:test",
+            owner_id: "owner:test",
+            source_generation: 7,
+            source_file_id: "file:test",
+            source_content_digest: [9; 32],
+        };
+        let first = encode_relation(&owner, &relation, &context).unwrap();
+        let second = encode_relation(&owner, &relation, &context).unwrap();
         assert_eq!(first, second);
-        assert!(first.starts_with(b"ARROW1") || first.starts_with(&[0xff; 4]));
+        let mut reader = StreamReader::try_new(Cursor::new(&first), None).unwrap();
+        assert_eq!(reader.schema(), RustcRelation::Compilation.schema());
+        assert_eq!(reader.next().unwrap().unwrap().num_rows(), 1);
+        assert!(reader.next().is_none());
+    }
+
+    #[test]
+    fn zero_fact_relation_is_a_schema_carrying_arrow_batch() {
+        let owner = OwnedRustcOwner {
+            qualified_name: "fixture::caller".to_owned(),
+            owner_kind: "MIR_BODY".to_owned(),
+            compiler_key: Some(crate::rustc_link::OwnedCompilerKey {
+                stable_crate_id: 11,
+                def_path_hash: [12; 16],
+            }),
+            relations: Vec::new(),
+        };
+        let relation = OwnedRustcRelation {
+            relation: RustcRelation::Call,
+            rows: Vec::new(),
+        };
+        let context = RelationContext {
+            provider_run_id: "run:test",
+            compilation_unit_id: "unit:test",
+            owner_id: "owner:test",
+            source_generation: 7,
+            source_file_id: "file:test",
+            source_content_digest: [9; 32],
+        };
+
+        let bytes = encode_relation(&owner, &relation, &context).unwrap();
+        let mut reader = StreamReader::try_new(Cursor::new(bytes), None).unwrap();
+        assert_eq!(reader.schema(), RustcRelation::Call.schema());
+        assert_eq!(reader.next().unwrap().unwrap().num_rows(), 0);
+        assert!(reader.next().is_none());
     }
 
     #[test]
@@ -1049,20 +1485,63 @@ mod tests {
             observed.last().and_then(|event| event.event.as_ref()),
             Some(Event::CompilationEnd(_))
         ));
-        let chunks = observed
+        assert!(
+            !observed
+                .iter()
+                .any(|event| matches!(event.event, Some(Event::OwnerObservationChunk(_))))
+        );
+        let first_end = observed
             .iter()
-            .filter_map(|event| match event.event.as_ref() {
-                Some(Event::OwnerObservationChunk(chunk)) => Some(chunk),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].arrow_ipc, chunks[1].arrow_ipc);
-        assert_eq!(chunks[0].chunk_digest, chunks[1].chunk_digest);
-        let mut reader = StreamReader::try_new(Cursor::new(&chunks[0].arrow_ipc), None).unwrap();
-        let batch = reader.next().unwrap().unwrap();
-        assert_eq!(batch.num_rows(), 1);
-        assert_eq!(batch.num_columns(), 9);
+            .position(|event| matches!(event.event, Some(Event::CompilationEnd(_))))
+            .unwrap();
+        let first_run = decode_relation_events(&observed[..=first_end]);
+        let second_run = decode_relation_events(&observed[first_end + 1..]);
+        assert!(first_run.len() > 2);
+        assert_eq!(first_run.len(), second_run.len());
+        for (first, second) in first_run.iter().zip(&second_run) {
+            assert_eq!(first.family_code, second.family_code);
+            assert_eq!(first.schema_fingerprint, second.schema_fingerprint);
+            assert_eq!(first.row_count, second.row_count);
+            assert_eq!(first.arrow_ipc, second.arrow_ipc);
+
+            let relation = RustcRelation::from_family_code(first.family_code).unwrap();
+            let schema_digest = relation.schema_digest();
+            let expected_schema_fingerprint = relation_wire_identity(
+                relation.relation_id(),
+                &schema_digest,
+                "test-run",
+                "test-scope",
+                &b3(b"test-source"),
+                &b3(b"test-context"),
+            )
+            .unwrap()
+            .schema_fingerprint;
+            assert_eq!(first.schema_fingerprint, expected_schema_fingerprint);
+            let mut reader = StreamReader::try_new(Cursor::new(&first.arrow_ipc), None).unwrap();
+            assert_eq!(reader.schema(), relation.schema());
+            let batch = reader.next().unwrap().unwrap();
+            assert_eq!(batch.num_rows() as u64, first.row_count);
+            assert!(reader.next().is_none());
+        }
+        let families = first_run
+            .iter()
+            .map(|relation| relation.family_code)
+            .collect::<BTreeSet<_>>();
+        for required in [
+            RustcRelation::Compilation,
+            RustcRelation::PublicItem,
+            RustcRelation::Type,
+            RustcRelation::MirBody,
+            RustcRelation::MirBlock,
+            RustcRelation::MirLocal,
+            RustcRelation::MirStatement,
+            RustcRelation::MirTerminator,
+            RustcRelation::CfgEdge,
+            RustcRelation::Coverage,
+            RustcRelation::Remainder,
+        ] {
+            assert!(families.contains(&required.family_code()));
+        }
 
         let _ = shutdown_sender.send(());
         server.join().unwrap();

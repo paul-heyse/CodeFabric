@@ -27,6 +27,45 @@ def test_cycle_is_rejected() -> None:
         assurance._topological_order({"WP01": {"WP02"}, "WP02": {"WP01"}})
 
 
+def test_first_packet_narrative_does_not_override_self_dependency(tmp_path: Path) -> None:
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "### WP01 — First\n\n"
+        "**Dependencies.** WP01 is the first packet in this DAG.\n\n"
+        "**Target invariants.** I-01.\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(assurance.PlanAssuranceError, match="depends on itself"):
+        assurance._dependency_map(plan)
+
+
+def test_actual_self_dependency_is_rejected(tmp_path: Path) -> None:
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "### WP01 — Invalid\n\n"
+        "**Dependencies.** WP01.\n\n"
+        "**Target invariants.** I-01.\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(assurance.PlanAssuranceError, match="depends on itself"):
+        assurance._dependency_map(plan)
+
+
+def test_overlap_dispositions_are_plan_qualified() -> None:
+    dispositions = assurance._load_overlap_dispositions(assurance.ROOT)
+    assert dispositions
+    assert all(plan_id for plan_id, _, _ in dispositions)
+    assert (
+        "codefabric-ontology-compiled-data-fabric",
+        "src/semantic_query.rs",
+        frozenset({"WP05", "WP08"}),
+    ) in dispositions
+    assert all(
+        plan_id != "codefabric-execution-proved-relational-data-fabric"
+        for plan_id, _, _ in dispositions
+    )
+
+
 def test_known_touch_parser_ignores_fenced_preflight_and_reads_owned_paths() -> None:
     block = (
         "**Change surface / Preflight / Known Touch.** Run:\n\n"
@@ -61,7 +100,7 @@ def test_packet_assurance_remains_runnable_during_declared_input_evolution(
     )
     plan_path, plan, state = assurance._active()
     assert plan_path == artifact_contracts.active_plan_path()
-    assert plan["plan_id"] == "codefabric-ontology-compiled-data-fabric"
+    assert plan["plan_id"] == "codefabric-execution-proved-relational-data-fabric"
     assert state["status"] in {"executing", "complete"}
 
 
@@ -85,8 +124,8 @@ def test_packet_oracle_can_select_an_immutable_inactive_plan(
         }
         return {
             "WP05": [
-                ("one", "PC-WP05-BEH"),
-                ("two", "PC-WP05-STR"),
+                ("one", "PC-WP05-INT"),
+                ("two", "PC-WP05-BEH"),
                 ("three", "PC-WP05-NEG"),
                 ("four", "PC-WP05-OPS"),
             ]
@@ -107,6 +146,15 @@ def test_packet_oracle_can_select_an_immutable_inactive_plan(
     )
 
     assert observed == [plan.resolve()]
+
+
+def test_dependency_check_can_select_the_active_plan_by_path() -> None:
+    plan_path = artifact_contracts.active_plan_path()
+    relative = plan_path.relative_to(assurance.ROOT)
+    assert assurance.validate_dependencies(plan_path=relative) == (
+        assurance.validate_dependencies()
+    )
+    assert assurance.main(["dependency-check", str(relative)]) == 0
 
 
 def test_single_call_python_alias_is_rejected(tmp_path: Path) -> None:
@@ -219,8 +267,8 @@ def test_ordered_oracle_catalog_gets_stable_criterion_ids(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     assert assurance._oracle_contracts(plan)["WP01"] == [
-        ("example_behavior", "PC-WP01-BEH"),
-        ("example_structure", "PC-WP01-STR"),
+        ("example_behavior", "PC-WP01-INT"),
+        ("example_structure", "PC-WP01-BEH"),
         ("example_negative", "PC-WP01-NEG"),
         ("example_operation", "PC-WP01-OPS"),
     ]
@@ -242,8 +290,8 @@ def test_multiline_oracle_catalog_stops_at_edit_local_gates(tmp_path: Path) -> N
         encoding="utf-8",
     )
     assert assurance._oracle_contracts(plan)["WP01"] == [
-        ("example_behavior", "PC-WP01-BEH"),
-        ("example_structure", "PC-WP01-STR"),
+        ("example_behavior", "PC-WP01-INT"),
+        ("example_structure", "PC-WP01-BEH"),
         ("example_negative", "PC-WP01-NEG"),
         ("example_operation", "PC-WP01-OPS"),
     ]

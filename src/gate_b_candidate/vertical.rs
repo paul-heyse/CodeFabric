@@ -1037,6 +1037,8 @@ async fn run_query_vertical(
                 maximum_bytes: None,
                 lease_token: artifact.lease_token,
                 accepted_compression: PayloadCompression::Identity as i32,
+                authorization_resource_id: String::new(),
+                owner: None,
             })
             .await
             .map_err(invariant)?

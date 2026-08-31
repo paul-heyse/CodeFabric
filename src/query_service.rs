@@ -23,6 +23,11 @@ use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 use tracing::Instrument as _;
 
+use crate::fabric::published_arrow_result::{
+    OpaqueResultLeaseToken, PublishedArrowResultDescriptor, PublishedArrowResultRegistry,
+    PublishedArtifactId, PublishedReleaseOutcome, PublishedResultAccess, PublishedResultOwner,
+    PublishedResultReadRequest, PublishedResultRegistryError, PublishedResultResourceId,
+};
 use crate::fabric::{
     FabricTable, QueryExecutionArtifactAccumulator, QueryExecutionArtifactEvidence,
     QueryExecutionContext, QueryPlanArtifact, ServingQuerySession,
@@ -66,6 +71,8 @@ use crate::semantic_query::{
 };
 
 const RESULT_LEASE_SECONDS: i64 = 1_800;
+const PUBLISHED_RESULT_DESCRIPTOR_MEDIA_TYPE: &str =
+    "application/vnd.codefabric.arrow-result-package+json";
 
 type QueryStream = Pin<Box<dyn Stream<Item = Result<QueryEvent, Status>> + Send>>;
 type ArtifactStream = Pin<Box<dyn Stream<Item = Result<ResultChunk, Status>> + Send>>;
@@ -76,6 +83,34 @@ pub(crate) fn now_millis() -> i64 {
         .map_or(0, |duration| {
             i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
         })
+}
+
+/// Project one registry-issued Arrow publication into the released query event envelope.
+///
+/// The descriptor is canonical control metadata only. Every semantic row remains in the
+/// owner-bound manifest/relation resources named by that descriptor.
+pub fn published_arrow_artifact_ready_event(
+    header: QueryEventHeader,
+    descriptor: &PublishedArrowResultDescriptor,
+    lease_token: &OpaqueResultLeaseToken,
+) -> Result<ArtifactReadyEvent, Status> {
+    let canonical_result_descriptor_json = descriptor
+        .canonical_control_bytes()
+        .map_err(published_result_status)?;
+    let result_descriptor_checksum = framed_digest(&canonical_result_descriptor_json);
+    Ok(ArtifactReadyEvent {
+        header: Some(header),
+        artifact_id: descriptor.artifact_id.public_id(),
+        artifact_checksum: result_descriptor_checksum.clone(),
+        content_type: PUBLISHED_RESULT_DESCRIPTOR_MEDIA_TYPE.to_owned(),
+        encoding: PayloadCompression::Identity as i32,
+        lease_expires_at_unix_ms: descriptor.lease_expires_at_unix_ms,
+        lease_token: lease_token.public_token(),
+        canonical_result_descriptor_json,
+        result_descriptor_checksum,
+        result_contract_version: descriptor.format.to_owned(),
+        arrow_release: crate::fabric::arrow_result_resource::ARROW_RELEASE.to_owned(),
+    })
 }
 
 fn execution_identity(request: &StartQueryRequest, sequence: u64, accepted_at: i64) -> String {
@@ -865,6 +900,48 @@ fn constant_time_equal(left: &[u8; 32], right: &[u8; 32]) -> bool {
         == 0
 }
 
+fn published_access(
+    artifact_id: &str,
+    lease_token: &str,
+    owner: Option<&crate::rpc::generated::codefabric::cpgd::v1::ResultOwner>,
+) -> Result<PublishedResultAccess, Status> {
+    let owner = owner.ok_or_else(|| {
+        Status::invalid_argument("Arrow result operations require an explicit result owner")
+    })?;
+    Ok(PublishedResultAccess {
+        artifact_id: PublishedArtifactId::try_from_public_id(artifact_id)
+            .map_err(published_result_status)?,
+        owner: PublishedResultOwner::try_from_public_ids(&owner.workspace_id, &owner.agent_id)
+            .map_err(published_result_status)?,
+        lease_token: OpaqueResultLeaseToken::try_from_public_token(lease_token)
+            .map_err(published_result_status)?,
+    })
+}
+
+fn published_result_status(error: PublishedResultRegistryError) -> Status {
+    match error {
+        PublishedResultRegistryError::InvalidPublicIdentity
+        | PublishedResultRegistryError::InvalidOpaqueToken => {
+            Status::invalid_argument(error.to_string())
+        }
+        PublishedResultRegistryError::UnknownArtifact(_)
+        | PublishedResultRegistryError::UnknownResource(_) => Status::not_found(error.to_string()),
+        PublishedResultRegistryError::WrongOwner
+        | PublishedResultRegistryError::WrongOpaqueToken => {
+            Status::permission_denied(error.to_string())
+        }
+        PublishedResultRegistryError::Released | PublishedResultRegistryError::Expired => {
+            Status::failed_precondition(error.to_string())
+        }
+        PublishedResultRegistryError::Package(
+            crate::fabric::arrow_result_resource::ArrowResultResourceError::ChunkLimitExceeded {
+                ..
+            },
+        ) => Status::resource_exhausted(error.to_string()),
+        _ => Status::internal(error.to_string()),
+    }
+}
+
 #[derive(Serialize)]
 #[serde(deny_unknown_fields)]
 struct PublicStatusView {
@@ -1025,6 +1102,7 @@ pub struct ProductionQueryService<B> {
     authorization: QueryAuthorization,
     artifacts: Arc<ResultArtifactStore>,
     artifact_records: Arc<Mutex<BTreeMap<String, ResultArtifact>>>,
+    published_results: Arc<PublishedArrowResultRegistry>,
     handles: Arc<Mutex<BTreeMap<String, Arc<QueryHandle>>>>,
     idempotency: Arc<Mutex<BTreeMap<String, String>>>,
     host_profile_digests: Arc<Mutex<BTreeMap<String, String>>>,
@@ -1090,6 +1168,7 @@ impl<B> ProductionQueryService<B> {
             authorization,
             artifacts: Arc::new(artifacts),
             artifact_records: Arc::new(Mutex::new(BTreeMap::new())),
+            published_results: Arc::new(PublishedArrowResultRegistry::new()),
             handles: Arc::new(Mutex::new(BTreeMap::new())),
             idempotency: Arc::new(Mutex::new(BTreeMap::new())),
             host_profile_digests: Arc::new(Mutex::new(BTreeMap::new())),
@@ -1106,6 +1185,25 @@ impl<B> ProductionQueryService<B> {
     pub fn with_core_source_coverage(mut self, coverage: CoreSourceCoverage) -> Self {
         self.core_source_coverage = Some(coverage);
         self
+    }
+
+    /// Install the daemon-wide Arrow result registry used by the relational publication path.
+    ///
+    /// The registry is shared with the admitted query runtime, so RPC reads and releases never
+    /// reconstruct artifact identity, owner authority, epoch pins, or lease state.
+    #[must_use]
+    pub fn with_published_results(
+        mut self,
+        published_results: Arc<PublishedArrowResultRegistry>,
+    ) -> Self {
+        self.published_results = published_results;
+        self
+    }
+
+    /// Return the exact registry handle for composition with the admitted relational runtime.
+    #[must_use]
+    pub fn published_results(&self) -> Arc<PublishedArrowResultRegistry> {
+        Arc::clone(&self.published_results)
     }
 }
 
@@ -1731,6 +1829,10 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                 encoding: PayloadCompression::Identity as i32,
                 lease_expires_at_unix_ms: artifact.lease_expires_at_unix_ms,
                 lease_token: artifact.lease_token.clone(),
+                canonical_result_descriptor_json: Vec::new(),
+                result_descriptor_checksum: String::new(),
+                result_contract_version: String::new(),
+                arrow_release: String::new(),
             })),
         },
         QueryEvent {
@@ -2359,6 +2461,63 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 "only identity encoding is supported",
             ));
         }
+        let maximum = usize::try_from(
+            request
+                .maximum_bytes
+                .unwrap_or(MAX_PAYLOAD_CHUNK_BYTES as u64)
+                .min(MAX_PAYLOAD_CHUNK_BYTES as u64),
+        )
+        .map_err(|_| Status::out_of_range("maximum result bytes is invalid"))?;
+        if maximum == 0 {
+            return Err(Status::invalid_argument(
+                "maximum result bytes must be positive",
+            ));
+        }
+        if !request.authorization_resource_id.is_empty() {
+            let access = published_access(
+                &request.artifact_id,
+                &request.lease_token,
+                request.owner.as_ref(),
+            )?;
+            let resource_id =
+                PublishedResultResourceId::try_from_public_id(&request.authorization_resource_id)
+                    .map_err(published_result_status)?;
+            let chunk = self
+                .published_results
+                .read_chunk(PublishedResultReadRequest {
+                    access,
+                    resource_id,
+                    observed_at_unix_ms: now_millis(),
+                    offset: request.offset,
+                    max_bytes: maximum,
+                })
+                .map_err(published_result_status)?;
+            let payload = chunk.bytes.to_vec();
+            let event = ResultChunk {
+                artifact_id: request.artifact_id,
+                offset: chunk.offset,
+                uncompressed_length: u64::try_from(payload.len()).unwrap_or(u64::MAX),
+                payload_checksum: framed_digest(&payload),
+                payload,
+                artifact_checksum: String::new(),
+                content_type: chunk.media_type.to_owned(),
+                encoding: PayloadCompression::Identity as i32,
+                final_chunk: chunk.complete,
+                lease_expires_at_unix_ms: chunk.lease_expires_at_unix_ms,
+                authorization_resource_id: chunk.resource_id.public_id(),
+                next_offset: chunk.next_offset,
+                total_length: chunk.total_length,
+                content_checksum: frame_digest(chunk.content_checksum),
+            };
+            return Ok(Response::new(Box::pin(stream::once(
+                async move { Ok(event) },
+            ))));
+        }
+        if request.owner.is_some() {
+            return Err(Status::invalid_argument(
+                "legacy result reads cannot carry an Arrow result owner",
+            ));
+        }
         let records = self.artifact_records.lock().await;
         let artifact = records
             .get(&request.artifact_id)
@@ -2376,18 +2535,6 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 "result offset exceeds artifact length",
             ));
         }
-        let maximum = usize::try_from(
-            request
-                .maximum_bytes
-                .unwrap_or(MAX_PAYLOAD_CHUNK_BYTES as u64)
-                .min(MAX_PAYLOAD_CHUNK_BYTES as u64),
-        )
-        .map_err(|_| Status::out_of_range("maximum result bytes is invalid"))?;
-        if maximum == 0 {
-            return Err(Status::invalid_argument(
-                "maximum result bytes must be positive",
-            ));
-        }
         let end = offset.saturating_add(maximum).min(artifact.bytes.len());
         let payload = artifact.bytes[offset..end].to_vec();
         let event = ResultChunk {
@@ -2401,6 +2548,10 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             encoding: PayloadCompression::Identity as i32,
             final_chunk: end == artifact.bytes.len(),
             lease_expires_at_unix_ms: artifact.lease_expires_at_unix_ms,
+            authorization_resource_id: String::new(),
+            next_offset: u64::try_from(end).unwrap_or(u64::MAX),
+            total_length: u64::try_from(artifact.bytes.len()).unwrap_or(u64::MAX),
+            content_checksum: artifact.checksum.clone(),
         };
         Ok(Response::new(Box::pin(stream::once(
             async move { Ok(event) },
@@ -2412,6 +2563,27 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         request: Request<ReleaseResultRequest>,
     ) -> Result<Response<ReleaseResultResponse>, Status> {
         let request = request.into_inner();
+        if request.owner.is_some() {
+            let access = published_access(
+                &request.artifact_id,
+                &request.lease_token,
+                request.owner.as_ref(),
+            )?;
+            let state = self
+                .published_results
+                .release(access, now_millis())
+                .map_err(published_result_status)?;
+            let release_state = match state {
+                PublishedReleaseOutcome::Released => "released",
+                PublishedReleaseOutcome::AlreadyReleased => "already_released",
+            };
+            return Ok(Response::new(ReleaseResultResponse {
+                artifact_id: request.artifact_id,
+                released: true,
+                remaining_lease_expires_at_unix_ms: None,
+                release_state: release_state.to_owned(),
+            }));
+        }
         let mut records = self.artifact_records.lock().await;
         let released = records
             .get(&request.artifact_id)
@@ -2423,6 +2595,11 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             artifact_id: request.artifact_id,
             released,
             remaining_lease_expires_at_unix_ms: None,
+            release_state: if released {
+                "released".to_owned()
+            } else {
+                String::new()
+            },
         }))
     }
 }
@@ -3296,6 +3473,8 @@ mod tests {
                 maximum_bytes: Some(1),
                 lease_token: expired.lease_token,
                 accepted_compression: PayloadCompression::Identity as i32,
+                authorization_resource_id: String::new(),
+                owner: None,
             }))
             .await
             .err()
@@ -3490,6 +3669,8 @@ mod tests {
                 maximum_bytes: Some(MAX_PAYLOAD_CHUNK_BYTES as u64),
                 lease_token: artifact.lease_token,
                 accepted_compression: PayloadCompression::Identity as i32,
+                authorization_resource_id: String::new(),
+                owner: None,
             }))
             .await
             .unwrap()

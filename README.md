@@ -99,7 +99,7 @@ just adapter-ci-fast      # Ruff, Pyrefly, pytest, and STDIO discipline
 just extractor-ci-fast    # dated-nightly extractor gate
 just sidecar-ci-fast      # stable pinned-source sidecar gate
 just model-family-check   # typed render plus independent staged consumers
-just model-repro-check    # exact two-root DesiredTree reproduction
+just model-repro-check    # bounded predecessor reproducibility during transition
 just model-assurance-check # live Just/test/rule evidence and profile soundness
 just stable-graph-check   # exact pins/families and local-vs-S3 activation boundary
 just governance           # model-derived structure, provenance, and zero-state checks
@@ -119,7 +119,7 @@ never dependencies of a gate. Note that `cargo nextest` does not execute doctest
 | `rustc-extractor/` | dated-nightly extractor domain |
 | `pyrefly-sidecar/` | pinned Pyrefly sidecar domain |
 | `codefabric-cpg-mcp/` | Python FastMCP adapter project and its own `uv.lock` |
-| `contracts/` | AC-G-05 authority, generated registries, and cross-language fixtures |
+| `contracts/` | released wire/fixture inputs and bounded predecessor products; not current semantic authority |
 | `fuzz/` | native-target JCS parser/canonicalizer fuzz harness |
 | `tooling/proto/` | hermetic Protobuf generation and version identity |
 | `scripts/` | operational scripts too substantial for a `just` recipe |
@@ -134,9 +134,11 @@ never dependencies of a gate. Note that `cargo nextest` does not execute doctest
 
 ## Governing documents
 
-The authoritative system design is the v1.3 suite under `docs/authoritative_design/`; the
-roadmap composes its implementation waves. `AGENTS.md` documents the repository’s
-tooling, assurance model, design map, and operating rules. The older
-`docs/rust_core_python_interface_repository_specification_2026-08-20.md` remains the
-infrastructure source for compatible decisions, but accepted v4 plan decisions and the
-v1.3 design corrections govern where they deliberately replace the seed-era extension shape.
+The authoritative system design is the discovered
+`codefabric-relational-data-fabric` v2.0 suite under `docs/authoritative_design/`; its roadmap
+orders capability stages and the active versioned implementation plan owns packet execution.
+The adjacent v1.3 masters remain historical transition evidence, not a coequal target.
+`AGENTS.md` documents the repository tooling, assurance model, design map, and operating rules.
+The older `docs/rust_core_python_interface_repository_specification_2026-08-20.md` remains the
+infrastructure source for compatible decisions unless the current suite explicitly supersedes
+one of its semantic realization premises.

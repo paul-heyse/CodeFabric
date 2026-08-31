@@ -114,6 +114,7 @@ REVIEW_REQUIREMENTS = {
     "implementation-review": {"plan_path", "verdict"},
     "implementation-status": {"plan_path", "state_path"},
     "library-capability-research": {"topic"},
+    "interface-design-review": {"interface_path", "verdict"},
     "lib-leverage": {"library"},
     "skill-eval": set(),
     "design-principles-conformance": {
@@ -131,6 +132,12 @@ REVIEW_REQUIREMENTS = {
     },
 }
 REVIEW_VERDICTS = {
+    "interface-design-review": {
+        "aligned",
+        "aligned-with-findings",
+        "revision-required",
+        "redesign-required",
+    },
     "plan-audit": {
         "ready",
         "ready-with-corrections",

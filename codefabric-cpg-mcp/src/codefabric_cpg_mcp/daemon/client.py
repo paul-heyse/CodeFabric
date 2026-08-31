@@ -9,7 +9,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from importlib.metadata import version
-from typing import Any, cast
+from typing import Any, Never, cast
 
 import grpc
 
@@ -23,6 +23,20 @@ from ..contracts.wire_models import (
     ValidateToolInput,
 )
 from ..settings import Settings
+from .arrow_resources import (
+    ARROW_RELEASE,
+    PUBLISHED_RESULT_FORMAT,
+    ArrowResourceAccessError,
+    ArrowResourceChunk,
+    ArrowResourceExpiredError,
+    ArrowResourceLimitError,
+    ArrowResourcePresenter,
+    ArrowResourceReleasedError,
+    ArrowResultAccess,
+    ArrowResultPackageDescriptor,
+    ArrowResultReleaseReceipt,
+    validate_package_descriptor_json,
+)
 from .channel import create_local_channel
 from .generated import cpg_query_service_pb2 as query_pb
 from .generated import cpg_query_service_pb2_grpc as query_grpc
@@ -85,6 +99,14 @@ class DaemonQueryResult:
     truncated: bool
     query_statuses: tuple[JsonObject, ...]
     notices: tuple[str, ...]
+    arrow_descriptor: ArrowResultPackageDescriptor | None = None
+
+
+@dataclass(slots=True)
+class _ArrowLeaseEntry:
+    descriptor: ArrowResultPackageDescriptor
+    access: ArrowResultAccess
+    consumed_resource_ids: set[str]
 
 
 class CpgDaemonClient:
@@ -100,6 +122,7 @@ class CpgDaemonClient:
         # Capability material cached only so a later resource read can ask the
         # daemon. Presence here never proves that the daemon still recognizes a lease.
         self._lease_cache: dict[str, tuple[str, str, int, int]] = {}
+        self._arrow_leases: dict[str, _ArrowLeaseEntry] = {}
 
     async def connect(self) -> None:
         """Perform the mandatory version/capability handshake exactly once."""
@@ -166,6 +189,13 @@ class CpgDaemonClient:
         """Release the process-lifetime channel."""
 
         try:
+            for artifact_id, entry in tuple(self._arrow_leases.items()):
+                try:
+                    await self.release(access=entry.access)
+                except grpc.RpcError, DaemonProtocolError:
+                    pass
+                finally:
+                    self._arrow_leases.pop(artifact_id, None)
             for artifact_id, (lease_token, _checksum, _expires_at, _byte_count) in tuple(
                 self._lease_cache.items()
             ):
@@ -340,6 +370,34 @@ class CpgDaemonClient:
 
         if not terminal.semantic_execution_state or not terminal.completeness_state:
             raise DaemonProtocolError("terminal event omitted semantic response states")
+        arrow_descriptor: ArrowResultPackageDescriptor | None = None
+        arrow_access: ArrowResultAccess | None = None
+        if artifact.canonical_result_descriptor_json:
+            descriptor_bytes = bytes(artifact.canonical_result_descriptor_json)
+            if (
+                artifact.content_type != "application/vnd.codefabric.arrow-result-package+json"
+                or artifact.encoding != query_pb.PAYLOAD_COMPRESSION_IDENTITY
+                or artifact.result_contract_version != PUBLISHED_RESULT_FORMAT
+                or artifact.arrow_release != ARROW_RELEASE
+                or checksum(descriptor_bytes) != artifact.result_descriptor_checksum
+                or artifact.artifact_checksum != artifact.result_descriptor_checksum
+            ):
+                raise DaemonProtocolError("Arrow result compatibility metadata differs")
+            arrow_descriptor = validate_package_descriptor_json(descriptor_bytes)
+            if (
+                arrow_descriptor.artifact_id != artifact.artifact_id
+                or arrow_descriptor.lease_expires_at_unix_ms != artifact.lease_expires_at_unix_ms
+                or arrow_descriptor.total_rows != terminal.result_row_count
+                or arrow_descriptor.total_ipc_bytes != terminal.result_byte_count
+            ):
+                raise DaemonProtocolError("Arrow result descriptor differs from terminal metadata")
+            arrow_access = ArrowResultAccess(
+                artifact_id=arrow_descriptor.artifact_id,
+                owner=arrow_descriptor.owner,
+                lease_token=artifact.lease_token,
+            )
+        elif artifact.result_descriptor_checksum:
+            raise DaemonProtocolError("Arrow result descriptor bytes are absent")
         query_statuses = tuple(
             cast(
                 JsonObject,
@@ -351,17 +409,28 @@ class CpgDaemonClient:
             )
             for status in terminal.query_statuses
         )
-        use_resource = tool_input.delivery == "resource" or (
-            tool_input.delivery == "automatic"
-            and terminal.result_byte_count > self.settings.inline_result_bytes
+        use_resource = (
+            arrow_descriptor is not None
+            or tool_input.delivery == "resource"
+            or (
+                tool_input.delivery == "automatic"
+                and terminal.result_byte_count > self.settings.inline_result_bytes
+            )
         )
         if use_resource:
-            self._lease_cache[artifact.artifact_id] = (
-                artifact.lease_token,
-                artifact.artifact_checksum,
-                artifact.lease_expires_at_unix_ms,
-                terminal.result_byte_count,
-            )
+            if arrow_descriptor is not None and arrow_access is not None:
+                self._arrow_leases[artifact.artifact_id] = _ArrowLeaseEntry(
+                    descriptor=arrow_descriptor,
+                    access=arrow_access,
+                    consumed_resource_ids=set(),
+                )
+            else:
+                self._lease_cache[artifact.artifact_id] = (
+                    artifact.lease_token,
+                    artifact.artifact_checksum,
+                    artifact.lease_expires_at_unix_ms,
+                    terminal.result_byte_count,
+                )
             return DaemonQueryResult(
                 semantic_request_id=started.effective_semantic_request_id,
                 daemon_query_id=started.daemon_query_id,
@@ -381,6 +450,7 @@ class CpgDaemonClient:
                 truncated=terminal.truncated,
                 query_statuses=query_statuses,
                 notices=tuple(terminal.notices),
+                arrow_descriptor=arrow_descriptor,
             )
 
         payload = await self._read_and_release(
@@ -433,6 +503,146 @@ class CpgDaemonClient:
             if isinstance(value, str):
                 return value
         return None
+
+    async def read_chunk(
+        self,
+        *,
+        access: ArrowResultAccess,
+        authorization_resource_id: str,
+        offset: int,
+        maximum_bytes: int,
+    ) -> ArrowResourceChunk:
+        """Translate one strict presenter read into the owner-bound gRPC branch."""
+
+        try:
+            stream = self.stub.ReadResult(
+                query_pb.ReadResultRequest(
+                    artifact_id=access.artifact_id,
+                    offset=offset,
+                    maximum_bytes=maximum_bytes,
+                    lease_token=access.lease_token,
+                    accepted_compression=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
+                    authorization_resource_id=authorization_resource_id,
+                    owner=query_pb.ResultOwner(
+                        workspace_id=access.owner.workspace_id,
+                        agent_id=access.owner.agent_id,
+                    ),
+                ),
+                timeout=self.settings.query_timeout_seconds,
+            )
+            chunks = [chunk async for chunk in stream]
+        except grpc.RpcError as error:
+            self._raise_arrow_rpc_error(error)
+        if len(chunks) != 1:
+            raise DaemonProtocolError("Arrow resource read did not return exactly one range")
+        chunk = chunks[0]
+        if (
+            chunk.artifact_id != access.artifact_id
+            or chunk.authorization_resource_id != authorization_resource_id
+            or chunk.encoding != query_pb.PAYLOAD_COMPRESSION_IDENTITY
+            or chunk.uncompressed_length != len(chunk.payload)
+            or checksum(chunk.payload) != chunk.payload_checksum
+        ):
+            raise DaemonProtocolError("Arrow resource transport metadata differs")
+        return ArrowResourceChunk(
+            authorization_resource_id=chunk.authorization_resource_id,
+            offset=chunk.offset,
+            next_offset=chunk.next_offset,
+            total_length=chunk.total_length,
+            content_checksum=chunk.content_checksum,
+            payload=chunk.payload,
+            complete=chunk.final_chunk,
+        )
+
+    async def release(self, *, access: ArrowResultAccess) -> ArrowResultReleaseReceipt:
+        """Release an Arrow artifact while preserving daemon tombstone semantics."""
+
+        try:
+            response = await self.stub.ReleaseResult(
+                query_pb.ReleaseResultRequest(
+                    artifact_id=access.artifact_id,
+                    lease_token=access.lease_token,
+                    owner=query_pb.ResultOwner(
+                        workspace_id=access.owner.workspace_id,
+                        agent_id=access.owner.agent_id,
+                    ),
+                ),
+                timeout=self.settings.query_timeout_seconds,
+            )
+        except grpc.RpcError as error:
+            self._raise_arrow_rpc_error(error)
+        if response.artifact_id != access.artifact_id or response.release_state not in {
+            "released",
+            "already_released",
+        }:
+            raise DaemonProtocolError("Arrow release receipt differs from the request")
+        return ArrowResultReleaseReceipt(
+            artifact_id=response.artifact_id,
+            state=response.release_state,
+        )
+
+    async def read_arrow_resource(self, artifact_id: str, authorization_resource_id: str) -> bytes:
+        """Read one descriptor-authorized resource and release after complete consumption."""
+
+        entry = self._arrow_leases.get(artifact_id)
+        if entry is None:
+            raise DaemonProtocolError("Arrow result is absent, expired, or already released")
+        handshake = self.handshake_response
+        if handshake is None:
+            raise DaemonProtocolError("daemon handshake is absent")
+        maximum_chunk_bytes = min(
+            self.settings.inline_result_bytes,
+            int(handshake.effective_limits.maximum_payload_chunk_bytes),
+        )
+        presenter = ArrowResourcePresenter(
+            self,
+            max_chunk_bytes=maximum_chunk_bytes,
+            max_manifest_bytes=self.settings.max_request_bytes,
+            max_relation_bytes=64 * 1024 * 1024,
+        )
+        payload = await presenter.read_subresource(
+            entry.descriptor,
+            entry.access,
+            authorization_resource_id=authorization_resource_id,
+            observed_at_unix_ms=int(time.time() * 1000),
+        )
+        entry.consumed_resource_ids.add(authorization_resource_id)
+        all_resource_ids = {
+            entry.descriptor.manifest.authorization_resource_id,
+            *(relation.authorization_resource_id for relation in entry.descriptor.relations),
+        }
+        if entry.consumed_resource_ids == all_resource_ids:
+            await presenter.release(
+                entry.descriptor,
+                entry.access,
+                observed_at_unix_ms=int(time.time() * 1000),
+            )
+            self._arrow_leases.pop(artifact_id, None)
+        return payload
+
+    def arrow_result_descriptor(self, artifact_id: str) -> ArrowResultPackageDescriptor:
+        """Return the already validated control descriptor for URI routing only."""
+
+        entry = self._arrow_leases.get(artifact_id)
+        if entry is None:
+            raise DaemonProtocolError("Arrow result is absent, expired, or already released")
+        return entry.descriptor
+
+    @staticmethod
+    def _raise_arrow_rpc_error(error: grpc.RpcError) -> Never:
+        code = error.code()
+        detail = (error.details() or "").upper()
+        if code == grpc.StatusCode.PERMISSION_DENIED:
+            raise ArrowResourceAccessError("daemon rejected the Arrow result owner or token")
+        if code == grpc.StatusCode.NOT_FOUND:
+            raise ArrowResourceAccessError("daemon rejected the Arrow resource handle")
+        if code == grpc.StatusCode.RESOURCE_EXHAUSTED:
+            raise ArrowResourceLimitError("daemon rejected the Arrow resource bound")
+        if code == grpc.StatusCode.FAILED_PRECONDITION and "EXPIRED" in detail:
+            raise ArrowResourceExpiredError("Arrow result lease expired")
+        if code == grpc.StatusCode.FAILED_PRECONDITION and "RELEASED" in detail:
+            raise ArrowResourceReleasedError("Arrow result is a released tombstone")
+        raise DaemonProtocolError("daemon rejected the Arrow result operation")
 
     async def _read_and_release(
         self,

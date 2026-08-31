@@ -307,6 +307,58 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "canonicalResultDescriptorJson",
+              "label": "LABEL_OPTIONAL",
+              "name": "canonical_result_descriptor_json",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resultDescriptorChecksum",
+              "label": "LABEL_OPTIONAL",
+              "name": "result_descriptor_checksum",
+              "number": 9,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resultContractVersion",
+              "label": "LABEL_OPTIONAL",
+              "name": "result_contract_version",
+              "number": 10,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "arrowRelease",
+              "label": "LABEL_OPTIONAL",
+              "name": "arrow_release",
+              "number": 11,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v1.ArtifactReadyEvent",
@@ -1582,6 +1634,32 @@
               "proto3_optional": false,
               "type": "TYPE_ENUM",
               "type_name": ".codefabric.cpgd.v1.PayloadCompression"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "authorizationResourceId",
+              "label": "LABEL_OPTIONAL",
+              "name": "authorization_resource_id",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "owner",
+              "label": "LABEL_OPTIONAL",
+              "name": "owner",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v1.ResultOwner"
             }
           ],
           "full_name": "codefabric.cpgd.v1.ReadResultRequest",
@@ -1720,6 +1798,19 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "owner",
+              "label": "LABEL_OPTIONAL",
+              "name": "owner",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v1.ResultOwner"
             }
           ],
           "full_name": "codefabric.cpgd.v1.ReleaseResultRequest",
@@ -1768,6 +1859,19 @@
               "options": {},
               "proto3_optional": true,
               "type": "TYPE_INT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "releaseState",
+              "label": "LABEL_OPTIONAL",
+              "name": "release_state",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
               "type_name": ""
             }
           ],
@@ -2015,9 +2119,97 @@
               "proto3_optional": false,
               "type": "TYPE_INT64",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "authorizationResourceId",
+              "label": "LABEL_OPTIONAL",
+              "name": "authorization_resource_id",
+              "number": 11,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "nextOffset",
+              "label": "LABEL_OPTIONAL",
+              "name": "next_offset",
+              "number": 12,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "totalLength",
+              "label": "LABEL_OPTIONAL",
+              "name": "total_length",
+              "number": 13,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "contentChecksum",
+              "label": "LABEL_OPTIONAL",
+              "name": "content_checksum",
+              "number": 14,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v1.ResultChunk",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "workspaceId",
+              "label": "LABEL_OPTIONAL",
+              "name": "workspace_id",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "agentId",
+              "label": "LABEL_OPTIONAL",
+              "name": "agent_id",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.cpgd.v1.ResultOwner",
           "oneofs": [],
           "options": {},
           "reserved_names": [],
@@ -3310,6 +3502,24 @@
       "edition": null,
       "enums": [
         {
+          "full_name": "codefabric.provider.v1.ArrowIpcMetadataVersion",
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": [],
+          "values": [
+            {
+              "name": "ARROW_IPC_METADATA_VERSION_UNSPECIFIED",
+              "number": 0,
+              "options": {}
+            },
+            {
+              "name": "ARROW_IPC_METADATA_VERSION_V5",
+              "number": 5,
+              "options": {}
+            }
+          ]
+        },
+        {
           "full_name": "codefabric.provider.v1.CancelAcknowledgementState",
           "options": {},
           "reserved_names": [],
@@ -3596,6 +3806,77 @@
             {
               "name": "PROVIDER_SCOPE_KIND_WORKSPACE_GLOBAL_DERIVATION",
               "number": 8,
+              "options": {}
+            }
+          ]
+        },
+        {
+          "full_name": "codefabric.provider.v1.RelationIpcRemainderReason",
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": [],
+          "values": [
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_UNSPECIFIED",
+              "number": 0,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_UNSUPPORTED",
+              "number": 1,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_PROVIDER_UNAVAILABLE",
+              "number": 2,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_RESOURCE_LIMIT",
+              "number": 3,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_INVALID_SOURCE",
+              "number": 4,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_CANCELLED",
+              "number": 5,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_UNKNOWN",
+              "number": 6,
+              "options": {}
+            }
+          ]
+        },
+        {
+          "full_name": "codefabric.provider.v1.RelationIpcTerminalStatus",
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": [],
+          "values": [
+            {
+              "name": "RELATION_IPC_TERMINAL_STATUS_UNSPECIFIED",
+              "number": 0,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_TERMINAL_STATUS_COMPLETE",
+              "number": 1,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_TERMINAL_STATUS_PARTIAL",
+              "number": 2,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_TERMINAL_STATUS_UNKNOWN",
+              "number": 3,
               "options": {}
             }
           ]
@@ -5013,6 +5294,623 @@
             {
               "default_value": null,
               "has_presence": false,
+              "json_name": "scope",
+              "label": "LABEL_OPTIONAL",
+              "name": "scope",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "unitCount",
+              "label": "LABEL_OPTIONAL",
+              "name": "unit_count",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "reason",
+              "label": "LABEL_OPTIONAL",
+              "name": "reason",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.provider.v1.RelationIpcRemainderReason"
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcCoverageRemainder",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "status",
+              "label": "LABEL_OPTIONAL",
+              "name": "status",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.provider.v1.RelationIpcTerminalStatus"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "requestedUnits",
+              "label": "LABEL_OPTIONAL",
+              "name": "requested_units",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "completedUnits",
+              "label": "LABEL_OPTIONAL",
+              "name": "completed_units",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "remainders",
+              "label": "LABEL_REPEATED",
+              "name": "remainders",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcCoverageRemainder"
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcCoverageTrailer",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "declaredIpcBytes",
+              "label": "LABEL_OPTIONAL",
+              "name": "declared_ipc_bytes",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "declaredBatches",
+              "label": "LABEL_OPTIONAL",
+              "name": "declared_batches",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "declaredRows",
+              "label": "LABEL_OPTIONAL",
+              "name": "declared_rows",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcEnd",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "acknowledgedSequence",
+              "label": "LABEL_OPTIONAL",
+              "name": "acknowledged_sequence",
+              "number": 2,
+              "oneof": "_acknowledged_sequence",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "releasedBytes",
+              "label": "LABEL_OPTIONAL",
+              "name": "released_bytes",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "cancelled",
+              "label": "LABEL_OPTIONAL",
+              "name": "cancelled",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BOOL",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcFlowControlAck",
+          "oneofs": [
+            {
+              "name": "_acknowledged_sequence",
+              "options": {}
+            }
+          ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "open",
+              "label": "LABEL_OPTIONAL",
+              "name": "open",
+              "number": 1,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcOpen"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "payload",
+              "label": "LABEL_OPTIONAL",
+              "name": "payload",
+              "number": 2,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcPayload"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "flowControlAck",
+              "label": "LABEL_OPTIONAL",
+              "name": "flow_control_ack",
+              "number": 3,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFlowControlAck"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "ipcEnd",
+              "label": "LABEL_OPTIONAL",
+              "name": "ipc_end",
+              "number": 4,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcEnd"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "coverageTrailer",
+              "label": "LABEL_OPTIONAL",
+              "name": "coverage_trailer",
+              "number": 5,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcCoverageTrailer"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "terminal",
+              "label": "LABEL_OPTIONAL",
+              "name": "terminal",
+              "number": 6,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcTerminal"
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcFrame",
+          "oneofs": [
+            {
+              "name": "frame",
+              "options": {}
+            }
+          ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "protocolVersion",
+              "label": "LABEL_OPTIONAL",
+              "name": "protocol_version",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "identity",
+              "label": "LABEL_OPTIONAL",
+              "name": "identity",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcStreamIdentity"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sequence",
+              "label": "LABEL_OPTIONAL",
+              "name": "sequence",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcFrameHeader",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "requestedUnits",
+              "label": "LABEL_OPTIONAL",
+              "name": "requested_units",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "arrowTypeUniverse",
+              "label": "LABEL_OPTIONAL",
+              "name": "arrow_type_universe",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "metadataVersion",
+              "label": "LABEL_OPTIONAL",
+              "name": "metadata_version",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.provider.v1.ArrowIpcMetadataVersion"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "semanticEncoding",
+              "label": "LABEL_OPTIONAL",
+              "name": "semantic_encoding",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcOpen",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "arrowIpcFragment",
+              "label": "LABEL_OPTIONAL",
+              "name": "arrow_ipc_fragment",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcPayload",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "relationId",
+              "label": "LABEL_OPTIONAL",
+              "name": "relation_id",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "streamId",
+              "label": "LABEL_OPTIONAL",
+              "name": "stream_id",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "schemaFingerprint",
+              "label": "LABEL_OPTIONAL",
+              "name": "schema_fingerprint",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sourcePin",
+              "label": "LABEL_OPTIONAL",
+              "name": "source_pin",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "contextPin",
+              "label": "LABEL_OPTIONAL",
+              "name": "context_pin",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcStreamIdentity",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "status",
+              "label": "LABEL_OPTIONAL",
+              "name": "status",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.provider.v1.RelationIpcTerminalStatus"
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcTerminal",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
               "json_name": "inputBytes",
               "label": "LABEL_OPTIONAL",
               "name": "input_bytes",
@@ -5260,6 +6158,19 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.pyrefly.v1.CancelRunRequest"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "relationIpcAck",
+              "label": "LABEL_OPTIONAL",
+              "name": "relation_ipc_ack",
+              "number": 5,
+              "oneof": "command",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrame"
             }
           ],
           "full_name": "codefabric.pyrefly.v1.AnalyzeCommand",
@@ -5353,6 +6264,19 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.pyrefly.v1.RunTerminal"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "relationIpcFrame",
+              "label": "LABEL_OPTIONAL",
+              "name": "relation_ipc_frame",
+              "number": 7,
+              "oneof": "event",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.pyrefly.v1.RelationIpcFrameEvent"
             }
           ],
           "full_name": "codefabric.pyrefly.v1.AnalyzeEvent",
@@ -6585,6 +7509,68 @@
             {
               "default_value": null,
               "has_presence": false,
+              "json_name": "moduleId",
+              "label": "LABEL_OPTIONAL",
+              "name": "module_id",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "observationFamilyCode",
+              "label": "LABEL_OPTIONAL",
+              "name": "observation_family_code",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "frame",
+              "label": "LABEL_OPTIONAL",
+              "name": "frame",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrame"
+            }
+          ],
+          "full_name": "codefabric.pyrefly.v1.RelationIpcFrameEvent",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.pyrefly.v1.AnalyzeEventHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
               "json_name": "grantedChunkCredits",
               "label": "LABEL_OPTIONAL",
               "name": "granted_chunk_credits",
@@ -7746,6 +8732,19 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.rustc.v1.CompilationEnd"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "ownerRelationIpcFrame",
+              "label": "LABEL_OPTIONAL",
+              "name": "owner_relation_ipc_frame",
+              "number": 7,
+              "oneof": "event",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.rustc.v1.OwnerRelationIpcFrame"
             }
           ],
           "full_name": "codefabric.rustc.v1.ExtractionEvent",
@@ -7820,6 +8819,19 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.rustc.v1.CancelCompilationRequest"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "relationIpcAck",
+              "label": "LABEL_OPTIONAL",
+              "name": "relation_ipc_ack",
+              "number": 5,
+              "oneof": "command",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrame"
             }
           ],
           "full_name": "codefabric.rustc.v1.ExtractorCommand",
@@ -8442,6 +9454,94 @@
               "options": {}
             }
           ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "providerRunId",
+              "label": "LABEL_OPTIONAL",
+              "name": "provider_run_id",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "compilationUnitId",
+              "label": "LABEL_OPTIONAL",
+              "name": "compilation_unit_id",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sequence",
+              "label": "LABEL_OPTIONAL",
+              "name": "sequence",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "ownerId",
+              "label": "LABEL_OPTIONAL",
+              "name": "owner_id",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "observationFamilyCode",
+              "label": "LABEL_OPTIONAL",
+              "name": "observation_family_code",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "frame",
+              "label": "LABEL_OPTIONAL",
+              "name": "frame",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrame"
+            }
+          ],
+          "full_name": "codefabric.rustc.v1.OwnerRelationIpcFrame",
+          "oneofs": [],
           "options": {},
           "reserved_names": [],
           "reserved_ranges": []

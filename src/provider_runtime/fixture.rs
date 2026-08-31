@@ -304,9 +304,7 @@ async fn execute_pyrefly_provider_runtime(
         modules,
         requested_capability_codes: vec![90, 110],
         deadline_unix_ms: now_millis() + 120_000,
-        output_schema_bundle_digest: digest(include_bytes!(
-            "../../contracts/schema/schema-contract-ir.json"
-        )),
+        output_schema_bundle_digest: crate::pyrefly_service::schema_bundle_digest(),
     };
     let driver = Arc::new(
         PyreflyProviderDriver::new(binary, state_root.join("pyrefly-supervisor"))
@@ -492,9 +490,7 @@ async fn run_rustc(
     let fixed_digest = digest(b"gate-b-rustc-fixture");
     let policy = RustcProtocolPolicy {
         daemon_build: "codefabricd-gate-b".to_owned(),
-        output_schema_bundle_digest: digest(include_bytes!(
-            "../../contracts/schema/schema-contract-ir.json"
-        )),
+        output_schema_bundle_digest: crate::rustc_relation_schema::schema_bundle_digest(),
         sandbox_profile_digest: fixed_digest.clone(),
         extractor_build: identity["extractor"]
             .as_str()

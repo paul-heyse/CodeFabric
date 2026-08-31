@@ -269,6 +269,122 @@ pub struct ChunkRejected {
     #[prost(string, tag = "2")]
     pub error_code: ::prost::alloc::string::String,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RelationIpcStreamIdentity {
+    #[prost(bytes = "vec", tag = "1")]
+    pub relation_id: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "2")]
+    pub stream_id: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "3")]
+    pub schema_fingerprint: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "4")]
+    pub source_pin: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "5")]
+    pub context_pin: ::prost::alloc::vec::Vec<u8>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RelationIpcFrameHeader {
+    #[prost(uint32, tag = "1")]
+    pub protocol_version: u32,
+    #[prost(message, optional, tag = "2")]
+    pub identity: ::core::option::Option<RelationIpcStreamIdentity>,
+    #[prost(uint64, tag = "3")]
+    pub sequence: u64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RelationIpcOpen {
+    #[prost(message, optional, tag = "1")]
+    pub header: ::core::option::Option<RelationIpcFrameHeader>,
+    #[prost(uint64, tag = "2")]
+    pub requested_units: u64,
+    #[prost(string, tag = "3")]
+    pub arrow_type_universe: ::prost::alloc::string::String,
+    #[prost(enumeration = "ArrowIpcMetadataVersion", tag = "4")]
+    pub metadata_version: i32,
+    #[prost(string, tag = "5")]
+    pub semantic_encoding: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RelationIpcPayload {
+    #[prost(message, optional, tag = "1")]
+    pub header: ::core::option::Option<RelationIpcFrameHeader>,
+    #[prost(bytes = "vec", tag = "2")]
+    pub arrow_ipc_fragment: ::prost::alloc::vec::Vec<u8>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RelationIpcFlowControlAck {
+    #[prost(message, optional, tag = "1")]
+    pub header: ::core::option::Option<RelationIpcFrameHeader>,
+    #[prost(uint64, optional, tag = "2")]
+    pub acknowledged_sequence: ::core::option::Option<u64>,
+    #[prost(uint64, tag = "3")]
+    pub released_bytes: u64,
+    #[prost(bool, tag = "4")]
+    pub cancelled: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RelationIpcEnd {
+    #[prost(message, optional, tag = "1")]
+    pub header: ::core::option::Option<RelationIpcFrameHeader>,
+    #[prost(uint64, tag = "2")]
+    pub declared_ipc_bytes: u64,
+    #[prost(uint64, tag = "3")]
+    pub declared_batches: u64,
+    #[prost(uint64, tag = "4")]
+    pub declared_rows: u64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RelationIpcCoverageRemainder {
+    #[prost(bytes = "vec", tag = "1")]
+    pub scope: ::prost::alloc::vec::Vec<u8>,
+    #[prost(uint64, tag = "2")]
+    pub unit_count: u64,
+    #[prost(enumeration = "RelationIpcRemainderReason", tag = "3")]
+    pub reason: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RelationIpcCoverageTrailer {
+    #[prost(message, optional, tag = "1")]
+    pub header: ::core::option::Option<RelationIpcFrameHeader>,
+    #[prost(enumeration = "RelationIpcTerminalStatus", tag = "2")]
+    pub status: i32,
+    #[prost(uint64, tag = "3")]
+    pub requested_units: u64,
+    #[prost(uint64, tag = "4")]
+    pub completed_units: u64,
+    #[prost(message, repeated, tag = "5")]
+    pub remainders: ::prost::alloc::vec::Vec<RelationIpcCoverageRemainder>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RelationIpcTerminal {
+    #[prost(message, optional, tag = "1")]
+    pub header: ::core::option::Option<RelationIpcFrameHeader>,
+    #[prost(enumeration = "RelationIpcTerminalStatus", tag = "2")]
+    pub status: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RelationIpcFrame {
+    #[prost(oneof = "relation_ipc_frame::Frame", tags = "1, 2, 3, 4, 5, 6")]
+    pub frame: ::core::option::Option<relation_ipc_frame::Frame>,
+}
+/// Nested message and enum types in `RelationIpcFrame`.
+pub mod relation_ipc_frame {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Frame {
+        #[prost(message, tag = "1")]
+        Open(super::RelationIpcOpen),
+        #[prost(message, tag = "2")]
+        Payload(super::RelationIpcPayload),
+        #[prost(message, tag = "3")]
+        FlowControlAck(super::RelationIpcFlowControlAck),
+        #[prost(message, tag = "4")]
+        IpcEnd(super::RelationIpcEnd),
+        #[prost(message, tag = "5")]
+        CoverageTrailer(super::RelationIpcCoverageTrailer),
+        #[prost(message, tag = "6")]
+        Terminal(super::RelationIpcTerminal),
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum ProviderRunState {
@@ -550,6 +666,105 @@ impl CreditControlLimit {
             "CREDIT_CONTROL_LIMIT_UNSPECIFIED" => Some(Self::Unspecified),
             "CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS" => Some(Self::MaxOutstandingChunks),
             "CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB" => Some(Self::MaxUnacknowledgedMib),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ArrowIpcMetadataVersion {
+    Unspecified = 0,
+    V5 = 5,
+}
+impl ArrowIpcMetadataVersion {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "ARROW_IPC_METADATA_VERSION_UNSPECIFIED",
+            Self::V5 => "ARROW_IPC_METADATA_VERSION_V5",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "ARROW_IPC_METADATA_VERSION_UNSPECIFIED" => Some(Self::Unspecified),
+            "ARROW_IPC_METADATA_VERSION_V5" => Some(Self::V5),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum RelationIpcRemainderReason {
+    Unspecified = 0,
+    Unsupported = 1,
+    ProviderUnavailable = 2,
+    ResourceLimit = 3,
+    InvalidSource = 4,
+    Cancelled = 5,
+    Unknown = 6,
+}
+impl RelationIpcRemainderReason {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "RELATION_IPC_REMAINDER_REASON_UNSPECIFIED",
+            Self::Unsupported => "RELATION_IPC_REMAINDER_REASON_UNSUPPORTED",
+            Self::ProviderUnavailable => "RELATION_IPC_REMAINDER_REASON_PROVIDER_UNAVAILABLE",
+            Self::ResourceLimit => "RELATION_IPC_REMAINDER_REASON_RESOURCE_LIMIT",
+            Self::InvalidSource => "RELATION_IPC_REMAINDER_REASON_INVALID_SOURCE",
+            Self::Cancelled => "RELATION_IPC_REMAINDER_REASON_CANCELLED",
+            Self::Unknown => "RELATION_IPC_REMAINDER_REASON_UNKNOWN",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "RELATION_IPC_REMAINDER_REASON_UNSPECIFIED" => Some(Self::Unspecified),
+            "RELATION_IPC_REMAINDER_REASON_UNSUPPORTED" => Some(Self::Unsupported),
+            "RELATION_IPC_REMAINDER_REASON_PROVIDER_UNAVAILABLE" => Some(Self::ProviderUnavailable),
+            "RELATION_IPC_REMAINDER_REASON_RESOURCE_LIMIT" => Some(Self::ResourceLimit),
+            "RELATION_IPC_REMAINDER_REASON_INVALID_SOURCE" => Some(Self::InvalidSource),
+            "RELATION_IPC_REMAINDER_REASON_CANCELLED" => Some(Self::Cancelled),
+            "RELATION_IPC_REMAINDER_REASON_UNKNOWN" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum RelationIpcTerminalStatus {
+    Unspecified = 0,
+    Complete = 1,
+    Partial = 2,
+    Unknown = 3,
+}
+impl RelationIpcTerminalStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "RELATION_IPC_TERMINAL_STATUS_UNSPECIFIED",
+            Self::Complete => "RELATION_IPC_TERMINAL_STATUS_COMPLETE",
+            Self::Partial => "RELATION_IPC_TERMINAL_STATUS_PARTIAL",
+            Self::Unknown => "RELATION_IPC_TERMINAL_STATUS_UNKNOWN",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "RELATION_IPC_TERMINAL_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "RELATION_IPC_TERMINAL_STATUS_COMPLETE" => Some(Self::Complete),
+            "RELATION_IPC_TERMINAL_STATUS_PARTIAL" => Some(Self::Partial),
+            "RELATION_IPC_TERMINAL_STATUS_UNKNOWN" => Some(Self::Unknown),
             _ => None,
         }
     }

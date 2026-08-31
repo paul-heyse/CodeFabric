@@ -38,6 +38,7 @@ from .contracts.wire_models import (
     ValidationIssue,
 )
 from .daemon import CpgDaemonClient, DaemonQueryError
+from .daemon.arrow_resources import manifest_resource_uri, relation_resource_uri
 from .settings import process_settings
 
 SERVER_INSTRUCTIONS = """\
@@ -220,15 +221,28 @@ async def query_code_graph(
             .isoformat()
             .replace("+00:00", "Z")
         )
-        delivery_result: InlineDelivery | ResourceDelivery = ResourceDelivery(
-            result_bytes=result.result_byte_count,
-            checksum=result.checksum,
-            result_resource=ResultResource(
+        if result.arrow_descriptor is None:
+            resource = ResultResource(
                 uri=f"cpg://result/{result.artifact_id}",
                 manifest_uri=f"cpg://result/{result.artifact_id}/manifest",
                 expires_at=expires_at,
                 subresource_uris=(),
-            ),
+            )
+        else:
+            manifest_uri = manifest_resource_uri(result.arrow_descriptor)
+            resource = ResultResource(
+                uri=manifest_uri,
+                manifest_uri=manifest_uri,
+                expires_at=expires_at,
+                subresource_uris=tuple(
+                    relation_resource_uri(result.arrow_descriptor, relation)
+                    for relation in result.arrow_descriptor.relations
+                ),
+            )
+        delivery_result: InlineDelivery | ResourceDelivery = ResourceDelivery(
+            result_bytes=result.result_byte_count,
+            checksum=result.checksum,
+            result_resource=resource,
             preview=None,
         )
     else:
@@ -279,6 +293,62 @@ async def get_query_result_resource(
 
     try:
         return (await (await _daemon(ctx)).read_resource(artifact_id)).decode("utf-8")
+    except RuntimeError as error:
+        raise ResourceError(str(error)) from None
+
+
+@mcp.resource(
+    "codefabric-result://{workspace_id}/{artifact_id}/manifest/{resource_id}",
+    name="CodeFabric Arrow result manifest",
+    description="Read one canonical daemon-owned Arrow result manifest.",
+    mime_type="application/json",
+)
+async def get_arrow_result_manifest(
+    workspace_id: str,
+    artifact_id: str,
+    resource_id: str,
+    ctx: Context = _CURRENT_CONTEXT,
+) -> str:
+    """Return the canonical metadata manifest without transforming semantic rows."""
+
+    client = await _daemon(ctx)
+    framed_artifact = f"b3:{artifact_id}"
+    descriptor = client.arrow_result_descriptor(framed_artifact)
+    if descriptor.owner.workspace_id != workspace_id:
+        raise ResourceError("Arrow result URI owner differs")
+    try:
+        payload = await client.read_arrow_resource(framed_artifact, f"b3:{resource_id}")
+        return payload.decode("utf-8")
+    except (RuntimeError, UnicodeDecodeError) as error:
+        raise ResourceError(str(error)) from None
+
+
+@mcp.resource(
+    "codefabric-result://{workspace_id}/{artifact_id}/relation/{relation_id}/{resource_id}",
+    name="CodeFabric Arrow relation stream",
+    description="Read one immutable daemon-owned Arrow IPC relation stream.",
+    mime_type="application/vnd.apache.arrow.stream",
+)
+async def get_arrow_result_relation(
+    workspace_id: str,
+    artifact_id: str,
+    relation_id: str,
+    resource_id: str,
+    ctx: Context = _CURRENT_CONTEXT,
+) -> bytes:
+    """Return untouched Arrow IPC bytes after descriptor and lease verification."""
+
+    client = await _daemon(ctx)
+    framed_artifact = f"b3:{artifact_id}"
+    descriptor = client.arrow_result_descriptor(framed_artifact)
+    if descriptor.owner.workspace_id != workspace_id or not any(
+        relation.relation_id == relation_id
+        and relation.authorization_resource_id == f"b3:{resource_id}"
+        for relation in descriptor.relations
+    ):
+        raise ResourceError("Arrow result URI metadata differs")
+    try:
+        return await client.read_arrow_resource(framed_artifact, f"b3:{resource_id}")
     except RuntimeError as error:
         raise ResourceError(str(error)) from None
 

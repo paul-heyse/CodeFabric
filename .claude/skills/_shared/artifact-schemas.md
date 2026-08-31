@@ -39,7 +39,7 @@ status: draft|accepted|superseded
 baseline_commit: <git-ref>
 primary_scope:
   - <paths-or-modules>
-doctrine_path: docs/library_ref/semantic_design_principles_holistic.md
+doctrine_path: docs/library_ref/full_data_fabric_design_principles_v2.md
 ---
 ```
 
@@ -283,6 +283,7 @@ Common required keys: `artifact`, `date`, `version` (`vN`), and
 | `implementation-review` | `plan_path`; `verdict: approved\|approved-with-minor-findings\|changes-required\|design-invalidated` |
 | `implementation-status` | `plan_path`, `state_path` |
 | `library-capability-research` | `topic` |
+| `interface-design-review` | `interface_path`; `verdict: aligned\|aligned-with-findings\|revision-required\|redesign-required` |
 | `lib-leverage` | `library` |
 | `skill-eval` | — |
 | `design-principles-conformance` | `principles_path`, `principles_digest`, `baseline_commit`; `verdict: conformant\|conformant-with-findings\|divergent\|framework-unowned` |

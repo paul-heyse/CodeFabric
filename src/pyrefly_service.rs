@@ -4,19 +4,15 @@
 //! library type is linked into or exposed by the stable daemon.
 
 use std::collections::BTreeMap;
-use std::io::Cursor;
 use std::io::Read as _;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
-use std::process::Child;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arrow_array::{BinaryArray, RecordBatch, StringArray};
-use arrow_ipc::reader::FileReader;
-use arrow_schema::{DataType, Field, Schema};
+use arrow_array::{Array as _, FixedSizeBinaryArray, RecordBatch, StringArray, UInt64Array};
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 use tokio::net::UnixStream;
@@ -24,12 +20,16 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Endpoint;
 use tower::service_fn;
 
-use crate::model_generated::schema_tables::{
-    PROVIDER_OBSERVATION_SCHEMAS, ProviderObservationLogicalType, ProviderObservationSchema,
+use crate::relation_ipc::{
+    FlowControlAck, FrameHeader, RelationIpcAssembler, RelationIpcFrame, RelationIpcLimits,
+    StreamId,
+};
+use crate::relation_ipc_wire::{
+    decode_relation_frame, encode_relation_frame, relation_stream_contract,
 };
 use crate::rpc::generated::codefabric::provider::v1::{
-    BlobReference, CancelAcknowledgementState, ChunkAccepted, ChunkRejected,
-    ProviderRunState as WireProviderRunState, SourceSnapshotLease,
+    BlobReference, CancelAcknowledgementState, ProviderRunState as WireProviderRunState,
+    SourceSnapshotLease,
 };
 use crate::rpc::generated::codefabric::pyrefly::v1::analyze_command::Command;
 use crate::rpc::generated::codefabric::pyrefly::v1::analyze_event::Event;
@@ -39,6 +39,13 @@ use crate::rpc::generated::codefabric::pyrefly::v1::{
     ModuleRequest, OpenContextRequest,
 };
 
+#[path = "pyrefly_relation_schema.rs"]
+mod relation_schema;
+
+pub use relation_schema::PyreflyRelation;
+pub(crate) use relation_schema::schema_bundle_digest;
+use relation_schema::schema_digests;
+
 const PYREFLY_SOURCE_DIGEST: &str =
     "b3:1b9e72144644d1b3df0bdca564496566238543dfb7f576980a8408714327fc3e";
 pub(crate) const SANDBOX_PROFILE_DIGEST: &str =
@@ -46,6 +53,11 @@ pub(crate) const SANDBOX_PROFILE_DIGEST: &str =
 const REQUIRED_FEATURE_BITS: u64 = (1_u64 << 17) | (1_u64 << 32);
 const OPTIONAL_FEATURE_BITS: u64 = 1_u64 << 33;
 const MAX_UNACKNOWLEDGED_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_MODULES_PER_RUN: usize = 64;
+const MAX_SOURCE_BYTES_PER_MODULE: u64 = 8 * 1024 * 1024;
+const MAX_SOURCE_BYTES_PER_RUN: u64 = 64 * 1024 * 1024;
+const MAX_RELATION_ROWS: u64 = 1_000_000;
+const MAX_TOTAL_RELATION_BYTES: usize = 256 * 1024 * 1024;
 const RESOURCE_PROFILE_ID: &str = "sidecar-semantic-standard";
 const TRUST_PROFILE: &str = "UNTRUSTED_SANDBOXED";
 const SIDECAR_START_TIMEOUT: Duration = Duration::from_secs(15);
@@ -91,6 +103,31 @@ pub struct AcceptedPyreflyModule {
     pub schema_digest: String,
     pub chunk_digest: String,
     pub module_digest: String,
+    /// Target-route typed relations. The singular fields above carry only the module-context
+    /// relation during the bounded predecessor migration; they never contain semantic JSON.
+    pub relations: Vec<AcceptedPyreflyRelation>,
+}
+
+/// One independently schema-validated relation-scoped Arrow stream.
+#[derive(Clone, Debug)]
+pub struct AcceptedPyreflyRelation {
+    pub relation: PyreflyRelation,
+    pub arrow_ipc: Vec<u8>,
+    pub batch: RecordBatch,
+    pub schema_digest: String,
+    pub chunk_digest: String,
+    pub row_count: u64,
+}
+
+struct PendingPyreflyModule {
+    module_id: String,
+    module_name: String,
+    canonical_file_id: [u8; 16],
+    source_bytes: Vec<u8>,
+    relations: BTreeMap<PyreflyRelation, AcceptedPyreflyRelation>,
+    relation_by_stream: BTreeMap<StreamId, PyreflyRelation>,
+    next_ack_sequence: BTreeMap<StreamId, u64>,
+    assembler: RelationIpcAssembler,
 }
 
 /// Terminal sidecar stream admitted for reconciliation.
@@ -131,7 +168,7 @@ pub enum PyreflyServiceError {
 }
 
 struct SupervisedSidecar {
-    child: Child,
+    child: crate::provider_sandbox::ProviderProcessGroupChild,
     socket: PathBuf,
     private_root: PathBuf,
     workspace_manifest_digest: [u8; 32],
@@ -140,7 +177,15 @@ struct SupervisedSidecar {
 
 impl Drop for SupervisedSidecar {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        let _ = self.child.terminate_group();
+        if !self
+            .child
+            .wait_group_empty(Duration::from_millis(250))
+            .unwrap_or(false)
+        {
+            let _ = self.child.kill_group();
+            let _ = self.child.wait_group_empty(Duration::from_secs(1));
+        }
         let _ = self.child.wait();
         let _ = std::fs::remove_file(&self.socket);
         let _ = std::fs::remove_dir_all(&self.private_root);
@@ -243,6 +288,8 @@ impl PyreflyProviderDriver {
         std::fs::create_dir(&private_root).map_err(|error| error.to_string())?;
         std::fs::set_permissions(&private_root, std::fs::Permissions::from_mode(0o700))
             .map_err(|error| error.to_string())?;
+        let private_root =
+            std::fs::canonicalize(private_root).map_err(|error| error.to_string())?;
         let profile = GeneratedSandboxProfile::generate(
             work.trust_profile,
             row.mechanism,
@@ -257,8 +304,13 @@ impl PyreflyProviderDriver {
         let socket = private_root.join("run.sock");
         let _ = std::fs::remove_file(&socket);
         let launch = ProviderLaunchRequest {
-            executable: self.binary.clone(),
+            host_executable: self.binary.clone(),
+            contained_executable: self.binary.clone(),
             arguments: vec!["--serve".to_owned(), format!("unix://{}", socket.display())],
+            environment: BTreeMap::from([
+                ("LC_ALL".to_owned(), "C".to_owned()),
+                ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+            ]),
             output_root: private_root.clone(),
             limits: ProviderProcessLimits {
                 cpu_seconds: 120,
@@ -298,7 +350,7 @@ impl PyreflyProviderDriver {
                 .is_some()
             {
                 let mut detail = String::new();
-                if let Some(mut stderr) = sidecar.child.stderr.take() {
+                if let Some(mut stderr) = sidecar.child.take_stderr() {
                     let _ = stderr.read_to_string(&mut detail);
                 }
                 return Err(format!(
@@ -506,93 +558,97 @@ fn valid_digest(value: &str) -> bool {
         && value[3..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn pyrefly_observation_contract() -> Result<&'static ProviderObservationSchema, PyreflyServiceError>
-{
-    PROVIDER_OBSERVATION_SCHEMAS
-        .iter()
-        .find(|schema| schema.provider_id == "pyrefly-python")
-        .ok_or_else(|| {
-            PyreflyServiceError::Protocol(
-                "generated Pyrefly observation schema is absent".to_owned(),
-            )
-        })
+fn parse_digest(value: &str) -> Result<[u8; 32], PyreflyServiceError> {
+    let encoded = value
+        .strip_prefix("b3:")
+        .filter(|encoded| encoded.len() == 64)
+        .ok_or_else(|| PyreflyServiceError::Protocol("digest is not b3-32".to_owned()))?;
+    let mut result = [0_u8; 32];
+    for (index, chunk) in encoded.as_bytes().chunks_exact(2).enumerate() {
+        let high = hex_nibble(chunk[0])
+            .ok_or_else(|| PyreflyServiceError::Protocol("digest is not hexadecimal".to_owned()))?;
+        let low = hex_nibble(chunk[1])
+            .ok_or_else(|| PyreflyServiceError::Protocol("digest is not hexadecimal".to_owned()))?;
+        result[index] = (high << 4) | low;
+    }
+    Ok(result)
 }
 
-fn expected_schema(contract: &ProviderObservationSchema) -> Schema {
-    Schema::new_with_metadata(
-        contract
-            .fields
-            .iter()
-            .map(|field| {
-                let data_type = match field.logical_type {
-                    ProviderObservationLogicalType::Utf8 => DataType::Utf8,
-                    ProviderObservationLogicalType::Binary => DataType::Binary,
-                    ProviderObservationLogicalType::Boolean => DataType::Boolean,
-                    ProviderObservationLogicalType::UInt64 => DataType::UInt64,
-                    ProviderObservationLogicalType::Utf8List => DataType::List(
-                        std::sync::Arc::new(Field::new_list_field(DataType::Utf8, false)),
-                    ),
-                };
-                Field::new(field.name, data_type, field.nullable)
-            })
-            .collect::<Vec<_>>(),
-        [(
-            "codefabric.schema".to_owned(),
-            contract.canonical_descriptor.to_owned(),
-        )]
-        .into_iter()
-        .collect(),
-    )
+const fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
 }
 
-fn decode_batch(
-    bytes: &[u8],
-    contract: &ProviderObservationSchema,
-) -> Result<RecordBatch, PyreflyServiceError> {
-    let mut reader = FileReader::try_new(Cursor::new(bytes), None)
-        .map_err(|error| PyreflyServiceError::Arrow(error.to_string()))?;
-    if reader.schema().as_ref() != &expected_schema(contract) {
-        return Err(PyreflyServiceError::Arrow(
-            "schema differs from the application-owned contract".to_owned(),
-        ));
+fn validate_relation_pins(
+    batch: &RecordBatch,
+    request: &PyreflyRunRequest,
+    module: &PyreflyModuleInput,
+) -> Result<(), PyreflyServiceError> {
+    if batch.num_rows() == 0 {
+        return Ok(());
     }
-    let batch = reader
-        .next()
-        .transpose()
-        .map_err(|error| PyreflyServiceError::Arrow(error.to_string()))?
-        .ok_or_else(|| PyreflyServiceError::Arrow("IPC contains no batch".to_owned()))?;
-    if reader.next().is_some() || batch.num_rows() != 1 {
-        return Err(PyreflyServiceError::Arrow(
-            "IPC must contain exactly one one-row batch".to_owned(),
-        ));
-    }
-    for column in ["type_table_json", "callees_json", "diagnostics_json"] {
-        let values = batch
+    let strings_match = |column: &str, expected: &str| {
+        batch
             .column_by_name(column)
-            .and_then(|array| array.as_any().downcast_ref::<BinaryArray>())
-            .ok_or_else(|| PyreflyServiceError::Arrow(format!("{column} is not binary")))?;
-        serde_json::from_slice::<serde_json::Value>(values.value(0))
-            .map_err(|error| PyreflyServiceError::Arrow(format!("{column}: {error}")))?;
+            .and_then(|array| array.as_any().downcast_ref::<StringArray>())
+            .is_some_and(|values| values.iter().all(|value| value == Some(expected)))
+    };
+    let binary_matches = |column: &str, expected: &[u8; 32]| {
+        batch
+            .column_by_name(column)
+            .and_then(|array| array.as_any().downcast_ref::<FixedSizeBinaryArray>())
+            .is_some_and(|values| {
+                values
+                    .iter()
+                    .all(|value| value.is_some_and(|value| value == expected.as_slice()))
+            })
+    };
+    let generations_match = batch
+        .column_by_name("source_generation")
+        .and_then(|array| array.as_any().downcast_ref::<UInt64Array>())
+        .is_some_and(|values| {
+            values
+                .iter()
+                .all(|value| value == Some(request.source_generation))
+        });
+    if !strings_match("provider_run_id", &request.provider_run_id)
+        || !strings_match("analysis_context_id", &request.analysis_context_id)
+        || !strings_match("module_id", &module.module_id)
+        || !strings_match("file_id", &module.file_id)
+        || !binary_matches("content_digest", &parse_digest(&module.content_digest)?)
+        || !binary_matches(
+            "semantic_environment_id",
+            &parse_digest(&b3(&request.context_manifest))?,
+        )
+        || !generations_match
+    {
+        return Err(PyreflyServiceError::Arrow(
+            "relation source, context, run, or generation pins differ".to_owned(),
+        ));
     }
-    Ok(batch)
+    Ok(())
 }
 
 fn expected_module_digest(
-    batch: &RecordBatch,
-    module_id: &str,
-    module_name: &str,
-) -> Result<String, PyreflyServiceError> {
+    module: &PyreflyModuleInput,
+    relations: &[AcceptedPyreflyRelation],
+) -> String {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(module_id.as_bytes());
-    bytes.extend_from_slice(module_name.as_bytes());
-    for column in ["type_table_json", "callees_json", "diagnostics_json"] {
-        let values = batch
-            .column_by_name(column)
-            .and_then(|array| array.as_any().downcast_ref::<BinaryArray>())
-            .ok_or_else(|| PyreflyServiceError::Arrow(format!("{column} is not binary")))?;
-        bytes.extend_from_slice(values.value(0));
+    bytes.extend_from_slice(module.module_id.as_bytes());
+    bytes.extend_from_slice(module.module_name.as_bytes());
+    bytes.extend_from_slice(module.file_id.as_bytes());
+    bytes.extend_from_slice(module.content_digest.as_bytes());
+    for relation in relations {
+        bytes.extend_from_slice(&relation.relation.family_code().to_be_bytes());
+        bytes.extend_from_slice(relation.schema_digest.as_bytes());
+        bytes.extend_from_slice(relation.chunk_digest.as_bytes());
+        bytes.extend_from_slice(&relation.row_count.to_be_bytes());
     }
-    Ok(b3(&bytes))
+    b3(&bytes)
 }
 
 fn header_matches(header: &AnalyzeEventHeader, request: &PyreflyRunRequest, sequence: u64) -> bool {
@@ -613,9 +669,16 @@ struct AdmittedImmutableBlob {
 fn read_immutable_blob(
     input: &PyreflyModuleInput,
 ) -> Result<AdmittedImmutableBlob, PyreflyServiceError> {
-    if !input.source_blob_path.is_absolute() || !input.source_blob_path.is_file() {
+    if !input.source_blob_path.is_absolute()
+        || !input.source_blob_path.is_file()
+        || input
+            .source_blob_path
+            .metadata()
+            .map(|metadata| metadata.len() > MAX_SOURCE_BYTES_PER_MODULE)
+            .unwrap_or(true)
+    {
         return Err(PyreflyServiceError::Invalid(
-            "module source blob path must be an existing absolute file".to_owned(),
+            "module source blob path or bounded size is invalid".to_owned(),
         ));
     }
     let bytes =
@@ -668,26 +731,33 @@ async fn analyze_pyrefly_uds_inner(
     cancellation: Option<crate::cancellation::Cancellation>,
 ) -> Result<AcceptedPyreflyRun, PyreflyServiceError> {
     if request.modules.is_empty()
+        || request.modules.len() > MAX_MODULES_PER_RUN
         || request.provider_run_id.is_empty()
         || request.workspace_id.is_empty()
         || request.analysis_context_id.is_empty()
         || request.canonical_workspace_id == [0; 16]
         || request.canonical_analysis_context_id == [0; 16]
         || !valid_digest(&request.source_manifest_digest)
-        || !valid_digest(&request.output_schema_bundle_digest)
+        || request.output_schema_bundle_digest != schema_bundle_digest()
     {
         return Err(PyreflyServiceError::Invalid(
             "run identity, modules, or digests are incomplete".to_owned(),
         ));
     }
-    let observation_contract = pyrefly_observation_contract()?;
-    let observation_family_code = u32::from(observation_contract.observation_family_code);
-    let observation_schema_digest = observation_contract.schema_digest.to_owned();
+    let relation_schema_digests = schema_digests();
     let admitted_blobs = request
         .modules
         .iter()
         .map(read_immutable_blob)
         .collect::<Result<Vec<_>, _>>()?;
+    let admitted_source_total = admitted_blobs.iter().try_fold(0_u64, |total, blob| {
+        total.checked_add(blob.reference.byte_length)
+    });
+    if admitted_source_total.is_none_or(|total| total > MAX_SOURCE_BYTES_PER_RUN) {
+        return Err(PyreflyServiceError::Invalid(
+            "Pyrefly admitted source bytes exceed the per-run bound".to_owned(),
+        ));
+    }
     let blobs = admitted_blobs
         .iter()
         .map(|blob| blob.reference.clone())
@@ -716,7 +786,7 @@ async fn analyze_pyrefly_uds_inner(
         .await
         .map_err(|error| PyreflyServiceError::Transport(error.to_string()))?;
     let mut client = WireClient::new(channel)
-        .max_decoding_message_size(68 * 1024 * 1024)
+        .max_decoding_message_size(4 * 1024 * 1024)
         .max_encoding_message_size(4 * 1024 * 1024);
     let acknowledgement = client
         .handshake(Hello {
@@ -726,7 +796,7 @@ async fn analyze_pyrefly_uds_inner(
             optional_feature_bits: OPTIONAL_FEATURE_BITS,
             daemon_build: "codefabricd 0.1.0".to_owned(),
             supported_python_versions: vec!["3.14".to_owned()],
-            observation_schema_digests: vec![observation_schema_digest.clone()],
+            observation_schema_digests: relation_schema_digests.clone(),
             maximum_frame_bytes: 4 * 1024 * 1024,
             maximum_arrow_chunk_bytes: 64 * 1024 * 1024,
             sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
@@ -738,7 +808,7 @@ async fn analyze_pyrefly_uds_inner(
         || acknowledgement.protocol_minor != 0
         || acknowledgement.negotiated_feature_bits != REQUIRED_FEATURE_BITS | OPTIONAL_FEATURE_BITS
         || acknowledgement.pyrefly_source_digest != PYREFLY_SOURCE_DIGEST
-        || acknowledgement.observation_schema_digests != [observation_schema_digest.clone()]
+        || acknowledgement.observation_schema_digests != relation_schema_digests
         || acknowledgement.sandbox_profile_digest != SANDBOX_PROFILE_DIGEST
     {
         return Err(PyreflyServiceError::Protocol(
@@ -784,7 +854,7 @@ async fn analyze_pyrefly_uds_inner(
             workspace_id: request.workspace_id.clone(),
             analysis_context_id: request.analysis_context_id.clone(),
             context_handle: opened.context_handle,
-            context_manifest_digest: context_digest,
+            context_manifest_digest: context_digest.clone(),
             source_generation: request.source_generation,
             source_snapshot_lease_id: request.source_snapshot_lease_id.clone(),
             modules,
@@ -858,9 +928,10 @@ async fn analyze_pyrefly_uds_inner(
     let mut sequence = 0_u64;
     let mut accepted = Vec::new();
     let mut open_module: Option<String> = None;
-    let mut pending: Option<AcceptedPyreflyModule> = None;
+    let mut pending: Option<PendingPyreflyModule> = None;
     let mut terminal = None;
     let mut cancelled_terminal = false;
+    let mut total_relation_bytes = 0_usize;
     while let Some(event) = stream
         .message()
         .await
@@ -889,59 +960,14 @@ async fn analyze_pyrefly_uds_inner(
                 let header = event.header.ok_or_else(|| {
                     PyreflyServiceError::Protocol("module-begin header is absent".to_owned())
                 })?;
-                if open_module.is_some() || !header_matches(&header, request, sequence) {
+                if open_module.is_some()
+                    || pending.is_some()
+                    || !header_matches(&header, request, sequence)
+                {
                     return Err(PyreflyServiceError::Protocol(
                         "module-begin order or correlation differs".to_owned(),
                     ));
                 }
-                open_module = Some(event.module_id);
-            }
-            Event::ObservationBatchChunk(event) => {
-                sequence += 1;
-                let header = event.header.ok_or_else(|| {
-                    PyreflyServiceError::Protocol("chunk header is absent".to_owned())
-                })?;
-                if open_module.as_deref() != Some(event.module_id.as_str())
-                    || pending.is_some()
-                    || !header_matches(&header, request, sequence)
-                    || event.observation_family_code != observation_family_code
-                    || event.schema_digest != observation_schema_digest
-                    || event.chunk_digest != b3(&event.arrow_ipc)
-                    || event.row_count != 1
-                {
-                    let _ = command_sender
-                        .send(AnalyzeCommand {
-                            command: Some(Command::ChunkRejected(ChunkRejected {
-                                sequence,
-                                error_code: "PYREFLY_CHUNK_IDENTITY_REJECTED".to_owned(),
-                            })),
-                        })
-                        .await;
-                    return Err(PyreflyServiceError::Protocol(
-                        "chunk identity, digest, schema, or count differs".to_owned(),
-                    ));
-                }
-                let batch = match decode_batch(&event.arrow_ipc, observation_contract) {
-                    Ok(batch) => batch,
-                    Err(error) => {
-                        let _ = command_sender
-                            .send(AnalyzeCommand {
-                                command: Some(Command::ChunkRejected(ChunkRejected {
-                                    sequence,
-                                    error_code: "PYREFLY_CHUNK_ARROW_REJECTED".to_owned(),
-                                })),
-                            })
-                            .await;
-                        return Err(error);
-                    }
-                };
-                let module_name = batch
-                    .column_by_name("module_name")
-                    .and_then(|array| array.as_any().downcast_ref::<StringArray>())
-                    .map(|array| array.value(0).to_owned())
-                    .ok_or_else(|| {
-                        PyreflyServiceError::Arrow("module_name is not UTF-8".to_owned())
-                    })?;
                 let requested_module = request
                     .modules
                     .iter()
@@ -970,59 +996,321 @@ async fn analyze_pyrefly_uds_inner(
                     })?
                     .as_ref()
                     .to_vec();
-                let accepted_bytes = u64::try_from(event.arrow_ipc.len()).unwrap_or(u64::MAX);
-                pending = Some(AcceptedPyreflyModule {
+                let limits = RelationIpcLimits {
+                    max_registered_streams: PyreflyRelation::ALL.len(),
+                    max_frames_per_stream: 64,
+                    max_payload_bytes_per_frame:
+                        crate::relation_ipc_contract::RELATION_IPC_FRAGMENT_BYTES,
+                    max_payload_bytes_per_stream: 16 * 1024 * 1024,
+                    max_total_payload_bytes: MAX_TOTAL_RELATION_BYTES,
+                    initial_credit_bytes: usize::try_from(MAX_UNACKNOWLEDGED_BYTES)
+                        .unwrap_or(usize::MAX),
+                    max_credit_bytes: usize::try_from(MAX_UNACKNOWLEDGED_BYTES)
+                        .unwrap_or(usize::MAX),
+                    max_batches_per_stream: 1,
+                    max_rows_per_stream: usize::try_from(MAX_RELATION_ROWS).unwrap_or(usize::MAX),
+                    max_remainders_per_stream: 64,
+                };
+                let mut assembler = RelationIpcAssembler::new(limits).map_err(|error| {
+                    PyreflyServiceError::Protocol(format!(
+                        "relation assembler limits are invalid: {error}"
+                    ))
+                })?;
+                let mut relation_by_stream = BTreeMap::new();
+                let mut next_ack_sequence = BTreeMap::new();
+                for relation in PyreflyRelation::ALL {
+                    let contract = relation_stream_contract(
+                        relation.relation_id(),
+                        relation.schema(),
+                        &request.provider_run_id,
+                        &event.module_id,
+                        &request.source_manifest_digest,
+                        &context_digest,
+                        1,
+                    )
+                    .map_err(PyreflyServiceError::Protocol)?;
+                    relation_by_stream.insert(contract.identity.stream_id, relation);
+                    next_ack_sequence.insert(contract.identity.stream_id, 0);
+                    assembler.register_contract(contract).map_err(|error| {
+                        PyreflyServiceError::Protocol(format!(
+                            "relation contract registration failed: {error}"
+                        ))
+                    })?;
+                }
+                open_module = Some(event.module_id.clone());
+                pending = Some(PendingPyreflyModule {
                     module_id: event.module_id,
-                    module_name,
+                    module_name: requested_module.module_name.clone(),
                     canonical_file_id,
                     source_bytes,
-                    arrow_ipc: event.arrow_ipc,
-                    batch,
-                    schema_digest: event.schema_digest,
-                    chunk_digest: event.chunk_digest,
-                    module_digest: String::new(),
+                    relations: BTreeMap::new(),
+                    relation_by_stream,
+                    next_ack_sequence,
+                    assembler,
                 });
-                command_sender
-                    .send(AnalyzeCommand {
-                        command: Some(Command::ChunkAccepted(ChunkAccepted {
-                            sequence,
-                            next_credit_bytes: accepted_bytes,
-                            next_credit_chunks: 1,
-                        })),
-                    })
-                    .await
-                    .map_err(|_| {
-                        PyreflyServiceError::Protocol(
-                            "chunk acknowledgement stream closed".to_owned(),
-                        )
-                    })?;
+            }
+            Event::RelationIpcFrame(event) => {
+                sequence += 1;
+                let header = event.header.ok_or_else(|| {
+                    PyreflyServiceError::Protocol("relation-frame header is absent".to_owned())
+                })?;
+                let relation = PyreflyRelation::from_family_code(event.observation_family_code);
+                if open_module.as_deref() != Some(event.module_id.as_str())
+                    || pending.is_none()
+                    || !header_matches(&header, request, sequence)
+                    || relation.is_none()
+                {
+                    return Err(PyreflyServiceError::Protocol(
+                        "relation-frame identity, module, or family differs".to_owned(),
+                    ));
+                }
+                let relation = relation.expect("checked above");
+                let wire_frame = event.frame.ok_or_else(|| {
+                    PyreflyServiceError::Protocol("relation frame is absent".to_owned())
+                })?;
+                let frame = decode_relation_frame(wire_frame).map_err(|error| {
+                    PyreflyServiceError::Protocol(format!(
+                        "relation protobuf envelope is invalid: {error}"
+                    ))
+                })?;
+                if matches!(frame, RelationIpcFrame::FlowControlAck(_)) {
+                    return Err(PyreflyServiceError::Protocol(
+                        "provider sent a receiver-direction acknowledgement frame".to_owned(),
+                    ));
+                }
+                let frame_header = frame.header();
+                let stream_id = frame_header.identity.stream_id;
+                let payload = match &frame {
+                    RelationIpcFrame::Payload(payload) => Some((
+                        payload.header.identity,
+                        payload.header.sequence,
+                        payload.payload.len(),
+                    )),
+                    _ => None,
+                };
+                if pending
+                    .as_ref()
+                    .and_then(|module| module.relation_by_stream.get(&stream_id))
+                    != Some(&relation)
+                {
+                    return Err(PyreflyServiceError::Protocol(
+                        "relation frame does not match its model-derived stream contract"
+                            .to_owned(),
+                    ));
+                }
+                if let Some((_, _, bytes)) = payload {
+                    total_relation_bytes =
+                        total_relation_bytes.checked_add(bytes).ok_or_else(|| {
+                            PyreflyServiceError::Protocol(
+                                "relation stream byte accounting overflowed".to_owned(),
+                            )
+                        })?;
+                    if total_relation_bytes > MAX_TOTAL_RELATION_BYTES {
+                        return Err(PyreflyServiceError::Protocol(
+                            "relation streams exceed the per-run byte budget".to_owned(),
+                        ));
+                    }
+                }
+                let assembled = {
+                    let module = pending.as_mut().expect("checked above");
+                    module.assembler.push(frame)
+                };
+                let assembled = match assembled {
+                    Ok(assembled) => assembled,
+                    Err(error) => {
+                        let ack_sequence = pending
+                            .as_ref()
+                            .and_then(|module| module.next_ack_sequence.get(&stream_id))
+                            .copied()
+                            .unwrap_or_default();
+                        let cancellation = RelationIpcFrame::FlowControlAck(FlowControlAck {
+                            header: FrameHeader::current(frame_header.identity, ack_sequence),
+                            acknowledged_sequence: None,
+                            released_bytes: 0,
+                            cancelled: true,
+                        });
+                        if let Ok(frame) = encode_relation_frame(&cancellation) {
+                            let _ = command_sender
+                                .send(AnalyzeCommand {
+                                    command: Some(Command::RelationIpcAck(frame)),
+                                })
+                                .await;
+                        }
+                        return Err(PyreflyServiceError::Protocol(format!(
+                            "relation stream failed closed: {error}"
+                        )));
+                    }
+                };
+                if let Some((identity, acknowledged_sequence, bytes)) = payload {
+                    let ack_sequence = pending
+                        .as_ref()
+                        .and_then(|module| module.next_ack_sequence.get(&stream_id))
+                        .copied()
+                        .ok_or_else(|| {
+                            PyreflyServiceError::Protocol(
+                                "relation acknowledgement state is absent".to_owned(),
+                            )
+                        })?;
+                    let acknowledgement = RelationIpcFrame::FlowControlAck(FlowControlAck {
+                        header: FrameHeader::current(identity, ack_sequence),
+                        acknowledged_sequence: Some(acknowledged_sequence),
+                        released_bytes: u64::try_from(bytes).unwrap_or(u64::MAX),
+                        cancelled: false,
+                    });
+                    {
+                        let module = pending.as_mut().expect("checked above");
+                        module
+                            .assembler
+                            .push(acknowledgement.clone())
+                            .map_err(|error| {
+                                PyreflyServiceError::Protocol(format!(
+                                    "local credit proof failed: {error}"
+                                ))
+                            })?;
+                        *module
+                            .next_ack_sequence
+                            .get_mut(&stream_id)
+                            .expect("registered stream has acknowledgement state") += 1;
+                    }
+                    command_sender
+                        .send(AnalyzeCommand {
+                            command: Some(Command::RelationIpcAck(
+                                encode_relation_frame(&acknowledgement)
+                                    .map_err(PyreflyServiceError::Protocol)?,
+                            )),
+                        })
+                        .await
+                        .map_err(|_| {
+                            PyreflyServiceError::Protocol(
+                                "relation acknowledgement stream closed".to_owned(),
+                            )
+                        })?;
+                }
+                if let Some(assembled) = assembled {
+                    if assembled.trailer.status != crate::relation_ipc::TerminalStatus::Complete
+                        || assembled.batches.len() != 1
+                    {
+                        return Err(PyreflyServiceError::Protocol(
+                            "successful Pyrefly relation is not complete or single-batch"
+                                .to_owned(),
+                        ));
+                    }
+                    let batch = assembled
+                        .batches
+                        .into_iter()
+                        .next()
+                        .expect("single batch checked above");
+                    let requested_module = request
+                        .modules
+                        .iter()
+                        .find(|module| module.module_id == event.module_id)
+                        .ok_or_else(|| {
+                            PyreflyServiceError::Protocol(
+                                "provider returned an unrequested module".to_owned(),
+                            )
+                        })?;
+                    validate_relation_pins(&batch, request, requested_module)?;
+                    let row_count = u64::try_from(batch.num_rows()).unwrap_or(u64::MAX);
+                    let arrow_ipc = assembled.ipc_bytes;
+                    let accepted = AcceptedPyreflyRelation {
+                        relation,
+                        schema_digest: relation.schema_digest(),
+                        chunk_digest: b3(&arrow_ipc),
+                        arrow_ipc,
+                        batch,
+                        row_count,
+                    };
+                    if pending
+                        .as_mut()
+                        .expect("checked above")
+                        .relations
+                        .insert(relation, accepted)
+                        .is_some()
+                    {
+                        return Err(PyreflyServiceError::Protocol(
+                            "relation terminal is duplicated".to_owned(),
+                        ));
+                    }
+                }
+            }
+            Event::ObservationBatchChunk(_) => {
+                return Err(PyreflyServiceError::Protocol(
+                    "legacy whole-relation Arrow chunks are no longer admitted".to_owned(),
+                ));
             }
             Event::ModuleEnd(event) => {
                 sequence += 1;
                 let header = event.header.ok_or_else(|| {
                     PyreflyServiceError::Protocol("module-end header is absent".to_owned())
                 })?;
-                let mut module = pending.take().ok_or_else(|| {
+                let module = pending.take().ok_or_else(|| {
                     PyreflyServiceError::Protocol("module ended without a chunk".to_owned())
                 })?;
+                module.assembler.finish().map_err(|error| {
+                    PyreflyServiceError::Protocol(format!(
+                        "module ended before every relation terminal: {error}"
+                    ))
+                })?;
+                let requested_module = request
+                    .modules
+                    .iter()
+                    .find(|candidate| candidate.module_id == event.module_id)
+                    .ok_or_else(|| {
+                        PyreflyServiceError::Protocol(
+                            "module terminal names an unrequested module".to_owned(),
+                        )
+                    })?;
+                let relation_census_matches = PyreflyRelation::ALL.into_iter().all(|relation| {
+                    module.relations.get(&relation).is_some_and(|accepted| {
+                        event.family_counts.get(&relation.family_code())
+                            == Some(&accepted.row_count)
+                    })
+                }) && event.family_counts.len()
+                    == PyreflyRelation::ALL.len();
+                let relations = module.relations.into_values().collect::<Vec<_>>();
                 if open_module.take().as_deref() != Some(event.module_id.as_str())
                     || module.module_id != event.module_id
-                    || event.family_counts.get(&observation_family_code) != Some(&1)
+                    || !relation_census_matches
                     || !header_matches(&header, request, sequence)
                     || !valid_digest(&event.module_digest)
-                    || event.module_digest
-                        != expected_module_digest(
-                            &module.batch,
-                            &module.module_id,
-                            &module.module_name,
-                        )?
+                    || event.module_digest != expected_module_digest(requested_module, &relations)
                 {
                     return Err(PyreflyServiceError::Protocol(
                         "module terminal identity or counts differ".to_owned(),
                     ));
                 }
-                module.module_digest = event.module_digest;
-                accepted.push(module);
+                let context = relations
+                    .iter()
+                    .find(|relation| relation.relation == PyreflyRelation::ModuleContext)
+                    .expect("relation census checked above");
+                let module_name = context
+                    .batch
+                    .column_by_name("module_name")
+                    .and_then(|array| array.as_any().downcast_ref::<StringArray>())
+                    .filter(|array| array.len() == 1)
+                    .map(|array| array.value(0).to_owned())
+                    .ok_or_else(|| {
+                        PyreflyServiceError::Arrow(
+                            "module context does not carry one module name".to_owned(),
+                        )
+                    })?;
+                if module_name != module.module_name {
+                    return Err(PyreflyServiceError::Arrow(
+                        "module context name differs from the admitted request".to_owned(),
+                    ));
+                }
+                accepted.push(AcceptedPyreflyModule {
+                    module_id: module.module_id,
+                    module_name,
+                    canonical_file_id: module.canonical_file_id,
+                    source_bytes: module.source_bytes,
+                    arrow_ipc: context.arrow_ipc.clone(),
+                    batch: context.batch.clone(),
+                    schema_digest: context.schema_digest.clone(),
+                    chunk_digest: context.chunk_digest.clone(),
+                    module_digest: event.module_digest,
+                    relations,
+                });
             }
             Event::RunTerminal(event) => {
                 sequence += 1;
@@ -1038,11 +1326,7 @@ async fn analyze_pyrefly_uds_inner(
                     .flat_map(std::string::String::as_bytes)
                     .copied()
                     .collect::<Vec<_>>());
-                let expected_rechecked = request
-                    .modules
-                    .iter()
-                    .map(|module| module.module_id.clone())
-                    .collect::<Vec<_>>();
+                let expected_rechecked = Vec::<String>::new();
                 let terminal_state =
                     WireProviderRunState::try_from(event.terminal_state).map_err(|_| {
                         PyreflyServiceError::Protocol(
@@ -1052,10 +1336,16 @@ async fn analyze_pyrefly_uds_inner(
                 let cancellation_expected = cancellation
                     .as_ref()
                     .is_some_and(crate::cancellation::Cancellation::is_cancelled);
+                let accepted_cancellation =
+                    cancellation_expected && terminal_state == WireProviderRunState::Cancelled;
+                if accepted_cancellation {
+                    open_module.take();
+                    pending.take();
+                }
                 let success_outcomes = event.capability_outcomes.iter().all(|outcome| {
-                    outcome.owner_capability_state_code == 10
-                        && outcome.completeness_state_code == 10
-                        && outcome.reason_code == "PYREFLY_SUCCEEDED"
+                    outcome.owner_capability_state_code == 40
+                        && outcome.completeness_state_code == 20
+                        && outcome.reason_code == "PYREFLY_QUERY_SLICE_PARTIAL"
                 });
                 let cancelled_outcomes = event.capability_outcomes.iter().all(|outcome| {
                     outcome.owner_capability_state_code == 30
@@ -1072,9 +1362,7 @@ async fn analyze_pyrefly_uds_inner(
                     || event.sandbox_profile_digest != SANDBOX_PROFILE_DIGEST
                     || event.trust_profile != TRUST_PROFILE
                     || !((terminal_state == WireProviderRunState::Succeeded && success_outcomes)
-                        || (cancellation_expected
-                            && terminal_state == WireProviderRunState::Cancelled
-                            && cancelled_outcomes))
+                        || (accepted_cancellation && cancelled_outcomes))
                 {
                     return Err(PyreflyServiceError::Protocol(
                         "run terminal identity, order, or state differs".to_owned(),
@@ -1144,6 +1432,7 @@ async fn analyze_pyrefly_uds_inner(
 mod tests {
     use std::pin::Pin;
 
+    use arrow_ipc::writer::StreamWriter;
     use tokio_stream::Stream;
     use tokio_stream::wrappers::UnixListenerStream;
     use tonic::{Request, Response, Status};
@@ -1158,7 +1447,7 @@ mod tests {
     };
     use crate::rpc::generated::codefabric::pyrefly::v1::{
         AnalyzeEvent, CloseContextRequest, CloseContextResponse, HelloAck, ModuleBegin,
-        ObservationBatchChunk, OpenContextResponse, RunAccepted, RunTerminal, ShutdownRequest,
+        OpenContextResponse, RelationIpcFrameEvent, RunAccepted, RunTerminal, ShutdownRequest,
         ShutdownResponse,
     };
 
@@ -1166,7 +1455,7 @@ mod tests {
     enum MalformedMode {
         StaleGeneration,
         MissingModuleEnd,
-        DigestMismatch,
+        WrongArrowUniverse,
     }
 
     struct MalformedSidecar {
@@ -1276,20 +1565,49 @@ mod tests {
                             })),
                         });
                     }
-                    MalformedMode::DigestMismatch => {
-                        let contract = pyrefly_observation_contract().unwrap();
+                    MalformedMode::WrongArrowUniverse => {
+                        let relation = PyreflyRelation::ModuleContext;
+                        let identity = crate::relation_ipc_contract::relation_wire_identity(
+                            relation.relation_id(),
+                            &relation.schema_digest(),
+                            &start.provider_run_id,
+                            &module_id,
+                            &self.source_manifest_digest,
+                            &start.context_manifest_digest,
+                        )
+                        .unwrap();
+                        let batch = RecordBatch::new_empty(relation.schema());
+                        let mut arrow_ipc = Vec::new();
+                        {
+                            let mut writer =
+                                StreamWriter::try_new(&mut arrow_ipc, &batch.schema()).unwrap();
+                            writer.write(&batch).unwrap();
+                            writer.finish().unwrap();
+                        }
+                        let mut frame = crate::relation_ipc_proto::encode_relation_frames(
+                            identity,
+                            &arrow_ipc,
+                            1,
+                            0,
+                            &crate::relation_ipc_proto::RelationCoverage::complete(1),
+                        )
+                        .unwrap()
+                        .remove(0);
+                        let Some(
+                            crate::rpc::generated::codefabric::provider::v1::relation_ipc_frame::Frame::Open(
+                                open,
+                            ),
+                        ) = frame.frame.as_mut()
+                        else {
+                            unreachable!("first relation frame is open")
+                        };
+                        open.arrow_type_universe = "arrow-array@60.0.0".to_owned();
                         events.push(AnalyzeEvent {
-                            event: Some(MockEvent::ObservationBatchChunk(ObservationBatchChunk {
+                            event: Some(MockEvent::RelationIpcFrame(RelationIpcFrameEvent {
                                 header: Some(header(2, start.source_generation)),
                                 module_id,
-                                observation_family_code: u32::from(
-                                    contract.observation_family_code,
-                                ),
-                                arrow_ipc: Vec::new(),
-                                payload_reference: None,
-                                schema_digest: contract.schema_digest.to_owned(),
-                                row_count: 1,
-                                chunk_digest: b3(b"not-the-empty-payload"),
+                                observation_family_code: relation.family_code(),
+                                frame: Some(frame),
                             })),
                         });
                     }
@@ -1367,9 +1685,7 @@ mod tests {
             }],
             requested_capability_codes: vec![90],
             deadline_unix_ms: i64::MAX,
-            output_schema_bundle_digest: b3(include_bytes!(
-                "../contracts/schema/schema-contract-ir.json"
-            )),
+            output_schema_bundle_digest: schema_bundle_digest(),
         }
     }
 
@@ -1382,7 +1698,7 @@ mod tests {
         for (index, mode) in [
             MalformedMode::StaleGeneration,
             MalformedMode::MissingModuleEnd,
-            MalformedMode::DigestMismatch,
+            MalformedMode::WrongArrowUniverse,
         ]
         .into_iter()
         .enumerate()
@@ -1414,7 +1730,7 @@ mod tests {
         }
         assert!(failures[0].contains("accepted correlation or sequence differs"));
         assert!(failures[1].contains("run terminal identity, order, or state differs"));
-        assert!(failures[2].contains("chunk identity, digest, schema, or count differs"));
+        assert!(failures[2].contains("relation protobuf envelope is invalid"));
         assert_eq!(
             failures.len(),
             3,
@@ -1473,7 +1789,7 @@ mod tests {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let sidecar = supervisors.get_mut(&key).unwrap();
-            sidecar.child.kill().unwrap();
+            sidecar.child.kill_group().unwrap();
             sidecar.child.wait().unwrap();
         }
         let rejection = active.await.unwrap().unwrap_err();
@@ -1495,7 +1811,10 @@ mod tests {
         let recovered = analyze_pyrefly_uds(&second_socket, &request).await.unwrap();
         assert_eq!(recovered.source_generation, request.source_generation);
         assert_eq!(recovered.modules.len(), 1);
-        assert_eq!(recovered.rechecked_module_ids, ["module-malformed"]);
+        assert!(
+            recovered.rechecked_module_ids.is_empty(),
+            "Pyrefly Query 1.2.0 does not expose the actual rechecked-module set"
+        );
         assert_eq!(recovered.sandbox_profile_digest, SANDBOX_PROFILE_DIGEST);
         assert_eq!(recovered.trust_profile, TRUST_PROFILE);
     }

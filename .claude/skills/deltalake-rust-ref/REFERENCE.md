@@ -19,7 +19,7 @@ Aliases follow `docs/spec_index/library-routing.md` §1 and must stay in sync wi
 | Alias | Document (under `docs/library_ref/`) | Chapters | Lines |
 |---|---|---|---:|
 | `delta` | `deltalake_rust_1.0.0_43a0cf10_datafusion55_arrow59_advanced_reference_2026-08-23.md` | §0, §2–§13 (**no §1**); §7 carries h1 sub-chapters §7.0–§7.13 | 17,270 |
-| `principles` | `full_data_fabric_design_principles.md` | Principles 1–25 + §27–§31 | 1,327 |
+| `principles` | `full_data_fabric_design_principles_v2.md` | staticness test + P1–P36 + Y1–Y7 | 2,189 |
 | `delta-align` | `deltalake_1.0.0_43a0cf10_design_principle_alignment_manual_2026-08-26.md` | §0–§2 · P1–P25 · 16 families / 156 pattern IDs · flows §8–§20 · artifacts §21–§33 · crosswalks §34–§36 · checklists §37–§47 · Parts VII–VIII · App. A–D | 2,903 |
 
 `principles` is shared with the sibling skill `datafusion-pyarrow-rust-ref`; it is one
@@ -346,7 +346,7 @@ itself must be verified against the pinned source.
 
 ### §1.3 `principles` — the design constitution
 
-Re-derive with `rg -n '^# ' docs/library_ref/full_data_fabric_design_principles.md`.
+Re-derive with `rg -n '^# ' docs/library_ref/full_data_fabric_design_principles_v2.md`.
 
 **Citation convention:** the h1 ordinal is **principle number + 1 by construction**
 (`# 15. Principle 14 — …`). Always cite by principle number and title ("Principle 14"),

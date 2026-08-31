@@ -354,6 +354,14 @@ pub struct ArtifactReadyEvent {
     pub lease_expires_at_unix_ms: i64,
     #[prost(string, tag = "7")]
     pub lease_token: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "8")]
+    pub canonical_result_descriptor_json: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, tag = "9")]
+    pub result_descriptor_checksum: ::prost::alloc::string::String,
+    #[prost(string, tag = "10")]
+    pub result_contract_version: ::prost::alloc::string::String,
+    #[prost(string, tag = "11")]
+    pub arrow_release: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TerminalEvent {
@@ -464,6 +472,17 @@ pub struct ReadResultRequest {
     pub lease_token: ::prost::alloc::string::String,
     #[prost(enumeration = "PayloadCompression", tag = "5")]
     pub accepted_compression: i32,
+    #[prost(string, tag = "6")]
+    pub authorization_resource_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "7")]
+    pub owner: ::core::option::Option<ResultOwner>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResultOwner {
+    #[prost(string, tag = "1")]
+    pub workspace_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub agent_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ResultChunk {
@@ -487,6 +506,14 @@ pub struct ResultChunk {
     pub final_chunk: bool,
     #[prost(int64, tag = "10")]
     pub lease_expires_at_unix_ms: i64,
+    #[prost(string, tag = "11")]
+    pub authorization_resource_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "12")]
+    pub next_offset: u64,
+    #[prost(uint64, tag = "13")]
+    pub total_length: u64,
+    #[prost(string, tag = "14")]
+    pub content_checksum: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseResultRequest {
@@ -494,6 +521,8 @@ pub struct ReleaseResultRequest {
     pub artifact_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub lease_token: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub owner: ::core::option::Option<ResultOwner>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseResultResponse {
@@ -503,6 +532,8 @@ pub struct ReleaseResultResponse {
     pub released: bool,
     #[prost(int64, optional, tag = "3")]
     pub remaining_lease_expires_at_unix_ms: ::core::option::Option<i64>,
+    #[prost(string, tag = "4")]
+    pub release_state: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

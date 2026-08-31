@@ -4,9 +4,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::os::fd::{AsRawFd as _, OwnedFd};
 use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
+use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -511,8 +513,13 @@ pub struct ProviderProcessLimits {
 /// Closed launch request. Environment and standard descriptors are rebuilt by the launcher.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProviderLaunchRequest {
-    pub executable: PathBuf,
+    /// Canonical host path whose immutable file identity is validated before launch.
+    pub host_executable: PathBuf,
+    /// Exact executable spelling inside the selected containment namespace.
+    pub contained_executable: PathBuf,
     pub arguments: Vec<String>,
+    /// Complete environment installed after `env_clear`.
+    pub environment: BTreeMap<String, String>,
     pub output_root: PathBuf,
     pub limits: ProviderProcessLimits,
 }
@@ -524,6 +531,116 @@ pub enum ProviderSandboxLaunchMaterial<'a> {
     DarwinProfile(&'a Path),
     LinuxSeccomp(&'a fs::File),
     None,
+}
+
+/// One provider child and the run-scoped process group created at spawn time.
+///
+/// The group leader PID is never accepted from provider output. It is captured from the child
+/// created by the sole launcher after `process_group(0)` has been installed on the command.
+#[derive(Debug)]
+pub struct ProviderProcessGroupChild {
+    child: Child,
+    process_group_id: rustix::process::Pid,
+}
+
+impl ProviderProcessGroupChild {
+    fn new(mut child: Child) -> Result<Self, SandboxError> {
+        let process_group_id = i32::try_from(child.id())
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .ok_or(SandboxError::InvalidLaunch)?;
+        if rustix::process::getpgid(Some(process_group_id)) != Ok(process_group_id) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(SandboxError::ProcessGroupUnavailable);
+        }
+        Ok(Self {
+            child,
+            process_group_id,
+        })
+    }
+
+    /// OS child identity, which is also the run-scoped process-group identity.
+    #[must_use]
+    pub fn id(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// Observe and reap the group leader without blocking.
+    pub fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        self.child.try_wait()
+    }
+
+    /// Wait for and reap the group leader.
+    pub fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        self.child.wait()
+    }
+
+    /// Take the captured standard-error stream exactly once.
+    pub fn take_stderr(&mut self) -> Option<ChildStderr> {
+        self.child.stderr.take()
+    }
+
+    /// Take the captured standard-output stream exactly once.
+    pub fn take_stdout(&mut self) -> Option<ChildStdout> {
+        self.child.stdout.take()
+    }
+
+    /// Numeric identity of the process group created by this launcher.
+    ///
+    /// The value is an observation input for the daemon-owned resource supervisor. It is never
+    /// accepted from provider output and must not be used to signal an unrelated process.
+    #[must_use]
+    pub fn process_group_id(&self) -> i32 {
+        self.process_group_id.as_raw_nonzero().get()
+    }
+
+    /// Send a graceful termination signal to the complete run-scoped group.
+    pub fn terminate_group(&mut self) -> std::io::Result<()> {
+        self.signal_group(rustix::process::Signal::TERM)
+    }
+
+    /// Send an unconditional kill signal to the complete run-scoped group.
+    pub fn kill_group(&mut self) -> std::io::Result<()> {
+        self.signal_group(rustix::process::Signal::KILL)
+    }
+
+    /// Wait until the complete process group no longer exists, reaping its leader as it exits.
+    pub fn wait_group_empty(&mut self, timeout: Duration) -> std::io::Result<bool> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let _ = self.child.try_wait()?;
+            match rustix::process::test_kill_process_group(self.process_group_id) {
+                Ok(()) => {}
+                Err(error) if error == rustix::io::Errno::SRCH => return Ok(true),
+                // Darwin can transiently report EPERM while a just-signalled group is being
+                // dismantled. It is not proof of emptiness: keep polling until ESRCH or timeout.
+                Err(error) if error == rustix::io::Errno::PERM => {}
+                Err(error) => return Err(error.into()),
+            }
+            if Instant::now() >= deadline {
+                return Ok(false);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn signal_group(&mut self, signal: rustix::process::Signal) -> std::io::Result<()> {
+        match rustix::process::kill_process_group(self.process_group_id, signal) {
+            Ok(()) => Ok(()),
+            Err(error) if error == rustix::io::Errno::SRCH => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+impl Drop for ProviderProcessGroupChild {
+    fn drop(&mut self) {
+        // A launcher-owned group must not outlive the object that proves and supervises it. This
+        // is a last-resort guard; the trust supervisor performs the graceful, receipted sequence.
+        let _ = self.kill_group();
+        let _ = self.child.wait();
+    }
 }
 
 /// The sole semantic-child launcher. Untrusted execution has no unsandboxed fallback.
@@ -548,7 +665,31 @@ impl ProviderSandboxLauncher {
         request: &ProviderLaunchRequest,
         profile: &GeneratedSandboxProfile,
         material: ProviderSandboxLaunchMaterial<'_>,
-    ) -> Result<Child, SandboxError> {
+    ) -> Result<ProviderProcessGroupChild, SandboxError> {
+        self.launch_with_output(request, profile, material, false)
+    }
+
+    /// Launch one child with both output streams reserved for a bounded daemon supervisor.
+    ///
+    /// This is separate from [`Self::launch`] so long-lived providers that own their own protocol
+    /// transport do not accidentally acquire an undrained stdout pipe.
+    pub fn launch_captured(
+        &self,
+        request: &ProviderLaunchRequest,
+        profile: &GeneratedSandboxProfile,
+        material: ProviderSandboxLaunchMaterial<'_>,
+    ) -> Result<ProviderProcessGroupChild, SandboxError> {
+        self.launch_with_output(request, profile, material, true)
+    }
+
+    #[allow(clippy::too_many_lines)] // Keep the fail-closed launch sequence auditable as one transaction.
+    fn launch_with_output(
+        &self,
+        request: &ProviderLaunchRequest,
+        profile: &GeneratedSandboxProfile,
+        material: ProviderSandboxLaunchMaterial<'_>,
+        capture_stdout: bool,
+    ) -> Result<ProviderProcessGroupChild, SandboxError> {
         let row = self
             .matrix
             .row(profile.trust_profile)
@@ -556,13 +697,16 @@ impl ProviderSandboxLauncher {
         if !row.available {
             return Err(SandboxError::SandboxUnavailable);
         }
-        if !request.executable.is_absolute()
-            || !request.executable.is_file()
+        if !request.host_executable.is_absolute()
+            || !request.host_executable.is_file()
+            || !request.contained_executable.is_absolute()
             || !request.output_root.is_absolute()
+            || request.output_root != profile.output_root
             || profile.sha256_digest != sha256_bytes(&profile.bytes)
         {
             return Err(SandboxError::InvalidLaunch);
         }
+        validate_launch_environment(&request.environment, profile)?;
         if profile.trust_profile == ProviderTrustProfile::ParsingOnly {
             return Err(SandboxError::ParsingOnly);
         }
@@ -570,6 +714,9 @@ impl ProviderSandboxLauncher {
         let mut inherited_seccomp = None::<OwnedFd>;
         match profile.mechanism {
             SandboxMechanism::DarwinSeatbelt => {
+                if request.contained_executable != request.host_executable {
+                    return Err(SandboxError::InvalidLaunch);
+                }
                 let ProviderSandboxLaunchMaterial::DarwinProfile(path) = material else {
                     return Err(SandboxError::InvalidLaunch);
                 };
@@ -580,6 +727,15 @@ impl ProviderSandboxLauncher {
                 ]);
             }
             SandboxMechanism::LinuxBubblewrap => {
+                let relative_executable = request
+                    .host_executable
+                    .strip_prefix(&profile.dependency_root)
+                    .map_err(|_| SandboxError::InvalidLaunch)?;
+                if request.contained_executable
+                    != Path::new("/dependencies").join(relative_executable)
+                {
+                    return Err(SandboxError::InvalidLaunch);
+                }
                 let ProviderSandboxLaunchMaterial::LinuxSeccomp(descriptor) = material else {
                     return Err(SandboxError::InvalidLaunch);
                 };
@@ -623,12 +779,15 @@ impl ProviderSandboxLauncher {
                 ]);
             }
             SandboxMechanism::None => {
+                if request.contained_executable != request.host_executable {
+                    return Err(SandboxError::InvalidLaunch);
+                }
                 if !matches!(material, ProviderSandboxLaunchMaterial::None) {
                     return Err(SandboxError::InvalidLaunch);
                 }
             }
         }
-        confined.push(request.executable.to_string_lossy().into_owned());
+        confined.push(request.contained_executable.to_string_lossy().into_owned());
         confined.extend(request.arguments.iter().cloned());
 
         // The fixed shell program only applies inherited limits. Provider-controlled strings are
@@ -647,11 +806,16 @@ impl ProviderSandboxLauncher {
             .arg(request.limits.output_file_bytes.div_ceil(512).to_string())
             .args(confined)
             .env_clear()
-            .env("PATH", "/usr/bin:/bin")
+            .envs(&request.environment)
             .current_dir(&request.output_root)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
+            .stdout(if capture_stdout {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stderr(Stdio::piped());
+        command.process_group(0);
         // Address-space limits are applied after spawn on Linux by the safe rustix API. Darwin's
         // shell does not expose a portable byte-granularity limit, so Seatbelt plus CPU/FD/file
         // limits is the advertised Darwin contract.
@@ -676,10 +840,10 @@ impl ProviderSandboxLauncher {
                 let _ = child.wait();
                 return Err(SandboxError::ResourceLimit);
             }
-            return Ok(child);
+            return ProviderProcessGroupChild::new(child);
         }
         #[cfg(not(target_os = "linux"))]
-        Ok(child)
+        ProviderProcessGroupChild::new(child)
     }
 }
 
@@ -693,14 +857,76 @@ pub enum SandboxError {
     ProfileDigestMismatch,
     #[error("provider launch request is invalid")]
     InvalidLaunch,
+    #[error("provider launch environment is not closed: {0}")]
+    InvalidEnvironment(&'static str),
     #[error("semantic child execution is forbidden by PARSING_ONLY")]
     ParsingOnly,
     #[error("provider resource limit could not be applied")]
     ResourceLimit,
+    #[error("provider child did not enter its required run-scoped process group")]
+    ProcessGroupUnavailable,
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+}
+
+fn validate_launch_environment(
+    environment: &BTreeMap<String, String>,
+    profile: &GeneratedSandboxProfile,
+) -> Result<(), SandboxError> {
+    if environment.is_empty() || environment.len() > 64 {
+        return Err(SandboxError::InvalidEnvironment("variable count"));
+    }
+    let path = environment
+        .get("PATH")
+        .ok_or(SandboxError::InvalidEnvironment("PATH is absent"))?;
+    if path.is_empty() || path.len() > 4_096 || path.bytes().any(|byte| byte == 0) {
+        return Err(SandboxError::InvalidEnvironment("PATH is invalid"));
+    }
+    for entry in path.split(':') {
+        let entry = Path::new(entry);
+        let dependency_visible = match profile.mechanism {
+            SandboxMechanism::LinuxBubblewrap => entry.starts_with("/dependencies"),
+            SandboxMechanism::DarwinSeatbelt | SandboxMechanism::None => {
+                entry.starts_with(&profile.dependency_root)
+            }
+        };
+        if !entry.is_absolute()
+            || !(entry == Path::new("/usr/bin") || entry == Path::new("/bin") || dependency_visible)
+        {
+            return Err(SandboxError::InvalidEnvironment(
+                "PATH entry is unauthorized",
+            ));
+        }
+    }
+    const FORBIDDEN_EXACT: [&str; 8] = [
+        "CARGO_ENCODED_RUSTFLAGS",
+        "DYLD_INSERT_LIBRARIES",
+        "LD_PRELOAD",
+        "RUSTFLAGS",
+        "SSH_AGENT_PID",
+        "SSH_AUTH_SOCK",
+        "SSLKEYLOGFILE",
+        "GIT_ASKPASS",
+    ];
+    for (name, value) in environment {
+        if name.is_empty()
+            || name.len() > 128
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+            || value.len() > 16 * 1_024
+            || value.bytes().any(|byte| byte == 0)
+            || FORBIDDEN_EXACT.contains(&name.as_str())
+            || ["TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "PROXY"]
+                .iter()
+                .any(|fragment| name.contains(fragment))
+        {
+            return Err(SandboxError::InvalidEnvironment("variable rejected"));
+        }
+    }
+    Ok(())
 }
 
 fn roots_overlap(left: &Path, right: &Path) -> bool {
@@ -819,8 +1045,10 @@ mod tests {
         let error = ProviderSandboxLauncher::new(matrix)
             .launch(
                 &ProviderLaunchRequest {
-                    executable: "/usr/bin/true".into(),
+                    host_executable: "/usr/bin/true".into(),
+                    contained_executable: "/usr/bin/true".into(),
                     arguments: Vec::new(),
+                    environment: BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]),
                     output_root: directory.path().join("output"),
                     limits: ProviderProcessLimits {
                         cpu_seconds: 1,
@@ -868,6 +1096,113 @@ mod tests {
                 .unwrap()
                 .contains("deny network")
         );
+    }
+
+    #[test]
+    fn trusted_local_launch_owns_and_terminates_complete_process_group() {
+        let root = tempfile::tempdir().unwrap();
+        let view = root.path().join("view");
+        let dependencies = root.path().join("dependencies");
+        let output = root.path().join("output");
+        for path in [&view, &dependencies, &output] {
+            std::fs::create_dir(path).unwrap();
+        }
+        let profile = GeneratedSandboxProfile::generate(
+            ProviderTrustProfile::TrustedLocal,
+            SandboxMechanism::None,
+            &view,
+            &dependencies,
+            &output,
+        )
+        .unwrap();
+        let matrix = SandboxCapabilityMatrix::evaluate(&observation(false));
+        let marker = output.join("environment-marker");
+        let mut child = ProviderSandboxLauncher::new(matrix)
+            .launch(
+                &ProviderLaunchRequest {
+                    host_executable: "/bin/sh".into(),
+                    contained_executable: "/bin/sh".into(),
+                    arguments: vec![
+                        "-c".into(),
+                        "printf '%s' \"$CF_TEST_MARKER\" > environment-marker; sleep 30 & wait"
+                            .into(),
+                    ],
+                    environment: BTreeMap::from([
+                        ("CF_TEST_MARKER".to_owned(), "expected".to_owned()),
+                        ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+                    ]),
+                    output_root: profile.output_root.clone(),
+                    limits: ProviderProcessLimits {
+                        cpu_seconds: 10,
+                        open_files: 32,
+                        address_space_bytes: 128 * 1024 * 1024,
+                        output_file_bytes: 1024,
+                    },
+                },
+                &profile,
+                ProviderSandboxLaunchMaterial::None,
+            )
+            .unwrap();
+
+        let marker_deadline = Instant::now() + Duration::from_secs(1);
+        let environment_installed = loop {
+            if std::fs::read(&marker).is_ok_and(|bytes| bytes == b"expected") {
+                break true;
+            }
+            if Instant::now() >= marker_deadline || child.try_wait().unwrap().is_some() {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+
+        child.terminate_group().unwrap();
+        if !child.wait_group_empty(Duration::from_secs(1)).unwrap() {
+            child.kill_group().unwrap();
+        }
+        assert!(child.wait_group_empty(Duration::from_secs(1)).unwrap());
+        let _ = child.wait();
+        assert!(
+            environment_installed,
+            "trusted launch did not install the exact declared environment"
+        );
+    }
+
+    #[test]
+    fn launch_environment_is_closed_and_path_scoped() {
+        let root = tempfile::tempdir().unwrap();
+        let view = root.path().join("view");
+        let dependencies = root.path().join("dependencies");
+        let output = root.path().join("output");
+        for path in [&view, &dependencies, &output] {
+            std::fs::create_dir(path).unwrap();
+        }
+        let profile = GeneratedSandboxProfile::generate(
+            ProviderTrustProfile::TrustedLocal,
+            SandboxMechanism::None,
+            &view,
+            &dependencies,
+            &output,
+        )
+        .unwrap();
+        let allowed = BTreeMap::from([
+            ("LC_ALL".to_owned(), "C".to_owned()),
+            ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+        ]);
+        assert!(validate_launch_environment(&allowed, &profile).is_ok());
+
+        for rejected in [
+            BTreeMap::from([("PATH".to_owned(), "relative/bin".to_owned())]),
+            BTreeMap::from([
+                ("HTTP_PROXY".to_owned(), "http://127.0.0.1".to_owned()),
+                ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+            ]),
+            BTreeMap::from([
+                ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+                ("RUSTFLAGS".to_owned(), "-C link-arg=-evil".to_owned()),
+            ]),
+        ] {
+            assert!(validate_launch_environment(&rejected, &profile).is_err());
+        }
     }
 
     #[test]

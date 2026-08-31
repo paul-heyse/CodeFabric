@@ -141,16 +141,18 @@ class AnalyzeModulesRequest(_message.Message):
     def __init__(self, provider_run_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., context_handle: _Optional[str] = ..., context_manifest_digest: _Optional[str] = ..., source_generation: _Optional[int] = ..., source_snapshot_lease_id: _Optional[str] = ..., modules: _Optional[_Iterable[_Union[ModuleRequest, _Mapping]]] = ..., requested_capability_codes: _Optional[_Iterable[int]] = ..., deadline_unix_ms: _Optional[int] = ..., output_schema_bundle_digest: _Optional[str] = ..., initial_chunk_credits: _Optional[int] = ..., initial_credit_bytes: _Optional[int] = ..., sandbox_profile_digest: _Optional[str] = ..., trust_profile: _Optional[str] = ..., resource_profile_id: _Optional[str] = ...) -> None: ...
 
 class AnalyzeCommand(_message.Message):
-    __slots__ = ("start", "chunk_accepted", "chunk_rejected", "cancel")
+    __slots__ = ("start", "chunk_accepted", "chunk_rejected", "cancel", "relation_ipc_ack")
     START_FIELD_NUMBER: _ClassVar[int]
     CHUNK_ACCEPTED_FIELD_NUMBER: _ClassVar[int]
     CHUNK_REJECTED_FIELD_NUMBER: _ClassVar[int]
     CANCEL_FIELD_NUMBER: _ClassVar[int]
+    RELATION_IPC_ACK_FIELD_NUMBER: _ClassVar[int]
     start: AnalyzeModulesRequest
     chunk_accepted: _provider_control_pb2.ChunkAccepted
     chunk_rejected: _provider_control_pb2.ChunkRejected
     cancel: CancelRunRequest
-    def __init__(self, start: _Optional[_Union[AnalyzeModulesRequest, _Mapping]] = ..., chunk_accepted: _Optional[_Union[_provider_control_pb2.ChunkAccepted, _Mapping]] = ..., chunk_rejected: _Optional[_Union[_provider_control_pb2.ChunkRejected, _Mapping]] = ..., cancel: _Optional[_Union[CancelRunRequest, _Mapping]] = ...) -> None: ...
+    relation_ipc_ack: _provider_control_pb2.RelationIpcFrame
+    def __init__(self, start: _Optional[_Union[AnalyzeModulesRequest, _Mapping]] = ..., chunk_accepted: _Optional[_Union[_provider_control_pb2.ChunkAccepted, _Mapping]] = ..., chunk_rejected: _Optional[_Union[_provider_control_pb2.ChunkRejected, _Mapping]] = ..., cancel: _Optional[_Union[CancelRunRequest, _Mapping]] = ..., relation_ipc_ack: _Optional[_Union[_provider_control_pb2.RelationIpcFrame, _Mapping]] = ...) -> None: ...
 
 class AnalyzeEventHeader(_message.Message):
     __slots__ = ("provider_run_id", "workspace_id", "analysis_context_id", "source_generation", "sequence", "context_manifest_digest", "source_manifest_digest")
@@ -218,6 +220,18 @@ class ObservationBatchChunk(_message.Message):
     chunk_digest: str
     def __init__(self, header: _Optional[_Union[AnalyzeEventHeader, _Mapping]] = ..., module_id: _Optional[str] = ..., observation_family_code: _Optional[int] = ..., arrow_ipc: _Optional[bytes] = ..., payload_reference: _Optional[_Union[_provider_control_pb2.BlobReference, _Mapping]] = ..., schema_digest: _Optional[str] = ..., row_count: _Optional[int] = ..., chunk_digest: _Optional[str] = ...) -> None: ...
 
+class RelationIpcFrameEvent(_message.Message):
+    __slots__ = ("header", "module_id", "observation_family_code", "frame")
+    HEADER_FIELD_NUMBER: _ClassVar[int]
+    MODULE_ID_FIELD_NUMBER: _ClassVar[int]
+    OBSERVATION_FAMILY_CODE_FIELD_NUMBER: _ClassVar[int]
+    FRAME_FIELD_NUMBER: _ClassVar[int]
+    header: AnalyzeEventHeader
+    module_id: str
+    observation_family_code: int
+    frame: _provider_control_pb2.RelationIpcFrame
+    def __init__(self, header: _Optional[_Union[AnalyzeEventHeader, _Mapping]] = ..., module_id: _Optional[str] = ..., observation_family_code: _Optional[int] = ..., frame: _Optional[_Union[_provider_control_pb2.RelationIpcFrame, _Mapping]] = ...) -> None: ...
+
 class ModuleEnd(_message.Message):
     __slots__ = ("header", "module_id", "family_counts", "module_digest")
     class FamilyCountsEntry(_message.Message):
@@ -258,20 +272,22 @@ class RunTerminal(_message.Message):
     def __init__(self, header: _Optional[_Union[AnalyzeEventHeader, _Mapping]] = ..., ordered_module_digests: _Optional[_Iterable[str]] = ..., capability_outcomes: _Optional[_Iterable[_Union[_provider_control_pb2.CapabilityOutcome, _Mapping]]] = ..., overall_digest: _Optional[str] = ..., terminal_state: _Optional[_Union[_provider_control_pb2.ProviderRunState, str]] = ..., rechecked_module_ids: _Optional[_Iterable[str]] = ..., sandbox_profile_digest: _Optional[str] = ..., trust_profile: _Optional[str] = ...) -> None: ...
 
 class AnalyzeEvent(_message.Message):
-    __slots__ = ("run_accepted", "run_progress", "module_begin", "observation_batch_chunk", "module_end", "run_terminal")
+    __slots__ = ("run_accepted", "run_progress", "module_begin", "observation_batch_chunk", "module_end", "run_terminal", "relation_ipc_frame")
     RUN_ACCEPTED_FIELD_NUMBER: _ClassVar[int]
     RUN_PROGRESS_FIELD_NUMBER: _ClassVar[int]
     MODULE_BEGIN_FIELD_NUMBER: _ClassVar[int]
     OBSERVATION_BATCH_CHUNK_FIELD_NUMBER: _ClassVar[int]
     MODULE_END_FIELD_NUMBER: _ClassVar[int]
     RUN_TERMINAL_FIELD_NUMBER: _ClassVar[int]
+    RELATION_IPC_FRAME_FIELD_NUMBER: _ClassVar[int]
     run_accepted: RunAccepted
     run_progress: RunProgress
     module_begin: ModuleBegin
     observation_batch_chunk: ObservationBatchChunk
     module_end: ModuleEnd
     run_terminal: RunTerminal
-    def __init__(self, run_accepted: _Optional[_Union[RunAccepted, _Mapping]] = ..., run_progress: _Optional[_Union[RunProgress, _Mapping]] = ..., module_begin: _Optional[_Union[ModuleBegin, _Mapping]] = ..., observation_batch_chunk: _Optional[_Union[ObservationBatchChunk, _Mapping]] = ..., module_end: _Optional[_Union[ModuleEnd, _Mapping]] = ..., run_terminal: _Optional[_Union[RunTerminal, _Mapping]] = ...) -> None: ...
+    relation_ipc_frame: RelationIpcFrameEvent
+    def __init__(self, run_accepted: _Optional[_Union[RunAccepted, _Mapping]] = ..., run_progress: _Optional[_Union[RunProgress, _Mapping]] = ..., module_begin: _Optional[_Union[ModuleBegin, _Mapping]] = ..., observation_batch_chunk: _Optional[_Union[ObservationBatchChunk, _Mapping]] = ..., module_end: _Optional[_Union[ModuleEnd, _Mapping]] = ..., run_terminal: _Optional[_Union[RunTerminal, _Mapping]] = ..., relation_ipc_frame: _Optional[_Union[RelationIpcFrameEvent, _Mapping]] = ...) -> None: ...
 
 class CancelRunRequest(_message.Message):
     __slots__ = ("provider_run_id", "reason")

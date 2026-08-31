@@ -570,8 +570,6 @@ dependencies = [
  "pyrefly_config",
  "pyrefly_python",
  "pyrefly_util",
- "serde",
- "serde_json",
  "tokio",
  "tokio-stream",
  "tonic",

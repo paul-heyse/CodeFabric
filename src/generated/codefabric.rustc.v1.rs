@@ -215,14 +215,14 @@ pub struct CompilationEnd {
     #[prost(enumeration = "RejectionRuleErrorCode", optional, tag = "10")]
     pub rejection_error: ::core::option::Option<i32>,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExtractorCommand {
-    #[prost(oneof = "extractor_command::Command", tags = "1, 2, 3, 4")]
+    #[prost(oneof = "extractor_command::Command", tags = "1, 2, 3, 4, 5")]
     pub command: ::core::option::Option<extractor_command::Command>,
 }
 /// Nested message and enum types in `ExtractorCommand`.
 pub mod extractor_command {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Command {
         #[prost(message, tag = "1")]
         CompilationAccepted(super::CompilationAccepted),
@@ -232,11 +232,28 @@ pub mod extractor_command {
         ChunkRejected(super::super::super::provider::v1::ChunkRejected),
         #[prost(message, tag = "4")]
         Cancel(super::CancelCompilationRequest),
+        #[prost(message, tag = "5")]
+        RelationIpcAck(super::super::super::provider::v1::RelationIpcFrame),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OwnerRelationIpcFrame {
+    #[prost(string, tag = "1")]
+    pub provider_run_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub compilation_unit_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "3")]
+    pub sequence: u64,
+    #[prost(string, tag = "4")]
+    pub owner_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "5")]
+    pub observation_family_code: u32,
+    #[prost(message, optional, tag = "6")]
+    pub frame: ::core::option::Option<super::super::provider::v1::RelationIpcFrame>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExtractionEvent {
-    #[prost(oneof = "extraction_event::Event", tags = "2, 3, 4, 5, 6")]
+    #[prost(oneof = "extraction_event::Event", tags = "2, 3, 4, 5, 6, 7")]
     pub event: ::core::option::Option<extraction_event::Event>,
 }
 /// Nested message and enum types in `ExtractionEvent`.
@@ -253,6 +270,8 @@ pub mod extraction_event {
         OwnerEnd(super::OwnerEnd),
         #[prost(message, tag = "6")]
         CompilationEnd(super::CompilationEnd),
+        #[prost(message, tag = "7")]
+        OwnerRelationIpcFrame(super::OwnerRelationIpcFrame),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

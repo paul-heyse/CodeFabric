@@ -75,6 +75,28 @@ class CreditControlLimit(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     CREDIT_CONTROL_LIMIT_UNSPECIFIED: _ClassVar[CreditControlLimit]
     CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS: _ClassVar[CreditControlLimit]
     CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB: _ClassVar[CreditControlLimit]
+
+class ArrowIpcMetadataVersion(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    ARROW_IPC_METADATA_VERSION_UNSPECIFIED: _ClassVar[ArrowIpcMetadataVersion]
+    ARROW_IPC_METADATA_VERSION_V5: _ClassVar[ArrowIpcMetadataVersion]
+
+class RelationIpcRemainderReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    RELATION_IPC_REMAINDER_REASON_UNSPECIFIED: _ClassVar[RelationIpcRemainderReason]
+    RELATION_IPC_REMAINDER_REASON_UNSUPPORTED: _ClassVar[RelationIpcRemainderReason]
+    RELATION_IPC_REMAINDER_REASON_PROVIDER_UNAVAILABLE: _ClassVar[RelationIpcRemainderReason]
+    RELATION_IPC_REMAINDER_REASON_RESOURCE_LIMIT: _ClassVar[RelationIpcRemainderReason]
+    RELATION_IPC_REMAINDER_REASON_INVALID_SOURCE: _ClassVar[RelationIpcRemainderReason]
+    RELATION_IPC_REMAINDER_REASON_CANCELLED: _ClassVar[RelationIpcRemainderReason]
+    RELATION_IPC_REMAINDER_REASON_UNKNOWN: _ClassVar[RelationIpcRemainderReason]
+
+class RelationIpcTerminalStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    RELATION_IPC_TERMINAL_STATUS_UNSPECIFIED: _ClassVar[RelationIpcTerminalStatus]
+    RELATION_IPC_TERMINAL_STATUS_COMPLETE: _ClassVar[RelationIpcTerminalStatus]
+    RELATION_IPC_TERMINAL_STATUS_PARTIAL: _ClassVar[RelationIpcTerminalStatus]
+    RELATION_IPC_TERMINAL_STATUS_UNKNOWN: _ClassVar[RelationIpcTerminalStatus]
 PROVIDER_RUN_STATE_UNSPECIFIED: ProviderRunState
 PROVIDER_RUN_STATE_QUEUED: ProviderRunState
 PROVIDER_RUN_STATE_RUNNING: ProviderRunState
@@ -122,6 +144,19 @@ CANCEL_ACKNOWLEDGEMENT_STATE_FORCE_TERMINATED: CancelAcknowledgementState
 CREDIT_CONTROL_LIMIT_UNSPECIFIED: CreditControlLimit
 CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS: CreditControlLimit
 CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB: CreditControlLimit
+ARROW_IPC_METADATA_VERSION_UNSPECIFIED: ArrowIpcMetadataVersion
+ARROW_IPC_METADATA_VERSION_V5: ArrowIpcMetadataVersion
+RELATION_IPC_REMAINDER_REASON_UNSPECIFIED: RelationIpcRemainderReason
+RELATION_IPC_REMAINDER_REASON_UNSUPPORTED: RelationIpcRemainderReason
+RELATION_IPC_REMAINDER_REASON_PROVIDER_UNAVAILABLE: RelationIpcRemainderReason
+RELATION_IPC_REMAINDER_REASON_RESOURCE_LIMIT: RelationIpcRemainderReason
+RELATION_IPC_REMAINDER_REASON_INVALID_SOURCE: RelationIpcRemainderReason
+RELATION_IPC_REMAINDER_REASON_CANCELLED: RelationIpcRemainderReason
+RELATION_IPC_REMAINDER_REASON_UNKNOWN: RelationIpcRemainderReason
+RELATION_IPC_TERMINAL_STATUS_UNSPECIFIED: RelationIpcTerminalStatus
+RELATION_IPC_TERMINAL_STATUS_COMPLETE: RelationIpcTerminalStatus
+RELATION_IPC_TERMINAL_STATUS_PARTIAL: RelationIpcTerminalStatus
+RELATION_IPC_TERMINAL_STATUS_UNKNOWN: RelationIpcTerminalStatus
 
 class BlobReference(_message.Message):
     __slots__ = ("blob_id", "content_digest", "byte_length", "read_only_uri")
@@ -411,3 +446,121 @@ class ChunkRejected(_message.Message):
     sequence: int
     error_code: str
     def __init__(self, sequence: _Optional[int] = ..., error_code: _Optional[str] = ...) -> None: ...
+
+class RelationIpcStreamIdentity(_message.Message):
+    __slots__ = ("relation_id", "stream_id", "schema_fingerprint", "source_pin", "context_pin")
+    RELATION_ID_FIELD_NUMBER: _ClassVar[int]
+    STREAM_ID_FIELD_NUMBER: _ClassVar[int]
+    SCHEMA_FINGERPRINT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_PIN_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_PIN_FIELD_NUMBER: _ClassVar[int]
+    relation_id: bytes
+    stream_id: bytes
+    schema_fingerprint: bytes
+    source_pin: bytes
+    context_pin: bytes
+    def __init__(self, relation_id: _Optional[bytes] = ..., stream_id: _Optional[bytes] = ..., schema_fingerprint: _Optional[bytes] = ..., source_pin: _Optional[bytes] = ..., context_pin: _Optional[bytes] = ...) -> None: ...
+
+class RelationIpcFrameHeader(_message.Message):
+    __slots__ = ("protocol_version", "identity", "sequence")
+    PROTOCOL_VERSION_FIELD_NUMBER: _ClassVar[int]
+    IDENTITY_FIELD_NUMBER: _ClassVar[int]
+    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    protocol_version: int
+    identity: RelationIpcStreamIdentity
+    sequence: int
+    def __init__(self, protocol_version: _Optional[int] = ..., identity: _Optional[_Union[RelationIpcStreamIdentity, _Mapping]] = ..., sequence: _Optional[int] = ...) -> None: ...
+
+class RelationIpcOpen(_message.Message):
+    __slots__ = ("header", "requested_units", "arrow_type_universe", "metadata_version", "semantic_encoding")
+    HEADER_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_UNITS_FIELD_NUMBER: _ClassVar[int]
+    ARROW_TYPE_UNIVERSE_FIELD_NUMBER: _ClassVar[int]
+    METADATA_VERSION_FIELD_NUMBER: _ClassVar[int]
+    SEMANTIC_ENCODING_FIELD_NUMBER: _ClassVar[int]
+    header: RelationIpcFrameHeader
+    requested_units: int
+    arrow_type_universe: str
+    metadata_version: ArrowIpcMetadataVersion
+    semantic_encoding: str
+    def __init__(self, header: _Optional[_Union[RelationIpcFrameHeader, _Mapping]] = ..., requested_units: _Optional[int] = ..., arrow_type_universe: _Optional[str] = ..., metadata_version: _Optional[_Union[ArrowIpcMetadataVersion, str]] = ..., semantic_encoding: _Optional[str] = ...) -> None: ...
+
+class RelationIpcPayload(_message.Message):
+    __slots__ = ("header", "arrow_ipc_fragment")
+    HEADER_FIELD_NUMBER: _ClassVar[int]
+    ARROW_IPC_FRAGMENT_FIELD_NUMBER: _ClassVar[int]
+    header: RelationIpcFrameHeader
+    arrow_ipc_fragment: bytes
+    def __init__(self, header: _Optional[_Union[RelationIpcFrameHeader, _Mapping]] = ..., arrow_ipc_fragment: _Optional[bytes] = ...) -> None: ...
+
+class RelationIpcFlowControlAck(_message.Message):
+    __slots__ = ("header", "acknowledged_sequence", "released_bytes", "cancelled")
+    HEADER_FIELD_NUMBER: _ClassVar[int]
+    ACKNOWLEDGED_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    RELEASED_BYTES_FIELD_NUMBER: _ClassVar[int]
+    CANCELLED_FIELD_NUMBER: _ClassVar[int]
+    header: RelationIpcFrameHeader
+    acknowledged_sequence: int
+    released_bytes: int
+    cancelled: bool
+    def __init__(self, header: _Optional[_Union[RelationIpcFrameHeader, _Mapping]] = ..., acknowledged_sequence: _Optional[int] = ..., released_bytes: _Optional[int] = ..., cancelled: _Optional[bool] = ...) -> None: ...
+
+class RelationIpcEnd(_message.Message):
+    __slots__ = ("header", "declared_ipc_bytes", "declared_batches", "declared_rows")
+    HEADER_FIELD_NUMBER: _ClassVar[int]
+    DECLARED_IPC_BYTES_FIELD_NUMBER: _ClassVar[int]
+    DECLARED_BATCHES_FIELD_NUMBER: _ClassVar[int]
+    DECLARED_ROWS_FIELD_NUMBER: _ClassVar[int]
+    header: RelationIpcFrameHeader
+    declared_ipc_bytes: int
+    declared_batches: int
+    declared_rows: int
+    def __init__(self, header: _Optional[_Union[RelationIpcFrameHeader, _Mapping]] = ..., declared_ipc_bytes: _Optional[int] = ..., declared_batches: _Optional[int] = ..., declared_rows: _Optional[int] = ...) -> None: ...
+
+class RelationIpcCoverageRemainder(_message.Message):
+    __slots__ = ("scope", "unit_count", "reason")
+    SCOPE_FIELD_NUMBER: _ClassVar[int]
+    UNIT_COUNT_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    scope: bytes
+    unit_count: int
+    reason: RelationIpcRemainderReason
+    def __init__(self, scope: _Optional[bytes] = ..., unit_count: _Optional[int] = ..., reason: _Optional[_Union[RelationIpcRemainderReason, str]] = ...) -> None: ...
+
+class RelationIpcCoverageTrailer(_message.Message):
+    __slots__ = ("header", "status", "requested_units", "completed_units", "remainders")
+    HEADER_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_UNITS_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_UNITS_FIELD_NUMBER: _ClassVar[int]
+    REMAINDERS_FIELD_NUMBER: _ClassVar[int]
+    header: RelationIpcFrameHeader
+    status: RelationIpcTerminalStatus
+    requested_units: int
+    completed_units: int
+    remainders: _containers.RepeatedCompositeFieldContainer[RelationIpcCoverageRemainder]
+    def __init__(self, header: _Optional[_Union[RelationIpcFrameHeader, _Mapping]] = ..., status: _Optional[_Union[RelationIpcTerminalStatus, str]] = ..., requested_units: _Optional[int] = ..., completed_units: _Optional[int] = ..., remainders: _Optional[_Iterable[_Union[RelationIpcCoverageRemainder, _Mapping]]] = ...) -> None: ...
+
+class RelationIpcTerminal(_message.Message):
+    __slots__ = ("header", "status")
+    HEADER_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    header: RelationIpcFrameHeader
+    status: RelationIpcTerminalStatus
+    def __init__(self, header: _Optional[_Union[RelationIpcFrameHeader, _Mapping]] = ..., status: _Optional[_Union[RelationIpcTerminalStatus, str]] = ...) -> None: ...
+
+class RelationIpcFrame(_message.Message):
+    __slots__ = ("open", "payload", "flow_control_ack", "ipc_end", "coverage_trailer", "terminal")
+    OPEN_FIELD_NUMBER: _ClassVar[int]
+    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
+    FLOW_CONTROL_ACK_FIELD_NUMBER: _ClassVar[int]
+    IPC_END_FIELD_NUMBER: _ClassVar[int]
+    COVERAGE_TRAILER_FIELD_NUMBER: _ClassVar[int]
+    TERMINAL_FIELD_NUMBER: _ClassVar[int]
+    open: RelationIpcOpen
+    payload: RelationIpcPayload
+    flow_control_ack: RelationIpcFlowControlAck
+    ipc_end: RelationIpcEnd
+    coverage_trailer: RelationIpcCoverageTrailer
+    terminal: RelationIpcTerminal
+    def __init__(self, open: _Optional[_Union[RelationIpcOpen, _Mapping]] = ..., payload: _Optional[_Union[RelationIpcPayload, _Mapping]] = ..., flow_control_ack: _Optional[_Union[RelationIpcFlowControlAck, _Mapping]] = ..., ipc_end: _Optional[_Union[RelationIpcEnd, _Mapping]] = ..., coverage_trailer: _Optional[_Union[RelationIpcCoverageTrailer, _Mapping]] = ..., terminal: _Optional[_Union[RelationIpcTerminal, _Mapping]] = ...) -> None: ...

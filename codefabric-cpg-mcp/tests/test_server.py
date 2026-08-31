@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import secrets
 import time
@@ -15,12 +16,19 @@ import grpc
 import pytest
 from fastmcp import Client
 from jsonschema import Draft202012Validator
-from mcp.types import TextResourceContents
+from mcp.types import BlobResourceContents, TextResourceContents
 
 from codefabric_cpg_mcp.contracts.fingerprints import fastmcp_protocol_fingerprint
-from codefabric_cpg_mcp.contracts.json import canonicalize_value, checksum
+from codefabric_cpg_mcp.contracts.json import JsonValue, canonicalize_value, checksum
 from codefabric_cpg_mcp.contracts.model_registries import CpgdFeature
 from codefabric_cpg_mcp.contracts.schemas import schema_manifest
+from codefabric_cpg_mcp.daemon.arrow_resources import (
+    ARROW_RELEASE,
+    ARROW_RESULT_RESOURCE_FORMAT,
+    ARROW_STREAM_MEDIA_TYPE,
+    PUBLISHED_RESULT_FORMAT,
+    framed_content_checksum,
+)
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2 as query_pb
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2_grpc as query_grpc
 from codefabric_cpg_mcp.server import mcp
@@ -78,6 +86,13 @@ class ProductionStubDaemon:
         self.release_result_calls = 0
         self.start_requests: list[Any] = []
         self.payload = self._payload()
+        self.arrow_mode = False
+        self.arrow_released = False
+        self.arrow_descriptor = b""
+        self.arrow_descriptor_checksum = ""
+        self.arrow_manifest = b""
+        self.arrow_relation = b""
+        self.arrow_resources: dict[str, tuple[bytes, str, str]] = {}
 
     def _payload(self) -> bytes:
         return canonicalize_value(
@@ -91,6 +106,113 @@ class ProductionStubDaemon:
                 "snapshot": _snapshot(),
             }
         )
+
+    def configure_arrow_result(self) -> None:
+        """Switch this generated-stub peer to the Arrow-native result branch."""
+
+        def digest(seed: int) -> str:
+            return f"b3:{seed:02x}" + f"{seed:02x}" * 31
+
+        self.arrow_mode = True
+        self.arrow_released = False
+        self.semantic_execution_state = "COMPLETE"
+        self.availability_state = "AVAILABLE"
+        self.completeness_state = "COMPLETE"
+        self.freshness_state = "CURRENT"
+        self.limit_state = "NOT_APPLIED"
+        self.query_status_state = "COMPLETE"
+        self.truncated = False
+        self.arrow_relation = b"ARROW-IPC-STREAM\x00\xffdaemon-owned-columnar-bytes"
+        relation_checksum = framed_content_checksum(b"arrow-ipc-stream.v1", self.arrow_relation)
+        manifest: JsonValue = {
+            "format": ARROW_RESULT_RESOURCE_FORMAT,
+            "arrow_release": ARROW_RELEASE,
+            "package_id": digest(3),
+            "epoch_id": "14" * 16,
+            "query_execution": digest(4),
+            "completion_state": "complete",
+            "complete": True,
+            "truncated": False,
+            "unknown": False,
+            "relation_count": 1,
+            "total_rows": 3,
+            "total_batches": 1,
+            "total_schema_bytes": 42,
+            "total_ipc_bytes": len(self.arrow_relation),
+            "subresources": [
+                {
+                    "relation_id": "public.people",
+                    "resource_id": digest(7),
+                    "media_type": ARROW_STREAM_MEDIA_TYPE,
+                    "schema_checksum": digest(8),
+                    "schema_byte_length": 42,
+                    "content_checksum": relation_checksum,
+                    "row_count": 3,
+                    "batch_count": 1,
+                    "byte_length": len(self.arrow_relation),
+                    "completion_state": "complete",
+                    "requested_units": 3,
+                    "completed_units": 3,
+                    "remainder_units": 0,
+                    "complete": True,
+                    "truncated": False,
+                    "unknown": False,
+                }
+            ],
+        }
+        self.arrow_manifest = canonicalize_value(manifest)
+        manifest_checksum = framed_content_checksum(b"result-manifest.v1", self.arrow_manifest)
+        descriptor: JsonValue = {
+            "format": PUBLISHED_RESULT_FORMAT,
+            "artifact_id": digest(1),
+            "package_id": digest(2),
+            "content_package_id": digest(3),
+            "owner": {"workspace_id": "01" * 16, "agent_id": "02" * 16},
+            "epoch_id": "14" * 16,
+            "query_execution": digest(4),
+            "source_manifest_checksum": manifest_checksum,
+            "source_manifest_byte_length": len(self.arrow_manifest),
+            "completion": "complete",
+            "total_rows": 3,
+            "total_batches": 1,
+            "total_schema_bytes": 42,
+            "total_ipc_bytes": len(self.arrow_relation),
+            "lease_expires_at_unix_ms": int((time.time() + 60) * 1000),
+            "manifest": {
+                "authorization_resource_id": digest(5),
+                "content_resource_id": digest(6),
+                "media_type": "application/json",
+                "content_checksum": manifest_checksum,
+                "byte_length": len(self.arrow_manifest),
+            },
+            "relations": [
+                {
+                    "relation_id": "public.people",
+                    "authorization_resource_id": digest(9),
+                    "content_resource_id": digest(7),
+                    "media_type": ARROW_STREAM_MEDIA_TYPE,
+                    "schema_checksum": digest(8),
+                    "schema_byte_length": 42,
+                    "content_checksum": relation_checksum,
+                    "row_count": 3,
+                    "batch_count": 1,
+                    "byte_length": len(self.arrow_relation),
+                    "coverage": {
+                        "state": "complete",
+                        "requested_units": 3,
+                        "completed_units": 3,
+                        "remainder_units": 0,
+                        "unknown_cause": None,
+                    },
+                }
+            ],
+        }
+        self.arrow_descriptor = canonicalize_value(descriptor)
+        self.arrow_descriptor_checksum = checksum(self.arrow_descriptor)
+        self.arrow_resources = {
+            digest(5): (self.arrow_manifest, manifest_checksum, "application/json"),
+            digest(9): (self.arrow_relation, relation_checksum, ARROW_STREAM_MEDIA_TYPE),
+        }
 
     async def Handshake(self, request: Any, _context: Any) -> Any:  # noqa: N802
         assert request.required_feature_bits == int(CpgdFeature.REQUIRED)
@@ -196,7 +318,15 @@ class ProductionStubDaemon:
 
         self.payload = self._payload()
         snapshot = canonicalize_value(_snapshot())
-        artifact_checksum = checksum(self.payload)
+        artifact_checksum = (
+            self.arrow_descriptor_checksum if self.arrow_mode else checksum(self.payload)
+        )
+        artifact_id = "b3:" + "01" * 32 if self.arrow_mode else "artifact:test"
+        lease_expiry = (
+            json.loads(self.arrow_descriptor)["lease_expires_at_unix_ms"]
+            if self.arrow_mode
+            else int((time.time() + 60) * 1000)
+        )
         yield query_pb.QueryEvent(
             snapshot_pinned=query_pb.SnapshotPinnedEvent(
                 canonical_public_snapshot_metadata_json=snapshot,
@@ -205,12 +335,24 @@ class ProductionStubDaemon:
         )
         yield query_pb.QueryEvent(
             artifact_ready=query_pb.ArtifactReadyEvent(
-                artifact_id="artifact:test",
+                artifact_id=artifact_id,
                 artifact_checksum=artifact_checksum,
-                content_type="application/json",
+                content_type=(
+                    "application/vnd.codefabric.arrow-result-package+json"
+                    if self.arrow_mode
+                    else "application/json"
+                ),
                 encoding=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
-                lease_expires_at_unix_ms=int((time.time() + 60) * 1000),
-                lease_token="lease-token",
+                lease_expires_at_unix_ms=lease_expiry,
+                lease_token=("ab" * 32 if self.arrow_mode else "lease-token"),
+                canonical_result_descriptor_json=(
+                    self.arrow_descriptor if self.arrow_mode else b""
+                ),
+                result_descriptor_checksum=(
+                    self.arrow_descriptor_checksum if self.arrow_mode else ""
+                ),
+                result_contract_version=(PUBLISHED_RESULT_FORMAT if self.arrow_mode else ""),
+                arrow_release=(ARROW_RELEASE if self.arrow_mode else ""),
             )
         )
         yield query_pb.QueryEvent(
@@ -221,9 +363,11 @@ class ProductionStubDaemon:
                 limit_state=self.limit_state,
                 dependency_state="FAILED_DEPENDENCY",
                 canonical_response_checksum=artifact_checksum,
-                artifact_id="artifact:test",
-                result_row_count=0,
-                result_byte_count=len(self.payload),
+                artifact_id=artifact_id,
+                result_row_count=3 if self.arrow_mode else 0,
+                result_byte_count=(
+                    len(self.arrow_relation) if self.arrow_mode else len(self.payload)
+                ),
                 cleanup_state="RETAINED_BY_LEASE",
                 semantic_execution_state=self.semantic_execution_state,
                 completeness_state=self.completeness_state,
@@ -256,6 +400,38 @@ class ProductionStubDaemon:
         self.read_result_calls += 1
         if self.revoked:
             await context.abort(grpc.StatusCode.NOT_FOUND, "lease revoked")
+        if request.authorization_resource_id:
+            if (
+                request.artifact_id != "b3:" + "01" * 32
+                or request.lease_token != "ab" * 32
+                or request.owner.workspace_id != "01" * 16
+                or request.owner.agent_id != "02" * 16
+                or request.authorization_resource_id not in self.arrow_resources
+                or self.arrow_released
+            ):
+                await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Arrow access differs")
+            resource, content_checksum, content_type = self.arrow_resources[
+                request.authorization_resource_id
+            ]
+            payload = resource[request.offset : request.offset + request.maximum_bytes]
+            next_offset = request.offset + len(payload)
+            yield query_pb.ResultChunk(
+                artifact_id=request.artifact_id,
+                offset=request.offset,
+                uncompressed_length=len(payload),
+                payload=payload,
+                payload_checksum=checksum(payload),
+                artifact_checksum=self.arrow_descriptor_checksum,
+                content_type=content_type,
+                encoding=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
+                final_chunk=next_offset == len(resource),
+                lease_expires_at_unix_ms=int((time.time() + 60) * 1000),
+                authorization_resource_id=request.authorization_resource_id,
+                next_offset=next_offset,
+                total_length=len(resource),
+                content_checksum=content_checksum,
+            )
+            return
         payload = self.payload[request.offset : request.offset + request.maximum_bytes]
         yield query_pb.ResultChunk(
             artifact_id=request.artifact_id,
@@ -268,11 +444,26 @@ class ProductionStubDaemon:
             encoding=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
             final_chunk=request.offset + len(payload) == len(self.payload),
             lease_expires_at_unix_ms=int((time.time() + 60) * 1000),
+            next_offset=request.offset + len(payload),
+            total_length=len(self.payload),
+            content_checksum=checksum(self.payload),
         )
 
     async def ReleaseResult(self, request: Any, _context: Any) -> Any:  # noqa: N802
         self.release_result_calls += 1
-        return query_pb.ReleaseResultResponse(artifact_id=request.artifact_id, released=True)
+        if request.HasField("owner"):
+            state = "already_released" if self.arrow_released else "released"
+            self.arrow_released = True
+            return query_pb.ReleaseResultResponse(
+                artifact_id=request.artifact_id,
+                released=True,
+                release_state=state,
+            )
+        return query_pb.ReleaseResultResponse(
+            artifact_id=request.artifact_id,
+            released=True,
+            release_state="released",
+        )
 
 
 def _environment(monkeypatch: pytest.MonkeyPatch, target: str) -> None:
@@ -400,6 +591,8 @@ def test_wp68_structural_acceptance(
 
             templates = await client.list_resource_templates()
             assert {str(template.uriTemplate) for template in templates} == {
+                "codefabric-result://{workspace_id}/{artifact_id}/manifest/{resource_id}",
+                "codefabric-result://{workspace_id}/{artifact_id}/relation/{relation_id}/{resource_id}",
                 "cpg://reference/{reference}/{version}",
                 "cpg://result/{artifact_id}",
             }
@@ -425,6 +618,41 @@ def test_wp68_negative_zero_state(
             with pytest.raises(Exception, match="lease revoked|resource|NOT_FOUND|result lease"):
                 await client.read_resource("cpg://result/artifact:test")
             assert daemon.read_result_calls == 1
+
+    asyncio.run(exercise())
+
+
+def test_wp15_arrow_descriptor_resources_and_release_cross_real_generated_grpc(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        async with _production_client(tmp_path, monkeypatch) as (client, daemon):
+            daemon.configure_arrow_result()
+            query = await client.call_tool(
+                "query_code_graph",
+                {"request": {"semantic_request_id": "semantic:arrow"}, "delivery": "inline"},
+            )
+            assert query.structured_content is not None
+            delivery = query.structured_content["delivery"]
+            assert delivery["mode"] == "resource"
+            manifest_uri = delivery["result_resource"]["manifest_uri"]
+            relation_uri = delivery["result_resource"]["subresource_uris"][0]
+            assert "ab" * 32 not in manifest_uri + relation_uri
+
+            manifest_resources = await client.read_resource(manifest_uri)
+            assert len(manifest_resources) == 1
+            assert isinstance(manifest_resources[0], TextResourceContents)
+            assert json.loads(manifest_resources[0].text)["format"] == (
+                ARROW_RESULT_RESOURCE_FORMAT
+            )
+            relation_resources = await client.read_resource(relation_uri)
+            assert len(relation_resources) == 1
+            assert isinstance(relation_resources[0], BlobResourceContents)
+            assert base64.b64decode(relation_resources[0].blob) == daemon.arrow_relation
+            assert daemon.read_result_calls == 2
+            assert daemon.release_result_calls == 1
+            assert daemon.arrow_released is True
 
     asyncio.run(exercise())
 

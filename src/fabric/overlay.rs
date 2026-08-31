@@ -2356,6 +2356,7 @@ mod tests {
         assert!(overlay.memory_bytes() > 0);
         assert_eq!(overlay.memory_bytes(), overlay.reservation.size() as u64);
         assert_eq!(overlay.table_manifests().len(), 1);
+        #[cfg(feature = "daemon")]
         assert_eq!(OverlayRebaseFaultPoint::ALL.len(), 3);
     }
 }

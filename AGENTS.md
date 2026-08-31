@@ -23,10 +23,11 @@ the convention `docs/spec_index/README.md` fixes. This file's own sections are r
 files in this repository also carry their own rationale comments; this file is the
 cross-cutting view.
 
-> **Status: implementation in progress.** The four Wave 0 build domains, dependency
-> boundaries, adapter shell, Protobuf/UDS compatibility harness, and aggregate gates are
-> present. The versioned execution state under `docs/plans/state/` is authoritative for
-> packet and milestone progress.
+> **Status: successor approved, activation pending.** The four build domains, dependency
+> boundaries, adapter shell, Protobuf/UDS compatibility harness, and substantial provisional
+> relational-fabric implementation are present. Plan v3 is the approved successor candidate, but
+> its state does not exist and it is not active until the separate activation transaction. The
+> active v2 state is invalidated and must not be resumed.
 
 ---
 
@@ -34,47 +35,50 @@ cross-cutting view.
 
 The system itself is specified in two sibling directories. They are **design inputs, not
 infrastructure**: deliberately not an input to any package/repository/tooling decision here
-(see *Scope boundary*), revised in place while in flux, and navigated with
-`just spec-outline` rather than read whole.
+(see *Scope boundary*), versioned rather than rewritten, and navigated with
+`just spec-outline` rather than read whole. The sole current suite identity is
+`codefabric-relational-data-fabric` version `2.1.0`; the sibling v2.0 and v1.3 masters are chained
+historical transition evidence, not coequal targets.
 
 `docs/authoritative_design/` — the authoritative suite: a governance manifest, six domain
 specifications, and the implementation roadmap.
 
 | Tag | File | What it holds |
 |---|---|---|
-| `SUITE` | `codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md` | who owns what: artifact precedence, all 84 `AC-G` contract owners, the generated `contracts/` tree, Readiness Gates A–G |
-| `ONT` | `code_property_graph_present_state_fact_ontology_specification_v1.3.md` | what facts exist: language-neutral core ontology + Python and Rust profiles |
-| `GEN` | `present_state_cpg_fact_generation_specification_python_rust_v1.3.md` | how facts are produced: Tree-sitter / Ruff / Pyrefly / `rustc_public` provider stack, reconciliation, derived analyses |
-| `FAB` | `present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md` | how facts are stored and served: Arrow schemas, Delta tables, DataFusion catalog; `FAB §2.1` pins the Cargo dependency baseline |
-| `QRY` | `code_property_graph_semantic_query_specification_v1.3.md` | how agents ask: semantic-first JSON envelope, eight request forms |
-| `LIFE` | `codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md` | how it stays current: watcher → update waves → snapshots → publication; runtime topology |
-| `SRV` | `present_state_cpg_fastmcp_serving_specification_v1.3.md` | how agents connect: one FastMCP STDIO process per agent over the Rust daemon boundary |
-| `RM` | `codefabric_1.3_implementation_roadmap_v1.0.md` | in what order: waves W0–W19; subordinate to the specs and manifest (`RM §0`) |
+| `SUITE` | `codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.1.md` | programmatic authority, relational contract ownership, proof, compatibility, release, and legacy disposition |
+| `ONT` | `code_property_graph_present_state_fact_ontology_specification_v2.1.md` | typed fact relations, identity, unknown semantics, Python/Rust profiles, and derived families |
+| `GEN` | `present_state_cpg_fact_generation_specification_python_rust_v2.1.md` | exact provider batches, explicit typed inputs, application analyses, reconciliation, and capability |
+| `FAB` | `present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v2.1.md` | Arrow schemas and IPC, programmatic DataFusion catalogs/transformations, exact Delta histories, epochs, and proof |
+| `QRY` | `code_property_graph_semantic_query_specification_v2.1.md` | eight bounded compositional request forms compiled as typed programmatic transformations |
+| `LIFE` | `codefabric_continuous_cpg_update_lifecycle_management_specification_v2.1.md` | FabricCommand, update waves, publication, exact activation, leases, fencing, and candidate-free recovery |
+| `SRV` | `present_state_cpg_fastmcp_serving_specification_v2.1.md` | Rust-daemon authority, relation streams, and presentation-only FastMCP serving |
+| `RM` | `codefabric_2.1_implementation_roadmap_v1.0.md` | dependency-closed capability/decommission order; subordinate to the domain specs and approved plan (`RM §0`) |
 
 `docs/spec_index/` — a derived navigation and traceability layer over those eight. **Never
 normative**: cite the section it points at, not the index.
 
 | File | Answers |
 |---|---|
-| `README.md` | citation convention, suite census, the `# Part`/`# Appendix` structure `spec-outline` cannot see, gap register |
+| `README.md` | citation convention, current-suite discovery, historical boundary, and navigation commands |
 | `fact-domain-map.md` | one fact domain traced across all six domain specs |
 | `library-routing.md` | which `docs/library_ref/` chapter covers a given spec section; the version-pin ledger |
-| `wave-traceability.md` | which spec sections and contracts each roadmap wave implements |
-| `contract-census.md` | all 84 `AC-G` contracts with owner, consumers, and wave |
+| `wave-traceability.md` | which v2.1 capability stage and successor work-packet family realizes each domain boundary |
+| `contract-census.md` | how runtime contract relations replace a hand-maintained static census while preserving historical IDs |
 | `invariants-and-doctrine.md` | the invariants every wave must preserve, traced to their normative homes |
 
 ### 0.1 How the suite composes
 
 Read the six domain specs as a stack: each layer consumes the one above, the ontology is the
-root vocabulary, and the governance manifest sits across all of them. The end-to-end data
-path (`GEN §6` + `LIFE §93` + `FAB §1`):
+root vocabulary, and the governance manifest sits across all of them. The end-to-end target
+path is:
 
 ```text
-source change → dirty registry → update wave → source images → invalidation plan
-  → fast syntax lane (Tree-sitter)           → immutable syntax-current snapshot
-  → semantic lane (Ruff+Pyrefly / rustc+MIR) → normalization → reconciliation
-  → derived lane (petgraph, fixed-point)     → interprocedural summaries
-  → validated immutable hot snapshot         → async Delta publication → DataFusion serving
+source change → FabricCommand → source images → invalidation relation
+  → exact provider-native Arrow relations + explicit typed inputs
+  → typed programmatic normalization/authority transformations
+  → versioned application analyses        → canonical and derived relations
+  → self-observed proved FabricEpoch       → exact Delta/Arrow pins and activation event
+  → authorized DataFusion child catalog   → Rust daemon stream → FastMCP presentation
 ```
 
 Runtime topology: one central **Rust daemon per workspace** owns source state, snapshots,
@@ -82,9 +86,11 @@ provider orchestration, query execution and capability status; one **FastMCP STD
 per agent** is presentation only and must never hold independent mutable CPG state
 (`LIFE §122`).
 
-Consult `docs/spec_index/`'s gap register before concluding a search failed: several cited
-authorities — requirement IDs, the flag registry, property names — are build outputs under
-`contracts/`, not prose that exists anywhere yet.
+Consult `docs/spec_index/` before concluding a search failed. Current target semantic authority is
+constructed from exact provider batches, explicit typed inputs, and typed transformations; relation,
+field, schema, dependency, and provenance observations are derived from the installed session.
+Bootstrap/model replay and generated predecessor registries are historical/decommission inputs, not
+fallback authority.
 
 ### 0.2 Cross-cutting doctrine
 
@@ -105,17 +111,17 @@ Violating any of these contradicts every spec at once.
   a type. Call sites are first-class entities, not just caller→callee edges.
 - **Canonical identity is application-owned.** Raw `DefId`, MIR local/block indices,
   Tree-sitter node IDs, Ruff node indices and Pyrefly internal keys are never canonical
-  identity (`GEN §13`). Rust prefers `StableCrateId + DefPathHash`.
+  identity. Rust uses the exact private stable-key seam when available and otherwise emits an
+  explicit downgraded capability rather than pretending a provider-local key is canonical.
 - **Provider isolation.** Every provider sits behind an application-owned adapter emitting
   application-owned DTOs; no long-lived borrowed provider type (e.g. `Node<'tree>`) escapes
   an adapter.
 - **Authority, never silent overwrite.** Conflicting provider facts resolve by the
   per-fact-family authority tables (`GEN §5`); conflicting evidence is retained in
   provenance/diagnostics, and unresolvable conflict emits an unknown or multi-candidate fact.
-- **Atomic present state.** Owner-scoped replacement plus manifest-pinned multi-table MVCC: a
-  publication maps to an exact Delta version per table, and intermediate versions are
-  invisible through `cpg_serving` until the pointer advances. Every query pins exactly one
-  immutable snapshot and never mixes source generations.
+- **Atomic present state.** One FabricEpoch binds the model, source, provider, analysis,
+  table, policy, proof, and compiler set. Activation appends and reads back one exact event;
+  every query pins one immutable epoch and never mixes source generations.
 
 `LIFE §§157–159` lists the mandatory consistency, performance and failure invariants — check
 any incremental-update design against them.
@@ -165,7 +171,7 @@ CodeFabric/
 ├── rustc-extractor/                           dated-nightly Cargo root
 ├── pyrefly-sidecar/                           pinned-source Cargo root
 ├── codefabric-cpg-mcp/                        Python adapter + local uv.lock
-├── contracts/                                 AC-G-05 authority + shared fixtures
+├── contracts/                                 released wire/fixture inputs + bounded legacy products
 ├── fuzz/                                      JCS parser/canonicalizer harness
 ├── tooling/proto/                             hermetic Protobuf generator
 ├── justfile                                   repository operational API
@@ -385,16 +391,43 @@ controlled measurement, or diagnosis commands.
 Ownership is divided (repo-spec §15.1, tooling-ref §72.22):
 
 ```
-rust-analyzer  →  semantic model, references, types, assists
+agent LSP      →  semantic model, references, types, assists
 Bacon          →  the persistent cargo check job          (bacon.toml)
+just root-check-fast → on-demand library type-check for a hot edit loop
 Watchexec      →  non-Rust tasks and process restarts only
 ```
 
 Do not configure editor check-on-save, Bacon, and Watchexec to run the same
-`cargo check`. `bacon.toml` defines stable-root `check`, `clippy`, and `nextest` jobs,
-and exports `.bacon-locations` for editor/agent consumption — an agent
-must confirm that file matches the current source generation before reading an empty list
-as success (§15.2).
+`cargo check`.
+
+**The Cursor rust-analyzer extension is deliberately disabled.** It violated the rule
+above: with `checkOnSave`, `cargo.allTargets` and `check.workspace` all at their `true`
+defaults and three entries in `linkedProjects`, every trigger started `cargo check
+--workspace --all-targets` *once per linked project* — three concurrent cargo processes,
+one on the dated nightly — into the shared repository `target/`, contending for its Cargo
+build lock with the CLI and with agent shells. Confirmed 2026-08-30 by PPID chain, not
+inference. `.vscode/settings.json` retains `cargo.targetDir` and `check.extraEnv` so the
+configuration is correct if the extension is ever re-enabled.
+
+Agents keep a semantic model through their own rust-analyzer (Claude Code ships one as a
+plugin), so nothing in the ladder of §10.1 is lost. What is deferred to an explicit check
+is what only rustc produces: borrow-check and lifetime errors, the `unused_imports` /
+`dead_code` / `unused_variables` lints, and Clippy.
+
+Measured cost of a check on the stable root, 2026-08-30, hyperfine 1.20.0, n=5, warm
+target, after a one-line edit to a private fn: `cargo check --lib` 6.22s ±0.31,
+`cargo check --all-targets` 10.23s ±0.96. Against the repository `target/`, `just root-check-fast` is ~7.5s and `just root-check` ~15s, the latter because it checks two surfaces. A no-op check is ~1s for either recipe. Populating a cold check
+cache is a one-time ~2min — check units (`--emit=metadata`) and test-build units
+(`--emit=link --test`) are separate unit families, so a stretch of test-only work leaves
+the check cache cold. Two things measured as **non**-levers and must not be re-litigated
+without new evidence: the sccache wrapper (sccache records *zero* compile requests on
+check workloads — every unit carries `-C incremental=` and the wrapper execs straight to
+rustc), and `RUSTC_WRAPPER` toggling (it does not enter Cargo's fingerprint; alternating
+`just` and raw `cargo` rebuilds nothing).
+
+`bacon.toml` defines stable-root `check`, `clippy`, and `nextest` jobs, and exports
+`.bacon-locations` for editor/agent consumption — an agent must confirm that file matches
+the current source generation before reading an empty list as success (§15.2).
 
 ### Shell environment — recipes are the boundary
 
@@ -430,7 +463,7 @@ compatibility tests; each later packet adds behavioral proof at the boundary it 
 | Do documented examples still work? | `cargo test --doc` | `just root-doctest` |
 | Does the exact stable graph match the design? | resolved metadata/tree validator | `just stable-graph-check` |
 | Do structural boundaries hold? | tested ast-grep rules | `just governance-scan` |
-| Is the complete DesiredTree reproducible? | dual isolated model generation | `just model-repro-check` |
+| Is the bounded predecessor DesiredTree reproducible during transition? | dual isolated legacy generation | `just model-repro-check` |
 | Do all four domains pass their routine gates? | aggregate command | `just ci-fast` |
 | Which Rust regions executed? | cargo-llvm-cov | `just coverage` |
 | Do assertions detect plausible faults? | cargo-mutants | `just mutants-file <path>` |

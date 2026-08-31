@@ -3,8 +3,8 @@
   "plan_path": "docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v3_2026-08-28.md",
   "design_path": "docs/designs/codefabric_ontology_compiled_data_fabric_datafusion_arrow_unified_design_v5_2026-08-28.md",
   "baseline_commit": "71a888fed8aae660f97a8bc420f04a039f5aacae",
-  "status": "executing",
-  "current_packet": "WP19",
+  "status": "superseded",
+  "current_packet": null,
   "packets": {
     "WP18": {
       "status": "complete",
@@ -239,8 +239,14 @@
     {
       "kind": "owner_directed_principles_v2_alignment",
       "summary": "The owner directed this remediation to use full_data_fabric_design_principles_v2.md as the current principles authority. The plan and accepted design remain immutable; the implementation must satisfy the stronger causal, reconstruction, staticness, and executable-oracle obligations without editing the concurrently changing principles artifact."
+    },
+    {
+      "kind": "successor_activation_supersession",
+      "successor_plan_path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v2_2026-08-29.md",
+      "activation_override_kind": "owner_directed_activation_override",
+      "summary": "The owner-directed activation of the approved relational-data-fabric v2 successor supersedes this execution authority. Existing packet, milestone, decommission, proving-commit, review, and failure history remains immutable historical evidence and is not completion evidence for the successor."
     }
   ],
-  "next_action": "Execute WP19 remediation for IR-001 and its dependency-closed graph/compiler proof, then advance through WP20-WP27 in review-required order.",
-  "updated_at": "2026-08-29T22:57:30Z"
+  "next_action": "No further packets execute under this historical authority; continue only under the active relational-data-fabric v2 successor plan.",
+  "updated_at": "2026-08-30T04:12:47Z"
 }

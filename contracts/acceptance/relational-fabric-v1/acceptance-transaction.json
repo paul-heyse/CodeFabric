@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "transaction_id": "sha256:b4cdbd288f43e2381bf5a52e18df40c06ea30b61537821f761a153cfc41aae92",
+  "evidence_set_id": "sha256:c31c52a775e1570ad81fe68d6d5a1499855340a5bbbafb9c1ebcd4a89e523b36",
+  "candidate": {
+    "corpus_path": "contracts/acceptance/relational-fabric-v1/expectations.json",
+    "corpus_sha256": "d54caf5183d8aedc940a3e854629e40cac1419233292076ab36c38a09c47dd3b",
+    "schema_path": "contracts/acceptance/relational-fabric-v1/expectation.schema.json",
+    "schema_sha256": "507ec8eadb637cd3e8ff45823fa550006c2322e702f22f2a558ace11dbbb35a0",
+    "comparator_path": "contracts/acceptance/relational-fabric-v1/comparator-manifest.json",
+    "comparator_sha256": "12f1f4ae5ea71b0c8449fb59da3f2703f746a57f92e268e8ed281de7857f4449"
+  },
+  "decision": "rejected",
+  "reviewer": {
+    "reviewer_id": "wp22-independent-contract-review",
+    "role": "Independent evidence-boundary reviewer",
+    "independence_class": "independent-from-production-producers",
+    "accountability": "Rejects post-hoc or non-reconstructible evidence and requires a new content-addressed successor transaction rather than in-place acceptance."
+  },
+  "reviewed_at": "2026-08-30T10:20:00-04:00",
+  "review_basis": [
+    "Accepted design v2 D-28 independent expectations and proof-native governance",
+    "Implementation plan v2 WP22 early authoring and frozen comparator obligations",
+    "Decoded expectation schema, category coverage, exact provenance, limitations, and causal controls",
+    "Historical Git object, toolchain, executable, and isolation reconstruction contract"
+  ],
+  "independence_attestation": "The candidate rows were authored from accepted design, version-pinned API references, released public contracts, and independent semantic judgment; no target provider, compiler, query result, Gate B candidate, or release output was used to calculate an expected row.",
+  "authoring_boundary": {
+    "required_predecessor_packet": "WP01",
+    "required_before_packet": "WP02",
+    "evidence_freeze_commit": null,
+    "consumer_state_path": "docs/plans/state/codefabric-execution-proved-relational-data-fabric_v2_state.json",
+    "status": "unproved-late"
+  },
+  "successor_of": null,
+  "invalidation_policy": "Any byte change to schema, corpus, comparator, provenance, rationale, limitation, control, ownership, or review creates a new evidence-set identity and successor review transaction and invalidates all dependent proving receipts.",
+  "blocking_conditions": [
+    "The candidate was first authored after WP02 and later implementation consumers had already begun, so the mandatory early-authoring boundary cannot be proven retroactively.",
+    "The exact historical root rustc and cargo binary identities were not captured at the transition start.",
+    "No immutable legacy comparator executable digest is available.",
+    "No enforcing no-network, read-only, no-filesystem-write comparator runtime was captured.",
+    "No independent numeric latency, throughput, memory, spill, or update-amplification release budget has been accepted."
+  ]
+}

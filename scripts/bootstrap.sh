@@ -328,8 +328,10 @@ EOF
 }
 
 _cf_ctx_corpus() {
-  local specs parts refs idx plans skills absent
+  local specs current historical parts refs idx plans skills absent
   specs="$(ls "${CF_ROOT}"/docs/authoritative_design/*.md 2>/dev/null | wc -l | tr -d ' ')"
+  current="$(rg -l '^authority_status: current$' "${CF_ROOT}"/docs/authoritative_design/*.md 2>/dev/null | wc -l | tr -d ' ')"
+  historical="$((specs - current))"
   parts="$(awk '/^```/{f=!f;next} !f && /^# (Part|Appendix)/{p++} END{print p+0}' \
     "${CF_ROOT}"/docs/authoritative_design/*.md 2>/dev/null)"
   refs="$(ls "${CF_ROOT}"/docs/library_ref/*.md 2>/dev/null | wc -l | tr -d ' ')"
@@ -338,7 +340,7 @@ _cf_ctx_corpus() {
   skills="$(find "${CF_ROOT}/.claude/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')"
 
   printf 'CORPUS  do not read these whole -- navigate them\n'
-  printf '  docs/authoritative_design/  %s artifacts, %s `# Part`/`# Appendix` headings that\n' "$specs" "$parts"
+  printf '  docs/authoritative_design/  %s current + %s historical masters, %s `# Part`/`# Appendix` headings that\n' "$current" "$historical" "$parts"
   printf '        spec-outline structurally cannot emit (docs/spec_index/README.md §3.1)\n'
   printf '  docs/library_ref/  %s refs   docs/spec_index/  %s   docs/plans/  %s   skills  %s\n' \
     "$refs" "$idx" "$plans" "$skills"
@@ -362,26 +364,41 @@ EOF
 }
 
 _cf_ctx_pins() {
-  local f blk
-  f="$(ls "${CF_ROOT}"/docs/authoritative_design/*data_fabric*.md 2>/dev/null | head -1)"
+  local f blk candidate arrow datafusion object_store delta rust edition
+  f=""
+  for candidate in "${CF_ROOT}"/docs/authoritative_design/*.md; do
+    if awk '
+      /^artifact_tag: FAB$/ { tag = 1 }
+      /^authority_status: current$/ { current = 1 }
+      END { exit !(tag && current) }
+    ' "$candidate"; then
+      f="$candidate"
+      break
+    fi
+  done
   if [ -z "$f" ]; then
     printf 'PINS  read them from the data-fabric spec §2.1 (that spec was not found here)\n'
     return 0
   fi
-  blk="$(awk '/^### 2\.1 Canonical workspace baseline/{s=1} s&&/^```toml/{c=1;next} c&&/^```/{exit} c' "$f" 2>/dev/null)"
+  blk="$(awk '/^### 2\.1 /{s=1; next} s&&/^### /{exit} s' "$f" 2>/dev/null)"
   # Degrade to a pointer rather than print a stale or partial pin set.
   case "$blk" in
-    *datafusion*) ;;
+    *DataFusion*Arrow*Parquet*) ;;
     *) printf 'PINS  read them from the data-fabric spec §2.1 (extraction failed here)\n'; return 0 ;;
   esac
+  arrow="$(printf '%s\n' "$blk" | awk -F'|' '/Arrow and Parquet/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3}')"
+  datafusion="$(printf '%s\n' "$blk" | awk -F'|' '/DataFusion/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3}')"
+  object_store="$(printf '%s\n' "$blk" | awk -F'|' '/`object_store`/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3}')"
+  delta="$(printf '%s\n' "$blk" | sed -n 's/.*revision `\([0-9a-f][0-9a-f]*\)`.*/\1/p')"
+  rust="$(printf '%s\n' "$blk" | awk -F'|' '/Rust toolchain floor/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); sub(/,.*/, "", $3); print $3}')"
+  edition="$(printf '%s\n' "$blk" | sed -n 's/.*edition \([0-9][0-9]*\).*/\1/p')"
+  if [ -z "$arrow" ] || [ -z "$datafusion" ] || [ -z "$object_store" ] || [ -z "$delta" ] || [ -z "$rust" ] || [ -z "$edition" ]; then
+    printf 'PINS  read them from the data-fabric spec §2.1 (extraction failed here)\n'
+    return 0
+  fi
   printf 'PINS  from the data-fabric spec §2.1 -- authoritative; never trust a quoted copy\n'
-  printf '%s\n' "$blk" | awk '
-    /^datafusion =/{d=$3} /^arrow =/{a=$3} /^object_store/{o=$3}
-    /^rust-version/{rv=$3} /^edition/{e=$3} /^resolver/{r=$3}
-    /rev = /{gsub(/[",]/,"");rev=$3}
-    END{gsub(/"/,"",a);gsub(/"/,"",d);gsub(/"/,"",o);gsub(/"/,"",rv);gsub(/"/,"",e);gsub(/"/,"",r)
-        printf "  arrow/parquet %s · datafusion %s · object_store %s\n", a, d, o
-        printf "  deltalake git %.8s (pre-release pin) · rust %s · edition %s · resolver %s\n", rev, rv, e, r}'
+  printf '  arrow/parquet =%s · datafusion =%s · object_store =%s\n' "$arrow" "$datafusion" "$object_store"
+  printf '  deltalake git %.8s (pre-release pin) · rust %s · edition %s · resolver 3\n' "$delta" "$rust" "$edition"
 }
 
 cf_context_extras() {

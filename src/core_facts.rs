@@ -2542,6 +2542,7 @@ mod tests {
                 schema_digest: contract.schema_digest.to_owned(),
                 chunk_digest,
                 module_digest: framed(0x24),
+                relations: Vec::new(),
             }],
             capability_codes: Vec::new(),
             overall_digest: framed(0x25),

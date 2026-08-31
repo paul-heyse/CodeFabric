@@ -100,6 +100,8 @@ message AnalyzeCommand {
     codefabric.provider.v1.ChunkAccepted chunk_accepted = 2;
     codefabric.provider.v1.ChunkRejected chunk_rejected = 3;
     CancelRunRequest cancel = 4;
+    // Only the flow_control_ack variant is valid in the daemon-to-sidecar direction.
+    codefabric.provider.v1.RelationIpcFrame relation_ipc_ack = 5;
   }
 }
 
@@ -141,6 +143,14 @@ message ObservationBatchChunk {
   string chunk_digest = 8;
 }
 
+message RelationIpcFrameEvent {
+  AnalyzeEventHeader header = 1;
+  string module_id = 2;
+  uint32 observation_family_code = 3;
+  // Only open/payload/ipc_end/coverage_trailer/terminal are valid in this direction.
+  codefabric.provider.v1.RelationIpcFrame frame = 4;
+}
+
 message ModuleEnd {
   AnalyzeEventHeader header = 1;
   string module_id = 2;
@@ -167,6 +177,7 @@ message AnalyzeEvent {
     ObservationBatchChunk observation_batch_chunk = 4;
     ModuleEnd module_end = 5;
     RunTerminal run_terminal = 6;
+    RelationIpcFrameEvent relation_ipc_frame = 7;
   }
 }
 

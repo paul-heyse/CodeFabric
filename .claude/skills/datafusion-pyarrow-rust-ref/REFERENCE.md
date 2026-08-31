@@ -23,7 +23,7 @@ Aliases follow `docs/spec_index/library-routing.md` §1 and must stay in sync wi
 | `df-calc` | same file | C1–C13 | — |
 | — | same file, Part III | V1–V6 upgrade gates | — |
 | `arrow` | `arrow_rust_59_datafusion55_advanced_reference_2026-08-23.md` | §0–§28 | 34,372 |
-| `principles` | `full_data_fabric_design_principles.md` | Principles 1–25 + §27–§31 | 1,327 |
+| `principles` | `full_data_fabric_design_principles_v2.md` | staticness test + P1–P36 + Y1–Y7 | 2,189 |
 | `align` | `datafusion55_arrow59_design_principle_alignment_manual_2026-08-24.md` | §0–§2 · P1–P25 · pattern families · flows §4–§11 · §12–§25 · App. A | 2,294 |
 
 `REFERENCE §N` and `SKILL §…` refer to this skill's own files, never to a document.
@@ -242,7 +242,7 @@ topic map (148–577) · recommended deep-dive order (578).
 
 ### §1.3 `principles` — the design constitution
 
-Re-derive with `rg -n '^# ' docs/library_ref/full_data_fabric_design_principles.md`.
+Re-derive with `rg -n '^# ' docs/library_ref/full_data_fabric_design_principles_v2.md`.
 
 **Citation convention:** the h1 ordinal is **principle number + 1 by construction**
 (`# 15. Principle 14 — …`). Always cite by principle number and title ("Principle 14"),

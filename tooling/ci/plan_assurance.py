@@ -28,7 +28,7 @@ SOURCE_ROOTS = (
     Path("rustc-extractor"),
     Path("pyrefly-sidecar"),
 )
-ORACLE_KINDS = ("BEH", "STR", "NEG", "OPS")
+ORACLE_KINDS = ("INT", "BEH", "NEG", "OPS")
 
 
 class PlanAssuranceError(ValueError):
@@ -207,7 +207,7 @@ def _validate_ontology_fabric_readiness_states(
 
 def _load_overlap_dispositions(
     root: Path,
-) -> dict[tuple[str, frozenset[str]], Mapping[str, Any]]:
+) -> dict[tuple[str, str, frozenset[str]], Mapping[str, Any]]:
     path = root / OVERLAP_DISPOSITIONS
     if not path.is_file():
         return {}
@@ -223,21 +223,24 @@ def _load_overlap_dispositions(
     }
     if (
         not isinstance(document, Mapping)
-        or document.get("schema_version") != 1
+        or document.get("schema_version") != 2
         or set(document) != expected_keys
         or document.get("artifact_id")
         != "codefabric.governance.plan-overlap-dispositions"
         or not isinstance(document.get("records"), list)
     ):
         raise PlanAssuranceError(f"{OVERLAP_DISPOSITIONS} has an invalid root")
-    result: dict[tuple[str, frozenset[str]], Mapping[str, Any]] = {}
+    result: dict[tuple[str, str, frozenset[str]], Mapping[str, Any]] = {}
     for record in document["records"]:
         if not isinstance(record, Mapping):
             raise PlanAssuranceError("overlap disposition must be a mapping")
         packets = record.get("packets")
+        plan_id = record.get("plan_id")
         resource = record.get("resource")
         if (
-            not isinstance(packets, list)
+            not isinstance(plan_id, str)
+            or not plan_id.strip()
+            or not isinstance(packets, list)
             or len(packets) != 2
             or not all(isinstance(packet, str) for packet in packets)
             or not isinstance(resource, str)
@@ -250,15 +253,46 @@ def _load_overlap_dispositions(
             raise PlanAssuranceError(
                 f"{resource} overlap lacks disjoint phase evidence"
             )
-        key = (resource, frozenset(packets))
+        key = (plan_id, resource, frozenset(packets))
         if key in result:
             raise PlanAssuranceError(f"duplicate overlap disposition {key}")
         result[key] = record
     return result
 
 
-def validate_dependencies(root: Path = ROOT) -> tuple[int, int]:
-    plan_path, _, _ = _active(root)
+def _selected_plan(
+    root: Path, plan_path: Path | None
+) -> tuple[Path, Mapping[str, Any]]:
+    """Resolve one explicit plan without changing the active-plan authority."""
+    if plan_path is None:
+        active_path, plan, _ = _active(root)
+        return active_path, plan
+    selected = plan_path if plan_path.is_absolute() else root / plan_path
+    selected = selected.resolve()
+    try:
+        selected.relative_to(root.resolve())
+    except ValueError as error:
+        raise PlanAssuranceError(
+            f"dependency-check plan escapes the repository: {selected}"
+        ) from error
+    if not selected.is_file():
+        raise PlanAssuranceError(f"dependency-check plan does not exist: {selected}")
+    try:
+        plan = artifact_contracts.validate_plan(
+            root,
+            selected,
+            verify_declared_inputs=False,
+            _allow_missing_state=True,
+        )
+    except artifact_contracts.ArtifactContractError as error:
+        raise PlanAssuranceError(str(error)) from error
+    return selected, plan
+
+
+def validate_dependencies(
+    root: Path = ROOT, plan_path: Path | None = None
+) -> tuple[int, int]:
+    plan_path, plan = _selected_plan(root, plan_path)
     dependencies = _dependency_map(plan_path)
     _topological_order(dependencies)
     _validate_ontology_fabric_readiness_states(dependencies)
@@ -267,9 +301,11 @@ def validate_dependencies(root: Path = ROOT) -> tuple[int, int]:
         packet: _known_touch_resources(block) for packet, block in blocks.items()
     }
     dispositions = {
-        key: value
-        for key, value in _load_overlap_dispositions(root).items()
-        if key[1] <= blocks.keys()
+        (resource, packets): value
+        for (plan_id, resource, packets), value in _load_overlap_dispositions(
+            root
+        ).items()
+        if plan_id == plan["plan_id"] and packets <= blocks.keys()
     }
     required: set[tuple[str, frozenset[str]]] = set()
     packets = sorted(blocks)
@@ -735,7 +771,19 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("oracle-substance-check")
-    subparsers.add_parser("dependency-check")
+    dependency = subparsers.add_parser("dependency-check")
+    dependency.add_argument(
+        "plan_path",
+        nargs="?",
+        type=Path,
+        help="optional repository-relative plan path",
+    )
+    dependency.add_argument(
+        "--plan",
+        dest="plan_option",
+        type=Path,
+        help="validate an explicit plan without changing active-plan authority",
+    )
     subparsers.add_parser("current-packet-oracle-check")
     packet = subparsers.add_parser("packet-oracle-check")
     packet.add_argument("packet")
@@ -756,7 +804,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"oracle substance: {declared} declared, {implemented} currently required definitions"
             )
         elif args.command == "dependency-check":
-            packets, overlaps = validate_dependencies()
+            if args.plan_path is not None and args.plan_option is not None:
+                raise PlanAssuranceError("dependency-check plan may be supplied once")
+            selected_plan = (
+                args.plan_option if args.plan_option is not None else args.plan_path
+            )
+            packets, overlaps = validate_dependencies(plan_path=selected_plan)
             print(
                 f"plan dependency closure: {packets} packets, {overlaps} disjoint-phase overlaps"
             )

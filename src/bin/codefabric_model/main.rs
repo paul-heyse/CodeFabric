@@ -11,6 +11,8 @@ pub(crate) mod catalog;
 pub mod desired_tree;
 pub mod driver_protocol;
 pub mod incremental;
+#[cfg(not(feature = "daemon"))]
+pub mod legacy_model_importer;
 pub mod model_control;
 pub mod model_git_state;
 #[allow(dead_code, clippy::enum_variant_names, clippy::struct_field_names)] // The shared wire models retain their normative field vocabulary.
@@ -21,6 +23,18 @@ pub mod registry_cbef_driver;
 #[allow(dead_code, clippy::missing_errors_doc, clippy::must_use_candidate)] // The shared registry API is wider than this compiler's projection subset.
 #[path = "../../contracts/registry_models.rs"]
 pub(crate) mod registry_models;
+#[cfg(not(feature = "daemon"))]
+#[allow(
+    dead_code,
+    unused_imports,
+    clippy::assigning_clones,
+    clippy::match_same_arms,
+    clippy::missing_errors_doc,
+    clippy::struct_field_names,
+    clippy::too_many_lines
+)]
+#[path = "../../relational_model/mod.rs"]
+pub(crate) mod relational_model;
 pub mod release_census;
 pub mod repository_model;
 pub mod schema_driver;

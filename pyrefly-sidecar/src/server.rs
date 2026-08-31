@@ -25,9 +25,13 @@ use crate::protocol::generated::codefabric::pyrefly::v1::pyrefly_sidecar_server:
 };
 use crate::protocol::generated::codefabric::pyrefly::v1::{
     AnalyzeCommand, AnalyzeEvent, AnalyzeEventHeader, CancelRunRequest, CloseContextRequest,
-    CloseContextResponse, Hello, HelloAck, ModuleBegin, ModuleEnd, ObservationBatchChunk,
-    OpenContextRequest, OpenContextResponse, RunAccepted, RunTerminal, ShutdownRequest,
+    CloseContextResponse, Hello, HelloAck, ModuleBegin, ModuleEnd, OpenContextRequest,
+    OpenContextResponse, RelationIpcFrameEvent, RunAccepted, RunTerminal, ShutdownRequest,
     ShutdownResponse,
+};
+use crate::relation_ipc_contract::{RelationWireIdentity, relation_wire_identity};
+use crate::relation_ipc_proto::{
+    RelationCoverage, decode_flow_control_ack, encode_relation_frames,
 };
 
 const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
@@ -36,6 +40,10 @@ const MAX_OUTSTANDING_CHUNKS: u32 = 4;
 const MAX_UNACKNOWLEDGED_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CONTEXTS: usize = 4;
 const MAX_MEMORY_MIB: u64 = 4096;
+const MAX_MODULES_PER_RUN: usize = 64;
+const MAX_SOURCE_BYTES_PER_MODULE: u64 = 8 * 1024 * 1024;
+const MAX_SOURCE_BYTES_PER_RUN: u64 = 64 * 1024 * 1024;
+const MAX_TOTAL_RELATION_BYTES: usize = 256 * 1024 * 1024;
 const REQUIRED_FEATURE_BITS: u64 = (1_u64 << 17) | (1_u64 << 32);
 const OPTIONAL_FEATURE_BITS: u64 = 1_u64 << 33;
 const RESOURCE_PROFILE_ID: &str = "sidecar-semantic-standard";
@@ -57,8 +65,15 @@ struct OpenContext {
 struct CreditState {
     available_chunks: u32,
     available_bytes: u64,
-    outstanding: BTreeMap<u64, u64>,
+    outstanding: BTreeMap<(Vec<u8>, u64), OutstandingPayload>,
+    next_ack_sequence: BTreeMap<Vec<u8>, u64>,
     rejected: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+struct OutstandingPayload {
+    identity: RelationWireIdentity,
+    bytes: u64,
 }
 
 struct ActiveRun {
@@ -131,12 +146,12 @@ fn valid_digest(value: &str) -> bool {
 }
 
 fn validate_hello(hello: &Hello) -> Result<(), Status> {
-    let expected_schema = crate::pyrefly_link::schema_digest();
+    let expected_schemas = crate::pyrefly_link::schema_digests();
     if hello.protocol_major != 1
         || hello.protocol_minor != 0
         || hello.required_feature_bits != REQUIRED_FEATURE_BITS
         || hello.optional_feature_bits & !OPTIONAL_FEATURE_BITS != 0
-        || hello.observation_schema_digests != [expected_schema]
+        || hello.observation_schema_digests != expected_schemas
         || hello.maximum_frame_bytes != u64::try_from(MAX_FRAME_BYTES).unwrap()
         || hello.maximum_arrow_chunk_bytes != u64::try_from(MAX_ARROW_CHUNK_BYTES).unwrap()
         || hello.sandbox_profile_digest != SANDBOX_PROFILE_DIGEST
@@ -148,6 +163,85 @@ fn validate_hello(hello: &Hello) -> Result<(), Status> {
     Ok(())
 }
 
+fn register_relation_stream(
+    credits: &mut CreditState,
+    identity: RelationWireIdentity,
+) -> Result<(), &'static str> {
+    if credits
+        .next_ack_sequence
+        .insert(identity.stream_id.to_vec(), 0)
+        .is_some()
+    {
+        return Err("relation stream identity is duplicated");
+    }
+    Ok(())
+}
+
+fn release_relation_credit(
+    credits: &mut CreditState,
+    frame: &crate::relation_ipc_proto_types::RelationIpcFrame,
+) -> Result<(), &'static str> {
+    let acknowledgement = decode_flow_control_ack(frame)?;
+    let stream_key = acknowledgement.header.identity.stream_id.to_vec();
+    let expected_ack_sequence = credits
+        .next_ack_sequence
+        .get_mut(&stream_key)
+        .ok_or("credit acknowledgement stream identity is unknown")?;
+    if acknowledgement.header.sequence != *expected_ack_sequence {
+        return Err("credit acknowledgement sequence is duplicate or out of order");
+    }
+    *expected_ack_sequence = expected_ack_sequence
+        .checked_add(1)
+        .ok_or("credit acknowledgement sequence space is exhausted")?;
+    if acknowledgement.cancelled {
+        return Err("relation stream was cancelled by the daemon");
+    }
+    let payload_sequence = acknowledgement
+        .acknowledged_sequence
+        .ok_or("credit acknowledgement payload sequence is absent")?;
+    let outstanding_key = (stream_key, payload_sequence);
+    let outstanding = credits
+        .outstanding
+        .get(&outstanding_key)
+        .copied()
+        .ok_or("credit acknowledgement payload sequence is unknown")?;
+    if outstanding.identity != acknowledgement.header.identity
+        || acknowledgement.released_bytes != outstanding.bytes
+    {
+        return Err("credit acknowledgement identity or byte release differs from the payload");
+    }
+
+    credits.outstanding.remove(&outstanding_key);
+    let outstanding_bytes = credits
+        .outstanding
+        .values()
+        .try_fold(0_u64, |total, payload| total.checked_add(payload.bytes))
+        .ok_or("outstanding credit accounting overflowed")?;
+    let maximum_available_chunks = MAX_OUTSTANDING_CHUNKS
+        .checked_sub(u32::try_from(credits.outstanding.len()).unwrap_or(u32::MAX))
+        .ok_or("outstanding chunk accounting exceeds its bound")?;
+    let available_chunks = credits
+        .available_chunks
+        .checked_add(1)
+        .ok_or("available chunk credit accounting overflowed")?;
+    if available_chunks > maximum_available_chunks {
+        return Err("chunk acknowledgement exceeds the bounded credit window");
+    }
+    let maximum_available_bytes = MAX_UNACKNOWLEDGED_BYTES
+        .checked_sub(outstanding_bytes)
+        .ok_or("outstanding byte accounting exceeds its bound")?;
+    let available_bytes = credits
+        .available_bytes
+        .checked_add(acknowledgement.released_bytes)
+        .ok_or("available byte credit accounting overflowed")?;
+    if available_bytes > maximum_available_bytes {
+        return Err("byte acknowledgement exceeds the bounded credit window");
+    }
+    credits.available_chunks = available_chunks;
+    credits.available_bytes = available_bytes;
+    Ok(())
+}
+
 async fn receive_run_control(
     mut commands: tonic::Streaming<AnalyzeCommand>,
     run: Arc<ActiveRun>,
@@ -156,7 +250,14 @@ async fn receive_run_control(
     loop {
         let command = match commands.message().await {
             Ok(Some(command)) => command.command,
-            Ok(None) => return,
+            Ok(None) => {
+                run.credits
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .rejected = Some("control stream closed before provider terminal".to_owned());
+                run.request_cancel(false);
+                return;
+            }
             Err(error) => {
                 run.credits
                     .lock()
@@ -171,35 +272,17 @@ async fn receive_run_control(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         match command {
-            Some(Command::ChunkAccepted(accepted)) => {
-                let Some(bytes) = credits.outstanding.remove(&accepted.sequence) else {
-                    credits.rejected = Some("credit acknowledgement sequence is unknown".into());
+            Some(Command::RelationIpcAck(frame)) => {
+                if let Err(error) = release_relation_credit(&mut credits, &frame) {
+                    credits.rejected = Some(error.to_owned());
                     drop(credits);
                     run.request_cancel(false);
                     return;
-                };
-                let outstanding_bytes = credits.outstanding.values().sum::<u64>();
-                let maximum_available_chunks = MAX_OUTSTANDING_CHUNKS
-                    .saturating_sub(u32::try_from(credits.outstanding.len()).unwrap_or(u32::MAX));
-                credits.available_chunks = credits
-                    .available_chunks
-                    .saturating_add(accepted.next_credit_chunks)
-                    .min(maximum_available_chunks);
-                let maximum_available_bytes =
-                    MAX_UNACKNOWLEDGED_BYTES.saturating_sub(outstanding_bytes);
-                credits.available_bytes = credits
-                    .available_bytes
-                    .saturating_add(accepted.next_credit_bytes.max(bytes))
-                    .min(maximum_available_bytes);
-            }
-            Some(Command::ChunkRejected(rejected)) => {
-                if !credits.outstanding.contains_key(&rejected.sequence)
-                    || rejected.error_code.is_empty()
-                {
-                    credits.rejected = Some("chunk rejection identity differs".into());
-                } else {
-                    credits.rejected = Some(rejected.error_code);
                 }
+            }
+            Some(Command::ChunkAccepted(_)) | Some(Command::ChunkRejected(_)) => {
+                credits.rejected =
+                    Some("legacy whole-relation chunk control is no longer admitted".into());
                 drop(credits);
                 run.request_cancel(false);
                 return;
@@ -227,7 +310,12 @@ async fn receive_run_control(
     }
 }
 
-async fn reserve_chunk_credit(run: &ActiveRun, sequence: u64, bytes: u64) -> Result<(), Status> {
+async fn reserve_relation_credit(
+    run: &ActiveRun,
+    identity: RelationWireIdentity,
+    sequence: u64,
+    bytes: u64,
+) -> Result<(), Status> {
     if bytes > MAX_UNACKNOWLEDGED_BYTES {
         return Err(Status::resource_exhausted(
             "one Pyrefly chunk exceeds the unacknowledged byte limit",
@@ -249,7 +337,18 @@ async fn reserve_chunk_credit(run: &ActiveRun, sequence: u64, bytes: u64) -> Res
             if credits.available_chunks > 0 && credits.available_bytes >= bytes {
                 credits.available_chunks -= 1;
                 credits.available_bytes -= bytes;
-                credits.outstanding.insert(sequence, bytes);
+                if credits
+                    .outstanding
+                    .insert(
+                        (identity.stream_id.to_vec(), sequence),
+                        OutstandingPayload { identity, bytes },
+                    )
+                    .is_some()
+                {
+                    return Err(Status::failed_precondition(
+                        "relation payload sequence is duplicated",
+                    ));
+                }
                 return Ok(());
             }
         }
@@ -305,17 +404,17 @@ fn capability_outcomes(
         .map(|capability_code| CapabilityOutcome {
             capability_code: *capability_code,
             owner_capability_state_code: if state == ProviderRunState::Succeeded {
-                10
+                40
             } else {
                 30
             },
             completeness_state_code: if state == ProviderRunState::Succeeded {
-                10
+                20
             } else {
                 40
             },
             reason_code: match state {
-                ProviderRunState::Succeeded => "PYREFLY_SUCCEEDED",
+                ProviderRunState::Succeeded => "PYREFLY_QUERY_SLICE_PARTIAL",
                 ProviderRunState::Superseded => "PYREFLY_SUPERSEDED",
                 ProviderRunState::Cancelled => "PYREFLY_CANCELLED",
                 _ => "PYREFLY_FAILED",
@@ -365,6 +464,7 @@ fn validate_source(
     if !valid_digest(&blob.content_digest)
         || blob.content_digest != module.source_digest
         || !lease.blobs.iter().any(|candidate| candidate == blob)
+        || blob.byte_length > MAX_SOURCE_BYTES_PER_MODULE
     {
         return Err(Status::failed_precondition(
             "Pyrefly module source is outside the opened immutable lease",
@@ -393,7 +493,7 @@ impl PyreflySidecar for Service {
             sidecar_build: "codefabric-pyrefly-sidecar 0.1.0".to_owned(),
             pyrefly_source_digest: PYREFLY_SOURCE_DIGEST.to_owned(),
             supported_python_versions: hello.supported_python_versions,
-            observation_schema_digests: vec![crate::pyrefly_link::schema_digest()],
+            observation_schema_digests: crate::pyrefly_link::schema_digests(),
             maximum_frame_bytes: u64::try_from(MAX_FRAME_BYTES).unwrap(),
             maximum_arrow_chunk_bytes: u64::try_from(MAX_ARROW_CHUNK_BYTES).unwrap(),
             sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
@@ -508,6 +608,14 @@ impl PyreflySidecar for Service {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
+        let declared_source_bytes = start.modules.iter().try_fold(0_u64, |total, module| {
+            total.checked_add(
+                module
+                    .source_blob
+                    .as_ref()
+                    .map_or(u64::MAX, |blob| blob.byte_length),
+            )
+        });
         if start.workspace_id != context.workspace_id
             || start.analysis_context_id != context.analysis_context_id
             || start.context_manifest_digest != context.manifest_digest
@@ -519,11 +627,13 @@ impl PyreflySidecar for Service {
             || start.initial_chunk_credits > MAX_OUTSTANDING_CHUNKS
             || start.initial_credit_bytes == 0
             || start.initial_credit_bytes > MAX_UNACKNOWLEDGED_BYTES
-            || !valid_digest(&start.output_schema_bundle_digest)
+            || start.output_schema_bundle_digest != crate::pyrefly_link::schema_bundle_digest()
             || start.sandbox_profile_digest != SANDBOX_PROFILE_DIGEST
             || start.trust_profile != TRUST_PROFILE
             || start.resource_profile_id != RESOURCE_PROFILE_ID
             || start.modules.is_empty()
+            || start.modules.len() > MAX_MODULES_PER_RUN
+            || declared_source_bytes.is_none_or(|total| total > MAX_SOURCE_BYTES_PER_RUN)
         {
             return Err(Status::failed_precondition(
                 "Pyrefly analysis identity, lease, credits, or deadline differs",
@@ -539,6 +649,7 @@ impl PyreflySidecar for Service {
                 available_chunks: start.initial_chunk_credits,
                 available_bytes: start.initial_credit_bytes,
                 outstanding: BTreeMap::new(),
+                next_ack_sequence: BTreeMap::new(),
                 rejected: None,
             }),
             credit_notify: tokio::sync::Notify::new(),
@@ -588,6 +699,7 @@ impl PyreflySidecar for Service {
                         crate::pyrefly_link::ModuleInput {
                             module_id: module.module_id.clone(),
                             module_name: module.module_name.clone(),
+                            file_id: module.file_id.clone(),
                             source_path,
                             source_digest: module.source_digest.clone(),
                         }
@@ -601,13 +713,19 @@ impl PyreflySidecar for Service {
                     return;
                 }
             };
+            let run_identity = crate::pyrefly_link::AnalysisRunIdentity {
+                provider_run_id: start.provider_run_id.clone(),
+                analysis_context_id: start.analysis_context_id.clone(),
+                semantic_environment_digest: start.context_manifest_digest.clone(),
+                source_generation: start.source_generation,
+            };
             let analysis_context = Arc::clone(&context);
             let analysis = match tokio::task::spawn_blocking(move || {
                 analysis_context
                     .semantic
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .analyze_modules(&inputs)
+                    .analyze_modules(&run_identity, &inputs)
             })
             .await
             {
@@ -625,6 +743,26 @@ impl PyreflySidecar for Service {
                     return;
                 }
             };
+            let total_relation_bytes =
+                analysis
+                    .modules
+                    .iter()
+                    .try_fold(0_usize, |module_total, module| {
+                        module
+                            .relations
+                            .iter()
+                            .try_fold(module_total, |total, relation| {
+                                total.checked_add(relation.arrow_ipc.len())
+                            })
+                    });
+            if total_relation_bytes.is_none_or(|total| total > MAX_TOTAL_RELATION_BYTES) {
+                let _ = sender
+                    .send(Err(Status::resource_exhausted(
+                        "Pyrefly relation streams exceed the per-run byte bound",
+                    )))
+                    .await;
+                return;
+            }
             if let Some(state) = interrupted_state(&run, &context, start.source_generation) {
                 *run.terminal
                     .lock()
@@ -637,7 +775,7 @@ impl PyreflySidecar for Service {
                             capability_outcomes: capability_outcomes(&start, state),
                             overall_digest: b3(&[]),
                             terminal_state: state as i32,
-                            rechecked_module_ids: analysis.rechecked_module_ids,
+                            rechecked_module_ids: analysis.proven_rechecked_module_ids,
                             sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
                             trust_profile: TRUST_PROFILE.to_owned(),
                         })),
@@ -645,11 +783,11 @@ impl PyreflySidecar for Service {
                     .await;
                 return;
             }
-            let rechecked_module_ids = analysis.rechecked_module_ids;
+            let rechecked_module_ids = analysis.proven_rechecked_module_ids;
             let mut sequence = 0_u64;
             let mut module_digests = Vec::new();
             let mut interrupted = None;
-            for (module, analysis) in start.modules.iter().zip(analysis.modules) {
+            'modules: for (module, analysis) in start.modules.iter().zip(analysis.modules) {
                 if let Some(state) = interrupted_state(&run, &context, start.source_generation) {
                     interrupted = Some(state);
                     break;
@@ -675,35 +813,104 @@ impl PyreflySidecar for Service {
                         .await;
                     return;
                 }
-                sequence += 1;
-                let chunk_digest = b3(&analysis.arrow_ipc);
-                if let Err(error) = reserve_chunk_credit(
-                    &run,
-                    sequence,
-                    u64::try_from(analysis.arrow_ipc.len()).unwrap_or(u64::MAX),
-                )
-                .await
-                {
-                    let _ = sender.send(Err(error)).await;
-                    return;
-                }
-                if sender
-                    .send(Ok(AnalyzeEvent {
-                        event: Some(Event::ObservationBatchChunk(ObservationBatchChunk {
-                            header: Some(header(&start, &source_manifest, sequence)),
-                            module_id: module.module_id.clone(),
-                            observation_family_code: crate::pyrefly_link::observation_family_code(),
-                            arrow_ipc: analysis.arrow_ipc,
-                            payload_reference: None,
-                            schema_digest: analysis.schema_digest,
-                            row_count: analysis.row_count,
-                            chunk_digest,
-                        })),
-                    }))
-                    .await
-                    .is_err()
-                {
-                    return;
+                let mut family_counts = BTreeMap::new();
+                for relation in analysis.relations {
+                    let family_code = relation.relation.family_code();
+                    if family_counts
+                        .insert(family_code, relation.row_count)
+                        .is_some()
+                    {
+                        let _ = sender
+                            .send(Err(Status::internal(
+                                "Pyrefly emitted one relation family more than once",
+                            )))
+                            .await;
+                        return;
+                    }
+                    let identity = match relation_wire_identity(
+                        relation.relation.relation_id(),
+                        &relation.schema_digest,
+                        &start.provider_run_id,
+                        &module.module_id,
+                        &source_manifest,
+                        &start.context_manifest_digest,
+                    ) {
+                        Ok(identity) => identity,
+                        Err(error) => {
+                            let _ = sender.send(Err(Status::internal(error))).await;
+                            return;
+                        }
+                    };
+                    let registration = {
+                        let mut credits = run
+                            .credits
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        register_relation_stream(&mut credits, identity)
+                    };
+                    if let Err(error) = registration {
+                        let _ = sender.send(Err(Status::internal(error))).await;
+                        return;
+                    }
+                    let frames = match encode_relation_frames(
+                        identity,
+                        &relation.arrow_ipc,
+                        1,
+                        relation.row_count,
+                        &RelationCoverage::complete(1),
+                    ) {
+                        Ok(frames) => frames,
+                        Err(error) => {
+                            let _ = sender.send(Err(Status::internal(error))).await;
+                            return;
+                        }
+                    };
+                    for frame in frames {
+                        sequence += 1;
+                        if let Some(
+                            crate::relation_ipc_proto_types::relation_ipc_frame::Frame::Payload(
+                                payload,
+                            ),
+                        ) = frame.frame.as_ref()
+                        {
+                            let frame_sequence = payload
+                                .header
+                                .as_ref()
+                                .map(|header| header.sequence)
+                                .unwrap_or(u64::MAX);
+                            if let Err(error) = reserve_relation_credit(
+                                &run,
+                                identity,
+                                frame_sequence,
+                                u64::try_from(payload.arrow_ipc_fragment.len()).unwrap_or(u64::MAX),
+                            )
+                            .await
+                            {
+                                if let Some(state) =
+                                    interrupted_state(&run, &context, start.source_generation)
+                                {
+                                    interrupted = Some(state);
+                                    break 'modules;
+                                }
+                                let _ = sender.send(Err(error)).await;
+                                return;
+                            }
+                        }
+                        if sender
+                            .send(Ok(AnalyzeEvent {
+                                event: Some(Event::RelationIpcFrame(RelationIpcFrameEvent {
+                                    header: Some(header(&start, &source_manifest, sequence)),
+                                    module_id: module.module_id.clone(),
+                                    observation_family_code: family_code,
+                                    frame: Some(frame),
+                                })),
+                            }))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
                 }
                 sequence += 1;
                 module_digests.push(analysis.module_digest.clone());
@@ -712,9 +919,7 @@ impl PyreflySidecar for Service {
                         event: Some(Event::ModuleEnd(ModuleEnd {
                             header: Some(header(&start, &source_manifest, sequence)),
                             module_id: module.module_id.clone(),
-                            family_counts: [(crate::pyrefly_link::observation_family_code(), 1)]
-                                .into_iter()
-                                .collect(),
+                            family_counts: family_counts.into_iter().collect(),
                             module_digest: analysis.module_digest,
                         })),
                     }))
@@ -895,7 +1100,7 @@ pub(crate) fn serve(socket: &Path) -> Result<(), String> {
             .add_service(
                 PyreflySidecarServer::new(service)
                     .max_decoding_message_size(MAX_FRAME_BYTES)
-                    .max_encoding_message_size(MAX_ARROW_CHUNK_BYTES + MAX_FRAME_BYTES),
+                    .max_encoding_message_size(MAX_FRAME_BYTES),
             )
             .serve_with_incoming(incoming)
             .await
@@ -917,11 +1122,73 @@ mod tests {
             optional_feature_bits: OPTIONAL_FEATURE_BITS,
             daemon_build: "protocol-test".to_owned(),
             supported_python_versions: vec!["3.14".to_owned()],
-            observation_schema_digests: vec![crate::pyrefly_link::schema_digest()],
+            observation_schema_digests: crate::pyrefly_link::schema_digests(),
             maximum_frame_bytes: u64::try_from(MAX_FRAME_BYTES).unwrap(),
             maximum_arrow_chunk_bytes: u64::try_from(MAX_ARROW_CHUNK_BYTES).unwrap(),
             sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
         }
+    }
+
+    fn relation_identity() -> RelationWireIdentity {
+        RelationWireIdentity {
+            relation_id: [1; 16],
+            stream_id: [2; 16],
+            schema_fingerprint: [3; 32],
+            source_pin: [4; 32],
+            context_pin: [5; 32],
+        }
+    }
+
+    #[test]
+    fn relation_acknowledgements_return_only_explicitly_accepted_credit() {
+        let identity = relation_identity();
+        let mut credits = CreditState {
+            available_chunks: MAX_OUTSTANDING_CHUNKS - 1,
+            available_bytes: MAX_UNACKNOWLEDGED_BYTES - 4,
+            outstanding: [(
+                (identity.stream_id.to_vec(), 7),
+                OutstandingPayload { identity, bytes: 4 },
+            )]
+            .into_iter()
+            .collect(),
+            next_ack_sequence: [(identity.stream_id.to_vec(), 0)].into_iter().collect(),
+            rejected: None,
+        };
+        let accepted =
+            crate::relation_ipc_proto::flow_control_ack_frame(identity, 0, Some(7), 4, false)
+                .unwrap();
+        release_relation_credit(&mut credits, &accepted).unwrap();
+        assert!(credits.outstanding.is_empty());
+        assert_eq!(credits.available_chunks, MAX_OUTSTANDING_CHUNKS);
+        assert_eq!(credits.available_bytes, MAX_UNACKNOWLEDGED_BYTES);
+
+        let mut excessive = CreditState {
+            available_chunks: MAX_OUTSTANDING_CHUNKS - 1,
+            available_bytes: MAX_UNACKNOWLEDGED_BYTES - 4,
+            outstanding: [(
+                (identity.stream_id.to_vec(), 8),
+                OutstandingPayload { identity, bytes: 4 },
+            )]
+            .into_iter()
+            .collect(),
+            next_ack_sequence: [(identity.stream_id.to_vec(), 0)].into_iter().collect(),
+            rejected: None,
+        };
+        let excessive_ack =
+            crate::relation_ipc_proto::flow_control_ack_frame(identity, 0, Some(8), 5, false)
+                .unwrap();
+        assert_eq!(
+            release_relation_credit(&mut excessive, &excessive_ack),
+            Err("credit acknowledgement identity or byte release differs from the payload")
+        );
+        assert_eq!(
+            excessive
+                .outstanding
+                .get(&(identity.stream_id.to_vec(), 8))
+                .map(|payload| payload.bytes),
+            Some(4)
+        );
+        assert_eq!(excessive.available_bytes, MAX_UNACKNOWLEDGED_BYTES - 4);
     }
 
     #[tokio::test]
@@ -955,7 +1222,7 @@ mod tests {
         );
         assert_eq!(
             acknowledgement.observation_schema_digests,
-            [crate::pyrefly_link::schema_digest()]
+            crate::pyrefly_link::schema_digests()
         );
 
         let manifest = b"{\"python\":\"3.14\"}".to_vec();
@@ -1002,15 +1269,19 @@ mod tests {
                 available_chunks: 1,
                 available_bytes: 4,
                 outstanding: BTreeMap::new(),
+                next_ack_sequence: [(relation_identity().stream_id.to_vec(), 0)]
+                    .into_iter()
+                    .collect(),
                 rejected: None,
             }),
             credit_notify: tokio::sync::Notify::new(),
         });
-        reserve_chunk_credit(&run, 1, 4).await.unwrap();
+        let identity = relation_identity();
+        reserve_relation_credit(&run, identity, 1, 4).await.unwrap();
         assert!(
             tokio::time::timeout(
                 std::time::Duration::from_millis(20),
-                reserve_chunk_credit(&run, 2, 1),
+                reserve_relation_credit(&run, identity, 2, 1),
             )
             .await
             .is_err(),
@@ -1021,12 +1292,18 @@ mod tests {
                 .credits
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            assert_eq!(credits.outstanding.remove(&1), Some(4));
+            assert_eq!(
+                credits
+                    .outstanding
+                    .remove(&(identity.stream_id.to_vec(), 1))
+                    .map(|payload| payload.bytes),
+                Some(4)
+            );
             credits.available_chunks = 1;
             credits.available_bytes = 4;
         }
         run.credit_notify.notify_waiters();
-        reserve_chunk_credit(&run, 2, 1).await.unwrap();
+        reserve_relation_credit(&run, identity, 2, 1).await.unwrap();
 
         service
             .runs
@@ -1046,6 +1323,14 @@ mod tests {
                 CancelAcknowledgementState::CancellationRequested as i32
             );
         }
+        assert_eq!(
+            reserve_relation_credit(&run, identity, 3, 1)
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::Cancelled,
+            "a cancelled producer must stop before emitting another relation payload"
+        );
         *run.terminal
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ProviderRunState::Cancelled);

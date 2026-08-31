@@ -1,5 +1,7 @@
 //! Actor-owned continuous source pipeline from watcher hints to immutable hot-overlay state.
 
+mod invalidation;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -19,8 +21,8 @@ use crate::inventory::{
 };
 use crate::lifecycle::{
     AcceptedUpdateWave, AuthoritativeCandidateSelection, ContinuousOverlayState,
-    FastSyntaxFactOutput, FastSyntaxReconciler, LifecycleError, UpdateWaveScheduler,
-    WatchHintBatch, fast_output_mutations, removed_owner_mutations,
+    FastSyntaxFactOutput, FastSyntaxReconciler, InvalidationPlan, LifecycleError,
+    UpdateWaveScheduler, WatchHintBatch, fast_output_mutations, removed_owner_mutations,
 };
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 use crate::secure_path::{PlatformPath, open_workspace_root};
@@ -81,6 +83,8 @@ pub struct SemanticLaneRequest {
     pub source_generation: u64,
     pub provider_ids: BTreeSet<&'static str>,
     pub sources: Vec<SemanticLaneSource>,
+    /// Dependency-closed invalidation evidence that caused this exact source set to be captured.
+    pub invalidation: InvalidationPlan,
 }
 
 /// Terminal receipt consumed by the continuous actor; provider-library output never crosses it.
@@ -123,6 +127,8 @@ pub struct ContinuousWaveResult {
     pub overlay: Arc<ConsolidatedOverlay>,
     pub flush_required: bool,
     pub git_plan: Option<GitCandidatePlan>,
+    /// Exact dependency closure or explicit full-rebuild escalation for this generation.
+    pub invalidation: InvalidationPlan,
 }
 
 /// Single-writer continuous-update actor. Every library boundary returns detached application
@@ -255,6 +261,14 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
         batch: WatchHintBatch,
         edits: &BTreeMap<Vec<u8>, TreeSitterEdit>,
     ) -> Result<Option<ContinuousWaveResult>, ContinuousError> {
+        let expanded = invalidation::expand_dirty_coverage(
+            store,
+            self.scheduler.workspace_id(),
+            self.scheduler.current_source_generation(),
+            batch,
+        )?;
+        let batch = expanded.batch;
+        let invalidation = expanded.plan;
         let watcher_paths = batch
             .hints
             .iter()
@@ -493,6 +507,7 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
                 source_generation: wave.source_generation,
                 provider_ids: provider_ids.clone(),
                 sources,
+                invalidation: invalidation.clone(),
             };
             let report = scheduler
                 .schedule(store, &request)
@@ -562,6 +577,7 @@ impl<A: GitStateAdapter> ContinuousWorkspaceEngine<A> {
             overlay: staged,
             flush_required,
             git_plan,
+            invalidation,
         }))
     }
 }
@@ -711,7 +727,8 @@ mod tests {
     use super::*;
     use crate::git_state::GixGitStateAdapter;
     use crate::lifecycle::{
-        FreshnessState, LifecycleConfig, OverlayFlushPolicy, WatchHint, WatchHintKind,
+        DependencyEdge, DependencyEdgeKind, FreshnessState, LifecycleConfig,
+        OperationalDependencyGraph, OverlayFlushPolicy, WatchHint, WatchHintKind,
     };
     use crate::source_image::SourceCapturePolicy;
     use crate::workspace_registry::{WorkspaceRegistry, WorkspaceSourceRegistration};
@@ -777,6 +794,40 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct CapturingSemanticScheduler {
+        requests: std::sync::Mutex<Vec<SemanticLaneRequest>>,
+    }
+
+    impl SemanticLaneScheduler for CapturingSemanticScheduler {
+        fn schedule(
+            &self,
+            _store: &mut OperationalStore,
+            request: &SemanticLaneRequest,
+        ) -> Result<SemanticLaneReport, String> {
+            self.requests
+                .lock()
+                .map_err(|_| "captured request lock poisoned".to_owned())?
+                .push(request.clone());
+            Ok(SemanticLaneReport {
+                terminals: request
+                    .provider_ids
+                    .iter()
+                    .enumerate()
+                    .map(|(index, provider_id)| SemanticLaneTerminal {
+                        provider_id,
+                        provider_run_id: [u8::try_from(index + 1).unwrap_or(u8::MAX); 16],
+                        source_generation: request.source_generation,
+                        state: crate::registries::ProviderRunState::Succeeded,
+                        output_fingerprint: Some([u8::try_from(index + 1).unwrap_or(u8::MAX); 32]),
+                    })
+                    .collect(),
+                discarded_stale_runs: 0,
+                semantic_mutations: Vec::new(),
+            })
+        }
+    }
+
     fn lifecycle_config() -> LifecycleConfig {
         LifecycleConfig {
             debounce_timeout: std::time::Duration::from_millis(20),
@@ -796,6 +847,156 @@ mod tests {
                 maximum_generations: 32,
             },
         }
+    }
+
+    #[test]
+    fn dependency_closed_dirty_coverage_refreshes_reverse_importers_and_escalates_unknown_paths() {
+        let directory = tempfile::tempdir().expect("dependency closure fixture");
+        let root = directory.path().join("workspace");
+        std::fs::create_dir(&root).expect("workspace root");
+        std::fs::write(root.join("provider.py"), b"VALUE = 1\n").expect("provider source");
+        std::fs::write(
+            root.join("importer.py"),
+            b"from provider import VALUE\nRESULT = VALUE\n",
+        )
+        .expect("importer source");
+        let mut store = OperationalStore::open(&directory.path().join("operational.sqlite"))
+            .expect("operational store");
+        let workspace_id = WorkspaceRegistry::new(&mut store)
+            .add(&root, WorkspaceSourceRegistration::Directory)
+            .expect("workspace registration")
+            .workspace_id;
+        let lifecycle = lifecycle_config();
+        let scheduler =
+            UpdateWaveScheduler::new(workspace_id, &root, 0, 0, 0, lifecycle).expect("scheduler");
+        let source_images = SourceImageStore::open(
+            &directory.path().join("source-blobs"),
+            SourceCapturePolicy {
+                maximum_bytes: lifecycle.maximum_capture_bytes,
+                stable_read_retries: lifecycle.stable_read_retry_count,
+                lease_ttl: lifecycle.source_blob_lease_ttl,
+            },
+        )
+        .expect("source-image store");
+        let mut engine = ContinuousWorkspaceEngine::new(
+            scheduler,
+            source_images,
+            GitCandidatePlanner::without_cache(GixGitStateAdapter),
+            ContinuousWorkspaceConfig {
+                analysis_context_id: crate::identity::SOURCE_CONTEXT_ID,
+                registered_git_identity: None,
+                git_observations: GitStateObservations {
+                    inclusion_policy_fingerprint: [0x61; 32],
+                    attributes_fingerprint: [0x62; 32],
+                    worktree_inventory_digest: [0; 32],
+                },
+                prior_git_vector: None,
+                overlay_memory_limit_bytes: 64 * 1024 * 1024,
+                semantic_capabilities_required: false,
+            },
+        );
+        let initial = engine
+            .rebuild_from_zero(&mut store)
+            .expect("initial full inventory")
+            .expect("initial wave");
+        assert!(initial.invalidation.full_rebuild_required);
+
+        let paths = BTreeSet::from([b"provider.py".to_vec(), b"importer.py".to_vec()]);
+        let owners =
+            load_prior_owners(&store, workspace_id, 1, &paths).expect("accepted source owners");
+        let provider_owner = owners[b"provider.py".as_slice()];
+        let importer_owner = owners[b"importer.py".as_slice()];
+        OperationalDependencyGraph::new(vec![DependencyEdge {
+            source_owner_id: provider_owner,
+            dependent_owner_id: importer_owner,
+            kind: DependencyEdgeKind::Derivation,
+            derivation_id: Some("PYTHON_REVERSE_IMPORTER_V1".into()),
+            source_generation: 1,
+            input_digest: [0x63; 32],
+        }])
+        .expect("dependency graph")
+        .persist(&mut store, workspace_id)
+        .expect("persist dependency graph");
+
+        let semantic = Arc::new(CapturingSemanticScheduler::default());
+        engine.set_semantic_capabilities_required(true);
+        engine.install_semantic_scheduler(semantic.clone());
+        std::fs::write(root.join("provider.py"), b"VALUE = 2\n").expect("provider edit");
+        let dependency_closed = engine
+            .process_batch(
+                &mut store,
+                WatchHintBatch {
+                    hints: vec![WatchHint {
+                        path_bytes: b"provider.py".to_vec(),
+                        kind: WatchHintKind::CreateOrModify,
+                    }],
+                    rescan_required: false,
+                },
+                &BTreeMap::new(),
+            )
+            .expect("dependency-closed wave")
+            .expect("dependency-closed publication");
+        assert!(!dependency_closed.invalidation.full_rebuild_required);
+        assert_eq!(
+            dependency_closed.invalidation.affected_owners,
+            BTreeSet::from([provider_owner, importer_owner])
+        );
+        assert_eq!(
+            dependency_closed
+                .wave
+                .items
+                .iter()
+                .map(|item| item.path_bytes.clone())
+                .collect::<BTreeSet<_>>(),
+            paths
+        );
+        let requests = semantic.requests.lock().expect("captured requests");
+        let request = requests.last().expect("semantic request");
+        assert_eq!(request.invalidation, dependency_closed.invalidation);
+        assert_eq!(
+            request
+                .sources
+                .iter()
+                .map(|source| source.raw_relative_path_bytes.clone())
+                .collect::<BTreeSet<_>>(),
+            paths
+        );
+        drop(requests);
+
+        std::fs::write(root.join("new_module.py"), b"from provider import VALUE\n")
+            .expect("new module");
+        let unknown_path = engine
+            .process_batch(
+                &mut store,
+                WatchHintBatch {
+                    hints: vec![WatchHint {
+                        path_bytes: b"new_module.py".to_vec(),
+                        kind: WatchHintKind::CreateOrModify,
+                    }],
+                    rescan_required: false,
+                },
+                &BTreeMap::new(),
+            )
+            .expect("unknown path wave")
+            .expect("unknown path publication");
+        assert!(unknown_path.invalidation.full_rebuild_required);
+        assert_eq!(
+            unknown_path.wave.candidate_strategy,
+            crate::registries::UpdateCandidateStrategy::GenericInventory
+        );
+        assert_eq!(
+            unknown_path
+                .wave
+                .items
+                .iter()
+                .map(|item| item.path_bytes.as_slice())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                b"provider.py".as_slice(),
+                b"importer.py".as_slice(),
+                b"new_module.py".as_slice(),
+            ])
+        );
     }
 
     #[test]

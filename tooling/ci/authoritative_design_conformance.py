@@ -1,4 +1,4 @@
-"""Validate the sole authoritative design suite and its generated identities."""
+"""Validate the discovered v2.1 authoritative suite and successor routing."""
 
 from __future__ import annotations
 
@@ -10,79 +10,29 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import blake3
+from tooling.ci.artifact_contracts import (
+    ArtifactContractError,
+    active_plan_path,
+    parse_frontmatter,
+    validate_plan,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 AUTHORITY_ROOT = Path("docs/authoritative_design")
+CURRENT_SUITE_ID = "codefabric-relational-data-fabric"
+CURRENT_SUITE_VERSION = "2.1.0"
+REQUIRED_TAGS = frozenset({"SUITE", "ONT", "GEN", "FAB", "QRY", "LIFE", "SRV", "RM"})
+SUCCESSOR_PLAN = Path(
+    "docs/plans/"
+    "codefabric_execution_proved_relational_data_fabric_implementation_plan_v3_2026-08-30.md"
+)
+PREDECESSOR_PLAN = Path(
+    "docs/plans/"
+    "codefabric_execution_proved_relational_data_fabric_implementation_plan_v2_2026-08-29.md"
+)
 LEGACY_ROOT = b"docs/" + b"upfront_design"
 LEGACY_OWNER = b"upfront" + b"-design"
 MAX_SOURCE_BYTES = 16 * 1024 * 1024
-
-
-class AuthoritativeDesignError(ValueError):
-    """The authoritative suite or one of its projections is inconsistent."""
-
-
-@dataclass(frozen=True)
-class MasterContract:
-    """Expected identity and amendment anchor for one master document."""
-
-    artifact_id: str
-    amendment_anchor: str
-
-
-MASTERS: dict[str, MasterContract] = {
-    "codefabric_present_state_cpg_suite_governance_and_release_manifest_v1.3.md": (
-        MasterContract(
-            "codefabric-present-state-cpg-suite-manifest",
-            "## Ontology-program, receipt, and decision authority amendment",
-        )
-    ),
-    "code_property_graph_present_state_fact_ontology_specification_v1.3.md": (
-        MasterContract(
-            "codefabric-present-state-cpg-ontology",
-            "## Compiled ontology-program projection",
-        )
-    ),
-    "present_state_cpg_fact_generation_specification_python_rust_v1.3.md": (
-        MasterContract(
-            "codefabric-present-state-cpg-fact-generation",
-            "## Provider boundary for compiled ontology programs",
-        )
-    ),
-    "present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v1.3.md": (
-        MasterContract(
-            "codefabric-present-state-cpg-data-fabric",
-            "## Arrow/DataFusion ontology-program and activation authority",
-        )
-    ),
-    "code_property_graph_semantic_query_specification_v1.3.md": MasterContract(
-        "codefabric-composable-semantic-cpg-query",
-        "## Sealed semantic planning and lease-scoped result authority",
-    ),
-    "codefabric_continuous_cpg_update_lifecycle_management_specification_v1.3.md": (
-        MasterContract(
-            "codefabric-continuous-cpg-lifecycle",
-            "## Durable candidate activation and serving-epoch lifecycle",
-        )
-    ),
-    "present_state_cpg_fastmcp_serving_specification_v1.3.md": MasterContract(
-        "codefabric-present-state-cpg-fastmcp-serving",
-        "## Administrative activation and presentation-only serving boundary",
-    ),
-    "codefabric_1.3_implementation_roadmap_v1.0.md": MasterContract(
-        "codefabric-implementation-roadmap",
-        "## Ontology-compiled data-fabric transition sequence",
-    ),
-}
-
-GENERATED_MANIFESTS = (
-    Path("contracts/manifests/suite-manifest.json"),
-    Path("contracts/generated/model/governance/suite-manifest.json"),
-    Path(
-        "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json"
-    ),
-)
 
 HISTORICAL_PREFIXES = (
     "docs/designs/",
@@ -92,9 +42,25 @@ HISTORICAL_PREFIXES = (
     "tests/golden/",
 )
 
+NAVIGATION_SURFACES = (
+    Path("AGENTS.md"),
+    Path("docs/spec_index/README.md"),
+)
 
-def _digest(payload: bytes) -> str:
-    return f"b3:{blake3.blake3(payload).hexdigest()}"
+
+class AuthoritativeDesignError(ValueError):
+    """The authoritative suite or one of its authority routes is inconsistent."""
+
+
+@dataclass(frozen=True)
+class MasterContract:
+    """One current master discovered from its authored identity fields."""
+
+    path: Path
+    artifact_id: str
+    artifact_tag: str
+    artifact_version: str
+    predecessor_path: Path
 
 
 def _git_paths(root: Path) -> list[str]:
@@ -107,110 +73,217 @@ def _git_paths(root: Path) -> list[str]:
     return [item.decode("utf-8") for item in completed.stdout.split(b"\0") if item]
 
 
-def _tracked_masters(root: Path) -> set[str]:
+def _tracked_masters(root: Path) -> set[Path]:
     completed = subprocess.run(
-        ("git", "ls-files", "-z", f"{AUTHORITY_ROOT.as_posix()}/*.md"),
+        (
+            "git",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            f"{AUTHORITY_ROOT.as_posix()}/*.md",
+        ),
         cwd=root,
         check=True,
         capture_output=True,
     )
     return {
-        Path(item.decode("utf-8")).name
-        for item in completed.stdout.split(b"\0")
-        if item
+        Path(item.decode("utf-8")) for item in completed.stdout.split(b"\0") if item
     }
 
 
-def validate_master_directory(directory: Path) -> dict[str, str]:
-    """Validate exact membership, identity headers, and amendment anchors."""
+def _historical_chain_paths(
+    root: Path,
+    directory: Path,
+    current: dict[str, MasterContract],
+) -> set[Path]:
+    """Return the exact recursively linked history for every current role."""
+    expected: set[Path] = set()
+    for tag, contract in current.items():
+        successor = contract.path
+        predecessor = contract.predecessor_path
+        seen = {successor}
+        while True:
+            if predecessor in seen:
+                raise AuthoritativeDesignError(
+                    f"historical predecessor cycle for {tag}: {predecessor}"
+                )
+            seen.add(predecessor)
+            absolute = root / predecessor
+            if (
+                not absolute.is_file()
+                or absolute.parent.resolve() != directory.resolve()
+            ):
+                raise AuthoritativeDesignError(
+                    f"unresolved or external historical predecessor for {tag}: "
+                    f"{predecessor}"
+                )
+            if predecessor in expected:
+                raise AuthoritativeDesignError(
+                    f"historical predecessor shared across roles: {predecessor}"
+                )
+            expected.add(predecessor)
+            metadata = _frontmatter(absolute)
+            if metadata is None:
+                break
+            if metadata.get("authority_status") != "historical":
+                raise AuthoritativeDesignError(
+                    f"predecessor remains coequal current authority: {predecessor}"
+                )
+            if (
+                metadata.get("artifact") != "authoritative-design"
+                or metadata.get("suite_id") != CURRENT_SUITE_ID
+                or metadata.get("artifact_tag") != tag
+            ):
+                raise AuthoritativeDesignError(
+                    f"historical role/identity chain differs for {tag}: {predecessor}"
+                )
+            if metadata.get("successor_path") != successor.as_posix():
+                raise AuthoritativeDesignError(
+                    f"historical successor link differs for {tag}: {predecessor}"
+                )
+            next_predecessor = metadata.get("predecessor_path")
+            if next_predecessor is None:
+                break
+            candidate = Path(str(next_predecessor))
+            if candidate.is_absolute() or ".." in candidate.parts:
+                raise AuthoritativeDesignError(
+                    f"invalid historical predecessor path: {predecessor}"
+                )
+            successor = predecessor
+            predecessor = candidate
+    return expected
+
+
+def _frontmatter(path: Path) -> dict[str, Any] | None:
+    if not path.read_bytes().startswith(b"---\n"):
+        return None
+    try:
+        return parse_frontmatter(path)
+    except ArtifactContractError as error:
+        raise AuthoritativeDesignError(str(error)) from error
+
+
+def _relative(path: Path, root: Path) -> Path:
+    try:
+        return path.resolve().relative_to(root.resolve())
+    except ValueError as error:
+        raise AuthoritativeDesignError(f"path escapes repository: {path}") from error
+
+
+def validate_master_directory(
+    directory: Path, *, root: Path = ROOT
+) -> dict[str, MasterContract]:
+    """Discover and validate one current master per stable domain role."""
     if not directory.is_dir():
         raise AuthoritativeDesignError(f"missing authoritative root: {directory}")
-    actual = {item.name for item in directory.iterdir() if item.is_file()}
-    expected = set(MASTERS)
-    if actual != expected:
-        raise AuthoritativeDesignError(
-            "authoritative master census differs: "
-            f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
-        )
+    entries = list(directory.iterdir())
+    stray = sorted(
+        item.name for item in entries if not item.is_file() or item.suffix != ".md"
+    )
+    if stray:
+        raise AuthoritativeDesignError(f"non-master entries in authority root: {stray}")
 
-    digests: dict[str, str] = {}
-    for name, contract in MASTERS.items():
-        master = directory / name
-        payload = master.read_bytes()
+    current: dict[str, MasterContract] = {}
+    current_paths: set[Path] = set()
+    artifact_ids: set[str] = set()
+
+    for path in sorted(entries):
+        payload = path.read_bytes()
         if len(payload) > MAX_SOURCE_BYTES:
             raise AuthoritativeDesignError(
-                f"authoritative master exceeds limit: {master}"
+                f"authoritative master exceeds limit: {path}"
             )
         try:
             text = payload.decode("utf-8")
         except UnicodeDecodeError as error:
             raise AuthoritativeDesignError(
-                f"authoritative master is not UTF-8: {master}"
+                f"authoritative master is not UTF-8: {path}"
             ) from error
-        if f"`{contract.artifact_id}`" not in text:
-            raise AuthoritativeDesignError(f"artifact identity missing from {master}")
-        if contract.amendment_anchor not in text:
-            raise AuthoritativeDesignError(f"amendment anchor missing from {master}")
-        if "version" not in text[:2_048].lower():
-            raise AuthoritativeDesignError(f"version header missing from {master}")
-        digests[name] = _digest(payload)
-    return digests
-
-
-def _validate_generated_manifest(
-    root: Path, manifest_path: Path, digests: dict[str, str]
-) -> None:
-    try:
-        document: dict[str, Any] = json.loads(
-            (root / manifest_path).read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError) as error:
-        raise AuthoritativeDesignError(
-            f"invalid generated manifest: {manifest_path}"
-        ) from error
-    artifacts = document.get("artifacts")
-    if not isinstance(artifacts, list):
-        raise AuthoritativeDesignError(
-            f"generated manifest has no artifact list: {manifest_path}"
-        )
-
-    expected_paths = {
-        f"{AUTHORITY_ROOT.as_posix()}/{name}": (contract, digests[name])
-        for name, contract in MASTERS.items()
-    }
-    selected = {
-        item.get("authority_path"): item
-        for item in artifacts
-        if isinstance(item, dict)
-        and isinstance(item.get("authority_path"), str)
-        and item["authority_path"].startswith(f"{AUTHORITY_ROOT.as_posix()}/")
-    }
-    if set(selected) != set(expected_paths):
-        raise AuthoritativeDesignError(
-            f"generated authority census differs in {manifest_path}: "
-            f"expected={sorted(expected_paths)}, actual={sorted(selected)}"
-        )
-    for authority_path, (contract, digest) in expected_paths.items():
-        item = selected[authority_path]
-        if item.get("artifact_id") != contract.artifact_id:
+        metadata = _frontmatter(path)
+        if metadata is None or metadata.get("authority_status") != "current":
+            continue
+        required = {
+            "artifact",
+            "artifact_id",
+            "suite_id",
+            "suite_version",
+            "artifact_tag",
+            "artifact_version",
+            "authority_status",
+            "predecessor_path",
+        }
+        missing = required - metadata.keys()
+        if missing:
             raise AuthoritativeDesignError(
-                f"artifact ID drift in {manifest_path}: {authority_path}"
+                f"current master missing identity fields {sorted(missing)}: {path}"
             )
-        if item.get("owner") != "authoritative-design":
-            raise AuthoritativeDesignError(
-                f"owner drift in {manifest_path}: {authority_path}"
-            )
-        if item.get("source_role") != "authority":
-            raise AuthoritativeDesignError(
-                f"source role drift in {manifest_path}: {authority_path}"
-            )
+        if metadata["artifact"] != "authoritative-design":
+            raise AuthoritativeDesignError(f"invalid artifact class: {path}")
         if (
-            item.get("source_digest") != digest
-            or item.get("canonical_digest") != digest
+            metadata["suite_id"] != CURRENT_SUITE_ID
+            or metadata["suite_version"] != CURRENT_SUITE_VERSION
+        ):
+            raise AuthoritativeDesignError(f"coequal current suite detected: {path}")
+        tag = str(metadata["artifact_tag"])
+        artifact_id = str(metadata["artifact_id"])
+        version = str(metadata["artifact_version"])
+        predecessor = Path(str(metadata["predecessor_path"]))
+        if predecessor.is_absolute() or ".." in predecessor.parts:
+            raise AuthoritativeDesignError(f"invalid predecessor path: {path}")
+        predecessor_absolute = root / predecessor
+        if (
+            not predecessor_absolute.is_file()
+            or predecessor_absolute.parent.resolve() != directory.resolve()
+            or predecessor_absolute.resolve() == path.resolve()
         ):
             raise AuthoritativeDesignError(
-                f"master digest drift in {manifest_path}: {authority_path}"
+                f"unresolved or external predecessor for {path}: {predecessor}"
             )
+        if tag in current:
+            raise AuthoritativeDesignError(f"duplicate current artifact tag {tag}")
+        if artifact_id in artifact_ids:
+            raise AuthoritativeDesignError(
+                f"duplicate current artifact ID {artifact_id}"
+            )
+        marker = f"{chr(96)}{artifact_id}{chr(96)}"
+        if marker not in text:
+            raise AuthoritativeDesignError(
+                f"artifact identity missing from body: {path}"
+            )
+        contract = MasterContract(
+            path=_relative(path, root),
+            artifact_id=artifact_id,
+            artifact_tag=tag,
+            artifact_version=version,
+            predecessor_path=predecessor,
+        )
+        current[tag] = contract
+        current_paths.add(contract.path)
+        artifact_ids.add(artifact_id)
+
+    if set(current) != REQUIRED_TAGS:
+        raise AuthoritativeDesignError(
+            "current authority roles differ: "
+            f"missing={sorted(REQUIRED_TAGS - set(current))}, "
+            f"extra={sorted(set(current) - REQUIRED_TAGS)}"
+        )
+
+    all_paths = {
+        _relative(item, root)
+        for item in entries
+        if item.is_file() and item.suffix == ".md"
+    }
+    historical_paths = all_paths - current_paths
+    predecessor_paths = _historical_chain_paths(root, directory, current)
+    if historical_paths != predecessor_paths:
+        raise AuthoritativeDesignError(
+            "historical predecessor closure differs: "
+            f"missing={sorted(predecessor_paths - historical_paths)}, "
+            f"extra={sorted(historical_paths - predecessor_paths)}"
+        )
+    return current
 
 
 def _legacy_hits(root: Path) -> tuple[list[str], list[str]]:
@@ -232,16 +305,90 @@ def _legacy_hits(root: Path) -> tuple[list[str], list[str]]:
     return live, historical
 
 
-def validate_authoritative_design(root: Path = ROOT) -> dict[str, Any]:
-    """Validate master census, generated identities, navigation, and path authority."""
-    digests = validate_master_directory(root / AUTHORITY_ROOT)
-    tracked = _tracked_masters(root)
-    if tracked != set(MASTERS):
-        raise AuthoritativeDesignError(
-            f"tracked master census differs: expected={sorted(MASTERS)}, actual={sorted(tracked)}"
+def _validate_navigation(root: Path, current: dict[str, MasterContract]) -> None:
+    for navigation in NAVIGATION_SURFACES:
+        text = (root / navigation).read_text(encoding="utf-8")
+        missing = [
+            contract.path.name
+            for contract in current.values()
+            if contract.path.name not in text
+        ]
+        if missing:
+            raise AuthoritativeDesignError(
+                f"{navigation} omits current authority paths: {sorted(missing)}"
+            )
+        if CURRENT_SUITE_ID not in text:
+            raise AuthoritativeDesignError(
+                f"{navigation} omits current suite identity {CURRENT_SUITE_ID}"
+            )
+
+
+def _validate_successor_plan(root: Path) -> str:
+    successor_path = root / SUCCESSOR_PLAN
+    try:
+        plan = validate_plan(
+            root,
+            successor_path,
+            _allow_missing_state=True,
         )
-    for manifest in GENERATED_MANIFESTS:
-        _validate_generated_manifest(root, manifest, digests)
+    except ArtifactContractError as error:
+        raise AuthoritativeDesignError(str(error)) from error
+    if plan.get("status") != "approved" or plan.get("version") != "v3":
+        raise AuthoritativeDesignError("successor relational plan is not approved v3")
+    design_path = root / str(plan.get("design_path", ""))
+    design = parse_frontmatter(design_path)
+    if design.get("design_id") != "codefabric-execution-proved-relational-data-fabric":
+        raise AuthoritativeDesignError(
+            "successor plan does not select the relational design"
+        )
+    if design.get("version") != "v3" or design.get("status") != "accepted":
+        raise AuthoritativeDesignError("successor relational design is not accepted v3")
+    if (
+        design.get("doctrine_path")
+        != "docs/library_ref/full_data_fabric_design_principles_v2.md"
+    ):
+        raise AuthoritativeDesignError("successor design does not select v2 doctrine")
+
+    active = _relative(active_plan_path(root), root)
+    if active == SUCCESSOR_PLAN:
+        try:
+            validate_plan(root, successor_path)
+        except ArtifactContractError as error:
+            raise AuthoritativeDesignError(str(error)) from error
+        return "active-v3"
+    if active != PREDECESSOR_PLAN:
+        raise AuthoritativeDesignError(
+            f"unexpected active plan while v3 is inactive: {active}"
+        )
+    predecessor = parse_frontmatter(root / PREDECESSOR_PLAN)
+    state_path = root / str(predecessor.get("state_path", ""))
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AuthoritativeDesignError("invalid predecessor execution state") from error
+    if state.get("status") != "invalidated" or state.get("current_packet") is not None:
+        raise AuthoritativeDesignError(
+            "inactive successor requires invalidated predecessor state with no current packet"
+        )
+    if (root / str(plan["state_path"])).exists():
+        raise AuthoritativeDesignError(
+            "inactive successor state exists before the activation transaction"
+        )
+    return "approved-v3-activation-pending"
+
+
+def validate_authoritative_design(root: Path = ROOT) -> dict[str, Any]:
+    """Validate discovered masters, navigation, history, and active selection."""
+    current = validate_master_directory(root / AUTHORITY_ROOT, root=root)
+    tracked = _tracked_masters(root)
+    historical = _historical_chain_paths(root, root / AUTHORITY_ROOT, current)
+    expected_tracked = {contract.path for contract in current.values()} | historical
+    if tracked != expected_tracked:
+        raise AuthoritativeDesignError(
+            "tracked authority closure differs: "
+            f"missing={sorted(expected_tracked - tracked)}, "
+            f"extra={sorted(tracked - expected_tracked)}"
+        )
 
     outlined = subprocess.run(
         ("just", "spec-outline"),
@@ -252,20 +399,30 @@ def validate_authoritative_design(root: Path = ROOT) -> dict[str, Any]:
     )
     if outlined.returncode != 0:
         raise AuthoritativeDesignError("default spec-outline failed")
-    missing_outlines = [name for name in MASTERS if name not in outlined.stdout]
+    missing_outlines = [
+        contract.path.name
+        for contract in current.values()
+        if contract.path.name not in outlined.stdout
+    ]
     if missing_outlines:
         raise AuthoritativeDesignError(
-            f"spec-outline omitted masters: {missing_outlines}"
+            f"spec-outline omitted current masters: {sorted(missing_outlines)}"
         )
 
+    _validate_navigation(root, current)
+    plan_selection = _validate_successor_plan(root)
     live_hits, historical_hits = _legacy_hits(root)
     if live_hits:
         raise AuthoritativeDesignError(f"legacy live authority remains: {live_hits}")
     return {
-        "master_count": len(MASTERS),
-        "generated_manifest_count": len(GENERATED_MANIFESTS),
+        "current_master_count": len(current),
+        "historical_master_count": len(historical),
+        "generated_manifest_authority_count": 0,
         "historical_exclusion_count": len(historical_hits),
+        "suite_id": CURRENT_SUITE_ID,
+        "suite_version": CURRENT_SUITE_VERSION,
         "authority_root": AUTHORITY_ROOT.as_posix(),
+        "plan_selection": plan_selection,
     }
 
 
@@ -275,7 +432,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         report = validate_authoritative_design(args.root.resolve())
-    except (AuthoritativeDesignError, OSError, subprocess.CalledProcessError) as error:
+    except (
+        ArtifactContractError,
+        AuthoritativeDesignError,
+        OSError,
+        subprocess.CalledProcessError,
+    ) as error:
         print(f"authoritative design conformance error: {error}", file=sys.stderr)
         return 1
     print(json.dumps(report, indent=2, sort_keys=True))
