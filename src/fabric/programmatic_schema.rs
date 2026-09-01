@@ -829,6 +829,16 @@ impl SealedProgrammaticSchemaAssembly {
         self.relations.get(relation_id)
     }
 
+    /// Enumerate every exact relation binding retained by the sealed session.
+    ///
+    /// The iterator exposes application-owned identities and contracts, not a mutable catalog.
+    /// It is used by the Delta snapshot publisher to make complete epoch persistence exhaustive.
+    pub(crate) fn relations(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&ProgrammaticRelationId, &SealedRelationBinding)> {
+        self.relations.iter()
+    }
+
     /// Transfer the exact live session authority and all sealed products to an epoch builder.
     #[must_use]
     pub fn into_parts(self) -> ProgrammaticSchemaParts {
@@ -1058,6 +1068,20 @@ fn validate_schema_identity_shape(
 impl IdentityPreservingViewTable {
     fn new(plan: LogicalPlan) -> Self {
         Self::with_definition(plan, None)
+    }
+
+    /// Rebind an executable plan to an exact Arrow batch schema with identical value shape.
+    /// This is used at persistence boundaries where Delta's native schema intentionally omits
+    /// application metadata retained by the logical contract.
+    pub(super) fn with_schema(
+        plan: LogicalPlan,
+        schema: SchemaRef,
+    ) -> Result<Self, DataFusionError> {
+        validate_schema_identity_shape(plan.schema().as_arrow(), schema.as_ref(), "boundary")?;
+        Ok(Self {
+            inner: ViewTable::new(plan, None),
+            schema,
+        })
     }
 
     pub(super) fn with_definition(plan: LogicalPlan, definition: Option<String>) -> Self {
@@ -1758,6 +1782,40 @@ impl ProgrammaticSchemaAssembly {
         )
     }
 
+    /// Seal an exact-version reconstruction from the durable self-observation relations.
+    ///
+    /// Recovered derived relations are intentionally installed as exact Delta providers: recovery
+    /// does not rerun provider acquisition or replay a serialized logical plan. The durable
+    /// relation/field/schema observations are therefore checked against the newly opened catalog,
+    /// while durable dependency/provenance rows are checked for complete selected-relation closure.
+    /// Release-owned producer and proof closure is re-executed by the active-workspace builder.
+    pub(crate) async fn finish_exact_reconstruction(
+        self,
+        epoch_id: EpochId,
+        durable_observation_batches: BTreeMap<ProgrammaticRelationId, RecordBatch>,
+    ) -> Result<SealedProgrammaticSchemaAssembly, ProgrammaticSchemaError> {
+        let fixed_point = enforce_observation_materialization(
+            &self.observation_policy,
+            1,
+            &durable_observation_batches,
+        )?;
+        let specs = self.observation_relation_specs()?;
+        let (relations, observations) = self.observe_live_catalog().await?;
+        let live_batches = build_observation_batches(epoch_id, &observations, &specs)?;
+        validate_exact_reconstruction_observations(
+            &relations,
+            &live_batches,
+            &durable_observation_batches,
+        )?;
+        Ok(SealedProgrammaticSchemaAssembly {
+            session: self.session,
+            relations,
+            observation_fixed_point: fixed_point,
+            #[cfg(test)]
+            observations,
+        })
+    }
+
     fn ensure_binding_available(
         &self,
         relation_id: &ProgrammaticRelationId,
@@ -2186,6 +2244,105 @@ impl ProgrammaticSchemaAssembly {
         }
         Ok((sealed_relations, observations))
     }
+}
+
+fn validate_exact_reconstruction_observations(
+    relations: &BTreeMap<ProgrammaticRelationId, SealedRelationBinding>,
+    live: &BTreeMap<ProgrammaticRelationId, RecordBatch>,
+    durable: &BTreeMap<ProgrammaticRelationId, RecordBatch>,
+) -> Result<(), ProgrammaticSchemaError> {
+    if live.keys().collect::<BTreeSet<_>>() != durable.keys().collect::<BTreeSet<_>>() {
+        return Err(ProgrammaticSchemaError::ExactReconstructionObservationSetMismatch);
+    }
+    for relation_id in [
+        FIELD_OBSERVATION_RELATION_ID,
+        SCHEMA_OBSERVATION_RELATION_ID,
+    ] {
+        let relation_id = ProgrammaticRelationId::new(relation_id);
+        if live.get(&relation_id) != durable.get(&relation_id) {
+            return Err(
+                ProgrammaticSchemaError::ExactReconstructionObservationMismatch { relation_id },
+            );
+        }
+    }
+    let relation_id = ProgrammaticRelationId::new(RELATION_OBSERVATION_RELATION_ID);
+    let live_relations =
+        live.get(&relation_id)
+            .ok_or_else(|| ProgrammaticSchemaError::ObservationBatchMissing {
+                relation_id: relation_id.clone(),
+            })?;
+    let durable_relations = durable.get(&relation_id).ok_or_else(|| {
+        ProgrammaticSchemaError::ObservationBatchMissing {
+            relation_id: relation_id.clone(),
+        }
+    })?;
+    // Epoch/relation/catalog/schema/table columns must be byte-for-byte identical. Origin and
+    // TableType describe the executable realization; an exact recovered Delta provider lawfully
+    // replaces the candidate's transient transformation view without changing semantic identity.
+    if live_relations.num_rows() != durable_relations.num_rows()
+        || live_relations.num_columns() != durable_relations.num_columns()
+        || (0..5).any(|index| {
+            live_relations.column(index).to_data() != durable_relations.column(index).to_data()
+        })
+    {
+        return Err(
+            ProgrammaticSchemaError::ExactReconstructionObservationMismatch { relation_id },
+        );
+    }
+
+    let selected = relations
+        .keys()
+        .map(ProgrammaticRelationId::as_str)
+        .collect::<BTreeSet<_>>();
+    let dependency_id = ProgrammaticRelationId::new(DEPENDENCY_OBSERVATION_RELATION_ID);
+    let dependencies = durable.get(&dependency_id).ok_or_else(|| {
+        ProgrammaticSchemaError::ObservationBatchMissing {
+            relation_id: dependency_id.clone(),
+        }
+    })?;
+    for column in [2, 3] {
+        let values = dependencies
+            .column(column)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(
+                || ProgrammaticSchemaError::ExactReconstructionObservationMismatch {
+                    relation_id: dependency_id.clone(),
+                },
+            )?;
+        for value in values.iter().flatten() {
+            if !selected.contains(value) {
+                return Err(
+                    ProgrammaticSchemaError::ExactReconstructionDanglingRelation {
+                        relation_id: ProgrammaticRelationId::new(value),
+                    },
+                );
+            }
+        }
+    }
+
+    let provenance_id = ProgrammaticRelationId::new(PROVENANCE_OBSERVATION_RELATION_ID);
+    let provenance = durable.get(&provenance_id).ok_or_else(|| {
+        ProgrammaticSchemaError::ObservationBatchMissing {
+            relation_id: provenance_id.clone(),
+        }
+    })?;
+    let provenance_relations = provenance
+        .column(1)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or_else(
+            || ProgrammaticSchemaError::ExactReconstructionObservationMismatch {
+                relation_id: provenance_id.clone(),
+            },
+        )?
+        .iter()
+        .flatten()
+        .collect::<BTreeSet<_>>();
+    if provenance_relations != selected {
+        return Err(ProgrammaticSchemaError::ExactReconstructionProvenanceClosure);
+    }
+    Ok(())
 }
 
 fn validate_relation_id(
@@ -4080,6 +4237,14 @@ pub enum ProgrammaticSchemaError {
     CatalogReplacementNotView { relation_id: ProgrammaticRelationId },
     #[error("observation batch was not built for {relation_id:?}")]
     ObservationBatchMissing { relation_id: ProgrammaticRelationId },
+    #[error("exact reconstruction observation relation set differs from the durable selection")]
+    ExactReconstructionObservationSetMismatch,
+    #[error("exact reconstruction observation rows differ for {relation_id:?}")]
+    ExactReconstructionObservationMismatch { relation_id: ProgrammaticRelationId },
+    #[error("exact reconstruction observations reference unselected relation {relation_id:?}")]
+    ExactReconstructionDanglingRelation { relation_id: ProgrammaticRelationId },
+    #[error("exact reconstruction provenance does not cover the complete selected relation set")]
+    ExactReconstructionProvenanceClosure,
     #[error(transparent)]
     SchemaContract(#[from] SchemaContractError),
     #[error(transparent)]

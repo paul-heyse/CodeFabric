@@ -10,19 +10,16 @@
 use std::fmt;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::forward_cutover_controller::ProductionForwardCutoverBinding;
 
-use super::activation::ActivationEventId;
 use super::activation_command_effect::ActivationCommandEffect;
 use super::activation_transaction::{
-    ActivationCacheReceipt, ActivationEpochRebuildOutcome, ActivationEpochRebuildRequest,
-    ActivationEpochRebuilderPort, ActivationRecoveryCoordinator, ActivationTransactionCoordinator,
-    IdempotentActivationAcknowledgements,
+    ActivationReconciliationReceiptCache, ActivationRecoveryCoordinator,
+    ActivationTransactionCoordinator, IdempotentActivationAcknowledgements,
 };
-use super::command::{EpochId, ExpectedHead, WorkspaceId, WriterFence};
+use super::command::{EpochId, WorkspaceId};
 use super::command_effect_router::FabricCommandEffectRouter;
 use super::command_effect_router::{
     AdministrationCommandEffectPort, CompactionCommandEffectPort,
@@ -40,7 +37,7 @@ use super::command_runtime_ports::{
     RelationalCommandSemanticContext, RelationalInterruptedCommitDiagnostics,
 };
 use super::programmatic_activation_admission::{
-    ProgrammaticActivationAdmission, ProgrammaticSuccessorQueryAuthorityPort,
+    ProgrammaticActivationAdmission, ReleaseOwnedActiveWorkspaceBuilder,
 };
 use super::programmatic_activation_command_ports::{
     ActivationCandidateProofRelationsPort, ActivationCommandStateStore,
@@ -55,100 +52,22 @@ use super::programmatic_command_capability::{
 use super::programmatic_delta_maintenance_command::ProgrammaticDeltaMaintenanceAdministrationPorts;
 use super::programmatic_workspace::{
     ProgrammaticCommandRuntimeContext, ProgrammaticCommandRuntimePartsFactory,
-    WorkspaceEpochQueryAuthorityRegistryError,
 };
-
-/// Exact installed authority identities which one command-runtime closure must retain.
-///
-/// These values come from the same explicit workspace construction inputs as the activation and
-/// epoch authorities. They are checked against live, already-installed objects when
-/// [`ProgrammaticCommandRuntimePartsFactory::build`] runs; they are not observations that can
-/// select a different epoch or discover a latest table version.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ProgrammaticCommandRuntimeAuthorityBinding {
-    workspace_id: WorkspaceId,
-    epoch_id: EpochId,
-    activation_event_id: ActivationEventId,
-    activation_fence: WriterFence,
-    activation_control_fingerprint: [u8; 32],
-    resource_policy_pin: [u8; 32],
-}
-
-impl ProgrammaticCommandRuntimeAuthorityBinding {
-    /// Bind the exact workspace, epoch, activation, and resource identities expected at the
-    /// post-authority factory boundary.
-    #[must_use]
-    pub const fn new(
-        workspace_id: WorkspaceId,
-        epoch_id: EpochId,
-        activation_event_id: ActivationEventId,
-        activation_fence: WriterFence,
-        activation_control_fingerprint: [u8; 32],
-        resource_policy_pin: [u8; 32],
-    ) -> Self {
-        Self {
-            workspace_id,
-            epoch_id,
-            activation_event_id,
-            activation_fence,
-            activation_control_fingerprint,
-            resource_policy_pin,
-        }
-    }
-
-    #[must_use]
-    pub const fn workspace_id(self) -> WorkspaceId {
-        self.workspace_id
-    }
-
-    #[must_use]
-    pub const fn epoch_id(self) -> EpochId {
-        self.epoch_id
-    }
-
-    #[must_use]
-    pub const fn activation_event_id(self) -> ActivationEventId {
-        self.activation_event_id
-    }
-
-    #[must_use]
-    pub const fn activation_fence(self) -> WriterFence {
-        self.activation_fence
-    }
-
-    #[must_use]
-    pub const fn activation_control_fingerprint(self) -> [u8; 32] {
-        self.activation_control_fingerprint
-    }
-
-    #[must_use]
-    pub const fn resource_policy_pin(self) -> [u8; 32] {
-        self.resource_policy_pin
-    }
-}
 
 /// Fail-closed errors while binding a complete command runtime to installed workspace authority.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 pub enum ProgrammaticCommandRuntimeFactoryError {
-    #[error("command runtime configuration belongs to another workspace")]
-    ConfigWorkspaceMismatch,
     #[error("command runtime factory received another workspace context")]
     ContextWorkspaceMismatch,
     #[error("activation authority belongs to another workspace")]
     ActivationWorkspaceMismatch,
-    #[error("query admission is not pinned to the configured epoch")]
-    AdmissionEpochMismatch,
-    #[error("resource coordinator is not pinned to the configured epoch")]
+    #[error("resource coordinator is not pinned to the installed query epoch")]
     ResourceEpochMismatch,
-    #[error("resource coordinator policy does not match the configured policy pin")]
+    #[error("resource coordinator policy does not match the activation-selected policy pin")]
     ResourcePolicyMismatch,
-    #[error("activation control relation does not match the configured exact binding")]
-    ActivationControlMismatch,
-    #[error("query authority registry cannot resolve the configured epoch: {0}")]
-    QueryAuthority(WorkspaceEpochQueryAuthorityRegistryError),
     #[error("resolved query authority belongs to another workspace")]
     QueryAuthorityWorkspaceMismatch,
-    #[error("resolved query authority is not pinned to the configured epoch")]
+    #[error("resolved query authority is not pinned to the installed epoch")]
     QueryAuthorityEpochMismatch,
     #[error("resolved query authority does not share the installed resource coordinator")]
     QueryAuthorityResourceMismatch,
@@ -168,18 +87,6 @@ pub enum ProgrammaticCommandRuntimeFactoryError {
     DeltaRuntimeEpochMismatch,
     #[error("Delta runtime table vector differs from the activation-selected exact vector")]
     DeltaRuntimeTableVersionsMismatch,
-    #[error("activation reconciliation receipt cache is unavailable")]
-    ReceiptCacheUnavailable,
-    #[error("activation reconciliation receipt is absent")]
-    ReceiptMissing,
-    #[error("activation reconciliation receipt belongs to another workspace")]
-    ReceiptWorkspaceMismatch,
-    #[error("activation reconciliation receipt is not pinned to the configured epoch")]
-    ReceiptEpochMismatch,
-    #[error("activation reconciliation receipt names another activation event")]
-    ReceiptEventMismatch,
-    #[error("activation reconciliation receipt names another active writer fence")]
-    ReceiptFenceMismatch,
 }
 
 /// One explicit non-activation command-family disposition and its persisted diagnostic identity.
@@ -321,11 +228,10 @@ impl ProgrammaticNonActivationCommandEffects {
 
 /// Production activation dependencies which do not belong to one process-local workspace context.
 #[derive(Clone)]
-pub struct ProgrammaticActivationCommandEffects {
+pub(crate) struct ProgrammaticActivationCommandEffects {
     state: Arc<ExactActivationCommandState>,
     proof: Arc<ExactActivationCandidateProof>,
-    epoch_rebuilder: Arc<dyn ActivationEpochRebuilderPort>,
-    successor_query_authority: Arc<dyn ProgrammaticSuccessorQueryAuthorityPort>,
+    active_workspace_builder: Arc<dyn ReleaseOwnedActiveWorkspaceBuilder>,
 }
 
 impl fmt::Debug for ProgrammaticActivationCommandEffects {
@@ -334,20 +240,18 @@ impl fmt::Debug for ProgrammaticActivationCommandEffects {
             .debug_struct("ProgrammaticActivationCommandEffects")
             .field("state", &"exact-store-adapter")
             .field("proof", &"exact-proof-relation-adapter")
-            .field("epoch_rebuilder", &"installed")
-            .field("successor_query_authority", &"installed")
+            .field("active_workspace_builder", &"release-owned")
             .finish_non_exhaustive()
     }
 }
 
 impl ProgrammaticActivationCommandEffects {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         state_store: Arc<dyn ActivationCommandStateStore>,
         proof_relations: Arc<dyn ActivationCandidateProofRelationsPort>,
         proof_integrity_diagnostic: super::command::DiagnosticRef,
-        epoch_rebuilder: Arc<dyn ActivationEpochRebuilderPort>,
-        successor_query_authority: Arc<dyn ProgrammaticSuccessorQueryAuthorityPort>,
+        active_workspace_builder: Arc<dyn ReleaseOwnedActiveWorkspaceBuilder>,
     ) -> Self {
         Self {
             state: Arc::new(ExactActivationCommandState::new(state_store)),
@@ -355,15 +259,14 @@ impl ProgrammaticActivationCommandEffects {
                 proof_relations,
                 proof_integrity_diagnostic,
             )),
-            epoch_rebuilder,
-            successor_query_authority,
+            active_workspace_builder,
         }
     }
 }
 
 /// Exhaustive effect closure which becomes a router only against the exact live workspace context.
 #[derive(Clone, Debug)]
-pub struct ExactProgrammaticCommandEffectClosure {
+pub(crate) struct ExactProgrammaticCommandEffectClosure {
     activation: ProgrammaticActivationCommandEffects,
     unavailable: ProgrammaticNonActivationCommandEffects,
     delta_maintenance_administration: Option<ProgrammaticDeltaMaintenanceAdministrationPorts>,
@@ -372,7 +275,7 @@ pub struct ExactProgrammaticCommandEffectClosure {
 
 impl ExactProgrammaticCommandEffectClosure {
     #[must_use]
-    pub const fn new(
+    pub(crate) const fn new(
         activation: ProgrammaticActivationCommandEffects,
         unavailable: ProgrammaticNonActivationCommandEffects,
     ) -> Self {
@@ -390,7 +293,7 @@ impl ExactProgrammaticCommandEffectClosure {
     /// Only the adapter's read-only maintenance subset becomes executable. Unsupported native
     /// checkpoint/optimize/destructive-vacuum actions still produce typed known failures.
     #[must_use]
-    pub fn with_delta_maintenance_administration(
+    pub(crate) fn with_delta_maintenance_administration(
         mut self,
         ports: ProgrammaticDeltaMaintenanceAdministrationPorts,
     ) -> Self {
@@ -401,7 +304,7 @@ impl ExactProgrammaticCommandEffectClosure {
     /// Wrap the installed administration family with the exact forward-cutover command effect.
     /// Non-cutover administrative actions continue to delegate to the existing effect.
     #[must_use]
-    pub fn with_forward_cutover(mut self, binding: ProductionForwardCutoverBinding) -> Self {
+    pub(crate) fn with_forward_cutover(mut self, binding: ProductionForwardCutoverBinding) -> Self {
         self.forward_cutover = Some(binding);
         self
     }
@@ -410,27 +313,29 @@ impl ExactProgrammaticCommandEffectClosure {
         let acknowledgements = Arc::new(IdempotentActivationAcknowledgements::new(
             context.workspace_id(),
         ));
+        // This reconstructible projection is private to the command runtime. It starts empty on
+        // every restart and is never consulted while validating or selecting workspace authority.
+        let receipt_cache = Arc::new(ActivationReconciliationReceiptCache::new(
+            context.workspace_id(),
+        ));
         let admission = Arc::new(ProgrammaticActivationAdmission::new(
             context.workspace_id(),
             context.admission().clone(),
-            context.query_authorities().clone(),
-            Arc::clone(&self.activation.successor_query_authority),
+            context.workspace_slot().clone(),
+            Arc::clone(&self.activation.active_workspace_builder),
         ));
         let commit = Arc::new(ActivationTransactionCoordinator::new(
             Arc::clone(&admission),
             Arc::clone(&self.activation.proof),
             context.activation_authority().clone(),
             context.activation_authority().clone(),
-            context.receipt_cache().clone(),
+            Arc::clone(&receipt_cache),
             Arc::clone(&acknowledgements),
         ));
         let recovery = Arc::new(ActivationRecoveryCoordinator::new(
             admission,
             context.activation_authority().clone(),
-            Arc::new(SharedActivationEpochRebuilder(Arc::clone(
-                &self.activation.epoch_rebuilder,
-            ))),
-            context.receipt_cache().clone(),
+            receipt_cache,
             acknowledgements,
         ));
         let activation = Arc::new(ActivationCommandEffect::new(
@@ -459,19 +364,6 @@ impl ExactProgrammaticCommandEffectClosure {
     }
 }
 
-#[derive(Clone)]
-struct SharedActivationEpochRebuilder(Arc<dyn ActivationEpochRebuilderPort>);
-
-#[async_trait]
-impl ActivationEpochRebuilderPort for SharedActivationEpochRebuilder {
-    async fn rebuild_selected_epoch(
-        &self,
-        request: ActivationEpochRebuildRequest,
-    ) -> ActivationEpochRebuildOutcome {
-        self.0.rebuild_selected_epoch(request).await
-    }
-}
-
 /// Concrete production factory for one complete workspace command-runtime closure.
 ///
 /// Every dependency is required and non-optional. In particular, the effect closure can become a
@@ -481,7 +373,6 @@ impl ActivationEpochRebuilderPort for SharedActivationEpochRebuilder {
 #[derive(Clone)]
 pub struct ExactProgrammaticCommandRuntimePartsFactory {
     config: FabricCommandRuntimeConfig,
-    authority: ProgrammaticCommandRuntimeAuthorityBinding,
     authorization: Arc<dyn CommandAuthorizationPort>,
     effects: ExactProgrammaticCommandEffectClosure,
     interruption_diagnostics: Arc<RelationalInterruptedCommitDiagnostics>,
@@ -492,7 +383,6 @@ impl fmt::Debug for ExactProgrammaticCommandRuntimePartsFactory {
         formatter
             .debug_struct("ExactProgrammaticCommandRuntimePartsFactory")
             .field("workspace_id", &self.config.workspace_id)
-            .field("epoch_id", &self.authority.epoch_id)
             .field("semantics", &"context-activation-bound")
             .field("effects", &"complete-production-router")
             .field("interruption_diagnostics", &"installed")
@@ -505,17 +395,15 @@ impl ExactProgrammaticCommandRuntimePartsFactory {
     ///
     /// No dependency has a default, optional, dynamic-registry, or test-probe representation.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         config: FabricCommandRuntimeConfig,
-        authority: ProgrammaticCommandRuntimeAuthorityBinding,
         authorization: Arc<dyn CommandAuthorizationPort>,
         effects: ExactProgrammaticCommandEffectClosure,
         interruption_diagnostic_relation: Arc<dyn InterruptedCommitDiagnosticRelationPort>,
     ) -> Self {
-        let workspace_id = authority.workspace_id;
+        let workspace_id = config.workspace_id;
         Self {
             config,
-            authority,
             authorization,
             effects,
             interruption_diagnostics: Arc::new(RelationalInterruptedCommitDiagnostics::new(
@@ -529,10 +417,7 @@ impl ExactProgrammaticCommandRuntimePartsFactory {
         &self,
         context_workspace_id: WorkspaceId,
     ) -> Result<(), ProgrammaticCommandRuntimeFactoryError> {
-        if self.config.workspace_id != self.authority.workspace_id {
-            return Err(ProgrammaticCommandRuntimeFactoryError::ConfigWorkspaceMismatch);
-        }
-        if context_workspace_id != self.authority.workspace_id {
+        if context_workspace_id != self.config.workspace_id {
             return Err(ProgrammaticCommandRuntimeFactoryError::ContextWorkspaceMismatch);
         }
         Ok(())
@@ -542,38 +427,32 @@ impl ExactProgrammaticCommandRuntimePartsFactory {
         &self,
         observation: &ProgrammaticCommandRuntimeAuthorityObservation,
     ) -> Result<(), ProgrammaticCommandRuntimeFactoryError> {
-        let expected = self.authority;
+        let expected_workspace = self.config.workspace_id;
+        let expected_epoch = observation.query_authority_epoch_id;
         self.validate_workspace_binding(observation.context_workspace_id)?;
-        if observation.activation_workspace_id != expected.workspace_id {
+        if observation.activation_workspace_id != expected_workspace {
             return Err(ProgrammaticCommandRuntimeFactoryError::ActivationWorkspaceMismatch);
         }
-        if observation.admission_head != ExpectedHead::Epoch(expected.epoch_id) {
-            return Err(ProgrammaticCommandRuntimeFactoryError::AdmissionEpochMismatch);
-        }
-        if observation.resource_epoch_id != expected.epoch_id {
+        if observation.resource_epoch_id != expected_epoch {
             return Err(ProgrammaticCommandRuntimeFactoryError::ResourceEpochMismatch);
         }
-        if observation.resource_policy_pin != expected.resource_policy_pin {
+        if observation.resource_policy_pin
+            != observation.query_authority_activation_resource_policy_pin
+        {
             return Err(ProgrammaticCommandRuntimeFactoryError::ResourcePolicyMismatch);
         }
-        if observation.activation_control_fingerprint != expected.activation_control_fingerprint {
-            return Err(ProgrammaticCommandRuntimeFactoryError::ActivationControlMismatch);
-        }
-        if observation.query_authority_workspace_id != expected.workspace_id {
+        if observation.query_authority_workspace_id != expected_workspace {
             return Err(ProgrammaticCommandRuntimeFactoryError::QueryAuthorityWorkspaceMismatch);
-        }
-        if observation.query_authority_epoch_id != expected.epoch_id {
-            return Err(ProgrammaticCommandRuntimeFactoryError::QueryAuthorityEpochMismatch);
         }
         if !observation.query_authority_shares_resources {
             return Err(ProgrammaticCommandRuntimeFactoryError::QueryAuthorityResourceMismatch);
         }
-        if observation.query_authority_resource_policy_pin != expected.resource_policy_pin {
+        if observation.query_authority_resource_policy_pin != observation.resource_policy_pin {
             return Err(
                 ProgrammaticCommandRuntimeFactoryError::QueryAuthorityResourcePolicyMismatch,
             );
         }
-        if observation.query_runtime_workspace_id != expected.workspace_id {
+        if observation.query_runtime_workspace_id != expected_workspace {
             return Err(ProgrammaticCommandRuntimeFactoryError::QueryRuntimeWorkspaceMismatch);
         }
         if !observation.query_runtime_shares_admission {
@@ -587,29 +466,14 @@ impl ExactProgrammaticCommandRuntimePartsFactory {
                 ProgrammaticCommandRuntimeFactoryError::QueryRuntimePublishedResultsMismatch,
             );
         }
-        if observation.delta_runtime_workspace_id != expected.workspace_id {
+        if observation.delta_runtime_workspace_id != expected_workspace {
             return Err(ProgrammaticCommandRuntimeFactoryError::DeltaRuntimeWorkspaceMismatch);
         }
-        if observation.delta_runtime_epoch_id != expected.epoch_id {
+        if observation.delta_runtime_epoch_id != expected_epoch {
             return Err(ProgrammaticCommandRuntimeFactoryError::DeltaRuntimeEpochMismatch);
         }
         if observation.delta_runtime_table_versions != observation.query_authority_table_versions {
             return Err(ProgrammaticCommandRuntimeFactoryError::DeltaRuntimeTableVersionsMismatch);
-        }
-        let receipt = observation
-            .receipt
-            .ok_or(ProgrammaticCommandRuntimeFactoryError::ReceiptMissing)?;
-        if receipt.workspace_id != expected.workspace_id {
-            return Err(ProgrammaticCommandRuntimeFactoryError::ReceiptWorkspaceMismatch);
-        }
-        if receipt.selected_epoch != expected.epoch_id {
-            return Err(ProgrammaticCommandRuntimeFactoryError::ReceiptEpochMismatch);
-        }
-        if receipt.event_id != expected.activation_event_id {
-            return Err(ProgrammaticCommandRuntimeFactoryError::ReceiptEventMismatch);
-        }
-        if receipt.active_fence != expected.activation_fence {
-            return Err(ProgrammaticCommandRuntimeFactoryError::ReceiptFenceMismatch);
         }
         Ok(())
     }
@@ -619,7 +483,7 @@ impl ExactProgrammaticCommandRuntimePartsFactory {
         view: &impl ProgrammaticCommandRuntimeAuthorityView,
     ) -> Result<(), ProgrammaticCommandRuntimeFactoryError> {
         self.validate_workspace_binding(view.context_workspace_id())?;
-        let observation = view.observe(self.authority.epoch_id)?;
+        let observation = view.observe()?;
         self.validate_observation(&observation)
     }
 }
@@ -633,7 +497,7 @@ impl ProgrammaticCommandRuntimePartsFactory for ExactProgrammaticCommandRuntimeP
             .map_err(|error| Box::new(error) as WorkspaceFabricCommandRuntimeFactoryError)?;
         let semantics: Arc<dyn CommandSemanticContextPort> =
             Arc::new(RelationalCommandSemanticContext::new(
-                self.authority.workspace_id,
+                self.config.workspace_id,
                 context.activation_authority().clone(),
                 Arc::clone(&self.authorization),
             ));
@@ -652,14 +516,13 @@ impl ProgrammaticCommandRuntimePartsFactory for ExactProgrammaticCommandRuntimeP
 struct ProgrammaticCommandRuntimeAuthorityObservation {
     context_workspace_id: WorkspaceId,
     activation_workspace_id: WorkspaceId,
-    admission_head: ExpectedHead,
     resource_epoch_id: EpochId,
     resource_policy_pin: [u8; 32],
-    activation_control_fingerprint: [u8; 32],
     query_authority_workspace_id: WorkspaceId,
     query_authority_epoch_id: EpochId,
     query_authority_shares_resources: bool,
     query_authority_resource_policy_pin: [u8; 32],
+    query_authority_activation_resource_policy_pin: [u8; 32],
     query_runtime_workspace_id: WorkspaceId,
     query_runtime_shares_admission: bool,
     query_runtime_shares_resources: bool,
@@ -668,7 +531,6 @@ struct ProgrammaticCommandRuntimeAuthorityObservation {
     delta_runtime_workspace_id: WorkspaceId,
     delta_runtime_epoch_id: EpochId,
     delta_runtime_table_versions: super::activation::TableVersionSetRef,
-    receipt: Option<ActivationCacheReceipt>,
 }
 
 trait ProgrammaticCommandRuntimeAuthorityView {
@@ -676,7 +538,6 @@ trait ProgrammaticCommandRuntimeAuthorityView {
 
     fn observe(
         &self,
-        expected_epoch: EpochId,
     ) -> Result<
         ProgrammaticCommandRuntimeAuthorityObservation,
         ProgrammaticCommandRuntimeFactoryError,
@@ -692,33 +553,19 @@ impl ProgrammaticCommandRuntimeAuthorityView for LiveProgrammaticCommandRuntimeA
 
     fn observe(
         &self,
-        expected_epoch: EpochId,
     ) -> Result<
         ProgrammaticCommandRuntimeAuthorityObservation,
         ProgrammaticCommandRuntimeFactoryError,
     > {
         let context = self.0;
-        let query_authority = context
-            .query_authorities()
-            .resolve(expected_epoch)
-            .map_err(ProgrammaticCommandRuntimeFactoryError::QueryAuthority)?;
-        let receipt = context
-            .receipt_cache()
-            .current_receipt()
-            .map_err(|_| ProgrammaticCommandRuntimeFactoryError::ReceiptCacheUnavailable)?;
-
+        let query_authority = context.query_authority();
         let query_runtime = context.query_runtime();
 
         Ok(ProgrammaticCommandRuntimeAuthorityObservation {
             context_workspace_id: context.workspace_id(),
             activation_workspace_id: context.activation_authority().workspace_id(),
-            admission_head: context.admission().active_head(),
             resource_epoch_id: context.resources().epoch_id(),
             resource_policy_pin: *context.resources().resource_policy(),
-            activation_control_fingerprint: *context
-                .activation_authority()
-                .control_relation()
-                .fingerprint(),
             query_authority_workspace_id: query_authority.workspace_id(),
             query_authority_epoch_id: query_authority.epoch_id(),
             query_authority_shares_resources: Arc::ptr_eq(
@@ -726,6 +573,10 @@ impl ProgrammaticCommandRuntimeAuthorityView for LiveProgrammaticCommandRuntimeA
                 context.resources(),
             ),
             query_authority_resource_policy_pin: *query_authority.resources().resource_policy(),
+            query_authority_activation_resource_policy_pin: *query_authority
+                .activation_pins()
+                .resource_envelope
+                .as_bytes(),
             query_runtime_workspace_id: query_runtime.workspace_id(),
             query_runtime_shares_admission: Arc::ptr_eq(
                 query_runtime.admission(),
@@ -743,7 +594,6 @@ impl ProgrammaticCommandRuntimeAuthorityView for LiveProgrammaticCommandRuntimeA
             delta_runtime_workspace_id: context.delta_runtime().workspace_id(),
             delta_runtime_epoch_id: context.delta_runtime().epoch_id(),
             delta_runtime_table_versions: context.delta_runtime().table_version_set_ref(),
-            receipt,
         })
     }
 }
@@ -756,8 +606,7 @@ mod tests {
 
     use super::*;
     use crate::fabric::command::{
-        ActorId, AuthorizationDecision, DiagnosticRef, FabricCommand, LeaseId, OperationId,
-        TransactionRef, WriterGeneration,
+        ActorId, AuthorizationDecision, DiagnosticRef, ExpectedHead, FabricCommand, LeaseId,
     };
     use crate::fabric::command_actor::CommandPortError;
     use crate::fabric::command_actor::FabricCommandActorConfig;
@@ -765,16 +614,14 @@ mod tests {
         CommandAuthorizationPort, InterruptedCommitDiagnosticQuery,
         InterruptedCommitDiagnosticRelationPort,
     };
-    use crate::fabric::programmatic_activation_admission::{
-        ProgrammaticSuccessorQueryAuthorityOutcome, ProgrammaticSuccessorQueryAuthorityRequest,
-    };
+    use crate::fabric::production_kernel::{ActiveWorkspace, SelectedEpochRecord};
+    use crate::fabric::programmatic_activation_admission::ActiveWorkspaceBuildError;
     use crate::fabric::programmatic_activation_command_ports::{
         ActivationCandidateProofObservation, ActivationCommandRequestKey,
         ActivationCommandRequestMaterial, ActivationNotSelectedClassification,
         ActivationNotSelectedClassificationQuery, ActivationReconciliationRead,
         ActivationReconciliationRecord, ActivationReconciliationWrite,
     };
-    use crate::fabric::programmatic_workspace::WorkspaceEpochQueryAuthority;
 
     fn id16(seed: u8) -> [u8; 16] {
         [seed; 16]
@@ -790,13 +637,6 @@ mod tests {
 
     fn epoch(seed: u8) -> EpochId {
         EpochId::from_bytes(id16(seed))
-    }
-
-    fn fence(seed: u8, generation: u64) -> WriterFence {
-        WriterFence {
-            lease_id: LeaseId::from_bytes(id16(seed)),
-            generation: WriterGeneration::new(generation).expect("test generation is nonzero"),
-        }
     }
 
     fn config(root: &Path, workspace_id: WorkspaceId) -> FabricCommandRuntimeConfig {
@@ -884,30 +724,25 @@ mod tests {
         }
     }
 
-    struct MissingEpochRebuilder;
+    struct MissingActiveWorkspaceBuilder;
 
     #[async_trait]
-    impl ActivationEpochRebuilderPort for MissingEpochRebuilder {
-        async fn rebuild_selected_epoch(
+    impl ReleaseOwnedActiveWorkspaceBuilder for MissingActiveWorkspaceBuilder {
+        async fn build_activated(
             &self,
-            _request: ActivationEpochRebuildRequest,
-        ) -> ActivationEpochRebuildOutcome {
-            ActivationEpochRebuildOutcome::Unknown {
-                diagnostic: DiagnosticRef::from_bytes(id32(0x42)),
-            }
+            _selection: SelectedEpochRecord,
+            _chain_after_readback: &super::super::activation::ActivationChain,
+            _candidate: Arc<super::super::programmatic_epoch::ProgrammaticFabricEpoch>,
+        ) -> Result<Arc<ActiveWorkspace>, ActiveWorkspaceBuildError> {
+            Err(ActiveWorkspaceBuildError::Unavailable)
         }
-    }
 
-    struct MissingSuccessorQueryAuthority;
-
-    #[async_trait]
-    impl ProgrammaticSuccessorQueryAuthorityPort for MissingSuccessorQueryAuthority {
-        async fn rebuild_successor(
+        async fn rebuild_selected(
             &self,
-            _request: ProgrammaticSuccessorQueryAuthorityRequest,
-        ) -> Result<Arc<WorkspaceEpochQueryAuthority>, ProgrammaticSuccessorQueryAuthorityOutcome>
-        {
-            Err(ProgrammaticSuccessorQueryAuthorityOutcome::Unavailable)
+            _selection: SelectedEpochRecord,
+            _chain_after_readback: &super::super::activation::ActivationChain,
+        ) -> Result<Arc<ActiveWorkspace>, ActiveWorkspaceBuildError> {
+            Err(ActiveWorkspaceBuildError::Unavailable)
         }
     }
 
@@ -932,61 +767,36 @@ mod tests {
                 Arc::new(MissingActivationState),
                 Arc::new(MissingProofRelations),
                 DiagnosticRef::from_bytes(id32(0x57)),
-                Arc::new(MissingEpochRebuilder),
-                Arc::new(MissingSuccessorQueryAuthority),
+                Arc::new(MissingActiveWorkspaceBuilder),
             ),
             unavailable,
         )
     }
 
-    fn binding(workspace_id: WorkspaceId) -> ProgrammaticCommandRuntimeAuthorityBinding {
-        ProgrammaticCommandRuntimeAuthorityBinding::new(
-            workspace_id,
-            epoch(2),
-            ActivationEventId::from_bytes(id32(3)),
-            fence(6, 7),
-            id32(8),
-            id32(9),
-        )
-    }
-
-    fn receipt(authority: ProgrammaticCommandRuntimeAuthorityBinding) -> ActivationCacheReceipt {
-        ActivationCacheReceipt {
-            workspace_id: authority.workspace_id(),
-            operation_id: OperationId::from_bytes(id16(10)),
-            event_id: authority.activation_event_id(),
-            selected_epoch: authority.epoch_id(),
-            active_fence: authority.activation_fence(),
-            transaction: TransactionRef::from_bytes(id32(11)),
-        }
-    }
-
-    fn observation(
-        authority: ProgrammaticCommandRuntimeAuthorityBinding,
-    ) -> ProgrammaticCommandRuntimeAuthorityObservation {
+    fn observation(workspace_id: WorkspaceId) -> ProgrammaticCommandRuntimeAuthorityObservation {
+        let epoch_id = epoch(2);
+        let resource_policy_pin = id32(9);
         ProgrammaticCommandRuntimeAuthorityObservation {
-            context_workspace_id: authority.workspace_id(),
-            activation_workspace_id: authority.workspace_id(),
-            admission_head: ExpectedHead::Epoch(authority.epoch_id()),
-            resource_epoch_id: authority.epoch_id(),
-            resource_policy_pin: authority.resource_policy_pin(),
-            activation_control_fingerprint: authority.activation_control_fingerprint(),
-            query_authority_workspace_id: authority.workspace_id(),
-            query_authority_epoch_id: authority.epoch_id(),
+            context_workspace_id: workspace_id,
+            activation_workspace_id: workspace_id,
+            resource_epoch_id: epoch_id,
+            resource_policy_pin,
+            query_authority_workspace_id: workspace_id,
+            query_authority_epoch_id: epoch_id,
             query_authority_shares_resources: true,
-            query_authority_resource_policy_pin: authority.resource_policy_pin(),
-            query_runtime_workspace_id: authority.workspace_id(),
+            query_authority_resource_policy_pin: resource_policy_pin,
+            query_authority_activation_resource_policy_pin: resource_policy_pin,
+            query_runtime_workspace_id: workspace_id,
             query_runtime_shares_admission: true,
             query_runtime_shares_resources: true,
             query_runtime_shares_published_results: true,
             query_authority_table_versions:
                 super::super::activation::TableVersionSetRef::from_bytes(id32(12)),
-            delta_runtime_workspace_id: authority.workspace_id(),
-            delta_runtime_epoch_id: authority.epoch_id(),
+            delta_runtime_workspace_id: workspace_id,
+            delta_runtime_epoch_id: epoch_id,
             delta_runtime_table_versions: super::super::activation::TableVersionSetRef::from_bytes(
                 id32(12),
             ),
-            receipt: Some(receipt(authority)),
         }
     }
 
@@ -999,7 +809,6 @@ mod tests {
 
         fn observe(
             &self,
-            _expected_epoch: EpochId,
         ) -> Result<
             ProgrammaticCommandRuntimeAuthorityObservation,
             ProgrammaticCommandRuntimeFactoryError,
@@ -1011,11 +820,9 @@ mod tests {
     fn factory(
         root: &Path,
         configured_workspace: WorkspaceId,
-        authority: ProgrammaticCommandRuntimeAuthorityBinding,
     ) -> ExactProgrammaticCommandRuntimePartsFactory {
         ExactProgrammaticCommandRuntimePartsFactory::new(
             config(root, configured_workspace),
-            authority,
             Arc::new(AuthorizationPort),
             effects(),
             Arc::new(DiagnosticRelation),
@@ -1025,38 +832,37 @@ mod tests {
     #[test]
     fn complete_authority_observation_passes_production_factory_validation() {
         let root = tempfile::tempdir().unwrap();
-        let authority = binding(workspace(1));
-        let factory = factory(root.path(), authority.workspace_id(), authority);
+        let workspace_id = workspace(1);
+        let factory = factory(root.path(), workspace_id);
 
         factory
-            .validate_authority_view(&AuthorityView(observation(authority)))
+            .validate_authority_view(&AuthorityView(observation(workspace_id)))
             .unwrap();
     }
 
     #[test]
     fn workspace_config_mismatch_is_rejected_before_parts_are_returned() {
         let root = tempfile::tempdir().unwrap();
-        let authority = binding(workspace(1));
-        let factory = factory(root.path(), workspace(99), authority);
+        let workspace_id = workspace(1);
+        let factory = factory(root.path(), workspace(99));
 
         let error = factory
-            .validate_authority_view(&AuthorityView(observation(authority)))
+            .validate_authority_view(&AuthorityView(observation(workspace_id)))
             .unwrap_err();
 
         assert_eq!(
             error,
-            ProgrammaticCommandRuntimeFactoryError::ConfigWorkspaceMismatch
+            ProgrammaticCommandRuntimeFactoryError::ContextWorkspaceMismatch
         );
     }
 
     #[test]
     fn production_construction_requires_router_semantics_and_diagnostics() {
         let root = tempfile::tempdir().unwrap();
-        let authority = binding(workspace(1));
+        let workspace_id = workspace(1);
         let authorization: Arc<dyn CommandAuthorizationPort> = Arc::new(AuthorizationPort);
         let factory = ExactProgrammaticCommandRuntimePartsFactory::new(
-            config(root.path(), authority.workspace_id()),
-            authority,
+            config(root.path(), workspace_id),
             Arc::clone(&authorization),
             effects(),
             Arc::new(DiagnosticRelation),
@@ -1073,20 +879,20 @@ mod tests {
     #[test]
     fn substituted_query_runtime_authorities_are_rejected() {
         let root = tempfile::tempdir().unwrap();
-        let authority = binding(workspace(1));
-        let factory = factory(root.path(), authority.workspace_id(), authority);
+        let workspace_id = workspace(1);
+        let factory = factory(root.path(), workspace_id);
 
         for (substituted, expected) in [
             (
-                observation(authority),
+                observation(workspace_id),
                 ProgrammaticCommandRuntimeFactoryError::QueryRuntimeAdmissionMismatch,
             ),
             (
-                observation(authority),
+                observation(workspace_id),
                 ProgrammaticCommandRuntimeFactoryError::QueryRuntimeResourceMismatch,
             ),
             (
-                observation(authority),
+                observation(workspace_id),
                 ProgrammaticCommandRuntimeFactoryError::QueryRuntimePublishedResultsMismatch,
             ),
         ]

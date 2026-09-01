@@ -515,7 +515,12 @@ datafusion-cache-resource-operations-check:
 [doc("Prove Delta history creation, transaction identity, exact proof rows, and activation readback integrity")]
 [group('test')]
 delta-durability-protocol-integrity-check:
-    cargo nextest run --locked --lib -E 'test(/(history_creation_contract_sets_cdf_stats_and_feature_properties_at_version_zero|commit_preserves_session_marker_provenance_and_zero_retry|corrupt_duplicate_rows_fail_closed_after_exact_reopen|exact_delta_append_readback_and_marker_reconciliation_round_trip)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/wp32_int_/)' --no-tests=fail
+
+[doc("Reconstruct the activation-selected exact Delta versions and decoded rows, including an older selected version")]
+[group('test')]
+delta-exact-reconstruction-v4-check:
+    cargo nextest run --locked --lib -E 'test(/wp32_beh_/)' --no-tests=fail
 
 [doc("Reconstruct exact semantic, CDF, checkpoint, and nine-relation proof state from pinned Delta versions")]
 [group('test')]
@@ -525,12 +530,12 @@ delta-exact-reconstruction-v3-check:
 [doc("Reject receipt, cache, predecessor-schema, and reversible-vector substitution as activation authority")]
 [group('test')]
 activation-receipt-nonauthority-check:
-    cargo nextest run --locked --lib -E 'test(/(missing_and_wrong_version_vectors_fail_closed|concrete_cache_and_acknowledgement_are_idempotent_and_fenced|recovery_rejects_a_reversible_version_vector_substitution|predecessor_v2_activation_schema_is_not_a_reopen_authority|durable_ack_marker_prevents_duplicate_acknowledgement_on_recovery)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/wp32_neg_/)' --no-tests=fail
 
 [doc("Recover admission-closed from durable Delta evidence without a process-local candidate")]
 [group('test')]
 candidate-free-recovery-check:
-    cargo nextest run --locked --lib -E 'test(/(unknown_commit_recovers_only_from_exact_operation_marker_and_chain|unknown_marker_keeps_restart_admission_closed_and_requires_reconciliation|cache_loss_and_process_reopen_reconstruct_durable_authority|split_head_and_stale_fence_reject_before_native_checkpoint|active_pins_cdf_and_proof_references_refuse_destructive_vacuum)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/wp32_ops_/)' --no-tests=fail
 
 [doc("Bind the independent v4 expectations to the active plan and terminal 2.2 suite")]
 [group('test')]

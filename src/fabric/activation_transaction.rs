@@ -27,7 +27,8 @@ use super::command::{
     OperationSelectionRef, ProofReceiptRef, ReconciliationEvidenceRef, RetentionPolicyRef,
     TransactionRef, WorkspaceId, WriterFence,
 };
-use super::programmatic_epoch::{ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder};
+use super::production_kernel::SelectedEpochRecord;
+use super::programmatic_epoch::ProgrammaticFabricEpoch;
 
 /// Candidate proof result. Failure, unknown, and cancellation are all distinct from proof.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -103,6 +104,7 @@ pub trait ActivationAdmissionPort: Send + Sync {
     async fn publish_selected_epoch(
         &self,
         barrier: Self::Barrier,
+        selection: SelectedEpochRecord,
         chain_after_readback: &ActivationChain,
         candidate: Arc<ProgrammaticFabricEpoch>,
     ) -> Result<(), AdmissionError>;
@@ -135,6 +137,7 @@ impl ActivationAdmissionPort for FabricAdmissionRuntime {
     async fn publish_selected_epoch(
         &self,
         barrier: Self::Barrier,
+        _selection: SelectedEpochRecord,
         chain_after_readback: &ActivationChain,
         candidate: Arc<ProgrammaticFabricEpoch>,
     ) -> Result<(), AdmissionError> {
@@ -284,8 +287,7 @@ impl ActivationAppendContract {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ActivationAppendOutcome {
     Committed {
-        event: ActivationEvent,
-        table_versions: Arc<TableVersionSet>,
+        selection: SelectedEpochRecord,
         chain_after_readback: ActivationChain,
     },
     NotCommitted {
@@ -581,8 +583,7 @@ pub enum ActivationAcknowledgementMarker {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ActivationOperationMarkerOutcome {
     Selected {
-        event: ActivationEvent,
-        table_versions: Arc<TableVersionSet>,
+        selection: SelectedEpochRecord,
         chain_after_readback: ActivationChain,
         acknowledgement: ActivationAcknowledgementMarker,
         evidence: ReconciliationEvidenceRef,
@@ -607,80 +608,6 @@ pub trait ActivationOperationMarkerPort: Send + Sync {
     ) -> ActivationOperationMarkerOutcome;
 }
 
-/// Exact durable selection presented to the epoch reconstruction boundary.
-///
-/// The selected event and reversible relation-version vector come from the
-/// same activation-control readback. No process-local candidate is accepted as
-/// an input, so restart reconstruction is causally downstream of durable
-/// selection rather than a prerequisite for reading it.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ActivationEpochRebuildRequest {
-    pub event: ActivationEvent,
-    pub table_versions: Arc<TableVersionSet>,
-}
-
-/// Result of rebuilding the selected sealed epoch from exact durable state.
-#[derive(Clone, Debug)]
-pub enum ActivationEpochRebuildOutcome {
-    Rebuilt(Arc<ProgrammaticFabricEpoch>),
-    Unknown { diagnostic: DiagnosticRef },
-}
-
-/// Cold-restart boundary for an activation-selected epoch.
-#[async_trait]
-pub trait ActivationEpochRebuilderPort: Send + Sync {
-    async fn rebuild_selected_epoch(
-        &self,
-        request: ActivationEpochRebuildRequest,
-    ) -> ActivationEpochRebuildOutcome;
-}
-
-/// Concrete exact-Delta rebuilder over an application-owned programmatic
-/// builder recipe.
-///
-/// The recipe installs the exact provider inputs and transformations for the
-/// selected compiler release. This adapter supplies only the durable epoch ID
-/// and version vector, then delegates reconstruction to
-/// [`ProgrammaticFabricEpochBuilder::reopen`].
-pub struct ExactDeltaProgrammaticEpochRebuilder<F> {
-    builder: F,
-}
-
-impl<F> ExactDeltaProgrammaticEpochRebuilder<F> {
-    #[must_use]
-    pub const fn new(builder: F) -> Self {
-        Self { builder }
-    }
-}
-
-#[async_trait]
-impl<F, E> ActivationEpochRebuilderPort for ExactDeltaProgrammaticEpochRebuilder<F>
-where
-    F: Fn(EpochId) -> Result<ProgrammaticFabricEpochBuilder, E> + Send + Sync,
-    E: std::fmt::Display + Send,
-{
-    async fn rebuild_selected_epoch(
-        &self,
-        request: ActivationEpochRebuildRequest,
-    ) -> ActivationEpochRebuildOutcome {
-        let selected_epoch = request.event.pins().epoch;
-        let builder = match (self.builder)(selected_epoch) {
-            Ok(builder) => builder,
-            Err(error) => {
-                return ActivationEpochRebuildOutcome::Unknown {
-                    diagnostic: epoch_rebuild_diagnostic(&request, &error.to_string()),
-                };
-            }
-        };
-        match builder.reopen(Arc::clone(&request.table_versions)).await {
-            Ok(epoch) => ActivationEpochRebuildOutcome::Rebuilt(Arc::new(epoch)),
-            Err(error) => ActivationEpochRebuildOutcome::Unknown {
-                diagnostic: epoch_rebuild_diagnostic(&request, &error.to_string()),
-            },
-        }
-    }
-}
-
 /// Admission operations used only after marker/control-history reconciliation.
 /// They can resume an in-process closed barrier or a fail-closed restarted
 /// runtime without performing a second epoch swap.
@@ -691,9 +618,8 @@ pub trait ActivationRecoveryAdmissionPort: Send + Sync {
         expected_head: ExpectedHead,
         execution_fence: WriterFence,
         active_recovery_fence: WriterFence,
-        event: ActivationEvent,
+        selection: SelectedEpochRecord,
         chain_after_readback: &ActivationChain,
-        candidate: Arc<ProgrammaticFabricEpoch>,
         allow_already_reopened: bool,
     ) -> Result<RecoverySelectionPublication, AdmissionError>;
 
@@ -720,9 +646,8 @@ impl ActivationRecoveryAdmissionPort for FabricAdmissionRuntime {
         expected_head: ExpectedHead,
         execution_fence: WriterFence,
         active_recovery_fence: WriterFence,
-        event: ActivationEvent,
+        selection: SelectedEpochRecord,
         chain_after_readback: &ActivationChain,
-        candidate: Arc<ProgrammaticFabricEpoch>,
         allow_already_reopened: bool,
     ) -> Result<RecoverySelectionPublication, AdmissionError> {
         FabricAdmissionRuntime::recover_selected_epoch(
@@ -730,9 +655,8 @@ impl ActivationRecoveryAdmissionPort for FabricAdmissionRuntime {
             expected_head,
             execution_fence,
             active_recovery_fence,
-            event,
+            selection.event(),
             chain_after_readback,
-            candidate,
             allow_already_reopened,
         )
     }
@@ -787,9 +711,8 @@ pub struct ActivationTransactionRequest {
 /// Durable activation inputs sufficient for marker-driven restart recovery.
 ///
 /// Unlike [`ActivationTransactionRequest`], this value deliberately carries
-/// no process-local candidate. Recovery first reads the durable marker and
-/// version vector, then reconstructs the selected epoch through
-/// [`ActivationEpochRebuilderPort`].
+/// no process-local candidate. Recovery reads the durable marker and complete selected record;
+/// the release-owned active-workspace installer reconstructs all runtime authority from it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActivationRecoveryRequest {
     attempt: ActivationAttempt,
@@ -828,7 +751,7 @@ impl ActivationTransactionRequest {
         if selected_epoch != pins.epoch || selected_epoch != *candidate.identity() {
             return Err(ActivationTransactionRequestError::CandidateIdentityMismatch);
         }
-        if pins.table_versions != candidate.observation_publication().table_version_set_ref() {
+        if pins.table_versions != candidate.table_version_set_ref() {
             return Err(ActivationTransactionRequestError::CandidateTableVersionSetMismatch);
         }
         Ok(Self {
@@ -1130,7 +1053,6 @@ pub enum ActivationTransactionStage {
     AdmissionClosure,
     AuthorityRevalidation,
     DurableAppendReadback,
-    EpochRebuild,
     EpochSwap,
     CacheReconciliation,
     AdmissionReopen,
@@ -1182,7 +1104,6 @@ pub enum ActivationReadbackViolation {
     AcknowledgementMarkerMismatch,
     RecoveryAttemptMismatch,
     RecoveryFenceNotAuthorized,
-    RebuiltEpochMismatch,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1201,7 +1122,6 @@ pub enum ActivationReconciliationReason {
     AcknowledgementUnknown(DiagnosticRef),
     AcknowledgementCancelled(DiagnosticRef),
     OperationMarkerUnknown(DiagnosticRef),
-    EpochRebuildUnknown(DiagnosticRef),
 }
 
 /// Fully pinned instruction for deterministic recovery. It never authorizes a persistence retry;
@@ -1395,14 +1315,14 @@ where
             .await
         {
             ActivationAppendOutcome::Committed {
-                event,
-                table_versions,
+                selection,
                 chain_after_readback,
             } => {
+                let event = selection.event();
                 if let Err(violation) = validate_committed_selection(
                     &contract,
                     event,
-                    &table_versions,
+                    selection.table_versions(),
                     &chain_after_readback,
                 ) {
                     return reconciliation(
@@ -1413,7 +1333,7 @@ where
                         ActivationAdmissionPosture::Closed,
                     );
                 }
-                (event, chain_after_readback)
+                (selection, chain_after_readback)
             }
             ActivationAppendOutcome::NotCommitted {
                 unchanged_chain,
@@ -1459,7 +1379,8 @@ where
                 );
             }
         };
-        let (event, chain_after_readback) = selection;
+        let (selection, chain_after_readback) = selection;
+        let event = selection.event();
         let durable_selection = DurableSelectionKnowledge::ReadBack {
             event_id: event.event_id(),
         };
@@ -1468,6 +1389,7 @@ where
             .admission
             .publish_selected_epoch(
                 barrier,
+                selection,
                 &chain_after_readback,
                 Arc::clone(&request.candidate),
             )
@@ -1591,38 +1513,34 @@ where
 /// port by construction, so recovery cannot blindly retry the selection
 /// commit. The only durable input is the operation-marker/control-history
 /// readback.
-pub struct ActivationRecoveryCoordinator<A, M, R, C, K> {
+pub struct ActivationRecoveryCoordinator<A, M, C, K> {
     admission: Arc<A>,
     operation_markers: Arc<M>,
-    epoch_rebuilder: Arc<R>,
     cache: Arc<C>,
     acknowledgements: Arc<K>,
 }
 
-impl<A, M, R, C, K> ActivationRecoveryCoordinator<A, M, R, C, K> {
+impl<A, M, C, K> ActivationRecoveryCoordinator<A, M, C, K> {
     #[must_use]
     pub const fn new(
         admission: Arc<A>,
         operation_markers: Arc<M>,
-        epoch_rebuilder: Arc<R>,
         cache: Arc<C>,
         acknowledgements: Arc<K>,
     ) -> Self {
         Self {
             admission,
             operation_markers,
-            epoch_rebuilder,
             cache,
             acknowledgements,
         }
     }
 }
 
-impl<A, M, R, C, K> ActivationRecoveryCoordinator<A, M, R, C, K>
+impl<A, M, C, K> ActivationRecoveryCoordinator<A, M, C, K>
 where
     A: ActivationRecoveryAdmissionPort,
     M: ActivationOperationMarkerPort,
-    R: ActivationEpochRebuilderPort,
     C: ActivationCachePort,
     K: ActivationAcknowledgementPort,
 {
@@ -1737,16 +1655,16 @@ where
                 )
             }
             ActivationOperationMarkerOutcome::Selected {
-                event,
-                table_versions,
+                selection,
                 chain_after_readback,
                 acknowledgement,
                 evidence,
             } => {
+                let event = selection.event();
                 if let Err(violation) = validate_recovered_selection(
                     &request,
                     event,
-                    &table_versions,
+                    selection.table_versions(),
                     &chain_after_readback,
                 ) {
                     return reconciliation(
@@ -1781,54 +1699,14 @@ where
                 let durable_selection = DurableSelectionKnowledge::ReadBack {
                     event_id: event.event_id(),
                 };
-                let candidate = match self
-                    .epoch_rebuilder
-                    .rebuild_selected_epoch(ActivationEpochRebuildRequest {
-                        event,
-                        table_versions: Arc::clone(&table_versions),
-                    })
-                    .await
-                {
-                    ActivationEpochRebuildOutcome::Rebuilt(candidate)
-                        if *candidate.identity() == event.pins().epoch
-                            && candidate
-                                .observation_publication()
-                                .table_version_set()
-                                .as_ref()
-                                == table_versions.as_ref() =>
-                    {
-                        candidate
-                    }
-                    ActivationEpochRebuildOutcome::Rebuilt(_) => {
-                        return reconciliation(
-                            &request,
-                            ActivationTransactionStage::EpochRebuild,
-                            ActivationReconciliationReason::ReadbackViolation(
-                                ActivationReadbackViolation::RebuiltEpochMismatch,
-                            ),
-                            durable_selection,
-                            ticket.admission_posture,
-                        );
-                    }
-                    ActivationEpochRebuildOutcome::Unknown { diagnostic } => {
-                        return reconciliation(
-                            &request,
-                            ActivationTransactionStage::EpochRebuild,
-                            ActivationReconciliationReason::EpochRebuildUnknown(diagnostic),
-                            durable_selection,
-                            ticket.admission_posture,
-                        );
-                    }
-                };
                 let publication = match self
                     .admission
                     .recover_selected_epoch(
                         request.command.expected_head,
                         request.execution_fence,
                         active_recovery_fence,
-                        event,
+                        selection,
                         &chain_after_readback,
-                        candidate,
                         ticket.admission_posture == ActivationAdmissionPosture::Reopened,
                     )
                     .await
@@ -2020,26 +1898,6 @@ fn operation_marker_request<R: ActivationRequestView>(
     }
 }
 
-fn epoch_rebuild_diagnostic(
-    request: &ActivationEpochRebuildRequest,
-    detail: &str,
-) -> DiagnosticRef {
-    fn frame(hasher: &mut blake3::Hasher, bytes: &[u8]) {
-        hasher.update(&u64::try_from(bytes.len()).unwrap_or(u64::MAX).to_be_bytes());
-        hasher.update(bytes);
-    }
-
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.activation-epoch-rebuild-diagnostic.v1\0");
-    frame(&mut hasher, request.event.workspace_id().as_bytes());
-    frame(&mut hasher, request.event.operation_id().as_bytes());
-    frame(&mut hasher, request.event.event_id().as_bytes());
-    frame(&mut hasher, request.event.pins().epoch.as_bytes());
-    frame(&mut hasher, request.table_versions.reference().as_bytes());
-    frame(&mut hasher, detail.as_bytes());
-    DiagnosticRef::from_bytes(*hasher.finalize().as_bytes())
-}
-
 fn recovery_ticket_matches(
     request: &ActivationRecoveryRequest,
     ticket: ActivationReconciliationTicket,
@@ -2076,17 +1934,6 @@ fn recovery_stage_is_causal(ticket: ActivationReconciliationTicket) -> bool {
                     ticket.durable_selection,
                     DurableSelectionKnowledge::NotAttempted | DurableSelectionKnowledge::Unknown
                 )
-        }
-        ActivationTransactionStage::EpochRebuild => {
-            matches!(
-                ticket.admission_posture,
-                ActivationAdmissionPosture::Closed
-                    | ActivationAdmissionPosture::Swapped
-                    | ActivationAdmissionPosture::Reopened
-            ) && matches!(
-                ticket.durable_selection,
-                DurableSelectionKnowledge::ReadBack { .. }
-            )
         }
         ActivationTransactionStage::EpochSwap => {
             ticket.admission_posture == ActivationAdmissionPosture::Closed
@@ -2192,12 +2039,7 @@ fn append_contract(
         predecessor_event_id,
         ordinal,
         pins: request.pins,
-        table_versions: Arc::clone(
-            request
-                .candidate
-                .observation_publication()
-                .table_version_set(),
-        ),
+        table_versions: Arc::clone(request.candidate.table_version_set()),
         compatibility: request.compatibility,
         retention: request.retention,
         operation_selection: request.operation_selection,
@@ -2352,6 +2194,7 @@ mod tests {
         ActivationReadbackRef, BackendCommitRef, OverlaySegmentSetRef, PolicySetRef,
         SealedActivationControlBinding, TableVersionSet, TableVersionSetRef,
     };
+    use crate::fabric::activation_control_delta::ActivationControlHorizon;
     use crate::fabric::command::{
         ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins, ExecutionOwner,
         IdempotencyKey, InputReleaseRef, LeaseId, PrincipalId, ProgramReleaseRef, ProviderSetRef,
@@ -2379,6 +2222,24 @@ mod tests {
             SealedActivationControlBinding::for_test(
                 "activation-transaction-test-session",
                 "binding.system.activation-control.delta",
+            ),
+        )
+    }
+
+    fn selected_record(
+        event: ActivationEvent,
+        table_versions: Arc<TableVersionSet>,
+        active_recovery_fence: WriterFence,
+    ) -> SelectedEpochRecord {
+        SelectedEpochRecord::for_test(
+            event,
+            table_versions,
+            ActivationControlHorizon::for_test(
+                event.workspace_id(),
+                control_relation(),
+                active_recovery_fence,
+                id32(0x7e),
+                1,
             ),
         )
     }
@@ -2448,7 +2309,7 @@ mod tests {
                 fence: execution_fence,
             },
         );
-        let table_versions = candidate.observation_publication().table_version_set_ref();
+        let table_versions = candidate.table_version_set_ref();
         ActivationTransactionRequest::try_new(
             attempt,
             candidate,
@@ -2581,6 +2442,7 @@ mod tests {
         async fn publish_selected_epoch(
             &self,
             _barrier: Self::Barrier,
+            _selection: SelectedEpochRecord,
             _chain_after_readback: &ActivationChain,
             _candidate: Arc<ProgrammaticFabricEpoch>,
         ) -> Result<(), AdmissionError> {
@@ -2688,8 +2550,11 @@ mod tests {
                             .unwrap()
                     };
                     ActivationAppendOutcome::Committed {
-                        event,
-                        table_versions: Arc::clone(&contract.table_versions),
+                        selection: selected_record(
+                            event,
+                            Arc::clone(&contract.table_versions),
+                            contract.execution_fence,
+                        ),
                         chain_after_readback,
                     }
                 }
@@ -2990,14 +2855,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recovery_rejects_a_reversible_version_vector_substitution() {
+    async fn wp32_neg_recovery_rejects_a_reversible_version_vector_substitution() {
         let candidate = candidate(EpochId::from_bytes(id16(54))).await;
         let request = request(candidate);
         let (event, chain) = recovered_event_and_chain(&request);
         let substituted = TableVersionSet::try_new(
             request
                 .candidate
-                .observation_publication()
                 .table_version_set()
                 .components()
                 .enumerate()
@@ -3137,39 +3001,6 @@ mod tests {
         }
     }
 
-    struct RecoveryEpochRebuilder {
-        candidate: Arc<ProgrammaticFabricEpoch>,
-    }
-
-    #[async_trait]
-    impl ActivationEpochRebuilderPort for RecoveryEpochRebuilder {
-        async fn rebuild_selected_epoch(
-            &self,
-            request: ActivationEpochRebuildRequest,
-        ) -> ActivationEpochRebuildOutcome {
-            if request.event.pins().epoch == *self.candidate.identity()
-                && request.table_versions.as_ref()
-                    == self
-                        .candidate
-                        .observation_publication()
-                        .table_version_set()
-                        .as_ref()
-            {
-                ActivationEpochRebuildOutcome::Rebuilt(Arc::clone(&self.candidate))
-            } else {
-                ActivationEpochRebuildOutcome::Unknown {
-                    diagnostic: DiagnosticRef::from_bytes(id32(79)),
-                }
-            }
-        }
-    }
-
-    fn recovery_rebuilder(request: &ActivationTransactionRequest) -> Arc<RecoveryEpochRebuilder> {
-        Arc::new(RecoveryEpochRebuilder {
-            candidate: Arc::clone(request.candidate()),
-        })
-    }
-
     struct RecoveryCache {
         admission: Arc<FabricAdmissionRuntime>,
         log: CallLog,
@@ -3184,9 +3015,8 @@ mod tests {
             active_fence: WriterFence,
         ) -> ActivationCacheOutcome {
             record(&self.log, "cache");
-            assert_eq!(
-                self.admission.admit().unwrap_err(),
-                AdmissionError::AdmissionClosed,
+            assert!(
+                !self.admission.is_open_for_test().unwrap(),
                 "cache recovery must run before admission reopens"
             );
             ActivationCacheOutcome::Reconciled(ActivationCacheReceipt {
@@ -3218,9 +3048,8 @@ mod tests {
                 "durable acknowledgement was repeated"
             );
             record(&self.log, "acknowledge");
-            assert_eq!(
-                self.admission.admit().unwrap().epoch_id(),
-                event.pins().epoch,
+            assert!(
+                self.admission.is_open_for_test().unwrap(),
                 "acknowledgement must follow recovery reopening"
             );
             ActivationAcknowledgementOutcome::Acknowledged(ActivationAcknowledgementReceipt {
@@ -3253,7 +3082,6 @@ mod tests {
     #[tokio::test]
     async fn unknown_commit_recovers_only_from_exact_operation_marker_and_chain() {
         let candidate = candidate(EpochId::from_bytes(id16(44))).await;
-        let original_session_id = candidate.context().state().session_id().to_owned();
         let request = request(Arc::clone(&candidate));
         let active_recovery_fence = WriterFence {
             lease_id: LeaseId::from_bytes(id16(51)),
@@ -3263,22 +3091,17 @@ mod tests {
         let admission = Arc::new(
             FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&chain).unwrap(),
         );
-        assert_eq!(
-            admission.admit().unwrap_err(),
-            AdmissionError::AdmissionClosed
-        );
+        assert!(!admission.is_open_for_test().unwrap());
         let log = Arc::new(Mutex::new(Vec::new()));
         let recovery = ActivationRecoveryCoordinator::new(
             Arc::clone(&admission),
             Arc::new(StaticOperationMarker {
                 expected: operation_marker_request(&request, active_recovery_fence),
                 outcome: ActivationOperationMarkerOutcome::Selected {
-                    event,
-                    table_versions: Arc::clone(
-                        request
-                            .candidate
-                            .observation_publication()
-                            .table_version_set(),
+                    selection: selected_record(
+                        event,
+                        Arc::clone(request.candidate.table_version_set()),
+                        active_recovery_fence,
                     ),
                     chain_after_readback: chain,
                     acknowledgement: ActivationAcknowledgementMarker::Absent,
@@ -3286,12 +3109,6 @@ mod tests {
                 },
                 log: Arc::clone(&log),
             }),
-            Arc::new(ExactDeltaProgrammaticEpochRebuilder::new(|epoch_id| {
-                ProgrammaticFabricEpochBuilder::try_new(
-                    epoch_id,
-                    FabricEpochRuntimeConfig::default(),
-                )
-            })),
             Arc::new(RecoveryCache {
                 admission: Arc::clone(&admission),
                 log: Arc::clone(&log),
@@ -3322,13 +3139,7 @@ mod tests {
         assert_eq!(receipt.event.execution_fence(), request.execution_fence);
         assert_eq!(receipt.cache.active_fence, active_recovery_fence);
         assert_eq!(receipt.acknowledgement.active_fence, active_recovery_fence);
-        let admitted = admission.admit().unwrap();
-        assert_eq!(admitted.epoch_id(), *candidate.identity());
-        assert_ne!(
-            admitted.epoch().context().state().session_id(),
-            original_session_id,
-            "restart recovery must install a freshly reconstructed DataFusion session"
-        );
+        assert!(admission.is_open_for_test().unwrap());
         assert_eq!(*log.lock().unwrap(), ["marker", "cache", "acknowledge"]);
     }
 
@@ -3338,10 +3149,7 @@ mod tests {
         let request = request(Arc::clone(&candidate));
         let (event, chain) = recovered_event_and_chain(&request);
         let admission = Arc::new(
-            FabricAdmissionRuntime::recover_for_reconciliation(&chain, |_| {
-                Some(Arc::clone(&candidate))
-            })
-            .unwrap(),
+            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&chain).unwrap(),
         );
         let log = Arc::new(Mutex::new(Vec::new()));
         let recovery = ActivationRecoveryCoordinator::new(
@@ -3349,12 +3157,10 @@ mod tests {
             Arc::new(StaticOperationMarker {
                 expected: operation_marker_request(&request, request.execution_fence),
                 outcome: ActivationOperationMarkerOutcome::Selected {
-                    event,
-                    table_versions: Arc::clone(
-                        request
-                            .candidate
-                            .observation_publication()
-                            .table_version_set(),
+                    selection: selected_record(
+                        event,
+                        Arc::clone(request.candidate.table_version_set()),
+                        request.execution_fence,
                     ),
                     chain_after_readback: chain,
                     acknowledgement: ActivationAcknowledgementMarker::Acknowledged(
@@ -3364,7 +3170,6 @@ mod tests {
                 },
                 log: Arc::clone(&log),
             }),
-            recovery_rebuilder(&request),
             Arc::new(RecoveryCache {
                 admission: Arc::clone(&admission),
                 log: Arc::clone(&log),
@@ -3403,8 +3208,7 @@ mod tests {
         let request = request(Arc::clone(&candidate));
         let (event, chain) = recovered_event_and_chain(&request);
         let admission = Arc::new(
-            FabricAdmissionRuntime::recover_for_reconciliation(&chain, |_| Some(candidate))
-                .unwrap(),
+            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&chain).unwrap(),
         );
         let log = Arc::new(Mutex::new(Vec::new()));
         let recovery = ActivationRecoveryCoordinator::new(
@@ -3412,12 +3216,10 @@ mod tests {
             Arc::new(StaticOperationMarker {
                 expected: operation_marker_request(&request, request.execution_fence),
                 outcome: ActivationOperationMarkerOutcome::Selected {
-                    event,
-                    table_versions: Arc::clone(
-                        request
-                            .candidate
-                            .observation_publication()
-                            .table_version_set(),
+                    selection: selected_record(
+                        event,
+                        Arc::clone(request.candidate.table_version_set()),
+                        request.execution_fence,
                     ),
                     chain_after_readback: chain,
                     acknowledgement: ActivationAcknowledgementMarker::Absent,
@@ -3425,7 +3227,6 @@ mod tests {
                 },
                 log: Arc::clone(&log),
             }),
-            recovery_rebuilder(&request),
             Arc::new(RecoveryCache {
                 admission: Arc::clone(&admission),
                 log: Arc::clone(&log),
@@ -3473,7 +3274,8 @@ mod tests {
         let unchanged_chain =
             ActivationChain::derive(request.command.ownership.workspace_id, []).unwrap();
         let admission = Arc::new(
-            FabricAdmissionRuntime::recover_for_reconciliation(&unchanged_chain, |_| None).unwrap(),
+            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&unchanged_chain)
+                .unwrap(),
         );
         let log = Arc::new(Mutex::new(Vec::new()));
         let recovery = ActivationRecoveryCoordinator::new(
@@ -3486,7 +3288,6 @@ mod tests {
                 },
                 log: Arc::clone(&log),
             }),
-            recovery_rebuilder(&request),
             Arc::new(RecoveryCache {
                 admission: Arc::clone(&admission),
                 log: Arc::clone(&log),
@@ -3517,10 +3318,7 @@ mod tests {
                 ..
             })
         ));
-        assert_eq!(
-            admission.admit().unwrap_err(),
-            AdmissionError::NoActiveEpoch
-        );
+        assert!(admission.is_open_for_test().unwrap());
         assert_eq!(*log.lock().unwrap(), ["marker"]);
     }
 
@@ -3531,7 +3329,8 @@ mod tests {
         let unchanged_chain =
             ActivationChain::derive(request.command.ownership.workspace_id, []).unwrap();
         let admission = Arc::new(
-            FabricAdmissionRuntime::recover_for_reconciliation(&unchanged_chain, |_| None).unwrap(),
+            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&unchanged_chain)
+                .unwrap(),
         );
         let log = Arc::new(Mutex::new(Vec::new()));
         let recovery = ActivationRecoveryCoordinator::new(
@@ -3544,7 +3343,6 @@ mod tests {
                 },
                 log: Arc::clone(&log),
             }),
-            recovery_rebuilder(&request),
             Arc::new(RecoveryCache {
                 admission: Arc::clone(&admission),
                 log: Arc::clone(&log),
@@ -3579,21 +3377,17 @@ mod tests {
                 ..
             })
         ));
-        assert_eq!(
-            admission.admit().unwrap_err(),
-            AdmissionError::AdmissionClosed
-        );
+        assert!(!admission.is_open_for_test().unwrap());
         assert_eq!(*log.lock().unwrap(), ["marker"]);
     }
 
     #[tokio::test]
-    async fn unknown_marker_keeps_restart_admission_closed_and_requires_reconciliation() {
+    async fn wp32_ops_unknown_marker_keeps_restart_admission_closed_and_requires_reconciliation() {
         let candidate = candidate(EpochId::from_bytes(id16(47))).await;
         let request = request(Arc::clone(&candidate));
-        let (event, chain) = recovered_event_and_chain(&request);
+        let (_event, chain) = recovered_event_and_chain(&request);
         let admission = Arc::new(
-            FabricAdmissionRuntime::recover_for_reconciliation(&chain, |_| Some(candidate))
-                .unwrap(),
+            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&chain).unwrap(),
         );
         let log = Arc::new(Mutex::new(Vec::new()));
         let recovery = ActivationRecoveryCoordinator::new(
@@ -3605,7 +3399,6 @@ mod tests {
                 },
                 log: Arc::clone(&log),
             }),
-            recovery_rebuilder(&request),
             Arc::new(RecoveryCache {
                 admission: Arc::clone(&admission),
                 log: Arc::clone(&log),
@@ -3636,14 +3429,7 @@ mod tests {
                 ..
             })
         ));
-        assert_eq!(
-            admission.admit().unwrap_err(),
-            AdmissionError::AdmissionClosed
-        );
+        assert!(!admission.is_open_for_test().unwrap());
         assert_eq!(*log.lock().unwrap(), ["marker"]);
-        assert_eq!(
-            admission.active_head(),
-            ExpectedHead::Epoch(event.pins().epoch)
-        );
     }
 }

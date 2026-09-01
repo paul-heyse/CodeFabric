@@ -29,9 +29,8 @@ use crate::semantic_query_contract::{
     SemanticSnapshotResponse,
 };
 
-use super::admission::AdmissionError;
 use super::arrow_result_resource::ResultResourceLease;
-use super::command::{ExpectedHead, WorkspaceId};
+use super::command::WorkspaceId;
 use super::production_kernel::{
     ActiveWorkspaceLease, CompiledPolicyAuthority, CompiledQueryAuthority, CompiledSemanticRelease,
     LifecycleAuthority, WorkspaceSlotRegistry,
@@ -513,17 +512,12 @@ impl ProgrammaticSnapshotProjectionPort for ExactProgrammaticSnapshotProjection 
         authority: &WorkspaceEpochQueryAuthority,
         freshness: FreshnessState,
     ) -> Result<SemanticSnapshotResponse, ProgrammaticQueryPortError> {
-        let startup = workspace.startup_observation();
         let pins = authority.activation_pins();
-        if startup.workspace_id != authority.workspace_id()
+        if workspace.workspace_id() != authority.workspace_id()
+            || !std::ptr::eq(workspace.query_authority().as_ref(), authority)
             || pins.epoch != authority.epoch_id()
-            || pins.table_versions
-                != authority
-                    .epoch()
-                    .observation_publication()
-                    .table_version_set_ref()
+            || pins.table_versions != authority.epoch().table_version_set_ref()
             || pins.resource_envelope.as_bytes() != authority.resources().resource_policy()
-            || workspace.admission().active_head() != ExpectedHead::Epoch(authority.epoch_id())
             || public_workspace_id
                 != workspace
                     .public_workspace_id()
@@ -549,7 +543,7 @@ impl ProgrammaticSnapshotProjectionPort for ExactProgrammaticSnapshotProjection 
             ),
         )
         .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))?;
-        let application_release = startup.releases.application_release();
+        let application_release = pins.application_release;
         let context_id = public_id16(
             b"codefabric.programmatic-analysis-context.v1",
             application_release.as_bytes(),
@@ -565,12 +559,7 @@ impl ProgrammaticSnapshotProjectionPort for ExactProgrammaticSnapshotProjection 
             &mut table_hasher,
             b"codefabric.programmatic-public-table-vector.v1",
         );
-        for (relation_id, table) in authority
-            .epoch()
-            .observation_publication()
-            .table_version_set()
-            .components()
-        {
+        for (relation_id, table) in authority.epoch().table_version_set().components() {
             frame_scope_identity(&mut table_hasher, relation_id.as_bytes());
             frame_scope_identity(
                 &mut table_hasher,
@@ -579,7 +568,10 @@ impl ProgrammaticSnapshotProjectionPort for ExactProgrammaticSnapshotProjection 
             frame_scope_identity(&mut table_hasher, &table.version().to_be_bytes());
         }
         let mut capability = BTreeMap::new();
-        capability.insert("factory_id".to_owned(), startup.factory_id.to_owned());
+        capability.insert(
+            "factory_id".to_owned(),
+            "codefabric.active-workspace.release-owned.v2".to_owned(),
+        );
         capability.insert(
             "program_catalog_pin".to_owned(),
             digest_text(&authority.ingress_catalog().program_catalog_pin),
@@ -602,7 +594,7 @@ impl ProgrammaticSnapshotProjectionPort for ExactProgrammaticSnapshotProjection 
             repository_id: None,
             worktree_id: None,
             source_generation: pins.source_generation.get(),
-            source_inventory_digest: digest_text(startup.releases.source_authority().as_bytes()),
+            source_inventory_digest: digest_text(pins.source_authority.as_bytes()),
             durable_base_publication: publication_id,
             base_table_version_digest: digest_text(table_hasher.finalize().as_bytes()),
             // The target has one immutable overlay-set pin, not a mutable overlay generation.
@@ -619,9 +611,7 @@ impl ProgrammaticSnapshotProjectionPort for ExactProgrammaticSnapshotProjection 
             ontology_version: "not-applicable-programmatic-authority".to_owned(),
             schema_bundle_version: authority.epoch().schema_authority_id().to_owned(),
             provider_bundle_version: digest_text(pins.provider_set.as_bytes()),
-            derivation_bundle_version: digest_text(
-                startup.releases.application_release().as_bytes(),
-            ),
+            derivation_bundle_version: digest_text(pins.application_release.as_bytes()),
             query_language_version: "2.0".to_owned(),
             capability_summaries: vec![capability],
             diagnostic_references: Vec::new(),
@@ -746,17 +736,21 @@ impl ProgrammaticSemanticQueryBackend {
             .lease()
             .map_err(|error| query_error("workspace_route", error.to_string()))?;
         let workspace = lease.workspace().runtime();
-        let startup = workspace.startup_observation();
-        if *startup.releases.application_release().as_bytes() != self.ports.application_release() {
+        let authority = workspace.query_authority();
+        if *authority.activation_pins().application_release.as_bytes()
+            != self.ports.application_release()
+        {
             return Err(query_error(
                 "application_release",
                 "active workspace differs from the installed query application release",
             ));
         }
-        let authority = workspace
-            .query_authorities()
-            .resolve(lease.workspace().selection().epoch_id())
-            .map_err(|error| query_error("epoch_authority", error.to_string()))?;
+        if authority.epoch_id() != lease.workspace().selection().epoch_id() {
+            return Err(query_error(
+                "epoch_authority",
+                "active workspace query authority differs from its durable selection",
+            ));
+        }
         if authority.authorization().query_policy() != &self.ports.scope_authorization.policy_pin()
         {
             return Err(query_error(
@@ -853,19 +847,13 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             );
         }
 
-        let epoch_lease = match workspace.admission().admit() {
-            Ok(lease) => lease,
-            Err(AdmissionError::NoActiveEpoch) => {
-                return failed(&artifacts, "admission", "workspace has no active epoch");
-            }
-            Err(error) => return failed(&artifacts, "admission", error.to_string()),
-        };
-        let authority = match workspace
-            .query_authorities()
-            .resolve(epoch_lease.epoch_id())
+        let authority = workspace.query_authority();
+        let epoch_lease = match workspace
+            .admission()
+            .admit_selected(Arc::clone(authority.epoch()))
         {
-            Ok(authority) => authority,
-            Err(error) => return failed(&artifacts, "epoch_authority", error.to_string()),
+            Ok(lease) => lease,
+            Err(error) => return failed(&artifacts, "admission", error.to_string()),
         };
         if !Arc::ptr_eq(authority.epoch(), epoch_lease.epoch()) {
             return failed(
@@ -1131,14 +1119,11 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         self.require_semantic_admission()?;
         let workspace_lease = self.workspace_lease(workspace_id)?;
         let workspace = workspace_lease.workspace().runtime();
+        let authority = workspace.query_authority();
         let lease = workspace
             .admission()
-            .admit()
+            .admit_selected(Arc::clone(authority.epoch()))
             .map_err(|error| query_error("admission", error.to_string()))?;
-        let authority = workspace
-            .query_authorities()
-            .resolve(lease.epoch_id())
-            .map_err(|error| query_error("epoch_authority", error.to_string()))?;
         if !Arc::ptr_eq(authority.epoch(), lease.epoch()) {
             return Err(query_error(
                 "epoch_authority",
@@ -1148,7 +1133,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         self.project_snapshot(
             workspace_id,
             workspace.as_ref(),
-            &authority,
+            authority,
             FreshnessState::Current,
         )
     }

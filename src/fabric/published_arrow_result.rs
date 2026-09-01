@@ -1105,7 +1105,7 @@ mod tests {
         let chain = ActivationChain::derive(workspace, [first_event]).unwrap();
         let runtime =
             FabricAdmissionRuntime::recover(&chain, |_| Some(Arc::clone(&first_epoch))).unwrap();
-        let admitted = runtime.admit().unwrap();
+        let admitted = runtime.admit_selected(Arc::clone(&first_epoch)).unwrap();
         let first_package = package(epoch_id, 0x61);
         let result_owner = owner(workspace, 0x31);
         let registry = PublishedArrowResultRegistry::new();
@@ -1248,7 +1248,7 @@ mod tests {
             &registry,
             result_owner,
             lease_token,
-            runtime.admit().unwrap(),
+            runtime.admit_selected(Arc::clone(&first_epoch)).unwrap(),
             package(epoch_id, 0x61),
             1_500,
         )
@@ -1328,7 +1328,7 @@ mod tests {
             &registry,
             result_owner,
             token(0x73),
-            runtime.admit().unwrap(),
+            runtime.admit_selected(Arc::clone(&first_epoch)).unwrap(),
             package(epoch_id, 0x62),
             1_500,
         )
@@ -1395,7 +1395,7 @@ mod tests {
             .publish(
                 result_owner,
                 token(0x71),
-                admission.admit().unwrap(),
+                admission.admit_selected(Arc::clone(&fabric_epoch)).unwrap(),
                 resource_lease,
                 first_package,
                 1_500,
@@ -1454,7 +1454,7 @@ mod tests {
             &registry,
             result_owner,
             lease_token,
-            runtime.admit().unwrap(),
+            runtime.admit_selected(Arc::clone(&first)).unwrap(),
             package(first_id, 0x61),
             1_500,
         )
@@ -1481,7 +1481,13 @@ mod tests {
         drop(first);
 
         assert!(first_weak.upgrade().is_some());
-        assert_eq!(runtime.admit().unwrap().epoch_id(), second_id);
+        assert_eq!(
+            runtime
+                .admit_selected(Arc::clone(&second))
+                .unwrap()
+                .epoch_id(),
+            second_id
+        );
         registry
             .release(
                 PublishedResultAccess {

@@ -3,27 +3,24 @@
 //! The workspace record is administrative identity only; it cannot synthesize providers,
 //! transformations, policies, or a query catalog. The target release owns construction. This
 //! module retains only the exact activation-selected runtime, epoch query authority, command-port
-//! context, and receipt/reconciliation capabilities that the production kernel and WP32 recovery
-//! path consume.
+//! context, and durable activation/reconstruction capabilities that the production kernel and
+//! WP32 recovery path consume.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::num::NonZeroU64;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Weak};
 
-use super::activation::{ActivationEventId, FabricEpochPins};
+use super::activation::FabricEpochPins;
 use super::activation_control_delta::DeltaActivationRuntimeAuthority;
-use super::activation_transaction::ActivationReconciliationReceiptCache;
 use super::admission::{AdmissionError, FabricAdmissionRuntime};
 use super::arrow_result_resource::ArrowResultResourceLimits;
 use super::child_session::resource_governance::{EpochResourceCoordinator, EpochResourceError};
-use super::command::{
-    ApplicationReleaseRef, EpochId, InputReleaseRef, ProgramReleaseRef, ProviderReleaseRef,
-    SourceAuthorityRef, WorkspaceId, WriterFence,
-};
+use super::command::{EpochId, WorkspaceId};
 use super::command_runtime_manager::{
     WorkspaceFabricCommandRuntimeFactoryError, WorkspaceFabricCommandRuntimeParts,
 };
+use super::production_kernel::{CompiledSemanticRelease, SelectedEpochRecord, WorkspaceSlot};
 use super::programmatic_delta_runtime::ProgrammaticDeltaRuntime;
 use super::programmatic_epoch::ProgrammaticFabricEpoch;
 use super::published_arrow_result::PublishedArrowResultRegistry;
@@ -34,119 +31,6 @@ use crate::relational_semantic_query::{
     EpochBoundSemanticExecutionCatalog, EpochBoundSemanticIngressCatalog, ProducerClosureProof,
     ProducerFamilyDisposition, SemanticQueryAuthority, SemanticQueryClass,
 };
-
-/// Stable identity of the retained exact workspace runtime shape.
-pub const PROGRAMMATIC_WORKSPACE_FACTORY_ID: &str =
-    "codefabric.programmatic-workspace.datafusion55.delta-exact.v1";
-
-/// Exact release inputs which cannot be inferred from a workspace record or compiled features.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ProgrammaticWorkspaceReleasePins {
-    input_release: InputReleaseRef,
-    program_release: ProgramReleaseRef,
-    provider_release: ProviderReleaseRef,
-    application_release: ApplicationReleaseRef,
-    source_authority: SourceAuthorityRef,
-}
-
-impl ProgrammaticWorkspaceReleasePins {
-    /// Construct a complete non-sentinel release vector.
-    pub fn try_new(
-        input_release: InputReleaseRef,
-        program_release: ProgramReleaseRef,
-        provider_release: ProviderReleaseRef,
-        application_release: ApplicationReleaseRef,
-        source_authority: SourceAuthorityRef,
-    ) -> Result<Self, ProgrammaticWorkspaceCompositionError> {
-        let pins = Self {
-            input_release,
-            program_release,
-            provider_release,
-            application_release,
-            source_authority,
-        };
-        pins.validate()?;
-        Ok(pins)
-    }
-
-    fn validate(self) -> Result<(), ProgrammaticWorkspaceCompositionError> {
-        for (kind, pin) in [
-            ("input", self.input_release.as_bytes()),
-            ("program", self.program_release.as_bytes()),
-            ("provider", self.provider_release.as_bytes()),
-            ("application", self.application_release.as_bytes()),
-            ("source authority", self.source_authority.as_bytes()),
-        ] {
-            if all_zero(pin) {
-                return Err(ProgrammaticWorkspaceCompositionError::MissingReleasePin(
-                    kind,
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    #[must_use]
-    pub const fn input_release(self) -> InputReleaseRef {
-        self.input_release
-    }
-
-    #[must_use]
-    pub const fn program_release(self) -> ProgramReleaseRef {
-        self.program_release
-    }
-
-    #[must_use]
-    pub const fn provider_release(self) -> ProviderReleaseRef {
-        self.provider_release
-    }
-
-    #[must_use]
-    pub const fn application_release(self) -> ApplicationReleaseRef {
-        self.application_release
-    }
-
-    #[must_use]
-    pub const fn source_authority(self) -> SourceAuthorityRef {
-        self.source_authority
-    }
-}
-
-/// One exact Delta component named in the startup observation.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProgrammaticTableVersionObservation {
-    pub relation_id: Arc<str>,
-    pub canonical_root: Arc<str>,
-    pub version: u64,
-}
-
-/// Structured startup observation. It reports composition but never authorizes it.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProgrammaticWorkspaceStartupObservation {
-    pub factory_id: &'static str,
-    pub workspace_id: WorkspaceId,
-    pub epoch_id: EpochId,
-    pub activation_event_id: ActivationEventId,
-    pub active_fence: WriterFence,
-    pub source_generation: u64,
-    pub provider_set_pin: [u8; 32],
-    pub overlay_segment_set_pin: [u8; 32],
-    pub policy_set_pin: [u8; 32],
-    pub proof_receipt_pin: [u8; 32],
-    pub activation_control_root: Arc<str>,
-    pub activation_control_version: u64,
-    pub releases: ProgrammaticWorkspaceReleasePins,
-    pub program_catalog_pin: [u8; 32],
-    pub execution_catalog_pin: [u8; 32],
-    pub program_release_pin: [u8; 32],
-    pub producer_closure_proof_pin: [u8; 32],
-    pub request_owned_relation_limits_pin: [u8; 32],
-    pub resource_policy_pin: [u8; 32],
-    pub runtime_configuration: Arc<str>,
-    pub schema_authority: Arc<str>,
-    pub relation_count: usize,
-    pub table_versions: Arc<[ProgrammaticTableVersionObservation]>,
-}
 
 /// Query authority which is valid for exactly one workspace and one immutable epoch.
 pub struct WorkspaceEpochQueryAuthority {
@@ -200,8 +84,7 @@ impl WorkspaceEpochQueryAuthority {
                 },
             );
         }
-        if activation_pins.table_versions != epoch.observation_publication().table_version_set_ref()
-        {
+        if activation_pins.table_versions != epoch.table_version_set_ref() {
             return Err(ProgrammaticWorkspaceCompositionError::SelectedTableVersionsMismatch);
         }
         if activation_pins.resource_envelope.as_bytes() != resources.resource_policy() {
@@ -264,7 +147,7 @@ impl WorkspaceEpochQueryAuthority {
     }
 
     #[must_use]
-    pub const fn epoch(&self) -> &Arc<ProgrammaticFabricEpoch> {
+    pub fn epoch(&self) -> &Arc<ProgrammaticFabricEpoch> {
         &self.epoch
     }
 
@@ -307,180 +190,25 @@ impl WorkspaceEpochQueryAuthority {
     pub const fn result_lease_millis(&self) -> u64 {
         self.result_lease_millis.get()
     }
-
-    fn exact_identity_matches(&self, other: &Self) -> bool {
-        self.workspace_id == other.workspace_id
-            && self.activation_pins == other.activation_pins
-            && self.epoch_id() == other.epoch_id()
-            && programmatic_fabric_epoch_authority_pin(&self.epoch)
-                == programmatic_fabric_epoch_authority_pin(&other.epoch)
-            && self.resources.epoch_id() == other.resources.epoch_id()
-            && self.resources.resource_policy() == other.resources.resource_policy()
-            && self.ingress_catalog.fabric_epoch_pin == other.ingress_catalog.fabric_epoch_pin
-            && self.ingress_catalog.program_catalog_pin == other.ingress_catalog.program_catalog_pin
-            && self.ingress_catalog.source_pin == other.ingress_catalog.source_pin
-            && self.ingress_catalog.policy_pin == other.ingress_catalog.policy_pin
-            && self.ingress_catalog.producer_closure_proof_pin
-                == other.ingress_catalog.producer_closure_proof_pin
-            && self.ingress_catalog.limits_pin == other.ingress_catalog.limits_pin
-            && self.execution_catalog.fabric_epoch_pin == other.execution_catalog.fabric_epoch_pin
-            && self.execution_catalog.program_catalog_pin
-                == other.execution_catalog.program_catalog_pin
-            && self.execution_catalog.source_pin == other.execution_catalog.source_pin
-            && self.execution_catalog.policy_pin == other.execution_catalog.policy_pin
-            && self.execution_catalog.producer_closure_proof_pin
-                == other.execution_catalog.producer_closure_proof_pin
-            && self.execution_catalog.execution_catalog_pin
-                == other.execution_catalog.execution_catalog_pin
-            && self.execution_catalog.program_release_pin
-                == other.execution_catalog.program_release_pin
-            && self.execution_catalog.authority == other.execution_catalog.authority
-            && self.execution_catalog.semantic_class == other.execution_catalog.semantic_class
-            && self.producer_closure.proof_pin == other.producer_closure.proof_pin
-            && self.producer_closure.application_authority_id
-                == other.producer_closure.application_authority_id
-            && self.authorization.access_scope() == other.authorization.access_scope()
-            && self.authorization.query_policy() == other.authorization.query_policy()
-            && self.authorization.resource_policy() == other.authorization.resource_policy()
-            && self.authorization.max_output_rows() == other.authorization.max_output_rows()
-            && self
-                .authorization
-                .table_relations()
-                .eq(other.authorization.table_relations())
-            && self.request_owned_relation_limits == other.request_owned_relation_limits
-            && self.result_limits == other.result_limits
-            && self.result_lease_millis == other.result_lease_millis
-    }
-}
-
-/// Workspace-local registry resolving an already-admitted epoch to its exact query authority.
-///
-/// Activation may install a successor before opening it. Old entries remain available while an
-/// admitted query or published result retains that immutable epoch.
-pub struct WorkspaceEpochQueryAuthorityRegistry {
-    workspace_id: WorkspaceId,
-    by_epoch: RwLock<BTreeMap<EpochId, Arc<WorkspaceEpochQueryAuthority>>>,
-}
-
-impl fmt::Debug for WorkspaceEpochQueryAuthorityRegistry {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let count = self.by_epoch.read().map_or(0, |entries| entries.len());
-        formatter
-            .debug_struct("WorkspaceEpochQueryAuthorityRegistry")
-            .field("workspace_id", &self.workspace_id)
-            .field("epoch_count", &count)
-            .finish_non_exhaustive()
-    }
-}
-
-impl WorkspaceEpochQueryAuthorityRegistry {
-    #[cfg(test)]
-    fn with_initial(authority: Arc<WorkspaceEpochQueryAuthority>) -> Self {
-        let workspace_id = authority.workspace_id();
-        Self {
-            workspace_id,
-            by_epoch: RwLock::new(BTreeMap::from([(authority.epoch_id(), authority)])),
-        }
-    }
-
-    /// Install one complete successor authority before activation can expose its epoch.
-    pub fn install(
-        &self,
-        authority: Arc<WorkspaceEpochQueryAuthority>,
-    ) -> Result<(), WorkspaceEpochQueryAuthorityRegistryError> {
-        if authority.workspace_id() != self.workspace_id {
-            return Err(WorkspaceEpochQueryAuthorityRegistryError::WorkspaceMismatch);
-        }
-        let epoch_id = authority.epoch_id();
-        let mut entries = self
-            .by_epoch
-            .write()
-            .map_err(|_| WorkspaceEpochQueryAuthorityRegistryError::Poisoned)?;
-        if entries.contains_key(&epoch_id) {
-            return Err(WorkspaceEpochQueryAuthorityRegistryError::DuplicateEpoch(
-                epoch_id,
-            ));
-        }
-        entries.insert(epoch_id, authority);
-        Ok(())
-    }
-
-    /// Install one successor, or accept an already-installed authority only when every stable
-    /// workspace/epoch/resource/catalog/policy identity is equal.
-    pub fn install_or_validate(
-        &self,
-        authority: Arc<WorkspaceEpochQueryAuthority>,
-    ) -> Result<(), WorkspaceEpochQueryAuthorityRegistryError> {
-        if authority.workspace_id() != self.workspace_id {
-            return Err(WorkspaceEpochQueryAuthorityRegistryError::WorkspaceMismatch);
-        }
-        let epoch_id = authority.epoch_id();
-        let mut entries = self
-            .by_epoch
-            .write()
-            .map_err(|_| WorkspaceEpochQueryAuthorityRegistryError::Poisoned)?;
-        match entries.get(&epoch_id) {
-            Some(existing) if existing.exact_identity_matches(&authority) => Ok(()),
-            Some(_) => Err(WorkspaceEpochQueryAuthorityRegistryError::AuthorityMismatch(epoch_id)),
-            None => {
-                entries.insert(epoch_id, authority);
-                Ok(())
-            }
-        }
-    }
-
-    /// Resolve only the exact epoch ID already pinned by admission.
-    pub fn resolve(
-        &self,
-        epoch_id: EpochId,
-    ) -> Result<Arc<WorkspaceEpochQueryAuthority>, WorkspaceEpochQueryAuthorityRegistryError> {
-        self.by_epoch
-            .read()
-            .map_err(|_| WorkspaceEpochQueryAuthorityRegistryError::Poisoned)?
-            .get(&epoch_id)
-            .cloned()
-            .ok_or(WorkspaceEpochQueryAuthorityRegistryError::UnknownEpoch(
-                epoch_id,
-            ))
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.by_epoch.read().map_or(0, |entries| entries.len())
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum WorkspaceEpochQueryAuthorityRegistryError {
-    #[error("query authority belongs to another workspace")]
-    WorkspaceMismatch,
-    #[error("query authority already exists for epoch {0:?}")]
-    DuplicateEpoch(EpochId),
-    #[error("query authority for epoch {0:?} differs from the already-installed authority")]
-    AuthorityMismatch(EpochId),
-    #[error("no query authority exists for admitted epoch {0:?}")]
-    UnknownEpoch(EpochId),
-    #[error("query authority registry lock is poisoned")]
-    Poisoned,
 }
 
 /// Exact daemon-owned capabilities available when constructing one workspace command router.
 ///
 /// This value is created only after activation selection has been reconstructed, the immutable
 /// epoch has been reopened, query admission and resource governance have been installed, and the
-/// exact epoch query authority is registered. A command effect therefore cannot capture a
-/// parallel admission gate or query-authority registry during pre-composition setup.
+/// exact epoch query authority is installed. A command effect therefore cannot capture a
+/// parallel admission gate or process-local receipt selector during pre-composition setup.
 #[derive(Clone)]
 pub struct ProgrammaticCommandRuntimeContext {
     workspace_id: WorkspaceId,
     admission: Arc<FabricAdmissionRuntime>,
     resources: Arc<EpochResourceCoordinator>,
     published_results: Arc<PublishedArrowResultRegistry>,
-    query_authorities: Arc<WorkspaceEpochQueryAuthorityRegistry>,
+    query_authority: Arc<WorkspaceEpochQueryAuthority>,
     query_runtime: Arc<RelationalQueryRuntime>,
     delta_runtime: Arc<ProgrammaticDeltaRuntime>,
     activation_authority: Arc<DeltaActivationRuntimeAuthority>,
-    receipt_cache: Arc<ActivationReconciliationReceiptCache>,
+    workspace_slot: Weak<WorkspaceSlot>,
 }
 
 impl ProgrammaticCommandRuntimeContext {
@@ -505,8 +233,8 @@ impl ProgrammaticCommandRuntimeContext {
     }
 
     #[must_use]
-    pub const fn query_authorities(&self) -> &Arc<WorkspaceEpochQueryAuthorityRegistry> {
-        &self.query_authorities
+    pub const fn query_authority(&self) -> &Arc<WorkspaceEpochQueryAuthority> {
+        &self.query_authority
     }
 
     #[must_use]
@@ -525,8 +253,8 @@ impl ProgrammaticCommandRuntimeContext {
     }
 
     #[must_use]
-    pub const fn receipt_cache(&self) -> &Arc<ActivationReconciliationReceiptCache> {
-        &self.receipt_cache
+    pub const fn workspace_slot(&self) -> &Weak<WorkspaceSlot> {
+        &self.workspace_slot
     }
 }
 
@@ -548,13 +276,11 @@ pub struct ProgrammaticWorkspaceRuntime {
     workspace_id: WorkspaceId,
     admission: Arc<FabricAdmissionRuntime>,
     published_results: Arc<PublishedArrowResultRegistry>,
-    query_authorities: Arc<WorkspaceEpochQueryAuthorityRegistry>,
+    query_authority: Arc<WorkspaceEpochQueryAuthority>,
     query_runtime: Arc<RelationalQueryRuntime>,
     delta_runtime: Arc<ProgrammaticDeltaRuntime>,
     activation_authority: Arc<DeltaActivationRuntimeAuthority>,
-    receipt_cache: Arc<ActivationReconciliationReceiptCache>,
     command_runtime: WorkspaceFabricCommandRuntimeParts,
-    startup: ProgrammaticWorkspaceStartupObservation,
 }
 
 impl fmt::Debug for ProgrammaticWorkspaceRuntime {
@@ -562,13 +288,90 @@ impl fmt::Debug for ProgrammaticWorkspaceRuntime {
         formatter
             .debug_struct("ProgrammaticWorkspaceRuntime")
             .field("workspace_id", &self.workspace_id)
-            .field("active_head", &self.admission.active_head())
-            .field("query_authorities", &self.query_authorities)
+            .field("epoch_id", &self.query_authority.epoch_id())
             .finish_non_exhaustive()
     }
 }
 
 impl ProgrammaticWorkspaceRuntime {
+    /// Build one complete release-owned runtime from an exact durable selection.
+    ///
+    /// The selection supplies the only epoch/vector/proof/control identities. Every retained
+    /// query, resource, Delta, admission, result, and command component must be the same concrete
+    /// capability closure before an [`ActiveWorkspace`](super::production_kernel::ActiveWorkspace)
+    /// can be installed.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn try_from_selected(
+        _release: &CompiledSemanticRelease,
+        selection: &SelectedEpochRecord,
+        admission: Arc<FabricAdmissionRuntime>,
+        published_results: Arc<PublishedArrowResultRegistry>,
+        query_authority: Arc<WorkspaceEpochQueryAuthority>,
+        query_runtime: Arc<RelationalQueryRuntime>,
+        delta_runtime: Arc<ProgrammaticDeltaRuntime>,
+        activation_authority: Arc<DeltaActivationRuntimeAuthority>,
+        workspace_slot: Weak<WorkspaceSlot>,
+        command_factory: &dyn ProgrammaticCommandRuntimePartsFactory,
+    ) -> Result<Self, ProgrammaticWorkspaceCompositionError> {
+        let workspace_id = selection.workspace_id();
+        let epoch_id = selection.epoch_id();
+        if admission.workspace_id() != workspace_id
+            || query_authority.workspace_id() != workspace_id
+            || query_authority.epoch_id() != epoch_id
+            || query_runtime.workspace_id() != workspace_id
+            || delta_runtime.workspace_id() != workspace_id
+            || activation_authority.workspace_id() != workspace_id
+        {
+            return Err(ProgrammaticWorkspaceCompositionError::WorkspaceAuthorityMismatch);
+        }
+        if query_authority.activation_pins().table_versions
+            != selection.table_versions().reference()
+            || query_authority.activation_pins().proof_receipt != selection.proof_reference()
+            || delta_runtime.table_version_set_ref() != selection.table_versions().reference()
+            || delta_runtime.epoch_id() != epoch_id
+        {
+            return Err(ProgrammaticWorkspaceCompositionError::SelectedAuthorityMismatch);
+        }
+        if !Arc::ptr_eq(query_authority.resources(), query_runtime.resources())
+            || !Arc::ptr_eq(query_runtime.admission(), &admission)
+            || !Arc::ptr_eq(query_runtime.published_results(), &published_results)
+        {
+            return Err(ProgrammaticWorkspaceCompositionError::RuntimeCapabilityMismatch);
+        }
+        // A restart necessarily creates a fresh DataFusion session binding for the exact control
+        // snapshot. The durable horizon selects the Delta root/version; provider construction
+        // revalidates protocol, properties, schema, and the new session binding independently.
+        // Requiring the predecessor process's session fingerprint here would make lawful restart
+        // impossible and turn an execution-observation digest into semantic authority.
+        if activation_authority.control_relation().table()
+            != selection.control_horizon().control_relation().table()
+        {
+            return Err(ProgrammaticWorkspaceCompositionError::ActivationControlMismatch);
+        }
+        let context = ProgrammaticCommandRuntimeContext {
+            workspace_id,
+            admission: Arc::clone(&admission),
+            resources: Arc::clone(query_authority.resources()),
+            published_results: Arc::clone(&published_results),
+            query_authority: Arc::clone(&query_authority),
+            query_runtime: Arc::clone(&query_runtime),
+            delta_runtime: Arc::clone(&delta_runtime),
+            activation_authority: Arc::clone(&activation_authority),
+            workspace_slot,
+        };
+        let command_runtime = command_factory.build(context)?;
+        Ok(Self {
+            workspace_id,
+            admission,
+            published_results,
+            query_authority,
+            query_runtime,
+            delta_runtime,
+            activation_authority,
+            command_runtime,
+        })
+    }
+
     #[must_use]
     pub const fn workspace_id(&self) -> WorkspaceId {
         self.workspace_id
@@ -598,8 +401,13 @@ impl ProgrammaticWorkspaceRuntime {
     }
 
     #[must_use]
-    pub const fn query_authorities(&self) -> &Arc<WorkspaceEpochQueryAuthorityRegistry> {
-        &self.query_authorities
+    pub const fn query_authority(&self) -> &Arc<WorkspaceEpochQueryAuthority> {
+        &self.query_authority
+    }
+
+    #[must_use]
+    pub fn epoch(&self) -> &Arc<ProgrammaticFabricEpoch> {
+        self.query_authority.epoch()
     }
 
     #[must_use]
@@ -618,18 +426,8 @@ impl ProgrammaticWorkspaceRuntime {
     }
 
     #[must_use]
-    pub const fn receipt_cache(&self) -> &Arc<ActivationReconciliationReceiptCache> {
-        &self.receipt_cache
-    }
-
-    #[must_use]
     pub fn command_runtime_parts(&self) -> WorkspaceFabricCommandRuntimeParts {
         self.command_runtime.clone()
-    }
-
-    #[must_use]
-    pub const fn startup_observation(&self) -> &ProgrammaticWorkspaceStartupObservation {
-        &self.startup
     }
 }
 
@@ -654,13 +452,12 @@ pub fn programmatic_fabric_epoch_authority_pin(epoch: &ProgrammaticFabricEpoch) 
         b"codefabric.programmatic-workspace.fabric-epoch-authority.v1",
     );
     frame_digest(&mut hasher, epoch.identity().as_bytes());
-    let publication = epoch.observation_publication();
-    frame_digest(&mut hasher, publication.table_version_set_ref().as_bytes());
+    frame_digest(&mut hasher, epoch.table_version_set_ref().as_bytes());
     frame_digest(
         &mut hasher,
-        &(publication.table_version_set().len() as u128).to_be_bytes(),
+        &(epoch.table_version_set().len() as u128).to_be_bytes(),
     );
-    for (relation_id, pin) in publication.table_versions() {
+    for (relation_id, pin) in epoch.table_version_set().components() {
         frame_digest(&mut hasher, relation_id.as_bytes());
         frame_digest(&mut hasher, pin.canonical_root().as_str().as_bytes());
         frame_digest(&mut hasher, &pin.version().to_be_bytes());
@@ -963,8 +760,14 @@ const fn all_zero<const N: usize>(value: &[u8; N]) -> bool {
 /// Fail-closed exact workspace-authority errors. No variant authorizes a fallback backend.
 #[derive(Debug, thiserror::Error)]
 pub enum ProgrammaticWorkspaceCompositionError {
-    #[error("required {0} release pin is absent")]
-    MissingReleasePin(&'static str),
+    #[error("workspace runtime components do not belong to the durable selected workspace")]
+    WorkspaceAuthorityMismatch,
+    #[error("workspace runtime epoch, vector, or proof differs from durable selection")]
+    SelectedAuthorityMismatch,
+    #[error("workspace runtime capabilities are not one shared concrete closure")]
+    RuntimeCapabilityMismatch,
+    #[error("activation authority does not retain the selected control horizon")]
+    ActivationControlMismatch,
     #[error("selected epoch {selected:?} differs from supplied builder {supplied:?}")]
     SelectedEpochMismatch {
         selected: EpochId,
@@ -1023,30 +826,21 @@ pub enum ProgrammaticWorkspaceCompositionError {
     Resources(#[from] EpochResourceError),
     #[error(transparent)]
     Admission(#[from] AdmissionError),
+    #[error(transparent)]
+    CommandRuntime(#[from] WorkspaceFabricCommandRuntimeFactoryError),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fabric::activation::{
-        ActivationAttempt, ActivationChain, ActivationCommit, ActivationEvent, ActivationOrdinal,
-        ActivationReadbackRef, BackendCommitRef, CompatibilityClassRef, FabricEpochPins,
-        OverlaySegmentSetRef, PolicySetRef,
-    };
-    use crate::fabric::activation_transaction::ActivationAdmissionPort;
+    use crate::fabric::activation::{FabricEpochPins, OverlaySegmentSetRef, PolicySetRef};
     use crate::fabric::child_session::resource_governance::EpochResourcePolicy;
     use crate::fabric::child_session::{
         ChildRegistryAllowlist, ChildResourceLimits, ChildTableGrant,
     };
     use crate::fabric::command::{
-        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins, ExecutionOwner,
-        FabricCommand, FabricCommandPayload, IdempotencyKey, InputReleaseRef, LeaseId, OperationId,
-        OperationSelectionRef, PrincipalId, ProgramReleaseRef, ProofReceiptRef, ProviderSetRef,
-        ResourceEnvelopeRef, RetentionPolicyRef, SourceGeneration, TransactionRef,
-        WriterGeneration,
-    };
-    use crate::fabric::programmatic_activation_admission::{
-        ExactProgrammaticSuccessorQueryAuthorityRecipe, ProgrammaticActivationAdmission,
+        InputReleaseRef, ProgramReleaseRef, ProofReceiptRef, ProviderSetRef, ResourceEnvelopeRef,
+        SourceGeneration,
     };
     use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
     use crate::fabric::programmatic_schema::ProgrammaticRelationId;
@@ -1062,22 +856,6 @@ mod tests {
 
     const fn id32(seed: u8) -> [u8; 32] {
         [seed; 32]
-    }
-
-    fn release_pins(
-        input: u8,
-        program: u8,
-        provider: u8,
-        application: u8,
-        source: u8,
-    ) -> Result<ProgrammaticWorkspaceReleasePins, ProgrammaticWorkspaceCompositionError> {
-        ProgrammaticWorkspaceReleasePins::try_new(
-            InputReleaseRef::from_bytes(id32(input)),
-            ProgramReleaseRef::from_bytes(id32(program)),
-            crate::fabric::command::ProviderReleaseRef::from_bytes(id32(provider)),
-            crate::fabric::command::ApplicationReleaseRef::from_bytes(id32(application)),
-            crate::fabric::command::SourceAuthorityRef::from_bytes(id32(source)),
-        )
     }
 
     fn child_resources() -> ChildResourceLimits {
@@ -1210,405 +988,12 @@ mod tests {
             provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(id32(0x72)),
             source_generation: SourceGeneration::new(1),
             provider_set: ProviderSetRef::from_bytes(id32(0x73)),
-            table_versions: epoch.observation_publication().table_version_set_ref(),
+            table_versions: epoch.table_version_set_ref(),
             overlay_segments: OverlaySegmentSetRef::from_bytes(id32(0x74)),
             policy_set: PolicySetRef::from_bytes(id32(0x75)),
             resource_envelope: ResourceEnvelopeRef::from_bytes(id32(6)),
             proof_receipt: ProofReceiptRef::from_bytes(id32(0x76)),
         }
-    }
-
-    async fn query_authority(
-        workspace_id: WorkspaceId,
-        epoch_id: EpochId,
-    ) -> Arc<WorkspaceEpochQueryAuthority> {
-        let epoch = Arc::new(
-            ProgrammaticFabricEpochBuilder::try_new(
-                epoch_id,
-                super::super::epoch_runtime::FabricEpochRuntimeConfig::default(),
-            )
-            .unwrap()
-            .seal_for_test()
-            .await
-            .unwrap(),
-        );
-        let resources = Arc::new(
-            EpochResourceCoordinator::try_new(epoch_id, id32(6), resource_policy()).unwrap(),
-        );
-        let fabric_epoch_pin = programmatic_fabric_epoch_authority_pin(&epoch);
-        let (ingress_catalog, execution_catalog) = catalogs(fabric_epoch_pin);
-        let pins = query_authority_pins(&epoch);
-        Arc::new(
-            WorkspaceEpochQueryAuthority::try_new(
-                workspace_id,
-                pins,
-                epoch,
-                resources,
-                ingress_catalog,
-                execution_catalog,
-                closure(),
-                authorization(),
-                request_owned_relation_limits(),
-                result_limits(),
-                60_000,
-            )
-            .unwrap(),
-        )
-    }
-
-    fn successor_recipe(
-        authority: &WorkspaceEpochQueryAuthority,
-        pins: FabricEpochPins,
-    ) -> ExactProgrammaticSuccessorQueryAuthorityRecipe {
-        ExactProgrammaticSuccessorQueryAuthorityRecipe::try_new(
-            authority.workspace_id(),
-            pins,
-            programmatic_fabric_epoch_authority_pin(authority.epoch()),
-            authority.resources().policy().clone(),
-            authority.ingress_catalog().as_ref().clone(),
-            authority.execution_catalog().as_ref().clone(),
-            authority.producer_closure().as_ref().clone(),
-            authority.authorization().clone(),
-            authority.request_owned_relation_limits(),
-            authority.result_limits(),
-            authority.result_lease_millis(),
-        )
-        .expect("complete exact successor recipe")
-    }
-
-    fn activation_command_for_authority(
-        authority: &WorkspaceEpochQueryAuthority,
-        operation_seed: u8,
-        fence_seed: u8,
-        expected_head: super::super::command::ExpectedHead,
-    ) -> FabricCommand {
-        let epoch_id = authority.epoch_id();
-        FabricCommand {
-            identity: CommandIdentity {
-                operation_id: OperationId::from_bytes(id16(operation_seed)),
-                idempotency_key: IdempotencyKey::from_bytes(id32(operation_seed)),
-            },
-            ownership: CommandOwnership {
-                workspace_id: authority.workspace_id(),
-                principal_id: PrincipalId::from_bytes(id16(0x31)),
-                authorization: AuthorizationRef::from_bytes(id32(0x32)),
-            },
-            expected_head,
-            writer_fence: WriterFence {
-                lease_id: LeaseId::from_bytes(id16(fence_seed)),
-                generation: WriterGeneration::new(1).expect("writer generation"),
-            },
-            pins: CommandPins {
-                input_release: InputReleaseRef::from_bytes(id32(0x33)),
-                program_release: ProgramReleaseRef::from_bytes(id32(0x34)),
-                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
-                    id32(0x34),
-                ),
-                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(id32(
-                    0x34,
-                )),
-                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(id32(
-                    0x34,
-                )),
-                source_generation: SourceGeneration::new(1),
-                provider_set: ProviderSetRef::from_bytes(id32(0x35)),
-            },
-            resources: ResourceEnvelopeRef::from_bytes(*authority.resources().resource_policy()),
-            payload: FabricCommandPayload::ActivateEpoch {
-                candidate_epoch: epoch_id,
-                proof_receipt: ProofReceiptRef::from_bytes(id32(0x36)),
-            },
-        }
-    }
-
-    fn activation_event_for_authority(
-        authority: &WorkspaceEpochQueryAuthority,
-        command: FabricCommand,
-        event_seed: u8,
-        predecessor_event_id: Option<super::super::activation::ActivationEventId>,
-        ordinal: u64,
-    ) -> ActivationEvent {
-        ActivationEvent::try_from_attempt(
-            super::super::activation::ActivationEventId::from_bytes(id32(event_seed)),
-            ActivationAttempt::for_test(
-                command,
-                1,
-                ExecutionOwner {
-                    actor_id: ActorId::from_bytes(id16(0x37)),
-                    fence: command.writer_fence,
-                },
-            ),
-            predecessor_event_id,
-            ActivationOrdinal::new(ordinal).expect("activation ordinal"),
-            FabricEpochPins {
-                epoch: authority.epoch_id(),
-                input_release: command.pins.input_release,
-                program_release: command.pins.program_release,
-                application_release: command.pins.application_release,
-                source_authority: command.pins.source_authority,
-                provider_release: command.pins.provider_release,
-                source_generation: command.pins.source_generation,
-                provider_set: command.pins.provider_set,
-                table_versions: authority
-                    .epoch()
-                    .observation_publication()
-                    .table_version_set_ref(),
-                overlay_segments: OverlaySegmentSetRef::from_bytes(id32(0x38)),
-                policy_set: PolicySetRef::from_bytes(id32(0x39)),
-                resource_envelope: command.resources,
-                proof_receipt: ProofReceiptRef::from_bytes(id32(0x36)),
-            },
-            CompatibilityClassRef::from_bytes(id32(0x3a)),
-            RetentionPolicyRef::from_bytes(id32(0x3b)),
-            ActivationCommit {
-                operation_selection: OperationSelectionRef::from_bytes(id32(
-                    event_seed.wrapping_add(1),
-                )),
-                transaction: TransactionRef::from_bytes(id32(event_seed.wrapping_add(2))),
-                backend_commit: BackendCommitRef::from_bytes(id32(event_seed.wrapping_add(3))),
-                readback: ActivationReadbackRef::from_bytes(id32(event_seed.wrapping_add(4))),
-            },
-        )
-        .expect("activation event")
-    }
-
-    #[test]
-    fn release_pins_reject_every_missing_identity() {
-        assert!(matches!(
-            release_pins(0, 2, 3, 4, 5),
-            Err(ProgrammaticWorkspaceCompositionError::MissingReleasePin(
-                "input"
-            ))
-        ));
-        assert!(matches!(
-            release_pins(1, 0, 3, 4, 5),
-            Err(ProgrammaticWorkspaceCompositionError::MissingReleasePin(
-                "program"
-            ))
-        ));
-        assert!(matches!(
-            release_pins(1, 2, 0, 4, 5),
-            Err(ProgrammaticWorkspaceCompositionError::MissingReleasePin(
-                "provider"
-            ))
-        ));
-        assert!(matches!(
-            release_pins(1, 2, 3, 0, 5),
-            Err(ProgrammaticWorkspaceCompositionError::MissingReleasePin(
-                "application"
-            ))
-        ));
-        assert!(matches!(
-            release_pins(1, 2, 3, 4, 0),
-            Err(ProgrammaticWorkspaceCompositionError::MissingReleasePin(
-                "source authority"
-            ))
-        ));
-        assert!(release_pins(1, 2, 3, 4, 5).is_ok());
-    }
-
-    #[test]
-    fn source_authority_is_explicit_and_independent_of_release_vector() {
-        let baseline = release_pins(1, 2, 3, 4, 5).unwrap();
-        for changed in [
-            release_pins(9, 2, 3, 4, 5).unwrap(),
-            release_pins(1, 9, 3, 4, 5).unwrap(),
-            release_pins(1, 2, 9, 4, 5).unwrap(),
-            release_pins(1, 2, 3, 9, 5).unwrap(),
-        ] {
-            assert_eq!(changed.source_authority(), baseline.source_authority());
-        }
-        assert_ne!(
-            release_pins(1, 2, 3, 4, 9).unwrap().source_authority(),
-            baseline.source_authority()
-        );
-    }
-
-    #[tokio::test]
-    async fn epoch_query_registry_is_exact_and_workspace_scoped() {
-        let workspace = WorkspaceId::from_bytes(id16(1));
-        let first_epoch = EpochId::from_bytes(id16(10));
-        let first = query_authority(workspace, first_epoch).await;
-        assert_eq!(
-            first.ingress_catalog().fabric_epoch_pin,
-            programmatic_fabric_epoch_authority_pin(first.epoch())
-        );
-        assert_eq!(
-            first.execution_catalog().fabric_epoch_pin,
-            first.ingress_catalog().fabric_epoch_pin
-        );
-        assert_eq!(
-            first.request_owned_relation_limits(),
-            request_owned_relation_limits()
-        );
-        let registry = WorkspaceEpochQueryAuthorityRegistry::with_initial(Arc::clone(&first));
-        assert!(Arc::ptr_eq(&registry.resolve(first_epoch).unwrap(), &first));
-        assert_eq!(registry.len(), 1);
-        assert_eq!(
-            registry.install(Arc::clone(&first)).unwrap_err(),
-            WorkspaceEpochQueryAuthorityRegistryError::DuplicateEpoch(first_epoch)
-        );
-
-        let second_epoch = EpochId::from_bytes(id16(11));
-        let foreign = query_authority(WorkspaceId::from_bytes(id16(2)), second_epoch).await;
-        assert_eq!(
-            registry.install(foreign).unwrap_err(),
-            WorkspaceEpochQueryAuthorityRegistryError::WorkspaceMismatch
-        );
-        assert_eq!(
-            registry.resolve(second_epoch).unwrap_err(),
-            WorkspaceEpochQueryAuthorityRegistryError::UnknownEpoch(second_epoch)
-        );
-    }
-
-    #[tokio::test]
-    async fn activation_admission_installs_before_swap_and_rejects_substituted_authority() {
-        let workspace = WorkspaceId::from_bytes(id16(0x51));
-        let first_epoch = EpochId::from_bytes(id16(0x52));
-        let successor_epoch = EpochId::from_bytes(id16(0x53));
-        let first = query_authority(workspace, first_epoch).await;
-        let successor = query_authority(workspace, successor_epoch).await;
-        let first_command = activation_command_for_authority(
-            &first,
-            0x54,
-            0x55,
-            super::super::command::ExpectedHead::Empty,
-        );
-        let first_event = activation_event_for_authority(&first, first_command, 0x56, None, 1);
-        let first_chain = ActivationChain::derive(workspace, [first_event]).expect("first chain");
-        let successor_command = activation_command_for_authority(
-            &successor,
-            0x57,
-            0x58,
-            super::super::command::ExpectedHead::Epoch(first_epoch),
-        );
-        let successor_event = activation_event_for_authority(
-            &successor,
-            successor_command,
-            0x59,
-            Some(first_event.event_id()),
-            2,
-        );
-        let selected_chain = ActivationChain::derive(workspace, [successor_event, first_event])
-            .expect("selected chain");
-
-        let runtime = Arc::new(
-            FabricAdmissionRuntime::recover(&first_chain, |_| Some(Arc::clone(first.epoch())))
-                .expect("initial admission"),
-        );
-        let registry = Arc::new(WorkspaceEpochQueryAuthorityRegistry::with_initial(
-            Arc::clone(&first),
-        ));
-        let admission = ProgrammaticActivationAdmission::new(
-            workspace,
-            Arc::clone(&runtime),
-            Arc::clone(&registry),
-            Arc::new(successor_recipe(&successor, successor_event.pins())),
-        );
-        let barrier = admission
-            .close_admission(
-                successor_command.expected_head,
-                successor_command.writer_fence,
-            )
-            .await
-            .expect("close admission");
-        admission
-            .publish_selected_epoch(barrier, &selected_chain, Arc::clone(successor.epoch()))
-            .await
-            .expect("install and publish successor");
-        let installed = registry
-            .resolve(successor_epoch)
-            .expect("installed authority");
-        assert!(Arc::ptr_eq(installed.epoch(), successor.epoch()));
-        assert_eq!(
-            runtime.admit().unwrap_err(),
-            AdmissionError::AdmissionClosed
-        );
-        admission
-            .reconcile_and_reopen(
-                barrier,
-                super::super::command::ExpectedHead::Epoch(successor_epoch),
-            )
-            .await
-            .expect("reopen successor");
-        assert!(Arc::ptr_eq(
-            runtime.admit().expect("successor query lease").epoch(),
-            successor.epoch()
-        ));
-
-        let failed_runtime = Arc::new(
-            FabricAdmissionRuntime::recover(&first_chain, |_| Some(Arc::clone(first.epoch())))
-                .expect("initial admission"),
-        );
-        let failed_registry = Arc::new(WorkspaceEpochQueryAuthorityRegistry::with_initial(
-            Arc::clone(&first),
-        ));
-        let failed_admission = ProgrammaticActivationAdmission::new(
-            workspace,
-            Arc::clone(&failed_runtime),
-            Arc::clone(&failed_registry),
-            Arc::new(successor_recipe(&successor, successor_event.pins())),
-        );
-        let mismatched_fence = WriterFence {
-            lease_id: LeaseId::from_bytes(id16(0x5a)),
-            generation: WriterGeneration::new(1).expect("writer generation"),
-        };
-        let barrier = failed_admission
-            .close_admission(successor_command.expected_head, mismatched_fence)
-            .await
-            .expect("close admission with independently supplied fence");
-        assert_eq!(
-            failed_admission
-                .publish_selected_epoch(barrier, &selected_chain, Arc::clone(successor.epoch()),)
-                .await
-                .unwrap_err(),
-            AdmissionError::SelectedEventFenceMismatch
-        );
-        let dormant = failed_registry
-            .resolve(successor_epoch)
-            .expect("dormant successor was installed before failed swap");
-        assert!(Arc::ptr_eq(dormant.epoch(), successor.epoch()));
-        assert_eq!(
-            failed_runtime.admit().unwrap_err(),
-            AdmissionError::AdmissionClosed
-        );
-
-        let substituted = query_authority(workspace, successor_epoch).await;
-        let substituted_runtime = Arc::new(
-            FabricAdmissionRuntime::recover(&first_chain, |_| Some(Arc::clone(first.epoch())))
-                .expect("initial admission"),
-        );
-        let substituted_registry = Arc::new(WorkspaceEpochQueryAuthorityRegistry::with_initial(
-            Arc::clone(&first),
-        ));
-        let substituted_admission = ProgrammaticActivationAdmission::new(
-            workspace,
-            Arc::clone(&substituted_runtime),
-            Arc::clone(&substituted_registry),
-            Arc::new(successor_recipe(&substituted, successor_event.pins())),
-        );
-        let barrier = substituted_admission
-            .close_admission(
-                successor_command.expected_head,
-                successor_command.writer_fence,
-            )
-            .await
-            .expect("close admission");
-        assert_eq!(
-            substituted_admission
-                .publish_selected_epoch(barrier, &selected_chain, Arc::clone(successor.epoch()),)
-                .await
-                .unwrap_err(),
-            AdmissionError::SuccessorQueryAuthorityMismatch(successor_epoch)
-        );
-        assert_eq!(
-            substituted_registry.resolve(successor_epoch).unwrap_err(),
-            WorkspaceEpochQueryAuthorityRegistryError::UnknownEpoch(successor_epoch)
-        );
-        assert_eq!(
-            substituted_runtime.admit().unwrap_err(),
-            AdmissionError::AdmissionClosed
-        );
     }
 
     #[test]

@@ -13,8 +13,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use thiserror::Error;
 
-use super::activation::ActivationEventId;
-use super::command::{EpochId, WorkspaceId, WriterFence};
+use super::activation::{ActivationEvent, ActivationEventId, TableVersionSet};
+use super::activation_control_delta::{ActivationControlHorizon, ExactSelectedActivation};
+use super::command::{EpochId, ProofReceiptRef, WorkspaceId, WriterFence};
 use super::derived_producer_closure::{
     CompiledDerivedProducerClosure, DerivedProducerClosureError, DerivedProducerClosureExecution,
     ProducerClosureCancellation, ProducerClosureResourceBounds,
@@ -28,9 +29,7 @@ use super::programmatic_query_backend::{
     ProgrammaticSemanticQueryPorts,
 };
 use super::programmatic_schema::ProgrammaticRelationId;
-use super::programmatic_workspace::{
-    ProgrammaticTableVersionObservation, ProgrammaticWorkspaceRuntime,
-};
+use super::programmatic_workspace::ProgrammaticWorkspaceRuntime;
 use super::proof::{
     ProofError, ProofTerminalStatus, ReleaseProducerClosureProofInput,
     ReleaseProducerClosureProofResult, evaluate_release_producer_closure,
@@ -470,12 +469,14 @@ impl ProductionLifecyclePhase {
             (self, next),
             (Self::Configured, Self::DaemonLeased)
                 | (Self::DaemonLeased, Self::WriterFenced)
-                | (Self::WriterFenced, Self::CommandRecovered)
+                | (
+                    Self::WriterFenced,
+                    Self::CommandRecovered | Self::EndpointsBoundBootstrapping
+                )
                 | (
                     Self::CommandRecovered,
                     Self::GenesisRequired | Self::SelectedEpochRecovered
                 )
-                | (Self::WriterFenced, Self::EndpointsBoundBootstrapping)
                 | (
                     Self::GenesisRequired | Self::SelectedEpochRecovered,
                     Self::EpochBuiltAndProved
@@ -673,64 +674,91 @@ impl LifecycleAuthority {
     }
 }
 
-/// Exact selection record derived from the installed runtime, never separately assembled.
+/// Exact durable selection reconstructed from one completed activation-control readback.
+///
+/// The constructor consumes the private readback aggregate. Consequently the event, complete
+/// reversible vector, writer fence, control horizon, and proof reference cannot be selected or
+/// recomputed independently by a workspace/runtime caller.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SelectedEpochRecord {
-    workspace_id: WorkspaceId,
-    epoch_id: EpochId,
-    activation_event_id: ActivationEventId,
-    writer_fence: WriterFence,
-    activation_control_version: u64,
-    table_versions: Arc<[ProgrammaticTableVersionObservation]>,
+    event: ActivationEvent,
+    table_versions: Arc<TableVersionSet>,
+    control_horizon: ActivationControlHorizon,
+    proof_reference: ProofReceiptRef,
 }
 
 impl SelectedEpochRecord {
-    fn from_runtime(runtime: &ProgrammaticWorkspaceRuntime) -> Self {
-        let startup = runtime.startup_observation();
+    pub(crate) fn from_exact_readback(selection: &ExactSelectedActivation) -> Self {
+        let proof_reference = selection.proof_reference();
         Self {
-            workspace_id: startup.workspace_id,
-            epoch_id: startup.epoch_id,
-            activation_event_id: startup.activation_event_id,
-            writer_fence: startup.active_fence,
-            activation_control_version: startup.activation_control_version,
-            table_versions: Arc::clone(&startup.table_versions),
+            event: selection.event(),
+            table_versions: Arc::clone(selection.table_versions()),
+            control_horizon: selection.control_horizon().clone(),
+            proof_reference,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        event: ActivationEvent,
+        table_versions: Arc<TableVersionSet>,
+        control_horizon: ActivationControlHorizon,
+    ) -> Self {
+        Self {
+            event,
+            table_versions,
+            control_horizon,
+            proof_reference: event.pins().proof_receipt,
         }
     }
 
     #[must_use]
     pub const fn workspace_id(&self) -> WorkspaceId {
-        self.workspace_id
+        self.event.workspace_id()
     }
 
     #[must_use]
     pub const fn epoch_id(&self) -> EpochId {
-        self.epoch_id
+        self.event.pins().epoch
     }
 
     #[must_use]
     pub const fn activation_event_id(&self) -> ActivationEventId {
-        self.activation_event_id
+        self.event.event_id()
     }
 
     #[must_use]
     pub const fn writer_fence(&self) -> WriterFence {
-        self.writer_fence
+        self.event.execution_fence()
     }
 
     #[must_use]
-    pub const fn activation_control_version(&self) -> u64 {
-        self.activation_control_version
+    pub const fn event(&self) -> ActivationEvent {
+        self.event
     }
 
     #[must_use]
-    pub fn table_versions(&self) -> &[ProgrammaticTableVersionObservation] {
+    pub const fn table_versions(&self) -> &Arc<TableVersionSet> {
         &self.table_versions
+    }
+
+    #[must_use]
+    pub const fn control_horizon(&self) -> &ActivationControlHorizon {
+        &self.control_horizon
+    }
+
+    #[must_use]
+    pub const fn proof_reference(&self) -> ProofReceiptRef {
+        self.proof_reference
     }
 }
 
 /// One indivisible query/mutation authority installed into a workspace slot.
 pub struct ActiveWorkspace {
+    #[cfg(not(test))]
     runtime: Arc<ProgrammaticWorkspaceRuntime>,
+    #[cfg(test)]
+    runtime: Option<Arc<ProgrammaticWorkspaceRuntime>>,
     selection: SelectedEpochRecord,
 }
 
@@ -738,38 +766,62 @@ impl fmt::Debug for ActiveWorkspace {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ActiveWorkspace")
-            .field("workspace_id", &self.selection.workspace_id)
-            .field("epoch_id", &self.selection.epoch_id)
+            .field("workspace_id", &self.selection.workspace_id())
+            .field("epoch_id", &self.selection.epoch_id())
             .finish_non_exhaustive()
     }
 }
 
 impl ActiveWorkspace {
-    /// Derive the selected record and validate the epoch query authority from one runtime.
+    /// Bind one complete runtime to the exact durable selection which caused its construction.
     ///
     /// # Errors
     ///
-    /// Returns the underlying exact-epoch registry error when the runtime is internally
-    /// incomplete. No caller-supplied epoch/vector/digest can bypass this derivation.
-    pub fn try_from_runtime(
+    /// Rejects a workspace, epoch, query-authority, or exact-vector substitution. The selection is
+    /// never derived from the runtime and the runtime cannot choose another durable record.
+    pub fn try_new(
+        selection: SelectedEpochRecord,
         runtime: Arc<ProgrammaticWorkspaceRuntime>,
     ) -> Result<Self, ActiveWorkspaceError> {
-        let selection = SelectedEpochRecord::from_runtime(&runtime);
-        let authority = runtime
-            .query_authorities()
-            .resolve(selection.epoch_id)
-            .map_err(|error| ActiveWorkspaceError::QueryAuthority(error.to_string()))?;
-        if authority.workspace_id() != selection.workspace_id
-            || authority.epoch_id() != selection.epoch_id
+        let authority = runtime.query_authority();
+        if runtime.workspace_id() != selection.workspace_id()
+            || authority.workspace_id() != selection.workspace_id()
+            || authority.epoch_id() != selection.epoch_id()
+            || authority.activation_pins().table_versions != selection.table_versions().reference()
+            || authority.activation_pins().proof_receipt != selection.proof_reference()
+            || !Arc::ptr_eq(authority.epoch(), runtime.epoch())
         {
             return Err(ActiveWorkspaceError::AuthoritySubstitution);
         }
-        Ok(Self { runtime, selection })
+        Ok(Self {
+            #[cfg(not(test))]
+            runtime,
+            #[cfg(test)]
+            runtime: Some(runtime),
+            selection,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn selection_probe(selection: SelectedEpochRecord) -> Self {
+        Self {
+            runtime: None,
+            selection,
+        }
     }
 
     #[must_use]
-    pub const fn runtime(&self) -> &Arc<ProgrammaticWorkspaceRuntime> {
-        &self.runtime
+    pub fn runtime(&self) -> &Arc<ProgrammaticWorkspaceRuntime> {
+        #[cfg(not(test))]
+        {
+            &self.runtime
+        }
+        #[cfg(test)]
+        {
+            self.runtime
+                .as_ref()
+                .expect("selection-only ActiveWorkspace probe has no runtime")
+        }
     }
 
     #[must_use]
@@ -943,7 +995,7 @@ impl WorkspaceSlot {
     /// Install the first exact active workspace while semantic admission remains closed.
     pub fn install_initial(
         &self,
-        runtime: Arc<ProgrammaticWorkspaceRuntime>,
+        active: Arc<ActiveWorkspace>,
     ) -> Result<Arc<ActiveWorkspace>, ActiveWorkspaceError> {
         let _guard = self
             .installation
@@ -955,7 +1007,6 @@ impl WorkspaceSlot {
         if self.active.load().is_some() {
             return Err(ActiveWorkspaceError::AlreadyInstalled(self.workspace_id));
         }
-        let active = Arc::new(ActiveWorkspace::try_from_runtime(runtime)?);
         self.validate_workspace(&active)?;
         self.active.store(Some(Arc::clone(&active)));
         Ok(active)
@@ -964,7 +1015,7 @@ impl WorkspaceSlot {
     /// Atomically advance to another exact active workspace and return the retained old lease.
     pub fn swap(
         &self,
-        runtime: Arc<ProgrammaticWorkspaceRuntime>,
+        active: Arc<ActiveWorkspace>,
     ) -> Result<ActiveWorkspaceLease, ActiveWorkspaceError> {
         let _guard = self
             .installation
@@ -977,7 +1028,6 @@ impl WorkspaceSlot {
             .active
             .load_full()
             .ok_or(ActiveWorkspaceError::NotInstalled(self.workspace_id))?;
-        let active = Arc::new(ActiveWorkspace::try_from_runtime(runtime)?);
         self.validate_workspace(&active)?;
         self.active.store(Some(active));
         Ok(ActiveWorkspaceLease {
@@ -986,10 +1036,10 @@ impl WorkspaceSlot {
     }
 
     fn validate_workspace(&self, workspace: &ActiveWorkspace) -> Result<(), ActiveWorkspaceError> {
-        if workspace.selection.workspace_id != self.workspace_id {
+        if workspace.selection.workspace_id() != self.workspace_id {
             return Err(ActiveWorkspaceError::WorkspaceSubstitution {
                 expected: self.workspace_id,
-                observed: workspace.selection.workspace_id,
+                observed: workspace.selection.workspace_id(),
             });
         }
         Ok(())

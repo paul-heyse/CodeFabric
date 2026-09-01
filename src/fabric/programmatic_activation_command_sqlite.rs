@@ -263,8 +263,7 @@ where
             .await
             .map_err(|_| CommandPortError::ContextUnavailable)?;
         if candidate.identity() != &request.pins.epoch
-            || candidate.observation_publication().table_version_set_ref()
-                != request.pins.table_versions
+            || candidate.table_version_set_ref() != request.pins.table_versions
         {
             return Err(CommandPortError::CorruptRecord);
         }
@@ -478,8 +477,8 @@ impl StoredActivationRequest {
         stored.table_version_vector = Some(
             material
                 .candidate()
-                .observation_publication()
-                .table_versions()
+                .table_version_set()
+                .components()
                 .map(|(relation_id, pin)| StoredDeltaComponent {
                     relation_id: relation_id.to_owned(),
                     canonical_root: pin.canonical_root().to_string(),
@@ -655,7 +654,6 @@ enum StoredActivationTransactionStage {
     AdmissionClosure,
     AuthorityRevalidation,
     DurableAppendReadback,
-    EpochRebuild,
     EpochSwap,
     CacheReconciliation,
     AdmissionReopen,
@@ -669,7 +667,6 @@ impl From<ActivationTransactionStage> for StoredActivationTransactionStage {
             ActivationTransactionStage::AdmissionClosure => Self::AdmissionClosure,
             ActivationTransactionStage::AuthorityRevalidation => Self::AuthorityRevalidation,
             ActivationTransactionStage::DurableAppendReadback => Self::DurableAppendReadback,
-            ActivationTransactionStage::EpochRebuild => Self::EpochRebuild,
             ActivationTransactionStage::EpochSwap => Self::EpochSwap,
             ActivationTransactionStage::CacheReconciliation => Self::CacheReconciliation,
             ActivationTransactionStage::AdmissionReopen => Self::AdmissionReopen,
@@ -685,7 +682,6 @@ impl From<StoredActivationTransactionStage> for ActivationTransactionStage {
             StoredActivationTransactionStage::AdmissionClosure => Self::AdmissionClosure,
             StoredActivationTransactionStage::AuthorityRevalidation => Self::AuthorityRevalidation,
             StoredActivationTransactionStage::DurableAppendReadback => Self::DurableAppendReadback,
-            StoredActivationTransactionStage::EpochRebuild => Self::EpochRebuild,
             StoredActivationTransactionStage::EpochSwap => Self::EpochSwap,
             StoredActivationTransactionStage::CacheReconciliation => Self::CacheReconciliation,
             StoredActivationTransactionStage::AdmissionReopen => Self::AdmissionReopen,
@@ -1194,7 +1190,6 @@ enum StoredActivationReadbackViolation {
     AcknowledgementMarkerMismatch,
     RecoveryAttemptMismatch,
     RecoveryFenceNotAuthorized,
-    RebuiltEpochMismatch,
 }
 
 impl TryFrom<ActivationReadbackViolation> for StoredActivationReadbackViolation {
@@ -1225,7 +1220,6 @@ impl TryFrom<ActivationReadbackViolation> for StoredActivationReadbackViolation 
             ActivationReadbackViolation::RecoveryFenceNotAuthorized => {
                 Self::RecoveryFenceNotAuthorized
             }
-            ActivationReadbackViolation::RebuiltEpochMismatch => Self::RebuiltEpochMismatch,
         })
     }
 }
@@ -1272,7 +1266,6 @@ impl TryFrom<StoredActivationReadbackViolation> for ActivationReadbackViolation 
             StoredActivationReadbackViolation::RecoveryFenceNotAuthorized => {
                 Self::RecoveryFenceNotAuthorized
             }
-            StoredActivationReadbackViolation::RebuiltEpochMismatch => Self::RebuiltEpochMismatch,
         })
     }
 }
@@ -1310,9 +1303,6 @@ enum StoredActivationReconciliationReason {
         diagnostic: DiagnosticRef,
     },
     OperationMarkerUnknown {
-        diagnostic: DiagnosticRef,
-    },
-    EpochRebuildUnknown {
         diagnostic: DiagnosticRef,
     },
 }
@@ -1358,9 +1348,6 @@ impl TryFrom<ActivationReconciliationReason> for StoredActivationReconciliationR
             ActivationReconciliationReason::OperationMarkerUnknown(diagnostic) => {
                 Self::OperationMarkerUnknown { diagnostic }
             }
-            ActivationReconciliationReason::EpochRebuildUnknown(diagnostic) => {
-                Self::EpochRebuildUnknown { diagnostic }
-            }
         })
     }
 }
@@ -1405,9 +1392,6 @@ impl StoredActivationReconciliationReason {
             }
             Self::OperationMarkerUnknown { diagnostic } => {
                 ActivationReconciliationReason::OperationMarkerUnknown(diagnostic)
-            }
-            Self::EpochRebuildUnknown { diagnostic } => {
-                ActivationReconciliationReason::EpochRebuildUnknown(diagnostic)
             }
         })
     }
@@ -1648,8 +1632,7 @@ impl SqliteProgrammaticActivationCommandStateStore {
         let candidate = material.candidate();
         if command.ownership.workspace_id != self.workspace_id
             || candidate.identity() != &material.pins().epoch
-            || candidate.observation_publication().table_version_set_ref()
-                != material.pins().table_versions
+            || candidate.table_version_set_ref() != material.pins().table_versions
             || material.control_relation().binding() != &self.control_binding
         {
             return Err(CommandPortError::CorruptRecord);
@@ -2266,6 +2249,9 @@ mod tests {
     use crate::fabric::epoch_runtime::FabricEpochRuntimeConfig;
     use crate::fabric::programmatic_activation_command_ports::ExactActivationCommandState;
     use crate::fabric::programmatic_observation_delta::ProgrammaticObservationWriteIdentity;
+    use crate::fabric::programmatic_relation_delta::{
+        ProgrammaticRelationDeltaLayout, ProgrammaticRelationDeltaPreparation,
+    };
     use crate::fabric::programmatic_schema::{
         DEPENDENCY_OBSERVATION_RELATION_ID, FIELD_OBSERVATION_RELATION_ID,
         PROVENANCE_OBSERVATION_RELATION_ID, ProgrammaticRelationId,
@@ -2318,7 +2304,17 @@ mod tests {
         );
         Arc::new(
             builder
-                .seal(identity, targets)
+                .seal(
+                    identity,
+                    targets,
+                    ProgrammaticRelationDeltaPreparation::Genesis(
+                        ProgrammaticRelationDeltaLayout::try_new(
+                            Url::from_directory_path(root.join("relation-snapshots"))
+                                .expect("relation-snapshot file URL"),
+                        )
+                        .expect("relation-snapshot layout"),
+                    ),
+                )
                 .await
                 .expect("seal exact candidate"),
         )
@@ -2375,7 +2371,7 @@ mod tests {
             provider_release: command.pins.provider_release,
             source_generation: command.pins.source_generation,
             provider_set: command.pins.provider_set,
-            table_versions: candidate.observation_publication().table_version_set_ref(),
+            table_versions: candidate.table_version_set_ref(),
             overlay_segments: OverlaySegmentSetRef::from_bytes(id32(0x49)),
             policy_set: PolicySetRef::from_bytes(id32(0x4a)),
             resource_envelope: command.resources,
@@ -2570,11 +2566,8 @@ mod tests {
         assert_eq!(second_rebuilds.load(Ordering::SeqCst), 1);
         assert!(!Arc::ptr_eq(rehydrated.candidate(), &candidate));
         assert_eq!(
-            rehydrated
-                .candidate()
-                .observation_publication()
-                .table_version_set(),
-            candidate.observation_publication().table_version_set()
+            rehydrated.candidate().table_version_set(),
+            candidate.table_version_set()
         );
 
         let state = ExactActivationCommandState::new(store);

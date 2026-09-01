@@ -49,8 +49,8 @@ use super::activation_transaction::{
 };
 use super::command::{
     DiagnosticRef, EpochId, ExpectedHead, LeaseId, OperationId, OperationSelectionRef,
-    ReconciliationEvidenceRef, RetentionPolicyRef, SourceGeneration, TransactionRef, WorkspaceId,
-    WriterFence, WriterGeneration,
+    ProofReceiptRef, ReconciliationEvidenceRef, RetentionPolicyRef, SourceGeneration,
+    TransactionRef, WorkspaceId, WriterFence, WriterGeneration,
 };
 use super::command_actor::CommandPortError;
 use super::command_runtime_ports::CommandActivationChainPort;
@@ -64,6 +64,7 @@ use super::delta_write::{
     write_exact_delta_plan,
 };
 use super::epoch_runtime::{FABRIC_CATALOG, FabricSchemaRole};
+use super::production_kernel::SelectedEpochRecord;
 use super::programmatic_schema::{
     ProgrammaticRelationId, ProgrammaticSchemaAssembly, ProviderInput,
 };
@@ -1301,6 +1302,41 @@ impl DeltaActivationRuntimeAuthority {
             .ok_or_else(|| Arc::<str>::from("no durable writer fence exists for workspace"))
     }
 
+    async fn read_current_horizon(
+        &self,
+    ) -> Result<
+        (ActivationControlReadback, ActivationChain),
+        DeltaActivationRuntimeAuthoritySnapshotError,
+    > {
+        let active_fence = self
+            .observe_fence()
+            .map_err(DeltaActivationRuntimeAuthoritySnapshotError::WriterAuthority)?;
+        let readback = self
+            .control
+            .read_workspace(self.workspace_id, active_fence)
+            .await
+            .map_err(DeltaActivationRuntimeAuthoritySnapshotError::Control)?;
+        let chain = self
+            .control
+            .reconstruct_workspace_chain(&readback, self.workspace_id, None)
+            .await
+            .map_err(DeltaActivationRuntimeAuthoritySnapshotError::Control)?;
+        Ok((readback, chain))
+    }
+
+    /// Reconstruct the durable workspace selection from one complete exact Delta readback.
+    ///
+    /// An empty scoped chain is a lawful genesis state. A selected state carries the exact event,
+    /// its complete reversible table-version vector, the event's writer fence and proof reference,
+    /// and the control horizon which produced all of them. The independently observed current
+    /// writer guard is used only to authorize recovery; this path never reacquires it.
+    pub(crate) async fn current_selection(
+        &self,
+    ) -> Result<ExactActivationControlSelection, DeltaActivationRuntimeAuthoritySnapshotError> {
+        let (readback, chain) = self.read_current_horizon().await?;
+        ExactActivationControlSelection::try_from_readback(&readback, &chain, self.workspace_id)
+    }
+
     /// Read the exact activation chain under the independently observed current writer fence.
     ///
     /// This is the production cold-start input to workspace composition. The returned snapshot is
@@ -1309,19 +1345,16 @@ impl DeltaActivationRuntimeAuthority {
     pub async fn current_snapshot(
         &self,
     ) -> Result<ActivationAuthoritySnapshot, DeltaActivationRuntimeAuthoritySnapshotError> {
-        let active_fence = self
-            .observe_fence()
-            .map_err(DeltaActivationRuntimeAuthoritySnapshotError::WriterAuthority)?;
-        let chain = self
-            .control
-            .read_workspace_chain(self.workspace_id, active_fence)
-            .await
-            .map_err(DeltaActivationRuntimeAuthoritySnapshotError::Control)?;
+        let (readback, chain) = self.read_current_horizon().await?;
         Ok(ActivationAuthoritySnapshot {
             chain,
-            active_fence,
+            active_fence: readback.active_recovery_fence,
         })
     }
+}
+
+fn recovery_fence_authorizes(selected: WriterFence, active: WriterFence) -> bool {
+    active == selected || active.generation.get() > selected.generation.get()
 }
 
 /// Fail-closed cold-start observation failures from the concrete Delta activation authority.
@@ -1331,6 +1364,15 @@ pub enum DeltaActivationRuntimeAuthoritySnapshotError {
     WriterAuthority(Arc<str>),
     #[error("exact activation-control readback failed: {0}")]
     Control(ActivationControlError),
+    #[error("selected activation event {0:?} has no reversible table-version vector")]
+    SelectedTableVersionsMissing(ActivationEventId),
+    #[error(
+        "current writer fence {active:?} does not authorize recovery of selected fence {selected:?}"
+    )]
+    SelectionFenceNotAuthorized {
+        selected: WriterFence,
+        active: WriterFence,
+    },
 }
 
 #[async_trait::async_trait]
@@ -1642,7 +1684,11 @@ impl ActivationEventPort for ActivationControlDeltaProvider {
                 );
             }
         };
-        let readback = match committed.read_all(contract.execution_fence()).await {
+        let workspace_id = contract.command().ownership.workspace_id;
+        let readback = match committed
+            .read_workspace(workspace_id, contract.execution_fence())
+            .await
+        {
             Ok(readback) => readback,
             Err(error) => {
                 return append_unknown(
@@ -1653,26 +1699,10 @@ impl ActivationEventPort for ActivationControlDeltaProvider {
                 );
             }
         };
-        let Some(observed_versions) = readback.table_versions_for_event(contract.event_id()) else {
-            return append_unknown(
-                &contract,
-                ActivationAppendUnknownReason::ReadbackUnavailable,
-                ActivationDiagnosticStage::RowDecode,
-                "committed control snapshot does not contain the appended event",
-            );
-        };
-        if observed_versions.as_ref() != contract.table_versions().as_ref() {
-            return append_unknown(
-                &contract,
-                ActivationAppendUnknownReason::ReadbackUnavailable,
-                ActivationDiagnosticStage::RowDecode,
-                "committed event's reversible table-version vector differs from the append contract",
-            );
-        }
         let chain = match committed
             .reconstruct_workspace_chain(
                 &readback,
-                contract.command().ownership.workspace_id,
+                workspace_id,
                 Some((contract.event_id(), &evidence)),
             )
             .await
@@ -1687,22 +1717,47 @@ impl ActivationEventPort for ActivationControlDeltaProvider {
                 );
             }
         };
-        let Some(event) = chain
-            .events()
-            .iter()
-            .find(|event| event.event_id() == contract.event_id())
-            .copied()
-        else {
+        let selection = match ExactActivationControlSelection::try_from_readback(
+            &readback,
+            &chain,
+            workspace_id,
+        ) {
+            Ok(ExactActivationControlSelection::Selected(selection)) => selection,
+            Ok(ExactActivationControlSelection::GenesisRequired(_)) => {
+                return append_unknown(
+                    &contract,
+                    ActivationAppendUnknownReason::ReadbackUnavailable,
+                    ActivationDiagnosticStage::ControlReadback,
+                    "committed append produced an empty exact activation horizon",
+                );
+            }
+            Err(error) => {
+                return append_unknown(
+                    &contract,
+                    ActivationAppendUnknownReason::ReadbackUnavailable,
+                    ActivationDiagnosticStage::ControlReadback,
+                    error.to_string(),
+                );
+            }
+        };
+        if selection.event().event_id() != contract.event_id() {
             return append_unknown(
                 &contract,
                 ActivationAppendUnknownReason::ReadbackUnavailable,
                 ActivationDiagnosticStage::ControlReadback,
-                "reconstructed activation chain does not contain the appended event",
+                "committed append is not the unique selected event at the exact read horizon",
             );
-        };
+        }
+        if selection.table_versions().as_ref() != contract.table_versions().as_ref() {
+            return append_unknown(
+                &contract,
+                ActivationAppendUnknownReason::ReadbackUnavailable,
+                ActivationDiagnosticStage::RowDecode,
+                "selected event's reversible table-version vector differs from the append contract",
+            );
+        }
         ActivationAppendOutcome::Committed {
-            event,
-            table_versions: Arc::clone(observed_versions),
+            selection: SelectedEpochRecord::from_exact_readback(&selection),
             chain_after_readback: chain,
         }
     }
@@ -1749,12 +1804,38 @@ impl ActivationOperationMarkerPort for ActivationControlDeltaProvider {
         };
         match fact.disposition() {
             ActivationReconciliationDisposition::Selected(event_id) => {
-                let Some(event) = chain
-                    .events()
-                    .iter()
-                    .find(|event| event.event_id() == event_id)
-                    .copied()
-                else {
+                let selection = match ExactActivationControlSelection::try_from_readback(
+                    &readback,
+                    &chain,
+                    request.workspace_id,
+                ) {
+                    Ok(ExactActivationControlSelection::Selected(selection)) => selection,
+                    Ok(ExactActivationControlSelection::GenesisRequired(_)) => {
+                        return ActivationOperationMarkerOutcome::Unknown {
+                            diagnostic: activation_diagnostic_ref(
+                                request.workspace_id,
+                                request.operation_id,
+                                request.transaction,
+                                &request.control_relation,
+                                ActivationDiagnosticStage::Reconciliation,
+                                "selected marker resolved to an empty exact activation horizon",
+                            ),
+                        };
+                    }
+                    Err(error) => {
+                        return ActivationOperationMarkerOutcome::Unknown {
+                            diagnostic: activation_diagnostic_ref(
+                                request.workspace_id,
+                                request.operation_id,
+                                request.transaction,
+                                &request.control_relation,
+                                ActivationDiagnosticStage::Reconciliation,
+                                error.to_string(),
+                            ),
+                        };
+                    }
+                };
+                if selection.event().event_id() != event_id {
                     return ActivationOperationMarkerOutcome::Unknown {
                         diagnostic: activation_diagnostic_ref(
                             request.workspace_id,
@@ -1762,17 +1843,12 @@ impl ActivationOperationMarkerPort for ActivationControlDeltaProvider {
                             request.transaction,
                             &request.control_relation,
                             ActivationDiagnosticStage::Reconciliation,
-                            "selected marker event is absent from the reconstructed chain",
+                            "operation marker does not name the selected event at the exact control horizon",
                         ),
                     };
-                };
+                }
                 ActivationOperationMarkerOutcome::Selected {
-                    event,
-                    table_versions: Arc::clone(
-                        readback
-                            .table_versions_for_event(event_id)
-                            .expect("selected reconciliation event exists in exact readback"),
-                    ),
+                    selection: SelectedEpochRecord::from_exact_readback(&selection),
                     chain_after_readback: chain,
                     acknowledgement: ActivationAcknowledgementMarker::Absent,
                     evidence: fact.evidence(),
@@ -1942,6 +2018,208 @@ impl ActivationControlReadback {
     #[must_use]
     pub const fn history_digest(&self) -> &[u8; 32] {
         &self.history_digest
+    }
+}
+
+/// One completed, exact activation-control read horizon for a workspace.
+///
+/// The relation pin fixes the Delta root, version, and executable provider/schema binding. The
+/// digest additionally binds the workspace scope, independently observed recovery fence, and every
+/// decoded row in the completed scan. This is durable-read evidence, not a separately selectable
+/// current pointer.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActivationControlHorizon {
+    workspace_id: WorkspaceId,
+    control_relation: ActivationControlRelationPin,
+    active_recovery_fence: WriterFence,
+    history_digest: [u8; 32],
+    history_row_count: u64,
+}
+
+impl ActivationControlHorizon {
+    fn try_from_readback(
+        readback: &ActivationControlReadback,
+        workspace_id: WorkspaceId,
+    ) -> Result<Self, ActivationControlError> {
+        if readback.scope != ActivationControlReadScope::Workspace(workspace_id) {
+            return Err(ActivationControlError::ReadScopeMismatch {
+                expected: workspace_id,
+                observed: readback.scope,
+            });
+        }
+        let history_row_count = u64::try_from(readback.rows.len())
+            .map_err(|_| ActivationControlError::HistoryRowCountOverflow)?;
+        Ok(Self {
+            workspace_id,
+            control_relation: readback.control_relation.clone(),
+            active_recovery_fence: readback.active_recovery_fence,
+            history_digest: readback.history_digest,
+            history_row_count,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        workspace_id: WorkspaceId,
+        control_relation: ActivationControlRelationPin,
+        active_recovery_fence: WriterFence,
+        history_digest: [u8; 32],
+        history_row_count: u64,
+    ) -> Self {
+        Self {
+            workspace_id,
+            control_relation,
+            active_recovery_fence,
+            history_digest,
+            history_row_count,
+        }
+    }
+
+    #[must_use]
+    pub const fn workspace_id(&self) -> WorkspaceId {
+        self.workspace_id
+    }
+
+    #[must_use]
+    pub const fn control_relation(&self) -> &ActivationControlRelationPin {
+        &self.control_relation
+    }
+
+    #[must_use]
+    pub const fn active_recovery_fence(&self) -> WriterFence {
+        self.active_recovery_fence
+    }
+
+    #[must_use]
+    pub const fn history_digest(&self) -> &[u8; 32] {
+        &self.history_digest
+    }
+
+    #[must_use]
+    pub const fn history_row_count(&self) -> u64 {
+        self.history_row_count
+    }
+}
+
+/// Lawful empty-head result from one exact activation-control read.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GenesisRequiredActivation {
+    workspace_id: WorkspaceId,
+    writer_fence: WriterFence,
+    control_horizon: ActivationControlHorizon,
+}
+
+impl GenesisRequiredActivation {
+    #[must_use]
+    pub(crate) const fn workspace_id(&self) -> WorkspaceId {
+        self.workspace_id
+    }
+
+    #[must_use]
+    pub(crate) const fn writer_fence(&self) -> WriterFence {
+        self.writer_fence
+    }
+
+    #[must_use]
+    pub(crate) const fn control_horizon(&self) -> &ActivationControlHorizon {
+        &self.control_horizon
+    }
+}
+
+/// Exact selected activation reconstructed from one completed durable control readback.
+///
+/// Construction is private to this module so an event, reversible vector, proof reference, fence,
+/// or horizon cannot be independently supplied by a caller. The public phase-owned
+/// `SelectedEpochRecord` consumes this value rather than accepting those components separately.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ExactSelectedActivation {
+    event: ActivationEvent,
+    table_versions: Arc<TableVersionSet>,
+    chain: ActivationChain,
+    control_horizon: ActivationControlHorizon,
+}
+
+impl ExactSelectedActivation {
+    #[must_use]
+    pub(crate) const fn event(&self) -> ActivationEvent {
+        self.event
+    }
+
+    #[must_use]
+    pub(crate) const fn table_versions(&self) -> &Arc<TableVersionSet> {
+        &self.table_versions
+    }
+
+    #[must_use]
+    pub(crate) const fn chain(&self) -> &ActivationChain {
+        &self.chain
+    }
+
+    #[must_use]
+    pub(crate) const fn writer_fence(&self) -> WriterFence {
+        self.event.execution_fence()
+    }
+
+    #[must_use]
+    pub(crate) const fn control_horizon(&self) -> &ActivationControlHorizon {
+        &self.control_horizon
+    }
+
+    #[must_use]
+    pub(crate) const fn proof_reference(&self) -> ProofReceiptRef {
+        self.event.pins().proof_receipt
+    }
+}
+
+/// Exact cold-start conclusion from the durable activation-control relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ExactActivationControlSelection {
+    GenesisRequired(GenesisRequiredActivation),
+    Selected(ExactSelectedActivation),
+}
+
+impl ExactActivationControlSelection {
+    fn try_from_readback(
+        readback: &ActivationControlReadback,
+        chain: &ActivationChain,
+        workspace_id: WorkspaceId,
+    ) -> Result<Self, DeltaActivationRuntimeAuthoritySnapshotError> {
+        let horizon = ActivationControlHorizon::try_from_readback(readback, workspace_id)
+            .map_err(DeltaActivationRuntimeAuthoritySnapshotError::Control)?;
+        let Some(event) = chain.head_event().copied() else {
+            return Ok(Self::GenesisRequired(GenesisRequiredActivation {
+                workspace_id,
+                writer_fence: horizon.active_recovery_fence,
+                control_horizon: horizon,
+            }));
+        };
+        if !recovery_fence_authorizes(event.execution_fence(), horizon.active_recovery_fence) {
+            return Err(
+                DeltaActivationRuntimeAuthoritySnapshotError::SelectionFenceNotAuthorized {
+                    selected: event.execution_fence(),
+                    active: horizon.active_recovery_fence,
+                },
+            );
+        }
+        let table_versions = readback
+            .table_versions_for_event(event.event_id())
+            .cloned()
+            .ok_or(
+                DeltaActivationRuntimeAuthoritySnapshotError::SelectedTableVersionsMissing(
+                    event.event_id(),
+                ),
+            )?;
+        if table_versions.reference() != event.pins().table_versions {
+            return Err(DeltaActivationRuntimeAuthoritySnapshotError::Control(
+                ActivationControlError::TableVersionSetReferenceMismatch,
+            ));
+        }
+        Ok(Self::Selected(ExactSelectedActivation {
+            event,
+            table_versions,
+            chain: chain.clone(),
+            control_horizon: horizon,
+        }))
     }
 }
 
@@ -2945,6 +3223,7 @@ mod tests {
         ProgramReleaseRef, ProofReceiptRef, ProviderSetRef, ResourceEnvelopeRef,
     };
     use crate::fabric::epoch_runtime::FabricEpochRuntimeConfig;
+    use crate::fabric::production_kernel::{ActiveWorkspace, WorkspaceSlot};
     use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
     use crate::fabric::writer_lease::WriterGenerationPortError;
 
@@ -3452,7 +3731,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exact_delta_append_readback_and_marker_reconciliation_round_trip() {
+    async fn wp32_int_exact_delta_append_readback_and_marker_reconciliation_round_trip() {
         let temporary = TempDir::new().unwrap();
         let table_path = temporary.path().join("activation-control");
         fs::create_dir_all(&table_path).unwrap();
@@ -3487,7 +3766,7 @@ mod tests {
         assert!(Arc::ptr_eq(&registered.contract, provider.contract()));
         assert_eq!(sealed.session().state().session_id(), candidate_session_id);
         let session = Arc::new(sealed.session().state());
-        let versions = Arc::clone(selected_epoch.observation_publication().table_version_set());
+        let versions = Arc::clone(selected_epoch.table_version_set());
         let mut semantic = row(21);
         semantic.pins.epoch = epoch_id;
         semantic.pins.table_versions = versions.reference();
@@ -3497,12 +3776,11 @@ mod tests {
         let outcome = provider.append_and_readback(contract).await;
         let (event, chain) = match outcome {
             ActivationAppendOutcome::Committed {
-                event,
-                table_versions,
+                selection,
                 chain_after_readback,
             } => {
-                assert_eq!(table_versions.as_ref(), versions.as_ref());
-                (event, chain_after_readback)
+                assert_eq!(selection.table_versions().as_ref(), versions.as_ref());
+                (selection.event(), chain_after_readback)
             }
             outcome => panic!("expected committed activation event, observed {outcome:?}"),
         };
@@ -3582,6 +3860,146 @@ mod tests {
         let startup_snapshot = authority.current_snapshot().await.unwrap();
         assert_eq!(startup_snapshot.chain, chain);
         assert_eq!(startup_snapshot.active_fence, semantic.execution_fence);
+        let selected = match authority.current_selection().await.unwrap() {
+            ExactActivationControlSelection::Selected(selected) => selected,
+            ExactActivationControlSelection::GenesisRequired(_) => {
+                panic!("committed workspace must reconstruct its selected activation")
+            }
+        };
+        assert_eq!(selected.event(), event);
+        assert_eq!(selected.chain(), &chain);
+        assert_eq!(selected.table_versions().as_ref(), versions.as_ref());
+        assert_eq!(selected.writer_fence(), semantic.execution_fence);
+        assert_eq!(selected.proof_reference(), semantic.pins.proof_receipt);
+        assert_eq!(
+            selected.control_horizon().workspace_id(),
+            semantic.workspace_id
+        );
+        assert_eq!(
+            selected.control_horizon().control_relation(),
+            committed.control_relation()
+        );
+        assert_eq!(selected.control_horizon().history_row_count(), 1);
+        assert_eq!(
+            selected.control_horizon().active_recovery_fence(),
+            semantic.execution_fence
+        );
+
+        let restarted_fence = fence(91, semantic.execution_fence.generation.get() + 1);
+        let restarted_authority = DeltaActivationRuntimeAuthority::new(
+            semantic.workspace_id,
+            Arc::clone(&committed),
+            Arc::new(FixedWriterGeneration {
+                workspace_id: semantic.workspace_id,
+                fence: restarted_fence,
+            }),
+        );
+        let restarted_selection = match restarted_authority.current_selection().await.unwrap() {
+            ExactActivationControlSelection::Selected(selected) => selected,
+            ExactActivationControlSelection::GenesisRequired(_) => {
+                panic!("restart must retain the exact durable selection")
+            }
+        };
+        assert_eq!(restarted_selection.event(), selected.event());
+        assert_eq!(
+            restarted_selection.table_versions().as_ref(),
+            selected.table_versions().as_ref()
+        );
+        assert_eq!(
+            restarted_selection.writer_fence(),
+            selected.writer_fence(),
+            "the selected fence comes from the durable event, not the new process guard"
+        );
+        assert_eq!(
+            restarted_selection.proof_reference(),
+            selected.proof_reference()
+        );
+        assert_eq!(
+            restarted_selection.control_horizon().control_relation(),
+            selected.control_horizon().control_relation()
+        );
+        assert_eq!(
+            restarted_selection
+                .control_horizon()
+                .active_recovery_fence(),
+            restarted_fence
+        );
+
+        let slot = WorkspaceSlot::empty(semantic.workspace_id);
+        let predecessor = Arc::new(ActiveWorkspace::selection_probe(
+            SelectedEpochRecord::from_exact_readback(&selected),
+        ));
+        slot.install_initial(Arc::clone(&predecessor)).unwrap();
+        let predecessor_lease = slot.lease().unwrap();
+        let successor = Arc::new(ActiveWorkspace::selection_probe(
+            SelectedEpochRecord::from_exact_readback(&restarted_selection),
+        ));
+        let retained = slot.swap(Arc::clone(&successor)).unwrap();
+        assert!(Arc::ptr_eq(retained.workspace(), &predecessor));
+        assert!(Arc::ptr_eq(predecessor_lease.workspace(), &predecessor));
+        assert_eq!(
+            predecessor_lease
+                .workspace()
+                .selection()
+                .control_horizon()
+                .active_recovery_fence(),
+            semantic.execution_fence,
+            "an old workspace lease must retain its exact pre-swap horizon"
+        );
+        let successor_lease = slot.lease().unwrap();
+        assert!(Arc::ptr_eq(successor_lease.workspace(), &successor));
+        assert_eq!(
+            successor_lease
+                .workspace()
+                .selection()
+                .control_horizon()
+                .active_recovery_fence(),
+            restarted_fence,
+            "a new lease must observe only the atomic successor workspace"
+        );
+
+        let stale_fence = fence(89, semantic.execution_fence.generation.get() - 1);
+        let stale_authority = DeltaActivationRuntimeAuthority::new(
+            semantic.workspace_id,
+            Arc::clone(&committed),
+            Arc::new(FixedWriterGeneration {
+                workspace_id: semantic.workspace_id,
+                fence: stale_fence,
+            }),
+        );
+        assert!(matches!(
+            stale_authority.current_selection().await,
+            Err(
+                DeltaActivationRuntimeAuthoritySnapshotError::SelectionFenceNotAuthorized {
+                    selected,
+                    active,
+                }
+            ) if selected == semantic.execution_fence && active == stale_fence
+        ));
+
+        let genesis_fence = fence(92, restarted_fence.generation.get());
+        let genesis_authority = DeltaActivationRuntimeAuthority::new(
+            other_workspace,
+            Arc::clone(&committed),
+            Arc::new(FixedWriterGeneration {
+                workspace_id: other_workspace,
+                fence: genesis_fence,
+            }),
+        );
+        let genesis = match genesis_authority.current_selection().await.unwrap() {
+            ExactActivationControlSelection::GenesisRequired(genesis) => genesis,
+            ExactActivationControlSelection::Selected(_) => {
+                panic!("an exact empty workspace scope must require lawful genesis")
+            }
+        };
+        assert_eq!(genesis.workspace_id(), other_workspace);
+        assert_eq!(genesis.writer_fence(), genesis_fence);
+        assert_eq!(genesis.control_horizon().workspace_id(), other_workspace);
+        assert_eq!(genesis.control_horizon().history_row_count(), 0);
+        assert_eq!(
+            genesis.control_horizon().control_relation(),
+            committed.control_relation()
+        );
         let authoritative_chain = authority
             .read_chain(semantic.workspace_id)
             .await
@@ -3632,17 +4050,17 @@ mod tests {
         let marker_outcome = committed.read_operation_marker(request).await;
         let recovered_versions = match marker_outcome {
             ActivationOperationMarkerOutcome::Selected {
-                event,
-                table_versions,
+                selection,
                 chain_after_readback,
                 acknowledgement: ActivationAcknowledgementMarker::Absent,
                 evidence: marker_evidence,
             } => {
+                let event = selection.event();
                 assert_eq!(event.event_id(), semantic.event_id);
-                assert_eq!(table_versions.as_ref(), versions.as_ref());
+                assert_eq!(selection.table_versions().as_ref(), versions.as_ref());
                 assert_eq!(chain_after_readback.head_event(), Some(&event));
                 assert_eq!(marker_evidence, evidence.evidence());
-                table_versions
+                Arc::clone(selection.table_versions())
             }
             outcome => panic!("expected selected marker outcome, observed {outcome:?}"),
         };
@@ -3658,10 +4076,8 @@ mod tests {
             restarted.context().state().session_id()
         );
         assert_eq!(
-            selected_epoch
-                .observation_publication()
-                .table_version_set_ref(),
-            restarted.observation_publication().table_version_set_ref()
+            selected_epoch.table_version_set_ref(),
+            restarted.table_version_set_ref()
         );
     }
 }

@@ -47,10 +47,33 @@ use super::delta_write::{
     ControlledDeltaWriteSpec, SessionBoundLogicalPlan, write_exact_delta_plan,
 };
 use super::programmatic_schema::{
-    PreparedObservationRelation, PreparedObservationRelationSpec, ProgrammaticRelationId,
-    ProgrammaticSchemaAssembly, ProgrammaticSchemaError, ProgrammaticTransformationId,
-    SealedProgrammaticSchemaAssembly, observation_view_identity_boundary,
+    DEPENDENCY_OBSERVATION_RELATION_ID, FIELD_OBSERVATION_RELATION_ID,
+    PROVENANCE_OBSERVATION_RELATION_ID, PreparedObservationRelation,
+    PreparedObservationRelationSpec, ProgrammaticRelationId, ProgrammaticSchemaAssembly,
+    ProgrammaticSchemaError, ProgrammaticTransformationId, RELATION_OBSERVATION_RELATION_ID,
+    SCHEMA_OBSERVATION_RELATION_ID, SealedProgrammaticSchemaAssembly,
+    observation_view_identity_boundary,
 };
+
+/// Whether a sealed relation is implemented by the dedicated append-only observation subsystem.
+///
+/// Current observation views and their physical history providers are excluded from the general
+/// replace-all relation publisher so no logical relation acquires two durable authorities.
+pub(super) fn is_programmatic_observation_relation(relation_id: &ProgrammaticRelationId) -> bool {
+    [
+        RELATION_OBSERVATION_RELATION_ID,
+        FIELD_OBSERVATION_RELATION_ID,
+        SCHEMA_OBSERVATION_RELATION_ID,
+        DEPENDENCY_OBSERVATION_RELATION_ID,
+        PROVENANCE_OBSERVATION_RELATION_ID,
+        "_storage.programmatic_relation_observation_history",
+        "_storage.programmatic_field_observation_history",
+        "_storage.programmatic_schema_observation_history",
+        "_storage.programmatic_dependency_observation_history",
+        "_storage.programmatic_provenance_observation_history",
+    ]
+    .contains(&relation_id.as_str())
+}
 use super::provider::{ProviderContractError, SchemaContractStorageProvider};
 use crate::schema_contract::{
     FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY, SchemaContract,
@@ -476,6 +499,16 @@ impl ProgrammaticObservationWriteIdentity {
     #[must_use]
     pub const fn epoch_id(self) -> EpochId {
         self.epoch_id
+    }
+
+    #[must_use]
+    pub const fn operation_id(self) -> OperationId {
+        self.operation_id
+    }
+
+    #[must_use]
+    pub const fn writer_generation(self) -> WriterGeneration {
+        self.writer_generation
     }
 
     #[must_use]
@@ -1116,9 +1149,10 @@ async fn bind_exact_observation_histories(
 /// was selected by its durable activation event.
 ///
 /// This path performs no Delta writes and never discovers latest state. It
-/// loads each named version, installs native current-epoch views in the fresh
-/// candidate session, and proves those views equal a new live catalog
-/// observation before sealing.
+/// loads each named version, installs native current-epoch views in the fresh candidate session,
+/// and validates the exact durable observations against the reconstructed catalog before sealing.
+/// Derived relations are exact snapshots on this path, so recovery does not rerun providers or
+/// pretend that a materialized provider is the original transient transformation view.
 pub async fn reopen_programmatic_observations(
     mut assembly: ProgrammaticSchemaAssembly,
     epoch_id: EpochId,
@@ -1142,16 +1176,10 @@ pub async fn reopen_programmatic_observations(
         .iter()
         .map(|(relation_id, (_, target))| (relation_id.clone(), target.predecessor.clone()))
         .collect::<BTreeMap<_, _>>();
-    let prepared = assembly
-        .materialize_live_observation_relations(epoch_id)
-        .await?;
-    let current_epoch_batches = prepared
-        .into_iter()
-        .map(|relation| (relation.relation_id, relation.batch))
-        .collect::<BTreeMap<_, _>>();
+    let current_epoch_batches = collect_current_epoch_views(&context, &registry, &selected).await?;
     verify_current_epoch_views(&context, &registry, &current_epoch_batches, &selected).await?;
     let sealed = assembly
-        .finish_seal(epoch_id, current_epoch_batches)
+        .finish_exact_reconstruction(epoch_id, current_epoch_batches)
         .await?;
     let publication = ProgrammaticObservationDeltaPublication::try_new(
         epoch_id,
@@ -1755,6 +1783,40 @@ async fn verify_current_epoch_views(
     Ok(())
 }
 
+async fn collect_current_epoch_views(
+    context: &datafusion::prelude::SessionContext,
+    registry: &ProgrammaticObservationHistoryRegistry,
+    selected: &BTreeMap<ProgrammaticRelationId, ExactDeltaPin>,
+) -> Result<BTreeMap<ProgrammaticRelationId, RecordBatch>, ProgrammaticObservationDeltaError> {
+    let mut batches = BTreeMap::new();
+    for history in registry.histories() {
+        let relation_id = history.system.relation_id.clone();
+        if !selected.contains_key(&relation_id) {
+            return Err(ProgrammaticObservationDeltaError::MissingTarget { relation_id });
+        }
+        let collected = context
+            .table(history.system.table_reference.clone())
+            .await
+            .map_err(|source| ProgrammaticObservationDeltaError::ViewReadback {
+                relation_id: relation_id.clone(),
+                detail: source.to_string(),
+            })?
+            .collect()
+            .await
+            .map_err(|source| ProgrammaticObservationDeltaError::ViewReadback {
+                relation_id: relation_id.clone(),
+                detail: source.to_string(),
+            })?;
+        let batch = concat_batches(history.system.contract.logical_schema(), collected.iter())
+            .map_err(|source| ProgrammaticObservationDeltaError::ViewReadback {
+                relation_id: relation_id.clone(),
+                detail: source.to_string(),
+            })?;
+        batches.insert(relation_id, batch);
+    }
+    Ok(batches)
+}
+
 fn validate_history_policy(
     registration: &ObservationHistorySpec,
     table: &DeltaTable,
@@ -2150,6 +2212,9 @@ mod tests {
     use crate::fabric::programmatic_epoch::{
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
+    use crate::fabric::programmatic_relation_delta::{
+        ProgrammaticRelationDeltaLayout, ProgrammaticRelationDeltaPreparation,
+    };
     use crate::fabric::programmatic_schema::{
         DEPENDENCY_OBSERVATION_RELATION_ID, FIELD_OBSERVATION_RELATION_ID,
         PROVENANCE_OBSERVATION_RELATION_ID, RELATION_OBSERVATION_RELATION_ID,
@@ -2176,6 +2241,14 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    fn relation_layout(temporary: &TempDir) -> ProgrammaticRelationDeltaLayout {
+        ProgrammaticRelationDeltaLayout::try_new(
+            Url::from_directory_path(temporary.path().join("relation-snapshots"))
+                .expect("relation-snapshot root is a file URL"),
+        )
+        .expect("valid relation-snapshot layout")
     }
 
     fn write_identity(seed: u8) -> ProgrammaticObservationWriteIdentity {
@@ -2396,7 +2469,11 @@ mod tests {
             .await
             .expect("provision all registered programmatic histories");
         let first = first_builder
-            .seal(first_identity, initial_targets)
+            .seal(
+                first_identity,
+                initial_targets,
+                ProgrammaticRelationDeltaPreparation::Genesis(relation_layout(&temporary)),
+            )
             .await
             .expect("historicize first epoch");
         assert_eq!(
@@ -2446,7 +2523,7 @@ mod tests {
         let first_current = current_relation_batches(&first).await;
         assert_current_epoch(&first_current, first_identity.epoch_id());
 
-        let selected_versions = Arc::clone(first.observation_publication().table_version_set());
+        let selected_versions = Arc::clone(first.table_version_set());
         let first_session_id = first.context().state().session_id().to_owned();
         let reopened_builder = ProgrammaticFabricEpochBuilder::try_new(
             first_identity.epoch_id(),
@@ -2527,7 +2604,14 @@ mod tests {
         )
         .expect("second candidate");
         let second = second_builder
-            .seal(second_identity, second_targets)
+            .seal(
+                second_identity,
+                second_targets,
+                ProgrammaticRelationDeltaPreparation::Advance {
+                    selected: first.relation_publication().clone(),
+                    layout: relation_layout(&temporary),
+                },
+            )
             .await
             .expect("historicize second epoch");
         assert!(

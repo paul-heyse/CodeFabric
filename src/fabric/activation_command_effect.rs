@@ -13,10 +13,10 @@ use super::activation::{ActivationAttempt, ActivationRecoveryAttempt};
 use super::activation_transaction::{
     ActivatedEpochReceipt, ActivationAcknowledgementPort, ActivationAdmissionPort,
     ActivationAuthorityPort, ActivationCachePort, ActivationCandidateProofPort,
-    ActivationEpochRebuilderPort, ActivationEventPort, ActivationNotSelected,
-    ActivationNotSelectedReason, ActivationOperationMarkerPort, ActivationReconciliationTicket,
-    ActivationRecoveryAdmissionPort, ActivationRecoveryCoordinator, ActivationRecoveryRequest,
-    ActivationTransactionCoordinator, ActivationTransactionOutcome, ActivationTransactionRequest,
+    ActivationEventPort, ActivationNotSelected, ActivationNotSelectedReason,
+    ActivationOperationMarkerPort, ActivationReconciliationTicket, ActivationRecoveryAdmissionPort,
+    ActivationRecoveryCoordinator, ActivationRecoveryRequest, ActivationTransactionCoordinator,
+    ActivationTransactionOutcome, ActivationTransactionRequest,
 };
 use super::command::{
     CommandFailure, CommandKind, CommandRecord, CommandResult, ExecutionOwner,
@@ -235,11 +235,10 @@ pub trait ActivationRecoveryExecutionPort: Send + Sync {
 }
 
 #[async_trait]
-impl<A, M, R, C, K> ActivationRecoveryExecutionPort for ActivationRecoveryCoordinator<A, M, R, C, K>
+impl<A, M, C, K> ActivationRecoveryExecutionPort for ActivationRecoveryCoordinator<A, M, C, K>
 where
     A: ActivationRecoveryAdmissionPort,
     M: ActivationOperationMarkerPort,
-    R: ActivationEpochRebuilderPort,
     C: ActivationCachePort,
     K: ActivationAcknowledgementPort,
 {
@@ -723,7 +722,7 @@ mod tests {
             provider_release: command.pins.provider_release,
             source_generation: command.pins.source_generation,
             provider_set: command.pins.provider_set,
-            table_versions: candidate.observation_publication().table_version_set_ref(),
+            table_versions: candidate.table_version_set_ref(),
             overlay_segments: OverlaySegmentSetRef::from_bytes(id32(seed.wrapping_add(14))),
             policy_set: PolicySetRef::from_bytes(id32(seed.wrapping_add(15))),
             resource_envelope: command.resources,

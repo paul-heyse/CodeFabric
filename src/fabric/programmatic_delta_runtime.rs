@@ -34,6 +34,7 @@ use super::delta_semantic_read::{
     ExactDeltaSemanticReadError, ExactDeltaSemanticReadRequest, PreparedExactDeltaSemanticRead,
     prepare_exact_delta_semantic_read,
 };
+use super::production_kernel::{CompiledSemanticRelease, SelectedEpochRecord};
 use super::programmatic_epoch::ProgrammaticFabricEpoch;
 use super::programmatic_schema::ProgrammaticRelationId;
 use crate::schema_contract::SchemaContract;
@@ -60,7 +61,7 @@ impl fmt::Debug for ProgrammaticDeltaRuntimePorts {
 
 impl ProgrammaticDeltaRuntimePorts {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         checkpoints: Arc<SqliteDeltaCdfCheckpointStore>,
         maintenance_authority: Arc<dyn DeltaMaintenanceSafetyPort>,
     ) -> Self {
@@ -99,12 +100,17 @@ impl ProgrammaticDeltaRuntime {
     /// Bind exact Delta services to the same sealed epoch and reversible table vector used by
     /// query authority.
     pub(super) fn try_new(
-        workspace_id: WorkspaceId,
+        _release: &CompiledSemanticRelease,
+        selection: &SelectedEpochRecord,
         epoch: &Arc<ProgrammaticFabricEpoch>,
-        table_versions: Arc<TableVersionSet>,
         ports: ProgrammaticDeltaRuntimePorts,
     ) -> Result<Self, ProgrammaticDeltaRuntimeError> {
-        if table_versions.reference() != epoch.observation_publication().table_version_set_ref() {
+        let workspace_id = selection.workspace_id();
+        let table_versions = Arc::clone(selection.table_versions());
+        if selection.epoch_id() != *epoch.identity() {
+            return Err(ProgrammaticDeltaRuntimeError::SelectedEpochMismatch);
+        }
+        if table_versions.reference() != epoch.table_version_set_ref() {
             return Err(ProgrammaticDeltaRuntimeError::TableVersionSetMismatch);
         }
         let contracts = table_versions
@@ -114,10 +120,16 @@ impl ProgrammaticDeltaRuntime {
                 let contract = epoch
                     .observation_publication()
                     .semantic_history_read_contract(&relation)
+                    .cloned()
+                    .or_else(|| {
+                        epoch
+                            .relation(&relation)
+                            .map(|binding| Arc::clone(&binding.contract))
+                    })
                     .ok_or_else(|| {
                         ProgrammaticDeltaRuntimeError::MissingSchemaContract(Arc::from(relation_id))
                     })?;
-                Ok((Arc::<str>::from(relation_id), Arc::clone(contract)))
+                Ok((Arc::<str>::from(relation_id), contract))
             })
             .collect::<Result<BTreeMap<_, _>, ProgrammaticDeltaRuntimeError>>()?;
         let checkpoints = ports.checkpoints;
@@ -265,6 +277,8 @@ async fn load_exact(pin: &ExactDeltaPin) -> Result<DeltaTable, DeltaTableError> 
 /// Fail-closed exact Delta runtime errors.
 #[derive(Debug, Error)]
 pub enum ProgrammaticDeltaRuntimeError {
+    #[error("programmatic Delta runtime epoch or proof differs from durable selection")]
+    SelectedEpochMismatch,
     #[error("programmatic Delta runtime table vector differs from the sealed epoch")]
     TableVersionSetMismatch,
     #[error("relation {0} is absent from the activation-selected table vector")]

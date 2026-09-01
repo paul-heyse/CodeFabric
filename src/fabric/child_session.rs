@@ -1074,12 +1074,7 @@ fn derive_child_logical_plan_authority(
     authority.frame(&policy.pins.query_policy);
     authority.frame(&policy.pins.resource_policy);
     authority.frame_str(epoch.program_bindings().authority_id());
-    authority.frame(
-        epoch
-            .observation_publication()
-            .table_version_set_ref()
-            .as_bytes(),
-    );
+    authority.frame(epoch.table_version_set_ref().as_bytes());
 
     authority.frame_usize(tables.len());
     for (relation_id, table) in tables {
@@ -1339,7 +1334,7 @@ impl AuthorizedChildSession {
             max_output_rows: policy.max_output_rows,
             tables: contracts,
             state,
-            table_versions: epoch.observation_publication().table_version_set_ref(),
+            table_versions: epoch.table_version_set_ref(),
             runtime_configuration: Arc::from(epoch.runtime_configuration_identity()),
             logical_plan_authority,
             logical_plan_cache: Arc::clone(epoch.logical_plan_cache()),

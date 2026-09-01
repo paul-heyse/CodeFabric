@@ -65,6 +65,8 @@ pub mod programmatic_activation_command_ports;
 #[cfg(feature = "daemon")]
 pub mod programmatic_activation_command_sqlite;
 #[cfg(feature = "daemon")]
+pub mod programmatic_active_workspace_builder;
+#[cfg(feature = "daemon")]
 pub mod programmatic_command_capability;
 #[cfg(feature = "daemon")]
 pub mod programmatic_command_runtime_factory;
@@ -80,6 +82,7 @@ pub mod programmatic_ingress_port;
 pub mod programmatic_observation_delta;
 #[cfg(feature = "daemon")]
 pub mod programmatic_query_backend;
+pub mod programmatic_relation_delta;
 pub mod programmatic_schema;
 #[cfg(feature = "daemon")]
 pub mod programmatic_workspace;

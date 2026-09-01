@@ -498,11 +498,13 @@ impl RelationalQueryRuntime {
     /// Fails closed on workspace/agent authority, missing or closed epoch admission, reduced-child
     /// construction, session binding/planning/execution, exact schema/row/batch/byte bounds, absent
     /// completeness, or publication. No successful result is truncated or row-transformed.
+    #[cfg(test)]
     pub async fn execute_and_publish(
         &self,
+        epoch: Arc<super::programmatic_epoch::ProgrammaticFabricEpoch>,
         transaction: RelationalQueryTransaction,
     ) -> Result<RelationalQueryPublication, RelationalQueryRuntimeError> {
-        let epoch_lease = match self.admission.admit() {
+        let epoch_lease = match self.admission.admit_selected(epoch) {
             Ok(lease) => lease,
             Err(AdmissionError::NoActiveEpoch) => {
                 return Err(RelationalQueryRuntimeError::NoActiveEpoch);
@@ -1238,17 +1240,20 @@ mod tests {
             resource_coordinator(&epoch),
         );
         let publication = runtime
-            .execute_and_publish(transaction(
-                &epoch,
-                result_owner,
-                &[ALLOWED_RELATION],
-                &[ALLOWED_RELATION],
-                10_000,
-                result_limits(),
-                0x51,
-                0x61,
-                0x71,
-            ))
+            .execute_and_publish(
+                Arc::clone(&epoch),
+                transaction(
+                    &epoch,
+                    result_owner,
+                    &[ALLOWED_RELATION],
+                    &[ALLOWED_RELATION],
+                    10_000,
+                    result_limits(),
+                    0x51,
+                    0x61,
+                    0x71,
+                ),
+            )
             .await
             .unwrap();
         let expected_rows = expected_rows(ALLOWED_RELATION);
@@ -1291,17 +1296,20 @@ mod tests {
             resource_coordinator(&epoch),
         );
         let rebuilt = rebuilt_runtime
-            .execute_and_publish(transaction(
-                &epoch,
-                result_owner,
-                &[ALLOWED_RELATION],
-                &[ALLOWED_RELATION],
-                10_000,
-                result_limits(),
-                0x51,
-                0x62,
-                0x72,
-            ))
+            .execute_and_publish(
+                Arc::clone(&epoch),
+                transaction(
+                    &epoch,
+                    result_owner,
+                    &[ALLOWED_RELATION],
+                    &[ALLOWED_RELATION],
+                    10_000,
+                    result_limits(),
+                    0x51,
+                    0x62,
+                    0x72,
+                ),
+            )
             .await
             .unwrap();
         assert_eq!(publication.descriptor(), rebuilt.descriptor());
@@ -1312,33 +1320,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_epoch_workspace_and_denied_relation_fail_at_their_authority_boundaries() {
+    async fn denied_workspace_and_relation_fail_at_their_authority_boundaries() {
         let workspace = WorkspaceId::from_bytes(id16(1));
         let epoch = epoch(EpochId::from_bytes(id16(20))).await;
-        let empty_chain = ActivationChain::derive(workspace, []).unwrap();
-        let no_epoch = RelationalQueryRuntime::new(
-            workspace,
-            Arc::new(FabricAdmissionRuntime::recover(&empty_chain, |_| None).unwrap()),
-            Arc::new(PublishedArrowResultRegistry::new()),
-            resource_coordinator(&epoch),
-        );
-        assert!(matches!(
-            no_epoch
-                .execute_and_publish(transaction(
-                    &epoch,
-                    owner(workspace, 0x31),
-                    &[ALLOWED_RELATION],
-                    &[ALLOWED_RELATION],
-                    10_000,
-                    result_limits(),
-                    0x51,
-                    0x61,
-                    0x71,
-                ))
-                .await,
-            Err(RelationalQueryRuntimeError::NoActiveEpoch)
-        ));
-
         let (admission, _) = admitted_runtime(workspace, Arc::clone(&epoch));
         let runtime = RelationalQueryRuntime::new(
             workspace,
@@ -1348,33 +1332,39 @@ mod tests {
         );
         assert!(matches!(
             runtime
-                .execute_and_publish(transaction(
-                    &epoch,
-                    owner(WorkspaceId::from_bytes(id16(2)), 0x31),
-                    &[ALLOWED_RELATION],
-                    &[ALLOWED_RELATION],
-                    10_000,
-                    result_limits(),
-                    0x52,
-                    0x62,
-                    0x72,
-                ))
+                .execute_and_publish(
+                    Arc::clone(&epoch),
+                    transaction(
+                        &epoch,
+                        owner(WorkspaceId::from_bytes(id16(2)), 0x31),
+                        &[ALLOWED_RELATION],
+                        &[ALLOWED_RELATION],
+                        10_000,
+                        result_limits(),
+                        0x52,
+                        0x62,
+                        0x72,
+                    )
+                )
                 .await,
             Err(RelationalQueryRuntimeError::WorkspaceNotAuthorized)
         ));
         assert!(matches!(
             runtime
-                .execute_and_publish(transaction(
-                    &epoch,
-                    owner(workspace, 0x31),
-                    &[ALLOWED_RELATION],
-                    &[SECOND_RELATION],
-                    10_000,
-                    result_limits(),
-                    0x53,
-                    0x63,
-                    0x73,
-                ))
+                .execute_and_publish(
+                    Arc::clone(&epoch),
+                    transaction(
+                        &epoch,
+                        owner(workspace, 0x31),
+                        &[ALLOWED_RELATION],
+                        &[SECOND_RELATION],
+                        10_000,
+                        result_limits(),
+                        0x53,
+                        0x63,
+                        0x73,
+                    )
+                )
                 .await,
             Err(RelationalQueryRuntimeError::Child(
                 ChildSessionError::DeniedProgramRelation { .. }
@@ -1401,7 +1391,9 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            runtime.execute_and_publish(mislabeled).await,
+            runtime
+                .execute_and_publish(Arc::clone(&epoch), mislabeled)
+                .await,
             Err(RelationalQueryRuntimeError::OutputRelationMismatch {
                 advertised,
                 session_bound,
@@ -1470,7 +1462,9 @@ mod tests {
         cancellation.cancel();
 
         assert!(matches!(
-            runtime.execute_and_publish(transaction).await,
+            runtime
+                .execute_and_publish(Arc::clone(&epoch), transaction)
+                .await,
             Err(RelationalQueryRuntimeError::ResourceGovernance(
                 EpochResourceError::Cancelled
             ))
@@ -1516,7 +1510,9 @@ mod tests {
         transaction.cancellation = cancellation.clone();
         cancellation.cancel();
         assert!(matches!(
-            runtime.execute_and_publish(transaction).await,
+            runtime
+                .execute_and_publish(Arc::clone(&epoch), transaction)
+                .await,
             Err(RelationalQueryRuntimeError::ResourceGovernance(
                 EpochResourceError::Cancelled
             ))
@@ -1558,17 +1554,20 @@ mod tests {
 
         assert!(matches!(
             runtime
-                .execute_and_publish(transaction(
-                    &epoch,
-                    result_owner,
-                    &[ALLOWED_RELATION],
-                    &[ALLOWED_RELATION],
-                    1,
-                    result_limits(),
-                    0x51,
-                    0x61,
-                    0x71,
-                ))
+                .execute_and_publish(
+                    Arc::clone(&epoch),
+                    transaction(
+                        &epoch,
+                        result_owner,
+                        &[ALLOWED_RELATION],
+                        &[ALLOWED_RELATION],
+                        1,
+                        result_limits(),
+                        0x51,
+                        0x61,
+                        0x71,
+                    )
+                )
                 .await,
             Err(RelationalQueryRuntimeError::Child(
                 ChildSessionError::ProgramOutputRowLimitExceeded { .. }
@@ -1591,17 +1590,20 @@ mod tests {
         .unwrap();
         assert!(matches!(
             runtime
-                .execute_and_publish(transaction(
-                    &epoch,
-                    result_owner,
-                    &[ALLOWED_RELATION, SECOND_RELATION],
-                    &[ALLOWED_RELATION, SECOND_RELATION],
-                    20_000,
-                    batch_limits,
-                    0x52,
-                    0x62,
-                    0x72,
-                ))
+                .execute_and_publish(
+                    Arc::clone(&epoch),
+                    transaction(
+                        &epoch,
+                        result_owner,
+                        &[ALLOWED_RELATION, SECOND_RELATION],
+                        &[ALLOWED_RELATION, SECOND_RELATION],
+                        20_000,
+                        batch_limits,
+                        0x52,
+                        0x62,
+                        0x72,
+                    )
+                )
                 .await,
             Err(RelationalQueryRuntimeError::ArrowResult(
                 ArrowResultResourceError::TotalBatchLimitExceeded { .. }
@@ -1624,17 +1626,20 @@ mod tests {
         .unwrap();
         assert!(matches!(
             runtime
-                .execute_and_publish(transaction(
-                    &epoch,
-                    result_owner,
-                    &[ALLOWED_RELATION],
-                    &[ALLOWED_RELATION],
-                    20_000,
-                    schema_limits,
-                    0x53,
-                    0x63,
-                    0x73,
-                ))
+                .execute_and_publish(
+                    Arc::clone(&epoch),
+                    transaction(
+                        &epoch,
+                        result_owner,
+                        &[ALLOWED_RELATION],
+                        &[ALLOWED_RELATION],
+                        20_000,
+                        schema_limits,
+                        0x53,
+                        0x63,
+                        0x73,
+                    )
+                )
                 .await,
             Err(RelationalQueryRuntimeError::ArrowResult(
                 ArrowResultResourceError::SchemaByteLimitExceeded { .. }
@@ -1657,17 +1662,20 @@ mod tests {
         .unwrap();
         assert!(matches!(
             runtime
-                .execute_and_publish(transaction(
-                    &epoch,
-                    result_owner,
-                    &[ALLOWED_RELATION],
-                    &[ALLOWED_RELATION],
-                    20_000,
-                    ipc_limits,
-                    0x54,
-                    0x64,
-                    0x74,
-                ))
+                .execute_and_publish(
+                    Arc::clone(&epoch),
+                    transaction(
+                        &epoch,
+                        result_owner,
+                        &[ALLOWED_RELATION],
+                        &[ALLOWED_RELATION],
+                        20_000,
+                        ipc_limits,
+                        0x54,
+                        0x64,
+                        0x74,
+                    )
+                )
                 .await,
             Err(RelationalQueryRuntimeError::ArrowResult(
                 ArrowResultResourceError::IpcByteLimitExceeded { .. }
@@ -1688,17 +1696,20 @@ mod tests {
         );
         let result_owner = owner(workspace, 0x31);
         let publication = runtime
-            .execute_and_publish(transaction(
-                &epoch,
-                result_owner,
-                &[ALLOWED_RELATION],
-                &[ALLOWED_RELATION],
-                10_000,
-                result_limits(),
-                0x51,
-                0x61,
-                0x71,
-            ))
+            .execute_and_publish(
+                Arc::clone(&epoch),
+                transaction(
+                    &epoch,
+                    result_owner,
+                    &[ALLOWED_RELATION],
+                    &[ALLOWED_RELATION],
+                    10_000,
+                    result_limits(),
+                    0x51,
+                    0x61,
+                    0x71,
+                ),
+            )
             .await
             .unwrap();
         let resource_id = publication.descriptor().relations[0].authorization_resource_id;
@@ -1745,7 +1756,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn published_result_retains_exact_predecessor_epoch_across_swap_until_release() {
+    async fn old_query_lease_retains_exact_predecessor_epoch_across_swap_until_release() {
         let workspace = WorkspaceId::from_bytes(id16(1));
         let first_id = EpochId::from_bytes(id16(20));
         let second_id = EpochId::from_bytes(id16(21));
@@ -1761,17 +1772,20 @@ mod tests {
         );
         let result_owner = owner(workspace, 0x31);
         let publication = runtime
-            .execute_and_publish(transaction(
-                &first,
-                result_owner,
-                &[ALLOWED_RELATION],
-                &[ALLOWED_RELATION],
-                10_000,
-                result_limits(),
-                0x51,
-                0x61,
-                0x71,
-            ))
+            .execute_and_publish(
+                Arc::clone(&first),
+                transaction(
+                    &first,
+                    result_owner,
+                    &[ALLOWED_RELATION],
+                    &[ALLOWED_RELATION],
+                    10_000,
+                    result_limits(),
+                    0x51,
+                    0x61,
+                    0x71,
+                ),
+            )
             .await
             .unwrap();
 
@@ -1796,7 +1810,13 @@ mod tests {
         drop(first);
 
         assert!(first_weak.upgrade().is_some());
-        assert_eq!(admission.admit().unwrap().epoch_id(), second_id);
+        assert_eq!(
+            admission
+                .admit_selected(Arc::clone(&second))
+                .unwrap()
+                .epoch_id(),
+            second_id
+        );
         runtime
             .release(
                 PublishedResultAccess {
@@ -1827,7 +1847,7 @@ mod tests {
         );
 
         // The semantic compiler pins this lease before activation moves the current head.
-        let compiled_epoch_lease = admission.admit().unwrap();
+        let compiled_epoch_lease = admission.admit_selected(Arc::clone(&first)).unwrap();
         let second_command = command(2, workspace, ExpectedHead::Epoch(first_id), second_id, 1);
         let barrier = admission
             .close_admission(second_command.expected_head, second_command.writer_fence)
@@ -1866,9 +1886,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(publication.descriptor().epoch_id, first_id);
-        assert_eq!(admission.admit().unwrap().epoch_id(), second_id);
+        assert_eq!(
+            admission
+                .admit_selected(Arc::clone(&second))
+                .unwrap()
+                .epoch_id(),
+            second_id
+        );
 
-        let second_lease = admission.admit().unwrap();
+        let second_lease = admission.admit_selected(Arc::clone(&second)).unwrap();
         assert!(matches!(
             runtime
                 .execute_admitted_and_publish(

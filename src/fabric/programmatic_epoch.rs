@@ -29,7 +29,7 @@ use crate::relational_program::{
     RelationalProgram, RelationalProgramCompiler, RelationalProgramError,
 };
 
-use super::activation::TableVersionSet;
+use super::activation::{TableVersionSet, TableVersionSetRef};
 use super::datafusion_cache::{
     CachedLogicalPlan, EpochLogicalPlanCache, LogicalPlanAuthorityBuilder,
     LogicalPlanAuthorityFingerprint, LogicalPlanCacheError, LogicalPlanCacheKey,
@@ -46,6 +46,13 @@ use super::programmatic_observation_delta::{
     ProgrammaticObservationHistoricizationFailure, ProgrammaticObservationProvisionError,
     ProgrammaticObservationWriteIdentity, historicize_programmatic_observations,
     provision_programmatic_observation_histories, reopen_programmatic_observations,
+};
+#[cfg(test)]
+use super::programmatic_relation_delta::ProgrammaticRelationDeltaLayout;
+use super::programmatic_relation_delta::{
+    ProgrammaticRelationDeltaError, ProgrammaticRelationDeltaPreparation,
+    ProgrammaticRelationDeltaPublication, persist_programmatic_relation_snapshots,
+    reopen_programmatic_relation_snapshots,
 };
 use super::programmatic_schema::{
     ProgrammaticRelationId, ProgrammaticSchemaAssembly, ProgrammaticSchemaError,
@@ -180,6 +187,7 @@ impl ProgrammaticFabricEpochBuilder {
         self,
         write_identity: ProgrammaticObservationWriteIdentity,
         targets: ProgrammaticObservationDeltaTargets,
+        relation_preparation: ProgrammaticRelationDeltaPreparation,
     ) -> Result<ProgrammaticFabricEpoch, ProgrammaticFabricEpochError> {
         if write_identity.epoch_id() != self.identity {
             return Err(
@@ -197,7 +205,25 @@ impl ProgrammaticFabricEpochBuilder {
         } = self;
         let historicized =
             historicize_programmatic_observations(assembly, write_identity, targets).await?;
-        Self::finish_historicized(identity, runtime_config, runtime_env, historicized)
+        let relation_publication = persist_programmatic_relation_snapshots(
+            historicized.sealed(),
+            identity,
+            write_identity.operation_id(),
+            write_identity.writer_generation(),
+            write_identity.observation_set_id(),
+            relation_preparation,
+        )
+        .await?;
+        let table_versions =
+            combine_table_versions(historicized.publication(), &relation_publication)?;
+        Self::finish_historicized(
+            identity,
+            runtime_config,
+            runtime_env,
+            historicized,
+            relation_publication,
+            table_versions,
+        )
     }
 
     /// Rebuild a sealed candidate from an activation-selected exact Delta
@@ -215,11 +241,28 @@ impl ProgrammaticFabricEpochBuilder {
             identity,
             runtime_config,
             runtime_env,
-            assembly,
+            mut assembly,
         } = self;
+        let (observation_versions, relation_versions) = split_table_versions(&table_versions)?;
+        let (relation_publication, providers) = reopen_programmatic_relation_snapshots(
+            Arc::new(assembly.candidate_state()),
+            identity,
+            relation_versions,
+        )
+        .await?;
+        for provider in providers {
+            assembly.register_provider(provider)?;
+        }
         let historicized =
-            reopen_programmatic_observations(assembly, identity, table_versions).await?;
-        Self::finish_historicized(identity, runtime_config, runtime_env, historicized)
+            reopen_programmatic_observations(assembly, identity, observation_versions).await?;
+        Self::finish_historicized(
+            identity,
+            runtime_config,
+            runtime_env,
+            historicized,
+            relation_publication,
+            table_versions,
+        )
     }
 
     fn finish_historicized(
@@ -227,6 +270,8 @@ impl ProgrammaticFabricEpochBuilder {
         runtime_config: FabricEpochRuntimeConfig,
         runtime_env: Arc<RuntimeEnv>,
         historicized: ProgrammaticObservationHistoricization,
+        relation_publication: ProgrammaticRelationDeltaPublication,
+        table_versions: Arc<TableVersionSet>,
     ) -> Result<ProgrammaticFabricEpoch, ProgrammaticFabricEpochError> {
         let (sealed, observation_publication) = historicized.into_parts();
         let (session, relations) = sealed.into_parts().into_components();
@@ -255,7 +300,7 @@ impl ProgrammaticFabricEpochBuilder {
             &runtime_config,
             &state,
             &relations,
-            &observation_publication,
+            &table_versions,
             &program_bindings,
         )?;
         Ok(ProgrammaticFabricEpoch {
@@ -265,6 +310,8 @@ impl ProgrammaticFabricEpochBuilder {
             session,
             relations,
             observation_publication,
+            relation_publication,
+            table_versions,
             program_bindings,
             logical_plan_authority,
             logical_plan_cache,
@@ -326,10 +373,68 @@ impl ProgrammaticFabricEpochBuilder {
             super::command::WriterGeneration::new(1).expect("one is a writer generation"),
             super::command::TransactionRef::from_bytes(transaction),
         );
-        let mut epoch = self.seal(identity, targets).await?;
+        let relation_root = temporary.path().join("relation-snapshots");
+        fs::create_dir_all(&relation_root).map_err(|source| {
+            ProgrammaticFabricEpochError::CatalogClosure(format!(
+                "cannot create test relation-snapshot root: {source}"
+            ))
+        })?;
+        let relation_layout = ProgrammaticRelationDeltaLayout::try_new(
+            url::Url::from_directory_path(relation_root).map_err(|()| {
+                ProgrammaticFabricEpochError::CatalogClosure(
+                    "test relation-snapshot root is not a file URL".to_owned(),
+                )
+            })?,
+        )?;
+        let mut epoch = self
+            .seal(
+                identity,
+                targets,
+                ProgrammaticRelationDeltaPreparation::Genesis(relation_layout),
+            )
+            .await?;
         epoch.observation_history_root = Some(temporary);
         Ok(epoch)
     }
+}
+
+fn combine_table_versions(
+    observations: &ProgrammaticObservationDeltaPublication,
+    relations: &ProgrammaticRelationDeltaPublication,
+) -> Result<Arc<TableVersionSet>, ProgrammaticFabricEpochError> {
+    let mut components = observations
+        .table_versions()
+        .map(|(relation_id, pin)| (Arc::<str>::from(relation_id), pin.clone()))
+        .collect::<Vec<_>>();
+    components.extend(
+        relations
+            .table_versions()
+            .map(|(relation_id, pin)| (Arc::<str>::from(relation_id), pin.clone())),
+    );
+    Ok(Arc::new(TableVersionSet::try_new(components)?))
+}
+
+fn split_table_versions(
+    selected: &TableVersionSet,
+) -> Result<
+    (
+        Arc<TableVersionSet>,
+        BTreeMap<ProgrammaticRelationId, super::delta_exact::ExactDeltaPin>,
+    ),
+    ProgrammaticFabricEpochError,
+> {
+    let mut observations = Vec::new();
+    let mut relations = BTreeMap::new();
+    for (relation_id, pin) in selected.components() {
+        let relation_id = ProgrammaticRelationId::new(relation_id);
+        if super::programmatic_observation_delta::is_programmatic_observation_relation(&relation_id)
+        {
+            observations.push((Arc::<str>::from(relation_id.as_str()), pin.clone()));
+        } else {
+            relations.insert(relation_id, pin.clone());
+        }
+    }
+    Ok((Arc::new(TableVersionSet::try_new(observations)?), relations))
 }
 
 fn derive_epoch_logical_plan_authority(
@@ -337,15 +442,15 @@ fn derive_epoch_logical_plan_authority(
     runtime_config: &FabricEpochRuntimeConfig,
     state: &datafusion::execution::SessionState,
     relations: &BTreeMap<ProgrammaticRelationId, SealedRelationBinding>,
-    publication: &ProgrammaticObservationDeltaPublication,
+    table_versions: &TableVersionSet,
     program_bindings: &ProgramBindings,
 ) -> Result<LogicalPlanAuthorityFingerprint, ProgrammaticFabricEpochError> {
     let mut authority = LogicalPlanAuthorityBuilder::new(b"programmatic-fabric-epoch-authority.v1");
     authority.frame(identity.as_bytes());
     authority.frame_str(&runtime_config.identity());
-    authority.frame(publication.table_version_set_ref().as_bytes());
-    authority.frame_usize(publication.table_version_set().len());
-    for (relation_id, pin) in publication.table_versions() {
+    authority.frame(table_versions.reference().as_bytes());
+    authority.frame_usize(table_versions.len());
+    for (relation_id, pin) in table_versions.components() {
         authority.frame_str(relation_id);
         authority.frame_str(pin.canonical_root().as_str());
         authority.frame_u64(pin.version());
@@ -395,6 +500,8 @@ pub struct ProgrammaticFabricEpoch {
     session: SessionContext,
     relations: BTreeMap<ProgrammaticRelationId, SealedRelationBinding>,
     observation_publication: ProgrammaticObservationDeltaPublication,
+    relation_publication: ProgrammaticRelationDeltaPublication,
+    table_versions: Arc<TableVersionSet>,
     program_bindings: Arc<ProgramBindings>,
     logical_plan_authority: LogicalPlanAuthorityFingerprint,
     logical_plan_cache: Arc<EpochLogicalPlanCache>,
@@ -427,6 +534,23 @@ impl ProgrammaticFabricEpoch {
     #[must_use]
     pub const fn observation_publication(&self) -> &ProgrammaticObservationDeltaPublication {
         &self.observation_publication
+    }
+
+    #[must_use]
+    pub const fn relation_publication(&self) -> &ProgrammaticRelationDeltaPublication {
+        &self.relation_publication
+    }
+
+    /// Complete reversible exact-version authority selected for this epoch.
+    #[must_use]
+    pub const fn table_version_set(&self) -> &Arc<TableVersionSet> {
+        &self.table_versions
+    }
+
+    /// Canonical reference derived from the complete reversible table-version set.
+    #[must_use]
+    pub fn table_version_set_ref(&self) -> TableVersionSetRef {
+        self.table_versions.reference()
     }
 
     #[must_use]
@@ -524,7 +648,7 @@ impl ProgrammaticFabricEpoch {
         let context = self.session.clone();
         let cache_key = LogicalPlanCacheKey::new(
             self.identity,
-            self.observation_publication.table_version_set_ref(),
+            self.table_version_set_ref(),
             self.program_bindings.authority_id(),
             self.runtime_config.identity(),
             self.logical_plan_authority,
@@ -737,6 +861,10 @@ pub enum ProgrammaticFabricEpochError {
     #[error(transparent)]
     ObservationProvision(#[from] ProgrammaticObservationProvisionError),
     #[error(transparent)]
+    RelationDelta(#[from] ProgrammaticRelationDeltaError),
+    #[error(transparent)]
+    TableVersions(#[from] super::activation::TableVersionSetError),
+    #[error(transparent)]
     RelationalProgram(#[from] RelationalProgramError),
     #[error(transparent)]
     DataFusion(#[from] datafusion::error::DataFusionError),
@@ -747,20 +875,25 @@ pub enum ProgrammaticFabricEpochError {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::fs;
 
     use arrow_array::Int64Array;
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::datasource::MemTable;
     use datafusion::logical_expr::{LogicalPlan, LogicalPlanBuilder};
     use datafusion::prelude::{col, lit};
+    use tempfile::TempDir;
+    use url::Url;
 
     use super::*;
     use crate::fabric::programmatic_schema::{
-        ProgrammaticFieldId, ProgrammaticTransformationContract, ProgrammaticTransformationId,
-        RELATION_OBSERVATION_RELATION_ID, TransformationDeterminismPolicy,
-        TransformationFieldIdentity, TransformationInputs, TransformationOrderingPolicy,
-        TransformationOutput, TransformationPlanError, TransformationProvenance,
-        TransformationProvenanceIdentity, TransformationRecursionPolicy,
+        DEPENDENCY_OBSERVATION_RELATION_ID, FIELD_OBSERVATION_RELATION_ID,
+        PROVENANCE_OBSERVATION_RELATION_ID, ProgrammaticFieldId,
+        ProgrammaticTransformationContract, ProgrammaticTransformationId,
+        RELATION_OBSERVATION_RELATION_ID, SCHEMA_OBSERVATION_RELATION_ID,
+        TransformationDeterminismPolicy, TransformationFieldIdentity, TransformationInputs,
+        TransformationOrderingPolicy, TransformationOutput, TransformationPlanError,
+        TransformationProvenance, TransformationProvenanceIdentity, TransformationRecursionPolicy,
         TransformationReleaseIdentity, TransformationResourceClass, TransformationSemanticVersion,
     };
     use crate::relational_program::{CompilationDependency, FieldId, RelationalExpression};
@@ -800,7 +933,7 @@ mod tests {
         }
     }
 
-    fn provider_input() -> ProviderInput {
+    fn provider_input_with_values(values: Vec<i64>) -> ProviderInput {
         let relation_id = "facts.input_values";
         let field = Field::new("value", DataType::Int64, false).with_metadata(HashMap::from([(
             FIELD_ID_METADATA_KEY.to_owned(),
@@ -812,7 +945,7 @@ mod tests {
         )])));
         let batch = RecordBatch::try_new(
             Arc::clone(&schema),
-            vec![Arc::new(Int64Array::from(vec![-1_i64, 1, 2]))],
+            vec![Arc::new(Int64Array::from(values))],
         )
         .unwrap();
         let provider = Arc::new(MemTable::try_new(Arc::clone(&schema), vec![vec![batch]]).unwrap());
@@ -837,6 +970,195 @@ mod tests {
             contract,
             provider,
         )
+    }
+
+    fn provider_input() -> ProviderInput {
+        provider_input_with_values(vec![-1_i64, 1, 2])
+    }
+
+    fn positive_builder(
+        epoch_id: FabricEpochId,
+        values: Vec<i64>,
+    ) -> ProgrammaticFabricEpochBuilder {
+        let mut builder =
+            ProgrammaticFabricEpochBuilder::try_new(epoch_id, FabricEpochRuntimeConfig::default())
+                .expect("programmatic epoch builder");
+        builder
+            .register_provider(provider_input_with_values(values))
+            .expect("register exact provider");
+        let input = ProgrammaticRelationId::new("facts.input_values");
+        let output = ProgrammaticRelationId::new("facts.positive_values");
+        builder
+            .add_transformation(Arc::new(PositiveValues {
+                contract: ProgrammaticTransformationContract::new(
+                    ProgrammaticTransformationId::new("transform.positive_values"),
+                    TransformationSemanticVersion::new(1, 0, 0),
+                    TransformationResourceClass::BoundedInMemory {
+                        max_rows: 1_000,
+                        max_memory_bytes: 1 << 20,
+                    },
+                    TransformationDeterminismPolicy::DeterministicSet,
+                    TransformationOrderingPolicy::Unordered,
+                    TransformationRecursionPolicy::Forbidden,
+                    TransformationProvenance::new(
+                        TransformationProvenanceIdentity::from_bytes([0x51; 32]),
+                        TransformationReleaseIdentity::from_bytes([0x61; 32]),
+                    ),
+                ),
+                output: TransformationOutput::new(
+                    output,
+                    TableReference::full(
+                        FABRIC_CATALOG,
+                        FabricSchemaRole::Derived.as_str(),
+                        "positive_values",
+                    ),
+                    vec![TransformationFieldIdentity::new(ProgrammaticFieldId::new(
+                        "facts.positive_values.value",
+                    ))],
+                ),
+                dependencies: Arc::from([input]),
+            }))
+            .expect("register positive-values transformation");
+        builder
+    }
+
+    fn observation_roots(temporary: &TempDir) -> BTreeMap<ProgrammaticRelationId, Url> {
+        [
+            RELATION_OBSERVATION_RELATION_ID,
+            FIELD_OBSERVATION_RELATION_ID,
+            SCHEMA_OBSERVATION_RELATION_ID,
+            DEPENDENCY_OBSERVATION_RELATION_ID,
+            PROVENANCE_OBSERVATION_RELATION_ID,
+        ]
+        .into_iter()
+        .map(|relation_id| {
+            let path = temporary.path().join(relation_id.replace('.', "_"));
+            fs::create_dir_all(&path).expect("create exact observation root");
+            (
+                ProgrammaticRelationId::new(relation_id),
+                Url::from_directory_path(path).expect("observation root file URL"),
+            )
+        })
+        .collect()
+    }
+
+    fn relation_layout(temporary: &TempDir) -> ProgrammaticRelationDeltaLayout {
+        ProgrammaticRelationDeltaLayout::try_new(
+            Url::from_directory_path(temporary.path().join("relation-snapshots"))
+                .expect("relation snapshot file URL"),
+        )
+        .expect("exact relation layout")
+    }
+
+    fn write_identity(seed: u8) -> ProgrammaticObservationWriteIdentity {
+        ProgrammaticObservationWriteIdentity::new(
+            FabricEpochId::from_bytes([seed; 16]),
+            super::super::command::OperationId::from_bytes([seed.wrapping_add(0x20); 16]),
+            super::super::command::WriterGeneration::new(u64::from(seed))
+                .expect("nonzero writer generation"),
+            super::super::command::TransactionRef::from_bytes([seed.wrapping_add(0x40); 32]),
+        )
+    }
+
+    async fn positive_rows(epoch: &ProgrammaticFabricEpoch) -> Vec<i64> {
+        let batches = epoch
+            .context()
+            .table(TableReference::full(
+                FABRIC_CATALOG,
+                FabricSchemaRole::Derived.as_str(),
+                "positive_values",
+            ))
+            .await
+            .expect("resolve positive-values relation")
+            .collect()
+            .await
+            .expect("execute positive-values relation");
+        let mut values = batches
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .expect("positive values are int64")
+                    .iter()
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        values.sort_unstable();
+        values
+    }
+
+    #[tokio::test]
+    async fn wp32_beh_exact_selected_older_relation_versions_reconstruct_decoded_rows() {
+        let temporary = TempDir::new().expect("exact relation fixture root");
+        let first_identity = write_identity(1);
+        let first_builder = positive_builder(first_identity.epoch_id(), vec![-1, 1, 2]);
+        let first_observations = first_builder
+            .provision_observation_histories(observation_roots(&temporary))
+            .await
+            .expect("provision observation histories");
+        let first = first_builder
+            .seal(
+                first_identity,
+                first_observations,
+                ProgrammaticRelationDeltaPreparation::Genesis(relation_layout(&temporary)),
+            )
+            .await
+            .expect("seal first exact epoch");
+        assert_eq!(positive_rows(&first).await, vec![1, 2]);
+        assert_eq!(first.relation_publication().table_versions().len(), 2);
+        assert!(
+            first
+                .relation_publication()
+                .table_versions()
+                .all(|(_, pin)| pin.version() == 1)
+        );
+
+        let second_identity = write_identity(2);
+        let second_builder = positive_builder(second_identity.epoch_id(), vec![-1, 7, 8]);
+        let second_observations = first
+            .observation_publication()
+            .open_targets()
+            .await
+            .expect("open first exact observation versions");
+        let second = second_builder
+            .seal(
+                second_identity,
+                second_observations,
+                ProgrammaticRelationDeltaPreparation::Advance {
+                    selected: first.relation_publication().clone(),
+                    layout: relation_layout(&temporary),
+                },
+            )
+            .await
+            .expect("seal second exact epoch");
+        assert_eq!(positive_rows(&second).await, vec![7, 8]);
+        assert!(
+            second
+                .relation_publication()
+                .table_versions()
+                .all(|(_, pin)| pin.version() == 2)
+        );
+
+        let selected_older = Arc::clone(first.table_version_set());
+        let reopened = ProgrammaticFabricEpochBuilder::try_new(
+            first_identity.epoch_id(),
+            FabricEpochRuntimeConfig::default(),
+        )
+        .expect("fresh recovery builder")
+        .reopen(selected_older)
+        .await
+        .expect("reopen exact older selected epoch without provider replay");
+        assert_eq!(
+            reopened.table_version_set_ref(),
+            first.table_version_set_ref()
+        );
+        assert_eq!(positive_rows(&reopened).await, vec![1, 2]);
+        assert_ne!(
+            reopened.table_version_set_ref(),
+            second.table_version_set_ref()
+        );
     }
 
     #[tokio::test]
