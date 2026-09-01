@@ -349,13 +349,13 @@ semantic-request-program-check:
 [doc("Validate the exact production workspace factory, typed inputs, ports, and release pins")]
 [group('test')]
 production-composition-contract-integrity-check:
-    cargo nextest run --locked --lib -E 'test(/(release_pins_reject_every_missing_identity|source_authority_is_explicit_and_independent_of_release_vector|semantic_catalog_authority_rejects_pin_and_program_drift|request_owned_limits_identity_is_complete_and_stable)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(semantic_catalog_authority_rejects_pin_and_program_drift|request_owned_limits_identity_is_complete_and_stable|workspace_public_identity_is_strictly_canonical|port_bundle_requires_application_and_every_component_identity)/)' --no-tests=fail
     cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|lifecycle_rejects_skips_stale_writers_and_false_ready|empty_workspace_slot_never_falls_back|production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)/)' --no-tests=fail
 
 [doc("Exercise the real typed-input daemon composition and causal query/activation vertical")]
 [group('test')]
 programmatic-production-composition-check:
-    cargo nextest run --locked --lib -E 'test(/(epoch_query_registry_is_exact_and_workspace_scoped|activation_admission_installs_before_swap_and_rejects_substituted_authority)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|lifecycle_authority_is_the_only_semantic_admission_gate)/)' --no-tests=fail
     cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
 
 [doc("Reject default, bootstrap, empty, and arbitrary-label production authority")]

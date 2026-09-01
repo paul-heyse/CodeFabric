@@ -178,7 +178,7 @@ impl CompiledSemanticRelease {
     /// # Errors
     ///
     /// Returns a typed descriptor, schema, or atomic provider-admission failure.
-    pub fn admit_provider_relations(
+    pub(crate) fn admit_provider_relations(
         &self,
         builder: ProgrammaticFabricEpochBuilder,
         authority: ProductionProviderAuthority,
