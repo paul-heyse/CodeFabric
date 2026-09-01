@@ -17,6 +17,7 @@ from tooling.ci.artifact_contracts import (
     ArtifactContractError,
     _accepted_gate_substitutions,
     _accepted_input_evolution_paths,
+    _successor_evidence_claim_count,
     activate_plan,
     active_plan_path,
     check_tracked_target_zero_state,
@@ -213,6 +214,39 @@ def test_active_program_structural_acceptance() -> None:
     report = validate_artifacts(ROOT, DEFAULT_PLAN)
     assert report["packet_count"] == len(plan_ids(DEFAULT_PLAN)["packets"])
     assert report["declared_input_count"] == len(declared_inputs(DEFAULT_PLAN))
+
+
+def test_active_v4_artifact_contract_uses_only_v4_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from tooling.ci import successor_evidence_issuance, successor_evidence_issuance_v4
+
+    expected_claims = successor_evidence_issuance_v4.EXPECTED_CLAIM_IDS
+
+    def predecessor_must_not_run(_root: Path) -> int:
+        raise AssertionError("v3 evidence remained live after v4 activation")
+
+    monkeypatch.setattr(
+        successor_evidence_issuance,
+        "validate_transaction_integrity",
+        predecessor_must_not_run,
+    )
+    monkeypatch.setattr(
+        successor_evidence_issuance_v4,
+        "validate_issuance",
+        lambda _root, *, require_review: SimpleNamespace(expectations=expected_claims),
+    )
+    plan = parse_frontmatter(DEFAULT_PLAN)
+    assert _successor_evidence_claim_count(ROOT, plan) == len(expected_claims)
+
+
+def test_non_relational_plan_has_no_implicit_successor_evidence() -> None:
+    assert (
+        _successor_evidence_claim_count(ROOT, {"plan_id": "fixture", "version": "v1"})
+        == 0
+    )
 
 
 def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:

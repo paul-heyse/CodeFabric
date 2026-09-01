@@ -350,10 +350,23 @@ SEARCH  .claude/ is hidden: rg --hidden -g '!.git/**'
 EOF
 }
 
+_cf_terminal_design_paths() {
+  local candidate predecessors relative
+  predecessors="$(awk -F': ' '/^predecessor_path: / { print $2 }' \
+    "${CF_ROOT}"/docs/authoritative_design/*.md 2>/dev/null)"
+  for candidate in "${CF_ROOT}"/docs/authoritative_design/*.md; do
+    relative="${candidate#"${CF_ROOT}/"}"
+    if ! printf '%s\n' "$predecessors" | grep -Fqx "$relative"; then
+      printf '%s\n' "$candidate"
+    fi
+  done
+}
+
 _cf_ctx_corpus() {
-  local specs current historical parts refs idx plans skills absent
+  local specs current historical parts refs idx plans skills absent terminal_paths
   specs="$(ls "${CF_ROOT}"/docs/authoritative_design/*.md 2>/dev/null | wc -l | tr -d ' ')"
-  current="$(rg -l '^authority_status: current$' "${CF_ROOT}"/docs/authoritative_design/*.md 2>/dev/null | wc -l | tr -d ' ')"
+  terminal_paths="$(_cf_terminal_design_paths)"
+  current="$(printf '%s\n' "$terminal_paths" | sed '/^$/d' | wc -l | tr -d ' ')"
   historical="$((specs - current))"
   parts="$(awk '/^```/{f=!f;next} !f && /^# (Part|Appendix)/{p++} END{print p+0}' \
     "${CF_ROOT}"/docs/authoritative_design/*.md 2>/dev/null)"
@@ -363,7 +376,7 @@ _cf_ctx_corpus() {
   skills="$(find "${CF_ROOT}/.claude/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')"
 
   printf 'CORPUS  do not read these whole -- navigate them\n'
-  printf '  docs/authoritative_design/  %s current + %s historical masters, %s `# Part`/`# Appendix` headings that\n' "$current" "$historical" "$parts"
+  printf '  docs/authoritative_design/  %s terminal + %s historical masters, %s `# Part`/`# Appendix` headings that\n' "$current" "$historical" "$parts"
   printf '        spec-outline structurally cannot emit (docs/spec_index/README.md §3.1)\n'
   printf '  docs/library_ref/  %s refs   docs/spec_index/  %s   docs/plans/  %s   skills  %s\n' \
     "$refs" "$idx" "$plans" "$skills"
@@ -389,16 +402,17 @@ EOF
 _cf_ctx_pins() {
   local f blk candidate arrow datafusion object_store delta rust edition
   f=""
-  for candidate in "${CF_ROOT}"/docs/authoritative_design/*.md; do
+  while IFS= read -r candidate; do
     if awk '
       /^artifact_tag: FAB$/ { tag = 1 }
-      /^authority_status: current$/ { current = 1 }
-      END { exit !(tag && current) }
+      END { exit !tag }
     ' "$candidate"; then
       f="$candidate"
       break
     fi
-  done
+  done <<EOF
+$(_cf_terminal_design_paths)
+EOF
   if [ -z "$f" ]; then
     printf 'PINS  read them from the data-fabric spec §2.1 (that spec was not found here)\n'
     return 0

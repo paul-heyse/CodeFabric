@@ -23,11 +23,10 @@ the convention `docs/spec_index/README.md` fixes. This file's own sections are r
 files in this repository also carry their own rationale comments; this file is the
 cross-cutting view.
 
-> **Status: successor approved, activation pending.** The four build domains, dependency
-> boundaries, adapter shell, Protobuf/UDS compatibility harness, and substantial provisional
-> relational-fabric implementation are present. Plan v3 is the approved successor candidate, but
-> its state does not exist and it is not active until the separate activation transaction. The
-> active v2 state is invalidated and must not be resumed.
+> **Status: v4 successor active.** The four build domains, dependency boundaries, adapter
+> shell, Protobuf/UDS harness, and substantial provisional relational-fabric implementation are
+> present. Plan v4 is active and executes the synchronized v2.2 target. Prior plans and suites
+> remain immutable history and must not be resumed as runtime authority.
 
 ---
 
@@ -37,22 +36,24 @@ The system itself is specified in two sibling directories. They are **design inp
 infrastructure**: deliberately not an input to any package/repository/tooling decision here
 (see *Scope boundary*), versioned rather than rewritten, and navigated with
 `just spec-outline` rather than read whole. The sole current suite identity is
-`codefabric-relational-data-fabric` version `2.1.0`; the sibling v2.0 and v1.3 masters are chained
-historical transition evidence, not coequal targets.
+`codefabric-relational-data-fabric` version `2.2.0`; v2.1, v2.0, and v1.3 masters are chained
+historical transition evidence, not coequal targets. Current selection is derived from the
+unique synchronized terminal predecessor chain, so an immutable ancestor may retain its
+issuance-time `authority_status` without becoming current again.
 
 `docs/authoritative_design/` — the authoritative suite: a governance manifest, six domain
 specifications, and the implementation roadmap.
 
 | Tag | File | What it holds |
 |---|---|---|
-| `SUITE` | `codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.1.md` | programmatic authority, relational contract ownership, proof, compatibility, release, and legacy disposition |
-| `ONT` | `code_property_graph_present_state_fact_ontology_specification_v2.1.md` | typed fact relations, identity, unknown semantics, Python/Rust profiles, and derived families |
-| `GEN` | `present_state_cpg_fact_generation_specification_python_rust_v2.1.md` | exact provider batches, explicit typed inputs, application analyses, reconciliation, and capability |
-| `FAB` | `present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v2.1.md` | Arrow schemas and IPC, programmatic DataFusion catalogs/transformations, exact Delta histories, epochs, and proof |
-| `QRY` | `code_property_graph_semantic_query_specification_v2.1.md` | eight bounded compositional request forms compiled as typed programmatic transformations |
-| `LIFE` | `codefabric_continuous_cpg_update_lifecycle_management_specification_v2.1.md` | FabricCommand, update waves, publication, exact activation, leases, fencing, and candidate-free recovery |
-| `SRV` | `present_state_cpg_fastmcp_serving_specification_v2.1.md` | Rust-daemon authority, relation streams, and presentation-only FastMCP serving |
-| `RM` | `codefabric_2.1_implementation_roadmap_v1.0.md` | dependency-closed capability/decommission order; subordinate to the domain specs and approved plan (`RM §0`) |
+| `SUITE` | `codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.2.md` | compiled authority, relational contract ownership, proof, forward-only release, and legacy disposition |
+| `ONT` | `code_property_graph_present_state_fact_ontology_specification_v2.2.md` | typed fact relations, identity, unknown semantics, Python/Rust profiles, and derived families |
+| `GEN` | `present_state_cpg_fact_generation_specification_python_rust_v2.2.md` | exact provider batches, explicit typed inputs, application analyses, reconciliation, and capability |
+| `FAB` | `present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v2.2.md` | Arrow schemas and IPC, programmatic DataFusion catalogs/transformations, exact Delta histories, epochs, and proof |
+| `QRY` | `code_property_graph_semantic_query_specification_v2.2.md` | eight bounded compositional request forms compiled as typed programmatic transformations |
+| `LIFE` | `codefabric_continuous_cpg_update_lifecycle_management_specification_v2.2.md` | FabricCommand, update waves, fresh activation, singleton supervision, leases, and forward recovery |
+| `SRV` | `present_state_cpg_fastmcp_serving_specification_v2.2.md` | Rust-daemon v2 authority, bounded resource streams, and presentation-only FastMCP serving |
+| `RM` | `codefabric_2.2_implementation_roadmap_v1.0.md` | dependency-closed capability/decommission order; subordinate to the domain specs and active plan (`RM §0`) |
 
 `docs/spec_index/` — a derived navigation and traceability layer over those eight. **Never
 normative**: cite the section it points at, not the index.
@@ -62,7 +63,7 @@ normative**: cite the section it points at, not the index.
 | `README.md` | citation convention, current-suite discovery, historical boundary, and navigation commands |
 | `fact-domain-map.md` | one fact domain traced across all six domain specs |
 | `library-routing.md` | which `docs/library_ref/` chapter covers a given spec section; the version-pin ledger |
-| `wave-traceability.md` | which v2.1 capability stage and successor work-packet family realizes each domain boundary |
+| `wave-traceability.md` | which v2.2 capability stage and v4 work-packet family realizes each domain boundary |
 | `contract-census.md` | how runtime contract relations replace a hand-maintained static census while preserving historical IDs |
 | `invariants-and-doctrine.md` | the invariants every wave must preserve, traced to their normative homes |
 
@@ -81,10 +82,12 @@ source change → FabricCommand → source images → invalidation relation
   → authorized DataFusion child catalog   → Rust daemon stream → FastMCP presentation
 ```
 
-Runtime topology: one central **Rust daemon per workspace** owns source state, snapshots,
-provider orchestration, query execution and capability status; one **FastMCP STDIO process
-per agent** is presentation only and must never hold independent mutable CPG state
-(`LIFE §122`).
+Runtime topology: one **WorkspaceSupervisor** owns one central Rust daemon per workspace,
+its singleton/control/grant/process lifecycle, and each attach-only Rust launcher starts one
+**FastMCP STDIO process per agent**. Supervisor and launch shells own no CPG semantics; the
+daemon owns source state, snapshots, provider orchestration, query execution, and capability
+status, while FastMCP is presentation only and must never hold independent mutable CPG state
+(`LIFE §1`).
 
 Consult `docs/spec_index/` before concluding a search failed. Current target semantic authority is
 constructed from exact provider batches, explicit typed inputs, and typed transformations; relation,
@@ -230,9 +233,10 @@ invariants are testable without widening visibility (§4.1).
 ## 3. The architectural invariant: isolated build domains
 
 ```
-agent → FastMCP adapter → private UDS gRPC → stable Rust daemon
-                                             ├─ rustc extractor subprocess
-                                             └─ Pyrefly sidecar subprocess
+agent → attach-only Rust launcher → FastMCP adapter → private UDS gRPC
+       WorkspaceSupervisor → one stable Rust daemon per workspace
+                              ├─ rustc extractor subprocess
+                              └─ Pyrefly sidecar subprocess
 ```
 
 The root keeps one default production aggregate and exposes narrow build capabilities for

@@ -6,7 +6,7 @@ global-invariant section.
 
 | Invariant | Primary owner | Executable proof family |
 |---|---|---|
-| one current suite and programmatic-session authority | SUITE, FAB | authority cutover, exact inputs/transformations, and bootstrap denial |
+| one terminal suite and compiled semantic authority | SUITE, FAB | terminal-chain discovery, exact inputs/transformations, and bootstrap denial |
 | source/provider/canonical/derived separation | ONT, GEN | provider authority split and producer closure |
 | explicit unknown, conflict, and remainder | ONT, GEN, QRY | capability/coverage and query semantics |
 | application-owned identity | ONT, GEN | identity conformance and rebuild equivalence |
@@ -14,9 +14,10 @@ global-invariant section.
 | optimizer-visible native-first planning | FAB, QRY | plan shape and extension conformance |
 | sealed bound catalog authority | FAB, QRY | child catalog and bound dependency isolation |
 | one immutable pinned programmatic FabricEpoch per query | FAB, LIFE | exact-vector epoch pinning and candidate-free activation recovery |
+| phase-typed fresh activation and atomic ActiveWorkspace | FAB, LIFE | empty-head genesis, exact readback, coherent-horizon and restart faults |
 | one idempotent durable command path | LIFE | FabricCommand and transaction contract |
 | one fenced writer and activation chain | LIFE | writer fence and activation fault matrix |
-| presentation-only FastMCP | SRV | public query port and adapter protocol |
+| one supervisor/daemon plus attach-only presentation | LIFE, SRV | singleton, policy/grant, descriptor, UDS, v2 RPC, and STDIO boundary checks |
 | independent execution proof | SUITE | semantic, causal, hostile, public, and recovery oracles |
 | complete consumer-first legacy purge | SUITE, RM | inventory, disposition coverage, zero state, clean reconstruction |
 

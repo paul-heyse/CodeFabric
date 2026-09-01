@@ -31,7 +31,7 @@ typed inputs, and proof obligations without executable discriminators.
 
 AC-G-01 through AC-G-84 remain immutable historical identifiers. Reviewed released commitments
 enter as ordinary explicit typed inputs; current dispositions are programmatic relations. A
-historical ID may support compatibility or evidence without keeping an importer, generated
+historical ID may support allocation provenance or evidence without keeping an importer, generated
 registry, manifest, replay engine, or code generator alive.
 
 ## 3. Discovery

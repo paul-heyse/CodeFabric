@@ -814,11 +814,7 @@ def validate_artifacts(
         if isinstance(value, str):
             validate_review(root, root / value)
             reviews.append(value)
-    from tooling.ci import successor_evidence_issuance
-
-    successor_claim_count = successor_evidence_issuance.validate_transaction_integrity(
-        root
-    )
+    successor_claim_count = _successor_evidence_claim_count(root, plan)
     return {
         "plan": expected_plan_path,
         "state": _relative(state_path, root),
@@ -827,6 +823,43 @@ def validate_artifacts(
         "packet_count": len(plan["ids"]["packets"]),
         "successor_evidence_claim_count": successor_claim_count,
     }
+
+
+def _successor_evidence_claim_count(root: Path, plan: Mapping[str, Any]) -> int:
+    """Validate only the evidence transaction owned by the selected plan.
+
+    The active-plan pointer is the authority for which successor transaction is
+    live.  Importing the predecessor validator unconditionally would keep its
+    expectations in the current governance path after a cutover.
+    """
+
+    if plan.get("plan_id") != "codefabric-execution-proved-relational-data-fabric":
+        return 0
+    version = plan.get("version")
+    if version == "v4":
+        from tooling.ci import (
+            successor_evidence_contracts_v4,
+            successor_evidence_issuance_v4,
+        )
+
+        try:
+            successor_evidence_contracts_v4.validate_evidence_contracts(root)
+        except successor_evidence_contracts_v4.V4ContractError as error:
+            raise ArtifactContractError(
+                f"v4 typed evidence contract {error.code}: {error}"
+            ) from error
+        return len(
+            successor_evidence_issuance_v4.validate_issuance(
+                root, require_review=True
+            ).expectations
+        )
+    if version == "v3":
+        from tooling.ci import successor_evidence_issuance
+
+        return successor_evidence_issuance.validate_transaction_integrity(root)
+    raise ArtifactContractError(
+        f"selected relational-fabric plan has no evidence validator: {version!r}"
+    )
 
 
 def commit_trust(root: Path, commit: str | None) -> dict[str, Any]:

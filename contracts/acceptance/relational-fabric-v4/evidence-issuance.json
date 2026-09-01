@@ -1,0 +1,832 @@
+{
+  "artifact_digests": {
+    "expectations_sha256": "d9cd74a9cbd4a78f43117b191ef14ddc86957445fc9eb3016db63cf3f5608e7f",
+    "negative_fixtures_sha256": "cce359c558a988ffa104ce4ca463617a79dc08774dc630eec8c8d66613d02d29"
+  },
+  "authoring_constraints": {
+    "author_identity": "codex-wp33-r6-expectation-author",
+    "forbidden_inputs": [
+      "production src/",
+      "generated cpgd.v2 output",
+      "v1 runtime fixtures",
+      "relational-fabric-v3 evidence values"
+    ],
+    "imports_production_modules": false,
+    "predecessor_evidence_used": false,
+    "production_expected_value_code_used": false,
+    "target_execution_used": false
+  },
+  "counts": {
+    "expectations": 41,
+    "negative_fixtures": 82
+  },
+  "evidence_release": "wp33-v4-r6",
+  "id_ranges": {
+    "claims": {
+      "first": "RFV4-CLAIM-001",
+      "last": "RFV4-CLAIM-041"
+    },
+    "fixtures": {
+      "first": "RFV4-FIX-001-C",
+      "last": "RFV4-FIX-041-N"
+    }
+  },
+  "independent_review": {
+    "claim_reviews": [
+      {
+        "claim_id": "RFV4-CLAIM-001",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:64b6114542c3e69e6f94812e3e67c76be30bab27d0cf3de0acf6180cf394246b",
+        "fixture_sha256": {
+          "causal": "sha256:b71f5d3ab088a77020a93b4249b3b4d18a697fce3d1cd5078ef668dbf0d7bf9c",
+          "negative": "sha256:94db94cb8e57fdcea8673df1a6d45da3f7467150e32f50d9668951e43b7cf58f"
+        },
+        "rationale": "RFV4-CLAIM-001 accepted; exact expectation sha256:64b6114542c3e69e6f94812e3e67c76be30bab27d0cf3de0acf6180cf394246b; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-002",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:3c4cffbb14c64f9f91232fca003bd7d60a4f2838a780cec889ca8ae4ba3a7bd8",
+        "fixture_sha256": {
+          "causal": "sha256:816cd31192ec31695916077506ca4ff927af28f976def5ceb51308d8bc62cddd",
+          "negative": "sha256:e7ef954808c323ea402450a26fb9db126489773ace7db67b4cee1f2087c8677f"
+        },
+        "rationale": "RFV4-CLAIM-002 accepted; exact expectation sha256:3c4cffbb14c64f9f91232fca003bd7d60a4f2838a780cec889ca8ae4ba3a7bd8; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-003",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:7f6753612b0629ad3933a33c8a9006244bc74de7b7ad595497158b88d053b0b8",
+        "fixture_sha256": {
+          "causal": "sha256:f085c179014e3002d41442a5fd62ca463de2848377c77b756234976f27e48e71",
+          "negative": "sha256:ac6a17baa0b43ad10beb98cfd87b3080b323053f25a18c1912e5beaa551a9e92"
+        },
+        "rationale": "RFV4-CLAIM-003 accepted; exact expectation sha256:7f6753612b0629ad3933a33c8a9006244bc74de7b7ad595497158b88d053b0b8; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-004",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:776d123414637fdbeb51b5347422557b2ee8fd268a72c7e3d84ab85731daf598",
+        "fixture_sha256": {
+          "causal": "sha256:cd6899bfa5bf4ca8b2fb5780dd419d03d75e78c823472ab8eea48f0816e5eb57",
+          "negative": "sha256:964c0283963ff387491d3fa0d0476718e2c48b3b9afc1f138bea21927be95d33"
+        },
+        "rationale": "RFV4-CLAIM-004 accepted; exact expectation sha256:776d123414637fdbeb51b5347422557b2ee8fd268a72c7e3d84ab85731daf598; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-005",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:7a62e6558b6c19fd1a5cf3f9487cd1fd0cbb78514eff7a434eb36e0997e3728f",
+        "fixture_sha256": {
+          "causal": "sha256:2ec4c9117c038b13c955b1166082a14ed52985adef2314eedc238fcb323100ca",
+          "negative": "sha256:d14dd4d442feb32983a7e4458f789bb3c06dfd29dc2d9e3fa9eb18798b328680"
+        },
+        "rationale": "RFV4-CLAIM-005 accepted; exact expectation sha256:7a62e6558b6c19fd1a5cf3f9487cd1fd0cbb78514eff7a434eb36e0997e3728f; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-006",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:c8538be76938f1596fe47fa1bec7930fdadc2842e89ce2d701cb834f3342d5db",
+        "fixture_sha256": {
+          "causal": "sha256:f6e9a7ca4c4ff100ff38c3674a4db242199a9e172c88250127918da36722ce8a",
+          "negative": "sha256:6a63909238840e6ffcb97e50a8c19ba90921b78061f6fb688d3315a97e14fbf2"
+        },
+        "rationale": "RFV4-CLAIM-006 accepted; exact expectation sha256:c8538be76938f1596fe47fa1bec7930fdadc2842e89ce2d701cb834f3342d5db; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-007",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:076be4fc67d6730448cab3b58daa1c3cbf3035461fa8ad6e31e8073f31716905",
+        "fixture_sha256": {
+          "causal": "sha256:9fd31096c3756aae5839708efc206133f6b3558f510bcb0e38a63665844ef989",
+          "negative": "sha256:dcbed2854b895df8975b5669340026f4f2a2d30d77e416e4a10e0401cf622bd3"
+        },
+        "rationale": "RFV4-CLAIM-007 accepted; exact expectation sha256:076be4fc67d6730448cab3b58daa1c3cbf3035461fa8ad6e31e8073f31716905; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-008",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:6eefd9799051315d59a12352a9e8ee40ab5cfa43a67a54828b6169c355cf5ba5",
+        "fixture_sha256": {
+          "causal": "sha256:5e9c78c641b68aa180357888b66d0bdcca968d93b12e36c845a7c13691c876ac",
+          "negative": "sha256:b5ab9993cf10d5b7477d9365882b94e90920b31a7f3fceeb99dbf65c6d5ba6cd"
+        },
+        "rationale": "RFV4-CLAIM-008 accepted; exact expectation sha256:6eefd9799051315d59a12352a9e8ee40ab5cfa43a67a54828b6169c355cf5ba5; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-009",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:10dba7ec8a00d7e300cab9ee6a438f2b7dea7d313cb99a86af3acf0a38503c71",
+        "fixture_sha256": {
+          "causal": "sha256:81d15699c412a604c63510e6811dd575b9f47a1aa5acfb54162ded6e72f4cca8",
+          "negative": "sha256:f5adbdc055a4eac65af1f778254e90f3a57f74c646e93b22cf1934c7ea03bcfd"
+        },
+        "rationale": "RFV4-CLAIM-009 accepted; exact expectation sha256:10dba7ec8a00d7e300cab9ee6a438f2b7dea7d313cb99a86af3acf0a38503c71; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-010",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:f29a9432da14c85e44d58eb223a63c3d01d2dc1df4b4ed8accba77f433980a7d",
+        "fixture_sha256": {
+          "causal": "sha256:65fc195803ddf82b4649e15ac470ec6dc24dfa56c663bfd0a92c6093e4204c41",
+          "negative": "sha256:d2fbd0795a843063ed51f24470e49a73812ebd63f66391d242311f82cf5b7671"
+        },
+        "rationale": "RFV4-CLAIM-010 accepted; exact expectation sha256:f29a9432da14c85e44d58eb223a63c3d01d2dc1df4b4ed8accba77f433980a7d; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-011",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:c8d00ea5528e7ab1e2640ac0f79604737695efca2867cdee1d8bef312b0c1ad7",
+        "fixture_sha256": {
+          "causal": "sha256:58cb26379f249ba9f1795fd350f733a9c7d89cc19395990b37a7f691d2cee4f8",
+          "negative": "sha256:708d03d94d14237e03c2f52ef6e6b8d4200b48c3a6cc0b3c94c1c9e6d06f16c9"
+        },
+        "rationale": "RFV4-CLAIM-011 accepted; exact expectation sha256:c8d00ea5528e7ab1e2640ac0f79604737695efca2867cdee1d8bef312b0c1ad7; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-012",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:086c97809971e0d90f69ab696ed8811afad2ea94278a96f7e98221e3179f57f4",
+        "fixture_sha256": {
+          "causal": "sha256:0c3d961d0cf75ae8f72393286cea9efe54c2b9a0d030f6fe9834e6e655f395de",
+          "negative": "sha256:5f723d8566be3bef1205f112e15480d88d4278fa8e3ee5486318c20c38a63ff5"
+        },
+        "rationale": "RFV4-CLAIM-012 accepted; exact expectation sha256:086c97809971e0d90f69ab696ed8811afad2ea94278a96f7e98221e3179f57f4; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-013",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:a73da2d4234f09a698839d56846da658c3059aa621f93bbc1afad76fcfe47106",
+        "fixture_sha256": {
+          "causal": "sha256:946dcf8eeb693edd13ecac8297ffd7f5f2fc91aff94c4c7df45ba514aa2ff389",
+          "negative": "sha256:210d158988daf125f36dadcc7dc8cd597778e2859cf248255f1de4c1aa2328df"
+        },
+        "rationale": "RFV4-CLAIM-013 accepted; exact expectation sha256:a73da2d4234f09a698839d56846da658c3059aa621f93bbc1afad76fcfe47106; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-014",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:35a1378da44ca321726997e2d2668c8dfc3732c2381dc5d2922bcdc00a6221b6",
+        "fixture_sha256": {
+          "causal": "sha256:4f9c74be8e3558529ce03a5da73019f04527776025c7df52ced51c4f1d72f132",
+          "negative": "sha256:4950a7555539580ff90ff6e1784465dbbfd958c81fd2a850cbd0ab87260d2ae8"
+        },
+        "rationale": "RFV4-CLAIM-014 accepted; exact expectation sha256:35a1378da44ca321726997e2d2668c8dfc3732c2381dc5d2922bcdc00a6221b6; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-015",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:37b5863de8ce2bfffd56d08a9e1c54e72661addbf8b4ea8c8748ea8ef352a9d0",
+        "fixture_sha256": {
+          "causal": "sha256:de30146ff2e9398b7592a4c482c7d174eec5d48be9ab72cd6b85046d7b4ecbec",
+          "negative": "sha256:c620d6e3e6c92d3db9d7b114c024d6b4c8e5133d4338a20cf8ae125e79adc903"
+        },
+        "rationale": "RFV4-CLAIM-015 accepted; exact expectation sha256:37b5863de8ce2bfffd56d08a9e1c54e72661addbf8b4ea8c8748ea8ef352a9d0; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-016",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:4572070c679332b8f2aa765114e9160a579e79b0fd21cee57b5c2c79f88fccb5",
+        "fixture_sha256": {
+          "causal": "sha256:6e754169edd23209b9257c531b2d715b3ac72c402d8b2bae9df4cb22b1d1fb0f",
+          "negative": "sha256:186dba53d2b991fe73d0dfaf05db0a9cd6d223c750fd6d68a07e3ce1ec9db7c8"
+        },
+        "rationale": "RFV4-CLAIM-016 accepted; exact expectation sha256:4572070c679332b8f2aa765114e9160a579e79b0fd21cee57b5c2c79f88fccb5; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-017",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:73601a5cad3c3f86430af0849e0ff1d29c01bddb1ca986a3189b717e5d384695",
+        "fixture_sha256": {
+          "causal": "sha256:0fab11b6abc4661c93908f5d178c7d67ec165aed01b4a5923ecc750e96522c9b",
+          "negative": "sha256:7d724ec8b03483d9263f749c57c0e6a834b03e9e6322bba8dd897b20350d6c33"
+        },
+        "rationale": "RFV4-CLAIM-017 accepted; exact expectation sha256:73601a5cad3c3f86430af0849e0ff1d29c01bddb1ca986a3189b717e5d384695; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-018",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:fef71933b6234dc56255f15745a14b977760d4d4e2afc317abba0856d76145ff",
+        "fixture_sha256": {
+          "causal": "sha256:49bf91f2bbe20632604c6086cada1049b5d2240ed69935074ea29da41f1a5cc2",
+          "negative": "sha256:42234de1d2885f4097c179bdf1930b2e42b7ebb64149aaa4671e8f17487bfca9"
+        },
+        "rationale": "RFV4-CLAIM-018 accepted; exact expectation sha256:fef71933b6234dc56255f15745a14b977760d4d4e2afc317abba0856d76145ff; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-019",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:bdb00503ac486fd227a947a9498494c63e4803546446334aa46aeb41928fae7f",
+        "fixture_sha256": {
+          "causal": "sha256:fe186a6a995543fd0c7e4552c2f2c6b6e14513ba27bab7504dd31ffe46525851",
+          "negative": "sha256:f10f3b1c6026016ca0f75bb692c8d98969224764acd3765ef521dbf1c9333463"
+        },
+        "rationale": "RFV4-CLAIM-019 accepted; exact expectation sha256:bdb00503ac486fd227a947a9498494c63e4803546446334aa46aeb41928fae7f; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-020",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:5e64106c45d639bf46d6725cd7675c3664b5711ed7bf633b9cc8b90d5c357224",
+        "fixture_sha256": {
+          "causal": "sha256:6b377c1903986e77e3ffb6166f924256b30b37a67a08378f06e278941ee02ef0",
+          "negative": "sha256:80662ce8e2d5af749ee4e2bfb7b9582ac7e3a1e8450d0efd2327b9f01b4fb56f"
+        },
+        "rationale": "RFV4-CLAIM-020 accepted; exact expectation sha256:5e64106c45d639bf46d6725cd7675c3664b5711ed7bf633b9cc8b90d5c357224; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-021",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:c5c3aa0992e95ce06074bf32f7623f302ff3324503c82869f7e8eaff31a8da4f",
+        "fixture_sha256": {
+          "causal": "sha256:c3a36e03383e7a3785804ffc34eab3d5c591259c66f6f5dc82d8440f3fe039c6",
+          "negative": "sha256:de81f759a587027e7cdc527cf7a76aeab935289879532cbda2d3a6a3e170fcfb"
+        },
+        "rationale": "RFV4-CLAIM-021 accepted; exact expectation sha256:c5c3aa0992e95ce06074bf32f7623f302ff3324503c82869f7e8eaff31a8da4f; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-022",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:ef16c05d822dd53df9e33a55185f01b02b38edb99b77600fbf350bbe7559ce48",
+        "fixture_sha256": {
+          "causal": "sha256:1d5d6e68071b058ba62651d36096cc134ab00ad3ff6e1fd18ee3192fc0223c61",
+          "negative": "sha256:4e5f2b78850d79370e2389023406e6c5114c56cf95ea04c1e3043674814b68dc"
+        },
+        "rationale": "RFV4-CLAIM-022 accepted; exact expectation sha256:ef16c05d822dd53df9e33a55185f01b02b38edb99b77600fbf350bbe7559ce48; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-023",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:2832ad87732554f4587a1d4714dd210bb00f7997d583db5ec730fb26b59892ce",
+        "fixture_sha256": {
+          "causal": "sha256:8e3a103ffb0de8f812196749ea812f142a19dcf71539615f8a5a8b939b244a8a",
+          "negative": "sha256:90504c99ca1144cffbc96ada488772ed7636380b9d533d7f04269e6b310558ab"
+        },
+        "rationale": "RFV4-CLAIM-023 accepted; exact expectation sha256:2832ad87732554f4587a1d4714dd210bb00f7997d583db5ec730fb26b59892ce; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-024",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:5bdb920d1df53d2df1b667dbfa898fe47d226ee9059789f9d34628d6df5e8d36",
+        "fixture_sha256": {
+          "causal": "sha256:9d9d294dd2f3e0480f859baa56b2c58aa92a58579ad8a4000f0772760258bdfb",
+          "negative": "sha256:da59c562e9ba1680c2ac0381a17a592eda011bfd27de9dedec892e4b821ffc7c"
+        },
+        "rationale": "RFV4-CLAIM-024 accepted; exact expectation sha256:5bdb920d1df53d2df1b667dbfa898fe47d226ee9059789f9d34628d6df5e8d36; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-025",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:b3275edb6f541d622b4be88158924a2176be94cacab59e17f5080e9939a62ed1",
+        "fixture_sha256": {
+          "causal": "sha256:66b8fbd171a7bbd29114039d9a674e1399e5540f1f6cfeefb06bd05bcc1ef820",
+          "negative": "sha256:a92a6fb9204d09f2a1e11c75d92da86eb67f1a8945f1170710b7b855bfbdabe3"
+        },
+        "rationale": "RFV4-CLAIM-025 accepted; exact expectation sha256:b3275edb6f541d622b4be88158924a2176be94cacab59e17f5080e9939a62ed1; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-026",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:9ba639af589cdc33faf4b35f88dd45bd92fee67984664f9afd6b633b6d484d3d",
+        "fixture_sha256": {
+          "causal": "sha256:404494d7f19be63f905f97baffa387323fe0a42d225ae15751f175d79a075a46",
+          "negative": "sha256:513467227c5877d877154884ca599e4cb7dae07220843a17b75f9a733a1ae4a4"
+        },
+        "rationale": "RFV4-CLAIM-026 accepted; exact expectation sha256:9ba639af589cdc33faf4b35f88dd45bd92fee67984664f9afd6b633b6d484d3d; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-027",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:de609e4d5989eb5d35cd39618c89eceaf40b8d133df38316a75ade038dc0dc9f",
+        "fixture_sha256": {
+          "causal": "sha256:a08866664db334b1e1e8e851045a968312abf4a623d04ed45644e0487114c84a",
+          "negative": "sha256:e227dff3c4afafb9c6ea4fbedc7d4f38755aae9b6a93d8ec9d54af2dbf2c2436"
+        },
+        "rationale": "RFV4-CLAIM-027 accepted; exact expectation sha256:de609e4d5989eb5d35cd39618c89eceaf40b8d133df38316a75ade038dc0dc9f; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-028",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:920f03528530099003ddd74189991c0fea9a1d1c660d2981b2168c30a521a304",
+        "fixture_sha256": {
+          "causal": "sha256:260419efdb69aab05fb7a943bd3cdf11a5cfec5243923c25a32fa5e6d8af83ed",
+          "negative": "sha256:43f1ad8cbe74aa1b3d5cff917c84ece66cb3e2f5aad16d72e40961177415a774"
+        },
+        "rationale": "RFV4-CLAIM-028 accepted; exact expectation sha256:920f03528530099003ddd74189991c0fea9a1d1c660d2981b2168c30a521a304; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-029",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:3a7deed810c44ca5f399427ad0d265f855819a12c208c648fb1c3a682bc8344f",
+        "fixture_sha256": {
+          "causal": "sha256:fcf4e2a3532ed5cb4c0774e546094dd7da05ca5122f66ea387321bddc02ab7f8",
+          "negative": "sha256:ac6c487fb1cfcb4ed9db71fdfb2d5184244fe631a08a801076e3ff8fff844dd9"
+        },
+        "rationale": "RFV4-CLAIM-029 accepted; exact expectation sha256:3a7deed810c44ca5f399427ad0d265f855819a12c208c648fb1c3a682bc8344f; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-030",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:1063326bf520432751c0035436adcb68b4503fdcd8bb0102283e0e146d9ce10b",
+        "fixture_sha256": {
+          "causal": "sha256:43d7286776284e2743329a1222c467fa010585aad18e7bbe824ff4a821450a91",
+          "negative": "sha256:e7584b25afb9090f4f033fc532f0766ebb39269f79da312a0a5818f214be6bc5"
+        },
+        "rationale": "RFV4-CLAIM-030 accepted; exact expectation sha256:1063326bf520432751c0035436adcb68b4503fdcd8bb0102283e0e146d9ce10b; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-031",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:eda84f05b2738bf6fc4527dd7db3908b2124ca17e0494363bc1edb549c4887f6",
+        "fixture_sha256": {
+          "causal": "sha256:1eefc4d0bb8086a93d54a2964b50feda3f8152110f0a96a7b301c7a7e0f8288f",
+          "negative": "sha256:1cba1487b11a5d9ec474213279a1dee7ef295decfa94f4eaf77073c336ce3a2c"
+        },
+        "rationale": "RFV4-CLAIM-031 accepted; exact expectation sha256:eda84f05b2738bf6fc4527dd7db3908b2124ca17e0494363bc1edb549c4887f6; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-032",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:7cd0b605d60fc255c8c706caef8db82ec8ca57f6f389894d56016b67fd6497c1",
+        "fixture_sha256": {
+          "causal": "sha256:68d0358fa2c065abe580fb9addc426ace37a1b37f4785a3406fb7b7487c8c1bf",
+          "negative": "sha256:bafa9c3a2fbffc99c2fe15139bde6c1cbc2df92828f65d8977b776197d1fb279"
+        },
+        "rationale": "RFV4-CLAIM-032 accepted; exact expectation sha256:7cd0b605d60fc255c8c706caef8db82ec8ca57f6f389894d56016b67fd6497c1; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-033",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:fa5786a5801f50cbca3eba7e845d31ea7571926392fb74a9ed4a3f59c58b8f75",
+        "fixture_sha256": {
+          "causal": "sha256:9d1fb21f2a6d76016529860983302870293474de9958bb08993437abc6ddf690",
+          "negative": "sha256:52050eaabfc3f23d07364632d11ab7ecd6071fb97172da7034b12dc1cd604e3c"
+        },
+        "rationale": "RFV4-CLAIM-033 accepted; exact expectation sha256:fa5786a5801f50cbca3eba7e845d31ea7571926392fb74a9ed4a3f59c58b8f75; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-034",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:a27cdc4840a3bd81fb4df322f5eea1de7884b8d26f530814f904cfdf55f8f541",
+        "fixture_sha256": {
+          "causal": "sha256:b76a2c0c6306fe823ce66c00c87908a18d5e1e4413a776e5878a6e639ce1ef09",
+          "negative": "sha256:212954ae769d2a8fb1e865e068ba41a62bdf81032ba293d39fd688ebe51af3d4"
+        },
+        "rationale": "RFV4-CLAIM-034 accepted; exact expectation sha256:a27cdc4840a3bd81fb4df322f5eea1de7884b8d26f530814f904cfdf55f8f541; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-035",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:de6f3ab1b453a2887800189e10277bdfd68d5e9aabd259bfdb698b70277a2fd2",
+        "fixture_sha256": {
+          "causal": "sha256:2dfcd0292b9d70e9d1e815e1b6e5ee758c097b0f44c7eada8dd47a53449fab0b",
+          "negative": "sha256:b81cc1474d7f2098418a43b2911664b3aeea4d16df798d6365758d5e1db8fa2d"
+        },
+        "rationale": "RFV4-CLAIM-035 accepted; exact expectation sha256:de6f3ab1b453a2887800189e10277bdfd68d5e9aabd259bfdb698b70277a2fd2; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-036",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:9ec35f5410ec3f9428323f84eb95e714021897e7cbbbd2da85249caadd5705f7",
+        "fixture_sha256": {
+          "causal": "sha256:12f437638b5fb83dcd00c8a2df33b4c43d32d955c53c971974b2e5954d496891",
+          "negative": "sha256:6e6eb18778cd7097ba995dfe81421f3a7da2cf7e38dd84efe52b5eea6d0d81c6"
+        },
+        "rationale": "RFV4-CLAIM-036 accepted; exact expectation sha256:9ec35f5410ec3f9428323f84eb95e714021897e7cbbbd2da85249caadd5705f7; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-037",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:f322afb5d0c70265271f68ee677aa318403c9fc277f7741ff9ed72e2fa4a3f8d",
+        "fixture_sha256": {
+          "causal": "sha256:89ccd6ea11b72d736fa181ad81c5015edf3e0aa0d32f17b233e50959e6166dc9",
+          "negative": "sha256:43c14c772f236edd1dfc8278ef3713244e4412246d4ea087f289f980b678bde3"
+        },
+        "rationale": "RFV4-CLAIM-037 accepted; exact expectation sha256:f322afb5d0c70265271f68ee677aa318403c9fc277f7741ff9ed72e2fa4a3f8d; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-038",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:d32c772c4c93a99c667ae3c018bb8605f20e0e2e7b97254f4e6a9fc0a2b9af51",
+        "fixture_sha256": {
+          "causal": "sha256:452efb675a47c06f2183f79ae49119dfdfbd4d7c021ab08408d074ebe34da2c6",
+          "negative": "sha256:56ab7f7077f22c3234104bcbe162ea6ecb41d7b938b3ba7d599ac813abded848"
+        },
+        "rationale": "RFV4-CLAIM-038 accepted; exact expectation sha256:d32c772c4c93a99c667ae3c018bb8605f20e0e2e7b97254f4e6a9fc0a2b9af51; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-039",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:c7ca63d9cb2178daae7c5759f51e415989cdb468d471c242f77e86eecc08f083",
+        "fixture_sha256": {
+          "causal": "sha256:0962684647b0321a758e760b00e8c682e86f4d1d7106422b8de3cd7e82a8b814",
+          "negative": "sha256:60577ed84872d160893b32b869a87ee6247b4b0e46899c14335ca9d190286e0c"
+        },
+        "rationale": "RFV4-CLAIM-039 accepted; exact expectation sha256:c7ca63d9cb2178daae7c5759f51e415989cdb468d471c242f77e86eecc08f083; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-040",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:192bfc8a3737269565f71faeca87f91daf1cafc3952de2a20f26288ef801731e",
+        "fixture_sha256": {
+          "causal": "sha256:b461dea69a2943099cbd09db8c2c3458d70407adffe1a94448ae6a3941992414",
+          "negative": "sha256:c9384745ee848cc4474026ea20715c41ade6c4a1d38c1e2a91f70a0b325f85ee"
+        },
+        "rationale": "RFV4-CLAIM-040 accepted; exact expectation sha256:192bfc8a3737269565f71faeca87f91daf1cafc3952de2a20f26288ef801731e; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      },
+      {
+        "claim_id": "RFV4-CLAIM-041",
+        "disposition": "accepted",
+        "expectation_sha256": "sha256:b73641ced83132fee908c6ef90745750d4462d994be55f97f724dda81e0cc95a",
+        "fixture_sha256": {
+          "causal": "sha256:ee2d3815ee4058b4ff162414c74a0eb8d78d2fadce5e28f18aeaf22ed75d1896",
+          "negative": "sha256:86c4ebbda03f6d01027c0cb1f4235ea2f376bb01054023e9dca5a0da36cf3513"
+        },
+        "rationale": "RFV4-CLAIM-041 accepted; exact expectation sha256:b73641ced83132fee908c6ef90745750d4462d994be55f97f724dda81e0cc95a; Independent read-only review covered all 41 expectations and 82 fixtures. CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound. All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes.",
+        "reviewer": "codex-wp33-r6-independent-semantic-reviewer"
+      }
+    ],
+    "notes": [
+      "Independent read-only review covered all 41 expectations and 82 fixtures.",
+      "CLAIM-031 complete per-read authority and no-path closure, CLAIM-035 daemon-owned progress projection, and CLAIM-041 exact 19-candidate and 17-rejection zero-state closure are sound.",
+      "All source provenance, typed derivations, selectors, and r6 tooling bindings were independently verified; acceptance applies only to the exact frozen pre-implementation evidence bytes."
+    ],
+    "reviewed_artifact_digests": {
+      "expectations_sha256": "d9cd74a9cbd4a78f43117b191ef14ddc86957445fc9eb3016db63cf3f5608e7f",
+      "negative_fixtures_sha256": "cce359c558a988ffa104ce4ca463617a79dc08774dc630eec8c8d66613d02d29"
+    },
+    "reviewed_at": "2026-09-01T09:41:08Z",
+    "reviewed_issuance_projection_sha256": "sha256:bfdf1f3a66286cb01c55b3c601b6a45f4ffb1d77d9e21e86ccc31bcbc0a92cb7",
+    "reviewer": "codex-wp33-r6-independent-semantic-reviewer",
+    "status": "accepted"
+  },
+  "limitations": [
+    "Independent semantic and causal review is pending; no row or issuance is accepted yet.",
+    "Releases r1 through r5 remain rejected transition history: r2 corrected fifteen typed and causal defects, r3 corrected those findings but left four supervisor and time defects, r4 corrected those and exposed CLAIM-031, CLAIM-035, and CLAIM-041 closure defects, and r5 retained the sound CLAIM-035 correction while leaving residual CLAIM-031 and CLAIM-041 defects addressed only by this r6 authoring transaction.",
+    "The fixtures are small design-derived discriminators, not performance baselines or claims about current production behavior.",
+    "Later packets must execute these expectations through the real Rust daemon, cpgd.v2 client, installed adapter, and FastMCP client before production certification.",
+    "Source digests must be refreshed and the review repeated if any source-provenance byte changes before freeze."
+  ],
+  "schema": "codefabric.relational-fabric-v4.evidence-issuance.v1",
+  "selectors": {
+    "expectation-drift-selector-sensitivity-check": {
+      "claim_ids": [
+        "RFV4-CLAIM-001",
+        "RFV4-CLAIM-004",
+        "RFV4-CLAIM-006",
+        "RFV4-CLAIM-014",
+        "RFV4-CLAIM-015",
+        "RFV4-CLAIM-019",
+        "RFV4-CLAIM-020",
+        "RFV4-CLAIM-021",
+        "RFV4-CLAIM-022",
+        "RFV4-CLAIM-023",
+        "RFV4-CLAIM-024",
+        "RFV4-CLAIM-028",
+        "RFV4-CLAIM-029",
+        "RFV4-CLAIM-031",
+        "RFV4-CLAIM-033",
+        "RFV4-CLAIM-039",
+        "RFV4-CLAIM-040",
+        "RFV4-CLAIM-041"
+      ],
+      "families": [
+        "provider_rows",
+        "transformations",
+        "query_find_code_entities",
+        "genesis",
+        "activation_readback",
+        "supervisor_policy",
+        "supervisor_singleton_multi_agent",
+        "supervisor_control",
+        "supervisor_fd3",
+        "supervisor_restart_revocation",
+        "rpc_handshake",
+        "rpc_start_query",
+        "rpc_watch_query",
+        "rpc_read_resource",
+        "wire_session_budget_cursor",
+        "mcp_lifespan_resources",
+        "recovery_resource_bounds",
+        "forward_only_zero_state"
+      ],
+      "fixture_kinds": [
+        "causal",
+        "negative"
+      ]
+    },
+    "independent-expected-relation-review-check": {
+      "claim_ids": [
+        "RFV4-CLAIM-001",
+        "RFV4-CLAIM-002",
+        "RFV4-CLAIM-003",
+        "RFV4-CLAIM-004",
+        "RFV4-CLAIM-005",
+        "RFV4-CLAIM-006",
+        "RFV4-CLAIM-007",
+        "RFV4-CLAIM-008",
+        "RFV4-CLAIM-009",
+        "RFV4-CLAIM-010",
+        "RFV4-CLAIM-011",
+        "RFV4-CLAIM-012",
+        "RFV4-CLAIM-013",
+        "RFV4-CLAIM-014",
+        "RFV4-CLAIM-015",
+        "RFV4-CLAIM-016",
+        "RFV4-CLAIM-017",
+        "RFV4-CLAIM-018",
+        "RFV4-CLAIM-019",
+        "RFV4-CLAIM-020",
+        "RFV4-CLAIM-021",
+        "RFV4-CLAIM-022",
+        "RFV4-CLAIM-023",
+        "RFV4-CLAIM-024",
+        "RFV4-CLAIM-025",
+        "RFV4-CLAIM-026",
+        "RFV4-CLAIM-027",
+        "RFV4-CLAIM-028",
+        "RFV4-CLAIM-029",
+        "RFV4-CLAIM-030",
+        "RFV4-CLAIM-031",
+        "RFV4-CLAIM-032",
+        "RFV4-CLAIM-033",
+        "RFV4-CLAIM-034",
+        "RFV4-CLAIM-035",
+        "RFV4-CLAIM-036",
+        "RFV4-CLAIM-037",
+        "RFV4-CLAIM-038",
+        "RFV4-CLAIM-039",
+        "RFV4-CLAIM-040",
+        "RFV4-CLAIM-041"
+      ],
+      "families": [
+        "provider_rows",
+        "provider_gaps",
+        "producer_remainders",
+        "transformations",
+        "analyses",
+        "query_find_code_entities",
+        "query_retrieve_facts",
+        "query_follow_relationships",
+        "query_connecting_paths",
+        "query_match_pattern",
+        "query_combine_results",
+        "query_summarize_facts",
+        "query_source_context",
+        "genesis",
+        "activation_readback",
+        "lifecycle",
+        "recovery_pre_append",
+        "recovery_uncertain_append",
+        "supervisor_policy",
+        "supervisor_singleton_multi_agent",
+        "supervisor_control",
+        "supervisor_fd3",
+        "supervisor_restart_revocation",
+        "rpc_handshake",
+        "rpc_get_status",
+        "rpc_get_reference",
+        "rpc_validate_query",
+        "rpc_start_query",
+        "rpc_watch_query",
+        "rpc_cancel_query",
+        "rpc_read_resource",
+        "rpc_release_resource",
+        "wire_session_budget_cursor",
+        "wire_errors",
+        "mcp_query",
+        "mcp_validate",
+        "mcp_status",
+        "mcp_reference",
+        "mcp_lifespan_resources",
+        "recovery_resource_bounds",
+        "forward_only_zero_state"
+      ],
+      "fixture_kinds": [
+        "causal",
+        "negative"
+      ]
+    },
+    "negative-fixture-independence-check": {
+      "claim_ids": [
+        "RFV4-CLAIM-001",
+        "RFV4-CLAIM-002",
+        "RFV4-CLAIM-003",
+        "RFV4-CLAIM-004",
+        "RFV4-CLAIM-005",
+        "RFV4-CLAIM-006",
+        "RFV4-CLAIM-007",
+        "RFV4-CLAIM-008",
+        "RFV4-CLAIM-009",
+        "RFV4-CLAIM-010",
+        "RFV4-CLAIM-011",
+        "RFV4-CLAIM-012",
+        "RFV4-CLAIM-013",
+        "RFV4-CLAIM-014",
+        "RFV4-CLAIM-015",
+        "RFV4-CLAIM-016",
+        "RFV4-CLAIM-017",
+        "RFV4-CLAIM-018",
+        "RFV4-CLAIM-019",
+        "RFV4-CLAIM-020",
+        "RFV4-CLAIM-021",
+        "RFV4-CLAIM-022",
+        "RFV4-CLAIM-023",
+        "RFV4-CLAIM-024",
+        "RFV4-CLAIM-025",
+        "RFV4-CLAIM-026",
+        "RFV4-CLAIM-027",
+        "RFV4-CLAIM-028",
+        "RFV4-CLAIM-029",
+        "RFV4-CLAIM-030",
+        "RFV4-CLAIM-031",
+        "RFV4-CLAIM-032",
+        "RFV4-CLAIM-033",
+        "RFV4-CLAIM-034",
+        "RFV4-CLAIM-035",
+        "RFV4-CLAIM-036",
+        "RFV4-CLAIM-037",
+        "RFV4-CLAIM-038",
+        "RFV4-CLAIM-039",
+        "RFV4-CLAIM-040",
+        "RFV4-CLAIM-041"
+      ],
+      "families": [
+        "provider_rows",
+        "provider_gaps",
+        "producer_remainders",
+        "transformations",
+        "analyses",
+        "query_find_code_entities",
+        "query_retrieve_facts",
+        "query_follow_relationships",
+        "query_connecting_paths",
+        "query_match_pattern",
+        "query_combine_results",
+        "query_summarize_facts",
+        "query_source_context",
+        "genesis",
+        "activation_readback",
+        "lifecycle",
+        "recovery_pre_append",
+        "recovery_uncertain_append",
+        "supervisor_policy",
+        "supervisor_singleton_multi_agent",
+        "supervisor_control",
+        "supervisor_fd3",
+        "supervisor_restart_revocation",
+        "rpc_handshake",
+        "rpc_get_status",
+        "rpc_get_reference",
+        "rpc_validate_query",
+        "rpc_start_query",
+        "rpc_watch_query",
+        "rpc_cancel_query",
+        "rpc_read_resource",
+        "rpc_release_resource",
+        "wire_session_budget_cursor",
+        "wire_errors",
+        "mcp_query",
+        "mcp_validate",
+        "mcp_status",
+        "mcp_reference",
+        "mcp_lifespan_resources",
+        "recovery_resource_bounds",
+        "forward_only_zero_state"
+      ],
+      "fixture_kinds": [
+        "negative"
+      ]
+    },
+    "successor-authority-expectation-integrity-check": {
+      "claim_ids": [
+        "RFV4-CLAIM-001",
+        "RFV4-CLAIM-014",
+        "RFV4-CLAIM-019",
+        "RFV4-CLAIM-024",
+        "RFV4-CLAIM-033",
+        "RFV4-CLAIM-041"
+      ],
+      "families": [
+        "provider_rows",
+        "genesis",
+        "supervisor_policy",
+        "rpc_handshake",
+        "wire_session_budget_cursor",
+        "forward_only_zero_state"
+      ],
+      "fixture_kinds": [
+        "causal",
+        "negative"
+      ]
+    }
+  },
+  "source_provenance": [
+    {
+      "path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v4_2026-09-01.md",
+      "role": "active-implementation-plan",
+      "sha256": "a11bd07e7e2533df8fc62e84acddb65258ba9cd3a60b03bd4f32b3749ba09ced"
+    },
+    {
+      "path": "docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v5.md",
+      "role": "accepted-operational-design",
+      "sha256": "2c4e819bc416a9fd7fcf5a76928aa17a470a5b296b003e62cf451b170513b7ae"
+    },
+    {
+      "path": "docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v4.md",
+      "role": "incorporated-forward-interface-design",
+      "sha256": "b3d9633272a931c511118c2ed639d4560184616a31b9aae38562fa4bfc52d8bc"
+    },
+    {
+      "path": "docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-08-31_v3.md",
+      "role": "incorporated-relational-interface-design",
+      "sha256": "9e53d7fbcad46e718390324e81b0daf15e3dd4a071f8e6d8e89fa9e405edbe4e"
+    },
+    {
+      "path": "docs/library_ref/full_data_fabric_design_principles_v2.md",
+      "role": "data-fabric-doctrine",
+      "sha256": "eb4db97fc9d4522832035002b0a3371e87786971c131a2920ce73af2ef350bd5"
+    },
+    {
+      "path": "docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.2.md",
+      "role": "SUITE",
+      "sha256": "a11b496912e98767d8e7e7c11ca8ce49a05fe53e9755dfbe8a9e1fcb51e985ab"
+    },
+    {
+      "path": "docs/authoritative_design/code_property_graph_present_state_fact_ontology_specification_v2.2.md",
+      "role": "ONT",
+      "sha256": "4e92c43769165b75e5c8e6f37d10571de9607f39f1344c9c43a7590457c9827e"
+    },
+    {
+      "path": "docs/authoritative_design/present_state_cpg_fact_generation_specification_python_rust_v2.2.md",
+      "role": "GEN",
+      "sha256": "ffd340a227e7c55f99b6cd4c4b0406e59ae9ed52702d50425ff121185afaeec2"
+    },
+    {
+      "path": "docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v2.2.md",
+      "role": "FAB",
+      "sha256": "efb447cbd0e444afeacd14c31828535ee46147c010d6ab62e3e5383c07b09fc2"
+    },
+    {
+      "path": "docs/authoritative_design/code_property_graph_semantic_query_specification_v2.2.md",
+      "role": "QRY",
+      "sha256": "cd4e5c4c991f3afad081d09febf94dce3d106596e638947c762ebfb15abd038b"
+    },
+    {
+      "path": "docs/authoritative_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v2.2.md",
+      "role": "LIFE",
+      "sha256": "137bd77c05874ccd458679bbcb95c27a28b066ae585f2d2ed81f14fe69928a98"
+    },
+    {
+      "path": "docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v2.2.md",
+      "role": "SRV",
+      "sha256": "6b8ac7e546079553360a47a277bd1e11a74e1ea4581a14bd8d1ea4ab6b6b6864"
+    },
+    {
+      "path": "docs/authoritative_design/codefabric_2.2_implementation_roadmap_v1.0.md",
+      "role": "RM",
+      "sha256": "b48499c56d99622071fd98a85e86073f2010f6d06a5a93314955cbc8e8f51546"
+    }
+  ],
+  "status": "accepted",
+  "suite_identity": "codefabric-relational-data-fabric@2.2.0"
+}

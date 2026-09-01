@@ -351,21 +351,24 @@ semantic-request-program-check:
 [group('test')]
 production-composition-contract-integrity-check:
     cargo nextest run --locked --lib -E 'test(/(release_pins_reject_every_missing_identity|source_authority_is_explicit_and_independent_of_release_vector|semantic_catalog_authority_rejects_pin_and_program_drift|request_owned_limits_identity_is_complete_and_stable)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|lifecycle_rejects_skips_stale_writers_and_false_ready|empty_workspace_slot_never_falls_back|production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)/)' --no-tests=fail
 
 [doc("Exercise the real typed-input daemon composition and causal query/activation vertical")]
 [group('test')]
 programmatic-production-composition-check:
     cargo nextest run --locked --lib -E 'test(/(epoch_query_registry_is_exact_and_workspace_scoped|activation_admission_installs_before_swap_and_rejects_substituted_authority|real_delta_sqlite_daemon_query_activation_and_process_reopen)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
 
 [doc("Reject default, bootstrap, empty, and arbitrary-label production authority")]
 [group('test')]
 daemon-bootstrap-route-denial-check:
-    cargo nextest run --locked --lib -E 'test(/(production_serve_requires_programmatic_composition|daemon_factory_rejects_an_empty_workspace_set|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(production_factory_rejects_empty_workspace_without_endpoint_or_lease_leaks|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|daemon_factory_rejects_an_empty_workspace_set|lifecycle_rejects_skips_stale_writers_and_false_ready|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail
 
 [doc("Prove bounded cancellation, shutdown, restart, and durable runtime reconstruction")]
 [group('test')]
 programmatic-runtime-lifecycle-check:
-    cargo nextest run --locked --lib -E 'test(/(real_delta_sqlite_daemon_query_activation_and_process_reopen|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|real_delta_sqlite_daemon_query_activation_and_process_reopen|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
 
 [doc("Prove released lifecycle identity, Protobuf descriptors, UDS peer policy, deadlines, and frame limits")]
 [group('test')]
@@ -521,6 +524,36 @@ activation-receipt-nonauthority-check:
 [group('test')]
 candidate-free-recovery-check:
     cargo nextest run --locked --lib -E 'test(/(unknown_commit_recovers_only_from_exact_operation_marker_and_chain|unknown_marker_keeps_restart_admission_closed_and_requires_reconciliation|cache_loss_and_process_reopen_reconstruct_durable_authority|split_head_and_stale_fence_reject_before_native_checkpoint|active_pins_cdf_and_proof_references_refuse_destructive_vacuum)/)' --no-tests=fail
+
+[doc("Bind the independent v4 expectations to the active plan and terminal 2.2 suite")]
+[group('test')]
+successor-authority-expectation-integrity-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance_v4.py -k 'int_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance_v4.py successor-authority-expectation-integrity-check
+
+[doc("Require claim-specific independent acceptance of every decoded v4 expectation")]
+[group('test')]
+independent-expected-relation-review-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance_v4.py -k 'beh_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance_v4.py independent-expected-relation-review-check
+
+[doc("Prove every v4 causal and rejection fixture is independent and discriminating")]
+[group('test')]
+negative-fixture-independence-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance_v4.py -k 'neg_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance_v4.py negative-fixture-independence-check
+
+[doc("Fail closed when a frozen v4 input or nonzero evidence selector drifts")]
+[group('test')]
+expectation-drift-selector-sensitivity-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance_v4.py -k 'ops_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance_v4.py expectation-drift-selector-sensitivity-check
+
+[doc("Validate the accepted supervisor policy, singleton, control, fd-3, and restart expectation slice")]
+[group('test')]
+supervisor-launch-contract-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_supervisor_launch_contract_v4.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/supervisor_launch_contract_v4.py
 
 [doc("Validate frozen WP33 claim, fixture, dependency, and review identities")]
 [group('test')]
@@ -900,7 +933,7 @@ model-zero-state-check:
 
 [doc("Run structural, artifact, provenance, compatibility, and zero-state governance")]
 [group('gate')]
-governance: tool-version-contract-check governance-scan authoritative-design-conformance-check proto-check model-zero-state-check remaining-legacy-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check successor-evidence-transaction-integrity-check successor-expected-behavior-review-check successor-negative-fixture-independence-check oracle-substance-check plan-dependency-check
+governance: tool-version-contract-check governance-scan authoritative-design-conformance-check proto-check model-zero-state-check remaining-legacy-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check successor-authority-expectation-integrity-check independent-expected-relation-review-check negative-fixture-independence-check expectation-drift-selector-sensitivity-check oracle-substance-check plan-dependency-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]

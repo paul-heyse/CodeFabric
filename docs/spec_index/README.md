@@ -1,4 +1,4 @@
-# CodeFabric 2.1 specification index
+# CodeFabric 2.2 specification index
 
 This directory is a derived navigation layer over the current
 codefabric-relational-data-fabric suite. It is never normative. Cite the
@@ -6,19 +6,21 @@ authoritative section it points to, not this index.
 
 ## 1. Current-suite discovery
 
-Current masters are discovered from YAML frontmatter under
-docs/authoritative_design. A current master has:
+Current masters are discovered from YAML frontmatter and predecessor edges under
+docs/authoritative_design. A current master is in the unique synchronized terminal suite and has:
 
 - suite_id codefabric-relational-data-fabric;
-- suite_version 2.1.0;
+- suite_version 2.2.0;
 - one unique artifact_tag from SUITE, ONT, GEN, FAB, QRY, LIFE, SRV, or RM;
 - authority_status current;
-- one predecessor_path naming its immutable v2.0 predecessor, whose own predecessor is v1.3.
+- one predecessor_path naming its immutable v2.1 predecessor, whose chain continues through v2.0 to v1.3.
 
-The authoritative-design-conformance-check proves that exactly one current
-master owns each role, every complete predecessor chain exists and is historical, navigation
-selects the current paths, and no generated suite manifest is semantic
-authority.
+The authoritative-design-conformance-check proves that exactly one terminal
+master owns each role, the eight terminals share one suite version, every complete predecessor
+chain exists, any authored successor link agrees when present, navigation selects the terminal
+paths, and no generated suite manifest is semantic authority. An ancestor's issuance-time
+`authority_status: current` is tolerated because the successor edge, not a rewritten status,
+determines terminality.
 
 ## 2. Citation convention
 
@@ -26,14 +28,14 @@ Use TAG §N plus the section title. The current tag mapping is:
 
 | Tag | Current master |
 |---|---|
-| SUITE | codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.1.md |
-| ONT | code_property_graph_present_state_fact_ontology_specification_v2.1.md |
-| GEN | present_state_cpg_fact_generation_specification_python_rust_v2.1.md |
-| FAB | present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v2.1.md |
-| QRY | code_property_graph_semantic_query_specification_v2.1.md |
-| LIFE | codefabric_continuous_cpg_update_lifecycle_management_specification_v2.1.md |
-| SRV | present_state_cpg_fastmcp_serving_specification_v2.1.md |
-| RM | codefabric_2.1_implementation_roadmap_v1.0.md |
+| SUITE | codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.2.md |
+| ONT | code_property_graph_present_state_fact_ontology_specification_v2.2.md |
+| GEN | present_state_cpg_fact_generation_specification_python_rust_v2.2.md |
+| FAB | present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v2.2.md |
+| QRY | code_property_graph_semantic_query_specification_v2.2.md |
+| LIFE | codefabric_continuous_cpg_update_lifecycle_management_specification_v2.2.md |
+| SRV | present_state_cpg_fastmcp_serving_specification_v2.2.md |
+| RM | codefabric_2.2_implementation_roadmap_v1.0.md |
 
 Historical citations retain their explicit filename/version. Historical
 AC-G-01 through AC-G-84 identities remain valid evidence but do not select
@@ -58,13 +60,13 @@ contract censuses.
 | library-routing.md | which pinned reference owns an implementation API decision |
 | wave-traceability.md | which capability stage and work-packet family realizes a boundary |
 | contract-census.md | how relational contract discovery replaces the static AC-G census |
-| invariants-and-doctrine.md | where cross-cutting v2.1 invariants are owned and proved |
+| invariants-and-doctrine.md | where cross-cutting v2.2 invariants are owned and proved |
 
 ## 5. Historical boundary
 
-The v2.0 and v1.3 masters remain adjacent as immutable design/release history. They are never
-runtime, build, package, or acceptance authority for the v2.1 target. Human and agent navigation,
-new design work, and new implementation decisions select only the v2.1 masters.
+The v2.1, v2.0, and v1.3 masters remain adjacent as immutable design/release history. They are never
+runtime, build, package, or acceptance authority for the v2.2 target. Human and agent navigation,
+new design work, and new implementation decisions select only the v2.2 terminal masters.
 
 ## 6. Failure interpretation
 
