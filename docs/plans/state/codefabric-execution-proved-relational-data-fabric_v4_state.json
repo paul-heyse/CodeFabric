@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v5.md",
   "baseline_commit": "6a76b5cff3d84e8249e5bedaa52a17f2abb816dd",
   "status": "executing",
-  "current_packet": "WP32",
+  "current_packet": "WP30",
   "packets": {
     "WP33": {
       "status": "complete",
@@ -46,11 +46,11 @@
       "blockers": []
     },
     "WP32": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "ce4dfbf62efa74ff43c779a036b6a828df497061",
       "deviations": [
-        "The working tree contains selected-event readback, receipt nonauthority, candidate-free recovery, and atomic-workspace changes, but exact reopen remains limited to the currently provisioned observation histories rather than every selected provider, canonical, derived, and proof relation.",
-        "No substantive WP32-BEH test currently exists, and the release-owned concrete rebuild path plus older selected-version reconstruction remain unfinished."
+        "The activation-selected semantic table vector covers every sealed provider, canonical, derived, and observation relation. Proof histories remain independently exact-reopened by the activation proof port because adding proof receipts to the semantic vector they attest would create circular authority; recovery re-executes the release-owned producer closure instead of substituting a hash.",
+        "The four packet oracles and both default and featureless all-target root checks pass. Repository-wide strict Clippy remains red on the broader transitional dead-code and pedantic backlog, not a WP32-local compilation or behavioral failure."
       ],
       "failed_approaches": [],
       "blockers": []
@@ -220,7 +220,7 @@
   ],
   "discovered_obligations": [
     "Revalidate WP29 and WP30 against the current target architecture: retarget the WP29 behavioral selector to substantive extant successor behavior and update the WP30 activation-residue ledger and zero-state validator to positively deny the removed ProgrammaticWorkspaceReleasePins symbol; never restore that displaced authority.",
-    "Finish WP32 exact durable reconstruction for every activation-selected provider, canonical, derived, and proof relation, including an older selected version and a concrete release-owned rebuild path, then add a nonzero WP32-BEH oracle.",
+    "WP32 closed exact durable reconstruction for the complete selected semantic relation vector, including an older selected version, decoded-row equivalence, release-owned reconstruction, candidate-free recovery, and receipt nonauthority at ce4dfbf62efa74ff43c779a036b6a828df497061.",
     "Isolate the packet-ready WP34 provider descriptor, relation IPC, admission, gap, and trust change surface into an atomic proving commit and record that commit only after rerunning its four named oracles.",
     "WP35 closed the release-owned producer census, typed analyses, executable decoded proof closure, cancellation, and substantive fixed-point/resource oracle at c58f98be94990b2608992247885ce2a0950e7237.",
     "Implement WP36 query coordination, streamed page sealing, result packages, retention, and cancellation; all four packet recipes are currently absent.",
@@ -228,6 +228,6 @@
     "Create and execute the still-missing WP38 through WP42 packet oracles only as their dependency-closed implementation surfaces land."
   ],
   "plan_deviations": [],
-  "next_action": "Finish WP32 exact durable reconstruction and release-owned rebuild for every activation-selected provider, canonical, derived, and proof relation; add and pass the nonzero WP32-BEH oracle, then close WP30 authority zero-state without restoring displaced authorities.",
-  "updated_at": "2026-09-01T17:03:22Z"
+  "next_action": "Revalidate and close WP30 and M03 against the successor-only authority zero state, positively denying removed activation authority without restoring it; then implement WP36 query/result coordination and close M04/DB10.",
+  "updated_at": "2026-09-01T18:01:01Z"
 }
