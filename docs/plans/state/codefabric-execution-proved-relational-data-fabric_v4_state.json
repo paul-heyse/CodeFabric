@@ -37,7 +37,7 @@
     },
     "WP31": {
       "status": "complete",
-      "proving_commit": "06a311276df3322e0cc5dc26178aa42cb8dd6c4e",
+      "proving_commit": "06a3112472a834262b9b45eaab0ea89b1c311c75",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -208,5 +208,5 @@
   "discovered_obligations": [],
   "plan_deviations": [],
   "next_action": "Execute WP32: implement lawful genesis, exact Delta activation selection, atomic workspace installation, and candidate-free reconstruction without receipt, cache, or latest authority.",
-  "updated_at": "2026-09-01T12:18:13Z"
+  "updated_at": "2026-09-01T12:20:37Z"
 }
