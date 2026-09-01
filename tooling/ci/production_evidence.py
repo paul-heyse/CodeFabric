@@ -85,7 +85,7 @@ EXPECTED_RECIPE_DEPENDENCIES = {
     CAUSAL_ORACLE: (
         INPUT_ORACLE,
         "provider-admission-exclusivity-check",
-        "authorized-child-schema-rejection-check",
+        "caller-defined-semantic-authority-denial-check",
         "analysis-causal-fault-check",
         "query-unknown-negative-proof-check",
         "activation-receipt-nonauthority-check",

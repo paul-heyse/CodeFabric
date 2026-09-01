@@ -13,11 +13,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use arrow_schema::SchemaRef;
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use datafusion::common::HashMap as DataFusionHashMap;
-use datafusion::common::TableReference;
 use datafusion::common::instant::Instant;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
+use datafusion::common::{Constraint, TableReference};
+use datafusion::datasource::source_as_provider;
 use datafusion::execution::SessionState;
 use datafusion::execution::cache::cache_manager::{
     CacheManagerConfig, CachedFileList, CachedFileMetadata, CachedFileMetadataEntry,
@@ -29,10 +30,13 @@ use datafusion::logical_expr::{Expr, LogicalPlan, TableScan, WindowFunctionDefin
 use object_store::path::Path as ObjectStorePath;
 
 use crate::relational_program::{CompilationObservations, RelationalProgram};
-use crate::schema_contract::SchemaContract;
+use crate::schema_contract::{
+    ColumnMappingMode, DeletionVectorBehavior, SchemaCompatibility, SchemaContract,
+};
 
 use super::activation::TableVersionSetRef;
 use super::command::EpochId;
+use super::programmatic_schema::registered_view_logical_plan;
 
 const COMPILED_PLAN_DIGEST_DOMAIN: &[u8] = b"codefabric.logical-plan.compiled.v1";
 const OPTIMIZED_PLAN_DIGEST_DOMAIN: &[u8] = b"codefabric.logical-plan.optimized.v1";
@@ -93,10 +97,6 @@ impl LogicalPlanAuthorityBuilder {
         self.frame(&value.to_be_bytes());
     }
 
-    pub(super) fn frame_debug(&mut self, value: &impl Debug) {
-        self.frame_str(&format!("{value:?}"));
-    }
-
     pub(super) fn frame_arc_identity<T: ?Sized>(&mut self, capability: &Arc<T>) {
         let data_address = Arc::as_ptr(capability) as *const () as usize;
         self.frame_usize(data_address);
@@ -107,6 +107,17 @@ impl LogicalPlanAuthorityBuilder {
             .map_err(|error| format!("canonical Arrow schema: {error}"))?;
         self.frame(&canonical);
         Ok(())
+    }
+
+    fn frame_data_type(&mut self, data_type: &DataType) -> Result<(), String> {
+        // Arrow's schema serde contract is the pinned, executable datatype encoding. A one-field
+        // schema avoids binding cache identity to the non-contractual Rust `Debug` rendering.
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "__codefabric_datatype__",
+            data_type.clone(),
+            true,
+        )]));
+        self.frame_schema(&schema)
     }
 
     pub(super) fn finish(self) -> LogicalPlanAuthorityFingerprint {
@@ -140,13 +151,48 @@ pub(super) fn frame_schema_contract(
         builder.frame_str(cast.storage_field_id());
         builder.frame_usize(cast.logical_index());
         builder.frame_usize(cast.storage_index());
-        builder.frame_debug(cast.logical_data_type());
-        builder.frame_debug(cast.storage_data_type());
+        builder.frame_data_type(cast.logical_data_type())?;
+        builder.frame_data_type(cast.storage_data_type())?;
     }
-    builder.frame_debug(contract.constraints());
-    builder.frame_debug(&contract.compatibility());
-    builder.frame_debug(&contract.column_mapping_mode());
-    builder.frame_debug(&contract.deletion_vector_behavior());
+    let constraints = contract
+        .constraints()
+        .as_ref()
+        .clone()
+        .into_iter()
+        .collect::<Vec<_>>();
+    builder.frame_usize(constraints.len());
+    for constraint in constraints {
+        match constraint {
+            Constraint::PrimaryKey(indices) => {
+                builder.frame(b"primary-key");
+                builder.frame_usize(indices.len());
+                for index in indices {
+                    builder.frame_usize(index);
+                }
+            }
+            Constraint::Unique(indices) => {
+                builder.frame(b"unique");
+                builder.frame_usize(indices.len());
+                for index in indices {
+                    builder.frame_usize(index);
+                }
+            }
+        }
+    }
+    builder.frame(match contract.compatibility() {
+        SchemaCompatibility::Exact => b"exact",
+        SchemaCompatibility::Contains => b"contains",
+    });
+    builder.frame(match contract.column_mapping_mode() {
+        ColumnMappingMode::Positional => b"positional",
+        ColumnMappingMode::Name => b"name",
+        ColumnMappingMode::FieldId => b"field-id",
+    });
+    builder.frame(match contract.deletion_vector_behavior() {
+        DeletionVectorBehavior::Forbidden => b"forbidden",
+        DeletionVectorBehavior::AppliedByProvider => b"applied-by-provider",
+        DeletionVectorBehavior::ExposedVisibilityColumn => b"exposed-visibility-column",
+    });
     Ok(())
 }
 
@@ -172,28 +218,25 @@ pub(super) fn frame_session_logical_authority(
         }
     }
 
+    // Analyzer, optimizer, and expression/relation planner sets are selected only by the
+    // compiled release. Their ordered names/counts plus the pinned crate and lock identities
+    // frame their semantics. Heap addresses would turn equivalent fresh child sessions into
+    // accidental cache misses. Function registries below are operational capabilities and retain
+    // exact Arc identity because policy may install a same-named replacement implementation.
     builder.frame_usize(state.analyzer().function_rewrites().len());
     for rewrite in state.analyzer().function_rewrites() {
-        builder.frame_debug(rewrite);
+        builder.frame_str(rewrite.name());
     }
     builder.frame_usize(state.analyzer().rules.len());
     for rule in &state.analyzer().rules {
         builder.frame_str(rule.name());
-        builder.frame_debug(rule);
     }
     builder.frame_usize(state.optimizers().len());
     for rule in state.optimizers() {
         builder.frame_str(rule.name());
-        builder.frame_debug(rule);
     }
     builder.frame_usize(state.expr_planners().len());
-    for planner in state.expr_planners() {
-        builder.frame_debug(planner);
-    }
     builder.frame_usize(state.relation_planners().len());
-    for planner in state.relation_planners() {
-        builder.frame_debug(planner);
-    }
 
     let mut scalar = state.scalar_functions().iter().collect::<Vec<_>>();
     scalar.sort_by(|(left, _), (right, _)| left.cmp(right));
@@ -201,7 +244,6 @@ pub(super) fn frame_session_logical_authority(
     for (installed_name, function) in scalar {
         builder.frame_str(installed_name);
         builder.frame_str(function.name());
-        builder.frame_debug(function.signature());
         let mut aliases = function.aliases().to_vec();
         aliases.sort();
         builder.frame_usize(aliases.len());
@@ -217,7 +259,6 @@ pub(super) fn frame_session_logical_authority(
     for (installed_name, function) in aggregate {
         builder.frame_str(installed_name);
         builder.frame_str(function.name());
-        builder.frame_debug(function.signature());
         let mut aliases = function.aliases().to_vec();
         aliases.sort();
         builder.frame_usize(aliases.len());
@@ -233,7 +274,6 @@ pub(super) fn frame_session_logical_authority(
     for (installed_name, function) in window {
         builder.frame_str(installed_name);
         builder.frame_str(function.name());
-        builder.frame_debug(function.signature());
         let mut aliases = function.aliases().to_vec();
         aliases.sort();
         builder.frame_usize(aliases.len());
@@ -261,6 +301,13 @@ pub(super) fn validate_logical_plan_references(
             && let Err(error) = validate_scan(scan)
         {
             drift = Some(error);
+            return Ok(TreeNodeRecursion::Stop);
+        }
+        if let LogicalPlan::Extension(extension) = node {
+            drift = Some(format!(
+                "cached logical plan retains unauthorized extension capability {}",
+                extension.node.name()
+            ));
             return Ok(TreeNodeRecursion::Stop);
         }
         for expression in node.expressions() {
@@ -948,12 +995,141 @@ impl LogicalPlanCacheKey {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RetainedLogicalCapability {
+    TableProvider {
+        table_name: TableReference,
+        data_address: usize,
+    },
+    TableSource {
+        table_name: TableReference,
+        data_address: usize,
+    },
+    ViewDefinition {
+        table_name: TableReference,
+        plan: Box<LogicalPlan>,
+    },
+    ScalarFunction {
+        name: Arc<str>,
+        data_address: usize,
+    },
+    AggregateFunction {
+        name: Arc<str>,
+        data_address: usize,
+    },
+    WindowFunction {
+        name: Arc<str>,
+        data_address: usize,
+    },
+}
+
+impl RetainedLogicalCapability {
+    fn accounted_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + match self {
+                Self::TableProvider { table_name, .. } | Self::TableSource { table_name, .. } => {
+                    table_name.to_string().len()
+                }
+                Self::ViewDefinition { table_name, plan } => table_name
+                    .to_string()
+                    .len()
+                    .saturating_add(plan.display_indent_schema().to_string().len()),
+                Self::ScalarFunction { name, .. }
+                | Self::AggregateFunction { name, .. }
+                | Self::WindowFunction { name, .. } => name.len(),
+            }
+    }
+}
+
+fn arc_data_address<T: ?Sized>(capability: &Arc<T>) -> usize {
+    Arc::as_ptr(capability) as *const () as usize
+}
+
+fn retained_logical_capabilities(plan: &LogicalPlan) -> Vec<RetainedLogicalCapability> {
+    fn collect(
+        plan: &LogicalPlan,
+        capabilities: &mut Vec<RetainedLogicalCapability>,
+        provider_stack: &mut Vec<usize>,
+    ) -> datafusion::common::Result<()> {
+        plan.apply_with_subqueries(|node| {
+            if let LogicalPlan::TableScan(scan) = node {
+                if let Ok(provider) = source_as_provider(&scan.source) {
+                    let provider_address = arc_data_address(&provider);
+                    if !provider_stack.contains(&provider_address)
+                        && let Some(definition) = registered_view_logical_plan(provider.as_ref())
+                    {
+                        capabilities.push(RetainedLogicalCapability::ViewDefinition {
+                            table_name: scan.table_name.clone(),
+                            plan: Box::new(definition.clone()),
+                        });
+                        provider_stack.push(provider_address);
+                        collect(&definition, capabilities, provider_stack)?;
+                        let removed = provider_stack.pop();
+                        debug_assert_eq!(removed, Some(provider_address));
+                    } else {
+                        capabilities.push(RetainedLogicalCapability::TableProvider {
+                            table_name: scan.table_name.clone(),
+                            data_address: provider_address,
+                        });
+                    }
+                } else {
+                    capabilities.push(RetainedLogicalCapability::TableSource {
+                        table_name: scan.table_name.clone(),
+                        data_address: arc_data_address(&scan.source),
+                    });
+                }
+            }
+            for expression in node.expressions() {
+                expression.apply(|candidate| {
+                    match candidate {
+                        Expr::ScalarFunction(function) => {
+                            capabilities.push(RetainedLogicalCapability::ScalarFunction {
+                                name: Arc::from(function.func.name()),
+                                data_address: arc_data_address(&function.func),
+                            });
+                        }
+                        Expr::AggregateFunction(function) => {
+                            capabilities.push(RetainedLogicalCapability::AggregateFunction {
+                                name: Arc::from(function.func.name()),
+                                data_address: arc_data_address(&function.func),
+                            });
+                        }
+                        Expr::WindowFunction(function) => match &function.fun {
+                            WindowFunctionDefinition::AggregateUDF(aggregate) => {
+                                capabilities.push(RetainedLogicalCapability::AggregateFunction {
+                                    name: Arc::from(aggregate.name()),
+                                    data_address: arc_data_address(aggregate),
+                                });
+                            }
+                            WindowFunctionDefinition::WindowUDF(window) => {
+                                capabilities.push(RetainedLogicalCapability::WindowFunction {
+                                    name: Arc::from(window.name()),
+                                    data_address: arc_data_address(window),
+                                });
+                            }
+                        },
+                        _ => {}
+                    }
+                    Ok(TreeNodeRecursion::Continue)
+                })?;
+            }
+            Ok(TreeNodeRecursion::Continue)
+        })?;
+        Ok(())
+    }
+
+    let mut capabilities = Vec::new();
+    collect(plan, &mut capabilities, &mut Vec::new())
+        .expect("logical capability collection is an infallible tree traversal");
+    capabilities
+}
+
 /// Reconstructible native plans and their causal compiler observations.
 ///
-/// `resident_bytes` is a deterministic retained-materialization measure: the owned plan values,
-/// their complete schema-bearing renderings, output schema, and compiler observations. Shared
-/// provider capabilities are authority references rather than cache-owned allocations and are not
-/// charged again here.
+/// `accounted_bytes` is a deterministic cache-pressure estimate over the owned plan values, their
+/// complete schema-bearing renderings, output schema, and compiler observations. It is deliberately
+/// not presented as allocator-observed resident memory: shared provider capabilities are authority
+/// references rather than cache-owned allocations and their heap allocations are not charged here.
 #[derive(Clone, Debug)]
 pub(super) struct CachedLogicalPlan {
     compiled_plan: LogicalPlan,
@@ -962,9 +1138,9 @@ pub(super) struct CachedLogicalPlan {
     observations: CompilationObservations,
     compiled_plan_digest: [u8; 32],
     optimized_plan_digest: [u8; 32],
-    compiled_plan_encoding: Arc<str>,
-    optimized_plan_encoding: Arc<str>,
-    resident_bytes: usize,
+    compiled_capabilities: Arc<[RetainedLogicalCapability]>,
+    optimized_capabilities: Arc<[RetainedLogicalCapability]>,
+    accounted_bytes: usize,
 }
 
 impl CachedLogicalPlan {
@@ -982,9 +1158,25 @@ impl CachedLogicalPlan {
             logical_plan_digest(COMPILED_PLAN_DIGEST_DOMAIN, &compiled_plan_encoding);
         let optimized_plan_digest =
             logical_plan_digest(OPTIMIZED_PLAN_DIGEST_DOMAIN, &optimized_plan_encoding);
-        let resident_bytes = std::mem::size_of::<Self>()
+        let compiled_capabilities: Arc<[RetainedLogicalCapability]> =
+            retained_logical_capabilities(&compiled_plan).into();
+        let optimized_capabilities: Arc<[RetainedLogicalCapability]> =
+            retained_logical_capabilities(&optimized_plan).into();
+        let accounted_bytes = std::mem::size_of::<Self>()
             .saturating_add(compiled_plan_encoding.len())
             .saturating_add(optimized_plan_encoding.len())
+            .saturating_add(
+                compiled_capabilities
+                    .iter()
+                    .map(RetainedLogicalCapability::accounted_bytes)
+                    .sum::<usize>(),
+            )
+            .saturating_add(
+                optimized_capabilities
+                    .iter()
+                    .map(RetainedLogicalCapability::accounted_bytes)
+                    .sum::<usize>(),
+            )
             .saturating_add(format!("{output_schema:?}").len())
             .saturating_add(format!("{observations:?}").len());
         Self {
@@ -994,9 +1186,9 @@ impl CachedLogicalPlan {
             observations,
             compiled_plan_digest,
             optimized_plan_digest,
-            compiled_plan_encoding,
-            optimized_plan_encoding,
-            resident_bytes,
+            compiled_capabilities,
+            optimized_capabilities,
+            accounted_bytes,
         }
     }
 
@@ -1031,13 +1223,15 @@ impl CachedLogicalPlan {
     }
 
     #[must_use]
-    pub(super) const fn resident_bytes(&self) -> usize {
-        self.resident_bytes
+    pub(super) const fn accounted_bytes(&self) -> usize {
+        self.accounted_bytes
     }
 
     fn same_materialization(&self, other: &Self) -> bool {
-        self.compiled_plan_encoding == other.compiled_plan_encoding
-            && self.optimized_plan_encoding == other.optimized_plan_encoding
+        self.compiled_plan == other.compiled_plan
+            && self.optimized_plan == other.optimized_plan
+            && self.compiled_capabilities == other.compiled_capabilities
+            && self.optimized_capabilities == other.optimized_capabilities
             && self.output_schema == other.output_schema
             && self.observations == other.observations
     }
@@ -1060,12 +1254,14 @@ pub struct LogicalPlanExecutionObservation {
 }
 
 /// Read-only aggregate cache counters suitable for a system relation.
+///
+/// The byte fields are deterministic pressure-accounting units, not allocator-observed memory.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LogicalPlanCacheObservation {
     pub capacity_entries: usize,
-    pub capacity_bytes: usize,
+    pub accounting_capacity_bytes: usize,
     pub resident_entries: usize,
-    pub resident_bytes: usize,
+    pub accounted_bytes: usize,
     pub hits: u64,
     pub misses: u64,
     pub evictions: u64,
@@ -1077,7 +1273,7 @@ pub struct LogicalPlanCacheObservation {
 struct ResidentPlan {
     entry: Arc<CachedLogicalPlan>,
     last_used: u64,
-    resident_bytes: usize,
+    accounted_bytes: usize,
 }
 
 #[derive(Debug, Default)]
@@ -1088,7 +1284,7 @@ struct LogicalPlanCacheState {
     evictions: u64,
     oversized_bypasses: u64,
     collisions: u64,
-    resident_bytes: usize,
+    accounted_bytes: usize,
     entries: HashMap<LogicalPlanCacheKey, ResidentPlan>,
 }
 
@@ -1109,17 +1305,17 @@ pub enum LogicalPlanCacheError {
 #[derive(Debug)]
 pub(super) struct EpochLogicalPlanCache {
     capacity_entries: NonZeroUsize,
-    capacity_bytes: NonZeroUsize,
+    accounting_capacity_bytes: NonZeroUsize,
     state: Mutex<LogicalPlanCacheState>,
 }
 
 impl EpochLogicalPlanCache {
-    pub(super) fn new(capacity_entries: usize, capacity_bytes: usize) -> Self {
+    pub(super) fn new(capacity_entries: usize, accounting_capacity_bytes: usize) -> Self {
         Self {
             capacity_entries: NonZeroUsize::new(capacity_entries)
                 .expect("cache policy construction guarantees a non-zero entry capacity"),
-            capacity_bytes: NonZeroUsize::new(capacity_bytes)
-                .expect("cache policy construction guarantees a non-zero byte capacity"),
+            accounting_capacity_bytes: NonZeroUsize::new(accounting_capacity_bytes)
+                .expect("cache policy construction guarantees a non-zero accounting capacity"),
             state: Mutex::new(LogicalPlanCacheState::default()),
         }
     }
@@ -1156,13 +1352,14 @@ impl EpochLogicalPlanCache {
             return Ok(Arc::clone(&resident.entry));
         }
         let entry = Arc::new(entry);
-        let entry_bytes = entry.resident_bytes();
-        if entry_bytes > self.capacity_bytes.get() {
+        let entry_bytes = entry.accounted_bytes();
+        if entry_bytes > self.accounting_capacity_bytes.get() {
             state.oversized_bypasses = state.oversized_bypasses.saturating_add(1);
             return Ok(entry);
         }
         while state.entries.len() >= self.capacity_entries.get()
-            || state.resident_bytes.saturating_add(entry_bytes) > self.capacity_bytes.get()
+            || state.accounted_bytes.saturating_add(entry_bytes)
+                > self.accounting_capacity_bytes.get()
         {
             let Some(eviction_key) = state
                 .entries
@@ -1173,17 +1370,19 @@ impl EpochLogicalPlanCache {
                 break;
             };
             if let Some(evicted) = state.entries.remove(&eviction_key) {
-                state.resident_bytes = state.resident_bytes.saturating_sub(evicted.resident_bytes);
+                state.accounted_bytes = state
+                    .accounted_bytes
+                    .saturating_sub(evicted.accounted_bytes);
             }
             state.evictions = state.evictions.saturating_add(1);
         }
-        state.resident_bytes = state.resident_bytes.saturating_add(entry_bytes);
+        state.accounted_bytes = state.accounted_bytes.saturating_add(entry_bytes);
         state.entries.insert(
             key,
             ResidentPlan {
                 entry: Arc::clone(&entry),
                 last_used: clock,
-                resident_bytes: entry_bytes,
+                accounted_bytes: entry_bytes,
             },
         );
         Ok(entry)
@@ -1194,9 +1393,9 @@ impl EpochLogicalPlanCache {
         let state = self.lock_state();
         LogicalPlanCacheObservation {
             capacity_entries: self.capacity_entries.get(),
-            capacity_bytes: self.capacity_bytes.get(),
+            accounting_capacity_bytes: self.accounting_capacity_bytes.get(),
             resident_entries: state.entries.len(),
-            resident_bytes: state.resident_bytes,
+            accounted_bytes: state.accounted_bytes,
             hits: state.hits,
             misses: state.misses,
             evictions: state.evictions,
@@ -1236,13 +1435,75 @@ fn logical_plan_digest(domain: &[u8], rendered: &str) -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
-    use datafusion::logical_expr::LogicalPlanBuilder;
+    use std::cmp::Ordering as CmpOrdering;
+    use std::fmt;
+
+    use arrow_array::RecordBatch;
+    use datafusion::common::{Constraints, DFSchema, DFSchemaRef};
+    use datafusion::datasource::{MemTable, TableProvider, provider_as_source};
+    use datafusion::logical_expr::{Extension, LogicalPlanBuilder, UserDefinedLogicalNodeCore};
+    use datafusion::prelude::SessionContext;
 
     use super::*;
     use crate::relational_program::{FieldId, RelationId, RelationalExpression};
+    use crate::schema_contract::{FieldIndexMapping, SchemaContractOptions};
 
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     struct TestNativeCacheKey(u8);
+
+    #[derive(Eq, Hash, PartialEq)]
+    struct OpaqueTestExtension {
+        schema: DFSchemaRef,
+    }
+
+    impl fmt::Debug for OpaqueTestExtension {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("OpaqueTestExtension")
+        }
+    }
+
+    impl PartialOrd for OpaqueTestExtension {
+        fn partial_cmp(&self, _other: &Self) -> Option<CmpOrdering> {
+            Some(CmpOrdering::Equal)
+        }
+    }
+
+    impl UserDefinedLogicalNodeCore for OpaqueTestExtension {
+        fn name(&self) -> &str {
+            "OpaqueTestExtension"
+        }
+
+        fn inputs(&self) -> Vec<&LogicalPlan> {
+            Vec::new()
+        }
+
+        fn schema(&self) -> &DFSchemaRef {
+            &self.schema
+        }
+
+        fn expressions(&self) -> Vec<Expr> {
+            Vec::new()
+        }
+
+        fn fmt_for_explain(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.name())
+        }
+
+        fn with_exprs_and_inputs(
+            &self,
+            expressions: Vec<Expr>,
+            inputs: Vec<LogicalPlan>,
+        ) -> datafusion::common::Result<Self> {
+            if !expressions.is_empty() || !inputs.is_empty() {
+                return datafusion::common::internal_err!(
+                    "opaque test extension accepts no expressions or inputs"
+                );
+            }
+            Ok(Self {
+                schema: Arc::clone(&self.schema),
+            })
+        }
+    }
 
     impl CacheKey for TestNativeCacheKey {
         fn size(&self) -> usize {
@@ -1268,6 +1529,79 @@ mod tests {
 
     fn native_value(id: u8, bytes: usize) -> TestNativeCacheValue {
         TestNativeCacheValue { id, bytes }
+    }
+
+    fn schema_contract_authority(options: SchemaContractOptions) -> [u8; 32] {
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::UInt64, false)]));
+        let contract = SchemaContract::try_new_with_options(
+            "test.schema.v1",
+            TableReference::bare("facts"),
+            Arc::clone(&schema),
+            schema,
+            vec![FieldIndexMapping::direct(0, 0)],
+            options,
+        )
+        .unwrap();
+        let mut builder = LogicalPlanAuthorityBuilder::new(b"schema-contract-test");
+        frame_schema_contract(&mut builder, "facts", &contract).unwrap();
+        *builder.finish().as_bytes()
+    }
+
+    #[test]
+    fn schema_contract_cache_identity_frames_typed_policy_without_debug_text() {
+        let exact = schema_contract_authority(SchemaContractOptions::new(
+            Constraints::default(),
+            SchemaCompatibility::Exact,
+            ColumnMappingMode::Positional,
+            DeletionVectorBehavior::Forbidden,
+        ));
+        let constrained = schema_contract_authority(SchemaContractOptions::new(
+            Constraints::new_unverified(vec![Constraint::PrimaryKey(vec![0])]),
+            SchemaCompatibility::Exact,
+            ColumnMappingMode::Positional,
+            DeletionVectorBehavior::Forbidden,
+        ));
+        let contains = schema_contract_authority(SchemaContractOptions::new(
+            Constraints::default(),
+            SchemaCompatibility::Contains,
+            ColumnMappingMode::Positional,
+            DeletionVectorBehavior::Forbidden,
+        ));
+        let field_id = schema_contract_authority(SchemaContractOptions::new(
+            Constraints::default(),
+            SchemaCompatibility::Exact,
+            ColumnMappingMode::FieldId,
+            DeletionVectorBehavior::Forbidden,
+        ));
+        let deletion_vectors = schema_contract_authority(SchemaContractOptions::new(
+            Constraints::default(),
+            SchemaCompatibility::Exact,
+            ColumnMappingMode::Positional,
+            DeletionVectorBehavior::AppliedByProvider,
+        ));
+
+        assert_ne!(exact, constrained);
+        assert_ne!(exact, contains);
+        assert_ne!(exact, field_id);
+        assert_ne!(exact, deletion_vectors);
+    }
+
+    #[test]
+    fn cached_plan_reference_validation_rejects_opaque_extension_capabilities() {
+        let plan = LogicalPlan::Extension(Extension {
+            node: Arc::new(OpaqueTestExtension {
+                schema: Arc::new(DFSchema::empty()),
+            }),
+        });
+        let state = SessionContext::new().state();
+
+        let error = validate_logical_plan_references(&plan, &state, false, |_| Ok(()))
+            .expect_err("an unregistered extension node must fail closed");
+
+        assert_eq!(
+            error,
+            "cached logical plan retains unauthorized extension capability OpaqueTestExtension"
+        );
     }
 
     #[test]
@@ -1446,9 +1780,9 @@ mod tests {
             cache.observation(),
             LogicalPlanCacheObservation {
                 capacity_entries: 1,
-                capacity_bytes: usize::MAX,
+                accounting_capacity_bytes: usize::MAX,
                 resident_entries: 1,
-                resident_bytes: entry().resident_bytes(),
+                accounted_bytes: entry().accounted_bytes(),
                 hits: 1,
                 misses: 2,
                 evictions: 1,
@@ -1482,15 +1816,15 @@ mod tests {
             Arc::new(plan.schema().as_arrow().clone()),
             CompilationObservations::default(),
         );
-        assert!(entry.resident_bytes() > 1);
+        assert!(entry.accounted_bytes() > 1);
         let cache = EpochLogicalPlanCache::new(4, 1);
 
         let returned = cache.try_insert(key.clone(), entry).unwrap();
-        assert!(returned.resident_bytes() > 1);
+        assert!(returned.accounted_bytes() > 1);
         assert!(cache.get(&key).is_none());
         let observation = cache.observation();
         assert_eq!(observation.resident_entries, 0);
-        assert_eq!(observation.resident_bytes, 0);
+        assert_eq!(observation.accounted_bytes, 0);
         assert_eq!(observation.oversized_bypasses, 1);
     }
 
@@ -1533,6 +1867,87 @@ mod tests {
                     different.clone(),
                     different.clone(),
                     Arc::new(different.schema().as_arrow().clone()),
+                    CompilationObservations::default(),
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(error, LogicalPlanCacheError::MaterializationCollision);
+        assert_eq!(cache.observation().collisions, 1);
+    }
+
+    #[test]
+    fn logical_plan_cache_does_not_treat_equal_renderings_as_equal_capabilities() {
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::UInt64, false)]));
+        let first_provider: Arc<dyn TableProvider> = Arc::new(
+            MemTable::try_new(Arc::clone(&schema), vec![Vec::new()])
+                .expect("one-empty-partition table"),
+        );
+        let second_provider: Arc<dyn TableProvider> = Arc::new(
+            MemTable::try_new(
+                Arc::clone(&schema),
+                vec![vec![RecordBatch::new_empty(Arc::clone(&schema))]],
+            )
+            .expect("one-empty-batch table"),
+        );
+        let first = LogicalPlanBuilder::scan("facts", provider_as_source(first_provider), None)
+            .unwrap()
+            .build()
+            .unwrap();
+        let second = LogicalPlanBuilder::scan("facts", provider_as_source(second_provider), None)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            first.display_indent_schema().to_string(),
+            second.display_indent_schema().to_string(),
+            "the diagnostic rendering deliberately cannot expose provider capability identity"
+        );
+        assert_eq!(
+            first, second,
+            "DataFusion plan equality deliberately omits provider capability identity"
+        );
+        assert_ne!(
+            retained_logical_capabilities(&first),
+            retained_logical_capabilities(&second),
+            "CodeFabric collision equality must retain exact provider capabilities"
+        );
+
+        let program = RelationalProgram {
+            root: RelationalExpression::Input(RelationId::new("facts").unwrap()),
+            output_fields: vec![FieldId::new("facts.id").unwrap()],
+        };
+        let mut authority = LogicalPlanAuthorityBuilder::new(b"cache-render-collision.v1");
+        authority.frame(b"same-complete-key");
+        let key = LogicalPlanCacheKey::new(
+            EpochId::from_bytes([5; 16]),
+            TableVersionSetRef::from_bytes([5; 32]),
+            "authority",
+            "runtime",
+            authority.finish(),
+            LogicalPlanCacheScope::Epoch,
+            &program,
+        );
+        let cache = EpochLogicalPlanCache::new(2, usize::MAX);
+        cache
+            .try_insert(
+                key.clone(),
+                CachedLogicalPlan::new(
+                    first.clone(),
+                    first,
+                    Arc::clone(&schema),
+                    CompilationObservations::default(),
+                ),
+            )
+            .unwrap();
+
+        let error = cache
+            .try_insert(
+                key,
+                CachedLogicalPlan::new(
+                    second.clone(),
+                    second,
+                    schema,
                     CompilationObservations::default(),
                 ),
             )

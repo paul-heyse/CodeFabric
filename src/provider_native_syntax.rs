@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use arrow_array::builder::{BooleanBuilder, FixedSizeBinaryBuilder, StringBuilder};
 use arrow_array::{ArrayRef, RecordBatch, StringArray, UInt16Array, UInt32Array, UInt64Array};
-use arrow_schema::{ArrowError, DataType, Field, Schema};
+use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
 use thiserror::Error;
 
 use crate::cancellation::Cancellation;
@@ -217,6 +217,15 @@ impl NativeSyntaxRelation {
             Self::RuffImport => "provider.ruff.import",
             Self::RuffExport => "provider.ruff.export",
         }
+    }
+
+    /// Return the exact application-owned Arrow schema compiled for this relation.
+    ///
+    /// Batch construction consumes the same schema, so schema-only contract compilation cannot
+    /// drift from a provider-emitted relation or require executing a provider on fabricated source.
+    #[must_use]
+    pub(crate) fn schema(self) -> SchemaRef {
+        native_relation_schema(self)
     }
 }
 
@@ -677,27 +686,6 @@ fn run_batch(
         relation,
         1,
         vec![
-            typed_field(
-                "provider_revision",
-                DataType::UInt64,
-                false,
-                "provider-local-revision",
-            ),
-            typed_field("catalog_id", DataType::Utf8, false, "provider-catalog-id"),
-            typed_field(
-                "inventory_fingerprint",
-                DataType::Utf8,
-                false,
-                "provider-inventory-fingerprint",
-            ),
-            typed_field(
-                "grammar_release",
-                DataType::Utf8,
-                true,
-                "provider-grammar-release",
-            ),
-        ],
-        vec![
             Arc::new(UInt64Array::from(vec![provider_revision])),
             Arc::new(StringArray::from(vec![catalog_id])),
             Arc::new(StringArray::from(vec![inventory_fingerprint])),
@@ -715,33 +703,6 @@ fn coverage_batch(
         pin,
         relation,
         rows.len(),
-        vec![
-            typed_field("family", DataType::Utf8, false, "provider-api-family"),
-            typed_field(
-                "requested_units",
-                DataType::UInt64,
-                false,
-                "coverage-requested",
-            ),
-            typed_field(
-                "completed_units",
-                DataType::UInt64,
-                false,
-                "coverage-completed",
-            ),
-            typed_field(
-                "terminal_status",
-                DataType::Utf8,
-                false,
-                "coverage-terminal",
-            ),
-            typed_field(
-                "remainder_reason",
-                DataType::Utf8,
-                true,
-                "coverage-remainder-reason",
-            ),
-        ],
         vec![
             utf8(rows, |row| Some(row.family)),
             Arc::new(UInt64Array::from_iter_values(
@@ -766,11 +727,6 @@ fn remainder_batch(
         relation,
         rows.len(),
         vec![
-            typed_field("family", DataType::Utf8, false, "provider-api-family"),
-            typed_field("reason", DataType::Utf8, false, "remainder-reason"),
-            typed_field("detail", DataType::Utf8, false, "bounded-diagnostic"),
-        ],
-        vec![
             utf8(rows, |row| Some(row.family)),
             utf8(rows, |row| Some(row.reason)),
             utf8(rows, |row| Some(row.detail)),
@@ -787,42 +743,6 @@ fn tree_node_batch(
         pin,
         NativeSyntaxRelation::TreeSitterCstNode,
         rows.len(),
-        vec![
-            typed_field(
-                "provider_local_node_id",
-                DataType::UInt64,
-                false,
-                "provider-local-id",
-            ),
-            typed_field(
-                "parent_provider_local_node_id",
-                DataType::UInt64,
-                true,
-                "provider-local-id",
-            ),
-            typed_field(
-                "raw_kind_id",
-                DataType::UInt16,
-                false,
-                "provider-native-kind-id",
-            ),
-            typed_field("raw_kind", DataType::Utf8, false, "provider-native-kind"),
-            typed_field("field_name", DataType::Utf8, true, "provider-native-field"),
-            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
-            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
-            typed_field("named", DataType::Boolean, false, "provider-native-flag"),
-            typed_field("extra", DataType::Boolean, false, "provider-native-flag"),
-            typed_field("error", DataType::Boolean, false, "provider-native-flag"),
-            typed_field("missing", DataType::Boolean, false, "provider-native-flag"),
-            typed_field("ordinal", DataType::UInt32, false, "provider-local-ordinal"),
-            typed_field("depth", DataType::UInt16, false, "provider-local-depth"),
-            typed_field(
-                "raw_kind_disposition",
-                DataType::Utf8,
-                false,
-                "raw-kind-disposition",
-            ),
-        ],
         vec![
             Arc::new(UInt64Array::from_iter_values(
                 rows.iter().map(|row| row.id.0),
@@ -868,16 +788,6 @@ fn tree_changed_range_batch(
         NativeSyntaxRelation::TreeSitterChangedRange,
         rows.len(),
         vec![
-            typed_field(
-                "range_ordinal",
-                DataType::UInt32,
-                false,
-                "provider-local-ordinal",
-            ),
-            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
-            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
-        ],
-        vec![
             Arc::new(UInt32Array::from_iter_values(
                 (0..rows.len()).map(|value| u32::try_from(value).unwrap_or(u32::MAX)),
             )),
@@ -905,23 +815,6 @@ fn tree_recovery_batch(
         NativeSyntaxRelation::TreeSitterRecoveryDiagnostic,
         rows.len(),
         vec![
-            typed_field(
-                "provider_local_node_id",
-                DataType::UInt64,
-                false,
-                "provider-local-id",
-            ),
-            typed_field(
-                "recovery_kind",
-                DataType::Utf8,
-                false,
-                "provider-native-recovery-kind",
-            ),
-            typed_field("raw_kind", DataType::Utf8, false, "provider-native-kind"),
-            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
-            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
-        ],
-        vec![
             Arc::new(UInt64Array::from_iter_values(
                 rows.iter().map(|row| row.id.0),
             )),
@@ -945,54 +838,6 @@ fn ruff_token_batch(pin: RelationPin<'_>, ruff: &RuffSnapshot) -> Result<RecordB
         pin,
         NativeSyntaxRelation::RuffToken,
         rows.len(),
-        vec![
-            typed_field(
-                "token_ordinal",
-                DataType::UInt32,
-                false,
-                "provider-local-ordinal",
-            ),
-            typed_field(
-                "raw_kind_id",
-                DataType::UInt16,
-                false,
-                "provider-native-kind-id",
-            ),
-            typed_field("raw_kind", DataType::Utf8, false, "provider-native-kind"),
-            typed_field("token_class", DataType::Utf8, false, "provider-token-class"),
-            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
-            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
-            typed_field(
-                "line",
-                DataType::UInt32,
-                false,
-                "provider-native-coordinate",
-            ),
-            typed_field(
-                "column",
-                DataType::UInt32,
-                false,
-                "provider-native-coordinate",
-            ),
-            typed_field(
-                "spelling_kind",
-                DataType::Utf8,
-                true,
-                "provider-spelling-kind",
-            ),
-            typed_field(
-                "spelling_value",
-                DataType::Utf8,
-                true,
-                "provider-spelling-or-digest",
-            ),
-            typed_field(
-                "provider_local_ast_id",
-                DataType::UInt64,
-                true,
-                "provider-local-id",
-            ),
-        ],
         vec![
             Arc::new(UInt32Array::from_iter_values(
                 rows.iter().map(|row| row.ordinal),
@@ -1044,22 +889,6 @@ fn ruff_comment_batch(
         NativeSyntaxRelation::RuffComment,
         rows.len(),
         vec![
-            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
-            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
-            typed_field(
-                "placement",
-                DataType::Utf8,
-                false,
-                "provider-comment-placement",
-            ),
-            typed_field(
-                "block_member",
-                DataType::Boolean,
-                false,
-                "provider-native-flag",
-            ),
-        ],
-        vec![
             Arc::new(UInt64Array::from_iter_values(
                 rows.iter().map(|row| row.start_byte),
             )),
@@ -1081,22 +910,6 @@ fn ruff_directive_batch(
         pin,
         NativeSyntaxRelation::RuffDirective,
         rows.len(),
-        vec![
-            typed_field(
-                "directive_kind",
-                DataType::Utf8,
-                false,
-                "provider-directive-kind",
-            ),
-            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
-            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
-            typed_field(
-                "provider_local_target_id",
-                DataType::UInt64,
-                true,
-                "provider-local-id",
-            ),
-        ],
         vec![
             utf8(rows, |row| Some(ruff_directive_kind(row.kind))),
             Arc::new(UInt64Array::from_iter_values(
@@ -1120,28 +933,6 @@ fn ruff_string_batch(pin: RelationPin<'_>, ruff: &RuffSnapshot) -> Result<Record
         pin,
         NativeSyntaxRelation::RuffStringRegion,
         rows.len(),
-        vec![
-            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
-            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
-            typed_field(
-                "multiline",
-                DataType::Boolean,
-                false,
-                "provider-native-flag",
-            ),
-            typed_field(
-                "interpolated",
-                DataType::Boolean,
-                false,
-                "provider-native-flag",
-            ),
-            typed_field(
-                "provider_local_ast_id",
-                DataType::UInt64,
-                true,
-                "provider-local-id",
-            ),
-        ],
         vec![
             Arc::new(UInt64Array::from_iter_values(
                 rows.iter().map(|row| row.start_byte),
@@ -1170,16 +961,6 @@ fn ruff_docstring_batch(
         NativeSyntaxRelation::RuffDocstring,
         rows.len(),
         vec![
-            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
-            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
-            typed_field(
-                "provider_local_owner_id",
-                DataType::UInt64,
-                false,
-                "provider-local-id",
-            ),
-        ],
-        vec![
             Arc::new(UInt64Array::from_iter_values(
                 rows.iter().map(|row| row.start_byte),
             )),
@@ -1202,12 +983,6 @@ fn ruff_continuation_batch(
         pin,
         NativeSyntaxRelation::RuffContinuationLine,
         rows.len(),
-        vec![typed_field(
-            "start_byte",
-            DataType::UInt64,
-            false,
-            "source-byte-start",
-        )],
         vec![Arc::new(UInt64Array::from_iter_values(
             rows.iter().copied(),
         ))],
@@ -1221,6 +996,565 @@ fn ruff_ast_batch(pin: RelationPin<'_>, ruff: &RuffSnapshot) -> Result<RecordBat
         NativeSyntaxRelation::RuffAstNode,
         rows.len(),
         vec![
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.id.0),
+            )),
+            Arc::new(UInt64Array::from(
+                rows.iter()
+                    .map(|row| row.parent.map(|id| id.0))
+                    .collect::<Vec<_>>(),
+            )),
+            Arc::new(UInt16Array::from_iter_values(
+                rows.iter().map(|row| row.raw_kind_id),
+            )),
+            utf8(rows, |row| Some(row.raw_kind.as_str())),
+            utf8(rows, |row| Some(ruff_ast_category(row.category))),
+            utf8(rows, |row| row.child_role.map(ruff_child_role)),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.start_byte),
+            )),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.end_byte),
+            )),
+            Arc::new(UInt32Array::from_iter_values(
+                rows.iter().map(|row| row.line),
+            )),
+            Arc::new(UInt32Array::from_iter_values(
+                rows.iter().map(|row| row.column),
+            )),
+            Arc::new(UInt32Array::from_iter_values(
+                rows.iter().map(|row| row.child_ordinal),
+            )),
+            Arc::new(UInt32Array::from_iter_values(
+                rows.iter().map(|row| row.source_ordinal),
+            )),
+            Arc::new(UInt32Array::from(
+                rows.iter()
+                    .map(|row| row.evaluation_ordinal)
+                    .collect::<Vec<_>>(),
+            )),
+            bools(rows, |row| row.explicit_parenthesized),
+            utf8(rows, |row| Some(raw_kind_disposition(row.disposition))),
+        ],
+    )
+}
+
+fn ruff_diagnostic_batch(
+    pin: RelationPin<'_>,
+    ruff: &RuffSnapshot,
+) -> Result<RecordBatch, ArrowError> {
+    let rows = ruff.diagnostics.as_ref();
+    batch(
+        pin,
+        NativeSyntaxRelation::RuffParseDiagnostic,
+        rows.len(),
+        vec![
+            Arc::new(UInt32Array::from_iter_values(
+                (0..rows.len()).map(|value| u32::try_from(value).unwrap_or(u32::MAX)),
+            )),
+            utf8(rows, |row| Some(ruff_diagnostic_kind(row.kind))),
+            utf8(rows, |row| Some(row.message.as_str())),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.start_byte),
+            )),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.end_byte),
+            )),
+        ],
+    )
+}
+
+fn ruff_diagnostic_evidence_batch(
+    pin: RelationPin<'_>,
+    ruff: &RuffSnapshot,
+) -> Result<RecordBatch, ArrowError> {
+    let rows = ruff
+        .diagnostics
+        .iter()
+        .enumerate()
+        .flat_map(|(diagnostic, row)| {
+            row.tree_sitter_recovery_ids
+                .iter()
+                .map(move |tree_id| (diagnostic, tree_id.0))
+        })
+        .collect::<Vec<_>>();
+    batch(
+        pin,
+        NativeSyntaxRelation::RuffDiagnosticRecoveryEvidence,
+        rows.len(),
+        vec![
+            Arc::new(UInt32Array::from_iter_values(
+                rows.iter()
+                    .map(|(ordinal, _)| u32::try_from(*ordinal).unwrap_or(u32::MAX)),
+            )),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|(_, tree_id)| *tree_id),
+            )),
+        ],
+    )
+}
+
+fn insert_semantic_relations(
+    relations: &mut BTreeMap<NativeSyntaxRelation, RecordBatch>,
+    pin: RelationPin<'_>,
+    semantics: Option<&PythonFrontendBatch>,
+) -> Result<(), ArrowError> {
+    insert(
+        relations,
+        NativeSyntaxRelation::RuffScope,
+        ruff_scope_batch(pin, semantics)?,
+    );
+    insert(
+        relations,
+        NativeSyntaxRelation::RuffBinding,
+        ruff_binding_batch(pin, semantics)?,
+    );
+    insert(
+        relations,
+        NativeSyntaxRelation::RuffReference,
+        ruff_reference_batch(pin, semantics)?,
+    );
+    insert(
+        relations,
+        NativeSyntaxRelation::RuffUnknownSymbol,
+        ruff_unknown_symbol_batch(pin, semantics)?,
+    );
+    insert(
+        relations,
+        NativeSyntaxRelation::RuffSemanticEdge,
+        ruff_semantic_edge_batch(pin, semantics)?,
+    );
+    insert(
+        relations,
+        NativeSyntaxRelation::RuffImport,
+        ruff_import_batch(pin, semantics)?,
+    );
+    insert(
+        relations,
+        NativeSyntaxRelation::RuffExport,
+        ruff_export_batch(pin, semantics)?,
+    );
+    Ok(())
+}
+
+fn ruff_scope_batch(
+    pin: RelationPin<'_>,
+    semantics: Option<&PythonFrontendBatch>,
+) -> Result<RecordBatch, ArrowError> {
+    let rows = semantics.map_or(&[][..], |batch| batch.scopes.as_slice());
+    batch(
+        pin,
+        NativeSyntaxRelation::RuffScope,
+        rows.len(),
+        vec![
+            fixed16(rows, |row| Some(&row.scope_id)),
+            fixed16(rows, |row| row.parent_scope_id.as_ref()),
+            utf8(rows, |row| Some(python_scope_kind(row.kind))),
+            utf8(rows, |row| row.name.as_deref()),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.start_byte),
+            )),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.end_byte),
+            )),
+        ],
+    )
+}
+
+fn ruff_binding_batch(
+    pin: RelationPin<'_>,
+    semantics: Option<&PythonFrontendBatch>,
+) -> Result<RecordBatch, ArrowError> {
+    let rows = semantics.map_or(&[][..], |batch| batch.bindings.as_slice());
+    batch(
+        pin,
+        NativeSyntaxRelation::RuffBinding,
+        rows.len(),
+        vec![
+            fixed16(rows, |row| Some(&row.binding_id)),
+            fixed16(rows, |row| Some(&row.scope_id)),
+            utf8(rows, |row| Some(row.name.as_str())),
+            utf8(rows, |row| Some(python_binding_kind(row.kind))),
+            utf8(rows, |row| Some(python_target_form(row.target_form))),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.start_byte),
+            )),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.end_byte),
+            )),
+        ],
+    )
+}
+
+fn ruff_reference_batch(
+    pin: RelationPin<'_>,
+    semantics: Option<&PythonFrontendBatch>,
+) -> Result<RecordBatch, ArrowError> {
+    let rows = semantics.map_or(&[][..], |batch| batch.references.as_slice());
+    batch(
+        pin,
+        NativeSyntaxRelation::RuffReference,
+        rows.len(),
+        vec![
+            fixed16(rows, |row| Some(&row.reference_id)),
+            fixed16(rows, |row| Some(&row.scope_id)),
+            utf8(rows, |row| Some(row.name.as_str())),
+            utf8(rows, |row| Some(python_reference_class(row.class))),
+            utf8(rows, |row| Some(python_resolution(row.resolution))),
+            fixed16(rows, |row| Some(&row.target_id)),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.start_byte),
+            )),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.end_byte),
+            )),
+            utf8(rows, |row| row.unknown_reason_code.as_deref()),
+        ],
+    )
+}
+
+fn ruff_unknown_symbol_batch(
+    pin: RelationPin<'_>,
+    semantics: Option<&PythonFrontendBatch>,
+) -> Result<RecordBatch, ArrowError> {
+    let rows = semantics.map_or(&[][..], |batch| batch.unknown_symbols.as_slice());
+    batch(
+        pin,
+        NativeSyntaxRelation::RuffUnknownSymbol,
+        rows.len(),
+        vec![
+            fixed16(rows, |row| Some(&row.unknown_symbol_id)),
+            fixed16(rows, |row| Some(&row.scope_id)),
+            utf8(rows, |row| Some(row.name.as_str())),
+            utf8(rows, |row| Some(row.reason_code.as_str())),
+        ],
+    )
+}
+
+fn ruff_semantic_edge_batch(
+    pin: RelationPin<'_>,
+    semantics: Option<&PythonFrontendBatch>,
+) -> Result<RecordBatch, ArrowError> {
+    let rows = semantics.map_or(&[][..], |batch| batch.edges.as_slice());
+    batch(
+        pin,
+        NativeSyntaxRelation::RuffSemanticEdge,
+        rows.len(),
+        vec![
+            fixed16(rows, |row| Some(&row.subject_id)),
+            fixed16(rows, |row| Some(&row.object_id)),
+            utf8(rows, |row| Some(python_semantic_edge_kind(row.kind))),
+        ],
+    )
+}
+
+fn ruff_import_batch(
+    pin: RelationPin<'_>,
+    semantics: Option<&PythonFrontendBatch>,
+) -> Result<RecordBatch, ArrowError> {
+    let rows = semantics.map_or(&[][..], |batch| batch.imports.as_slice());
+    batch(
+        pin,
+        NativeSyntaxRelation::RuffImport,
+        rows.len(),
+        vec![
+            fixed16(rows, |row| Some(&row.import_id)),
+            fixed16(rows, |row| Some(&row.scope_id)),
+            utf8(rows, |row| Some(python_import_kind(row.kind))),
+            Arc::new(UInt16Array::from(
+                rows.iter()
+                    .map(|row| {
+                        row.relative_level
+                            .and_then(|level| u16::try_from(level).ok())
+                    })
+                    .collect::<Vec<_>>(),
+            )),
+            utf8(rows, |row| Some(row.source_name.as_str())),
+            utf8(rows, |row| row.alias_name.as_deref()),
+            bools(rows, |row| row.star_import),
+            fixed16(rows, |row| Some(&row.target_module_id)),
+            utf8(rows, |row| row.target_module_name.as_deref()),
+            utf8(rows, |row| row.ruff_qualified_name.as_deref()),
+            utf8(rows, |row| Some(python_resolution(row.resolution))),
+            fixed16(rows, |row| row.imported_entity_id.as_ref()),
+            utf8(rows, |row| row.imported_name.as_deref()),
+            fixed16(rows, |row| row.local_binding_id.as_ref()),
+            utf8(rows, |row| row.unknown_reason_code.as_deref()),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.start_byte),
+            )),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.end_byte),
+            )),
+        ],
+    )
+}
+
+fn ruff_export_batch(
+    pin: RelationPin<'_>,
+    semantics: Option<&PythonFrontendBatch>,
+) -> Result<RecordBatch, ArrowError> {
+    let rows = semantics.map_or(&[][..], |batch| batch.exports.as_slice());
+    let status = semantics.map(|batch| python_export_status(batch.export_status));
+    batch(
+        pin,
+        NativeSyntaxRelation::RuffExport,
+        rows.len(),
+        vec![
+            fixed16(rows, |row| Some(&row.export_id)),
+            utf8(rows, |row| Some(row.name.as_str())),
+            fixed16(rows, |row| Some(&row.target_id)),
+            bools(rows, |row| row.reexport),
+            Arc::new(StringArray::from_iter_values(
+                rows.iter().map(|_| status.unwrap_or("unknown")),
+            )),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.start_byte),
+            )),
+            Arc::new(UInt64Array::from_iter_values(
+                rows.iter().map(|row| row.end_byte),
+            )),
+        ],
+    )
+}
+
+fn native_relation_specific_fields(relation: NativeSyntaxRelation) -> Vec<Field> {
+    match relation {
+        NativeSyntaxRelation::TreeSitterRun | NativeSyntaxRelation::RuffRun => vec![
+            typed_field(
+                "provider_revision",
+                DataType::UInt64,
+                false,
+                "provider-local-revision",
+            ),
+            typed_field("catalog_id", DataType::Utf8, false, "provider-catalog-id"),
+            typed_field(
+                "inventory_fingerprint",
+                DataType::Utf8,
+                false,
+                "provider-inventory-fingerprint",
+            ),
+            typed_field(
+                "grammar_release",
+                DataType::Utf8,
+                true,
+                "provider-grammar-release",
+            ),
+        ],
+        NativeSyntaxRelation::TreeSitterCoverage | NativeSyntaxRelation::RuffCoverage => vec![
+            typed_field("family", DataType::Utf8, false, "provider-api-family"),
+            typed_field(
+                "requested_units",
+                DataType::UInt64,
+                false,
+                "coverage-requested",
+            ),
+            typed_field(
+                "completed_units",
+                DataType::UInt64,
+                false,
+                "coverage-completed",
+            ),
+            typed_field(
+                "terminal_status",
+                DataType::Utf8,
+                false,
+                "coverage-terminal",
+            ),
+            typed_field(
+                "remainder_reason",
+                DataType::Utf8,
+                true,
+                "coverage-remainder-reason",
+            ),
+        ],
+        NativeSyntaxRelation::TreeSitterRemainder | NativeSyntaxRelation::RuffRemainder => vec![
+            typed_field("family", DataType::Utf8, false, "provider-api-family"),
+            typed_field("reason", DataType::Utf8, false, "remainder-reason"),
+            typed_field("detail", DataType::Utf8, false, "bounded-diagnostic"),
+        ],
+        NativeSyntaxRelation::TreeSitterCstNode => vec![
+            typed_field(
+                "provider_local_node_id",
+                DataType::UInt64,
+                false,
+                "provider-local-id",
+            ),
+            typed_field(
+                "parent_provider_local_node_id",
+                DataType::UInt64,
+                true,
+                "provider-local-id",
+            ),
+            typed_field(
+                "raw_kind_id",
+                DataType::UInt16,
+                false,
+                "provider-native-kind-id",
+            ),
+            typed_field("raw_kind", DataType::Utf8, false, "provider-native-kind"),
+            typed_field("field_name", DataType::Utf8, true, "provider-native-field"),
+            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
+            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
+            typed_field("named", DataType::Boolean, false, "provider-native-flag"),
+            typed_field("extra", DataType::Boolean, false, "provider-native-flag"),
+            typed_field("error", DataType::Boolean, false, "provider-native-flag"),
+            typed_field("missing", DataType::Boolean, false, "provider-native-flag"),
+            typed_field("ordinal", DataType::UInt32, false, "provider-local-ordinal"),
+            typed_field("depth", DataType::UInt16, false, "provider-local-depth"),
+            typed_field(
+                "raw_kind_disposition",
+                DataType::Utf8,
+                false,
+                "raw-kind-disposition",
+            ),
+        ],
+        NativeSyntaxRelation::TreeSitterChangedRange => vec![
+            typed_field(
+                "range_ordinal",
+                DataType::UInt32,
+                false,
+                "provider-local-ordinal",
+            ),
+            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
+            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
+        ],
+        NativeSyntaxRelation::TreeSitterRecoveryDiagnostic => vec![
+            typed_field(
+                "provider_local_node_id",
+                DataType::UInt64,
+                false,
+                "provider-local-id",
+            ),
+            typed_field(
+                "recovery_kind",
+                DataType::Utf8,
+                false,
+                "provider-native-recovery-kind",
+            ),
+            typed_field("raw_kind", DataType::Utf8, false, "provider-native-kind"),
+            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
+            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
+        ],
+        NativeSyntaxRelation::RuffToken => vec![
+            typed_field(
+                "token_ordinal",
+                DataType::UInt32,
+                false,
+                "provider-local-ordinal",
+            ),
+            typed_field(
+                "raw_kind_id",
+                DataType::UInt16,
+                false,
+                "provider-native-kind-id",
+            ),
+            typed_field("raw_kind", DataType::Utf8, false, "provider-native-kind"),
+            typed_field("token_class", DataType::Utf8, false, "provider-token-class"),
+            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
+            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
+            typed_field(
+                "line",
+                DataType::UInt32,
+                false,
+                "provider-native-coordinate",
+            ),
+            typed_field(
+                "column",
+                DataType::UInt32,
+                false,
+                "provider-native-coordinate",
+            ),
+            typed_field(
+                "spelling_kind",
+                DataType::Utf8,
+                true,
+                "provider-spelling-kind",
+            ),
+            typed_field(
+                "spelling_value",
+                DataType::Utf8,
+                true,
+                "provider-spelling-or-digest",
+            ),
+            typed_field(
+                "provider_local_ast_id",
+                DataType::UInt64,
+                true,
+                "provider-local-id",
+            ),
+        ],
+        NativeSyntaxRelation::RuffComment => vec![
+            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
+            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
+            typed_field(
+                "placement",
+                DataType::Utf8,
+                false,
+                "provider-comment-placement",
+            ),
+            typed_field(
+                "block_member",
+                DataType::Boolean,
+                false,
+                "provider-native-flag",
+            ),
+        ],
+        NativeSyntaxRelation::RuffDirective => vec![
+            typed_field(
+                "directive_kind",
+                DataType::Utf8,
+                false,
+                "provider-directive-kind",
+            ),
+            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
+            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
+            typed_field(
+                "provider_local_target_id",
+                DataType::UInt64,
+                true,
+                "provider-local-id",
+            ),
+        ],
+        NativeSyntaxRelation::RuffStringRegion => vec![
+            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
+            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
+            typed_field(
+                "multiline",
+                DataType::Boolean,
+                false,
+                "provider-native-flag",
+            ),
+            typed_field(
+                "interpolated",
+                DataType::Boolean,
+                false,
+                "provider-native-flag",
+            ),
+            typed_field(
+                "provider_local_ast_id",
+                DataType::UInt64,
+                true,
+                "provider-local-id",
+            ),
+        ],
+        NativeSyntaxRelation::RuffDocstring => vec![
+            typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
+            typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
+            typed_field(
+                "provider_local_owner_id",
+                DataType::UInt64,
+                false,
+                "provider-local-id",
+            ),
+        ],
+        NativeSyntaxRelation::RuffContinuationLine => vec![typed_field(
+            "start_byte",
+            DataType::UInt64,
+            false,
+            "source-byte-start",
+        )],
+        NativeSyntaxRelation::RuffAstNode => vec![
             typed_field(
                 "provider_local_ast_id",
                 DataType::UInt64,
@@ -1287,60 +1621,7 @@ fn ruff_ast_batch(pin: RelationPin<'_>, ruff: &RuffSnapshot) -> Result<RecordBat
                 "raw-kind-disposition",
             ),
         ],
-        vec![
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.id.0),
-            )),
-            Arc::new(UInt64Array::from(
-                rows.iter()
-                    .map(|row| row.parent.map(|id| id.0))
-                    .collect::<Vec<_>>(),
-            )),
-            Arc::new(UInt16Array::from_iter_values(
-                rows.iter().map(|row| row.raw_kind_id),
-            )),
-            utf8(rows, |row| Some(row.raw_kind.as_str())),
-            utf8(rows, |row| Some(ruff_ast_category(row.category))),
-            utf8(rows, |row| row.child_role.map(ruff_child_role)),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.start_byte),
-            )),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.end_byte),
-            )),
-            Arc::new(UInt32Array::from_iter_values(
-                rows.iter().map(|row| row.line),
-            )),
-            Arc::new(UInt32Array::from_iter_values(
-                rows.iter().map(|row| row.column),
-            )),
-            Arc::new(UInt32Array::from_iter_values(
-                rows.iter().map(|row| row.child_ordinal),
-            )),
-            Arc::new(UInt32Array::from_iter_values(
-                rows.iter().map(|row| row.source_ordinal),
-            )),
-            Arc::new(UInt32Array::from(
-                rows.iter()
-                    .map(|row| row.evaluation_ordinal)
-                    .collect::<Vec<_>>(),
-            )),
-            bools(rows, |row| row.explicit_parenthesized),
-            utf8(rows, |row| Some(raw_kind_disposition(row.disposition))),
-        ],
-    )
-}
-
-fn ruff_diagnostic_batch(
-    pin: RelationPin<'_>,
-    ruff: &RuffSnapshot,
-) -> Result<RecordBatch, ArrowError> {
-    let rows = ruff.diagnostics.as_ref();
-    batch(
-        pin,
-        NativeSyntaxRelation::RuffParseDiagnostic,
-        rows.len(),
-        vec![
+        NativeSyntaxRelation::RuffParseDiagnostic => vec![
             typed_field(
                 "diagnostic_ordinal",
                 DataType::UInt32,
@@ -1357,41 +1638,7 @@ fn ruff_diagnostic_batch(
             typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
             typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
         ],
-        vec![
-            Arc::new(UInt32Array::from_iter_values(
-                (0..rows.len()).map(|value| u32::try_from(value).unwrap_or(u32::MAX)),
-            )),
-            utf8(rows, |row| Some(ruff_diagnostic_kind(row.kind))),
-            utf8(rows, |row| Some(row.message.as_str())),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.start_byte),
-            )),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.end_byte),
-            )),
-        ],
-    )
-}
-
-fn ruff_diagnostic_evidence_batch(
-    pin: RelationPin<'_>,
-    ruff: &RuffSnapshot,
-) -> Result<RecordBatch, ArrowError> {
-    let rows = ruff
-        .diagnostics
-        .iter()
-        .enumerate()
-        .flat_map(|(diagnostic, row)| {
-            row.tree_sitter_recovery_ids
-                .iter()
-                .map(move |tree_id| (diagnostic, tree_id.0))
-        })
-        .collect::<Vec<_>>();
-    batch(
-        pin,
-        NativeSyntaxRelation::RuffDiagnosticRecoveryEvidence,
-        rows.len(),
-        vec![
+        NativeSyntaxRelation::RuffDiagnosticRecoveryEvidence => vec![
             typed_field(
                 "diagnostic_ordinal",
                 DataType::UInt32,
@@ -1405,71 +1652,7 @@ fn ruff_diagnostic_evidence_batch(
                 "provider-local-id",
             ),
         ],
-        vec![
-            Arc::new(UInt32Array::from_iter_values(
-                rows.iter()
-                    .map(|(ordinal, _)| u32::try_from(*ordinal).unwrap_or(u32::MAX)),
-            )),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|(_, tree_id)| *tree_id),
-            )),
-        ],
-    )
-}
-
-fn insert_semantic_relations(
-    relations: &mut BTreeMap<NativeSyntaxRelation, RecordBatch>,
-    pin: RelationPin<'_>,
-    semantics: Option<&PythonFrontendBatch>,
-) -> Result<(), ArrowError> {
-    insert(
-        relations,
-        NativeSyntaxRelation::RuffScope,
-        ruff_scope_batch(pin, semantics)?,
-    );
-    insert(
-        relations,
-        NativeSyntaxRelation::RuffBinding,
-        ruff_binding_batch(pin, semantics)?,
-    );
-    insert(
-        relations,
-        NativeSyntaxRelation::RuffReference,
-        ruff_reference_batch(pin, semantics)?,
-    );
-    insert(
-        relations,
-        NativeSyntaxRelation::RuffUnknownSymbol,
-        ruff_unknown_symbol_batch(pin, semantics)?,
-    );
-    insert(
-        relations,
-        NativeSyntaxRelation::RuffSemanticEdge,
-        ruff_semantic_edge_batch(pin, semantics)?,
-    );
-    insert(
-        relations,
-        NativeSyntaxRelation::RuffImport,
-        ruff_import_batch(pin, semantics)?,
-    );
-    insert(
-        relations,
-        NativeSyntaxRelation::RuffExport,
-        ruff_export_batch(pin, semantics)?,
-    );
-    Ok(())
-}
-
-fn ruff_scope_batch(
-    pin: RelationPin<'_>,
-    semantics: Option<&PythonFrontendBatch>,
-) -> Result<RecordBatch, ArrowError> {
-    let rows = semantics.map_or(&[][..], |batch| batch.scopes.as_slice());
-    batch(
-        pin,
-        NativeSyntaxRelation::RuffScope,
-        rows.len(),
-        vec![
+        NativeSyntaxRelation::RuffScope => vec![
             typed_field(
                 "scope_id",
                 DataType::FixedSizeBinary(16),
@@ -1487,31 +1670,7 @@ fn ruff_scope_batch(
             typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
             typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
         ],
-        vec![
-            fixed16(rows, |row| Some(&row.scope_id)),
-            fixed16(rows, |row| row.parent_scope_id.as_ref()),
-            utf8(rows, |row| Some(python_scope_kind(row.kind))),
-            utf8(rows, |row| row.name.as_deref()),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.start_byte),
-            )),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.end_byte),
-            )),
-        ],
-    )
-}
-
-fn ruff_binding_batch(
-    pin: RelationPin<'_>,
-    semantics: Option<&PythonFrontendBatch>,
-) -> Result<RecordBatch, ArrowError> {
-    let rows = semantics.map_or(&[][..], |batch| batch.bindings.as_slice());
-    batch(
-        pin,
-        NativeSyntaxRelation::RuffBinding,
-        rows.len(),
-        vec![
+        NativeSyntaxRelation::RuffBinding => vec![
             typed_field(
                 "binding_id",
                 DataType::FixedSizeBinary(16),
@@ -1540,32 +1699,7 @@ fn ruff_binding_batch(
             typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
             typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
         ],
-        vec![
-            fixed16(rows, |row| Some(&row.binding_id)),
-            fixed16(rows, |row| Some(&row.scope_id)),
-            utf8(rows, |row| Some(row.name.as_str())),
-            utf8(rows, |row| Some(python_binding_kind(row.kind))),
-            utf8(rows, |row| Some(python_target_form(row.target_form))),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.start_byte),
-            )),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.end_byte),
-            )),
-        ],
-    )
-}
-
-fn ruff_reference_batch(
-    pin: RelationPin<'_>,
-    semantics: Option<&PythonFrontendBatch>,
-) -> Result<RecordBatch, ArrowError> {
-    let rows = semantics.map_or(&[][..], |batch| batch.references.as_slice());
-    batch(
-        pin,
-        NativeSyntaxRelation::RuffReference,
-        rows.len(),
-        vec![
+        NativeSyntaxRelation::RuffReference => vec![
             typed_field(
                 "reference_id",
                 DataType::FixedSizeBinary(16),
@@ -1601,34 +1735,7 @@ fn ruff_reference_batch(
             typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
             typed_field("unknown_reason", DataType::Utf8, true, "unknown-reason"),
         ],
-        vec![
-            fixed16(rows, |row| Some(&row.reference_id)),
-            fixed16(rows, |row| Some(&row.scope_id)),
-            utf8(rows, |row| Some(row.name.as_str())),
-            utf8(rows, |row| Some(python_reference_class(row.class))),
-            utf8(rows, |row| Some(python_resolution(row.resolution))),
-            fixed16(rows, |row| Some(&row.target_id)),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.start_byte),
-            )),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.end_byte),
-            )),
-            utf8(rows, |row| row.unknown_reason_code.as_deref()),
-        ],
-    )
-}
-
-fn ruff_unknown_symbol_batch(
-    pin: RelationPin<'_>,
-    semantics: Option<&PythonFrontendBatch>,
-) -> Result<RecordBatch, ArrowError> {
-    let rows = semantics.map_or(&[][..], |batch| batch.unknown_symbols.as_slice());
-    batch(
-        pin,
-        NativeSyntaxRelation::RuffUnknownSymbol,
-        rows.len(),
-        vec![
+        NativeSyntaxRelation::RuffUnknownSymbol => vec![
             typed_field(
                 "unknown_symbol_id",
                 DataType::FixedSizeBinary(16),
@@ -1644,25 +1751,7 @@ fn ruff_unknown_symbol_batch(
             typed_field("name", DataType::Utf8, false, "source-name"),
             typed_field("reason", DataType::Utf8, false, "unknown-reason"),
         ],
-        vec![
-            fixed16(rows, |row| Some(&row.unknown_symbol_id)),
-            fixed16(rows, |row| Some(&row.scope_id)),
-            utf8(rows, |row| Some(row.name.as_str())),
-            utf8(rows, |row| Some(row.reason_code.as_str())),
-        ],
-    )
-}
-
-fn ruff_semantic_edge_batch(
-    pin: RelationPin<'_>,
-    semantics: Option<&PythonFrontendBatch>,
-) -> Result<RecordBatch, ArrowError> {
-    let rows = semantics.map_or(&[][..], |batch| batch.edges.as_slice());
-    batch(
-        pin,
-        NativeSyntaxRelation::RuffSemanticEdge,
-        rows.len(),
-        vec![
+        NativeSyntaxRelation::RuffSemanticEdge => vec![
             typed_field(
                 "subject_id",
                 DataType::FixedSizeBinary(16),
@@ -1682,24 +1771,7 @@ fn ruff_semantic_edge_batch(
                 "ruff-local-semantic-edge-kind",
             ),
         ],
-        vec![
-            fixed16(rows, |row| Some(&row.subject_id)),
-            fixed16(rows, |row| Some(&row.object_id)),
-            utf8(rows, |row| Some(python_semantic_edge_kind(row.kind))),
-        ],
-    )
-}
-
-fn ruff_import_batch(
-    pin: RelationPin<'_>,
-    semantics: Option<&PythonFrontendBatch>,
-) -> Result<RecordBatch, ArrowError> {
-    let rows = semantics.map_or(&[][..], |batch| batch.imports.as_slice());
-    batch(
-        pin,
-        NativeSyntaxRelation::RuffImport,
-        rows.len(),
-        vec![
+        NativeSyntaxRelation::RuffImport => vec![
             typed_field(
                 "import_id",
                 DataType::FixedSizeBinary(16),
@@ -1773,50 +1845,7 @@ fn ruff_import_batch(
             typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
             typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
         ],
-        vec![
-            fixed16(rows, |row| Some(&row.import_id)),
-            fixed16(rows, |row| Some(&row.scope_id)),
-            utf8(rows, |row| Some(python_import_kind(row.kind))),
-            Arc::new(UInt16Array::from(
-                rows.iter()
-                    .map(|row| {
-                        row.relative_level
-                            .and_then(|level| u16::try_from(level).ok())
-                    })
-                    .collect::<Vec<_>>(),
-            )),
-            utf8(rows, |row| Some(row.source_name.as_str())),
-            utf8(rows, |row| row.alias_name.as_deref()),
-            bools(rows, |row| row.star_import),
-            fixed16(rows, |row| Some(&row.target_module_id)),
-            utf8(rows, |row| row.target_module_name.as_deref()),
-            utf8(rows, |row| row.ruff_qualified_name.as_deref()),
-            utf8(rows, |row| Some(python_resolution(row.resolution))),
-            fixed16(rows, |row| row.imported_entity_id.as_ref()),
-            utf8(rows, |row| row.imported_name.as_deref()),
-            fixed16(rows, |row| row.local_binding_id.as_ref()),
-            utf8(rows, |row| row.unknown_reason_code.as_deref()),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.start_byte),
-            )),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.end_byte),
-            )),
-        ],
-    )
-}
-
-fn ruff_export_batch(
-    pin: RelationPin<'_>,
-    semantics: Option<&PythonFrontendBatch>,
-) -> Result<RecordBatch, ArrowError> {
-    let rows = semantics.map_or(&[][..], |batch| batch.exports.as_slice());
-    let status = semantics.map(|batch| python_export_status(batch.export_status));
-    batch(
-        pin,
-        NativeSyntaxRelation::RuffExport,
-        rows.len(),
-        vec![
+        NativeSyntaxRelation::RuffExport => vec![
             typed_field(
                 "export_id",
                 DataType::FixedSizeBinary(16),
@@ -1840,33 +1869,12 @@ fn ruff_export_batch(
             typed_field("start_byte", DataType::UInt64, false, "source-byte-start"),
             typed_field("end_byte", DataType::UInt64, false, "source-byte-end"),
         ],
-        vec![
-            fixed16(rows, |row| Some(&row.export_id)),
-            utf8(rows, |row| Some(row.name.as_str())),
-            fixed16(rows, |row| Some(&row.target_id)),
-            bools(rows, |row| row.reexport),
-            Arc::new(StringArray::from_iter_values(
-                rows.iter().map(|_| status.unwrap_or("unknown")),
-            )),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.start_byte),
-            )),
-            Arc::new(UInt64Array::from_iter_values(
-                rows.iter().map(|row| row.end_byte),
-            )),
-        ],
-    )
+    }
 }
 
-fn batch(
-    pin: RelationPin<'_>,
-    relation: NativeSyntaxRelation,
-    row_count: usize,
-    extra_fields: Vec<Field>,
-    extra_columns: Vec<ArrayRef>,
-) -> Result<RecordBatch, ArrowError> {
+fn native_relation_schema(relation: NativeSyntaxRelation) -> SchemaRef {
     let mut fields = common_fields();
-    fields.extend(extra_fields);
+    fields.extend(native_relation_specific_fields(relation));
     let fields = fields
         .into_iter()
         .map(|field| {
@@ -1878,8 +1886,6 @@ fn batch(
             field.with_metadata(metadata)
         })
         .collect::<Vec<_>>();
-    let mut columns = common_columns(pin, row_count);
-    columns.extend(extra_columns);
     let metadata = HashMap::from([
         (
             "codefabric.relation_id".to_owned(),
@@ -1905,10 +1911,18 @@ fn batch(
             "typed-arrow-fields-only".to_owned(),
         ),
     ]);
-    RecordBatch::try_new(
-        Arc::new(Schema::new_with_metadata(fields, metadata)),
-        columns,
-    )
+    Arc::new(Schema::new_with_metadata(fields, metadata))
+}
+
+fn batch(
+    pin: RelationPin<'_>,
+    relation: NativeSyntaxRelation,
+    row_count: usize,
+    extra_columns: Vec<ArrayRef>,
+) -> Result<RecordBatch, ArrowError> {
+    let mut columns = common_columns(pin, row_count);
+    columns.extend(extra_columns);
+    RecordBatch::try_new(relation.schema(), columns)
 }
 
 fn common_fields() -> Vec<Field> {
@@ -2348,6 +2362,20 @@ mod tests {
             .downcast_ref::<FixedSizeBinaryArray>()
             .unwrap();
         assert!(file_ids.iter().flatten().all(|value| value == [2; 16]));
+    }
+
+    #[test]
+    fn compiled_native_relation_schemas_exactly_match_every_emitted_batch() {
+        let run = run("from pkg import value\nresult = value + 1\n");
+        assert_eq!(run.relations.len(), NativeSyntaxRelation::ALL.len());
+        for relation in NativeSyntaxRelation::ALL {
+            assert_eq!(
+                relation.schema().as_ref(),
+                run.relation(relation).schema().as_ref(),
+                "compiled schema drifted for {}",
+                relation.as_str()
+            );
+        }
     }
 
     #[test]

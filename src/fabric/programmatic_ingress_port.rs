@@ -20,45 +20,23 @@ use crate::relational_semantic_query::{
     validate_epoch_bound_semantic_ingress,
 };
 use crate::semantic_query_contract::{
-    FreshnessPolicy, ParsedSemanticRequest, PatternBinding, PatternRelationship,
-    PriorResultReference, ResultRole, ReturnSpec, SemanticQueryClause, SemanticQueryRequest,
-    SemanticReference, parse_request,
+    COMPILED_V2_0_SCOPE_DEFINITIONS, CompiledV20ScopeRole, ParsedSemanticRequest, PatternBinding,
+    PatternRelationship, PriorResultReference, ResultRole, ReturnSpec, SemanticQueryClause,
+    SemanticQueryRequest, SemanticReference, parse_request,
 };
 
+use super::production_kernel::CompiledQueryAuthority;
 use super::programmatic_query_backend::{
     ProgrammaticQueryPortError, ProgrammaticSemanticIngressPort, canonical_request_content_pin,
+    compiled_query_release_pin,
 };
 use super::programmatic_workspace::{ProgrammaticWorkspaceRuntime, WorkspaceEpochQueryAuthority};
 
-/// One request-global field whose value is projected into an installed scope binding.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum ProgrammaticGlobalIngressField {
-    Specification,
-    Version,
-    WorkspaceId,
-    FreshnessPolicy,
-    CostBudgetMaximumRows,
-    ResponseProjectionField,
-    ResponseProjectionEnabled,
-}
-
-impl ProgrammaticGlobalIngressField {
-    const ALL: [Self; 7] = [
-        Self::Specification,
-        Self::Version,
-        Self::WorkspaceId,
-        Self::FreshnessPolicy,
-        Self::CostBudgetMaximumRows,
-        Self::ResponseProjectionField,
-        Self::ResponseProjectionEnabled,
-    ];
-}
-
-/// Data-owned mapping from one request-global field to an installed scope identity.
+/// Mapping from one compiled v2.0 scope role to its installed relation identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProgrammaticGlobalIngressMapping {
-    pub field: ProgrammaticGlobalIngressField,
-    pub scope_id: Arc<str>,
+struct ProgrammaticGlobalIngressMapping {
+    role: CompiledV20ScopeRole,
+    scope_id: Arc<str>,
 }
 
 /// Every field carried by one of the eight released query forms.
@@ -203,9 +181,9 @@ pub struct ProgrammaticResultRoleMapping {
 
 /// Concrete application-owned semantic ingress port.
 ///
-/// Construction accepts semantic identities and field mappings, but deliberately accepts no
-/// program binding IDs or execution pins. Those identities are selected from the admitted epoch
-/// catalog at request projection time.
+/// Production construction accepts only the compiled query-release capability and operational
+/// limits. Semantic identities and field mappings are closed private data; program binding IDs and
+/// execution pins are selected from the admitted epoch catalog at request projection time.
 #[derive(Clone, Debug)]
 pub struct ApplicationOwnedSemanticIngressPort {
     authority_pin: [u8; 32],
@@ -213,7 +191,7 @@ pub struct ApplicationOwnedSemanticIngressPort {
     released_version: Arc<str>,
     limits: EpochBoundSemanticIngressLimits,
     roles: BTreeMap<ResultRole, Arc<str>>,
-    globals: BTreeMap<ProgrammaticGlobalIngressField, Arc<str>>,
+    globals: BTreeMap<CompiledV20ScopeRole, Arc<str>>,
     forms: BTreeMap<
         ReleasedSemanticForm,
         BTreeMap<ProgrammaticFormIngressField, ProgrammaticFormIngressTarget>,
@@ -221,63 +199,78 @@ pub struct ApplicationOwnedSemanticIngressPort {
 }
 
 impl ApplicationOwnedSemanticIngressPort {
-    /// Construct the application-owned projection for the exact released 1.3 wire contract.
-    ///
-    /// The caller still supplies the release authority and every execution bound. This helper
-    /// fixes only the versioned, application-owned field-to-relation mapping; it performs no
-    /// latest-version lookup and does not select an execution program.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same completeness and identity errors as [`Self::try_new`].
-    pub fn try_released_v1_3(
-        authority_pin: [u8; 32],
-        limits: EpochBoundSemanticIngressLimits,
-    ) -> Result<Self, ProgrammaticQueryPortError> {
-        Self::try_new(
-            authority_pin,
-            "composable semantic CPG fact query",
-            "1.3",
-            limits,
-            released_v1_3_roles(),
-            released_v1_3_globals(),
-            released_v1_3_forms(),
-        )
-    }
-
-    /// Construct the application-owned projection for the released 2.0 wire contract.
+    /// Construct the sole compiled application-owned projection for the released 2.0 contract.
     ///
     /// Version 2.0 retains the eight semantic forms while replacing several external field
     /// spellings and the request-global scope/freshness objects. [`parse_request`] normalizes
     /// those released spellings into the same typed form vocabulary before this port binds them
-    /// to an admitted epoch catalog. Version 1.3 remains available only through its explicit
-    /// compatibility constructor.
+    /// to an admitted epoch catalog. The opaque release capability and fixed mappings prevent an
+    /// operational caller from selecting another version, role, global, or form mapping; only the
+    /// resource limits remain variable.
     ///
     /// # Errors
     ///
-    /// Returns the same completeness and identity errors as [`Self::try_new`].
-    pub fn try_released_v2_0(
+    /// Returns an error if the compiled mapping is internally incomplete or ambiguous.
+    pub(crate) fn try_compiled_v2_0(
+        compiled_release: &CompiledQueryAuthority,
+        limits: EpochBoundSemanticIngressLimits,
+    ) -> Result<Self, ProgrammaticQueryPortError> {
+        Self::build(
+            compiled_query_release_pin(compiled_release),
+            "composable semantic CPG fact query",
+            "2.0",
+            limits,
+            compiled_v2_0_roles(),
+            compiled_v2_0_globals(),
+            compiled_v2_0_forms(),
+        )
+    }
+
+    /// Test-only construction hook retaining an explicit pin for independent evidence fixtures.
+    #[cfg(test)]
+    pub(crate) fn try_released_v2_0(
         authority_pin: [u8; 32],
         limits: EpochBoundSemanticIngressLimits,
     ) -> Result<Self, ProgrammaticQueryPortError> {
-        Self::try_new(
+        Self::build(
             authority_pin,
             "composable semantic CPG fact query",
             "2.0",
             limits,
-            released_v1_3_roles(),
-            released_v1_3_globals(),
-            released_v1_3_forms(),
+            compiled_v2_0_roles(),
+            compiled_v2_0_globals(),
+            compiled_v2_0_forms(),
         )
     }
 
-    /// Construct a complete, unambiguous projection release.
+    /// Test-only generic constructor for exercising mapping validation faults.
     ///
     /// # Errors
     ///
     /// Rejects a sentinel authority, an empty released-contract identity, duplicate or incomplete
     /// role/global/form mappings, incompatible field destinations, or reused semantic binding IDs.
-    pub fn try_new(
+    #[cfg(test)]
+    fn try_new(
+        authority_pin: [u8; 32],
+        released_specification: impl Into<Arc<str>>,
+        released_version: impl Into<Arc<str>>,
+        limits: EpochBoundSemanticIngressLimits,
+        roles: Vec<ProgrammaticResultRoleMapping>,
+        globals: Vec<ProgrammaticGlobalIngressMapping>,
+        forms: Vec<ProgrammaticFormIngressMapping>,
+    ) -> Result<Self, ProgrammaticQueryPortError> {
+        Self::build(
+            authority_pin,
+            released_specification,
+            released_version,
+            limits,
+            roles,
+            globals,
+            forms,
+        )
+    }
+
+    fn build(
         authority_pin: [u8; 32],
         released_specification: impl Into<Arc<str>>,
         released_version: impl Into<Arc<str>>,
@@ -318,7 +311,7 @@ impl ApplicationOwnedSemanticIngressPort {
         for mapping in globals {
             validate_text_identity("semantic scope", &mapping.scope_id)?;
             if global_map
-                .insert(mapping.field, Arc::clone(&mapping.scope_id))
+                .insert(mapping.role, Arc::clone(&mapping.scope_id))
                 .is_some()
             {
                 return Err(rejected("duplicate request-global field mapping"));
@@ -328,8 +321,9 @@ impl ApplicationOwnedSemanticIngressPort {
             }
         }
         if global_map.keys().copied().collect::<BTreeSet<_>>()
-            != ProgrammaticGlobalIngressField::ALL
+            != COMPILED_V2_0_SCOPE_DEFINITIONS
                 .into_iter()
+                .map(|definition| definition.role)
                 .collect::<BTreeSet<_>>()
         {
             return Err(rejected("request-global field mapping is incomplete"));
@@ -499,7 +493,6 @@ impl ApplicationOwnedSemanticIngressPort {
         }
 
         let mut forms = BTreeMap::new();
-        let mut total_rows = 0_usize;
         for clause in &request.queries {
             if !valid_wire_id(clause.query_id(), 128)
                 || forms
@@ -534,32 +527,7 @@ impl ApplicationOwnedSemanticIngressPort {
                     "query result limit is outside the admitted compiler bounds",
                 ));
             }
-            total_rows = total_rows
-                .checked_add(maximum_results)
-                .ok_or_else(|| rejected("semantic request result budget overflow"))?;
         }
-        if request
-            .cost_budget
-            .is_some_and(|budget| budget.maximum_rows == 0 || total_rows > budget.maximum_rows)
-        {
-            return Err(rejected(
-                "query result limits exceed the request cost budget",
-            ));
-        }
-        if request
-            .response_projection
-            .as_ref()
-            .is_some_and(|projection| {
-                projection
-                    .keys()
-                    .any(|field| field.trim().is_empty() || field.len() > 128)
-            })
-        {
-            return Err(rejected(
-                "response projection contains an invalid field identity",
-            ));
-        }
-
         let mut edge_count = 0_usize;
         let mut edges = BTreeSet::new();
         let mut fanin = BTreeMap::<&str, usize>::new();
@@ -628,40 +596,14 @@ impl ApplicationOwnedSemanticIngressPort {
         request: &SemanticQueryRequest,
         projection: &mut IngressProjection,
     ) -> Result<(), ProgrammaticQueryPortError> {
-        projection.push_scope(
-            self.global_scope(ProgrammaticGlobalIngressField::Specification)?,
-            text(&request.specification)?,
-        )?;
-        projection.push_scope(
-            self.global_scope(ProgrammaticGlobalIngressField::Version)?,
-            text(&request.version)?,
-        )?;
-        projection.push_scope(
-            self.global_scope(ProgrammaticGlobalIngressField::WorkspaceId)?,
-            text(&request.workspace_id)?,
-        )?;
-        projection.push_scope(
-            self.global_scope(ProgrammaticGlobalIngressField::FreshnessPolicy)?,
-            SemanticClauseValue::Text(Arc::from(freshness_label(request.freshness_policy))),
-        )?;
-        if let Some(cost_budget) = request.cost_budget {
-            projection.push_scope(
-                self.global_scope(ProgrammaticGlobalIngressField::CostBudgetMaximumRows)?,
-                SemanticClauseValue::UInt64(to_u64(
-                    cost_budget.maximum_rows,
-                    "cost budget maximum rows",
-                )?),
-            )?;
-        }
-        if let Some(response_projection) = &request.response_projection {
-            for (field, enabled) in response_projection {
+        for definition in COMPILED_V2_0_SCOPE_DEFINITIONS {
+            let scope_id = self.global_scope(definition.role)?;
+            for operand in request.compiled_v2_0_scope_operands(definition.role) {
                 projection.push_scope(
-                    self.global_scope(ProgrammaticGlobalIngressField::ResponseProjectionField)?,
-                    text(field)?,
-                )?;
-                projection.push_scope(
-                    self.global_scope(ProgrammaticGlobalIngressField::ResponseProjectionEnabled)?,
-                    SemanticClauseValue::Boolean(*enabled),
+                    scope_id,
+                    // Source-boundary operands arrive here as opaque RFC/JCS canonical JSON
+                    // UTF-8. This projection deliberately performs no JSON interpretation.
+                    text(operand)?,
                 )?;
             }
         }
@@ -670,11 +612,11 @@ impl ApplicationOwnedSemanticIngressPort {
 
     fn global_scope(
         &self,
-        field: ProgrammaticGlobalIngressField,
+        role: CompiledV20ScopeRole,
     ) -> Result<&Arc<str>, ProgrammaticQueryPortError> {
         self.globals
-            .get(&field)
-            .ok_or_else(|| rejected(format!("unmapped request-global field {field:?}")))
+            .get(&role)
+            .ok_or_else(|| rejected(format!("unmapped compiled scope role {role:?}")))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1232,23 +1174,23 @@ impl ApplicationOwnedSemanticIngressPort {
     }
 }
 
-fn released_v1_3_arc(value: impl Into<String>) -> Arc<str> {
+fn compiled_v2_0_arc(value: impl Into<String>) -> Arc<str> {
     Arc::from(value.into())
 }
 
-fn released_v1_3_field(value: impl Into<String>) -> FieldId {
+fn compiled_v2_0_field(value: impl Into<String>) -> FieldId {
     // These identities are a closed, compile-time release mapping. Keeping construction fallible
     // at the public boundary would only turn an application-owned invariant into a runtime
     // fallback opportunity.
-    FieldId::new(value).expect("released 1.3 field identity is valid")
+    FieldId::new(value).expect("compiled 2.0 field identity is valid")
 }
 
-fn released_v1_3_roles() -> Vec<ProgrammaticResultRoleMapping> {
+fn compiled_v2_0_roles() -> Vec<ProgrammaticResultRoleMapping> {
     all_result_roles()
         .into_iter()
         .map(|role| ProgrammaticResultRoleMapping {
             role,
-            role_id: released_v1_3_arc(format!(
+            role_id: compiled_v2_0_arc(format!(
                 "role.{}",
                 match role {
                     ResultRole::Entities => "entities",
@@ -1264,174 +1206,159 @@ fn released_v1_3_roles() -> Vec<ProgrammaticResultRoleMapping> {
         .collect()
 }
 
-fn released_v1_3_globals() -> Vec<ProgrammaticGlobalIngressMapping> {
-    ProgrammaticGlobalIngressField::ALL
+fn compiled_v2_0_globals() -> Vec<ProgrammaticGlobalIngressMapping> {
+    COMPILED_V2_0_SCOPE_DEFINITIONS
         .into_iter()
-        .map(|field| ProgrammaticGlobalIngressMapping {
-            field,
-            scope_id: released_v1_3_arc(format!(
-                "scope.{}",
-                match field {
-                    ProgrammaticGlobalIngressField::Specification => "specification",
-                    ProgrammaticGlobalIngressField::Version => "version",
-                    ProgrammaticGlobalIngressField::WorkspaceId => "workspace",
-                    ProgrammaticGlobalIngressField::FreshnessPolicy => "freshness",
-                    ProgrammaticGlobalIngressField::CostBudgetMaximumRows => "cost-maximum-rows",
-                    ProgrammaticGlobalIngressField::ResponseProjectionField => {
-                        "response-projection-field"
-                    }
-                    ProgrammaticGlobalIngressField::ResponseProjectionEnabled => {
-                        "response-projection-enabled"
-                    }
-                }
-            )),
+        .map(|definition| ProgrammaticGlobalIngressMapping {
+            role: definition.role,
+            scope_id: Arc::from(definition.scope_id),
         })
         .collect()
 }
 
-fn released_v1_3_selection(
+fn compiled_v2_0_selection(
     field: ProgrammaticFormIngressField,
     slug: &str,
 ) -> ProgrammaticFormIngressMappingRow {
     ProgrammaticFormIngressMappingRow {
         field,
         target: ProgrammaticFormIngressTarget::Selection {
-            selection_id: released_v1_3_arc(format!("selection.{slug}")),
+            selection_id: compiled_v2_0_arc(format!("selection.{slug}")),
         },
     }
 }
 
-fn released_v1_3_return(
+fn compiled_v2_0_return(
     field: ProgrammaticFormIngressField,
     slug: &str,
 ) -> ProgrammaticFormIngressMappingRow {
     ProgrammaticFormIngressMappingRow {
         field,
         target: ProgrammaticFormIngressTarget::Return {
-            return_id: released_v1_3_arc(format!("return.{slug}")),
+            return_id: compiled_v2_0_arc(format!("return.{slug}")),
         },
     }
 }
 
-fn released_v1_3_reference(
+fn compiled_v2_0_reference(
     field: ProgrammaticFormIngressField,
     slug: &str,
 ) -> ProgrammaticFormIngressMappingRow {
     ProgrammaticFormIngressMappingRow {
         field,
         target: ProgrammaticFormIngressTarget::References(ProgrammaticReferenceInputMapping {
-            input_id: released_v1_3_arc(format!("input.{slug}")),
-            kind_field_id: released_v1_3_field(format!("{slug}.kind")),
-            value_field_id: released_v1_3_field(format!("{slug}.value")),
-            producer_role_field_id: released_v1_3_field(format!("{slug}.producer-role")),
-            consumer_slot_id: released_v1_3_arc(format!("slot.{slug}")),
+            input_id: compiled_v2_0_arc(format!("input.{slug}")),
+            kind_field_id: compiled_v2_0_field(format!("{slug}.kind")),
+            value_field_id: compiled_v2_0_field(format!("{slug}.value")),
+            producer_role_field_id: compiled_v2_0_field(format!("{slug}.producer-role")),
+            consumer_slot_id: compiled_v2_0_arc(format!("slot.{slug}")),
         }),
     }
 }
 
-fn released_v1_3_form(
+fn compiled_v2_0_form(
     form: ReleasedSemanticForm,
     specific: Vec<ProgrammaticFormIngressMappingRow>,
 ) -> ProgrammaticFormIngressMapping {
     use ProgrammaticFormIngressField as Field;
 
     let mut fields = vec![
-        released_v1_3_selection(Field::Label, "label"),
-        released_v1_3_return(Field::ReturnInclude, "include"),
-        released_v1_3_return(Field::ReturnExclude, "exclude"),
-        released_v1_3_return(Field::ReturnResultShape, "result-shape"),
-        released_v1_3_return(Field::ReturnGroupBy, "group-by"),
-        released_v1_3_return(Field::ReturnOrderBy, "order-by"),
-        released_v1_3_return(Field::ReturnDeduplicateBy, "deduplicate-by"),
-        released_v1_3_return(Field::ReturnSupportingFacts, "supporting-facts"),
-        released_v1_3_return(Field::ReturnIncludeQueryResult, "include-query-result"),
+        compiled_v2_0_selection(Field::Label, "label"),
+        compiled_v2_0_return(Field::ReturnInclude, "include"),
+        compiled_v2_0_return(Field::ReturnExclude, "exclude"),
+        compiled_v2_0_return(Field::ReturnResultShape, "result-shape"),
+        compiled_v2_0_return(Field::ReturnGroupBy, "group-by"),
+        compiled_v2_0_return(Field::ReturnOrderBy, "order-by"),
+        compiled_v2_0_return(Field::ReturnDeduplicateBy, "deduplicate-by"),
+        compiled_v2_0_return(Field::ReturnSupportingFacts, "supporting-facts"),
+        compiled_v2_0_return(Field::ReturnIncludeQueryResult, "include-query-result"),
         ProgrammaticFormIngressMappingRow {
             field: Field::ReturnMaximumResults,
             target: ProgrammaticFormIngressTarget::ExplicitResultLimit {
-                return_id: released_v1_3_arc("return.maximum-results"),
+                return_id: compiled_v2_0_arc("return.maximum-results"),
             },
         },
-        released_v1_3_return(Field::ReturnPer, "per"),
-        released_v1_3_return(Field::ReturnWhenExceeded, "when-exceeded"),
+        compiled_v2_0_return(Field::ReturnPer, "per"),
+        compiled_v2_0_return(Field::ReturnWhenExceeded, "when-exceeded"),
     ];
     fields.extend(specific);
     ProgrammaticFormIngressMapping { form, fields }
 }
 
 #[allow(clippy::too_many_lines)]
-fn released_v1_3_forms() -> Vec<ProgrammaticFormIngressMapping> {
+fn compiled_v2_0_forms() -> Vec<ProgrammaticFormIngressMapping> {
     use ProgrammaticFormIngressField as Field;
 
     vec![
-        released_v1_3_form(
+        compiled_v2_0_form(
             ReleasedSemanticForm::FindCodeEntities,
             vec![
-                released_v1_3_selection(Field::LookingFor, "looking-for"),
-                released_v1_3_reference(Field::Within, "within"),
-                released_v1_3_selection(Field::Where, "where"),
+                compiled_v2_0_selection(Field::LookingFor, "looking-for"),
+                compiled_v2_0_reference(Field::Within, "within"),
+                compiled_v2_0_selection(Field::Where, "where"),
             ],
         ),
-        released_v1_3_form(
+        compiled_v2_0_form(
             ReleasedSemanticForm::RetrieveFactsAboutCode,
             vec![
-                released_v1_3_reference(Field::About, "about"),
-                released_v1_3_selection(Field::Facts, "facts"),
-                released_v1_3_selection(Field::At, "at"),
-                released_v1_3_selection(Field::Where, "where"),
+                compiled_v2_0_reference(Field::About, "about"),
+                compiled_v2_0_selection(Field::Facts, "facts"),
+                compiled_v2_0_selection(Field::At, "at"),
+                compiled_v2_0_selection(Field::Where, "where"),
             ],
         ),
-        released_v1_3_form(
+        compiled_v2_0_form(
             ReleasedSemanticForm::FollowCodeRelationships,
             vec![
-                released_v1_3_reference(Field::StartingFrom, "starting-from"),
-                released_v1_3_selection(Field::Relationship, "relationship"),
-                released_v1_3_selection(Field::Direction, "direction"),
-                released_v1_3_selection(Field::Distance, "distance"),
-                released_v1_3_selection(Field::StopWhen, "stop-when"),
-                released_v1_3_selection(Field::Where, "where"),
+                compiled_v2_0_reference(Field::StartingFrom, "starting-from"),
+                compiled_v2_0_selection(Field::Relationship, "relationship"),
+                compiled_v2_0_selection(Field::Direction, "direction"),
+                compiled_v2_0_selection(Field::Distance, "distance"),
+                compiled_v2_0_selection(Field::StopWhen, "stop-when"),
+                compiled_v2_0_selection(Field::Where, "where"),
             ],
         ),
-        released_v1_3_form(
+        compiled_v2_0_form(
             ReleasedSemanticForm::FindConnectingFactPaths,
             vec![
-                released_v1_3_reference(Field::StartingFrom, "starting-from"),
-                released_v1_3_reference(Field::EndingAt, "ending-at"),
-                released_v1_3_selection(Field::Through, "through"),
-                released_v1_3_selection(Field::PathPolicy, "path-policy"),
-                released_v1_3_selection(Field::Direction, "direction"),
-                released_v1_3_selection(Field::MaximumLength, "maximum-length"),
-                released_v1_3_selection(Field::Where, "where"),
+                compiled_v2_0_reference(Field::StartingFrom, "starting-from"),
+                compiled_v2_0_reference(Field::EndingAt, "ending-at"),
+                compiled_v2_0_selection(Field::Through, "through"),
+                compiled_v2_0_selection(Field::PathPolicy, "path-policy"),
+                compiled_v2_0_selection(Field::Direction, "direction"),
+                compiled_v2_0_selection(Field::MaximumLength, "maximum-length"),
+                compiled_v2_0_selection(Field::Where, "where"),
             ],
         ),
-        released_v1_3_form(
+        compiled_v2_0_form(
             ReleasedSemanticForm::MatchCodeFactPattern,
             vec![
                 ProgrammaticFormIngressMappingRow {
                     field: Field::PatternBindings,
                     target: ProgrammaticFormIngressTarget::PatternBindings(
                         ProgrammaticPatternBindingInputMapping {
-                            binding_input_id: released_v1_3_arc("input.pattern-bindings"),
-                            binding_name_field_id: released_v1_3_field("pattern-binding.name"),
-                            looking_for_field_id: released_v1_3_field(
+                            binding_input_id: compiled_v2_0_arc("input.pattern-bindings"),
+                            binding_name_field_id: compiled_v2_0_field("pattern-binding.name"),
+                            looking_for_field_id: compiled_v2_0_field(
                                 "pattern-binding.looking-for",
                             ),
                             within: ProgrammaticReferenceInputMapping {
-                                input_id: released_v1_3_arc("input.pattern-binding-within"),
-                                kind_field_id: released_v1_3_field("pattern-within.kind"),
-                                value_field_id: released_v1_3_field("pattern-within.value"),
-                                producer_role_field_id: released_v1_3_field(
+                                input_id: compiled_v2_0_arc("input.pattern-binding-within"),
+                                kind_field_id: compiled_v2_0_field("pattern-within.kind"),
+                                value_field_id: compiled_v2_0_field("pattern-within.value"),
+                                producer_role_field_id: compiled_v2_0_field(
                                     "pattern-within.producer-role",
                                 ),
-                                consumer_slot_id: released_v1_3_arc("slot.pattern-binding-within"),
+                                consumer_slot_id: compiled_v2_0_arc("slot.pattern-binding-within"),
                             },
-                            within_binding_name_field_id: released_v1_3_field(
+                            within_binding_name_field_id: compiled_v2_0_field(
                                 "pattern-within.binding-name",
                             ),
-                            where_input_id: released_v1_3_arc("input.pattern-binding-where"),
-                            where_binding_name_field_id: released_v1_3_field(
+                            where_input_id: compiled_v2_0_arc("input.pattern-binding-where"),
+                            where_binding_name_field_id: compiled_v2_0_field(
                                 "pattern-where.binding-name",
                             ),
-                            where_value_field_id: released_v1_3_field("pattern-where.value"),
+                            where_value_field_id: compiled_v2_0_field("pattern-where.value"),
                         },
                     ),
                 },
@@ -1439,48 +1366,48 @@ fn released_v1_3_forms() -> Vec<ProgrammaticFormIngressMapping> {
                     field: Field::PatternRelationships,
                     target: ProgrammaticFormIngressTarget::PatternRelationships(
                         ProgrammaticPatternRelationshipInputMapping {
-                            input_id: released_v1_3_arc("input.pattern-relationships"),
-                            from_field_id: released_v1_3_field("pattern-relationship.from"),
-                            to_field_id: released_v1_3_field("pattern-relationship.to"),
-                            relationship_field_id: released_v1_3_field(
+                            input_id: compiled_v2_0_arc("input.pattern-relationships"),
+                            from_field_id: compiled_v2_0_field("pattern-relationship.from"),
+                            to_field_id: compiled_v2_0_field("pattern-relationship.to"),
+                            relationship_field_id: compiled_v2_0_field(
                                 "pattern-relationship.relationship",
                             ),
-                            direction_field_id: released_v1_3_field(
+                            direction_field_id: compiled_v2_0_field(
                                 "pattern-relationship.direction",
                             ),
-                            distance_field_id: released_v1_3_field("pattern-relationship.distance"),
+                            distance_field_id: compiled_v2_0_field("pattern-relationship.distance"),
                         },
                     ),
                 },
-                released_v1_3_selection(Field::Where, "where"),
+                compiled_v2_0_selection(Field::Where, "where"),
             ],
         ),
-        released_v1_3_form(
+        compiled_v2_0_form(
             ReleasedSemanticForm::CombineResultSets,
             vec![
-                released_v1_3_reference(Field::Inputs, "inputs"),
-                released_v1_3_selection(Field::Combination, "combination"),
-                released_v1_3_selection(Field::Identity, "identity"),
-                released_v1_3_selection(Field::PreserveOrigin, "preserve-origin"),
+                compiled_v2_0_reference(Field::Inputs, "inputs"),
+                compiled_v2_0_selection(Field::Combination, "combination"),
+                compiled_v2_0_selection(Field::Identity, "identity"),
+                compiled_v2_0_selection(Field::PreserveOrigin, "preserve-origin"),
             ],
         ),
-        released_v1_3_form(
+        compiled_v2_0_form(
             ReleasedSemanticForm::SummarizeObjectiveFacts,
             vec![
-                released_v1_3_reference(Field::Input, "input"),
-                released_v1_3_selection(Field::Summaries, "summaries"),
-                released_v1_3_selection(Field::GroupBy, "group-by"),
-                released_v1_3_selection(Field::IncludeSupport, "include-support"),
-                released_v1_3_selection(Field::Where, "where"),
+                compiled_v2_0_reference(Field::Input, "input"),
+                compiled_v2_0_selection(Field::Summaries, "summaries"),
+                compiled_v2_0_selection(Field::GroupBy, "group-by"),
+                compiled_v2_0_selection(Field::IncludeSupport, "include-support"),
+                compiled_v2_0_selection(Field::Where, "where"),
             ],
         ),
-        released_v1_3_form(
+        compiled_v2_0_form(
             ReleasedSemanticForm::RetrieveSourceAndSyntaxContext,
             vec![
-                released_v1_3_reference(Field::ForInputs, "for-inputs"),
-                released_v1_3_selection(Field::Context, "context"),
-                released_v1_3_selection(Field::TextHandling, "text-handling"),
-                released_v1_3_selection(Field::Where, "where"),
+                compiled_v2_0_reference(Field::ForInputs, "for-inputs"),
+                compiled_v2_0_selection(Field::Context, "context"),
+                compiled_v2_0_selection(Field::TextHandling, "text-handling"),
+                compiled_v2_0_selection(Field::Where, "where"),
             ],
         ),
     ]
@@ -2237,18 +2164,6 @@ fn to_u64(value: usize, field: &str) -> Result<u64, ProgrammaticQueryPortError> 
     u64::try_from(value).map_err(|_| rejected(format!("{field} cannot be represented as u64")))
 }
 
-fn freshness_label(policy: FreshnessPolicy) -> &'static str {
-    match policy {
-        FreshnessPolicy::CurrentRequired => "current_required",
-        FreshnessPolicy::WaitForCurrent => "wait_for_current",
-        FreshnessPolicy::BestAvailableSnapshot => "best_available_snapshot",
-        FreshnessPolicy::AwaitLatest => "await_latest",
-        FreshnessPolicy::RequireCurrentForTargets => "require_current_for_targets",
-        FreshnessPolicy::RequireSourceCurrent => "require_source_current",
-        FreshnessPolicy::RequireSemanticCurrent => "require_semantic_current",
-    }
-}
-
 fn dependency_order(
     blocks: &[EpochBoundBlockBindingRow],
     dependencies: &[EpochBoundDependencyRow],
@@ -2587,7 +2502,7 @@ mod tests {
             SemanticRequestLimits::try_new(16, 64, 32, 32, 64, 32, 1_000).expect("compiler limits"),
             512,
             512,
-            128,
+            256,
             512,
             8,
         )
@@ -2617,27 +2532,13 @@ mod tests {
     }
 
     fn globals() -> Vec<ProgrammaticGlobalIngressMapping> {
-        ProgrammaticGlobalIngressField::ALL
+        COMPILED_V2_0_SCOPE_DEFINITIONS
             .into_iter()
-            .map(|field| ProgrammaticGlobalIngressMapping {
-                field,
-                scope_id: arc(format!("scope.{}", global_slug(field))),
+            .map(|definition| ProgrammaticGlobalIngressMapping {
+                role: definition.role,
+                scope_id: arc(definition.scope_id),
             })
             .collect()
-    }
-
-    fn global_slug(field: ProgrammaticGlobalIngressField) -> &'static str {
-        match field {
-            ProgrammaticGlobalIngressField::Specification => "specification",
-            ProgrammaticGlobalIngressField::Version => "version",
-            ProgrammaticGlobalIngressField::WorkspaceId => "workspace",
-            ProgrammaticGlobalIngressField::FreshnessPolicy => "freshness",
-            ProgrammaticGlobalIngressField::CostBudgetMaximumRows => "cost-maximum-rows",
-            ProgrammaticGlobalIngressField::ResponseProjectionField => "response-projection-field",
-            ProgrammaticGlobalIngressField::ResponseProjectionEnabled => {
-                "response-projection-enabled"
-            }
-        }
     }
 
     fn reference_target(slug: &str) -> ProgrammaticFormIngressTarget {
@@ -2832,16 +2733,9 @@ mod tests {
     }
 
     fn port() -> ApplicationOwnedSemanticIngressPort {
-        ApplicationOwnedSemanticIngressPort::try_new(
-            [0xa1; 32],
-            "composable semantic CPG fact query",
-            "1.3",
-            limits(),
-            roles(),
-            globals(),
-            forms(),
-        )
-        .expect("complete mapping")
+        let release = super::super::production_kernel::CompiledSemanticRelease::current();
+        ApplicationOwnedSemanticIngressPort::try_compiled_v2_0(release.query_authority(), limits())
+            .expect("complete compiled 2.0 mapping")
     }
 
     fn output_role(form: ReleasedSemanticForm) -> ResultRole {
@@ -3023,31 +2917,13 @@ mod tests {
                 }
             }
         }
-        let scopes = ProgrammaticGlobalIngressField::ALL
+        let scopes = COMPILED_V2_0_SCOPE_DEFINITIONS
             .into_iter()
-            .map(|field| EpochBoundScopeBindingRow {
-                scope_id: Arc::clone(&port.globals[&field]),
-                value_kind: match field {
-                    ProgrammaticGlobalIngressField::CostBudgetMaximumRows => {
-                        SemanticValueKind::UInt64
-                    }
-                    ProgrammaticGlobalIngressField::ResponseProjectionEnabled => {
-                        SemanticValueKind::Boolean
-                    }
-                    _ => SemanticValueKind::Text,
-                },
-                minimum_values: match field {
-                    ProgrammaticGlobalIngressField::Specification
-                    | ProgrammaticGlobalIngressField::Version
-                    | ProgrammaticGlobalIngressField::WorkspaceId
-                    | ProgrammaticGlobalIngressField::FreshnessPolicy => 1,
-                    _ => 0,
-                },
-                maximum_values: match field {
-                    ProgrammaticGlobalIngressField::ResponseProjectionField
-                    | ProgrammaticGlobalIngressField::ResponseProjectionEnabled => 64,
-                    _ => 1,
-                },
+            .map(|definition| EpochBoundScopeBindingRow {
+                scope_id: Arc::clone(&port.globals[&definition.role]),
+                value_kind: SemanticValueKind::Text,
+                minimum_values: definition.minimum_values,
+                maximum_values: definition.maximum_values,
             })
             .collect();
         EpochBoundSemanticIngressCatalog {
@@ -3070,10 +2946,21 @@ mod tests {
     fn eight_form_request() -> ParsedSemanticRequest {
         let value = serde_json::json!({
             "specification": "composable semantic CPG fact query",
-            "version": "1.3",
+            "version": "2.0",
             "semantic_request_id": "request.all-eight",
-            "workspace_id": "workspace:00112233445566778899aabbccddeeff",
-            "freshness_policy": "current_required",
+            "scope": {
+                "workspace_id": "workspace:00112233445566778899aabbccddeeff",
+                "codebase": "codebase:current",
+                "languages": ["Rust", "Python"],
+                "source_boundaries": [{"root": "src", "kind": "path"}],
+                "analysis_contexts": {
+                    "mode": "explicit",
+                    "context_ids": ["analysis:one", "analysis:two"]
+                },
+                "representations": ["syntax", "semantic"],
+                "external_entities": "endpoint-only"
+            },
+            "freshness": {"policy": "require_current_for_targets"},
             "queries": [
                 {
                     "request": "find code entities",
@@ -3117,9 +3004,9 @@ mod tests {
                 {
                     "request": "find connecting fact paths",
                     "query_id": "q4",
-                    "starting_from": [{"results_of": "q1", "select": "entities"}],
-                    "ending_at": [{"results_of": "q2", "select": "facts"}],
-                    "through": ["call", "definition"],
+                    "from": [{"results_of": "q1", "select": "entities"}],
+                    "to": [{"results_of": "q2", "select": "facts"}],
+                    "using": ["call", "definition"],
                     "path_policy": "shortest",
                     "direction": "outgoing",
                     "maximum_length": 4,
@@ -3129,16 +3016,26 @@ mod tests {
                 {
                     "request": "match a code fact pattern",
                     "query_id": "q5",
-                    "bindings": [{
-                        "name": "caller",
-                        "looking_for": "function",
-                        "within": {"results_of": "q1", "select": "entities"},
-                        "where": ["public", "typed"]
-                    }],
-                    "relationships": [{
-                        "from": "caller", "to": "callee", "relationship": "calls",
-                        "direction": "outgoing", "distance": "one"
-                    }],
+                    "pattern": {
+                        "nodes": [
+                            {
+                                "binding": "caller",
+                                "semantic_kind": "function",
+                                "module_id": "entity:module:caller",
+                                "name": "public"
+                            },
+                            {
+                                "binding": "callee",
+                                "semantic_kind": "function",
+                                "module_id": "entity:module:callee",
+                                "name": "typed"
+                            }
+                        ],
+                        "facts": [{
+                            "from": "caller", "to": "callee", "relationship": "calls",
+                            "direction": "outgoing", "distance": "one"
+                        }]
+                    },
                     "where": ["resolved"],
                     "return": {"limit": {"maximum_results": 5}}
                 },
@@ -3149,7 +3046,7 @@ mod tests {
                         {"results_of": "q1", "select": "entities"},
                         {"results_of": "q2", "select": "facts"}
                     ],
-                    "combination": "union",
+                    "operation": "union",
                     "identity": "canonical",
                     "preserve_origin": "yes",
                     "return": {"limit": {"maximum_results": 5}}
@@ -3157,8 +3054,8 @@ mod tests {
                 {
                     "request": "summarize objective facts",
                     "query_id": "q7",
-                    "input": [{"results_of": "q2", "select": "facts"}],
-                    "summaries": ["count", "distinct_count"],
+                    "about": [{"results_of": "q2", "select": "facts"}],
+                    "measure": "count",
                     "group_by": ["semantic_kind", "language"],
                     "include_support": "yes",
                     "where": ["known"],
@@ -3167,18 +3064,12 @@ mod tests {
                 {
                     "request": "retrieve source and syntax context",
                     "query_id": "q8",
-                    "for": [{"results_of": "q2", "select": "facts"}],
-                    "context": ["source", "syntax"],
-                    "text_handling": "bounded",
+                    "about": [{"results_of": "q2", "select": "facts"}],
+                    "context": "source",
                     "where": ["available"],
                     "return": {"limit": {"maximum_results": 5}}
                 }
-            ],
-            "response_projection": {
-                "canonical_semantic_identity": true,
-                "coverage": false
-            },
-            "cost_budget": {"maximum_rows": 40}
+            ]
         });
         parse_request(&serde_json::to_vec(&value).expect("request JSON"))
             .expect("released request parses")
@@ -3215,6 +3106,23 @@ mod tests {
             catalog.producer_closure_proof_pin
         );
         assert_eq!(ingress.limits_pin, catalog.limits_pin);
+        assert_eq!(ingress.scopes.len(), 11);
+        assert!(ingress.scopes.iter().all(|row| {
+            COMPILED_V2_0_SCOPE_DEFINITIONS
+                .iter()
+                .any(|definition| definition.scope_id == row.scope_id.as_ref())
+        }));
+        assert!(ingress.scopes.iter().any(|row| {
+            row.scope_id.as_ref() == "scope.source-boundary"
+                && row.value
+                    == SemanticClauseValue::Text(Arc::from(r#"{"kind":"path","root":"src"}"#))
+        }));
+        assert!(!ingress.scopes.iter().any(|row| {
+            matches!(
+                row.scope_id.as_ref(),
+                "scope.specification" | "scope.version" | "scope.freshness"
+            )
+        }));
 
         let order_by = ingress
             .returns
@@ -3273,13 +3181,58 @@ mod tests {
     }
 
     #[test]
+    fn compiled_constructor_is_v2_only_and_has_no_caller_mapping_parameters() {
+        type ProductionConstructor =
+            fn(
+                &super::super::production_kernel::CompiledQueryAuthority,
+                EpochBoundSemanticIngressLimits,
+            )
+                -> Result<ApplicationOwnedSemanticIngressPort, ProgrammaticQueryPortError>;
+
+        let constructor: ProductionConstructor =
+            ApplicationOwnedSemanticIngressPort::try_compiled_v2_0;
+        let release = super::super::production_kernel::CompiledSemanticRelease::current();
+        let port = constructor(release.query_authority(), limits()).expect("compiled v2 mapping");
+        assert_eq!(
+            port.authority_pin(),
+            compiled_query_release_pin(release.query_authority())
+        );
+        assert_ne!(port.authority_pin(), [0; 32]);
+        assert_eq!(port.released_version.as_ref(), "2.0");
+
+        let legacy = serde_json::json!({
+            "specification": "composable semantic CPG fact query",
+            "version": "1.3",
+            "semantic_request_id": "request.legacy",
+            "workspace_id": "workspace:00112233445566778899aabbccddeeff",
+            "freshness_policy": "current_required",
+            "queries": [{
+                "request": "find code entities",
+                "query_id": "q1",
+                "label": null,
+                "looking_for": "functions",
+                "within": [],
+                "where": [],
+                "return": {"limit": {"maximum_results": 5}}
+            }]
+        });
+        let error = parse_request(&serde_json::to_vec(&legacy).expect("legacy JSON"))
+            .expect_err("the removed v1.3 envelope must not remain operable");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported semantic request version 1.3")
+        );
+    }
+
+    #[test]
     fn incomplete_mapping_and_ambiguous_catalog_program_are_rejected() {
         let mut incomplete = forms();
         incomplete.pop();
         let error = ApplicationOwnedSemanticIngressPort::try_new(
             [0xa1; 32],
             "composable semantic CPG fact query",
-            "1.3",
+            "2.0",
             limits(),
             roles(),
             globals(),

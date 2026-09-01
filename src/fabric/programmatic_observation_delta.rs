@@ -54,7 +54,7 @@ use super::programmatic_schema::{
 use super::provider::{ProviderContractError, SchemaContractStorageProvider};
 use crate::schema_contract::{
     FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY, SchemaContract,
-    SchemaContractError,
+    SchemaContractError, canonical_arrow_schema_fingerprint,
 };
 
 const HISTORY_SOURCE_IDENTITY: &str = "programmatic-observation-history-v1";
@@ -749,6 +749,12 @@ pub enum ProgrammaticObservationDeltaConfigurationError {
     NativeStorageSchema {
         relation_id: ProgrammaticRelationId,
         detail: String,
+    },
+    #[error("Delta history target {relation_id:?} canonical Arrow schema failed: {source}")]
+    CanonicalSchema {
+        relation_id: ProgrammaticRelationId,
+        #[source]
+        source: serde_json::Error,
     },
     #[error(
         "Delta history target {relation_id:?} has protocol {min_reader_version}/{min_writer_version}, expected {HISTORY_MIN_READER_VERSION}/{HISTORY_MIN_WRITER_VERSION}"
@@ -1873,7 +1879,14 @@ fn validate_history_policy(
     )?;
 
     let table_config = snapshot.table_config();
-    let schema_fingerprint = schema_fingerprint(registration.history_contract.storage_schema());
+    let schema_fingerprint =
+        canonical_arrow_schema_fingerprint(registration.history_contract.storage_schema())
+            .map_err(
+                |source| ProgrammaticObservationDeltaConfigurationError::CanonicalSchema {
+                    relation_id: relation_id.clone(),
+                    source,
+                },
+            )?;
     let protocol_fingerprint = digest_frames([
         b"codefabric.delta.protocol.v1".as_slice(),
         &min_reader_version.to_be_bytes(),
@@ -2061,29 +2074,6 @@ fn failure(
         committed: committed.clone(),
         source,
     }
-}
-
-fn schema_fingerprint(schema: &SchemaRef) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    digest_frame(&mut hasher, b"codefabric.arrow-schema.v1");
-    let mut schema_metadata = schema.metadata().iter().collect::<Vec<_>>();
-    schema_metadata.sort_by(|(left, _), (right, _)| left.cmp(right));
-    for (key, value) in schema_metadata {
-        digest_frame(&mut hasher, key.as_bytes());
-        digest_frame(&mut hasher, value.as_bytes());
-    }
-    for field in schema.fields() {
-        digest_frame(&mut hasher, field.name().as_bytes());
-        digest_frame(&mut hasher, format!("{:?}", field.data_type()).as_bytes());
-        digest_frame(&mut hasher, &[u8::from(field.is_nullable())]);
-        let mut metadata = field.metadata().iter().collect::<Vec<_>>();
-        metadata.sort_by(|(left, _), (right, _)| left.cmp(right));
-        for (key, value) in metadata {
-            digest_frame(&mut hasher, key.as_bytes());
-            digest_frame(&mut hasher, value.as_bytes());
-        }
-    }
-    *hasher.finalize().as_bytes()
 }
 
 fn digest_frames<const N: usize>(frames: [&[u8]; N]) -> [u8; 32] {

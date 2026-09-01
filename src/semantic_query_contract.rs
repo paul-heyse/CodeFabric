@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use thiserror::Error;
 
-use crate::contracts::jcs::{CanonicalJsonError, canonicalize_slice};
+use crate::contracts::jcs::{CanonicalJsonError, canonicalize_slice, canonicalize_value};
 use crate::registries::{FRESHNESS_STATE_VALUES, FreshnessState, registry_state_name};
 use serde::{Deserialize, Serialize};
 
@@ -34,25 +34,147 @@ impl Serialize for FreshnessState {
     }
 }
 
-/// Aggregate row budget carried by the released request envelope.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct CostBudget {
-    pub maximum_rows: usize,
-}
-
-/// Exact released semantic-query request envelope.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
+/// Strict normalized DTO for the released v2.0 semantic-query envelope.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SemanticQueryRequest {
     pub specification: String,
     pub version: String,
     pub semantic_request_id: String,
     pub workspace_id: String,
+    pub codebase: Option<String>,
+    pub languages: Vec<String>,
+    /// Lossless RFC/JCS canonical JSON UTF-8 operands.
+    ///
+    /// These strings are opaque authorization values. Semantic programs must not parse them or
+    /// infer additional scope from their JSON structure.
+    pub source_boundaries: Vec<String>,
+    pub analysis_context_mode: Option<String>,
+    pub analysis_context_ids: Vec<String>,
+    pub representations: Vec<String>,
+    pub external_entity_policy: Option<String>,
     pub freshness_policy: FreshnessPolicy,
+    pub freshness_target_scope: Option<String>,
+    pub freshness_deadline_ms: Option<u64>,
     pub queries: Vec<SemanticQueryClause>,
-    pub response_projection: Option<BTreeMap<String, bool>>,
-    pub cost_budget: Option<CostBudget>,
+}
+
+/// One role in the sole compiled v2.0 authorization-scope contract.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum CompiledV20ScopeRole {
+    WorkspaceId,
+    Codebase,
+    Language,
+    SourceBoundary,
+    AnalysisContextMode,
+    AnalysisContextId,
+    Representation,
+    ExternalEntityPolicy,
+}
+
+/// One closed scope relation and its application-owned authorization operand.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CompiledV20ScopeDefinition {
+    pub role: CompiledV20ScopeRole,
+    pub scope_id: &'static str,
+    pub authorization_input_id: &'static str,
+    pub minimum_values: usize,
+    pub maximum_values: usize,
+}
+
+/// Exhaustive scope authority shared by the recipe, ingress, and authorization ports.
+///
+/// Specification/version validation and freshness admission deliberately do not appear here:
+/// neither is a child-authorization scope relation.
+pub(crate) const COMPILED_V2_0_SCOPE_DEFINITIONS: [CompiledV20ScopeDefinition; 8] = [
+    CompiledV20ScopeDefinition {
+        role: CompiledV20ScopeRole::WorkspaceId,
+        scope_id: "scope.workspace-id",
+        authorization_input_id: "authorization.workspace",
+        minimum_values: 1,
+        maximum_values: 1,
+    },
+    CompiledV20ScopeDefinition {
+        role: CompiledV20ScopeRole::Codebase,
+        scope_id: "scope.codebase",
+        authorization_input_id: "authorization.codebase",
+        minimum_values: 0,
+        maximum_values: 1,
+    },
+    CompiledV20ScopeDefinition {
+        role: CompiledV20ScopeRole::Language,
+        scope_id: "scope.language",
+        authorization_input_id: "authorization.language",
+        minimum_values: 0,
+        maximum_values: 32,
+    },
+    CompiledV20ScopeDefinition {
+        role: CompiledV20ScopeRole::SourceBoundary,
+        scope_id: "scope.source-boundary",
+        authorization_input_id: "authorization.source-boundary",
+        minimum_values: 0,
+        maximum_values: 256,
+    },
+    CompiledV20ScopeDefinition {
+        role: CompiledV20ScopeRole::AnalysisContextMode,
+        scope_id: "scope.analysis-context-mode",
+        authorization_input_id: "authorization.analysis-context-mode",
+        minimum_values: 0,
+        maximum_values: 1,
+    },
+    CompiledV20ScopeDefinition {
+        role: CompiledV20ScopeRole::AnalysisContextId,
+        scope_id: "scope.analysis-context-id",
+        authorization_input_id: "authorization.analysis-context",
+        minimum_values: 0,
+        maximum_values: 256,
+    },
+    CompiledV20ScopeDefinition {
+        role: CompiledV20ScopeRole::Representation,
+        scope_id: "scope.representation",
+        authorization_input_id: "authorization.representation",
+        minimum_values: 0,
+        maximum_values: 64,
+    },
+    CompiledV20ScopeDefinition {
+        role: CompiledV20ScopeRole::ExternalEntityPolicy,
+        scope_id: "scope.external-entity-policy",
+        authorization_input_id: "authorization.external-entity-policy",
+        minimum_values: 0,
+        maximum_values: 1,
+    },
+];
+
+impl SemanticQueryRequest {
+    /// Return the lossless text operands for one compiled v2.0 scope role.
+    #[must_use]
+    pub(crate) fn compiled_v2_0_scope_operands(&self, role: CompiledV20ScopeRole) -> Vec<&str> {
+        match role {
+            CompiledV20ScopeRole::WorkspaceId => vec![self.workspace_id.as_str()],
+            CompiledV20ScopeRole::Codebase => self.codebase.iter().map(String::as_str).collect(),
+            CompiledV20ScopeRole::Language => self.languages.iter().map(String::as_str).collect(),
+            CompiledV20ScopeRole::SourceBoundary => {
+                self.source_boundaries.iter().map(String::as_str).collect()
+            }
+            CompiledV20ScopeRole::AnalysisContextMode => self
+                .analysis_context_mode
+                .iter()
+                .map(String::as_str)
+                .collect(),
+            CompiledV20ScopeRole::AnalysisContextId => self
+                .analysis_context_ids
+                .iter()
+                .map(String::as_str)
+                .collect(),
+            CompiledV20ScopeRole::Representation => {
+                self.representations.iter().map(String::as_str).collect()
+            }
+            CompiledV20ScopeRole::ExternalEntityPolicy => self
+                .external_entity_policy
+                .iter()
+                .map(String::as_str)
+                .collect(),
+        }
+    }
 }
 
 /// Strictly decoded request together with its canonical bytes and content digest.
@@ -102,8 +224,6 @@ pub fn parse_request(bytes: &[u8]) -> Result<ParsedSemanticRequest, SemanticQuer
             SemanticQueryError::Invalid("request version must be a string".to_owned())
         })?;
     let request = match version {
-        "1.3" => serde_json::from_slice(&canonical_bytes)
-            .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?,
         "2.0" => translate_v2_request(&canonical_bytes)?,
         other => {
             return Err(SemanticQueryError::Invalid(format!(
@@ -135,37 +255,37 @@ struct SemanticQueryRequestV2Wire {
 #[serde(deny_unknown_fields)]
 struct SemanticQueryScopeV2Wire {
     workspace_id: String,
-    #[serde(default, rename = "codebase")]
-    _codebase: Option<String>,
-    #[serde(default, rename = "languages")]
-    _languages: Vec<String>,
-    #[serde(default, rename = "source_boundaries")]
-    _source_boundaries: Vec<serde_json::Value>,
-    #[serde(default, rename = "analysis_contexts")]
-    _analysis_contexts: Option<SemanticAnalysisContextsV2Wire>,
-    #[serde(default, rename = "representations")]
-    _representations: Vec<String>,
-    #[serde(default, rename = "external_entities")]
-    _external_entities: Option<String>,
+    #[serde(default)]
+    codebase: Option<String>,
+    #[serde(default)]
+    languages: Vec<String>,
+    #[serde(default)]
+    source_boundaries: Vec<serde_json::Value>,
+    #[serde(default)]
+    analysis_contexts: Option<SemanticAnalysisContextsV2Wire>,
+    #[serde(default)]
+    representations: Vec<String>,
+    #[serde(default)]
+    external_entities: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SemanticAnalysisContextsV2Wire {
-    #[serde(default, rename = "mode")]
-    _mode: Option<String>,
-    #[serde(default, rename = "context_ids")]
-    _context_ids: Vec<String>,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    context_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SemanticQueryFreshnessV2Wire {
     policy: String,
-    #[serde(default, rename = "target_scope")]
-    _target_scope: Option<String>,
-    #[serde(default, rename = "deadline_ms")]
-    _deadline_ms: Option<u64>,
+    #[serde(default)]
+    target_scope: Option<String>,
+    #[serde(default)]
+    deadline_ms: Option<u64>,
 }
 
 fn translate_v2_request(bytes: &[u8]) -> Result<SemanticQueryRequest, SemanticQueryError> {
@@ -193,16 +313,46 @@ fn translate_v2_request(bytes: &[u8]) -> Result<SemanticQueryRequest, SemanticQu
         .into_iter()
         .map(translate_v2_clause)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(SemanticQueryRequest {
+    let analysis_contexts = wire.scope.analysis_contexts.unwrap_or_default();
+    let source_boundaries = wire
+        .scope
+        .source_boundaries
+        .iter()
+        .map(|boundary| {
+            String::from_utf8(canonicalize_value(boundary)?).map_err(|error| {
+                SemanticQueryError::Invalid(format!(
+                    "canonical source boundary is not UTF-8: {error}"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let request = SemanticQueryRequest {
         specification: wire.specification,
         version: wire.version,
         semantic_request_id: wire.semantic_request_id,
         workspace_id: wire.scope.workspace_id,
+        codebase: wire.scope.codebase,
+        languages: wire.scope.languages,
+        source_boundaries,
+        analysis_context_mode: analysis_contexts.mode,
+        analysis_context_ids: analysis_contexts.context_ids,
+        representations: wire.scope.representations,
+        external_entity_policy: wire.scope.external_entities,
         freshness_policy,
+        freshness_target_scope: wire.freshness.target_scope,
+        freshness_deadline_ms: wire.freshness.deadline_ms,
         queries,
-        response_projection: None,
-        cost_budget: None,
-    })
+    };
+    for definition in COMPILED_V2_0_SCOPE_DEFINITIONS {
+        let observed = request.compiled_v2_0_scope_operands(definition.role).len();
+        if observed < definition.minimum_values || observed > definition.maximum_values {
+            return Err(SemanticQueryError::Invalid(format!(
+                "scope {} has {observed} values; expected {}..={}",
+                definition.scope_id, definition.minimum_values, definition.maximum_values
+            )));
+        }
+    }
+    Ok(request)
 }
 
 fn translate_v2_clause(
@@ -1059,20 +1209,70 @@ impl SemanticQueryClause {
 mod tests {
     use super::*;
 
-    const REQUEST: &[u8] = br#"{"cost_budget":{"maximum_rows":1},"freshness_policy":"best_available_snapshot","queries":[{"label":null,"looking_for":"syntax nodes","query_id":"q1","request":"find code entities","return":{"limit":{"maximum_results":1}}}],"response_projection":null,"semantic_request_id":"request:1","specification":"composable semantic CPG fact query","version":"1.3","workspace_id":"workspace:00000000000000000000000000000000"}"#;
+    const REQUEST: &[u8] = br#"{
+        "specification":"composable semantic CPG fact query",
+        "version":"2.0",
+        "semantic_request_id":"request:1",
+        "scope":{
+            "workspace_id":"workspace:00000000000000000000000000000000",
+            "codebase":"codebase:current",
+            "languages":["Rust","Python"],
+            "source_boundaries":[{"root":"src","kind":"path"}],
+            "analysis_contexts":{"mode":"explicit","context_ids":["analysis:one"]},
+            "representations":["syntax","semantic"],
+            "external_entities":"endpoint-only"
+        },
+        "freshness":{
+            "policy":"best_available_snapshot",
+            "target_scope":"semantic",
+            "deadline_ms":2500
+        },
+        "queries":[{
+            "request":"find code entities",
+            "query_id":"q1",
+            "looking_for":"syntax nodes",
+            "within":[],
+            "where":[],
+            "return":{"limit":{"maximum_results":1}}
+        }]
+    }"#;
 
     #[test]
     fn released_request_parser_is_authority_neutral_and_canonical() {
         let parsed = parse_request(REQUEST).expect("released request must decode");
-        assert_eq!(parsed.canonical_bytes, REQUEST);
+        assert_eq!(
+            parsed.canonical_bytes,
+            canonicalize_slice(REQUEST).expect("canonical request")
+        );
         assert_eq!(parsed.request.queries.len(), 1);
+        assert_eq!(parsed.request.codebase.as_deref(), Some("codebase:current"));
+        assert_eq!(parsed.request.languages, ["Rust", "Python"]);
+        assert_eq!(
+            parsed.request.source_boundaries,
+            [r#"{"kind":"path","root":"src"}"#]
+        );
+        assert_eq!(
+            parsed.request.analysis_context_mode.as_deref(),
+            Some("explicit")
+        );
+        assert_eq!(parsed.request.analysis_context_ids, ["analysis:one"]);
+        assert_eq!(parsed.request.representations, ["syntax", "semantic"]);
+        assert_eq!(
+            parsed.request.external_entity_policy.as_deref(),
+            Some("endpoint-only")
+        );
         assert_eq!(
             parsed.request.freshness_policy,
             FreshnessPolicy::BestAvailableSnapshot
         );
         assert_eq!(
+            parsed.request.freshness_target_scope.as_deref(),
+            Some("semantic")
+        );
+        assert_eq!(parsed.request.freshness_deadline_ms, Some(2_500));
+        assert_eq!(
             parsed.request_digest,
-            crate::integrity::framed_digest(REQUEST)
+            crate::integrity::framed_digest(&parsed.canonical_bytes)
         );
     }
 
@@ -1083,6 +1283,17 @@ mod tests {
         let bytes = crate::contracts::jcs::canonicalize_value(&value).unwrap();
         let error = parse_request(&bytes).unwrap_err();
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn released_request_parser_rejects_v1_3_instead_of_translating_legacy_globals() {
+        let legacy = br#"{"freshness_policy":"current_required","queries":[],"semantic_request_id":"request:legacy","specification":"composable semantic CPG fact query","version":"1.3","workspace_id":"workspace:legacy"}"#;
+        let error = parse_request(legacy).expect_err("v1.3 is not an operable request envelope");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported semantic request version 1.3")
+        );
     }
 
     #[test]

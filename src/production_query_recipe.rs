@@ -1,11 +1,12 @@
 //! Production construction of the released semantic-query program catalogs.
 //!
-//! This module is an application-owned composition boundary.  It accepts typed Rust program
-//! definitions, checks every epoch-owned relation and field against the exact sealed
-//! [`ProgrammaticFabricEpoch`], and emits the two catalogs consumed by the programmatic query
-//! ports.  It deliberately accepts neither a serialized semantic manifest nor caller-selected
-//! catalog/program pins.  Pins emitted here are only canonical identities of typed program rows;
-//! semantic validity comes from the relation/field checks and native compiler execution.
+//! This module is an application-owned composition boundary.  The compiled release privately
+//! constructs the complete eight-form program and scope set, checks every epoch-owned relation
+//! and field against the exact sealed [`ProgrammaticFabricEpoch`], and emits the two catalogs
+//! consumed by the programmatic query ports.  Callers may vary only source, policy, and resource
+//! inputs; they cannot supply a serialized semantic manifest, program, scope, catalog, or release
+//! pin.  Pins emitted here use explicit typed framing. Semantic validity comes from exact
+//! relation/field checks and executed producer-closure proof, never from a digest alone.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -15,10 +16,13 @@ use arrow_array::{Array, RecordBatch, StringArray, UInt64Array};
 use crate::fabric::derived_producer_closure::{
     DerivedProducerClosureExecution, FamilyClosureFields, ProducerClosureCompilationDependency,
 };
+use crate::fabric::production_kernel::CompiledQueryAuthority;
 use crate::fabric::programmatic_epoch::ProgrammaticFabricEpoch;
 use crate::fabric::programmatic_schema::ProgrammaticRelationId;
 use crate::fabric::programmatic_workspace::programmatic_fabric_epoch_authority_pin;
-use crate::relational_program::{FieldId, RelationId, ScalarOperator};
+use crate::relational_program::{
+    AggregateOperator, FieldId, JoinKind, RelationId, ScalarOperator, UnionKind,
+};
 use crate::relational_semantic_query::{
     EpochBoundConsumerComposition, EpochBoundConsumerSlotBindingRow,
     EpochBoundExecutionConsumerSlotRow, EpochBoundExecutionOperatorRow,
@@ -35,10 +39,16 @@ use crate::relational_semantic_query::{
     epoch_bound_semantic_ingress_limits_pin,
 };
 use crate::schema_contract::SchemaRole;
+use crate::semantic_query_contract::COMPILED_V2_0_SCOPE_DEFINITIONS;
+
+const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
+    "codefabric.semantic-query.release.v2.2.0:datafusion=55.0.0:arrow=59.2.0";
+const RELEASE_FACTUAL_SEMANTIC_CLASS_ID: &str = "semantic.fact.v2";
+const RELEASE_SELECTION_MAXIMUM_VALUES: usize = 64;
 
 /// Whether a relation is owned by the sealed epoch or exists only inside one compiled request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ProductionRelationAuthority {
+enum ProductionRelationAuthority {
     /// The exact relation and field sequence must exist in the sealed epoch.
     Epoch,
     /// The relation is supplied through a validated request-input or prior-result handoff.
@@ -49,112 +59,132 @@ pub enum ProductionRelationAuthority {
 
 /// One relation schema referenced by a typed production program.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProductionRelationDefinition {
-    pub relation_id: RelationId,
-    pub fields: Vec<FieldId>,
-    pub authority: ProductionRelationAuthority,
+struct ProductionRelationDefinition {
+    relation_id: RelationId,
+    fields: Vec<FieldId>,
+    authority: ProductionRelationAuthority,
 }
 
 /// One operator node.  Its program and execution pins are derived by this module.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProductionOperatorDefinition {
-    pub node_id: Arc<str>,
-    pub ordinal: u32,
-    pub input_node_ids: Vec<Arc<str>>,
-    pub operator: ProgramRelationalOperator,
-    pub output_fields: Vec<FieldId>,
+struct ProductionOperatorDefinition {
+    node_id: Arc<str>,
+    ordinal: u32,
+    input_node_ids: Vec<Arc<str>>,
+    operator: ProgramRelationalOperator,
+    output_fields: Vec<FieldId>,
 }
 
 /// Ingress and execution realization for one repeatable selection.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProductionSelectionDefinition {
-    pub selection_id: Arc<str>,
-    pub value_kind: SemanticValueKind,
-    pub minimum_values: usize,
-    pub maximum_values: usize,
-    pub operator_node_id: Arc<str>,
-    pub input_field_id: FieldId,
-    pub scalar_operator: ScalarOperator,
-    pub fold: EpochBoundSelectionFold,
+struct ProductionSelectionDefinition {
+    selection_id: Arc<str>,
+    value_kind: SemanticValueKind,
+    minimum_values: usize,
+    maximum_values: usize,
+    operator_node_id: Arc<str>,
+    input_field_id: FieldId,
+    scalar_operator: ScalarOperator,
+    fold: EpochBoundSelectionFold,
 }
 
 /// One exact return value and its programmatic realization.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProductionReturnRealization {
-    pub value: SemanticClauseValue,
-    pub realization_node_id: Arc<str>,
-    pub realization_field_ids: Vec<FieldId>,
+struct ProductionReturnRealization {
+    value: SemanticClauseValue,
+    realization_node_id: Arc<str>,
+    realization_field_ids: Vec<FieldId>,
 }
 
 /// Ingress contract and finite execution realizations for one return directive.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProductionReturnDefinition {
-    pub return_id: Arc<str>,
-    pub value_kind: SemanticValueKind,
-    pub minimum_values: usize,
-    pub maximum_values: usize,
-    pub realizations: Vec<ProductionReturnRealization>,
+struct ProductionReturnDefinition {
+    return_id: Arc<str>,
+    value_kind: SemanticValueKind,
+    minimum_values: usize,
+    maximum_values: usize,
+    realizations: Vec<ProductionReturnRealization>,
 }
 
 /// One request-owned relation consumed by a program.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProductionRequestInputDefinition {
-    pub input_id: Arc<str>,
-    pub relation_id: RelationId,
-    pub fields: Vec<EpochBoundRequestInputField>,
-    pub minimum_rows: usize,
-    pub maximum_rows: usize,
+struct ProductionRequestInputDefinition {
+    input_id: Arc<str>,
+    relation_id: RelationId,
+    fields: Vec<EpochBoundRequestInputField>,
+    minimum_rows: usize,
+    maximum_rows: usize,
 }
 
 /// One prior-result consumer slot consumed by a program.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProductionConsumerSlotDefinition {
-    pub consumer_slot_id: Arc<str>,
-    pub consumer_role_id: Arc<str>,
-    pub input_relation_id: RelationId,
-    pub minimum_edges: usize,
-    pub maximum_edges: usize,
-    pub composition: EpochBoundConsumerComposition,
+struct ProductionConsumerSlotDefinition {
+    consumer_slot_id: Arc<str>,
+    consumer_role_id: Arc<str>,
+    input_relation_id: RelationId,
+    minimum_edges: usize,
+    maximum_edges: usize,
+    composition: EpochBoundConsumerComposition,
 }
 
 /// Complete compiled-Rust definition of one released form.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProductionSemanticFormProgram {
-    pub form: ReleasedSemanticForm,
-    pub program_binding_id: Arc<str>,
-    pub output_role_id: Arc<str>,
-    pub root_node_id: Arc<str>,
-    pub output_relation_id: RelationId,
-    pub output_fields: Vec<FieldId>,
-    pub relations: Vec<ProductionRelationDefinition>,
-    pub operators: Vec<ProductionOperatorDefinition>,
-    pub selections: Vec<ProductionSelectionDefinition>,
-    pub returns: Vec<ProductionReturnDefinition>,
-    pub request_inputs: Vec<ProductionRequestInputDefinition>,
-    pub consumer_slots: Vec<ProductionConsumerSlotDefinition>,
-    pub required_fact_families: Vec<Arc<str>>,
+struct ProductionSemanticFormProgram {
+    form: ReleasedSemanticForm,
+    program_binding_id: Arc<str>,
+    output_role_id: Arc<str>,
+    root_node_id: Arc<str>,
+    output_relation_id: RelationId,
+    output_fields: Vec<FieldId>,
+    relations: Vec<ProductionRelationDefinition>,
+    operators: Vec<ProductionOperatorDefinition>,
+    selections: Vec<ProductionSelectionDefinition>,
+    returns: Vec<ProductionReturnDefinition>,
+    request_inputs: Vec<ProductionRequestInputDefinition>,
+    consumer_slots: Vec<ProductionConsumerSlotDefinition>,
+    required_fact_families: Vec<Arc<str>>,
 }
 
 /// Request-global scope contract and its child-authorization handoff.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProductionScopeDefinition {
-    pub scope_id: Arc<str>,
-    pub value_kind: SemanticValueKind,
-    pub minimum_values: usize,
-    pub maximum_values: usize,
-    pub authorization_input_id: Arc<str>,
+struct ProductionScopeDefinition {
+    scope_id: Arc<str>,
+    value_kind: SemanticValueKind,
+    minimum_values: usize,
+    maximum_values: usize,
+    authorization_input_id: Arc<str>,
 }
 
 /// Explicit application inputs that are not derivable from the sealed epoch.
 #[derive(Clone, Debug)]
 pub struct ProductionSemanticQueryRecipeInput {
-    pub source_pin: [u8; 32],
-    pub policy_pin: [u8; 32],
-    pub program_release_pin: [u8; 32],
-    pub factual_semantic_class_id: Arc<str>,
-    pub limits: EpochBoundSemanticIngressLimits,
-    pub scopes: Vec<ProductionScopeDefinition>,
-    pub forms: Vec<ProductionSemanticFormProgram>,
+    source_pin: [u8; 32],
+    policy_pin: [u8; 32],
+    limits: EpochBoundSemanticIngressLimits,
+}
+
+impl ProductionSemanticQueryRecipeInput {
+    /// Construct the complete set of caller-variable query-recipe inputs.
+    ///
+    /// The release program, semantic class, scopes, relation contracts, and program operands are
+    /// intentionally absent from this interface.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an absent source or policy authority pin.
+    pub fn try_new(
+        source_pin: [u8; 32],
+        policy_pin: [u8; 32],
+        limits: EpochBoundSemanticIngressLimits,
+    ) -> Result<Self, ProductionQueryRecipeError> {
+        validate_pin("source", source_pin)?;
+        validate_pin("policy", policy_pin)?;
+        Ok(Self {
+            source_pin,
+            policy_pin,
+            limits,
+        })
+    }
 }
 
 /// Complete epoch-bound products accepted by workspace construction and concrete query ports.
@@ -177,31 +207,34 @@ impl ProductionSemanticQueryRecipe {
     ///
     /// Rejects incomplete released-form coverage, relation/field drift, invalid operator graphs,
     /// incomplete ingress realization, or any producer-closure violation.
-    pub fn try_from_executed_closure(
+    pub(crate) fn try_from_executed_closure(
+        compiled_release: &CompiledQueryAuthority,
         epoch: &ProgrammaticFabricEpoch,
         input: ProductionSemanticQueryRecipeInput,
         closure_execution: &DerivedProducerClosureExecution,
-        closure_fields: &FamilyClosureFields,
     ) -> Result<Self, ProductionQueryRecipeError> {
         let producer_closure = decode_executed_closure(
             epoch,
             closure_execution,
-            closure_fields,
-            &input.factual_semantic_class_id,
+            closure_execution.family_closure_fields(),
+            &Arc::from(RELEASE_FACTUAL_SEMANTIC_CLASS_ID),
         )?;
-        Self::assemble(epoch, input, producer_closure)
+        Self::assemble(compiled_release, epoch, input, producer_closure)
     }
 
     fn assemble(
+        _compiled_release: &CompiledQueryAuthority,
         epoch: &ProgrammaticFabricEpoch,
         input: ProductionSemanticQueryRecipeInput,
         producer_closure: ProducerClosureProof,
     ) -> Result<Self, ProductionQueryRecipeError> {
         validate_pin("source", input.source_pin)?;
         validate_pin("policy", input.policy_pin)?;
-        validate_pin("program release", input.program_release_pin)?;
-        validate_identity("factual semantic class", &input.factual_semantic_class_id)?;
-        let forms = validate_form_coverage(input.forms)?;
+        validate_identity("factual semantic class", RELEASE_FACTUAL_SEMANTIC_CLASS_ID)?;
+        let forms = compiled_released_form_programs()?;
+        let scopes = compiled_release_scopes();
+        let program_release_pin = compiled_release_identity_pin(&forms, &scopes);
+        validate_pin("program release", program_release_pin)?;
         let fabric_epoch_pin = programmatic_fabric_epoch_authority_pin(epoch);
         let limits_pin = epoch_bound_semantic_ingress_limits_pin(input.limits);
 
@@ -217,16 +250,20 @@ impl ProductionSemanticQueryRecipe {
             fabric_epoch_pin,
             input.source_pin,
             input.policy_pin,
-            input.program_release_pin,
+            program_release_pin,
+            producer_closure.proof_pin,
             &forms,
+            &scopes,
         );
         let execution_catalog_pin = catalog_identity_pin(
             b"codefabric.production-semantic-execution-catalog.v1",
             fabric_epoch_pin,
             input.source_pin,
             input.policy_pin,
-            input.program_release_pin,
+            program_release_pin,
+            producer_closure.proof_pin,
             &forms,
+            &scopes,
         );
 
         let mut ingress = EpochBoundSemanticIngressCatalog {
@@ -250,11 +287,11 @@ impl ProductionSemanticQueryRecipe {
             policy_pin: input.policy_pin,
             producer_closure_proof_pin: producer_closure.proof_pin,
             execution_catalog_pin,
-            program_release_pin: input.program_release_pin,
+            program_release_pin,
             authority: SemanticQueryAuthority::ApplicationOwned(Arc::clone(
                 &producer_closure.application_authority_id,
             )),
-            semantic_class: SemanticQueryClass::Fact(Arc::clone(&input.factual_semantic_class_id)),
+            semantic_class: SemanticQueryClass::Fact(Arc::from(RELEASE_FACTUAL_SEMANTIC_CLASS_ID)),
             programs: Vec::new(),
             operators: Vec::new(),
             relation_schemas: Vec::new(),
@@ -351,10 +388,11 @@ impl ProductionSemanticQueryRecipe {
             })
             .collect();
         append_scopes(
-            input.scopes,
+            scopes,
             &mut ingress,
             &mut execution,
             program_catalog_pin,
+            input.limits,
         )?;
 
         Ok(Self {
@@ -395,6 +433,364 @@ impl ProductionSemanticQueryRecipe {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ReleasedEpochFormSpec {
+    program_binding_id: &'static str,
+    output_role_id: &'static str,
+    relation_id: &'static str,
+    field_id: &'static str,
+    selection_id: &'static str,
+    required_fact_family: &'static str,
+}
+
+fn compiled_released_form_programs()
+-> Result<BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>, ProductionQueryRecipeError>
+{
+    let programs = ReleasedSemanticForm::ALL
+        .into_iter()
+        .map(compiled_released_form_program)
+        .collect::<Result<Vec<_>, _>>()?;
+    validate_form_coverage(programs)
+}
+
+fn compiled_released_form_program(
+    form: ReleasedSemanticForm,
+) -> Result<ProductionSemanticFormProgram, ProductionQueryRecipeError> {
+    match form {
+        ReleasedSemanticForm::FindCodeEntities => compiled_epoch_filter_program(
+            form,
+            ReleasedEpochFormSpec {
+                program_binding_id: "program.semantic-query.find-code-entities.v2",
+                output_role_id: "result.semantic-entities",
+                relation_id: "public.semantic_entity",
+                field_id: "public.semantic_entity.record_id",
+                selection_id: "looking_for",
+                required_fact_family: "fact-family.semantic-entity",
+            },
+        ),
+        ReleasedSemanticForm::RetrieveFactsAboutCode => compiled_epoch_filter_program(
+            form,
+            ReleasedEpochFormSpec {
+                program_binding_id: "program.semantic-query.retrieve-facts-about-code.v2",
+                output_role_id: "result.semantic-facts",
+                relation_id: "public.semantic_fact",
+                field_id: "public.semantic_fact.record_id",
+                selection_id: "about",
+                required_fact_family: "fact-family.semantic-fact",
+            },
+        ),
+        ReleasedSemanticForm::FollowCodeRelationships => compiled_epoch_filter_program(
+            form,
+            ReleasedEpochFormSpec {
+                program_binding_id: "program.semantic-query.follow-code-relationships.v2",
+                output_role_id: "result.semantic-relationships",
+                relation_id: "public.semantic_relationship",
+                field_id: "public.semantic_relationship.record_id",
+                selection_id: "starting_from",
+                required_fact_family: "fact-family.semantic-relationship",
+            },
+        ),
+        ReleasedSemanticForm::FindConnectingFactPaths => compiled_epoch_filter_program(
+            form,
+            ReleasedEpochFormSpec {
+                program_binding_id: "program.semantic-query.find-connecting-fact-paths.v2",
+                output_role_id: "result.semantic-fact-paths",
+                relation_id: "public.semantic_fact_path",
+                field_id: "public.semantic_fact_path.record_id",
+                selection_id: "from",
+                required_fact_family: "fact-family.semantic-path",
+            },
+        ),
+        ReleasedSemanticForm::MatchCodeFactPattern => compiled_epoch_filter_program(
+            form,
+            ReleasedEpochFormSpec {
+                program_binding_id: "program.semantic-query.match-code-fact-pattern.v2",
+                output_role_id: "result.semantic-pattern-matches",
+                relation_id: "public.semantic_pattern_match",
+                field_id: "public.semantic_pattern_match.record_id",
+                selection_id: "pattern",
+                required_fact_family: "fact-family.semantic-pattern",
+            },
+        ),
+        ReleasedSemanticForm::CombineResultSets => compiled_combine_result_sets_program(),
+        ReleasedSemanticForm::SummarizeObjectiveFacts => {
+            compiled_summarize_objective_facts_program()
+        }
+        ReleasedSemanticForm::RetrieveSourceAndSyntaxContext => compiled_epoch_filter_program(
+            form,
+            ReleasedEpochFormSpec {
+                program_binding_id: "program.semantic-query.retrieve-source-syntax-context.v2",
+                output_role_id: "result.source-syntax-contexts",
+                relation_id: "public.source_syntax_context",
+                field_id: "public.source_syntax_context.record_id",
+                selection_id: "about",
+                required_fact_family: "fact-family.source-context",
+            },
+        ),
+    }
+}
+
+fn compiled_epoch_filter_program(
+    form: ReleasedSemanticForm,
+    spec: ReleasedEpochFormSpec,
+) -> Result<ProductionSemanticFormProgram, ProductionQueryRecipeError> {
+    let relation_id = release_relation_id(spec.relation_id)?;
+    let field_id = release_field_id(spec.field_id)?;
+    let input_node_id: Arc<str> = Arc::from(format!("{}.input", spec.program_binding_id));
+    let filter_node_id: Arc<str> = Arc::from(format!("{}.filter", spec.program_binding_id));
+    Ok(ProductionSemanticFormProgram {
+        form,
+        program_binding_id: Arc::from(spec.program_binding_id),
+        output_role_id: Arc::from(spec.output_role_id),
+        root_node_id: Arc::clone(&filter_node_id),
+        output_relation_id: relation_id.clone(),
+        output_fields: vec![field_id.clone()],
+        relations: vec![ProductionRelationDefinition {
+            relation_id: relation_id.clone(),
+            fields: vec![field_id.clone()],
+            authority: ProductionRelationAuthority::Epoch,
+        }],
+        operators: vec![
+            ProductionOperatorDefinition {
+                node_id: Arc::clone(&input_node_id),
+                ordinal: 0,
+                input_node_ids: Vec::new(),
+                operator: ProgramRelationalOperator::Input { relation_id },
+                output_fields: vec![field_id.clone()],
+            },
+            ProductionOperatorDefinition {
+                node_id: Arc::clone(&filter_node_id),
+                ordinal: 1,
+                input_node_ids: vec![input_node_id],
+                operator: ProgramRelationalOperator::Filter,
+                output_fields: vec![field_id.clone()],
+            },
+        ],
+        selections: vec![ProductionSelectionDefinition {
+            selection_id: Arc::from(spec.selection_id),
+            value_kind: SemanticValueKind::Text,
+            minimum_values: 0,
+            maximum_values: RELEASE_SELECTION_MAXIMUM_VALUES,
+            operator_node_id: Arc::clone(&filter_node_id),
+            input_field_id: field_id.clone(),
+            scalar_operator: ScalarOperator::Equal,
+            fold: EpochBoundSelectionFold::Any,
+        }],
+        returns: vec![identity_return(filter_node_id, field_id)],
+        request_inputs: Vec::new(),
+        consumer_slots: Vec::new(),
+        required_fact_families: vec![Arc::from(spec.required_fact_family)],
+    })
+}
+
+fn compiled_combine_result_sets_program()
+-> Result<ProductionSemanticFormProgram, ProductionQueryRecipeError> {
+    let left_relation = release_relation_id("input.semantic-query.combine.left")?;
+    let right_relation = release_relation_id("input.semantic-query.combine.right")?;
+    let output_relation = release_relation_id("program.semantic-query.combine.output")?;
+    let field_id = release_field_id("query-local.semantic-result.record_id")?;
+    let left_node: Arc<str> = Arc::from("program.semantic-query.combine-result-sets.v2.left");
+    let right_node: Arc<str> = Arc::from("program.semantic-query.combine-result-sets.v2.right");
+    let root_node: Arc<str> = Arc::from("program.semantic-query.combine-result-sets.v2.union");
+    Ok(ProductionSemanticFormProgram {
+        form: ReleasedSemanticForm::CombineResultSets,
+        program_binding_id: Arc::from("program.semantic-query.combine-result-sets.v2"),
+        output_role_id: Arc::from("result.combined-semantic-results"),
+        root_node_id: Arc::clone(&root_node),
+        output_relation_id: output_relation.clone(),
+        output_fields: vec![field_id.clone()],
+        relations: vec![
+            ProductionRelationDefinition {
+                relation_id: left_relation.clone(),
+                fields: vec![field_id.clone()],
+                authority: ProductionRelationAuthority::QueryLocal,
+            },
+            ProductionRelationDefinition {
+                relation_id: right_relation.clone(),
+                fields: vec![field_id.clone()],
+                authority: ProductionRelationAuthority::QueryLocal,
+            },
+            ProductionRelationDefinition {
+                relation_id: output_relation,
+                fields: vec![field_id.clone()],
+                authority: ProductionRelationAuthority::ProgramResult,
+            },
+        ],
+        operators: vec![
+            ProductionOperatorDefinition {
+                node_id: Arc::clone(&left_node),
+                ordinal: 0,
+                input_node_ids: Vec::new(),
+                operator: ProgramRelationalOperator::Input {
+                    relation_id: left_relation.clone(),
+                },
+                output_fields: vec![field_id.clone()],
+            },
+            ProductionOperatorDefinition {
+                node_id: Arc::clone(&right_node),
+                ordinal: 1,
+                input_node_ids: Vec::new(),
+                operator: ProgramRelationalOperator::Input {
+                    relation_id: right_relation.clone(),
+                },
+                output_fields: vec![field_id.clone()],
+            },
+            ProductionOperatorDefinition {
+                node_id: Arc::clone(&root_node),
+                ordinal: 2,
+                input_node_ids: vec![left_node, right_node],
+                operator: ProgramRelationalOperator::Union {
+                    kind: UnionKind::Distinct,
+                },
+                output_fields: vec![field_id.clone()],
+            },
+        ],
+        selections: Vec::new(),
+        returns: vec![identity_return(root_node, field_id)],
+        request_inputs: Vec::new(),
+        consumer_slots: vec![
+            ProductionConsumerSlotDefinition {
+                consumer_slot_id: Arc::from("input.left-results"),
+                consumer_role_id: Arc::from("result.semantic-records"),
+                input_relation_id: left_relation,
+                minimum_edges: 0,
+                maximum_edges: 64,
+                composition: EpochBoundConsumerComposition::Single,
+            },
+            ProductionConsumerSlotDefinition {
+                consumer_slot_id: Arc::from("input.right-results"),
+                consumer_role_id: Arc::from("result.semantic-records"),
+                input_relation_id: right_relation,
+                minimum_edges: 0,
+                maximum_edges: 64,
+                composition: EpochBoundConsumerComposition::Union(UnionKind::Distinct),
+            },
+        ],
+        required_fact_families: vec![Arc::from("fact-family.result-set")],
+    })
+}
+
+fn compiled_summarize_objective_facts_program()
+-> Result<ProductionSemanticFormProgram, ProductionQueryRecipeError> {
+    let input_relation = release_relation_id("input.semantic-query.objective-summary")?;
+    let output_relation = release_relation_id("program.semantic-query.objective-summary")?;
+    let input_field = release_field_id("query-local.objective-summary.record_id")?;
+    let output_field = release_field_id("program.objective-summary.count")?;
+    let input_node: Arc<str> =
+        Arc::from("program.semantic-query.summarize-objective-facts.v2.input");
+    let root_node: Arc<str> =
+        Arc::from("program.semantic-query.summarize-objective-facts.v2.aggregate");
+    Ok(ProductionSemanticFormProgram {
+        form: ReleasedSemanticForm::SummarizeObjectiveFacts,
+        program_binding_id: Arc::from("program.semantic-query.summarize-objective-facts.v2"),
+        output_role_id: Arc::from("result.objective-fact-summary"),
+        root_node_id: Arc::clone(&root_node),
+        output_relation_id: output_relation.clone(),
+        output_fields: vec![output_field.clone()],
+        relations: vec![
+            ProductionRelationDefinition {
+                relation_id: input_relation.clone(),
+                fields: vec![input_field.clone()],
+                authority: ProductionRelationAuthority::QueryLocal,
+            },
+            ProductionRelationDefinition {
+                relation_id: output_relation,
+                fields: vec![output_field.clone()],
+                authority: ProductionRelationAuthority::ProgramResult,
+            },
+        ],
+        operators: vec![
+            ProductionOperatorDefinition {
+                node_id: Arc::clone(&input_node),
+                ordinal: 0,
+                input_node_ids: Vec::new(),
+                operator: ProgramRelationalOperator::Input {
+                    relation_id: input_relation.clone(),
+                },
+                output_fields: vec![input_field.clone()],
+            },
+            ProductionOperatorDefinition {
+                node_id: Arc::clone(&root_node),
+                ordinal: 1,
+                input_node_ids: vec![input_node],
+                operator: ProgramRelationalOperator::Aggregate {
+                    group_by: Vec::new(),
+                    aggregates: vec![crate::relational_semantic_query::ProgramAggregateField {
+                        input_field_id: input_field.clone(),
+                        output_field_id: output_field.clone(),
+                        aggregate_operator: AggregateOperator::Count,
+                    }],
+                },
+                output_fields: vec![output_field.clone()],
+            },
+        ],
+        selections: Vec::new(),
+        returns: vec![ProductionReturnDefinition {
+            return_id: Arc::from("include"),
+            value_kind: SemanticValueKind::Text,
+            minimum_values: 0,
+            maximum_values: 1,
+            realizations: vec![ProductionReturnRealization {
+                value: SemanticClauseValue::Text(Arc::from("count")),
+                realization_node_id: root_node,
+                realization_field_ids: vec![output_field],
+            }],
+        }],
+        request_inputs: vec![ProductionRequestInputDefinition {
+            input_id: Arc::from("facts"),
+            relation_id: input_relation,
+            fields: vec![EpochBoundRequestInputField {
+                field_id: input_field,
+                value_kind: SemanticValueKind::Text,
+                required: true,
+            }],
+            minimum_rows: 0,
+            maximum_rows: 10_000,
+        }],
+        consumer_slots: Vec::new(),
+        required_fact_families: vec![Arc::from("fact-family.objective-summary")],
+    })
+}
+
+fn identity_return(realization_node_id: Arc<str>, field_id: FieldId) -> ProductionReturnDefinition {
+    ProductionReturnDefinition {
+        return_id: Arc::from("include"),
+        value_kind: SemanticValueKind::Text,
+        minimum_values: 0,
+        maximum_values: 1,
+        realizations: vec![ProductionReturnRealization {
+            value: SemanticClauseValue::Text(Arc::from("canonical-id")),
+            realization_node_id,
+            realization_field_ids: vec![field_id],
+        }],
+    }
+}
+
+fn compiled_release_scopes() -> Vec<ProductionScopeDefinition> {
+    COMPILED_V2_0_SCOPE_DEFINITIONS
+        .into_iter()
+        .map(|definition| ProductionScopeDefinition {
+            scope_id: Arc::from(definition.scope_id),
+            value_kind: SemanticValueKind::Text,
+            minimum_values: definition.minimum_values,
+            maximum_values: definition.maximum_values,
+            authorization_input_id: Arc::from(definition.authorization_input_id),
+        })
+        .collect()
+}
+
+fn release_relation_id(value: &str) -> Result<RelationId, ProductionQueryRecipeError> {
+    RelationId::new(value).map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+        detail: error.to_string(),
+    })
+}
+
+fn release_field_id(value: &str) -> Result<FieldId, ProductionQueryRecipeError> {
+    FieldId::new(value).map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+        detail: error.to_string(),
+    })
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProductionQueryRecipeError {
     #[error("required {0} pin is absent")]
@@ -403,6 +799,8 @@ pub enum ProductionQueryRecipeError {
     InvalidIdentity { kind: &'static str, value: String },
     #[error("released form coverage is incomplete or duplicated: {0}")]
     ReleasedFormCoverage(String),
+    #[error("compiled semantic-query release is invalid: {detail}")]
+    InvalidCompiledRelease { detail: String },
     #[error("program {program} relation {relation} is absent from the sealed epoch")]
     MissingEpochRelation { program: String, relation: String },
     #[error("program {program} relation {relation} field contract differs from the sealed epoch")]
@@ -584,7 +982,7 @@ fn validate_program(
     if output_schema != &program.output_fields {
         return invalid(program, "output relation schema differs from root fields");
     }
-    validate_program_bindings(program, &nodes, &relation_schemas)
+    validate_program_bindings(program, &nodes, &relation_schemas, limits)
 }
 
 fn validate_operator_node(
@@ -687,6 +1085,7 @@ fn validate_program_bindings(
     program: &ProductionSemanticFormProgram,
     nodes: &BTreeMap<Arc<str>, &ProductionOperatorDefinition>,
     schemas: &BTreeMap<RelationId, Vec<FieldId>>,
+    limits: EpochBoundSemanticIngressLimits,
 ) -> Result<(), ProductionQueryRecipeError> {
     for selection in &program.selections {
         let node = nodes
@@ -704,6 +1103,7 @@ fn validate_program_bindings(
             || input.is_none_or(|input| !input.output_fields.contains(&selection.input_field_id))
             || selection.maximum_values == 0
             || selection.minimum_values > selection.maximum_values
+            || selection.maximum_values > limits.max_selection_rows()
         {
             return invalid(
                 program,
@@ -714,6 +1114,7 @@ fn validate_program_bindings(
     for return_definition in &program.returns {
         if return_definition.maximum_values == 0
             || return_definition.minimum_values > return_definition.maximum_values
+            || return_definition.maximum_values > limits.max_return_rows()
             || return_definition.realizations.is_empty()
             || return_definition.realizations.iter().any(|realization| {
                 nodes
@@ -738,6 +1139,8 @@ fn validate_program_bindings(
             .collect::<Vec<_>>();
         if input.maximum_rows == 0
             || input.minimum_rows > input.maximum_rows
+            || input.maximum_rows > limits.max_request_input_rows()
+            || input.fields.len() > limits.max_fields_per_request_input_row()
             || schemas
                 .get(&input.relation_id)
                 .is_none_or(|schema| schema.iter().ne(declared))
@@ -751,6 +1154,7 @@ fn validate_program_bindings(
     for slot in &program.consumer_slots {
         if slot.maximum_edges == 0
             || slot.minimum_edges > slot.maximum_edges
+            || slot.maximum_edges > limits.compiler().max_fanin()
             || !schemas.contains_key(&slot.input_relation_id)
             || !program.operators.iter().any(|node| {
                 matches!(&node.operator, ProgramRelationalOperator::Input { relation_id } if relation_id == &slot.input_relation_id)
@@ -820,10 +1224,8 @@ fn append_returns(
                 value: realization.value.clone(),
                 realization_node_id: Arc::clone(&realization.realization_node_id),
                 realization_field_ids: realization.realization_field_ids.clone(),
-                realization_pin: typed_identity_pin(
-                    b"codefabric.semantic-return-realization.v1",
-                    &format!("{realization:?}"),
-                ),
+                realization_pin: encode_return_realization(realization)
+                    .finish(b"codefabric.semantic-return-realization.v2"),
             });
         }
     }
@@ -854,10 +1256,8 @@ fn append_request_inputs(
                 input_id: Arc::clone(&input.input_id),
                 input_relation_id: input.relation_id.clone(),
                 fields: input.fields.clone(),
-                handoff_pin: typed_identity_pin(
-                    b"codefabric.semantic-request-input-handoff.v1",
-                    &format!("{input:?}"),
-                ),
+                handoff_pin: encode_request_input(input)
+                    .finish(b"codefabric.semantic-request-input-handoff.v2"),
             });
     }
 }
@@ -896,6 +1296,7 @@ fn append_scopes(
     ingress: &mut EpochBoundSemanticIngressCatalog,
     execution: &mut EpochBoundSemanticExecutionCatalog,
     catalog_pin: [u8; 32],
+    limits: EpochBoundSemanticIngressLimits,
 ) -> Result<(), ProductionQueryRecipeError> {
     let mut seen = BTreeSet::new();
     for scope in scopes {
@@ -903,6 +1304,7 @@ fn append_scopes(
         validate_identity("scope authorization input", &scope.authorization_input_id)?;
         if scope.maximum_values == 0
             || scope.minimum_values > scope.maximum_values
+            || scope.maximum_values > limits.max_scope_rows()
             || !seen.insert(Arc::clone(&scope.scope_id))
         {
             return Err(ProductionQueryRecipeError::InvalidIdentity {
@@ -919,10 +1321,12 @@ fn append_scopes(
         execution.scopes.push(EpochBoundExecutionScopeRow {
             scope_id: Arc::clone(&scope.scope_id),
             authorization_input_id: Arc::clone(&scope.authorization_input_id),
-            handoff_pin: typed_identity_pin(
-                b"codefabric.semantic-scope-handoff.v1",
-                &format!("{catalog_pin:?}:{scope:?}"),
-            ),
+            handoff_pin: {
+                let mut frame = CanonicalIdentityFrame::default();
+                frame.pin(1, catalog_pin);
+                frame.nested(2, encode_scope(&scope));
+                frame.finish(b"codefabric.semantic-scope-handoff.v2")
+            },
         });
     }
     Ok(())
@@ -1212,10 +1616,12 @@ fn decode_closure_batches(
     {
         return closure_row_error(0, "family has multiple closure dispositions");
     }
-    let proof_pin = typed_identity_pin(
-        b"codefabric.executed-producer-closure.v1",
-        &format!("{operation_id:?}:{decoded:?}"),
-    );
+    let proof_pin = {
+        let mut frame = CanonicalIdentityFrame::default();
+        frame.text(1, operation_id);
+        frame.frames(2, decoded.iter().map(encode_producer_family_closure));
+        frame.finish(b"codefabric.executed-producer-closure.v2")
+    };
     Ok(ProducerClosureProof {
         proof_pin,
         application_authority_id: Arc::clone(expected_authority),
@@ -1356,23 +1762,30 @@ fn closure_row_error<T>(row: usize, detail: &str) -> Result<T, ProductionQueryRe
 }
 
 fn program_identity_pin(program: &ProductionSemanticFormProgram) -> [u8; 32] {
-    typed_identity_pin(
-        b"codefabric.production-semantic-program.v1",
-        &format!("{program:?}"),
-    )
+    encode_program(program).finish(b"codefabric.production-semantic-program.v2")
 }
 
 fn binding_identity_pin(
     program: &ProductionSemanticFormProgram,
     execution_pin: [u8; 32],
 ) -> [u8; 32] {
-    typed_identity_pin(
-        b"codefabric.production-semantic-binding.v1",
-        &format!(
-            "{:?}:{:?}:{:?}:{execution_pin:?}",
-            program.form, program.program_binding_id, program.output_role_id
-        ),
-    )
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.u64(1, released_form_code(program.form));
+    frame.text(2, &program.program_binding_id);
+    frame.text(3, &program.output_role_id);
+    frame.pin(4, execution_pin);
+    frame.finish(b"codefabric.production-semantic-binding.v2")
+}
+
+fn compiled_release_identity_pin(
+    forms: &BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>,
+    scopes: &[ProductionScopeDefinition],
+) -> [u8; 32] {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, PRODUCTION_SEMANTIC_QUERY_RELEASE_ID);
+    frame.frames(2, forms.values().map(encode_program));
+    frame.frames(3, scopes.iter().map(encode_scope));
+    frame.finish(b"codefabric.production-semantic-query-release.v2")
 }
 
 fn catalog_identity_pin(
@@ -1381,28 +1794,462 @@ fn catalog_identity_pin(
     source_pin: [u8; 32],
     policy_pin: [u8; 32],
     release_pin: [u8; 32],
+    producer_closure_pin: [u8; 32],
     forms: &BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>,
+    scopes: &[ProductionScopeDefinition],
 ) -> [u8; 32] {
-    typed_identity_pin(
-        domain,
-        &format!("{epoch_pin:?}:{source_pin:?}:{policy_pin:?}:{release_pin:?}:{forms:?}"),
-    )
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.pin(1, epoch_pin);
+    frame.pin(2, source_pin);
+    frame.pin(3, policy_pin);
+    frame.pin(4, release_pin);
+    frame.pin(5, producer_closure_pin);
+    frame.frames(6, forms.values().map(encode_program));
+    frame.frames(7, scopes.iter().map(encode_scope));
+    frame.finish(domain)
 }
 
 fn typed_identity_pin(domain: &[u8], value: &str) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&(domain.len() as u64).to_be_bytes());
-    hasher.update(domain);
-    hasher.update(&(value.len() as u64).to_be_bytes());
-    hasher.update(value.as_bytes());
-    *hasher.finalize().as_bytes()
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, value);
+    frame.finish(domain)
+}
+
+#[derive(Default)]
+struct CanonicalIdentityFrame {
+    bytes: Vec<u8>,
+}
+
+impl CanonicalIdentityFrame {
+    fn bytes(&mut self, tag: u16, value: &[u8]) {
+        self.bytes.extend_from_slice(&tag.to_be_bytes());
+        self.bytes.extend_from_slice(
+            &u64::try_from(value.len())
+                .expect("identity frame length fits u64")
+                .to_be_bytes(),
+        );
+        self.bytes.extend_from_slice(value);
+    }
+
+    fn text(&mut self, tag: u16, value: &str) {
+        self.bytes(tag, value.as_bytes());
+    }
+
+    fn u64(&mut self, tag: u16, value: u64) {
+        self.bytes(tag, &value.to_be_bytes());
+    }
+
+    fn i64(&mut self, tag: u16, value: i64) {
+        self.bytes(tag, &value.to_be_bytes());
+    }
+
+    fn bool(&mut self, tag: u16, value: bool) {
+        self.bytes(tag, &[u8::from(value)]);
+    }
+
+    fn pin(&mut self, tag: u16, value: [u8; 32]) {
+        self.bytes(tag, &value);
+    }
+
+    fn nested(&mut self, tag: u16, value: Self) {
+        self.bytes(tag, &value.bytes);
+    }
+
+    fn frames(&mut self, tag: u16, values: impl IntoIterator<Item = Self>) {
+        let values = values.into_iter().collect::<Vec<_>>();
+        let mut sequence = Self::default();
+        sequence.u64(
+            1,
+            u64::try_from(values.len()).expect("identity sequence length fits u64"),
+        );
+        for value in values {
+            sequence.nested(2, value);
+        }
+        self.nested(tag, sequence);
+    }
+
+    fn finish(self, domain: &[u8]) -> [u8; 32] {
+        let mut envelope = Self::default();
+        envelope.text(1, "codefabric.typed-identity-frame.v1");
+        envelope.bytes(2, domain);
+        envelope.bytes(3, &self.bytes);
+        *blake3::hash(&envelope.bytes).as_bytes()
+    }
+}
+
+fn encode_program(program: &ProductionSemanticFormProgram) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.u64(1, released_form_code(program.form));
+    frame.text(2, &program.program_binding_id);
+    frame.text(3, &program.output_role_id);
+    frame.text(4, &program.root_node_id);
+    frame.text(5, program.output_relation_id.as_str());
+    frame.frames(6, program.output_fields.iter().map(encode_field_id));
+    frame.frames(7, program.relations.iter().map(encode_relation));
+    frame.frames(8, program.operators.iter().map(encode_operator));
+    frame.frames(9, program.selections.iter().map(encode_selection));
+    frame.frames(10, program.returns.iter().map(encode_return));
+    frame.frames(11, program.request_inputs.iter().map(encode_request_input));
+    frame.frames(12, program.consumer_slots.iter().map(encode_consumer_slot));
+    frame.frames(
+        13,
+        program
+            .required_fact_families
+            .iter()
+            .map(|value| encode_text(value)),
+    );
+    frame
+}
+
+fn encode_relation(value: &ProductionRelationDefinition) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, value.relation_id.as_str());
+    frame.frames(2, value.fields.iter().map(encode_field_id));
+    frame.u64(3, relation_authority_code(value.authority));
+    frame
+}
+
+fn encode_operator(value: &ProductionOperatorDefinition) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, &value.node_id);
+    frame.u64(2, u64::from(value.ordinal));
+    frame.frames(
+        3,
+        value
+            .input_node_ids
+            .iter()
+            .map(|node_id| encode_text(node_id)),
+    );
+    frame.nested(4, encode_relational_operator(&value.operator));
+    frame.frames(5, value.output_fields.iter().map(encode_field_id));
+    frame
+}
+
+fn encode_relational_operator(value: &ProgramRelationalOperator) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    match value {
+        ProgramRelationalOperator::Input { relation_id } => {
+            frame.u64(1, 1);
+            frame.text(2, relation_id.as_str());
+        }
+        ProgramRelationalOperator::Projection { fields } => {
+            frame.u64(1, 2);
+            frame.frames(
+                2,
+                fields.iter().map(|field| {
+                    let mut field_frame = CanonicalIdentityFrame::default();
+                    field_frame.text(1, field.input_field_id.as_str());
+                    field_frame.text(2, field.output_field_id.as_str());
+                    field_frame
+                }),
+            );
+        }
+        ProgramRelationalOperator::Filter => frame.u64(1, 3),
+        ProgramRelationalOperator::Join { kind, predicates } => {
+            frame.u64(1, 4);
+            frame.u64(2, join_kind_code(*kind));
+            frame.frames(
+                3,
+                predicates.iter().map(|predicate| {
+                    let mut predicate_frame = CanonicalIdentityFrame::default();
+                    predicate_frame.text(1, predicate.left_field_id.as_str());
+                    predicate_frame.text(2, predicate.right_field_id.as_str());
+                    predicate_frame.u64(3, scalar_operator_code(predicate.scalar_operator));
+                    predicate_frame
+                }),
+            );
+        }
+        ProgramRelationalOperator::Union { kind } => {
+            frame.u64(1, 5);
+            frame.u64(2, union_kind_code(*kind));
+        }
+        ProgramRelationalOperator::Aggregate {
+            group_by,
+            aggregates,
+        } => {
+            frame.u64(1, 6);
+            frame.frames(
+                2,
+                group_by.iter().map(|field| {
+                    let mut field_frame = CanonicalIdentityFrame::default();
+                    field_frame.text(1, field.input_field_id.as_str());
+                    field_frame.text(2, field.output_field_id.as_str());
+                    field_frame
+                }),
+            );
+            frame.frames(
+                3,
+                aggregates.iter().map(|field| {
+                    let mut field_frame = CanonicalIdentityFrame::default();
+                    field_frame.text(1, field.input_field_id.as_str());
+                    field_frame.text(2, field.output_field_id.as_str());
+                    field_frame.u64(3, aggregate_operator_code(field.aggregate_operator));
+                    field_frame
+                }),
+            );
+        }
+        ProgramRelationalOperator::Sort { fields } => {
+            frame.u64(1, 7);
+            frame.frames(
+                2,
+                fields.iter().map(|field| {
+                    let mut field_frame = CanonicalIdentityFrame::default();
+                    field_frame.text(1, field.input_field_id.as_str());
+                    field_frame.bool(2, field.ascending);
+                    field_frame.bool(3, field.nulls_first);
+                    field_frame
+                }),
+            );
+        }
+        ProgramRelationalOperator::Limit { skip } => {
+            frame.u64(1, 8);
+            frame.u64(
+                2,
+                u64::try_from(*skip).expect("validated limit skip fits u64"),
+            );
+        }
+    }
+    frame
+}
+
+fn encode_selection(value: &ProductionSelectionDefinition) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, &value.selection_id);
+    frame.u64(2, semantic_value_kind_code(value.value_kind));
+    frame.u64(3, usize_identity(value.minimum_values));
+    frame.u64(4, usize_identity(value.maximum_values));
+    frame.text(5, &value.operator_node_id);
+    frame.text(6, value.input_field_id.as_str());
+    frame.u64(7, scalar_operator_code(value.scalar_operator));
+    frame.u64(8, selection_fold_code(value.fold));
+    frame
+}
+
+fn encode_return(value: &ProductionReturnDefinition) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, &value.return_id);
+    frame.u64(2, semantic_value_kind_code(value.value_kind));
+    frame.u64(3, usize_identity(value.minimum_values));
+    frame.u64(4, usize_identity(value.maximum_values));
+    frame.frames(5, value.realizations.iter().map(encode_return_realization));
+    frame
+}
+
+fn encode_return_realization(value: &ProductionReturnRealization) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.nested(1, encode_clause_value(&value.value));
+    frame.text(2, &value.realization_node_id);
+    frame.frames(3, value.realization_field_ids.iter().map(encode_field_id));
+    frame
+}
+
+fn encode_request_input(value: &ProductionRequestInputDefinition) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, &value.input_id);
+    frame.text(2, value.relation_id.as_str());
+    frame.frames(
+        3,
+        value.fields.iter().map(|field| {
+            let mut field_frame = CanonicalIdentityFrame::default();
+            field_frame.text(1, field.field_id.as_str());
+            field_frame.u64(2, semantic_value_kind_code(field.value_kind));
+            field_frame.bool(3, field.required);
+            field_frame
+        }),
+    );
+    frame.u64(4, usize_identity(value.minimum_rows));
+    frame.u64(5, usize_identity(value.maximum_rows));
+    frame
+}
+
+fn encode_consumer_slot(value: &ProductionConsumerSlotDefinition) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, &value.consumer_slot_id);
+    frame.text(2, &value.consumer_role_id);
+    frame.text(3, value.input_relation_id.as_str());
+    frame.u64(4, usize_identity(value.minimum_edges));
+    frame.u64(5, usize_identity(value.maximum_edges));
+    match value.composition {
+        EpochBoundConsumerComposition::Single => frame.u64(6, 1),
+        EpochBoundConsumerComposition::Union(kind) => {
+            frame.u64(6, 2);
+            frame.u64(7, union_kind_code(kind));
+        }
+    }
+    frame
+}
+
+fn encode_scope(value: &ProductionScopeDefinition) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, &value.scope_id);
+    frame.u64(2, semantic_value_kind_code(value.value_kind));
+    frame.u64(3, usize_identity(value.minimum_values));
+    frame.u64(4, usize_identity(value.maximum_values));
+    frame.text(5, &value.authorization_input_id);
+    frame
+}
+
+fn encode_clause_value(value: &SemanticClauseValue) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    match value {
+        SemanticClauseValue::Boolean(value) => {
+            frame.u64(1, 1);
+            frame.bool(2, *value);
+        }
+        SemanticClauseValue::Int64(value) => {
+            frame.u64(1, 2);
+            frame.i64(2, *value);
+        }
+        SemanticClauseValue::UInt64(value) => {
+            frame.u64(1, 3);
+            frame.u64(2, *value);
+        }
+        SemanticClauseValue::Text(value) => {
+            frame.u64(1, 4);
+            frame.text(2, value);
+        }
+    }
+    frame
+}
+
+fn encode_producer_family_closure(value: &ProducerFamilyClosureRow) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, &value.family_id);
+    match &value.disposition {
+        ProducerFamilyDisposition::RuntimeProducer(producer) => {
+            frame.u64(2, 1);
+            frame.text(3, &producer.producer_id);
+            frame.text(4, &producer.authority_id);
+            frame.text(5, &producer.algorithm_release);
+            frame.text(6, &producer.precision_id);
+            frame.pin(7, producer.input_pin);
+            frame.pin(8, producer.invalidation_pin);
+            frame.pin(9, producer.materialization_pin);
+            frame.u64(10, producer.requested_units);
+            frame.u64(11, producer.completed_units);
+            frame.u64(12, producer.remainder_units);
+            frame.u64(13, producer.unknown_units);
+            frame.pin(14, producer.completeness_proof_pin);
+            frame.pin(15, producer.producer_proof_pin);
+        }
+        ProducerFamilyDisposition::UnsupportedRemainder(remainder) => {
+            frame.u64(2, 2);
+            frame.text(3, &remainder.remainder_id);
+            frame.text(4, &remainder.authority_id);
+            frame.text(5, &remainder.reason_id);
+            frame.pin(6, remainder.proof_pin);
+        }
+    }
+    frame
+}
+
+fn encode_text(value: &str) -> CanonicalIdentityFrame {
+    let mut frame = CanonicalIdentityFrame::default();
+    frame.text(1, value);
+    frame
+}
+
+fn encode_field_id(value: &FieldId) -> CanonicalIdentityFrame {
+    encode_text(value.as_str())
+}
+
+fn usize_identity(value: usize) -> u64 {
+    u64::try_from(value).expect("validated identity cardinality fits u64")
+}
+
+const fn released_form_code(value: ReleasedSemanticForm) -> u64 {
+    match value {
+        ReleasedSemanticForm::FindCodeEntities => 1,
+        ReleasedSemanticForm::RetrieveFactsAboutCode => 2,
+        ReleasedSemanticForm::FollowCodeRelationships => 3,
+        ReleasedSemanticForm::FindConnectingFactPaths => 4,
+        ReleasedSemanticForm::MatchCodeFactPattern => 5,
+        ReleasedSemanticForm::CombineResultSets => 6,
+        ReleasedSemanticForm::SummarizeObjectiveFacts => 7,
+        ReleasedSemanticForm::RetrieveSourceAndSyntaxContext => 8,
+    }
+}
+
+const fn relation_authority_code(value: ProductionRelationAuthority) -> u64 {
+    match value {
+        ProductionRelationAuthority::Epoch => 1,
+        ProductionRelationAuthority::QueryLocal => 2,
+        ProductionRelationAuthority::ProgramResult => 3,
+    }
+}
+
+const fn semantic_value_kind_code(value: SemanticValueKind) -> u64 {
+    match value {
+        SemanticValueKind::Boolean => 1,
+        SemanticValueKind::Int64 => 2,
+        SemanticValueKind::UInt64 => 3,
+        SemanticValueKind::Text => 4,
+    }
+}
+
+const fn scalar_operator_code(value: ScalarOperator) -> u64 {
+    match value {
+        ScalarOperator::Equal => 1,
+        ScalarOperator::NotEqual => 2,
+        ScalarOperator::LessThan => 3,
+        ScalarOperator::LessThanOrEqual => 4,
+        ScalarOperator::GreaterThan => 5,
+        ScalarOperator::GreaterThanOrEqual => 6,
+        ScalarOperator::And => 7,
+        ScalarOperator::Or => 8,
+        ScalarOperator::Not => 9,
+        ScalarOperator::Add => 10,
+        ScalarOperator::Subtract => 11,
+        ScalarOperator::Multiply => 12,
+        ScalarOperator::Divide => 13,
+        ScalarOperator::IsNull => 14,
+        ScalarOperator::IsNotNull => 15,
+    }
+}
+
+const fn aggregate_operator_code(value: AggregateOperator) -> u64 {
+    match value {
+        AggregateOperator::Count => 1,
+        AggregateOperator::CountDistinct => 2,
+        AggregateOperator::Sum => 3,
+        AggregateOperator::Average => 4,
+        AggregateOperator::Minimum => 5,
+        AggregateOperator::Maximum => 6,
+    }
+}
+
+const fn join_kind_code(value: JoinKind) -> u64 {
+    match value {
+        JoinKind::Inner => 1,
+        JoinKind::Left => 2,
+        JoinKind::Right => 3,
+        JoinKind::Full => 4,
+        JoinKind::LeftSemi => 5,
+        JoinKind::RightSemi => 6,
+        JoinKind::LeftAnti => 7,
+        JoinKind::RightAnti => 8,
+    }
+}
+
+const fn union_kind_code(value: UnionKind) -> u64 {
+    match value {
+        UnionKind::All => 1,
+        UnionKind::Distinct => 2,
+    }
+}
+
+const fn selection_fold_code(value: EpochBoundSelectionFold) -> u64 {
+    match value {
+        EpochBoundSelectionFold::All => 1,
+        EpochBoundSelectionFold::Any => 2,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
-    use arrow_array::{Int64Array, StringArray, UInt64Array};
+    use arrow_array::{ArrayRef, Int64Array, StringArray, UInt64Array};
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::common::TableReference;
     use datafusion::datasource::MemTable;
@@ -1411,6 +2258,7 @@ mod tests {
     use crate::fabric::epoch_runtime::{
         FABRIC_CATALOG, FabricEpochId, FabricEpochRuntimeConfig, FabricSchemaRole,
     };
+    use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
     use crate::fabric::programmatic_schema::ProviderInput;
     use crate::schema_contract::{
@@ -1431,25 +2279,43 @@ mod tests {
             FabricEpochRuntimeConfig::default(),
         )
         .expect("epoch builder");
-        for index in 0..ReleasedSemanticForm::ALL.len() {
-            let relation_id = format!("fact.production-query.{index}");
-            let field_id = format!("fact.production-query.{index}.identity");
+        let epoch_relations = compiled_released_form_programs()
+            .expect("compiled programs")
+            .into_values()
+            .flat_map(|program| program.relations)
+            .filter(|relation| relation.authority == ProductionRelationAuthority::Epoch)
+            .map(|relation| (relation.relation_id, relation.fields))
+            .collect::<BTreeMap<_, _>>();
+        for (index, (relation_id, field_ids)) in epoch_relations.into_iter().enumerate() {
             let schema = Arc::new(
-                Schema::new(vec![
-                    Field::new("identity", DataType::Int64, false).with_metadata(HashMap::from([
-                        (FIELD_ID_METADATA_KEY.to_owned(), field_id),
-                    ])),
-                ])
+                Schema::new(
+                    field_ids
+                        .iter()
+                        .enumerate()
+                        .map(|(field_index, field_id)| {
+                            Field::new(format!("field_{field_index}"), DataType::Int64, false)
+                                .with_metadata(HashMap::from([(
+                                    FIELD_ID_METADATA_KEY.to_owned(),
+                                    field_id.as_str().to_owned(),
+                                )]))
+                        })
+                        .collect::<Vec<_>>(),
+                )
                 .with_metadata(HashMap::from([(
                     RELATION_ID_METADATA_KEY.to_owned(),
-                    relation_id.clone(),
+                    relation_id.as_str().to_owned(),
                 )])),
             );
             let batch = RecordBatch::try_new(
                 Arc::clone(&schema),
-                vec![Arc::new(Int64Array::from(vec![
-                    i64::try_from(index).expect("small test index"),
-                ]))],
+                field_ids
+                    .iter()
+                    .map(|_| {
+                        Arc::new(Int64Array::from(vec![
+                            i64::try_from(index).expect("small test index"),
+                        ])) as ArrayRef
+                    })
+                    .collect(),
             )
             .expect("batch");
             let provider = Arc::new(
@@ -1466,13 +2332,15 @@ mod tests {
                     table_reference.clone(),
                     Arc::clone(&schema),
                     schema,
-                    vec![FieldIndexMapping::direct(0, 0)],
+                    (0..field_ids.len())
+                        .map(|field_index| FieldIndexMapping::direct(field_index, field_index))
+                        .collect(),
                 )
                 .expect("schema contract"),
             );
             builder
                 .register_provider(ProviderInput::new(
-                    ProgrammaticRelationId::new(relation_id),
+                    ProgrammaticRelationId::new(relation_id.as_str()),
                     table_reference,
                     contract,
                     provider,
@@ -1482,104 +2350,92 @@ mod tests {
         builder.seal_for_test().await.expect("sealed epoch")
     }
 
-    fn form_programs() -> Vec<ProductionSemanticFormProgram> {
-        ReleasedSemanticForm::ALL
-            .into_iter()
-            .enumerate()
-            .map(|(index, form)| {
-                let relation_id = relation(format!("fact.production-query.{index}"));
-                let field_id = field(format!("fact.production-query.{index}.identity"));
-                let node_id: Arc<str> = Arc::from(format!("node.production-query.{index}.input"));
-                ProductionSemanticFormProgram {
-                    form,
-                    program_binding_id: Arc::from(format!(
-                        "program.production-query.{}",
-                        form.label().replace(' ', "-")
-                    )),
-                    output_role_id: Arc::from(format!("role.production-query.{index}")),
-                    root_node_id: Arc::clone(&node_id),
-                    output_relation_id: relation_id.clone(),
-                    output_fields: vec![field_id.clone()],
-                    relations: vec![ProductionRelationDefinition {
-                        relation_id: relation_id.clone(),
-                        fields: vec![field_id.clone()],
-                        authority: ProductionRelationAuthority::Epoch,
-                    }],
-                    operators: vec![ProductionOperatorDefinition {
-                        node_id,
-                        ordinal: 0,
-                        input_node_ids: Vec::new(),
-                        operator: ProgramRelationalOperator::Input { relation_id },
-                        output_fields: vec![field_id],
-                    }],
-                    selections: Vec::new(),
-                    returns: Vec::new(),
-                    request_inputs: Vec::new(),
-                    consumer_slots: Vec::new(),
-                    required_fact_families: vec![Arc::from("family.core")],
-                }
-            })
-            .collect()
-    }
-
     fn limits() -> EpochBoundSemanticIngressLimits {
         use crate::relational_semantic_query::SemanticRequestLimits;
 
         EpochBoundSemanticIngressLimits::try_new(
-            SemanticRequestLimits::try_new(16, 64, 16, 16, 32, 32, 10_000)
+            SemanticRequestLimits::try_new(16, 64, 16, 64, 32, 32, 10_000)
                 .expect("compiler limits"),
             128,
             128,
-            64,
             256,
+            10_000,
             32,
         )
         .expect("ingress limits")
     }
 
-    fn input(forms: Vec<ProductionSemanticFormProgram>) -> ProductionSemanticQueryRecipeInput {
-        ProductionSemanticQueryRecipeInput {
-            source_pin: [0x11; 32],
-            policy_pin: [0x12; 32],
-            program_release_pin: [0x13; 32],
-            factual_semantic_class_id: Arc::from("semantic.fact"),
-            limits: limits(),
-            scopes: Vec::new(),
-            forms,
-        }
+    fn alternate_limits() -> EpochBoundSemanticIngressLimits {
+        use crate::relational_semantic_query::SemanticRequestLimits;
+
+        EpochBoundSemanticIngressLimits::try_new(
+            SemanticRequestLimits::try_new(32, 128, 32, 128, 64, 64, 20_000)
+                .expect("compiler limits"),
+            256,
+            256,
+            512,
+            20_000,
+            64,
+        )
+        .expect("ingress limits")
+    }
+
+    fn input(
+        source_pin: [u8; 32],
+        policy_pin: [u8; 32],
+        limits: EpochBoundSemanticIngressLimits,
+    ) -> ProductionSemanticQueryRecipeInput {
+        ProductionSemanticQueryRecipeInput::try_new(source_pin, policy_pin, limits)
+            .expect("operational query input")
     }
 
     fn closure() -> ProducerClosureProof {
+        let families = compiled_released_form_programs()
+            .expect("compiled programs")
+            .into_values()
+            .flat_map(|program| program.required_fact_families)
+            .collect::<BTreeSet<_>>();
         ProducerClosureProof {
             proof_pin: [0x14; 32],
             application_authority_id: Arc::from("authority.application"),
-            families: vec![ProducerFamilyClosureRow {
-                family_id: Arc::from("family.core"),
-                disposition: ProducerFamilyDisposition::RuntimeProducer(RuntimeProducerProof {
-                    producer_id: Arc::from("producer.core"),
-                    authority_id: Arc::from("authority.application"),
-                    algorithm_release: Arc::from("algorithm.core.v1"),
-                    precision_id: Arc::from("precision.exact"),
-                    input_pin: [0x21; 32],
-                    invalidation_pin: [0x22; 32],
-                    materialization_pin: [0x23; 32],
-                    requested_units: 1,
-                    completed_units: 1,
-                    remainder_units: 0,
-                    unknown_units: 0,
-                    completeness_proof_pin: [0x24; 32],
-                    producer_proof_pin: [0x25; 32],
-                }),
-            }],
+            families: families
+                .into_iter()
+                .enumerate()
+                .map(|(index, family_id)| ProducerFamilyClosureRow {
+                    family_id,
+                    disposition: ProducerFamilyDisposition::RuntimeProducer(RuntimeProducerProof {
+                        producer_id: Arc::from(format!("producer.release.{index}")),
+                        authority_id: Arc::from("authority.application"),
+                        algorithm_release: Arc::from("algorithm.release.v2"),
+                        precision_id: Arc::from("precision.exact"),
+                        input_pin: [0x21; 32],
+                        invalidation_pin: [0x22; 32],
+                        materialization_pin: [0x23; 32],
+                        requested_units: 1,
+                        completed_units: 1,
+                        remainder_units: 0,
+                        unknown_units: 0,
+                        completeness_proof_pin: [0x24; 32],
+                        producer_proof_pin: [0x25; 32],
+                    }),
+                })
+                .collect(),
         }
     }
 
+    fn assemble(
+        epoch: &ProgrammaticFabricEpoch,
+        input: ProductionSemanticQueryRecipeInput,
+    ) -> Result<ProductionSemanticQueryRecipe, ProductionQueryRecipeError> {
+        let release = CompiledSemanticRelease::current();
+        ProductionSemanticQueryRecipe::assemble(release.query_authority(), epoch, input, closure())
+    }
+
     #[tokio::test]
-    async fn all_eight_forms_are_built_from_epoch_checked_programs() {
+    async fn compiled_release_builds_all_eight_epoch_checked_programs() {
         let epoch = epoch().await;
         let recipe =
-            ProductionSemanticQueryRecipe::assemble(&epoch, input(form_programs()), closure())
-                .expect("all eight programs");
+            assemble(&epoch, input([0x11; 32], [0x12; 32], limits())).expect("all eight programs");
         assert_eq!(
             recipe.ingress_catalog().program_bindings.len(),
             ReleasedSemanticForm::ALL.len()
@@ -1590,7 +2446,7 @@ mod tests {
         );
 
         use crate::relational_semantic_query::{
-            EpochBoundBlockBindingRow, EpochBoundSemanticIngress,
+            EpochBoundBlockBindingRow, EpochBoundScopeRow, EpochBoundSemanticIngress,
             compile_epoch_bound_semantic_request, validate_epoch_bound_semantic_ingress,
         };
         let catalog = recipe.ingress_catalog();
@@ -1625,7 +2481,19 @@ mod tests {
             blocks,
             selections: Vec::new(),
             returns: Vec::new(),
-            scopes: Vec::new(),
+            scopes: [
+                ("scope.workspace-id", "workspace:test"),
+                ("scope.codebase", "current"),
+                ("scope.analysis-context-mode", "default"),
+                ("scope.external-entity-policy", "endpoint-only"),
+            ]
+            .into_iter()
+            .map(|(scope_id, value)| EpochBoundScopeRow {
+                scope_id: Arc::from(scope_id),
+                ordinal: 0,
+                value: SemanticClauseValue::Text(Arc::from(value)),
+            })
+            .collect(),
             request_inputs: Vec::new(),
             dependencies: Vec::new(),
             dependency_order,
@@ -1645,37 +2513,139 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn typed_program_input_is_causal_to_catalog_identity() {
+    async fn recipe_composes_compiled_v2_ports_with_shared_scope_authority() {
         let epoch = epoch().await;
-        let first =
-            ProductionSemanticQueryRecipe::assemble(&epoch, input(form_programs()), closure())
-                .expect("first recipe");
-        let mut changed = form_programs();
-        changed[0].output_role_id = Arc::from("role.production-query.changed");
-        let second = ProductionSemanticQueryRecipe::assemble(&epoch, input(changed), closure())
-            .expect("changed recipe");
-        assert_ne!(
-            first.ingress_catalog().program_catalog_pin,
-            second.ingress_catalog().program_catalog_pin
+        let policy_pin = [0x12; 32];
+        let recipe = assemble(&epoch, input([0x11; 32], policy_pin, limits()))
+            .expect("compiled query recipe");
+        let release = CompiledSemanticRelease::current();
+        let ports = release
+            .compose_semantic_query_ports(
+                &recipe,
+                limits(),
+                policy_pin,
+                BTreeSet::from([ProgrammaticRelationId::new("public.semantic_entity")]),
+                1_000,
+            )
+            .expect("recipe and release-owned ports share one v2 scope authority");
+        assert_eq!(
+            ports.application_release(),
+            crate::fabric::programmatic_query_backend::compiled_query_release_pin(
+                release.query_authority()
+            )
         );
     }
 
     #[tokio::test]
-    async fn missing_epoch_relation_and_field_drift_are_rejected() {
+    async fn operational_inputs_cannot_substitute_release_owned_forms_or_scopes() {
         let epoch = epoch().await;
-        let mut missing = form_programs();
-        missing[0].relations[0].relation_id = relation("fact.absent");
+        let first =
+            assemble(&epoch, input([0x11; 32], [0x12; 32], limits())).expect("first recipe");
+        let changed_authority = assemble(&epoch, input([0x41; 32], [0x42; 32], limits()))
+            .expect("changed operational authority");
+        let changed_resources = assemble(&epoch, input([0x11; 32], [0x12; 32], alternate_limits()))
+            .expect("changed resource policy");
+
+        assert_eq!(
+            first.execution_catalog().program_release_pin,
+            changed_authority.execution_catalog().program_release_pin
+        );
+        assert_eq!(
+            first.execution_catalog().programs,
+            changed_authority.execution_catalog().programs
+        );
+        assert_eq!(
+            first.execution_catalog().operators,
+            changed_authority.execution_catalog().operators
+        );
+        assert_eq!(
+            first.execution_catalog().relation_schemas,
+            changed_authority.execution_catalog().relation_schemas
+        );
+        let first_scope_authority = first
+            .execution_catalog()
+            .scopes
+            .iter()
+            .map(|scope| (&scope.scope_id, &scope.authorization_input_id))
+            .collect::<Vec<_>>();
+        let changed_scope_authority = changed_authority
+            .execution_catalog()
+            .scopes
+            .iter()
+            .map(|scope| (&scope.scope_id, &scope.authorization_input_id))
+            .collect::<Vec<_>>();
+        assert_eq!(first_scope_authority, changed_scope_authority);
+        assert!(
+            first
+                .execution_catalog()
+                .scopes
+                .iter()
+                .zip(&changed_authority.execution_catalog().scopes)
+                .all(|(first, changed)| first.handoff_pin != changed.handoff_pin)
+        );
+        assert_eq!(
+            first.execution_catalog().programs,
+            changed_resources.execution_catalog().programs
+        );
+        assert_eq!(
+            first.execution_catalog().scopes,
+            changed_resources.execution_catalog().scopes
+        );
+        assert_ne!(
+            first.ingress_catalog().program_catalog_pin,
+            changed_authority.ingress_catalog().program_catalog_pin
+        );
+        assert_eq!(
+            first.ingress_catalog().program_catalog_pin,
+            changed_resources.ingress_catalog().program_catalog_pin
+        );
+        assert_ne!(
+            first.ingress_catalog().limits_pin,
+            changed_resources.ingress_catalog().limits_pin
+        );
+    }
+
+    #[tokio::test]
+    async fn compiled_operand_and_epoch_schema_mutations_fail_closed() {
+        let epoch = epoch().await;
+        let forms = compiled_released_form_programs().expect("compiled programs");
+        let original = forms
+            .get(&ReleasedSemanticForm::FindCodeEntities)
+            .expect("entity program");
+        let mut changed_operand = original.clone();
+        changed_operand.selections[0].scalar_operator = ScalarOperator::NotEqual;
+        assert_ne!(
+            program_identity_pin(original),
+            program_identity_pin(&changed_operand)
+        );
+
+        let mut missing = original.clone();
+        missing.relations[0].relation_id = relation("public.absent");
         assert!(matches!(
-            ProductionSemanticQueryRecipe::assemble(&epoch, input(missing), closure()),
+            validate_program(&epoch, &missing, limits()),
             Err(ProductionQueryRecipeError::MissingEpochRelation { .. })
         ));
 
-        let mut drifted = form_programs();
-        drifted[0].relations[0].fields[0] = field("fact.wrong-field");
+        let mut drifted = original.clone();
+        drifted.relations[0].fields[0] = field("public.wrong-field");
         assert!(matches!(
-            ProductionSemanticQueryRecipe::assemble(&epoch, input(drifted), closure()),
+            validate_program(&epoch, &drifted, limits()),
             Err(ProductionQueryRecipeError::EpochFieldDrift { .. })
         ));
+    }
+
+    #[test]
+    fn typed_identity_framing_distinguishes_field_boundaries() {
+        let mut left = CanonicalIdentityFrame::default();
+        left.text(1, "ab");
+        left.text(2, "c");
+        let mut right = CanonicalIdentityFrame::default();
+        right.text(1, "a");
+        right.text(2, "bc");
+        assert_ne!(
+            left.finish(b"test.identity"),
+            right.finish(b"test.identity")
+        );
     }
 
     fn closure_fields() -> FamilyClosureFields {
@@ -1732,8 +2702,8 @@ mod tests {
         let batch = RecordBatch::try_new(
             schema,
             vec![
-                text(Some("family.core")),
-                text(Some("semantic.fact")),
+                text(Some("fact-family.semantic-fact")),
+                text(Some(RELEASE_FACTUAL_SEMANTIC_CLASS_ID)),
                 text(Some("unknown")),
                 text(None),
                 text(None),
@@ -1758,7 +2728,7 @@ mod tests {
             decode_closure_batches(
                 &[batch],
                 &fields,
-                &Arc::from("semantic.fact"),
+                &Arc::from(RELEASE_FACTUAL_SEMANTIC_CLASS_ID),
                 &Arc::from("operation.test"),
                 &Arc::from("authority.application"),
             ),

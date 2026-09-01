@@ -29,6 +29,23 @@ pub const FIELD_ID_METADATA_KEY: &str = "codefabric.field_id";
 /// Arrow field metadata key carrying the field's semantic role.
 pub const SEMANTIC_ROLE_METADATA_KEY: &str = "codefabric.semantic_role";
 
+/// Return a domain-separated fingerprint of the RFC 8785 canonical Arrow schema bytes.
+///
+/// This is a compact boundary identity for an already authoritative [`Schema`]; it is never used
+/// to prove schema equality. Callers must still compare the exact Arrow schema at every phase.
+pub(crate) fn canonical_arrow_schema_fingerprint(
+    schema: &SchemaRef,
+) -> Result<[u8; 32], serde_json::Error> {
+    let canonical = serde_json_canonicalizer::to_vec(schema.as_ref())?;
+    let mut hasher = blake3::Hasher::new();
+    let domain = b"codefabric.arrow-schema.canonical.v1";
+    hasher.update(&(domain.len() as u64).to_be_bytes());
+    hasher.update(domain);
+    hasher.update(&(canonical.len() as u64).to_be_bytes());
+    hasher.update(&canonical);
+    Ok(*hasher.finalize().as_bytes())
+}
+
 /// A named boundary at which a schema contract is enforced.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SchemaPhase {
@@ -2130,6 +2147,52 @@ mod tests {
             ),
             (EXTENSION_TYPE_METADATA_KEY.to_owned(), metadata.to_owned()),
         ]))
+    }
+
+    #[test]
+    fn canonical_schema_fingerprint_tracks_exact_schema_not_map_insertion_order() {
+        let left = Arc::new(Schema::new_with_metadata(
+            vec![
+                Field::new("value", DataType::Int64, false).with_metadata(HashMap::from([
+                    ("z".to_owned(), "last".to_owned()),
+                    ("a".to_owned(), "first".to_owned()),
+                ])),
+            ],
+            HashMap::from([
+                ("release".to_owned(), "2.2.0".to_owned()),
+                ("relation".to_owned(), "facts.values".to_owned()),
+            ]),
+        ));
+        let right = Arc::new(Schema::new_with_metadata(
+            vec![
+                Field::new("value", DataType::Int64, false).with_metadata(HashMap::from([
+                    ("a".to_owned(), "first".to_owned()),
+                    ("z".to_owned(), "last".to_owned()),
+                ])),
+            ],
+            HashMap::from([
+                ("relation".to_owned(), "facts.values".to_owned()),
+                ("release".to_owned(), "2.2.0".to_owned()),
+            ]),
+        ));
+        let nullable = Arc::new(Schema::new_with_metadata(
+            vec![
+                Field::new("value", DataType::Int64, true).with_metadata(HashMap::from([
+                    ("a".to_owned(), "first".to_owned()),
+                    ("z".to_owned(), "last".to_owned()),
+                ])),
+            ],
+            right.metadata().clone(),
+        ));
+
+        assert_eq!(
+            canonical_arrow_schema_fingerprint(&left).unwrap(),
+            canonical_arrow_schema_fingerprint(&right).unwrap()
+        );
+        assert_ne!(
+            canonical_arrow_schema_fingerprint(&left).unwrap(),
+            canonical_arrow_schema_fingerprint(&nullable).unwrap()
+        );
     }
 
     fn payload_field(code_nullable: bool) -> Field {

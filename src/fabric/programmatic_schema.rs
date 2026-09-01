@@ -9,7 +9,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use arrow_array::builder::FixedSizeBinaryBuilder;
-use arrow_array::{ArrayRef, BooleanArray, Int64Array, RecordBatch, StringArray};
+use arrow_array::{
+    ArrayRef, BooleanArray, Int64Array, RecordBatch, RecordBatchOptions, StringArray,
+};
 use arrow_schema::{ArrowError, DataType, Field, FieldRef, Schema, SchemaRef};
 use async_trait::async_trait;
 use datafusion::catalog::{Session, TableProvider};
@@ -19,16 +21,20 @@ use datafusion::common::{Column, DFSchema, DFSchemaRef, DataFusionError, TableRe
 #[cfg(test)]
 use datafusion::datasource::MemTable;
 use datafusion::datasource::{ViewTable, provider_as_source};
-use datafusion::execution::context::{SessionContext, SessionState};
+use datafusion::execution::context::{SessionContext, SessionState, TaskContext};
 use datafusion::execution::session_state::SessionStateBuilder;
 use datafusion::logical_expr::logical_plan::Projection;
 use datafusion::logical_expr::{
     Expr, LogicalPlan, LogicalPlanBuilder, TableProviderFilterPushDown, TableType, Volatility,
 };
+use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_expr::expressions::Column as PhysicalColumn;
 use datafusion::physical_plan::metrics::MetricValue;
-use datafusion::physical_plan::projection::{ProjectionExec, ProjectionExpr};
-use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties, execute_stream};
+use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+use datafusion::physical_plan::{
+    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
+    SendableRecordBatchStream, execute_stream,
+};
 use futures::StreamExt as _;
 use thiserror::Error;
 
@@ -777,6 +783,7 @@ pub struct SealedRelationBinding {
     pub table_reference: TableReference,
     pub contract: Arc<SchemaContract>,
     pub actual_datafusion_schema: DFSchemaRef,
+    pub(super) logical_plan: Option<Arc<LogicalPlan>>,
 }
 
 /// Sealed candidate retaining the exact session/catalog authority used for planning.
@@ -863,7 +870,9 @@ impl ProgrammaticSchemaParts {
 
 #[derive(Clone)]
 enum RegisteredOrigin {
-    Provider,
+    Provider {
+        logical_plan: Option<Arc<LogicalPlan>>,
+    },
     #[cfg(test)]
     SystemObservation,
     Transformation {
@@ -891,19 +900,170 @@ struct RegisteredRelation {
 /// input providers. That is correct for values, but schema-level identity
 /// metadata attached by [`output_identity_boundary`] otherwise disappears
 /// before record-batch execution. This transparent adapter delegates view
-/// planning and uses DataFusion's native identity [`ProjectionExec`] to make
-/// the advertised identity an executable batch boundary as well.
+/// planning and uses one narrow physical boundary to make the advertised
+/// identity an executable batch boundary as well.
 #[derive(Debug)]
-struct IdentityPreservingViewTable {
+pub(super) struct IdentityPreservingViewTable {
     inner: ViewTable,
     schema: SchemaRef,
 }
 
+/// Opaque, value-preserving physical boundary for exact Arrow schema identity.
+///
+/// DataFusion 55's native projection-pushdown rule can legally merge identity
+/// projections but currently rejects nested views when the inner and outer
+/// relation metadata differ. This node is deliberately narrower than a custom
+/// query operator: it owns no expressions or values, preserves partitioning and
+/// ordering, and only rebinds each batch to the already validated target schema.
+/// Keeping the node opaque prevents optimizer rewrites from conflating distinct
+/// relation identities while leaving the complete child plan optimizer-visible.
+#[derive(Clone, Debug)]
+struct SchemaIdentityExec {
+    input: Arc<dyn ExecutionPlan>,
+    schema: SchemaRef,
+    properties: Arc<PlanProperties>,
+}
+
+impl SchemaIdentityExec {
+    fn try_new(input: Arc<dyn ExecutionPlan>, schema: SchemaRef) -> Result<Self, DataFusionError> {
+        validate_schema_identity_shape(input.schema().as_ref(), schema.as_ref(), "planning")?;
+        let equivalence = input.output_ordering().cloned().map_or_else(
+            || EquivalenceProperties::new(Arc::clone(&schema)),
+            |ordering| EquivalenceProperties::new_with_orderings(Arc::clone(&schema), [ordering]),
+        );
+        let properties =
+            Arc::new(PlanProperties::clone(input.properties()).with_eq_properties(equivalence));
+        Ok(Self {
+            input,
+            schema,
+            properties,
+        })
+    }
+}
+
+impl DisplayAs for SchemaIdentityExec {
+    fn fmt_as(
+        &self,
+        display_type: DisplayFormatType,
+        formatter: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match display_type {
+            DisplayFormatType::Default | DisplayFormatType::Verbose => {
+                write!(formatter, "SchemaIdentityExec")
+            }
+            DisplayFormatType::TreeRender => writeln!(formatter, "schema_identity"),
+        }
+    }
+}
+
+impl ExecutionPlan for SchemaIdentityExec {
+    fn name(&self) -> &str {
+        "SchemaIdentityExec"
+    }
+
+    fn properties(&self) -> &Arc<PlanProperties> {
+        &self.properties
+    }
+
+    fn maintains_input_order(&self) -> Vec<bool> {
+        vec![true]
+    }
+
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
+    }
+
+    fn apply_expressions(
+        &self,
+        _visitor: &mut dyn FnMut(
+            &Arc<dyn datafusion::physical_plan::PhysicalExpr>,
+        ) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        Ok(TreeNodeRecursion::Continue)
+    }
+
+    fn with_new_children(
+        self: Arc<Self>,
+        mut children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+        if children.len() != 1 {
+            return Err(DataFusionError::Internal(format!(
+                "SchemaIdentityExec requires one child, received {}",
+                children.len()
+            )));
+        }
+        Ok(Arc::new(Self::try_new(
+            children.swap_remove(0),
+            Arc::clone(&self.schema),
+        )?))
+    }
+
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> datafusion::common::Result<SendableRecordBatchStream> {
+        let schema = Arc::clone(&self.schema);
+        let stream = self.input.execute(partition, context)?.map({
+            let schema = Arc::clone(&schema);
+            move |batch| {
+                let batch = batch?;
+                validate_schema_identity_shape(
+                    batch.schema_ref().as_ref(),
+                    schema.as_ref(),
+                    "execution",
+                )?;
+                RecordBatch::try_new_with_options(
+                    Arc::clone(&schema),
+                    batch.columns().to_vec(),
+                    &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
+                )
+                .map_err(DataFusionError::from)
+            }
+        });
+        Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
+    }
+}
+
+fn validate_schema_identity_shape(
+    actual: &Schema,
+    expected: &Schema,
+    phase: &str,
+) -> Result<(), DataFusionError> {
+    if actual.fields().len() != expected.fields().len() {
+        return Err(DataFusionError::Execution(format!(
+            "programmatic view {phase} field count {} differs from its identity schema count {}",
+            actual.fields().len(),
+            expected.fields().len()
+        )));
+    }
+    for (index, (actual, expected)) in actual
+        .fields()
+        .iter()
+        .zip(expected.fields().iter())
+        .enumerate()
+    {
+        if actual.name() != expected.name()
+            || actual.data_type() != expected.data_type()
+            || actual.is_nullable() != expected.is_nullable()
+        {
+            return Err(DataFusionError::Execution(format!(
+                "programmatic view {phase} field {index} shape differs: actual={actual:?}, expected={expected:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl IdentityPreservingViewTable {
     fn new(plan: LogicalPlan) -> Self {
+        Self::with_definition(plan, None)
+    }
+
+    pub(super) fn with_definition(plan: LogicalPlan, definition: Option<String>) -> Self {
         let schema = Arc::clone(plan.schema().inner());
         Self {
-            inner: ViewTable::new(plan, None),
+            inner: ViewTable::new(plan, definition),
             schema,
         }
     }
@@ -931,6 +1091,10 @@ impl TableProvider for IdentityPreservingViewTable {
 
     fn table_type(&self) -> TableType {
         TableType::View
+    }
+
+    fn get_table_definition(&self) -> Option<&str> {
+        self.inner.get_table_definition()
     }
 
     fn supports_filters_pushdown(
@@ -970,32 +1134,11 @@ impl TableProvider for IdentityPreservingViewTable {
             .scan(&nested_state, projection, filters, limit)
             .await?;
         let target = self.projected_schema(projection)?;
-        let input = physical.schema();
-        if input.fields().len() != target.fields().len() {
-            return Err(DataFusionError::Plan(format!(
-                "programmatic view physical field count {} differs from its declared count {}",
-                input.fields().len(),
-                target.fields().len()
-            )));
-        }
-        let expressions = target
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(index, field)| ProjectionExpr {
-                expr: Arc::new(PhysicalColumn::new(input.field(index).name(), index)),
-                alias: field.name().to_owned(),
-            })
-            .collect::<Vec<_>>();
-        Ok(Arc::new(ProjectionExec::try_new_with_schema_metadata(
-            expressions,
-            physical,
-            target.as_ref(),
-        )?))
+        Ok(Arc::new(SchemaIdentityExec::try_new(physical, target)?))
     }
 }
 
-fn registered_view_logical_plan(provider: &dyn TableProvider) -> Option<LogicalPlan> {
+pub(super) fn registered_view_logical_plan(provider: &dyn TableProvider) -> Option<LogicalPlan> {
     provider
         .downcast_ref::<IdentityPreservingViewTable>()
         .map(|view| view.logical_plan().clone())
@@ -1160,13 +1303,13 @@ pub struct ProgrammaticSchemaAssembly {
 impl ProgrammaticSchemaAssembly {
     /// Start from the exact candidate `SessionState` later transferred to the epoch.
     #[must_use]
-    pub fn new(candidate_state: SessionState) -> Self {
+    pub(crate) fn new(candidate_state: SessionState) -> Self {
         Self::with_observation_policy(candidate_state, ObservationFixedPointPolicy::production())
     }
 
     /// Start a candidate with an explicit validated observation fixed-point envelope.
     #[must_use]
-    pub fn with_observation_policy(
+    pub(crate) fn with_observation_policy(
         candidate_state: SessionState,
         observation_policy: ObservationFixedPointPolicy,
     ) -> Self {
@@ -1227,7 +1370,7 @@ impl ProgrammaticSchemaAssembly {
     }
 
     /// Register one exact provider contract into the candidate catalog.
-    pub fn register_provider(
+    pub(crate) fn register_provider(
         &mut self,
         input: ProviderInput,
     ) -> Result<(), ProgrammaticSchemaError> {
@@ -1263,6 +1406,10 @@ impl ProgrammaticSchemaAssembly {
                 .field_id_at(SchemaRole::Logical, field_index)?;
         }
 
+        let logical_plan = input
+            .provider
+            .get_logical_plan()
+            .map(|plan| Arc::new(plan.into_owned()));
         self.session
             .register_table(input.table_reference.clone(), input.provider)?;
         self.table_references
@@ -1272,14 +1419,14 @@ impl ProgrammaticSchemaAssembly {
             RegisteredRelation {
                 table_reference: input.table_reference,
                 contract: input.contract,
-                origin: RegisteredOrigin::Provider,
+                origin: RegisteredOrigin::Provider { logical_plan },
             },
         );
         Ok(())
     }
 
     /// Add one programmatic transformation. It is built during [`Self::seal`].
-    pub fn add_transformation(
+    pub(crate) fn add_transformation(
         &mut self,
         transformation: Arc<dyn ProgrammaticTransformation>,
     ) -> Result<(), ProgrammaticSchemaError> {
@@ -1906,7 +2053,7 @@ impl ProgrammaticSchemaAssembly {
                     Ok(())
                 };
             let origin = match &registered.origin {
-                RegisteredOrigin::Provider => RelationOrigin::Provider,
+                RegisteredOrigin::Provider { .. } => RelationOrigin::Provider,
                 #[cfg(test)]
                 RegisteredOrigin::SystemObservation => RelationOrigin::SystemObservation,
                 RegisteredOrigin::Transformation { plan, .. } => {
@@ -1943,7 +2090,7 @@ impl ProgrammaticSchemaAssembly {
             }
 
             match &registered.origin {
-                RegisteredOrigin::Provider => {
+                RegisteredOrigin::Provider { .. } => {
                     observations
                         .provenance
                         .push(ProvenanceObservation::Provider {
@@ -2025,6 +2172,15 @@ impl ProgrammaticSchemaAssembly {
                     table_reference: registered.table_reference.clone(),
                     contract: Arc::clone(&registered.contract),
                     actual_datafusion_schema,
+                    logical_plan: match &registered.origin {
+                        RegisteredOrigin::Provider { logical_plan } => {
+                            logical_plan.as_ref().map(Arc::clone)
+                        }
+                        RegisteredOrigin::Transformation { plan, .. }
+                        | RegisteredOrigin::ObservationView { plan, .. } => Some(Arc::clone(plan)),
+                        #[cfg(test)]
+                        RegisteredOrigin::SystemObservation => None,
+                    },
                 },
             );
         }
@@ -4428,6 +4584,56 @@ mod tests {
         assert!(queried_observations.iter().all(|batch| {
             batch.schema_ref().as_ref() == observation_binding.contract.logical_schema().as_ref()
         }));
+    }
+
+    #[tokio::test]
+    async fn native_view_control_loses_relation_metadata_and_identity_boundary_restores_it() {
+        let sealed = fixture(false, 2, false, None).await.unwrap();
+        let output_id = ProgrammaticRelationId::new("derived.active_events");
+        let binding = sealed.relation(&output_id).unwrap();
+        let plan = binding
+            .logical_plan
+            .as_ref()
+            .expect("transformation view retains its application-owned logical plan")
+            .as_ref()
+            .clone();
+        let target = Arc::clone(binding.contract.logical_schema());
+        let state = sealed.session().state();
+
+        let native = ViewTable::new(plan.clone(), None)
+            .scan(&state, None, &[], None)
+            .await
+            .unwrap();
+        assert_ne!(
+            native.schema().as_ref(),
+            target.as_ref(),
+            "the pinned DataFusion 55 native control must keep proving the metadata-loss fault"
+        );
+        assert_eq!(native.schema().fields().len(), target.fields().len());
+        assert!(
+            native
+                .schema()
+                .fields()
+                .iter()
+                .zip(target.fields())
+                .all(|(actual, expected)| actual.name() == expected.name()
+                    && actual.data_type() == expected.data_type()
+                    && actual.is_nullable() == expected.is_nullable())
+        );
+
+        let preserving = IdentityPreservingViewTable::new(plan)
+            .scan(&state, None, &[], None)
+            .await
+            .unwrap();
+        assert_eq!(preserving.schema().as_ref(), target.as_ref());
+        let batches = datafusion::physical_plan::collect(preserving, state.task_ctx())
+            .await
+            .unwrap();
+        assert!(
+            batches
+                .iter()
+                .all(|batch| batch.schema_ref().as_ref() == target.as_ref())
+        );
     }
 
     #[test]

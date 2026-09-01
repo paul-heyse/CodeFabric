@@ -5,7 +5,7 @@
 //! [`ActiveWorkspace`]. Callers can observe lifecycle state, but only the startup coordinator and
 //! daemon kernel can advance it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -15,9 +15,36 @@ use thiserror::Error;
 
 use super::activation::ActivationEventId;
 use super::command::{EpochId, WorkspaceId, WriterFence};
+use super::derived_producer_closure::{
+    CompiledDerivedProducerClosure, DerivedProducerClosureError, DerivedProducerClosureExecution,
+    ProducerClosureResourceBounds, compile_release_owned_derived_producer_closure,
+};
+use super::programmatic_epoch::{ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder};
+use super::programmatic_ingress_port::ApplicationOwnedSemanticIngressPort;
+use super::programmatic_query_backend::{
+    CompiledV20ProgrammaticScopeAuthorization, ExactProgrammaticSnapshotProjection,
+    ProgrammaticQueryPortError, ProgrammaticSemanticQueryBackendError,
+    ProgrammaticSemanticQueryPorts,
+};
+use super::programmatic_schema::ProgrammaticRelationId;
 use super::programmatic_workspace::{
     ProgrammaticTableVersionObservation, ProgrammaticWorkspaceRuntime,
 };
+use crate::production_provider_recipe::{
+    ProductionProviderAuthority, ProductionProviderRecipeError, ProductionProviderRuns,
+    admit_production_provider_relations,
+};
+use crate::production_query_recipe::{
+    ProductionQueryRecipeError, ProductionSemanticQueryRecipe, ProductionSemanticQueryRecipeInput,
+};
+use crate::programmatic_derived_analysis::{
+    ProgrammaticDerivedAnalysisComposition, ProgrammaticDerivedAnalysisError,
+    ProgrammaticDerivedAnalysisOutcome, admit_and_compose_programmatic_derived_analyses,
+};
+use crate::provider_admission::{
+    ExactProgrammaticProviderRuns, ProgrammaticProviderAdmissionOutcome,
+};
+use crate::relational_semantic_query::EpochBoundSemanticIngressLimits;
 use crate::workspace_registry::WorkspaceRecord;
 
 /// Sole compiled suite selected by this production release.
@@ -58,13 +85,43 @@ impl SuiteIdentity {
     }
 }
 
+/// Capability proving that a provider recipe came from the compiled release.
+///
+/// The field is private so no sibling module can manufacture this authority. Operational provider
+/// runs and source pins remain variable inputs, but schemas, relation descriptors, field roles,
+/// coverage semantics, and admission programs require this token.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CompiledProviderAuthority(());
+
+/// Capability proving that transformation and analysis programs came from the compiled release.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CompiledTransformationAuthority(());
+
+/// Capability proving that the eight query programs came from the compiled release.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CompiledQueryAuthority(());
+
+/// Capability proving that proof programs and producer closure came from the compiled release.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CompiledProofAuthority(());
+
+/// Capability proving that policy and reduced-child construction came from the compiled release.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CompiledPolicyAuthority(());
+
 /// Immutable semantic authority compiled into the daemon.
 ///
-/// WP31 fills the private descriptor/program closure behind this release. The public constructor
-/// intentionally accepts no caller-authored semantic values.
+/// Every semantic constructor requires one of the private capabilities below. The public
+/// constructor accepts no caller-authored schema, descriptor, transformation, producer, proof,
+/// policy, catalog, or query-program value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CompiledSemanticRelease {
     suite: SuiteIdentity,
+    providers: CompiledProviderAuthority,
+    transformations: CompiledTransformationAuthority,
+    queries: CompiledQueryAuthority,
+    proof: CompiledProofAuthority,
+    policy: CompiledPolicyAuthority,
 }
 
 impl CompiledSemanticRelease {
@@ -74,6 +131,11 @@ impl CompiledSemanticRelease {
     pub const fn current() -> Self {
         Self {
             suite: SuiteIdentity::current(),
+            providers: CompiledProviderAuthority(()),
+            transformations: CompiledTransformationAuthority(()),
+            queries: CompiledQueryAuthority(()),
+            proof: CompiledProofAuthority(()),
+            policy: CompiledPolicyAuthority(()),
         }
     }
 
@@ -81,6 +143,158 @@ impl CompiledSemanticRelease {
     pub const fn suite(self) -> SuiteIdentity {
         self.suite
     }
+
+    #[must_use]
+    pub(crate) const fn provider_authority(&self) -> &CompiledProviderAuthority {
+        &self.providers
+    }
+
+    #[must_use]
+    pub(crate) const fn transformation_authority(&self) -> &CompiledTransformationAuthority {
+        &self.transformations
+    }
+
+    #[must_use]
+    pub(crate) const fn query_authority(&self) -> &CompiledQueryAuthority {
+        &self.queries
+    }
+
+    #[must_use]
+    pub(crate) const fn proof_authority(&self) -> &CompiledProofAuthority {
+        &self.proof
+    }
+
+    #[must_use]
+    pub(crate) const fn policy_authority(&self) -> &CompiledPolicyAuthority {
+        &self.policy
+    }
+
+    /// Admit one operational provider-run set through the sole compiled descriptor release.
+    ///
+    /// Source/context pins and requested-unit counts remain explicit operational inputs. Relation
+    /// schemas, field roles, coverage semantics, and admission programs are selected privately by
+    /// this release and cannot be supplied by the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed descriptor, schema, or atomic provider-admission failure.
+    pub fn admit_provider_relations(
+        &self,
+        builder: ProgrammaticFabricEpochBuilder,
+        authority: ProductionProviderAuthority,
+        runs: ProductionProviderRuns<'_>,
+    ) -> Result<ProgrammaticProviderAdmissionOutcome, ProductionProviderRecipeError> {
+        admit_production_provider_relations(self.provider_authority(), builder, authority, runs)
+    }
+
+    /// Admit operational provider runs and install one release-owned derived-analysis program.
+    ///
+    /// The provider batches and candidate builder remain operational inputs. The composition can
+    /// only be constructed inside this compiled release with its non-forgeable transformation
+    /// capability; callers cannot submit an alternate family census, schema, disposition, or
+    /// transformation program.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed provider-admission, transformation-contract, or atomic composition error.
+    pub(crate) fn admit_and_compose_derived_analyses(
+        &self,
+        builder: ProgrammaticFabricEpochBuilder,
+        runs: ExactProgrammaticProviderRuns<'_>,
+        composition: ProgrammaticDerivedAnalysisComposition,
+    ) -> Result<ProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
+        admit_and_compose_programmatic_derived_analyses(
+            self.transformation_authority(),
+            builder,
+            runs,
+            composition,
+        )
+    }
+
+    /// Compile the eight released query programs against one exact sealed epoch and executed
+    /// producer closure.
+    ///
+    /// The caller supplies only source/policy/resource inputs and the non-forgeable result of the
+    /// release-owned closure execution. Query forms, operands, scopes, schemas, and catalog
+    /// identities remain private compiled outputs.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed epoch, program, or producer-closure mismatch.
+    pub fn compile_semantic_query_recipe(
+        &self,
+        epoch: &ProgrammaticFabricEpoch,
+        input: ProductionSemanticQueryRecipeInput,
+        closure_execution: &DerivedProducerClosureExecution,
+    ) -> Result<ProductionSemanticQueryRecipe, ProductionQueryRecipeError> {
+        ProductionSemanticQueryRecipe::try_from_executed_closure(
+            self.query_authority(),
+            epoch,
+            input,
+            closure_execution,
+        )
+    }
+
+    /// Compile the release-owned producer and transitive query closure as native DataFusion plans.
+    ///
+    /// The sealed epoch and resource bounds remain explicit operational inputs. Exact relation
+    /// identities, providers, schemas, field roles, output contracts, semantic identities, and
+    /// proof programs are resolved or constructed privately by this release.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed relation/schema drift or logical-plan construction failure.
+    pub async fn compile_producer_closure(
+        &self,
+        epoch: &ProgrammaticFabricEpoch,
+        bounds: ProducerClosureResourceBounds,
+    ) -> Result<CompiledDerivedProducerClosure, DerivedProducerClosureError> {
+        compile_release_owned_derived_producer_closure(self.proof_authority(), epoch, bounds).await
+    }
+
+    /// Compose the exact ingress, authorization, and snapshot ports for one compiled query recipe.
+    ///
+    /// The recipe is a non-forgeable output of [`Self::compile_semantic_query_recipe`]. The caller
+    /// may vary only explicit policy/resource inputs and the table capabilities admitted for the
+    /// child session. The release chooses the v2.0 mapping and concrete snapshot implementation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed mapping, policy, or port-bundle mismatch.
+    pub fn compose_semantic_query_ports(
+        &self,
+        recipe: &ProductionSemanticQueryRecipe,
+        limits: EpochBoundSemanticIngressLimits,
+        policy_pin: [u8; 32],
+        table_relations: BTreeSet<ProgrammaticRelationId>,
+        max_output_rows: usize,
+    ) -> Result<ProgrammaticSemanticQueryPorts, CompiledSemanticQueryPortsError> {
+        let ingress =
+            ApplicationOwnedSemanticIngressPort::try_compiled_v2_0(self.query_authority(), limits)?;
+        let scope = CompiledV20ProgrammaticScopeAuthorization::try_new(
+            self.query_authority(),
+            self.policy_authority(),
+            policy_pin,
+            recipe.execution_catalog(),
+            table_relations,
+            max_output_rows,
+        )?;
+        Ok(ProgrammaticSemanticQueryPorts::try_new(
+            self.query_authority(),
+            Arc::new(ingress),
+            Arc::new(scope),
+            Arc::new(ExactProgrammaticSnapshotProjection::new()),
+        )?)
+    }
+}
+
+/// Closed failures while composing the release-owned semantic query ports.
+#[derive(Debug, Error)]
+pub enum CompiledSemanticQueryPortsError {
+    #[error(transparent)]
+    Port(#[from] ProgrammaticQueryPortError),
+    #[error(transparent)]
+    Bundle(#[from] ProgrammaticSemanticQueryBackendError),
 }
 
 /// Operational-only workspace registrations loaded from the coordinator-owned database.

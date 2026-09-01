@@ -21,7 +21,7 @@ use datafusion::catalog::{
 };
 use datafusion::common::tree_node::{Transformed, TreeNodeRecursion};
 use datafusion::common::{DataFusionError, TableReference};
-use datafusion::datasource::{ViewTable, provider_as_source, source_as_provider};
+use datafusion::datasource::{provider_as_source, source_as_provider};
 use datafusion::execution::memory_pool::{FairSpillPool, TrackConsumersPool};
 use datafusion::execution::object_store::{ObjectStoreRegistry, ObjectStoreUrl};
 use datafusion::execution::runtime_env::{RuntimeEnv, RuntimeEnvBuilder};
@@ -52,7 +52,8 @@ use super::datafusion_cache::{
 };
 use super::epoch_runtime::{FABRIC_CATALOG, FabricEpochId, FabricSchemaRole};
 use super::programmatic_epoch::{ProgrammaticFabricEpoch, ProgrammaticFabricEpochError};
-use super::programmatic_schema::ProgrammaticRelationId;
+use super::programmatic_schema::registered_view_logical_plan;
+use super::programmatic_schema::{IdentityPreservingViewTable, ProgrammaticRelationId};
 #[cfg(feature = "daemon")]
 use super::request_owned_relation::{RequestOwnedRelationCollection, RequestOwnedRelationError};
 use resource_governance::{EpochResourceCoordinator, EpochResourceError};
@@ -734,6 +735,7 @@ struct SealedTableContract {
     table_reference: TableReference,
     contract: Arc<SchemaContract>,
     provider: Arc<dyn datafusion::catalog::TableProvider>,
+    logical_plan: Option<Arc<LogicalPlan>>,
 }
 
 fn rebuild_child_provider_graph(
@@ -779,9 +781,10 @@ fn rebuild_child_provider(
     let parent_provider = Arc::clone(&parent.provider);
     let table_type = parent_provider.table_type();
     let definition = parent_provider.get_table_definition().map(str::to_owned);
-    let logical_plan = parent_provider
-        .get_logical_plan()
-        .map(|plan| plan.into_owned());
+    let logical_plan = parent
+        .logical_plan
+        .as_ref()
+        .map(|plan| plan.as_ref().clone());
 
     let result = if let Some(logical_plan) = logical_plan {
         let dependencies = provider_plan_dependencies(&logical_plan)?;
@@ -815,8 +818,9 @@ fn rebuild_child_provider(
 
         if table_type == TableType::View {
             let plan = rebind_child_view_plan(relation_id, logical_plan, &child_dependencies)?;
-            Arc::new(ViewTable::new(plan, definition))
-                as Arc<dyn datafusion::catalog::TableProvider>
+            Arc::new(IdentityPreservingViewTable::with_definition(
+                plan, definition,
+            )) as Arc<dyn datafusion::catalog::TableProvider>
         } else {
             parent_provider
         }
@@ -939,9 +943,9 @@ fn validate_child_provider(
         .get(relation_id)
         .expect("provider validation starts from an exact child relation");
     let logical_plan = table
-        .provider
-        .get_logical_plan()
-        .map(|plan| plan.into_owned());
+        .logical_plan
+        .as_ref()
+        .map(|plan| plan.as_ref().clone());
     if let Some(logical_plan) = logical_plan {
         let mut dependencies = BTreeSet::new();
         validate_logical_plan_references(&logical_plan, state, false, |scan| {
@@ -1181,7 +1185,7 @@ impl AuthorizedChildSession {
         let mut parent_tables = BTreeMap::new();
         let mut relations_by_reference = BTreeMap::new();
         for relation_id in policy.tables.keys() {
-            let (table_reference, provider, parent_contract) =
+            let (table_reference, provider, parent_contract, logical_plan) =
                 epoch.resolve_sealed_relation(relation_id).await?;
             if full_table_parts(&table_reference).is_none() {
                 return Err(ChildSessionError::CatalogClosure(format!(
@@ -1223,6 +1227,7 @@ impl AuthorizedChildSession {
                     table_reference,
                     contract: parent_contract,
                     provider,
+                    logical_plan,
                 },
             );
         }
@@ -1293,12 +1298,14 @@ impl AuthorizedChildSession {
                     relation_id.clone(),
                 ));
             }
+            let logical_plan = registered_view_logical_plan(provider.as_ref()).map(Arc::new);
             contracts.insert(
                 relation_id,
                 SealedTableContract {
                     table_reference,
                     contract: parent_contract,
                     provider,
+                    logical_plan,
                 },
             );
         }
@@ -1407,7 +1414,7 @@ impl AuthorizedChildSession {
     ///
     /// Rejects denied tables, invalid/duplicate projections, limits above the
     /// pinned query bound, planning/execution failures, and output-schema drift.
-    pub async fn scan(
+    pub(crate) async fn scan(
         &self,
         request: &ChildTableScan,
     ) -> Result<ChildQueryResult, ChildSessionError> {
@@ -1488,7 +1495,7 @@ impl AuthorizedChildSession {
     ///
     /// Rejects any input absent from the child catalog, binding/table drift, relational typing or
     /// planning failure, output-schema drift, and output above the pinned row envelope.
-    pub async fn execute_relational_program(
+    pub(crate) async fn execute_relational_program(
         &self,
         program: &RelationalProgram,
     ) -> Result<ChildProgramResult, ChildSessionError> {
@@ -1619,7 +1626,7 @@ impl AuthorizedChildSession {
     /// optimized scan that does not retain the exact request/provider capability, relational
     /// typing or planning failure, output-schema drift, and output above the pinned row envelope.
     #[cfg(feature = "daemon")]
-    pub async fn execute_relational_program_with_request_inputs(
+    pub(crate) async fn execute_relational_program_with_request_inputs(
         &self,
         program: &RelationalProgram,
         request_inputs: &RequestOwnedRelationCollection,
@@ -1876,7 +1883,7 @@ impl ProgrammaticFabricEpoch {
     ///
     /// Fails closed on pin disagreement, unavailable registry installations,
     /// parent contract/provider drift, catalog leakage, or resource leakage.
-    pub async fn authorized_child_session(
+    pub(crate) async fn authorized_child_session(
         &self,
         policy: ChildSessionPolicy,
         resources: &EpochResourceCoordinator,
@@ -2855,6 +2862,14 @@ mod tests {
     #[tokio::test]
     async fn fully_granted_view_graph_is_rebuilt_against_child_providers() {
         let epoch = sealed_view_epoch().await;
+        assert!(
+            epoch
+                .relation(&ProgrammaticRelationId::new(INNER_VIEW_RELATION))
+                .expect("sealed inner view binding")
+                .logical_plan
+                .is_some(),
+            "the sealed epoch must retain the application-owned inner view plan"
+        );
         let resources = resource_coordinator(&epoch);
         let child = epoch
             .authorized_child_session(
@@ -2875,30 +2890,22 @@ mod tests {
         let inner_id = ProgrammaticRelationId::new(INNER_VIEW_RELATION);
         let outer_id = ProgrammaticRelationId::new(OUTER_VIEW_RELATION);
         let base_id = ProgrammaticRelationId::new(DENIED_RELATION);
-        let (_, parent_inner, _) = epoch.resolve_sealed_relation(&inner_id).await.unwrap();
-        let (_, parent_outer, _) = epoch.resolve_sealed_relation(&outer_id).await.unwrap();
+        let (_, parent_inner, _, _) = epoch.resolve_sealed_relation(&inner_id).await.unwrap();
+        let (_, parent_outer, _, _) = epoch.resolve_sealed_relation(&outer_id).await.unwrap();
         let child_inner = Arc::clone(&child.tables.get(&inner_id).unwrap().provider);
         let child_outer = Arc::clone(&child.tables.get(&outer_id).unwrap().provider);
         let child_base = Arc::clone(&child.tables.get(&base_id).unwrap().provider);
         assert!(!Arc::ptr_eq(&parent_inner, &child_inner));
         assert!(!Arc::ptr_eq(&parent_outer, &child_outer));
 
-        let inner_dependencies = provider_plan_dependencies(
-            child_inner
-                .get_logical_plan()
-                .expect("rebuilt inner view plan")
-                .as_ref(),
-        )
-        .unwrap();
+        let inner_plan =
+            registered_view_logical_plan(child_inner.as_ref()).expect("rebuilt inner view plan");
+        let inner_dependencies = provider_plan_dependencies(&inner_plan).unwrap();
         assert_eq!(inner_dependencies.len(), 1);
         assert!(Arc::ptr_eq(&inner_dependencies[0].1, &child_base));
-        let outer_dependencies = provider_plan_dependencies(
-            child_outer
-                .get_logical_plan()
-                .expect("rebuilt outer view plan")
-                .as_ref(),
-        )
-        .unwrap();
+        let outer_plan =
+            registered_view_logical_plan(child_outer.as_ref()).expect("rebuilt outer view plan");
+        let outer_dependencies = provider_plan_dependencies(&outer_plan).unwrap();
         assert_eq!(outer_dependencies.len(), 1);
         // DataFusion 55 inlines an unfiltered ViewTable scan while building the outer
         // plan, so its exposed capability edge is directly to the base provider.
@@ -2913,6 +2920,20 @@ mod tests {
 
         assert_eq!(child_inner.schema(), parent_inner.schema());
         assert_eq!(child_outer.schema(), parent_outer.schema());
+
+        let executed = child
+            .scan(&ChildTableScan::all(outer_id))
+            .await
+            .expect("rebuilt nested child view must execute through its reduced catalog");
+        assert!(executed.row_count() > 0);
+        assert_eq!(executed.schema().as_ref(), parent_outer.schema().as_ref());
+        assert!(
+            executed
+                .batches()
+                .iter()
+                .all(|batch| batch.schema().as_ref() == parent_outer.schema().as_ref()),
+            "analyzed, optimized, physical, and batch schemas must retain exact view identity",
+        );
     }
 
     #[tokio::test]

@@ -25,13 +25,17 @@ use crate::relational_semantic_query::{
     validate_epoch_bound_semantic_ingress,
 };
 use crate::semantic_query_contract::{
-    FreshnessPolicy, ParsedSemanticRequest, SemanticQueryError, SemanticSnapshotResponse,
+    COMPILED_V2_0_SCOPE_DEFINITIONS, ParsedSemanticRequest, SemanticQueryError,
+    SemanticSnapshotResponse,
 };
 
 use super::admission::AdmissionError;
 use super::arrow_result_resource::ResultResourceLease;
 use super::command::{ExpectedHead, WorkspaceId};
-use super::production_kernel::{ActiveWorkspaceLease, LifecycleAuthority, WorkspaceSlotRegistry};
+use super::production_kernel::{
+    ActiveWorkspaceLease, CompiledPolicyAuthority, CompiledQueryAuthority, CompiledSemanticRelease,
+    LifecycleAuthority, WorkspaceSlotRegistry,
+};
 use super::programmatic_schema::ProgrammaticRelationId;
 use super::programmatic_workspace::{ProgrammaticWorkspaceRuntime, WorkspaceEpochQueryAuthority};
 use super::published_arrow_result::PublishedResultOwner;
@@ -42,6 +46,8 @@ use super::relational_query_runtime::{RelationalQueryAuthorization, RelationalQu
 use super::request_owned_relation::RequestOwnedRelationCollection;
 
 const REQUEST_CONTENT_PIN_DOMAIN: &[u8] = b"codefabric.programmatic-semantic-request-content.v1\0";
+const COMPILED_QUERY_RELEASE_PIN_DOMAIN: &[u8] =
+    b"codefabric.compiled-semantic-query-release.v2.0\0";
 
 /// Explicit application port from the released request DTO to normalized epoch-bound relations.
 ///
@@ -229,33 +235,35 @@ impl ProgrammaticScopeAuthorizationPort for ExactProgrammaticScopeAuthorization 
 }
 
 #[derive(Clone, Debug)]
-struct ReleasedV13ScopeRule {
+struct CompiledV20ScopeRule {
     authorization_input_id: Arc<str>,
     handoff_pin: [u8; 32],
 }
 
-/// Request-independent application policy for the exact released 1.3 scope projection.
+/// Request-independent application policy for the sole compiled 2.0 scope projection.
 ///
 /// The execution catalog supplies the preinstalled scope identities and handoff pins. At request
 /// time this port reconstructs every expected normalized value from the parsed request, validates
 /// the compiler handoff row-for-row, and only then narrows the epoch baseline. It never learns a
 /// request content pin during backend construction and therefore remains valid for later requests.
 #[derive(Clone, Debug)]
-pub struct ReleasedV13ProgrammaticScopeAuthorization {
+pub struct CompiledV20ProgrammaticScopeAuthorization {
     policy_pin: [u8; 32],
-    rules: BTreeMap<Arc<str>, ReleasedV13ScopeRule>,
+    rules: BTreeMap<Arc<str>, CompiledV20ScopeRule>,
     table_relations: BTreeSet<ProgrammaticRelationId>,
     max_output_rows: usize,
 }
 
-impl ReleasedV13ProgrammaticScopeAuthorization {
-    /// Bind the exact released 1.3 scope policy to one installed execution catalog.
+impl CompiledV20ProgrammaticScopeAuthorization {
+    /// Bind the sole compiled 2.0 scope policy to one installed execution catalog.
     ///
     /// # Errors
     ///
     /// Rejects a policy mismatch, an incomplete/duplicate scope set, sentinel handoff pins, an
     /// empty table capability, or a zero result bound.
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _compiled_query: &CompiledQueryAuthority,
+        _compiled_policy: &CompiledPolicyAuthority,
         policy_pin: [u8; 32],
         execution_catalog: &EpochBoundSemanticExecutionCatalog,
         table_relations: BTreeSet<ProgrammaticRelationId>,
@@ -267,28 +275,23 @@ impl ReleasedV13ProgrammaticScopeAuthorization {
             || max_output_rows == 0
         {
             return Err(ProgrammaticQueryPortError::Rejected(
-                "released 1.3 scope policy authority is incomplete".to_owned(),
+                "compiled 2.0 scope policy authority is incomplete".to_owned(),
             ));
         }
-        let expected = [
-            "scope.specification",
-            "scope.version",
-            "scope.workspace",
-            "scope.freshness",
-            "scope.cost-maximum-rows",
-            "scope.response-projection-field",
-            "scope.response-projection-enabled",
-        ]
-        .into_iter()
-        .collect::<BTreeSet<_>>();
+        let expected = COMPILED_V2_0_SCOPE_DEFINITIONS
+            .into_iter()
+            .map(|definition| (definition.scope_id, definition.authorization_input_id))
+            .collect::<BTreeMap<_, _>>();
         let mut rules = BTreeMap::new();
         for row in &execution_catalog.scopes {
             if row.handoff_pin == [0; 32]
                 || row.authorization_input_id.trim().is_empty()
+                || expected.get(row.scope_id.as_ref()).copied()
+                    != Some(row.authorization_input_id.as_ref())
                 || rules
                     .insert(
                         Arc::clone(&row.scope_id),
-                        ReleasedV13ScopeRule {
+                        CompiledV20ScopeRule {
                             authorization_input_id: Arc::clone(&row.authorization_input_id),
                             handoff_pin: row.handoff_pin,
                         },
@@ -296,13 +299,15 @@ impl ReleasedV13ProgrammaticScopeAuthorization {
                     .is_some()
             {
                 return Err(ProgrammaticQueryPortError::Rejected(
-                    "released 1.3 scope catalog is ambiguous".to_owned(),
+                    "compiled 2.0 scope catalog is ambiguous".to_owned(),
                 ));
             }
         }
-        if rules.keys().map(AsRef::as_ref).collect::<BTreeSet<_>>() != expected {
+        if rules.keys().map(AsRef::as_ref).collect::<BTreeSet<_>>()
+            != expected.keys().copied().collect::<BTreeSet<_>>()
+        {
             return Err(ProgrammaticQueryPortError::Rejected(
-                "released 1.3 scope catalog is incomplete".to_owned(),
+                "compiled 2.0 scope catalog is incomplete".to_owned(),
             ));
         }
         Ok(Self {
@@ -314,7 +319,7 @@ impl ReleasedV13ProgrammaticScopeAuthorization {
     }
 }
 
-impl ProgrammaticScopeAuthorizationPort for ReleasedV13ProgrammaticScopeAuthorization {
+impl ProgrammaticScopeAuthorizationPort for CompiledV20ProgrammaticScopeAuthorization {
     fn policy_pin(&self) -> [u8; 32] {
         self.policy_pin
     }
@@ -336,21 +341,16 @@ impl ProgrammaticScopeAuthorizationPort for ReleasedV13ProgrammaticScopeAuthoriz
                     .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))?
         {
             return Err(ProgrammaticQueryPortError::Rejected(
-                "released 1.3 scope policy differs from admitted authority".to_owned(),
+                "compiled 2.0 scope policy differs from admitted authority".to_owned(),
             ));
         }
-        let expected = released_v1_3_scope_values(request)?;
-        if scopes.len() != expected.len() {
-            return Err(ProgrammaticQueryPortError::Rejected(
-                "released 1.3 scope handoff set is incomplete".to_owned(),
-            ));
-        }
+        let expected = compiled_v2_0_scope_values(request);
+        validate_compiled_v2_0_scope_handoffs(&self.rules, &expected, scopes)?;
 
-        let mut observed = BTreeSet::new();
         let mut scope_identity = blake3::Hasher::new();
         frame_scope_identity(
             &mut scope_identity,
-            b"codefabric.released-v1.3-scope-authorization.v1",
+            b"codefabric.compiled-v2.0-scope-authorization.v1",
         );
         frame_scope_identity(&mut scope_identity, &self.policy_pin);
         frame_scope_identity(&mut scope_identity, owner.agent_id().as_bytes());
@@ -359,49 +359,10 @@ impl ProgrammaticScopeAuthorizationPort for ReleasedV13ProgrammaticScopeAuthoriz
             &canonical_request_content_pin(&request.canonical_bytes),
         );
         for scope in scopes {
-            let rule = self.rules.get(scope.scope_id.as_ref()).ok_or_else(|| {
-                ProgrammaticQueryPortError::Rejected(format!(
-                    "scope {} is outside released 1.3 policy",
-                    scope.scope_id
-                ))
-            })?;
-            let values = expected.get(scope.scope_id.as_ref()).ok_or_else(|| {
-                ProgrammaticQueryPortError::Rejected(format!(
-                    "scope {} was not caused by the released request",
-                    scope.scope_id
-                ))
-            })?;
-            if !observed.insert(Arc::clone(&scope.scope_id))
-                || scope.authorization_input_id != rule.authorization_input_id
-                || scope.handoff_pin != rule.handoff_pin
-                || scope.rows.len() != values.len()
-                || scope.rows.iter().zip(values).enumerate().any(
-                    |(ordinal, (row, expected_value))| {
-                        row.scope_id != scope.scope_id
-                            || usize::try_from(row.ordinal).ok() != Some(ordinal)
-                            || &row.value != expected_value
-                    },
-                )
-            {
-                return Err(ProgrammaticQueryPortError::Rejected(format!(
-                    "scope {} differs from the released 1.3 request projection",
-                    scope.scope_id
-                )));
-            }
             frame_scope_identity(&mut scope_identity, scope.scope_id.as_bytes());
             frame_scope_identity(&mut scope_identity, scope.authorization_input_id.as_bytes());
             frame_scope_identity(&mut scope_identity, &scope.handoff_pin);
             frame_scope_identity(&mut scope_identity, &scope.content_pin);
-        }
-        if observed
-            != expected
-                .keys()
-                .map(|scope| Arc::<str>::from(*scope))
-                .collect::<BTreeSet<_>>()
-        {
-            return Err(ProgrammaticQueryPortError::Rejected(
-                "released 1.3 scope handoff omitted a request scope".to_owned(),
-            ));
         }
 
         let retained_tables = baseline
@@ -409,92 +370,94 @@ impl ProgrammaticScopeAuthorizationPort for ReleasedV13ProgrammaticScopeAuthoriz
             .filter(|relation| self.table_relations.contains(*relation))
             .cloned()
             .collect::<BTreeSet<_>>();
-        let request_max_output_rows = request
-            .request
-            .cost_budget
-            .map_or(usize::MAX, |budget| budget.maximum_rows);
         baseline
             .narrow_to(
                 *scope_identity.finalize().as_bytes(),
                 &retained_tables,
-                baseline
-                    .max_output_rows()
-                    .min(self.max_output_rows)
-                    .min(request_max_output_rows),
+                baseline.max_output_rows().min(self.max_output_rows),
             )
             .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))
     }
 }
 
-fn released_v1_3_scope_values(
+fn compiled_v2_0_scope_values(
     request: &ParsedSemanticRequest,
-) -> Result<BTreeMap<&'static str, Vec<SemanticClauseValue>>, ProgrammaticQueryPortError> {
+) -> BTreeMap<&'static str, Vec<SemanticClauseValue>> {
     let request = &request.request;
-    let freshness = match request.freshness_policy {
-        FreshnessPolicy::CurrentRequired => "current_required",
-        FreshnessPolicy::WaitForCurrent => "wait_for_current",
-        FreshnessPolicy::BestAvailableSnapshot => "best_available_snapshot",
-        FreshnessPolicy::AwaitLatest => "await_latest",
-        FreshnessPolicy::RequireCurrentForTargets => "require_current_for_targets",
-        FreshnessPolicy::RequireSourceCurrent => "require_source_current",
-        FreshnessPolicy::RequireSemanticCurrent => "require_semantic_current",
-    };
-    let mut expected = BTreeMap::from([
-        (
-            "scope.specification",
-            vec![SemanticClauseValue::Text(Arc::from(
-                request.specification.as_str(),
-            ))],
-        ),
-        (
-            "scope.version",
-            vec![SemanticClauseValue::Text(Arc::from(
-                request.version.as_str(),
-            ))],
-        ),
-        (
-            "scope.workspace",
-            vec![SemanticClauseValue::Text(Arc::from(
-                request.workspace_id.as_str(),
-            ))],
-        ),
-        (
-            "scope.freshness",
-            vec![SemanticClauseValue::Text(Arc::from(freshness))],
-        ),
-    ]);
-    if let Some(cost) = request.cost_budget {
-        expected.insert(
-            "scope.cost-maximum-rows",
-            vec![SemanticClauseValue::UInt64(
-                u64::try_from(cost.maximum_rows).map_err(|_| {
-                    ProgrammaticQueryPortError::Rejected(
-                        "released cost budget exceeds u64".to_owned(),
-                    )
-                })?,
-            )],
-        );
+    let expected = COMPILED_V2_0_SCOPE_DEFINITIONS
+        .into_iter()
+        .filter_map(|definition| {
+            let operands = request.compiled_v2_0_scope_operands(definition.role);
+            (!operands.is_empty()).then(|| {
+                (
+                    definition.scope_id,
+                    operands
+                        .into_iter()
+                        .map(|operand| SemanticClauseValue::Text(Arc::from(operand)))
+                        .collect(),
+                )
+            })
+        })
+        .collect();
+    expected
+}
+
+fn validate_compiled_v2_0_scope_handoffs(
+    rules: &BTreeMap<Arc<str>, CompiledV20ScopeRule>,
+    expected: &BTreeMap<&'static str, Vec<SemanticClauseValue>>,
+    scopes: &[CompiledEpochBoundScopeHandoff],
+) -> Result<(), ProgrammaticQueryPortError> {
+    if scopes.len() != expected.len() {
+        return Err(ProgrammaticQueryPortError::Rejected(
+            "compiled 2.0 scope handoff set is incomplete".to_owned(),
+        ));
     }
-    if let Some(projection) = &request.response_projection {
-        if !projection.is_empty() {
-            expected.insert(
-                "scope.response-projection-field",
-                projection
-                    .keys()
-                    .map(|field| SemanticClauseValue::Text(Arc::from(field.as_str())))
-                    .collect(),
-            );
-            expected.insert(
-                "scope.response-projection-enabled",
-                projection
-                    .values()
-                    .copied()
-                    .map(SemanticClauseValue::Boolean)
-                    .collect(),
-            );
+    let mut observed = BTreeSet::new();
+    for scope in scopes {
+        let rule = rules.get(scope.scope_id.as_ref()).ok_or_else(|| {
+            ProgrammaticQueryPortError::Rejected(format!(
+                "scope {} is outside compiled 2.0 policy",
+                scope.scope_id
+            ))
+        })?;
+        let values = expected.get(scope.scope_id.as_ref()).ok_or_else(|| {
+            ProgrammaticQueryPortError::Rejected(format!(
+                "scope {} was not caused by the released request",
+                scope.scope_id
+            ))
+        })?;
+        if !observed.insert(Arc::clone(&scope.scope_id))
+            || scope.authorization_input_id != rule.authorization_input_id
+            || scope.handoff_pin != rule.handoff_pin
+            || scope.rows.len() != values.len()
+            || scope
+                .rows
+                .iter()
+                .zip(values)
+                .enumerate()
+                .any(|(ordinal, (row, expected_value))| {
+                    row.scope_id != scope.scope_id
+                        || usize::try_from(row.ordinal).ok() != Some(ordinal)
+                        || &row.value != expected_value
+                })
+        {
+            return Err(ProgrammaticQueryPortError::Rejected(format!(
+                "scope {} differs from the compiled 2.0 request projection",
+                scope.scope_id
+            )));
         }
     }
-    Ok(expected)
+    if observed
+        != expected
+            .keys()
+            .map(|scope| Arc::<str>::from(*scope))
+            .collect::<BTreeSet<_>>()
+    {
+        return Err(ProgrammaticQueryPortError::Rejected(
+            "compiled 2.0 scope handoff omitted a request scope".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 /// Public, non-authoritative projection of one exact programmatic epoch.
@@ -659,7 +622,7 @@ impl ProgrammaticSnapshotProjectionPort for ExactProgrammaticSnapshotProjection 
             derivation_bundle_version: digest_text(
                 startup.releases.application_release().as_bytes(),
             ),
-            query_language_version: "1.3".to_owned(),
+            query_language_version: "2.0".to_owned(),
             capability_summaries: vec![capability],
             diagnostic_references: Vec::new(),
         })
@@ -687,16 +650,15 @@ impl fmt::Debug for ProgrammaticSemanticQueryPorts {
 }
 
 impl ProgrammaticSemanticQueryPorts {
-    /// Construct ports only when every implementation names a real release/policy identity.
-    pub fn try_new(
-        application_release: [u8; 32],
+    /// Construct ports only under the compiled release and when every implementation names a
+    /// real release/policy identity.
+    pub(crate) fn try_new(
+        compiled_release: &CompiledQueryAuthority,
         ingress: Arc<dyn ProgrammaticSemanticIngressPort>,
         scope_authorization: Arc<dyn ProgrammaticScopeAuthorizationPort>,
         snapshot: Arc<dyn ProgrammaticSnapshotProjectionPort>,
     ) -> Result<Self, ProgrammaticSemanticQueryBackendError> {
-        if application_release == [0; 32] {
-            return Err(ProgrammaticSemanticQueryBackendError::MissingApplicationRelease);
-        }
+        let application_release = compiled_query_release_pin(compiled_release);
         for (kind, pin) in [
             ("semantic ingress", ingress.authority_pin()),
             ("scope authorization", scope_authorization.policy_pin()),
@@ -705,6 +667,11 @@ impl ProgrammaticSemanticQueryPorts {
             if pin == [0; 32] {
                 return Err(ProgrammaticSemanticQueryBackendError::MissingPortPin(kind));
             }
+        }
+        if ingress.authority_pin() != application_release {
+            return Err(ProgrammaticSemanticQueryBackendError::PortReleaseMismatch(
+                "semantic ingress",
+            ));
         }
         Ok(Self {
             application_release,
@@ -1198,6 +1165,27 @@ pub fn canonical_request_content_pin(canonical_bytes: &[u8]) -> [u8; 32] {
     *hasher.finalize().as_bytes()
 }
 
+/// Canonical application-release identity of the sole compiled semantic-query release.
+///
+/// The opaque capability prevents callers from selecting a suite or query-language mapping. The
+/// identity is derived solely from the compiled suite and the sole released query language; it is
+/// never accepted as an operational input.
+#[must_use]
+pub(crate) fn compiled_query_release_pin(_authority: &CompiledQueryAuthority) -> [u8; 32] {
+    let suite = CompiledSemanticRelease::current().suite();
+    let mut hasher = blake3::Hasher::new();
+    for part in [
+        COMPILED_QUERY_RELEASE_PIN_DOMAIN,
+        suite.suite_id().as_bytes(),
+        suite.suite_version().as_bytes(),
+        b"composable semantic CPG fact query".as_slice(),
+        b"2.0".as_slice(),
+    ] {
+        frame_scope_identity(&mut hasher, part);
+    }
+    *hasher.finalize().as_bytes()
+}
+
 fn frame_scope_identity(hasher: &mut blake3::Hasher, bytes: &[u8]) {
     hasher.update(&(bytes.len() as u64).to_be_bytes());
     hasher.update(bytes);
@@ -1293,15 +1281,98 @@ pub enum ProgrammaticQueryPortError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProgrammaticSemanticQueryBackendError {
-    #[error("programmatic query ports have no application release identity")]
-    MissingApplicationRelease,
     #[error("programmatic query {0} port has no authority pin")]
     MissingPortPin(&'static str),
+    #[error("programmatic query {0} port does not belong to the compiled release")]
+    PortReleaseMismatch(&'static str),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::relational_semantic_query::EpochBoundScopeRow;
+    use crate::semantic_query_contract::parse_request;
+
+    fn parsed_scope_request(include_optional_scopes: bool) -> ParsedSemanticRequest {
+        let scope = if include_optional_scopes {
+            serde_json::json!({
+                "workspace_id": "workspace:00112233445566778899aabbccddeeff",
+                "codebase": "codebase:current",
+                "languages": ["Rust", "Python"],
+                "source_boundaries": [{"root": "src", "kind": "path"}],
+                "analysis_contexts": {
+                    "mode": "explicit",
+                    "context_ids": ["analysis:one"]
+                },
+                "representations": ["syntax"],
+                "external_entities": "endpoint-only"
+            })
+        } else {
+            serde_json::json!({
+                "workspace_id": "workspace:00112233445566778899aabbccddeeff"
+            })
+        };
+        let value = serde_json::json!({
+            "specification": "composable semantic CPG fact query",
+            "version": "2.0",
+            "semantic_request_id": "request.scope-causality",
+            "scope": scope,
+            "freshness": {"policy": "best_available_snapshot"},
+            "queries": [{
+                "request": "find code entities",
+                "query_id": "q1",
+                "looking_for": "functions",
+                "within": [],
+                "where": [],
+                "return": {"limit": {"maximum_results": 1}}
+            }]
+        });
+        parse_request(&serde_json::to_vec(&value).expect("request JSON"))
+            .expect("compiled v2 request")
+    }
+
+    fn scope_handoff_fixture(
+        request: &ParsedSemanticRequest,
+    ) -> (
+        BTreeMap<Arc<str>, CompiledV20ScopeRule>,
+        BTreeMap<&'static str, Vec<SemanticClauseValue>>,
+        Vec<CompiledEpochBoundScopeHandoff>,
+    ) {
+        let expected = compiled_v2_0_scope_values(request);
+        let mut rules = BTreeMap::new();
+        let mut scopes = Vec::new();
+        for (index, definition) in COMPILED_V2_0_SCOPE_DEFINITIONS.into_iter().enumerate() {
+            let handoff_pin = [u8::try_from(index + 1).expect("eight scopes"); 32];
+            rules.insert(
+                Arc::from(definition.scope_id),
+                CompiledV20ScopeRule {
+                    authorization_input_id: Arc::from(definition.authorization_input_id),
+                    handoff_pin,
+                },
+            );
+            let Some(values) = expected.get(definition.scope_id) else {
+                continue;
+            };
+            let scope_id = Arc::<str>::from(definition.scope_id);
+            scopes.push(CompiledEpochBoundScopeHandoff {
+                scope_id: Arc::clone(&scope_id),
+                authorization_input_id: Arc::from(definition.authorization_input_id),
+                rows: values
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(ordinal, value)| EpochBoundScopeRow {
+                        scope_id: Arc::clone(&scope_id),
+                        ordinal: u32::try_from(ordinal).expect("bounded scope ordinal"),
+                        value,
+                    })
+                    .collect(),
+                handoff_pin,
+                content_pin: [u8::try_from(index + 11).expect("eight scopes"); 32],
+            });
+        }
+        (rules, expected, scopes)
+    }
 
     struct IngressProbe([u8; 32]);
 
@@ -1373,13 +1444,12 @@ mod tests {
     }
 
     fn probes(
-        application_release: [u8; 32],
         ingress: [u8; 32],
         policy: [u8; 32],
         snapshot: [u8; 32],
     ) -> Result<ProgrammaticSemanticQueryPorts, ProgrammaticSemanticQueryBackendError> {
         ProgrammaticSemanticQueryPorts::try_new(
-            application_release,
+            super::super::production_kernel::CompiledSemanticRelease::current().query_authority(),
             Arc::new(IngressProbe(ingress)),
             Arc::new(ScopeProbe(policy)),
             Arc::new(SnapshotProbe(snapshot)),
@@ -1388,22 +1458,30 @@ mod tests {
 
     #[test]
     fn port_bundle_requires_application_and_every_component_identity() {
-        assert!(matches!(
-            probes([0; 32], [1; 32], [2; 32], [3; 32]),
-            Err(ProgrammaticSemanticQueryBackendError::MissingApplicationRelease)
-        ));
+        let release = super::super::production_kernel::CompiledSemanticRelease::current();
+        let release_pin = compiled_query_release_pin(release.query_authority());
         for (expected, pins) in [
             ("semantic ingress", ([0; 32], [2; 32], [3; 32])),
-            ("scope authorization", ([1; 32], [0; 32], [3; 32])),
-            ("snapshot projection", ([1; 32], [2; 32], [0; 32])),
+            ("scope authorization", (release_pin, [0; 32], [3; 32])),
+            ("snapshot projection", (release_pin, [2; 32], [0; 32])),
         ] {
             assert!(matches!(
-                probes([9; 32], pins.0, pins.1, pins.2),
+                probes(pins.0, pins.1, pins.2),
                 Err(ProgrammaticSemanticQueryBackendError::MissingPortPin(kind)) if kind == expected
             ));
         }
-        let ports = probes([9; 32], [1; 32], [2; 32], [3; 32]).unwrap();
-        assert_eq!(ports.application_release(), [9; 32]);
+        assert!(matches!(
+            probes([1; 32], [2; 32], [3; 32]),
+            Err(ProgrammaticSemanticQueryBackendError::PortReleaseMismatch(
+                "semantic ingress"
+            ))
+        ));
+        let ports = probes(release_pin, [2; 32], [3; 32]).unwrap();
+        assert_eq!(
+            ports.application_release(),
+            compiled_query_release_pin(release.query_authority())
+        );
+        assert_ne!(ports.application_release(), [0; 32]);
     }
 
     #[test]
@@ -1411,13 +1489,19 @@ mod tests {
         use super::super::production_kernel::ProductionLifecyclePhase;
 
         let lifecycle = Arc::new(LifecycleAuthority::new());
+        let release = super::super::production_kernel::CompiledSemanticRelease::current();
         let backend = ProgrammaticSemanticQueryBackend {
             workspace_slots: Arc::new(WorkspaceSlotRegistry::new()),
             lifecycle: Arc::clone(&lifecycle),
             published_results: Arc::new(
                 super::super::published_arrow_result::PublishedArrowResultRegistry::new(),
             ),
-            ports: probes([9; 32], [1; 32], [2; 32], [3; 32]).unwrap(),
+            ports: probes(
+                compiled_query_release_pin(release.query_authority()),
+                [2; 32],
+                [3; 32],
+            )
+            .unwrap(),
         };
 
         let error = backend.require_semantic_admission().unwrap_err();
@@ -1463,5 +1547,45 @@ mod tests {
             )
             .unwrap();
         assert!(backend.require_semantic_admission().is_err());
+    }
+
+    #[test]
+    fn compiled_v2_scope_authorization_rejects_omitted_or_changed_causal_operands() {
+        let request = parsed_scope_request(true);
+        let (rules, expected, scopes) = scope_handoff_fixture(&request);
+        validate_compiled_v2_0_scope_handoffs(&rules, &expected, &scopes)
+            .expect("unchanged causal scope handoffs");
+
+        let mut omitted = scopes.clone();
+        omitted.retain(|scope| scope.scope_id.as_ref() != "scope.workspace-id");
+        let omitted_error = validate_compiled_v2_0_scope_handoffs(&rules, &expected, &omitted)
+            .expect_err("omitted request scope must be rejected");
+        assert!(
+            omitted_error
+                .to_string()
+                .contains("handoff set is incomplete")
+        );
+
+        let mut changed = scopes;
+        let workspace = changed
+            .iter_mut()
+            .find(|scope| scope.scope_id.as_ref() == "scope.workspace-id")
+            .expect("workspace scope");
+        workspace.rows[0].value = SemanticClauseValue::Text(Arc::from("workspace:changed"));
+        let changed_error = validate_compiled_v2_0_scope_handoffs(&rules, &expected, &changed)
+            .expect_err("changed request scope must be rejected");
+        assert!(
+            changed_error
+                .to_string()
+                .contains("differs from the compiled 2.0 request projection")
+        );
+
+        let minimal = parsed_scope_request(false);
+        let (_, minimal_expected, minimal_scopes) = scope_handoff_fixture(&minimal);
+        assert_eq!(
+            minimal_expected.keys().copied().collect::<Vec<_>>(),
+            ["scope.workspace-id"]
+        );
+        assert_eq!(minimal_scopes.len(), 1);
     }
 }

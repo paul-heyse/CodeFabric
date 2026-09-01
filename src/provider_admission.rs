@@ -636,7 +636,7 @@ pub struct ExactProgrammaticProviderRuns<'a> {
 
 impl<'a> ExactProgrammaticProviderRuns<'a> {
     #[must_use]
-    pub const fn new(
+    pub(crate) const fn new(
         tree_sitter_plan: &'a ProviderAdmissionPlan,
         ruff_plan: &'a ProviderAdmissionPlan,
         native_syntax_runs: &'a [ProviderNativeSyntaxRun],
@@ -708,7 +708,7 @@ impl ProgrammaticProviderAdmissionOutcome {
     }
 
     #[must_use]
-    pub fn into_parts(
+    pub(crate) fn into_parts(
         self,
     ) -> (
         ProgrammaticFabricEpochBuilder,
@@ -750,7 +750,7 @@ impl ProviderCapabilityAdmissionOutcome {
     }
 
     #[must_use]
-    pub fn into_parts(
+    pub(crate) fn into_parts(
         self,
     ) -> (
         ProgrammaticFabricEpochBuilder,
@@ -1231,7 +1231,7 @@ fn evaluate_provider_admission(
 ///
 /// Returns a typed exact-run, admission, cross-provider collision,
 /// schema-contract, catalog, or DataFusion failure.
-pub fn admit_provider_relations_programmatic(
+pub(crate) fn admit_provider_relations_programmatic(
     builder: ProgrammaticFabricEpochBuilder,
     runs: ExactProgrammaticProviderRuns<'_>,
 ) -> Result<ProgrammaticProviderAdmissionOutcome, ProviderAdmissionError> {

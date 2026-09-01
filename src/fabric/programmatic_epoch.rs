@@ -19,6 +19,7 @@ use datafusion::common::TableReference;
 use datafusion::datasource::source_as_provider;
 use datafusion::execution::SessionStateBuilder;
 use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::collect;
 use datafusion::prelude::SessionContext;
 use deltalake::delta_datafusion::planner::DeltaPlanner;
@@ -62,7 +63,7 @@ pub struct ProgrammaticFabricEpochBuilder {
 impl ProgrammaticFabricEpochBuilder {
     /// Create a fresh candidate with the exact runtime and role-schema
     /// isolation boundary. The legacy `model` schema is intentionally absent.
-    pub fn try_new(
+    pub(crate) fn try_new(
         identity: FabricEpochId,
         runtime_config: FabricEpochRuntimeConfig,
     ) -> Result<Self, ProgrammaticFabricEpochError> {
@@ -109,7 +110,7 @@ impl ProgrammaticFabricEpochBuilder {
     }
 
     /// Register one exact code-fact or execution-input provider.
-    pub fn register_provider(
+    pub(crate) fn register_provider(
         &mut self,
         input: ProviderInput,
     ) -> Result<(), ProgrammaticFabricEpochError> {
@@ -118,7 +119,7 @@ impl ProgrammaticFabricEpochBuilder {
     }
 
     /// Register one typed native transformation for dependency-ordered build.
-    pub fn add_transformation(
+    pub(crate) fn add_transformation(
         &mut self,
         transformation: Arc<dyn ProgrammaticTransformation>,
     ) -> Result<(), ProgrammaticFabricEpochError> {
@@ -129,7 +130,7 @@ impl ProgrammaticFabricEpochBuilder {
     /// Transfer the assembly for a consuming admission step. The matching
     /// constructor retains the same identity/runtime ownership.
     #[must_use]
-    pub fn into_assembly_parts(
+    pub(crate) fn into_assembly_parts(
         self,
     ) -> (
         FabricEpochId,
@@ -148,7 +149,7 @@ impl ProgrammaticFabricEpochBuilder {
     /// Reconstitute ownership after a consuming admission operation without
     /// rebuilding or replaying the candidate session.
     #[must_use]
-    pub fn from_assembly_parts(
+    pub(crate) fn from_assembly_parts(
         identity: FabricEpochId,
         runtime_config: FabricEpochRuntimeConfig,
         runtime_env: Arc<RuntimeEnv>,
@@ -165,7 +166,7 @@ impl ProgrammaticFabricEpochBuilder {
     /// Create the five empty, stable Delta histories from the observation
     /// contracts derived by this candidate. Existing histories must be opened
     /// from an exact prior publication instead.
-    pub async fn provision_observation_histories(
+    pub(crate) async fn provision_observation_histories(
         &self,
         roots: BTreeMap<ProgrammaticRelationId, url::Url>,
     ) -> Result<ProgrammaticObservationDeltaTargets, ProgrammaticFabricEpochError> {
@@ -175,7 +176,7 @@ impl ProgrammaticFabricEpochBuilder {
     /// Build all transformations, append the candidate's five observation
     /// relations to their stable Delta histories, rebind the exact committed
     /// versions in this same session, and seal only after fixed-point proof.
-    pub async fn seal(
+    pub(crate) async fn seal(
         self,
         write_identity: ProgrammaticObservationWriteIdentity,
         targets: ProgrammaticObservationDeltaTargets,
@@ -206,7 +207,7 @@ impl ProgrammaticFabricEpochBuilder {
     /// The fresh candidate must still contain the same provider inputs and
     /// transformations; catalog observations prove that correspondence before
     /// the epoch becomes sealable.
-    pub async fn reopen(
+    pub(crate) async fn reopen(
         self,
         table_versions: Arc<TableVersionSet>,
     ) -> Result<ProgrammaticFabricEpoch, ProgrammaticFabricEpochError> {
@@ -468,6 +469,7 @@ impl ProgrammaticFabricEpoch {
             TableReference,
             Arc<dyn TableProvider>,
             Arc<crate::schema_contract::SchemaContract>,
+            Option<Arc<LogicalPlan>>,
         ),
         ProgrammaticFabricEpochError,
     > {
@@ -492,6 +494,7 @@ impl ProgrammaticFabricEpoch {
             binding.table_reference.clone(),
             provider,
             Arc::clone(&binding.contract),
+            binding.logical_plan.as_ref().map(Arc::clone),
         ))
     }
 
@@ -514,7 +517,7 @@ impl ProgrammaticFabricEpoch {
 
     /// Execute a typed program using catalog scans and schema bindings from
     /// this exact sealed session.
-    pub async fn execute_relational_program(
+    pub(crate) async fn execute_relational_program(
         &self,
         program: &RelationalProgram,
     ) -> Result<ProgrammaticFabricProgramResult, ProgrammaticFabricEpochError> {
@@ -577,18 +580,8 @@ impl ProgrammaticFabricEpoch {
             (cached, LogicalPlanCacheOutcome::Miss)
         };
         let optimized_schema = cached.optimized_plan().schema().as_arrow();
-        let optimized_shape_matches = optimized_schema.fields().len()
-            == cached.output_schema().fields().len()
-            && optimized_schema
-                .fields()
-                .iter()
-                .zip(cached.output_schema().fields())
-                .all(|(optimized, expected)| {
-                    optimized.name() == expected.name()
-                        && optimized.data_type() == expected.data_type()
-                });
         if cached.compiled_plan().schema().as_arrow() != cached.output_schema().as_ref()
-            || !optimized_shape_matches
+            || optimized_schema != cached.output_schema().as_ref()
         {
             return Err(ProgrammaticFabricEpochError::CachedPlanSchemaDrift);
         }
@@ -629,6 +622,14 @@ impl ProgrammaticFabricEpoch {
             .query_planner()
             .create_physical_plan(cached.optimized_plan(), &state)
             .await?;
+        let schema = Arc::clone(cached.output_schema());
+        let physical_schema = physical_plan.schema();
+        if physical_schema.as_ref() != schema.as_ref() {
+            return Err(ProgrammaticFabricEpochError::OutputSchemaDrift {
+                expected: schema,
+                actual: physical_schema,
+            });
+        }
         let physical_batches = collect(physical_plan, state.task_ctx()).await?;
         let schema = Arc::clone(cached.output_schema());
         let observations = cached.observations().clone();
@@ -636,30 +637,13 @@ impl ProgrammaticFabricEpoch {
         let mut batches = Vec::with_capacity(physical_batches.len());
         for batch in physical_batches {
             let actual = batch.schema();
-            let same_shape = actual.fields().len() == schema.fields().len()
-                && actual
-                    .fields()
-                    .iter()
-                    .zip(schema.fields())
-                    .all(|(observed, expected)| {
-                        observed.name() == expected.name()
-                            && observed.data_type() == expected.data_type()
-                    });
-            let satisfies_nullability = batch
-                .columns()
-                .iter()
-                .zip(schema.fields())
-                .all(|(column, expected)| expected.is_nullable() || column.null_count() == 0);
-            if !(same_shape && satisfies_nullability) {
+            if actual.as_ref() != schema.as_ref() {
                 return Err(ProgrammaticFabricEpochError::OutputSchemaDrift {
                     expected: Arc::clone(&schema),
                     actual,
                 });
             }
-            batches.push(RecordBatch::try_new(
-                Arc::clone(&schema),
-                batch.columns().to_vec(),
-            )?);
+            batches.push(batch);
         }
         Ok(ProgrammaticFabricProgramResult {
             schema,
@@ -957,9 +941,9 @@ mod tests {
         );
         let cache = epoch.logical_plan_cache_observation();
         assert_eq!(cache.capacity_entries, 256);
-        assert!(cache.capacity_bytes > 0);
+        assert!(cache.accounting_capacity_bytes > 0);
         assert_eq!(cache.resident_entries, 1);
-        assert!(cache.resident_bytes > 0);
+        assert!(cache.accounted_bytes > 0);
         assert_eq!(cache.hits, 1);
         assert_eq!(cache.misses, 1);
         assert_eq!(cache.evictions, 0);

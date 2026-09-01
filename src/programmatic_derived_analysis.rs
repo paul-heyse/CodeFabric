@@ -29,6 +29,7 @@ use thiserror::Error;
 
 use crate::common_derived_analysis::{CommonAnalysisBindings, CommonAnalysisFamilies};
 use crate::fabric::epoch_runtime::FabricEpochId;
+use crate::fabric::production_kernel::CompiledTransformationAuthority;
 use crate::fabric::programmatic_epoch::{
     ProgrammaticFabricEpochBuilder, ProgrammaticFabricEpochError,
 };
@@ -174,7 +175,10 @@ pub struct DerivedFamilyId(Arc<str>);
 
 impl DerivedFamilyId {
     /// Construct a bounded, non-sentinel family identity.
-    pub fn try_new(value: impl Into<Arc<str>>) -> Result<Self, ProgrammaticDerivedAnalysisError> {
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
+        value: impl Into<Arc<str>>,
+    ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
         let value = value.into();
         validate_text("derived family", &value)?;
         Ok(Self(value))
@@ -211,7 +215,8 @@ pub struct DerivedAlgorithmContract {
 
 impl DerivedAlgorithmContract {
     #[must_use]
-    pub const fn new(
+    pub(crate) const fn new(
+        _authority: &CompiledTransformationAuthority,
         semantic_id: ProgrammaticTransformationId,
         semantic_version: TransformationSemanticVersion,
         release_identity: TransformationReleaseIdentity,
@@ -281,7 +286,8 @@ pub struct AcceptedDerivedFamily {
 
 impl AcceptedDerivedFamily {
     /// Define one accepted family without consulting a static semantic inventory.
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         family_id: DerivedFamilyId,
         domain: DerivedAnalysisDomain,
         kind: DerivedFamilyKind,
@@ -362,7 +368,8 @@ pub struct AcceptedDerivedProducer {
 
 impl AcceptedDerivedProducer {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
+        _authority: &CompiledTransformationAuthority,
         family_id: DerivedFamilyId,
         authority: DerivedProducerAuthority,
         algorithm: DerivedAlgorithmContract,
@@ -434,7 +441,8 @@ pub struct ExplicitDerivedRemainder {
 }
 
 impl ExplicitDerivedRemainder {
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         family_id: DerivedFamilyId,
         algorithm: DerivedAlgorithmContract,
         reason: DerivedRemainderReason,
@@ -519,7 +527,8 @@ pub struct DerivedMetadataColumnBinding {
 
 impl DerivedMetadataColumnBinding {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
+        _authority: &CompiledTransformationAuthority,
         role: DerivedMetadataRole,
         field_id: ProgrammaticFieldId,
         physical_name: impl Into<Arc<str>>,
@@ -539,7 +548,8 @@ pub struct DerivedMetadataBindings {
 }
 
 impl DerivedMetadataBindings {
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         columns: impl IntoIterator<Item = DerivedMetadataColumnBinding>,
     ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
         let mut by_role = BTreeMap::new();
@@ -608,7 +618,8 @@ pub struct DerivedRemainderMetadataColumnBinding {
 
 impl DerivedRemainderMetadataColumnBinding {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
+        _authority: &CompiledTransformationAuthority,
         role: DerivedRemainderMetadataRole,
         field_id: ProgrammaticFieldId,
         physical_name: impl Into<Arc<str>>,
@@ -631,7 +642,8 @@ pub struct DerivedRemainderRelationBinding {
 }
 
 impl DerivedRemainderRelationBinding {
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         authority_identity: [u8; 32],
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
@@ -671,6 +683,7 @@ impl DerivedRemainderRelationBinding {
 
 /// Complete runtime input for one atomic derived-analysis composition.
 pub struct ProgrammaticDerivedAnalysisComposition {
+    release_authority: CompiledTransformationAuthority,
     families: Arc<[AcceptedDerivedFamily]>,
     dispositions: Vec<DerivedFamilyDisposition>,
     metadata: DerivedMetadataBindings,
@@ -684,13 +697,15 @@ impl ProgrammaticDerivedAnalysisComposition {
     /// Use [`Self::try_new_with_resource_envelope`] when a deployment owns a narrower explicit
     /// aggregate budget. Per-transformation resource contracts are still mandatory and enforced
     /// independently during DataFusion execution.
-    pub fn try_new(
+    pub(crate) fn try_new(
+        authority: &CompiledTransformationAuthority,
         families: impl Into<Arc<[AcceptedDerivedFamily]>>,
         dispositions: Vec<DerivedFamilyDisposition>,
         metadata: DerivedMetadataBindings,
         remainder_relation: DerivedRemainderRelationBinding,
     ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
         Self::try_new_with_resource_envelope(
+            authority,
             families,
             dispositions,
             metadata,
@@ -700,7 +715,8 @@ impl ProgrammaticDerivedAnalysisComposition {
     }
 
     /// Construct a composition under an explicit aggregate planning envelope.
-    pub fn try_new_with_resource_envelope(
+    pub(crate) fn try_new_with_resource_envelope(
+        authority: &CompiledTransformationAuthority,
         families: impl Into<Arc<[AcceptedDerivedFamily]>>,
         dispositions: Vec<DerivedFamilyDisposition>,
         metadata: DerivedMetadataBindings,
@@ -718,6 +734,7 @@ impl ProgrammaticDerivedAnalysisComposition {
             });
         }
         Ok(Self {
+            release_authority: *authority,
             families,
             dispositions,
             metadata,
@@ -1140,8 +1157,8 @@ pub struct ExistingDerivedDependencyObservation {
 
 /// One explicit declaration in the current production-family census.
 ///
-/// Algorithms, dependencies, authorities, and evidence are caller-owned. This type deliberately
-/// has no default and never derives release authority from the legacy procedural implementation.
+/// Algorithms, dependencies, authorities, and evidence are compiled release declarations. This
+/// type has no public constructor and never derives authority from runtime or legacy data.
 #[derive(Clone, Debug)]
 pub struct ExistingDerivedFamilyDeclaration {
     role: ExistingDerivedFamilyRole,
@@ -1154,7 +1171,8 @@ pub struct ExistingDerivedFamilyDeclaration {
 
 impl ExistingDerivedFamilyDeclaration {
     #[must_use]
-    pub fn producer(
+    pub(crate) fn producer(
+        _authority: &CompiledTransformationAuthority,
         role: ExistingDerivedFamilyRole,
         family_id: DerivedFamilyId,
         algorithm: DerivedAlgorithmContract,
@@ -1172,7 +1190,8 @@ impl ExistingDerivedFamilyDeclaration {
         }
     }
 
-    pub fn adapter_unavailable(
+    pub(crate) fn adapter_unavailable(
+        authority: &CompiledTransformationAuthority,
         role: ExistingDerivedFamilyRole,
         family_id: DerivedFamilyId,
         algorithm: DerivedAlgorithmContract,
@@ -1182,6 +1201,7 @@ impl ExistingDerivedFamilyDeclaration {
         retryability: DerivedRemainderRetryability,
     ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
         let disposition = DerivedFamilyDisposition::Remainder(ExplicitDerivedRemainder::try_new(
+            authority,
             family_id.clone(),
             algorithm.clone(),
             DerivedRemainderReason::TypedTransformationAdapterUnavailable,
@@ -1218,7 +1238,8 @@ pub struct ExistingDerivedAnalysisCensusObservation {
 
 impl ExistingDerivedAnalysisCensus {
     /// Validate the exact role census against the real module binding types.
-    pub fn try_new(
+    pub(crate) fn try_new(
+        authority: &CompiledTransformationAuthority,
         python: &PythonFlowBindings,
         rust_mir: &RustMirAnalysisBindings,
         common: &CommonAnalysisBindings,
@@ -1323,6 +1344,7 @@ impl ExistingDerivedAnalysisCensus {
                 }
             }
             families.push(AcceptedDerivedFamily::try_new(
+                authority,
                 declaration.family_id,
                 role.domain(),
                 role.kind(),
@@ -1356,12 +1378,14 @@ impl ExistingDerivedAnalysisCensus {
         &self.observation
     }
 
-    pub fn into_composition(
+    pub(crate) fn into_composition(
         self,
+        authority: &CompiledTransformationAuthority,
         metadata: DerivedMetadataBindings,
         remainder_relation: DerivedRemainderRelationBinding,
     ) -> Result<ProgrammaticDerivedAnalysisComposition, ProgrammaticDerivedAnalysisError> {
         ProgrammaticDerivedAnalysisComposition::try_new(
+            authority,
             self.families,
             self.dispositions,
             metadata,
@@ -1388,7 +1412,7 @@ impl ExistingProgrammaticDerivedAnalysisOutcome {
     }
 
     #[must_use]
-    pub fn into_parts(
+    pub(crate) fn into_parts(
         self,
     ) -> (
         ProgrammaticDerivedAnalysisOutcome,
@@ -1399,7 +1423,8 @@ impl ExistingProgrammaticDerivedAnalysisOutcome {
 }
 
 /// Admit the exact four provider lanes and close every role exposed by the three current modules.
-pub fn admit_and_compose_existing_programmatic_derived_analyses(
+pub(crate) fn admit_and_compose_existing_programmatic_derived_analyses(
+    authority: &CompiledTransformationAuthority,
     builder: ProgrammaticFabricEpochBuilder,
     runs: ExactProgrammaticProviderRuns<'_>,
     census: ExistingDerivedAnalysisCensus,
@@ -1407,8 +1432,9 @@ pub fn admit_and_compose_existing_programmatic_derived_analyses(
     remainder_relation: DerivedRemainderRelationBinding,
 ) -> Result<ExistingProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
     let census_observation = census.observation.clone();
-    let composition = census.into_composition(metadata, remainder_relation)?;
-    let derived = admit_and_compose_programmatic_derived_analyses(builder, runs, composition)?;
+    let composition = census.into_composition(authority, metadata, remainder_relation)?;
+    let derived =
+        admit_and_compose_programmatic_derived_analyses(authority, builder, runs, composition)?;
     Ok(ExistingProgrammaticDerivedAnalysisOutcome {
         derived,
         census: census_observation,
@@ -1504,7 +1530,8 @@ pub struct ProgrammaticPythonCfgNodeRowContract {
 }
 
 impl ProgrammaticPythonCfgNodeRowContract {
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         algorithm_release: impl Into<Arc<str>>,
         precision_release: impl Into<Arc<str>>,
         authority: impl Into<Arc<str>>,
@@ -1543,7 +1570,8 @@ pub struct ProgrammaticPythonCfgNodeTransformation {
 impl ProgrammaticPythonCfgNodeTransformation {
     pub const OUTPUT_FIELD_COUNT: usize = 18;
 
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
         bindings: &PythonFlowBindings,
@@ -1662,7 +1690,8 @@ pub struct ProgrammaticPythonCfgEdgeRowContract {
 }
 
 impl ProgrammaticPythonCfgEdgeRowContract {
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         algorithm_release: impl Into<Arc<str>>,
         precision_release: impl Into<Arc<str>>,
         authority: impl Into<Arc<str>>,
@@ -1705,7 +1734,8 @@ pub struct ProgrammaticPythonCfgEdgeTransformation {
 impl ProgrammaticPythonCfgEdgeTransformation {
     pub const OUTPUT_FIELD_COUNT: usize = 17;
 
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
         bindings: &PythonFlowBindings,
@@ -1890,7 +1920,8 @@ pub struct ProgrammaticPythonDataflowRowContract {
 }
 
 impl ProgrammaticPythonDataflowRowContract {
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         algorithm_release: impl Into<Arc<str>>,
         precision_release: impl Into<Arc<str>>,
         authority: impl Into<Arc<str>>,
@@ -1935,7 +1966,8 @@ impl ProgrammaticPythonDataflowTransformation {
     pub const FLOW_LINK_OUTPUT_FIELD_COUNT: usize = 20;
     pub const LIVENESS_OUTPUT_FIELD_COUNT: usize = 18;
 
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
         bindings: &PythonFlowBindings,
@@ -2897,7 +2929,8 @@ pub struct ProgrammaticRustMirCfgEdgeTransformation {
 impl ProgrammaticRustMirCfgEdgeTransformation {
     pub const OUTPUT_FIELD_COUNT: usize = 15;
 
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
         bindings: &RustMirAnalysisBindings,
@@ -3002,7 +3035,8 @@ pub struct ProgrammaticRustMirControlInputTransformation {
 impl ProgrammaticRustMirControlInputTransformation {
     pub const OUTPUT_FIELD_COUNT: usize = 22;
 
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
         bindings: &RustMirAnalysisBindings,
@@ -3238,7 +3272,8 @@ pub struct ProgrammaticRustMirStructuralTransformation {
 
 impl ProgrammaticRustMirStructuralTransformation {
     /// Construct one of the five exact public-MIR structural producers.
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         role: RustMirDerivedRelation,
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
@@ -4049,7 +4084,8 @@ pub struct ProgrammaticCommonCallGraphTransformation {
 impl ProgrammaticCommonCallGraphTransformation {
     pub const OUTPUT_FIELD_COUNT: usize = 10;
 
-    pub fn try_new(
+    pub(crate) fn try_new(
+        _authority: &CompiledTransformationAuthority,
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
         bindings: &CommonAnalysisBindings,
@@ -5637,7 +5673,7 @@ impl ProgrammaticDerivedAnalysisOutcome {
     }
 
     #[must_use]
-    pub fn into_parts(
+    pub(crate) fn into_parts(
         self,
     ) -> (
         ProgrammaticFabricEpochBuilder,
@@ -5652,24 +5688,28 @@ impl ProgrammaticDerivedAnalysisOutcome {
 ///
 /// Both stages consume their candidate. A provider or later producer failure returns no builder,
 /// so a partially registered session cannot escape.
-pub fn admit_and_compose_programmatic_derived_analyses(
+pub(crate) fn admit_and_compose_programmatic_derived_analyses(
+    authority: &CompiledTransformationAuthority,
     builder: ProgrammaticFabricEpochBuilder,
     runs: ExactProgrammaticProviderRuns<'_>,
     composition: ProgrammaticDerivedAnalysisComposition,
 ) -> Result<ProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
     let admitted = admit_provider_relations_programmatic(builder, runs)?;
-    compose_programmatic_derived_analyses(admitted, composition)
+    compose_programmatic_derived_analyses(authority, admitted, composition)
 }
 
 /// Bind accepted Python, Rust MIR, and common producers into an admitted candidate.
-pub fn compose_programmatic_derived_analyses(
+pub(crate) fn compose_programmatic_derived_analyses(
+    authority: &CompiledTransformationAuthority,
     admitted: ProgrammaticProviderAdmissionOutcome,
     composition: ProgrammaticDerivedAnalysisComposition,
 ) -> Result<ProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
+    debug_assert_eq!(*authority, composition.release_authority);
     let (mut builder, provider_reports) = admitted.into_parts();
     let (mut relation_authorities, provider_authority_identity) =
         provider_relation_authorities(&provider_reports)?;
     let ProgrammaticDerivedAnalysisComposition {
+        release_authority: _,
         families,
         dispositions,
         metadata,
@@ -7443,6 +7483,61 @@ mod tests {
         fabric::programmatic_schema::SealedProgrammaticSchemaAssembly,
     };
 
+    fn transformation_authority() -> CompiledTransformationAuthority {
+        *crate::fabric::production_kernel::CompiledSemanticRelease::current()
+            .transformation_authority()
+    }
+
+    #[test]
+    fn compiled_transformation_authority_is_required_and_composition_input_is_not_public() {
+        let _raw_compose: fn(
+            &CompiledTransformationAuthority,
+            ProgrammaticProviderAdmissionOutcome,
+            ProgrammaticDerivedAnalysisComposition,
+        ) -> Result<
+            ProgrammaticDerivedAnalysisOutcome,
+            ProgrammaticDerivedAnalysisError,
+        > = compose_programmatic_derived_analyses;
+        let _raw_admit: for<'a> fn(
+            &CompiledTransformationAuthority,
+            ProgrammaticFabricEpochBuilder,
+            ExactProgrammaticProviderRuns<'a>,
+            ProgrammaticDerivedAnalysisComposition,
+        ) -> Result<
+            ProgrammaticDerivedAnalysisOutcome,
+            ProgrammaticDerivedAnalysisError,
+        > = admit_and_compose_programmatic_derived_analyses;
+
+        let analysis_source = include_str!("programmatic_derived_analysis.rs");
+        for route in [
+            concat!(
+                "pub",
+                " fn admit_and_compose_programmatic_derived_analyses("
+            ),
+            concat!("pub", " fn compose_programmatic_derived_analyses("),
+        ] {
+            assert!(
+                !analysis_source.contains(route),
+                "raw semantic-composition route became public: {route}"
+            );
+        }
+        assert!(analysis_source.contains(concat!(
+            "release_authority: Compiled",
+            "TransformationAuthority"
+        )));
+        assert!(!analysis_source.contains(concat!("    pub", " fn into_parts(")));
+
+        let kernel_source = include_str!("fabric/production_kernel.rs");
+        assert!(!kernel_source.contains(concat!(
+            "    pub",
+            " fn admit_and_compose_derived_analyses("
+        )));
+        assert!(kernel_source.contains(concat!(
+            "    pub(crate)",
+            " fn admit_and_compose_derived_analyses("
+        )));
+    }
+
     struct ProjectSupportTransformation {
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
@@ -7509,14 +7604,18 @@ mod tests {
     }
 
     fn metadata_bindings() -> DerivedMetadataBindings {
-        DerivedMetadataBindings::try_new(DerivedMetadataRole::ALL.into_iter().map(|role| {
-            let name = metadata_name(role);
-            DerivedMetadataColumnBinding::new(
-                role,
-                ProgrammaticFieldId::new(format!("fixture.metadata.{name}")),
-                name,
-            )
-        }))
+        DerivedMetadataBindings::try_new(
+            &transformation_authority(),
+            DerivedMetadataRole::ALL.into_iter().map(|role| {
+                let name = metadata_name(role);
+                DerivedMetadataColumnBinding::new(
+                    &transformation_authority(),
+                    role,
+                    ProgrammaticFieldId::new(format!("fixture.metadata.{name}")),
+                    name,
+                )
+            }),
+        )
         .unwrap()
     }
 
@@ -7572,6 +7671,7 @@ mod tests {
 
     fn algorithm(transformation: &Arc<ProjectSupportTransformation>) -> DerivedAlgorithmContract {
         DerivedAlgorithmContract::new(
+            &transformation_authority(),
             transformation.contract.semantic_id().clone(),
             transformation.contract.semantic_version(),
             transformation.contract.provenance().release_identity(),
@@ -7582,16 +7682,19 @@ mod tests {
         let contract = transformation_contract("analysis.remainder.fixture", 240, 64);
         let columns = [
             DerivedRemainderMetadataColumnBinding::new(
+                &transformation_authority(),
                 DerivedRemainderMetadataRole::Reason,
                 ProgrammaticFieldId::new("fixture.remainder.reason"),
                 "__cf_derived_remainder_reason",
             ),
             DerivedRemainderMetadataColumnBinding::new(
+                &transformation_authority(),
                 DerivedRemainderMetadataRole::EvidenceIdentity,
                 ProgrammaticFieldId::new("fixture.remainder.evidence"),
                 "__cf_derived_remainder_evidence",
             ),
             DerivedRemainderMetadataColumnBinding::new(
+                &transformation_authority(),
                 DerivedRemainderMetadataRole::Retryability,
                 ProgrammaticFieldId::new("fixture.remainder.retryability"),
                 "__cf_derived_remainder_retryability",
@@ -7607,6 +7710,7 @@ mod tests {
             )
             .collect::<Vec<_>>();
         DerivedRemainderRelationBinding::try_new(
+            &transformation_authority(),
             [241; 32],
             contract,
             TransformationOutput::new(
@@ -7668,6 +7772,7 @@ mod tests {
         contract: &ProgrammaticTransformationContract,
     ) -> DerivedAlgorithmContract {
         DerivedAlgorithmContract::new(
+            &transformation_authority(),
             contract.semantic_id().clone(),
             contract.semantic_version(),
             contract.provenance().release_identity(),
@@ -7689,7 +7794,11 @@ mod tests {
             .map(|(index, role)| {
                 (
                     *role,
-                    DerivedFamilyId::try_new(format!("family.existing.role.{index}")).unwrap(),
+                    DerivedFamilyId::try_new(
+                        &transformation_authority(),
+                        format!("family.existing.role.{index}"),
+                    )
+                    .unwrap(),
                 )
             })
             .collect::<BTreeMap<_, _>>();
@@ -7710,11 +7819,13 @@ mod tests {
         let python_node_witness = python_node_output.fields()[13].field_id().clone();
         let python_node = Arc::new(
             ProgrammaticPythonCfgNodeTransformation::try_new(
+                &transformation_authority(),
                 python_node_contract.clone(),
                 python_node_output,
                 python_bindings,
                 FabricEpochId::from_bytes([90; 16]),
                 ProgrammaticPythonCfgNodeRowContract::try_new(
+                    &transformation_authority(),
                     "codefabric.python-cfg-node.programmatic-datafusion-55.v3",
                     "ruff-typed-ast-node-normalization.v3",
                     PYTHON_DERIVED_AUTHORITY,
@@ -7744,11 +7855,13 @@ mod tests {
         let python_witness = python_output.fields()[13].field_id().clone();
         let python = Arc::new(
             ProgrammaticPythonCfgEdgeTransformation::try_new(
+                &transformation_authority(),
                 python_contract.clone(),
                 python_output,
                 python_bindings,
                 FabricEpochId::from_bytes([90; 16]),
                 ProgrammaticPythonCfgEdgeRowContract::try_new(
+                    &transformation_authority(),
                     "codefabric.python-cfg.programmatic-datafusion-55.v3",
                     "ruff-evaluation-order-sequential-cfg.v3",
                     PYTHON_DERIVED_AUTHORITY,
@@ -7792,12 +7905,14 @@ mod tests {
                 let witness = output.fields()[13].field_id().clone();
                 let transformation = Arc::new(
                     ProgrammaticPythonDataflowTransformation::try_new(
+                        &transformation_authority(),
                         contract.clone(),
                         output,
                         python_bindings,
                         FabricEpochId::from_bytes([90; 16]),
                         role,
                         ProgrammaticPythonDataflowRowContract::try_new(
+                            &transformation_authority(),
                             algorithm_release,
                             precision_release,
                             PYTHON_DERIVED_AUTHORITY,
@@ -7810,12 +7925,14 @@ mod tests {
                 let dependencies = transformation.dependencies().to_vec();
                 let algorithm = algorithm_from_contract(&contract);
                 let declaration = ExistingDerivedFamilyDeclaration::producer(
+                    &transformation_authority(),
                     role,
                     family_ids[&role].clone(),
                     algorithm.clone(),
                     precision.clone(),
                     dependencies,
                     AcceptedDerivedProducer::new(
+                        &transformation_authority(),
                         family_ids[&role].clone(),
                         DerivedProducerAuthority::ApplicationOwned([marker.wrapping_add(91); 32]),
                         algorithm,
@@ -7899,6 +8016,7 @@ mod tests {
         let rust_witness = rust_output.fields()[8].field_id().clone();
         let rust = Arc::new(
             ProgrammaticRustMirCfgEdgeTransformation::try_new(
+                &transformation_authority(),
                 rust_contract.clone(),
                 rust_output,
                 rust_bindings,
@@ -7929,6 +8047,7 @@ mod tests {
         let rust_control_witness = rust_control_output.fields()[9].field_id().clone();
         let rust_control = Arc::new(
             ProgrammaticRustMirControlInputTransformation::try_new(
+                &transformation_authority(),
                 rust_control_contract.clone(),
                 rust_control_output,
                 rust_bindings,
@@ -7960,6 +8079,7 @@ mod tests {
                 let witness = output.fields()[9].field_id().clone();
                 let transformation = Arc::new(
                     ProgrammaticRustMirStructuralTransformation::try_new(
+                        &transformation_authority(),
                         role,
                         contract.clone(),
                         output,
@@ -7971,12 +8091,14 @@ mod tests {
                 let dependencies = transformation.dependencies().to_vec();
                 let algorithm = algorithm_from_contract(&contract);
                 let declaration = ExistingDerivedFamilyDeclaration::producer(
+                    &transformation_authority(),
                     role,
                     family_ids[&role].clone(),
                     algorithm.clone(),
                     precision.clone(),
                     dependencies,
                     AcceptedDerivedProducer::new(
+                        &transformation_authority(),
                         family_ids[&role].clone(),
                         DerivedProducerAuthority::ApplicationOwned([marker.wrapping_add(91); 32]),
                         algorithm,
@@ -8041,6 +8163,7 @@ mod tests {
         let common_witness = common_output.fields()[3].field_id().clone();
         let common = Arc::new(
             ProgrammaticCommonCallGraphTransformation::try_new(
+                &transformation_authority(),
                 common_contract.clone(),
                 common_output,
                 common_bindings,
@@ -8057,12 +8180,14 @@ mod tests {
             (
                 python_node_role,
                 ExistingDerivedFamilyDeclaration::producer(
+                    &transformation_authority(),
                     python_node_role,
                     family_ids[&python_node_role].clone(),
                     python_node_algorithm.clone(),
                     python_node_precision.clone(),
                     python_node_dependencies,
                     AcceptedDerivedProducer::new(
+                        &transformation_authority(),
                         family_ids[&python_node_role].clone(),
                         DerivedProducerAuthority::ApplicationOwned([174; 32]),
                         python_node_algorithm,
@@ -8076,12 +8201,14 @@ mod tests {
             (
                 python_role,
                 ExistingDerivedFamilyDeclaration::producer(
+                    &transformation_authority(),
                     python_role,
                     family_ids[&python_role].clone(),
                     python_algorithm.clone(),
                     python_precision.clone(),
                     python_dependencies,
                     AcceptedDerivedProducer::new(
+                        &transformation_authority(),
                         family_ids[&python_role].clone(),
                         DerivedProducerAuthority::ApplicationOwned([171; 32]),
                         python_algorithm,
@@ -8095,12 +8222,14 @@ mod tests {
             (
                 rust_role,
                 ExistingDerivedFamilyDeclaration::producer(
+                    &transformation_authority(),
                     rust_role,
                     family_ids[&rust_role].clone(),
                     rust_algorithm.clone(),
                     rust_precision.clone(),
                     rust_dependencies,
                     AcceptedDerivedProducer::new(
+                        &transformation_authority(),
                         family_ids[&rust_role].clone(),
                         DerivedProducerAuthority::ApplicationOwned([172; 32]),
                         rust_algorithm,
@@ -8114,12 +8243,14 @@ mod tests {
             (
                 rust_control_role,
                 ExistingDerivedFamilyDeclaration::producer(
+                    &transformation_authority(),
                     rust_control_role,
                     family_ids[&rust_control_role].clone(),
                     rust_control_algorithm.clone(),
                     rust_control_precision.clone(),
                     rust_control_dependencies,
                     AcceptedDerivedProducer::new(
+                        &transformation_authority(),
                         family_ids[&rust_control_role].clone(),
                         DerivedProducerAuthority::ApplicationOwned([175; 32]),
                         rust_control_algorithm,
@@ -8133,12 +8264,14 @@ mod tests {
             (
                 common_role,
                 ExistingDerivedFamilyDeclaration::producer(
+                    &transformation_authority(),
                     common_role,
                     family_ids[&common_role].clone(),
                     common_algorithm.clone(),
                     common_precision.clone(),
                     common_dependencies,
                     AcceptedDerivedProducer::new(
+                        &transformation_authority(),
                         family_ids[&common_role].clone(),
                         DerivedProducerAuthority::ApplicationOwned([173; 32]),
                         common_algorithm,
@@ -8174,6 +8307,7 @@ mod tests {
                 }
                 let marker = 180_u8.saturating_add(u8::try_from(index).unwrap());
                 let algorithm = DerivedAlgorithmContract::new(
+                    &transformation_authority(),
                     ProgrammaticTransformationId::new(format!(
                         "analysis.existing.adapter_pending.{index}"
                     )),
@@ -8181,6 +8315,7 @@ mod tests {
                     TransformationReleaseIdentity::from_bytes([marker; 32]),
                 );
                 ExistingDerivedFamilyDeclaration::adapter_unavailable(
+                    &transformation_authority(),
                     role,
                     family_ids[&role].clone(),
                     algorithm,
@@ -8222,6 +8357,7 @@ mod tests {
             existing_declarations(python_bindings, rust_bindings, common_bindings);
         (
             ExistingDerivedAnalysisCensus::try_new(
+                &transformation_authority(),
                 python_bindings,
                 rust_bindings,
                 common_bindings,
@@ -8241,10 +8377,20 @@ mod tests {
         let rust_relation = "derived.rust_mir.flow.fixture";
         let common_relation = "derived.common.graph.fixture";
         let remainder_relation = "derived.common.recursive.fixture";
-        let python_family = DerivedFamilyId::try_new("family.python.flow.fixture").unwrap();
-        let rust_family = DerivedFamilyId::try_new("family.rust_mir.flow.fixture").unwrap();
-        let common_family = DerivedFamilyId::try_new("family.common.graph.fixture").unwrap();
-        let recursive_family = DerivedFamilyId::try_new("family.common.recursive.fixture").unwrap();
+        let python_family =
+            DerivedFamilyId::try_new(&transformation_authority(), "family.python.flow.fixture")
+                .unwrap();
+        let rust_family =
+            DerivedFamilyId::try_new(&transformation_authority(), "family.rust_mir.flow.fixture")
+                .unwrap();
+        let common_family =
+            DerivedFamilyId::try_new(&transformation_authority(), "family.common.graph.fixture")
+                .unwrap();
+        let recursive_family = DerivedFamilyId::try_new(
+            &transformation_authority(),
+            "family.common.recursive.fixture",
+        )
+        .unwrap();
 
         let python = transformation(
             "analysis.python.flow.fixture",
@@ -8286,6 +8432,7 @@ mod tests {
             ],
         );
         let recursive_algorithm = DerivedAlgorithmContract::new(
+            &transformation_authority(),
             ProgrammaticTransformationId::new("analysis.common.recursive.fixture"),
             TransformationSemanticVersion::new(1, 0, 0),
             TransformationReleaseIdentity::from_bytes([61; 32]),
@@ -8293,6 +8440,7 @@ mod tests {
 
         let families = vec![
             AcceptedDerivedFamily::try_new(
+                &transformation_authority(),
                 python_family.clone(),
                 DerivedAnalysisDomain::Python,
                 DerivedFamilyKind::Fact,
@@ -8303,6 +8451,7 @@ mod tests {
             )
             .unwrap(),
             AcceptedDerivedFamily::try_new(
+                &transformation_authority(),
                 rust_family.clone(),
                 DerivedAnalysisDomain::RustMir,
                 DerivedFamilyKind::Fact,
@@ -8313,6 +8462,7 @@ mod tests {
             )
             .unwrap(),
             AcceptedDerivedFamily::try_new(
+                &transformation_authority(),
                 common_family.clone(),
                 DerivedAnalysisDomain::Common,
                 DerivedFamilyKind::Fact,
@@ -8323,6 +8473,7 @@ mod tests {
             )
             .unwrap(),
             AcceptedDerivedFamily::try_new(
+                &transformation_authority(),
                 recursive_family.clone(),
                 DerivedAnalysisDomain::Common,
                 DerivedFamilyKind::Fact,
@@ -8337,6 +8488,7 @@ mod tests {
         ];
         let dispositions = vec![
             DerivedFamilyDisposition::Producer(AcceptedDerivedProducer::new(
+                &transformation_authority(),
                 python_family,
                 DerivedProducerAuthority::ApplicationOwned([101; 32]),
                 algorithm(&python),
@@ -8346,6 +8498,7 @@ mod tests {
                 python,
             )),
             DerivedFamilyDisposition::Producer(AcceptedDerivedProducer::new(
+                &transformation_authority(),
                 rust_family,
                 DerivedProducerAuthority::ApplicationOwned([102; 32]),
                 algorithm(&rust),
@@ -8355,6 +8508,7 @@ mod tests {
                 rust,
             )),
             DerivedFamilyDisposition::Producer(AcceptedDerivedProducer::new(
+                &transformation_authority(),
                 common_family,
                 DerivedProducerAuthority::ApplicationOwned([103; 32]),
                 algorithm(&common),
@@ -8365,6 +8519,7 @@ mod tests {
             )),
             DerivedFamilyDisposition::Remainder(
                 ExplicitDerivedRemainder::try_new(
+                    &transformation_authority(),
                     recursive_family,
                     recursive_algorithm,
                     DerivedRemainderReason::AlgorithmUnavailable,
@@ -8375,6 +8530,7 @@ mod tests {
             ),
         ];
         ProgrammaticDerivedAnalysisComposition::try_new(
+            &transformation_authority(),
             families,
             dispositions,
             metadata.clone(),
@@ -8621,6 +8777,7 @@ mod tests {
         builder
             .add_transformation(Arc::new(
                 ProgrammaticRustMirCfgEdgeTransformation::try_new(
+                    &transformation_authority(),
                     cfg_contract,
                     cfg_output,
                     &bindings,
@@ -8645,6 +8802,7 @@ mod tests {
         builder
             .add_transformation(Arc::new(
                 ProgrammaticRustMirControlInputTransformation::try_new(
+                    &transformation_authority(),
                     control_contract,
                     control_output,
                     &bindings,
@@ -8709,6 +8867,7 @@ mod tests {
         builder
             .add_transformation(Arc::new(
                 ProgrammaticRustMirCfgEdgeTransformation::try_new(
+                    &transformation_authority(),
                     transformation_contract("analysis.rust.structural-fixture.cfg", 91, 64),
                     cfg_output,
                     &bindings,
@@ -8736,6 +8895,7 @@ mod tests {
             builder
                 .add_transformation(Arc::new(
                     ProgrammaticRustMirStructuralTransformation::try_new(
+                        &transformation_authority(),
                         role,
                         transformation_contract(
                             &format!("analysis.rust.structural-fixture.{index}"),
@@ -8775,6 +8935,7 @@ mod tests {
         let (census, relations) = existing_census(&python, &rust, &common);
         let metadata = metadata_bindings();
         let outcome = admit_and_compose_existing_programmatic_derived_analyses(
+            &transformation_authority(),
             programmatic_epoch_builder(),
             fixture.runs(),
             census,
@@ -9591,7 +9752,13 @@ mod tests {
         let (mut missing, _) = existing_declarations(&python, &rust, &common);
         let missing_role = missing.pop().unwrap().role;
         assert!(matches!(
-            ExistingDerivedAnalysisCensus::try_new(&python, &rust, &common, missing),
+            ExistingDerivedAnalysisCensus::try_new(
+                &transformation_authority(),
+                &python,
+                &rust,
+                &common,
+                missing,
+            ),
             Err(ProgrammaticDerivedAnalysisError::MissingExistingCensusRole(role))
                 if role == missing_role
         ));
@@ -9600,7 +9767,13 @@ mod tests {
         let duplicate_role = duplicate[0].role;
         duplicate.push(duplicate[0].clone());
         assert!(matches!(
-            ExistingDerivedAnalysisCensus::try_new(&python, &rust, &common, duplicate),
+            ExistingDerivedAnalysisCensus::try_new(
+                &transformation_authority(),
+                &python,
+                &rust,
+                &common,
+                duplicate,
+            ),
             Err(ProgrammaticDerivedAnalysisError::DuplicateExistingCensusRole(role))
                 if role == duplicate_role
         ));
@@ -9622,7 +9795,13 @@ mod tests {
         drifted.dependencies = Arc::from([]);
 
         assert!(matches!(
-            ExistingDerivedAnalysisCensus::try_new(&python, &rust, &common, declarations),
+            ExistingDerivedAnalysisCensus::try_new(
+                &transformation_authority(),
+                &python,
+                &rust,
+                &common,
+                declarations,
+            ),
             Err(
                 ProgrammaticDerivedAnalysisError::ExistingCensusDependencyMismatch(
                     ExistingDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode),
@@ -9752,14 +9931,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exact_admission_composes_all_domains_and_queryable_remainder() {
+    async fn compiled_release_admits_all_domains_and_queryable_remainder() {
         let fixture = exact_workspace_fixture();
-        let outcome = admit_and_compose_programmatic_derived_analyses(
-            programmatic_epoch_builder(),
-            fixture.runs(),
-            composition(DerivedPrecisionPolicy::Exact, 4_096),
-        )
-        .unwrap();
+        let release = crate::fabric::production_kernel::CompiledSemanticRelease::current();
+        let outcome = release
+            .admit_and_compose_derived_analyses(
+                programmatic_epoch_builder(),
+                fixture.runs(),
+                composition(DerivedPrecisionPolicy::Exact, 4_096),
+            )
+            .unwrap();
         assert_eq!(outcome.observation().producers.len(), 3);
         assert_eq!(outcome.observation().remainders.len(), 1);
         assert_eq!(
@@ -9850,7 +10031,11 @@ mod tests {
         let removed = missing.dispositions.pop().unwrap();
         let missing_id = removed.family_id().clone();
         assert!(matches!(
-            compose_programmatic_derived_analyses(admitted(), missing),
+            compose_programmatic_derived_analyses(
+                &transformation_authority(),
+                admitted(),
+                missing,
+            ),
             Err(ProgrammaticDerivedAnalysisError::MissingFamilyDisposition(id)) if id == missing_id
         ));
 
@@ -9859,7 +10044,11 @@ mod tests {
             .dispositions
             .push(duplicate.dispositions[0].clone());
         assert!(matches!(
-            compose_programmatic_derived_analyses(admitted(), duplicate),
+            compose_programmatic_derived_analyses(
+                &transformation_authority(),
+                admitted(),
+                duplicate,
+            ),
             Err(ProgrammaticDerivedAnalysisError::DuplicateFamilyDisposition(_))
         ));
 
@@ -9870,7 +10059,11 @@ mod tests {
         };
         producer.authority = DerivedProducerAuthority::ProviderNative(ProviderNativeLane::Ruff);
         assert!(matches!(
-            compose_programmatic_derived_analyses(admitted(), provider_owned),
+            compose_programmatic_derived_analyses(
+                &transformation_authority(),
+                admitted(),
+                provider_owned,
+            ),
             Err(ProgrammaticDerivedAnalysisError::ProviderOwnedDerivedFamily { .. })
         ));
     }
@@ -9886,7 +10079,7 @@ mod tests {
         python.dependencies = Arc::from([ProgrammaticRelationId::new("raw.orphan.fixture")]);
         orphan.families = families.into();
         assert!(matches!(
-            compose_programmatic_derived_analyses(admitted(), orphan),
+            compose_programmatic_derived_analyses(&transformation_authority(), admitted(), orphan,),
             Err(ProgrammaticDerivedAnalysisError::OrphanDependency { .. })
         ));
 
@@ -9895,10 +10088,14 @@ mod tests {
             unreachable!()
         };
         producer.completeness = DerivedCompletenessPolicy::Partial {
-            unknown_family: DerivedFamilyId::try_new("family.python.unknown.missing").unwrap(),
+            unknown_family: DerivedFamilyId::try_new(
+                &transformation_authority(),
+                "family.python.unknown.missing",
+            )
+            .unwrap(),
         };
         assert!(matches!(
-            compose_programmatic_derived_analyses(admitted(), partial),
+            compose_programmatic_derived_analyses(&transformation_authority(), admitted(), partial,),
             Err(ProgrammaticDerivedAnalysisError::MissingUnknownFamily { .. })
         ));
     }
@@ -9906,11 +10103,13 @@ mod tests {
     #[test]
     fn precision_change_causally_changes_observed_producer_authority() {
         let exact = compose_programmatic_derived_analyses(
+            &transformation_authority(),
             admitted(),
             composition(DerivedPrecisionPolicy::Exact, 4_096),
         )
         .unwrap();
         let may = compose_programmatic_derived_analyses(
+            &transformation_authority(),
             admitted(),
             composition(DerivedPrecisionPolicy::SoundMay, 4_096),
         )
@@ -9956,7 +10155,11 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            compose_programmatic_derived_analyses(admitted(), producer_overcommit),
+            compose_programmatic_derived_analyses(
+                &transformation_authority(),
+                admitted(),
+                producer_overcommit,
+            ),
             Err(
                 ProgrammaticDerivedAnalysisError::CompositionResourceLimitExceeded {
                     resource: "producer_count",
@@ -9977,7 +10180,11 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            compose_programmatic_derived_analyses(admitted(), edge_overcommit),
+            compose_programmatic_derived_analyses(
+                &transformation_authority(),
+                admitted(),
+                edge_overcommit,
+            ),
             Err(
                 ProgrammaticDerivedAnalysisError::CompositionResourceLimitExceeded {
                     resource: "dependency_edge_count",
@@ -9998,7 +10205,11 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            compose_programmatic_derived_analyses(admitted(), row_overcommit),
+            compose_programmatic_derived_analyses(
+                &transformation_authority(),
+                admitted(),
+                row_overcommit,
+            ),
             Err(
                 ProgrammaticDerivedAnalysisError::CompositionResourceLimitExceeded {
                     resource: "declared_max_rows",
@@ -10019,7 +10230,11 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            compose_programmatic_derived_analyses(admitted(), memory_overcommit),
+            compose_programmatic_derived_analyses(
+                &transformation_authority(),
+                admitted(),
+                memory_overcommit,
+            ),
             Err(
                 ProgrammaticDerivedAnalysisError::CompositionResourceLimitExceeded {
                     resource: "declared_max_memory_bytes",
@@ -10031,6 +10246,7 @@ mod tests {
 
         assert!(matches!(
             compose_programmatic_derived_analyses(
+                &transformation_authority(),
                 admitted(),
                 composition(DerivedPrecisionPolicy::Exact, 0),
             ),
@@ -10046,11 +10262,13 @@ mod tests {
     #[test]
     fn resource_contract_is_causal_in_composition_closure_observation() {
         let baseline = compose_programmatic_derived_analyses(
+            &transformation_authority(),
             admitted(),
             composition(DerivedPrecisionPolicy::Exact, 4_096),
         )
         .unwrap();
         let expanded = compose_programmatic_derived_analyses(
+            &transformation_authority(),
             admitted(),
             composition(DerivedPrecisionPolicy::Exact, 8_192),
         )
@@ -10088,7 +10306,12 @@ mod tests {
             1024 * 1024 * 1024,
         )
         .unwrap();
-        let policy_only = compose_programmatic_derived_analyses(admitted(), policy_only).unwrap();
+        let policy_only = compose_programmatic_derived_analyses(
+            &transformation_authority(),
+            admitted(),
+            policy_only,
+        )
+        .unwrap();
         assert_eq!(
             baseline.observation().resources.declared_max_rows,
             policy_only.observation().resources.declared_max_rows
@@ -10139,7 +10362,11 @@ mod tests {
         rust_producer.transformation = replacement;
 
         assert!(matches!(
-            compose_programmatic_derived_analyses(admitted(), composition),
+            compose_programmatic_derived_analyses(
+                &transformation_authority(),
+                admitted(),
+                composition,
+            ),
             Err(ProgrammaticDerivedAnalysisError::Epoch(
                 ProgrammaticFabricEpochError::ProgrammaticSchema(
                     ProgrammaticSchemaError::DuplicateTransformation { .. }
@@ -10151,6 +10378,7 @@ mod tests {
     #[tokio::test]
     async fn execution_bound_aborts_seal_without_returning_partial_epoch() {
         let outcome = compose_programmatic_derived_analyses(
+            &transformation_authority(),
             admitted(),
             composition(DerivedPrecisionPolicy::Exact, 1),
         )
