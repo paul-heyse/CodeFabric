@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v5.md",
   "baseline_commit": "6a76b5cff3d84e8249e5bedaa52a17f2abb816dd",
   "status": "executing",
-  "current_packet": "WP32",
+  "current_packet": "WP35",
   "packets": {
     "WP33": {
       "status": "complete",
@@ -19,18 +19,21 @@
     },
     "WP29": {
       "status": "complete",
-      "proving_commit": "fe4e5b7b99bab0b7167d6f597521081bdc071538",
-      "deviations": [],
+      "proving_commit": "2ef15f5f0cb9276be455b07de9112b3c970395d9",
+      "deviations": [
+        "The stale selector was rebound to substantive successor-owned production composition and lifecycle-admission behavior instead of restoring deleted release-vector or epoch-registry authority."
+      ],
       "failed_approaches": [
         "Earlier review rounds found incomplete post-bind cleanup and partial multi-workspace writer-owner release; the accepted implementation joins and releases every acquired owner before returning each startup failure."
       ],
       "blockers": []
     },
     "WP30": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "917a08183e3ff3215f07ba1916a2e288de666410",
       "deviations": [
-        "Eleven exact activation-era primitives remain in tooling/ci/wp30_activation_residue.json for WP32 disposition; this is the plan-authorized boundary that keeps DB09 open and is not legacy-operability preservation."
+        "At the WP30 proving commit, eleven exact activation-era primitives remained in tooling/ci/wp30_activation_residue.json for WP32 disposition; this was the plan-authorized boundary that kept DB09 open and was not legacy-operability preservation.",
+        "Current WP32 work has correctly removed ProgrammaticWorkspaceReleasePins, but the WP30 residue ledger and zero-state validator still require that displaced symbol to exist. The assurance contract must record and positively deny the removed authority rather than reintroduce it."
       ],
       "failed_approaches": [],
       "blockers": []
@@ -43,23 +46,30 @@
       "blockers": []
     },
     "WP32": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The working tree contains selected-event readback, receipt nonauthority, candidate-free recovery, and atomic-workspace changes, but exact reopen remains limited to the currently provisioned observation histories rather than every selected provider, canonical, derived, and proof relation.",
+        "No substantive WP32-BEH test currently exists, and the release-owned concrete rebuild path plus older selected-version reconstruction remain unfinished."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP34": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "10ee529ec8e8f27f3f072aad4c226fffaeed0bf9",
+      "deviations": [
+        "The packet was isolated from concurrent WP32/WP35 work and proved from a detached tree containing only the staged WP34 commit: root-check-fast and all four named packet recipes passed there before the identical index was committed."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP35": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Released producer-census, decoded closure, and proof work is present in the working tree, but production composition still leaves substantial release-owned paths unused and analysis-fixed-point-resource-check selects zero tests."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -122,14 +132,16 @@
       "blockers": []
     },
     "M03": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "917a08183e3ff3215f07ba1916a2e288de666410",
-      "deviations": [],
+      "deviations": [
+        "The WP29 and WP30 proving commits remain ancestral, but current successor work has invalidated their named acceptance selectors and residue ledger; M03 requires target-aligned revalidation before it can again be complete at HEAD."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "M04": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -205,8 +217,16 @@
     "At baseline commit 6a76b5cff3d84e8249e5bedaa52a17f2abb816dd, just root-fmt exits 1 on the formatting of programmatic backend construction in src/daemon.rs; WP29 owns reconciliation.",
     "At baseline commit 6a76b5cff3d84e8249e5bedaa52a17f2abb816dd, just root-check exits 101 because three daemon tests omit the current eighth serve_query_transport backend argument; WP29 owns reconciliation."
   ],
-  "discovered_obligations": [],
+  "discovered_obligations": [
+    "Revalidate WP29 and WP30 against the current target architecture: retarget the WP29 behavioral selector to substantive extant successor behavior and update the WP30 activation-residue ledger and zero-state validator to positively deny the removed ProgrammaticWorkspaceReleasePins symbol; never restore that displaced authority.",
+    "Finish WP32 exact durable reconstruction for every activation-selected provider, canonical, derived, and proof relation, including an older selected version and a concrete release-owned rebuild path, then add a nonzero WP32-BEH oracle.",
+    "Isolate the packet-ready WP34 provider descriptor, relation IPC, admission, gap, and trust change surface into an atomic proving commit and record that commit only after rerunning its four named oracles.",
+    "Finish WP35 production wiring for the released analysis producer closure and executable proof, remove displaced caller-composition routes, and add a substantive WP35-OPS oracle.",
+    "Implement WP36 query coordination, streamed page sealing, result packages, retention, and cancellation; all four packet recipes are currently absent.",
+    "Implement WP37's real supervisor, public gRPC v2 UDS service, and presentation-only FastMCP vertical; replace placeholder recipes and add the missing boundary-rejection recipe.",
+    "Create and execute the still-missing WP38 through WP42 packet oracles only as their dependency-closed implementation surfaces land."
+  ],
   "plan_deviations": [],
-  "next_action": "Execute WP32: implement lawful genesis, exact Delta activation selection, atomic workspace installation, and candidate-free reconstruction without receipt, cache, or latest authority.",
-  "updated_at": "2026-09-01T12:20:37Z"
+  "next_action": "Finish WP35 by joining the release-owned producer census, typed analyses, and executable proof closure into production; remove caller-composed alternatives and add a substantive WP35-OPS fixed-point/resource oracle.",
+  "updated_at": "2026-09-01T16:10:22Z"
 }
