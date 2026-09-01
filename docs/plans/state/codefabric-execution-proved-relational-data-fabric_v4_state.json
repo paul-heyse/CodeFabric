@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v5.md",
   "baseline_commit": "6a76b5cff3d84e8249e5bedaa52a17f2abb816dd",
   "status": "executing",
-  "current_packet": "WP35",
+  "current_packet": "WP32",
   "packets": {
     "WP33": {
       "status": "complete",
@@ -65,10 +65,11 @@
       "blockers": []
     },
     "WP35": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "c58f98be94990b2608992247885ce2a0950e7237",
       "deviations": [
-        "Released producer-census, decoded closure, and proof work is present in the working tree, but production composition still leaves substantial release-owned paths unused and analysis-fixed-point-resource-check selects zero tests."
+        "The exact current provider inputs close fourteen executable typed producers and twenty-four explicit remainders; the stale fifteen-producer expectation would have manufactured Common CallGraph authority, so the released closure proves the actual typed disposition instead.",
+        "The packet was isolated from concurrent WP32 work and proved from an exported staged tree: root-check-fast and all four named WP35 packet recipes passed before the identical index was committed."
       ],
       "failed_approaches": [],
       "blockers": []
@@ -221,12 +222,12 @@
     "Revalidate WP29 and WP30 against the current target architecture: retarget the WP29 behavioral selector to substantive extant successor behavior and update the WP30 activation-residue ledger and zero-state validator to positively deny the removed ProgrammaticWorkspaceReleasePins symbol; never restore that displaced authority.",
     "Finish WP32 exact durable reconstruction for every activation-selected provider, canonical, derived, and proof relation, including an older selected version and a concrete release-owned rebuild path, then add a nonzero WP32-BEH oracle.",
     "Isolate the packet-ready WP34 provider descriptor, relation IPC, admission, gap, and trust change surface into an atomic proving commit and record that commit only after rerunning its four named oracles.",
-    "Finish WP35 production wiring for the released analysis producer closure and executable proof, remove displaced caller-composition routes, and add a substantive WP35-OPS oracle.",
+    "WP35 closed the release-owned producer census, typed analyses, executable decoded proof closure, cancellation, and substantive fixed-point/resource oracle at c58f98be94990b2608992247885ce2a0950e7237.",
     "Implement WP36 query coordination, streamed page sealing, result packages, retention, and cancellation; all four packet recipes are currently absent.",
     "Implement WP37's real supervisor, public gRPC v2 UDS service, and presentation-only FastMCP vertical; replace placeholder recipes and add the missing boundary-rejection recipe.",
     "Create and execute the still-missing WP38 through WP42 packet oracles only as their dependency-closed implementation surfaces land."
   ],
   "plan_deviations": [],
-  "next_action": "Finish WP35 by joining the release-owned producer census, typed analyses, and executable proof closure into production; remove caller-composed alternatives and add a substantive WP35-OPS fixed-point/resource oracle.",
-  "updated_at": "2026-09-01T16:10:22Z"
+  "next_action": "Finish WP32 exact durable reconstruction and release-owned rebuild for every activation-selected provider, canonical, derived, and proof relation; add and pass the nonzero WP32-BEH oracle, then close WP30 authority zero-state without restoring displaced authorities.",
+  "updated_at": "2026-09-01T17:03:22Z"
 }
