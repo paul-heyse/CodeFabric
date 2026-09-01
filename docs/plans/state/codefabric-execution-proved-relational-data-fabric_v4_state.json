@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v5.md",
   "baseline_commit": "6a76b5cff3d84e8249e5bedaa52a17f2abb816dd",
   "status": "executing",
-  "current_packet": "WP30",
+  "current_packet": "WP31",
   "packets": {
     "WP33": {
       "status": "complete",
@@ -27,9 +27,11 @@
       "blockers": []
     },
     "WP30": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "917a08183e3ff3215f07ba1916a2e288de666410",
+      "deviations": [
+        "Eleven exact activation-era primitives remain in tooling/ci/wp30_activation_residue.json for WP32 disposition; this is the plan-authorized boundary that keeps DB09 open and is not legacy-operability preservation."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -120,8 +122,8 @@
       "blockers": []
     },
     "M03": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "917a08183e3ff3215f07ba1916a2e288de666410",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -157,7 +159,7 @@
   },
   "decommission_batches": {
     "DB09": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -205,6 +207,6 @@
   ],
   "discovered_obligations": [],
   "plan_deviations": [],
-  "next_action": "Execute WP30 immediately: remove predecessor bootstrap/model/generated-schema authority and prove the exact 13-dimension target/history zero state without preserving legacy operability.",
-  "updated_at": "2026-09-01T09:46:22Z"
+  "next_action": "Execute WP31: close compiled-release descriptor/program ownership, exact provider and epoch schemas, governed child sessions, identity-safe logical-plan caching, and observation-derived contract matrices.",
+  "updated_at": "2026-09-01T10:27:11Z"
 }
