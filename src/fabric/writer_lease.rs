@@ -65,6 +65,7 @@ pub struct WorkspaceWriterLease {
     fence: WriterFence,
     lock_path: PathBuf,
     lock: File,
+    released: bool,
 }
 
 impl std::fmt::Debug for WorkspaceWriterLease {
@@ -150,6 +151,7 @@ impl WorkspaceWriterLease {
             fence,
             lock_path,
             lock,
+            released: false,
         })
     }
 
@@ -172,11 +174,25 @@ impl WorkspaceWriterLease {
     ) -> Result<(), WorkspaceWriterLeaseError> {
         validate_writer_fence(generations, self.workspace_id, self.fence)
     }
+
+    /// Explicitly release the exact OS writer lock and report the owner outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns the kernel unlock failure. Ordinary drop remains only a partial-construction
+    /// safety net and is not successful shutdown evidence.
+    pub fn release(mut self) -> Result<(), WorkspaceWriterLeaseError> {
+        flock(&self.lock, FlockOperation::Unlock).map_err(WorkspaceWriterLeaseError::Io)?;
+        self.released = true;
+        Ok(())
+    }
 }
 
 impl Drop for WorkspaceWriterLease {
     fn drop(&mut self) {
-        let _ = flock(&self.lock, FlockOperation::Unlock);
+        if !self.released {
+            let _ = flock(&self.lock, FlockOperation::Unlock);
+        }
     }
 }
 

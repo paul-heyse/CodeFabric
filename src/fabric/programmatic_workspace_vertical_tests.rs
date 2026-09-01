@@ -61,6 +61,7 @@ use super::delta_semantic_read::{
 };
 use super::delta_write::ControlledDeltaWriteOutcome;
 use super::epoch_runtime::{FABRIC_CATALOG, FabricEpochRuntimeConfig, FabricSchemaRole};
+use super::production_kernel::{ActiveWorkspaceError, WorkspaceSlot};
 use super::programmatic_activation_admission::ExactProgrammaticSuccessorQueryAuthorityRecipe;
 use super::programmatic_activation_command_ports::{
     ActivationCommandRequestKey, ActivationCommandRequestMaterial,
@@ -1557,6 +1558,31 @@ async fn real_delta_sqlite_daemon_query_activation_and_process_reopen() {
         .expect("cold programmatic daemon construction");
 
     let initial_workspace = daemon.workspace(workspace_id).expect("initial workspace");
+    let slot = WorkspaceSlot::empty(workspace_id);
+    assert!(matches!(
+        slot.swap(Arc::clone(&initial_workspace)),
+        Err(ActiveWorkspaceError::NotInstalled(observed)) if observed == workspace_id
+    ));
+    assert!(matches!(
+        slot.lease(),
+        Err(ActiveWorkspaceError::NotInstalled(observed)) if observed == workspace_id
+    ));
+    let initially_installed = slot
+        .install_initial(Arc::clone(&initial_workspace))
+        .expect("initial exact active workspace");
+    let pinned_before_swap = slot.lease().expect("initial active-workspace lease");
+    let retained = slot
+        .swap(Arc::clone(&initial_workspace))
+        .expect("atomic active-workspace replacement");
+    assert!(Arc::ptr_eq(
+        pinned_before_swap.workspace(),
+        &initially_installed
+    ));
+    assert!(Arc::ptr_eq(retained.workspace(), &initially_installed));
+    assert!(!Arc::ptr_eq(
+        slot.lease().expect("replacement lease").workspace(),
+        &initially_installed
+    ));
     let relation_pin = initial_epoch
         .observation_publication()
         .table_version_set()

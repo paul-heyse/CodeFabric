@@ -1,9 +1,12 @@
 //! Local daemon lifecycle, closed configuration, singleton lease, and admin IPC.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Write as _};
-use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
+use std::os::unix::fs::{
+    FileTypeExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -15,7 +18,13 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot;
 
 use crate::contracts::deployment_profile::DeploymentProfileDocument;
+use crate::fabric::command::LeaseId;
 use crate::fabric::forward_cutover::{CutoverAdmission, CutoverPhase, DurableCutoverState};
+use crate::fabric::production_kernel::{
+    CompiledSemanticRelease, LifecycleAuthority, OperationalWorkspaceRegistry,
+    OperationalWorkspaceRegistryError, ProductionLifecycleError, ProductionLifecyclePhase,
+    WorkspaceSlotRegistry, WorkspaceSlotRegistryError,
+};
 use crate::fabric::programmatic_query_backend::{
     ProgrammaticSemanticQueryBackend, ProgrammaticSemanticQueryBackendError,
     ProgrammaticSemanticQueryPorts,
@@ -25,9 +34,15 @@ use crate::fabric::programmatic_workspace::{
     ProgrammaticDaemonCompositionShutdownError,
 };
 use crate::fabric::published_arrow_result::PublishedArrowResultRegistry;
+use crate::fabric::writer_generation_sqlite::{
+    SqliteWriterGenerationCloseError, SqliteWriterGenerationOpenError, SqliteWriterGenerationStore,
+};
+use crate::fabric::writer_lease::{WorkspaceWriterLease, WorkspaceWriterLeaseError};
 use crate::forward_cutover_controller::{
     ProductionCutoverStatus, ProductionForwardCutoverController,
 };
+use crate::operational_store::OperationalStore;
+use crate::operational_store::OperationalStoreError;
 use crate::query_service::{
     ProductionQueryService, QueryAuthorization, QueryTransportError, ResultArtifactStore,
     SemanticQueryBackend, serve_query_uds,
@@ -35,6 +50,7 @@ use crate::query_service::{
 use crate::rpc::SameUserInterceptor;
 use crate::rpc::generated::codefabric::cpgd::v1::{WorkspaceClaim, WorkspaceReadiness};
 use crate::workspace_registry::{RelinkProof, RemovalPolicy, WorkspaceRecord};
+use crate::workspace_registry::{WorkspaceRegistry, WorkspaceRegistryError};
 
 const CONFIG_MAX_BYTES: u64 = 262_144;
 const ADMIN_MESSAGE_MAX_BYTES: usize = 65_536;
@@ -344,10 +360,6 @@ pub enum DaemonError {
     },
     #[error("invalid daemon configuration: {0}")]
     Config(String),
-    #[error(
-        "production serving requires an explicitly constructed programmatic daemon composition"
-    )]
-    ProgrammaticCompositionRequired,
     #[error("daemon singleton lease is already held")]
     LeaseHeld,
     #[error("administrative protocol failure: {0}")]
@@ -357,6 +369,14 @@ pub enum DaemonError {
         completed_steps: Vec<&'static str>,
         detail: String,
     },
+    #[error(
+        "{primary}; joined startup cleanup also failed after {completed_steps:?}: {cleanup_failures:?}"
+    )]
+    StartupCleanup {
+        primary: Box<DaemonError>,
+        completed_steps: Vec<&'static str>,
+        cleanup_failures: Vec<String>,
+    },
     #[error(transparent)]
     QueryTransport(#[from] QueryTransportError),
     #[error(transparent)]
@@ -365,6 +385,28 @@ pub enum DaemonError {
     ProgrammaticCommandRecovery(#[from] ProgrammaticCommandRecoveryError),
     #[error("programmatic daemon composition shutdown failed: {0}")]
     ProgrammaticCompositionShutdown(#[from] ProgrammaticDaemonCompositionShutdownError),
+    #[error(transparent)]
+    ProductionLifecycle(#[from] ProductionLifecycleError),
+    #[error(transparent)]
+    OperationalStore(#[from] OperationalStoreError),
+    #[error(transparent)]
+    WorkspaceRegistry(#[from] WorkspaceRegistryError),
+    #[error(transparent)]
+    OperationalWorkspaceRegistry(#[from] OperationalWorkspaceRegistryError),
+    #[error(transparent)]
+    WorkspaceSlotRegistry(#[from] WorkspaceSlotRegistryError),
+    #[error(transparent)]
+    WriterGeneration(#[from] SqliteWriterGenerationOpenError),
+    #[error(transparent)]
+    WriterGenerationClose(#[from] SqliteWriterGenerationCloseError),
+    #[error(transparent)]
+    WorkspaceWriterLease(#[from] WorkspaceWriterLeaseError),
+    #[error("production startup has no explicit operational workspace")]
+    NoOperationalWorkspace,
+    #[error("owned socket identity changed before retirement: {0}")]
+    OwnedSocketIdentityChanged(PathBuf),
+    #[error(transparent)]
+    Identity(#[from] crate::identity::IdentityError),
 }
 
 fn record_shutdown_step<E: std::fmt::Display>(
@@ -382,6 +424,37 @@ fn record_shutdown_step<E: std::fmt::Display>(
         "joined daemon shutdown step completed"
     );
     Ok(())
+}
+
+fn record_joined_cleanup<E: std::fmt::Display>(
+    completed_steps: &mut Vec<&'static str>,
+    cleanup_failures: &mut Vec<String>,
+    step: &'static str,
+    outcome: Result<(), E>,
+) {
+    match outcome {
+        Ok(()) => {
+            completed_steps.push(step);
+            tracing::info!(shutdown_step = step, "joined daemon cleanup step completed");
+        }
+        Err(error) => cleanup_failures.push(format!("{step}: {error}")),
+    }
+}
+
+fn joined_startup_error(
+    primary: DaemonError,
+    completed_steps: Vec<&'static str>,
+    cleanup_failures: Vec<String>,
+) -> DaemonError {
+    if cleanup_failures.is_empty() {
+        primary
+    } else {
+        DaemonError::StartupCleanup {
+            primary: Box::new(primary),
+            completed_steps,
+            cleanup_failures,
+        }
+    }
 }
 
 fn private_directory(path: &Path) -> Result<(), DaemonError> {
@@ -444,6 +517,7 @@ pub struct DaemonLease {
     lock: File,
     discovery_path: PathBuf,
     runtime_root: PathBuf,
+    released: bool,
 }
 
 impl DaemonLease {
@@ -487,6 +561,7 @@ impl DaemonLease {
             lock,
             discovery_path,
             runtime_root: config.static_config.runtime_root.clone(),
+            released: false,
         })
     }
 
@@ -515,13 +590,884 @@ impl DaemonLease {
         })?;
         sync_directory(&self.runtime_root)
     }
+
+    /// Explicitly retire discovery authority and release the singleton lock.
+    ///
+    /// # Errors
+    ///
+    /// Returns exact endpoint-metadata, directory-sync, or unlock failures. Drop remains only a
+    /// partial-construction safety net and is not successful joined-shutdown evidence.
+    pub fn release(mut self) -> Result<(), DaemonError> {
+        match fs::remove_file(&self.discovery_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(DaemonError::Io {
+                    path: self.discovery_path.clone(),
+                    source,
+                });
+            }
+        }
+        sync_directory(&self.runtime_root)?;
+        self.lock.unlock().map_err(|source| DaemonError::Io {
+            path: self.runtime_root.join("daemon.lock"),
+            source,
+        })?;
+        self.released = true;
+        Ok(())
+    }
 }
 
 impl Drop for DaemonLease {
     fn drop(&mut self) {
+        if self.released {
+            return;
+        }
         let _ = fs::remove_file(&self.discovery_path);
         let _ = sync_directory(&self.runtime_root);
         let _ = self.lock.unlock();
+    }
+}
+
+/// One bound Unix socket which may unlink only the exact inode it created.
+struct OwnedUnixSocket {
+    path: PathBuf,
+    device: u64,
+    inode: u64,
+    owner_uid: u32,
+    retired: bool,
+}
+
+impl OwnedUnixSocket {
+    fn bind(path: &Path) -> Result<(UnixListener, Self), DaemonError> {
+        match fs::symlink_metadata(path) {
+            Ok(_) => {
+                return Err(DaemonError::Config(format!(
+                    "refusing to replace existing socket path {}",
+                    path.display()
+                )));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(DaemonError::Io {
+                    path: path.to_owned(),
+                    source,
+                });
+            }
+        }
+        let listener = UnixListener::bind(path).map_err(|source| DaemonError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+        let initial = fs::symlink_metadata(path).map_err(|source| DaemonError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+        let mut owned = Self {
+            path: path.to_owned(),
+            device: initial.dev(),
+            inode: initial.ino(),
+            owner_uid: initial.uid(),
+            retired: false,
+        };
+        if !initial.file_type().is_socket() {
+            return Err(DaemonError::Config(format!(
+                "bound endpoint is not a Unix socket: {}",
+                path.display()
+            )));
+        }
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|source| {
+            DaemonError::Io {
+                path: path.to_owned(),
+                source,
+            }
+        })?;
+        let final_metadata = fs::symlink_metadata(path).map_err(|source| DaemonError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+        if !owned.matches(&final_metadata)
+            || !final_metadata.file_type().is_socket()
+            || final_metadata.mode() & 0o777 != 0o600
+        {
+            return Err(DaemonError::OwnedSocketIdentityChanged(path.to_owned()));
+        }
+        owned.retired = false;
+        Ok((listener, owned))
+    }
+
+    fn matches(&self, metadata: &fs::Metadata) -> bool {
+        metadata.dev() == self.device
+            && metadata.ino() == self.inode
+            && metadata.uid() == self.owner_uid
+    }
+
+    fn retire(&mut self) -> Result<(), DaemonError> {
+        if self.retired {
+            return Ok(());
+        }
+        let metadata = fs::symlink_metadata(&self.path).map_err(|source| DaemonError::Io {
+            path: self.path.clone(),
+            source,
+        })?;
+        if !metadata.file_type().is_socket() || !self.matches(&metadata) {
+            return Err(DaemonError::OwnedSocketIdentityChanged(self.path.clone()));
+        }
+        fs::remove_file(&self.path).map_err(|source| DaemonError::Io {
+            path: self.path.clone(),
+            source,
+        })?;
+        self.retired = true;
+        sync_directory(
+            self.path
+                .parent()
+                .ok_or_else(|| DaemonError::Config("socket has no parent".to_owned()))?,
+        )
+    }
+}
+
+impl Drop for OwnedUnixSocket {
+    fn drop(&mut self) {
+        if self.retired {
+            return;
+        }
+        let Ok(metadata) = fs::symlink_metadata(&self.path) else {
+            return;
+        };
+        if metadata.file_type().is_socket() && self.matches(&metadata) {
+            let _ = fs::remove_file(&self.path);
+            if let Some(parent) = self.path.parent() {
+                let _ = sync_directory(parent);
+            }
+        }
+    }
+}
+
+/// Marker for a validated, side-effect-free production startup configuration.
+pub struct Configured;
+
+/// Phase aggregate which owns the daemon singleton lease.
+pub struct DaemonLeased {
+    lease: DaemonLease,
+}
+
+/// Phase aggregate which owns every operational writer fence and its durable generation store.
+pub struct WriterFenced {
+    daemon_lease: DaemonLease,
+    registry: OperationalWorkspaceRegistry,
+    generation_store: SqliteWriterGenerationStore,
+    writer_leases: Vec<WorkspaceWriterLease>,
+}
+
+/// Phase-typed startup owner. Semantic phase values cannot be supplied by configuration.
+pub struct ProductionStartupCoordinator<Phase> {
+    config: DaemonConfig,
+    release: CompiledSemanticRelease,
+    lifecycle: Arc<LifecycleAuthority>,
+    workspace_slots: Arc<WorkspaceSlotRegistry>,
+    phase: Phase,
+}
+
+fn cleanup_owned_startup_failure(
+    lifecycle: &LifecycleAuthority,
+    workspace_slots: &WorkspaceSlotRegistry,
+    daemon_lease: DaemonLease,
+    registry: Option<OperationalWorkspaceRegistry>,
+    generation_store: Option<SqliteWriterGenerationStore>,
+    mut writer_leases: Vec<WorkspaceWriterLease>,
+    primary: DaemonError,
+) -> DaemonError {
+    let mut completed_steps = Vec::new();
+    let mut cleanup_failures = Vec::new();
+    record_joined_cleanup(
+        &mut completed_steps,
+        &mut cleanup_failures,
+        "mark-failed-closed",
+        lifecycle.fail_closed("PRODUCTION_STARTUP_FAILED").map(drop),
+    );
+    record_joined_cleanup(
+        &mut completed_steps,
+        &mut cleanup_failures,
+        "mark-draining",
+        lifecycle.begin_draining().map(drop),
+    );
+    if let Some(registry) = registry {
+        drop(registry);
+        completed_steps.push("close-operational-registry");
+    }
+    record_joined_cleanup(
+        &mut completed_steps,
+        &mut cleanup_failures,
+        "close-workspace-slots",
+        workspace_slots.shutdown().map(drop),
+    );
+    if let Some(store) = generation_store {
+        record_joined_cleanup(
+            &mut completed_steps,
+            &mut cleanup_failures,
+            "close-writer-generation-store",
+            store.close(),
+        );
+    }
+    let mut writer_release = Ok(());
+    for lease in writer_leases.drain(..) {
+        if let Err(error) = lease.release() {
+            writer_release = Err(error);
+        }
+    }
+    record_joined_cleanup(
+        &mut completed_steps,
+        &mut cleanup_failures,
+        "release-writer-leases",
+        writer_release,
+    );
+    record_joined_cleanup(
+        &mut completed_steps,
+        &mut cleanup_failures,
+        "release-daemon-lease",
+        daemon_lease.release(),
+    );
+    record_joined_cleanup(
+        &mut completed_steps,
+        &mut cleanup_failures,
+        "mark-stopped",
+        lifecycle.finish_stopped().map(drop),
+    );
+    joined_startup_error(primary, completed_steps, cleanup_failures)
+}
+
+impl ProductionStartupCoordinator<Configured> {
+    fn new(config: DaemonConfig, release: CompiledSemanticRelease) -> Self {
+        Self {
+            config,
+            release,
+            lifecycle: Arc::new(LifecycleAuthority::new()),
+            workspace_slots: Arc::new(WorkspaceSlotRegistry::new()),
+            phase: Configured,
+        }
+    }
+
+    fn acquire_daemon_lease(
+        self,
+    ) -> Result<ProductionStartupCoordinator<DaemonLeased>, DaemonError> {
+        let lease = DaemonLease::acquire(&self.config)?;
+        if let Err(error) = self.lifecycle.advance(
+            ProductionLifecyclePhase::Configured,
+            ProductionLifecyclePhase::DaemonLeased,
+        ) {
+            return Err(cleanup_owned_startup_failure(
+                &self.lifecycle,
+                &self.workspace_slots,
+                lease,
+                None,
+                None,
+                Vec::new(),
+                error.into(),
+            ));
+        }
+        Ok(ProductionStartupCoordinator {
+            config: self.config,
+            release: self.release,
+            lifecycle: self.lifecycle,
+            workspace_slots: self.workspace_slots,
+            phase: DaemonLeased { lease },
+        })
+    }
+}
+
+impl ProductionStartupCoordinator<DaemonLeased> {
+    fn acquire_workspace_writers(
+        self,
+    ) -> Result<ProductionStartupCoordinator<WriterFenced>, DaemonError> {
+        let ProductionStartupCoordinator {
+            config,
+            release,
+            lifecycle,
+            workspace_slots,
+            phase: DaemonLeased {
+                lease: daemon_lease,
+            },
+        } = self;
+        let operational_path = config
+            .static_config
+            .state_root
+            .join(&config.static_config.operational_database);
+        let mut store = match OperationalStore::open(&operational_path) {
+            Ok(store) => store,
+            Err(error) => {
+                return Err(cleanup_owned_startup_failure(
+                    &lifecycle,
+                    &workspace_slots,
+                    daemon_lease,
+                    None,
+                    None,
+                    Vec::new(),
+                    error.into(),
+                ));
+            }
+        };
+        let records = WorkspaceRegistry::new(&mut store).list();
+        drop(store);
+        let records = match records {
+            Ok(records) => records,
+            Err(error) => {
+                return Err(cleanup_owned_startup_failure(
+                    &lifecycle,
+                    &workspace_slots,
+                    daemon_lease,
+                    None,
+                    None,
+                    Vec::new(),
+                    error.into(),
+                ));
+            }
+        };
+        let registry = match OperationalWorkspaceRegistry::try_from_records(records) {
+            Ok(registry) => registry,
+            Err(error) => {
+                return Err(cleanup_owned_startup_failure(
+                    &lifecycle,
+                    &workspace_slots,
+                    daemon_lease,
+                    None,
+                    None,
+                    Vec::new(),
+                    error.into(),
+                ));
+            }
+        };
+        if registry.is_empty() {
+            return Err(cleanup_owned_startup_failure(
+                &lifecycle,
+                &workspace_slots,
+                daemon_lease,
+                Some(registry),
+                None,
+                Vec::new(),
+                DaemonError::NoOperationalWorkspace,
+            ));
+        }
+        if let Err(error) = workspace_slots.close_from_operational_registry(&registry) {
+            return Err(cleanup_owned_startup_failure(
+                &lifecycle,
+                &workspace_slots,
+                daemon_lease,
+                Some(registry),
+                None,
+                Vec::new(),
+                error.into(),
+            ));
+        }
+
+        // Validate the explicit credential input before creating any public endpoint. WP34
+        // replaces this transitional file with policy-bound launch-grant registration.
+        if let Err(error) = query_capability_token(&config.static_config) {
+            return Err(cleanup_owned_startup_failure(
+                &lifecycle,
+                &workspace_slots,
+                daemon_lease,
+                Some(registry),
+                None,
+                Vec::new(),
+                error,
+            ));
+        }
+
+        let writer_root = config.static_config.state_root.join("writer-authority");
+        if let Err(error) = private_directory(&writer_root) {
+            return Err(cleanup_owned_startup_failure(
+                &lifecycle,
+                &workspace_slots,
+                daemon_lease,
+                Some(registry),
+                None,
+                Vec::new(),
+                error,
+            ));
+        }
+        let generation_store = SqliteWriterGenerationStore::open(
+            &config
+                .static_config
+                .state_root
+                .join("writer-generations.sqlite"),
+        );
+        let generation_store = match generation_store {
+            Ok(store) => store,
+            Err(error) => {
+                return Err(cleanup_owned_startup_failure(
+                    &lifecycle,
+                    &workspace_slots,
+                    daemon_lease,
+                    Some(registry),
+                    None,
+                    Vec::new(),
+                    error.into(),
+                ));
+            }
+        };
+        let mut writer_leases = Vec::with_capacity(registry.records().len());
+        for record in registry.records() {
+            let lease_id = match crate::identity::random_registration_nonce() {
+                Ok(nonce) => LeaseId::from_bytes(nonce),
+                Err(error) => {
+                    return Err(cleanup_owned_startup_failure(
+                        &lifecycle,
+                        &workspace_slots,
+                        daemon_lease,
+                        Some(registry),
+                        Some(generation_store),
+                        writer_leases,
+                        error.into(),
+                    ));
+                }
+            };
+            let lease = WorkspaceWriterLease::acquire(
+                &writer_root,
+                crate::fabric::command::WorkspaceId::from_bytes(record.workspace_id),
+                lease_id,
+                &generation_store,
+            );
+            match lease {
+                Ok(lease) => writer_leases.push(lease),
+                Err(error) => {
+                    return Err(cleanup_owned_startup_failure(
+                        &lifecycle,
+                        &workspace_slots,
+                        daemon_lease,
+                        Some(registry),
+                        Some(generation_store),
+                        writer_leases,
+                        error.into(),
+                    ));
+                }
+            }
+        }
+        if let Err(error) = lifecycle.advance(
+            ProductionLifecyclePhase::DaemonLeased,
+            ProductionLifecyclePhase::WriterFenced,
+        ) {
+            return Err(cleanup_owned_startup_failure(
+                &lifecycle,
+                &workspace_slots,
+                daemon_lease,
+                Some(registry),
+                Some(generation_store),
+                writer_leases,
+                error.into(),
+            ));
+        }
+        Ok(ProductionStartupCoordinator {
+            config,
+            release,
+            lifecycle,
+            workspace_slots,
+            phase: WriterFenced {
+                daemon_lease,
+                registry,
+                generation_store,
+                writer_leases,
+            },
+        })
+    }
+}
+
+/// Sole factory used by the production `codefabricd` entrypoint.
+#[derive(Clone, Copy, Debug)]
+pub struct ProductionDaemonFactory {
+    release: CompiledSemanticRelease,
+}
+
+impl ProductionDaemonFactory {
+    #[must_use]
+    pub const fn current() -> Self {
+        Self {
+            release: CompiledSemanticRelease::current(),
+        }
+    }
+
+    /// Validate operational configuration and construct one side-effect-free kernel.
+    ///
+    /// # Errors
+    ///
+    /// Returns closed configuration errors before acquiring leases, opening stores, or binding
+    /// endpoints.
+    pub fn build(self, config: DaemonConfig) -> Result<DaemonKernel, DaemonError> {
+        config.validate()?;
+        Ok(DaemonKernel {
+            startup: ProductionStartupCoordinator::new(config, self.release),
+        })
+    }
+}
+
+/// Joined production daemon owner. It never accepts a test/default semantic backend.
+pub struct DaemonKernel {
+    startup: ProductionStartupCoordinator<Configured>,
+}
+
+impl fmt::Debug for DaemonKernel {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DaemonKernel")
+            .field("suite", &self.startup.release.suite().display())
+            .field("lifecycle", &self.startup.lifecycle.observe())
+            .finish_non_exhaustive()
+    }
+}
+
+impl DaemonKernel {
+    #[must_use]
+    pub fn lifecycle(&self) -> Arc<LifecycleAuthority> {
+        Arc::clone(&self.startup.lifecycle)
+    }
+
+    /// Return the kernel-owned atomic workspace slots. The registry is empty until the
+    /// operational census is closed during startup; each slot remains semantically uninstalled
+    /// until WP32's exact reconstruction path succeeds.
+    #[must_use]
+    pub fn workspace_slots(&self) -> Arc<WorkspaceSlotRegistry> {
+        Arc::clone(&self.startup.workspace_slots)
+    }
+
+    #[must_use]
+    pub const fn release(&self) -> CompiledSemanticRelease {
+        self.startup.release
+    }
+
+    /// Run the currently realizable production startup phases and an admin-only bootstrapping
+    /// service. WP32 supplies command recovery/genesis and WP36 supplies the v2 query service; no
+    /// semantic endpoint or false Ready projection is exposed in their absence.
+    ///
+    /// # Errors
+    ///
+    /// Returns the exact configuration, lease, registry, writer, endpoint, or admin failure after
+    /// joined best-effort cleanup. The lifecycle ends `Stopped` on every owned failure path.
+    pub async fn run(self) -> Result<DaemonExit, DaemonError> {
+        let lifecycle = Arc::clone(&self.startup.lifecycle);
+        let result = async {
+            let leased = self.startup.acquire_daemon_lease()?;
+            let fenced = leased.acquire_workspace_writers()?;
+            serve_writer_fenced_bootstrap(fenced).await
+        }
+        .await;
+        if result.is_err() && lifecycle.observe().phase() != ProductionLifecyclePhase::Stopped {
+            if lifecycle.observe().phase() != ProductionLifecyclePhase::FailedClosed {
+                let _ = lifecycle.fail_closed("PRODUCTION_STARTUP_FAILED");
+            }
+            let _ = lifecycle.begin_draining();
+            let _ = lifecycle.finish_stopped();
+        }
+        result
+    }
+}
+
+fn finish_writer_fenced_bootstrap(
+    startup: ProductionStartupCoordinator<WriterFenced>,
+    listener: Option<UnixListener>,
+    mut admin_socket: Option<OwnedUnixSocket>,
+    drained: bool,
+    primary: Option<DaemonError>,
+) -> Result<DaemonExit, DaemonError> {
+    let ProductionStartupCoordinator {
+        lifecycle,
+        workspace_slots,
+        phase:
+            WriterFenced {
+                daemon_lease,
+                registry,
+                generation_store,
+                mut writer_leases,
+            },
+        ..
+    } = startup;
+    let mut steps = Vec::new();
+    let mut cleanup_failures = Vec::new();
+    if primary.is_some() {
+        record_joined_cleanup(
+            &mut steps,
+            &mut cleanup_failures,
+            "mark-failed-closed",
+            lifecycle
+                .fail_closed("PRODUCTION_BOOTSTRAP_SERVICE_FAILED")
+                .map(drop),
+        );
+    }
+    record_joined_cleanup(
+        &mut steps,
+        &mut cleanup_failures,
+        "mark-draining",
+        lifecycle.begin_draining().map(drop),
+    );
+    if let Some(listener) = listener {
+        drop(listener);
+        steps.push("close-admin-ingress");
+    }
+    if let Some(socket) = admin_socket.as_mut() {
+        record_joined_cleanup(
+            &mut steps,
+            &mut cleanup_failures,
+            "retire-admin-endpoint",
+            socket.retire(),
+        );
+    }
+    drop(admin_socket);
+    drop(registry);
+    steps.push("close-operational-registry");
+    record_joined_cleanup(
+        &mut steps,
+        &mut cleanup_failures,
+        "close-workspace-slots",
+        workspace_slots.shutdown().map(drop),
+    );
+    record_joined_cleanup(
+        &mut steps,
+        &mut cleanup_failures,
+        "close-writer-generation-store",
+        generation_store.close(),
+    );
+    let mut writer_release = Ok(());
+    for lease in writer_leases.drain(..) {
+        if let Err(error) = lease.release() {
+            writer_release = Err(error);
+        }
+    }
+    record_joined_cleanup(
+        &mut steps,
+        &mut cleanup_failures,
+        "release-writer-leases",
+        writer_release,
+    );
+    record_joined_cleanup(
+        &mut steps,
+        &mut cleanup_failures,
+        "release-daemon-lease",
+        daemon_lease.release(),
+    );
+    record_joined_cleanup(
+        &mut steps,
+        &mut cleanup_failures,
+        "mark-stopped",
+        lifecycle.finish_stopped().map(drop),
+    );
+
+    if let Some(primary) = primary {
+        return Err(joined_startup_error(primary, steps, cleanup_failures));
+    }
+    if !cleanup_failures.is_empty() {
+        return Err(DaemonError::Shutdown {
+            completed_steps: steps,
+            detail: cleanup_failures.join("; "),
+        });
+    }
+    Ok(DaemonExit {
+        drained,
+        shutdown_steps: steps,
+    })
+}
+
+async fn serve_writer_fenced_bootstrap(
+    startup: ProductionStartupCoordinator<WriterFenced>,
+) -> Result<DaemonExit, DaemonError> {
+    if startup.config.static_config.query_socket_endpoint.exists() {
+        let error = DaemonError::Config(format!(
+            "query endpoint is occupied before v2 service construction: {}",
+            startup.config.static_config.query_socket_endpoint.display()
+        ));
+        return finish_writer_fenced_bootstrap(startup, None, None, false, Some(error));
+    }
+    let admin_service = match BootstrapAdminService::try_new(
+        Arc::clone(&startup.lifecycle),
+        &startup.phase.registry,
+        &startup.workspace_slots,
+    ) {
+        Ok(service) => service,
+        Err(error) => {
+            return finish_writer_fenced_bootstrap(startup, None, None, false, Some(error));
+        }
+    };
+    let public_versions = BTreeMap::from([(
+        "codefabric.authoritative-suite".to_owned(),
+        startup.release.suite().display(),
+    )]);
+    let published = match discovery(
+        &startup.config,
+        public_versions,
+        startup.lifecycle.observe().semantic_admission_open(),
+    ) {
+        Ok(published) => published,
+        Err(error) => {
+            drop(admin_service);
+            return finish_writer_fenced_bootstrap(startup, None, None, false, Some(error));
+        }
+    };
+    let (listener, admin_socket) =
+        match OwnedUnixSocket::bind(&startup.config.static_config.socket_endpoint) {
+            Ok(owners) => owners,
+            Err(error) => {
+                drop(admin_service);
+                return finish_writer_fenced_bootstrap(startup, None, None, false, Some(error));
+            }
+        };
+    if let Err(error) = startup.lifecycle.advance(
+        ProductionLifecyclePhase::WriterFenced,
+        ProductionLifecyclePhase::EndpointsBoundBootstrapping,
+    ) {
+        drop(admin_service);
+        return finish_writer_fenced_bootstrap(
+            startup,
+            Some(listener),
+            Some(admin_socket),
+            false,
+            Some(error.into()),
+        );
+    }
+    if let Err(error) = startup.phase.daemon_lease.publish(&published) {
+        drop(admin_service);
+        return finish_writer_fenced_bootstrap(
+            startup,
+            Some(listener),
+            Some(admin_socket),
+            false,
+            Some(error),
+        );
+    }
+    let allowed_uid = match fs::symlink_metadata(&startup.config.static_config.socket_endpoint)
+        .map_err(|source| DaemonError::Io {
+            path: startup.config.static_config.socket_endpoint.clone(),
+            source,
+        }) {
+        Ok(metadata) => metadata.uid(),
+        Err(error) => {
+            drop(admin_service);
+            return finish_writer_fenced_bootstrap(
+                startup,
+                Some(listener),
+                Some(admin_socket),
+                false,
+                Some(error),
+            );
+        }
+    };
+    tracing::info!(
+        lifecycle = ProductionLifecyclePhase::EndpointsBoundBootstrapping.code(),
+        "production daemon bootstrapping admin ingress opened"
+    );
+
+    let serve_result = loop {
+        let (mut stream, _) = match listener.accept().await {
+            Ok(stream) => stream,
+            Err(source) => break Err(DaemonError::Admin(format!("accept: {source}"))),
+        };
+        if SameUserInterceptor::new(allowed_uid)
+            .authenticate_stream(&stream)
+            .is_err()
+        {
+            continue;
+        }
+        let request = match read_request(&mut stream).await {
+            Ok(request) => request,
+            Err(error) => break Err(error),
+        };
+        let (response, stop) = admin_service.handle(request);
+        if let Err(error) = write_response(&mut stream, &response).await {
+            break Err(error);
+        }
+        if let Some(drained) = stop {
+            break Ok(drained);
+        }
+    };
+    drop(admin_service);
+    match serve_result {
+        Ok(drained) => finish_writer_fenced_bootstrap(
+            startup,
+            Some(listener),
+            Some(admin_socket),
+            drained,
+            None,
+        ),
+        Err(error) => finish_writer_fenced_bootstrap(
+            startup,
+            Some(listener),
+            Some(admin_socket),
+            false,
+            Some(error),
+        ),
+    }
+}
+
+/// Fully constructed admin-only bootstrapping service. Binding happens only after this value
+/// validates the kernel's operational registry, lifecycle, and atomic slot census.
+struct BootstrapAdminService<'a> {
+    lifecycle: Arc<LifecycleAuthority>,
+    registry: &'a OperationalWorkspaceRegistry,
+}
+
+impl<'a> BootstrapAdminService<'a> {
+    fn try_new(
+        lifecycle: Arc<LifecycleAuthority>,
+        registry: &'a OperationalWorkspaceRegistry,
+        workspace_slots: &WorkspaceSlotRegistry,
+    ) -> Result<Self, DaemonError> {
+        if !workspace_slots.is_closed() || workspace_slots.len() != registry.records().len() {
+            return Err(DaemonError::Config(
+                "production workspace-slot census is not closed over the operational registry"
+                    .to_owned(),
+            ));
+        }
+        Ok(Self {
+            lifecycle,
+            registry,
+        })
+    }
+
+    fn handle(&self, request: AdminEnvelope) -> (AdminResponse, Option<bool>) {
+        let projection = self.lifecycle.observe();
+        let readiness = projection.phase().code().to_owned();
+        match request {
+            AdminEnvelope::Daemon(request) => {
+                let stop = match request.command {
+                    AdminCommand::Stop => Some(false),
+                    AdminCommand::Drain => Some(true),
+                    AdminCommand::Status | AdminCommand::CutoverStatus => None,
+                };
+                let accepted = request.command != AdminCommand::CutoverStatus;
+                (
+                    AdminResponse {
+                        accepted,
+                        daemon_liveness: "LIVE".to_owned(),
+                        workspace_readiness: readiness,
+                        shutdown_mode: stop
+                            .map(|drain| if drain { "drain" } else { "stop" }.to_owned()),
+                        workspaces: self.registry.records().to_vec(),
+                        workspace_health: Vec::new(),
+                        cutover_status: None,
+                        error_code: Some(
+                            if accepted {
+                                projection
+                                    .failure_code()
+                                    .unwrap_or("SEMANTIC_AUTHORITY_BOOTSTRAPPING")
+                            } else {
+                                "CUTOVER_AUTHORITY_UNAVAILABLE"
+                            }
+                            .to_owned(),
+                        ),
+                    },
+                    stop,
+                )
+            }
+            AdminEnvelope::Workspace(_) => (
+                AdminResponse {
+                    accepted: false,
+                    daemon_liveness: "LIVE".to_owned(),
+                    workspace_readiness: readiness,
+                    shutdown_mode: None,
+                    workspaces: self.registry.records().to_vec(),
+                    workspace_health: Vec::new(),
+                    cutover_status: None,
+                    error_code: Some("COMMAND_RECOVERY_REQUIRED".to_owned()),
+                },
+                None,
+            ),
+        }
     }
 }
 
@@ -614,6 +1560,7 @@ fn programmatic_public_bundle_versions(
 fn discovery(
     config: &DaemonConfig,
     public_bundle_versions: BTreeMap<String, String>,
+    basic_readiness: bool,
 ) -> Result<DaemonDiscovery, DaemonError> {
     let startup_time_unix_ms = now_millis()?;
     let pid = std::process::id();
@@ -638,7 +1585,7 @@ fn discovery(
         query_socket_endpoint: config.static_config.query_socket_endpoint.clone(),
         rpc_minimum_minor: 0,
         rpc_maximum_minor: 0,
-        basic_readiness: false,
+        basic_readiness,
         startup_time_unix_ms,
         public_bundle_versions,
     })
@@ -708,8 +1655,10 @@ fn query_capability_token(config: &StaticConfig) -> Result<Vec<u8>, DaemonError>
 /// Returns startup, permission, socket, protocol, or joined-shutdown failures.
 #[allow(clippy::too_many_lines)] // The ordered lifecycle is kept visible as one joined sequence.
 pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
-    config.validate()?;
-    Err(DaemonError::ProgrammaticCompositionRequired)
+    ProductionDaemonFactory::current()
+        .build(config)?
+        .run()
+        .await
 }
 
 /// Run the production daemon over one fully constructed programmatic composition.
@@ -776,11 +1725,13 @@ pub async fn serve_programmatic(
         let cutover_configured = ProductionForwardCutoverController::open_if_configured(&config)
             .map_err(|error| DaemonError::Config(error.to_string()))?
             .is_some();
-        let backend = Arc::new(if cutover_configured || !composition.command_runtimes_ready() {
-            ProgrammaticSemanticQueryBackend::try_new_staged(&composition, ports)?
-        } else {
-            ProgrammaticSemanticQueryBackend::try_new(&composition, ports)?
-        });
+        let backend = Arc::new(
+            if cutover_configured || !composition.command_runtimes_ready() {
+                ProgrammaticSemanticQueryBackend::try_new_staged(&composition, ports)?
+            } else {
+                ProgrammaticSemanticQueryBackend::try_new(&composition, ports)?
+            },
+        );
         let published_results = Arc::clone(backend.published_results());
         serve_with_programmatic_query_backend(
             config,
@@ -957,7 +1908,7 @@ async fn serve_query_transport<B: SemanticQueryBackend>(
             "query service did not bind its configured endpoint".to_owned(),
         ));
     }
-    let mut published_discovery = discovery(&config, public_bundle_versions)?;
+    let mut published_discovery = discovery(&config, public_bundle_versions, false)?;
     lease.publish(&published_discovery)?;
     let startup_admission = async {
         if let Some(composition) = programmatic_composition
@@ -1372,6 +2323,28 @@ mod tests {
         }
     }
 
+    fn register_operational_workspace(config: &DaemonConfig, root: &Path) -> WorkspaceRecord {
+        add_operational_workspace(config, &root.join("workspace"))
+    }
+
+    fn add_operational_workspace(config: &DaemonConfig, workspace_root: &Path) -> WorkspaceRecord {
+        private_directory(&config.static_config.state_root).unwrap();
+        private_directory(workspace_root).unwrap();
+        let mut store = OperationalStore::open(
+            &config
+                .static_config
+                .state_root
+                .join(&config.static_config.operational_database),
+        )
+        .unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .add(
+                workspace_root,
+                crate::workspace_registry::WorkspaceSourceRegistration::Directory,
+            )
+            .unwrap()
+    }
+
     fn released_wire_compatibility_versions() -> BTreeMap<String, String> {
         BTreeMap::from([(
             "codefabric.released-wire-compatibility".to_owned(),
@@ -1495,7 +2468,7 @@ maintenance_schedule = "daily-idle"
             Err(DaemonError::Config(_))
         ));
 
-        let discovery = discovery(&config, released_wire_compatibility_versions()).unwrap();
+        let discovery = discovery(&config, released_wire_compatibility_versions(), false).unwrap();
         let value = serde_json::to_value(&discovery).unwrap();
         let keys = value
             .as_object()
@@ -1544,6 +2517,7 @@ maintenance_schedule = "daily-idle"
             None,
             None,
             released_wire_compatibility_versions(),
+            None,
         ));
         wait_for_discovery(&discovery_path, Duration::from_secs(5))
             .await
@@ -1605,6 +2579,7 @@ maintenance_schedule = "daily-idle"
             None,
             None,
             released_wire_compatibility_versions(),
+            None,
         ));
         wait_for_discovery(&discovery_path, Duration::from_secs(5))
             .await
@@ -1640,6 +2615,7 @@ maintenance_schedule = "daily-idle"
             None,
             None,
             released_wire_compatibility_versions(),
+            None,
         ));
         wait_for_discovery(&discovery_path, Duration::from_secs(5))
             .await
@@ -1660,11 +2636,364 @@ maintenance_schedule = "daily-idle"
     }
 
     #[tokio::test]
-    async fn production_serve_requires_programmatic_composition() {
+    async fn production_factory_rejects_empty_workspace_without_endpoint_or_lease_leaks() {
         let root = tempfile::tempdir().unwrap();
+        let config = config(root.path());
+        let kernel = ProductionDaemonFactory::current()
+            .build(config.clone())
+            .unwrap();
+        let lifecycle = kernel.lifecycle();
         assert!(matches!(
-            serve(config(root.path())).await,
-            Err(DaemonError::ProgrammaticCompositionRequired)
+            kernel.run().await,
+            Err(DaemonError::NoOperationalWorkspace)
         ));
+        assert_eq!(
+            lifecycle.observe().phase(),
+            ProductionLifecyclePhase::Stopped
+        );
+        assert!(!config.static_config.socket_endpoint.exists());
+        assert!(!config.static_config.query_socket_endpoint.exists());
+        assert!(
+            !config
+                .static_config
+                .runtime_root
+                .join("daemon.json")
+                .exists()
+        );
+
+        let second = DaemonLease::acquire(&config).unwrap();
+        drop(second);
+    }
+
+    #[tokio::test]
+    async fn production_startup_faults_before_endpoint_exposure_and_releases_owners() {
+        let missing_token_root = tempfile::tempdir().unwrap();
+        let missing_token_config = config(missing_token_root.path());
+        register_operational_workspace(&missing_token_config, missing_token_root.path());
+        fs::remove_file(
+            missing_token_config.static_config.config_root.join(
+                &missing_token_config
+                    .static_config
+                    .query_capability_token_file,
+            ),
+        )
+        .unwrap();
+        let missing_token_kernel = ProductionDaemonFactory::current()
+            .build(missing_token_config.clone())
+            .unwrap();
+        let missing_token_lifecycle = missing_token_kernel.lifecycle();
+        assert!(missing_token_kernel.run().await.is_err());
+        assert_eq!(
+            missing_token_lifecycle.observe().phase(),
+            ProductionLifecyclePhase::Stopped
+        );
+        assert!(!missing_token_config.static_config.socket_endpoint.exists());
+        assert!(
+            !missing_token_config
+                .static_config
+                .runtime_root
+                .join("daemon.json")
+                .exists()
+        );
+        DaemonLease::acquire(&missing_token_config)
+            .unwrap()
+            .release()
+            .unwrap();
+
+        let occupied_query_root = tempfile::tempdir().unwrap();
+        let occupied_query_config = config(occupied_query_root.path());
+        register_operational_workspace(&occupied_query_config, occupied_query_root.path());
+        private_directory(&occupied_query_config.static_config.runtime_root).unwrap();
+        private_file(
+            &occupied_query_config.static_config.query_socket_endpoint,
+            b"foreign-query-owner",
+        )
+        .unwrap();
+        let occupied_query_kernel = ProductionDaemonFactory::current()
+            .build(occupied_query_config.clone())
+            .unwrap();
+        let occupied_query_lifecycle = occupied_query_kernel.lifecycle();
+        assert!(matches!(
+            occupied_query_kernel.run().await,
+            Err(DaemonError::Config(message)) if message.contains("query endpoint is occupied")
+        ));
+        assert_eq!(
+            occupied_query_lifecycle.observe().phase(),
+            ProductionLifecyclePhase::Stopped
+        );
+        assert!(!occupied_query_config.static_config.socket_endpoint.exists());
+        assert_eq!(
+            fs::read(&occupied_query_config.static_config.query_socket_endpoint).unwrap(),
+            b"foreign-query-owner"
+        );
+        DaemonLease::acquire(&occupied_query_config)
+            .unwrap()
+            .release()
+            .unwrap();
+
+        let writer_contention_root = tempfile::tempdir().unwrap();
+        let writer_contention_config = config(writer_contention_root.path());
+        let record = register_operational_workspace(
+            &writer_contention_config,
+            writer_contention_root.path(),
+        );
+        let writer_root = writer_contention_config
+            .static_config
+            .state_root
+            .join("writer-authority");
+        private_directory(&writer_root).unwrap();
+        let generation_store = SqliteWriterGenerationStore::open(
+            &writer_contention_config
+                .static_config
+                .state_root
+                .join("writer-generations.sqlite"),
+        )
+        .unwrap();
+        let held_writer = WorkspaceWriterLease::acquire(
+            &writer_root,
+            crate::fabric::command::WorkspaceId::from_bytes(record.workspace_id),
+            LeaseId::from_bytes([9; 16]),
+            &generation_store,
+        )
+        .unwrap();
+        assert!(matches!(
+            ProductionDaemonFactory::current()
+                .build(writer_contention_config.clone())
+                .unwrap()
+                .run()
+                .await,
+            Err(DaemonError::WorkspaceWriterLease(
+                WorkspaceWriterLeaseError::AlreadyHeld
+            ))
+        ));
+        assert!(
+            !writer_contention_config
+                .static_config
+                .socket_endpoint
+                .exists()
+        );
+        held_writer.release().unwrap();
+        generation_store.close().unwrap();
+        DaemonLease::acquire(&writer_contention_config)
+            .unwrap()
+            .release()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners() {
+        let root = tempfile::tempdir().unwrap();
+        let config = config(root.path());
+        let record = register_operational_workspace(&config, root.path());
+        private_directory(&config.static_config.runtime_root).unwrap();
+        private_file(
+            &config.static_config.socket_endpoint,
+            b"foreign-admin-owner",
+        )
+        .unwrap();
+        let kernel = ProductionDaemonFactory::current()
+            .build(config.clone())
+            .unwrap();
+        let lifecycle = kernel.lifecycle();
+        let workspace_slots = kernel.workspace_slots();
+
+        assert!(matches!(
+            kernel.run().await,
+            Err(DaemonError::Config(message))
+                if message.contains("refusing to replace existing socket path")
+        ));
+        assert_eq!(
+            lifecycle.observe().phase(),
+            ProductionLifecyclePhase::Stopped
+        );
+        assert!(workspace_slots.is_shutdown());
+        assert_eq!(
+            fs::read(&config.static_config.socket_endpoint).unwrap(),
+            b"foreign-admin-owner"
+        );
+        assert!(
+            !config
+                .static_config
+                .runtime_root
+                .join("daemon.json")
+                .exists()
+        );
+
+        let writer_root = config.static_config.state_root.join("writer-authority");
+        let generations = SqliteWriterGenerationStore::open(
+            &config
+                .static_config
+                .state_root
+                .join("writer-generations.sqlite"),
+        )
+        .unwrap();
+        WorkspaceWriterLease::acquire(
+            &writer_root,
+            crate::fabric::command::WorkspaceId::from_bytes(record.workspace_id),
+            LeaseId::from_bytes([7; 16]),
+            &generations,
+        )
+        .unwrap()
+        .release()
+        .unwrap();
+        generations.close().unwrap();
+        DaemonLease::acquire(&config).unwrap().release().unwrap();
+    }
+
+    #[tokio::test]
+    async fn production_partial_multi_workspace_fencing_releases_every_earlier_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let config = config(root.path());
+        let first = add_operational_workspace(&config, &root.path().join("workspace-a"));
+        let second = add_operational_workspace(&config, &root.path().join("workspace-b"));
+        let mut records = [first, second];
+        records.sort_by_key(|record| record.workspace_id);
+
+        let writer_root = config.static_config.state_root.join("writer-authority");
+        private_directory(&writer_root).unwrap();
+        let generations = SqliteWriterGenerationStore::open(
+            &config
+                .static_config
+                .state_root
+                .join("writer-generations.sqlite"),
+        )
+        .unwrap();
+        let held_last = WorkspaceWriterLease::acquire(
+            &writer_root,
+            crate::fabric::command::WorkspaceId::from_bytes(records[1].workspace_id),
+            LeaseId::from_bytes([8; 16]),
+            &generations,
+        )
+        .unwrap();
+        let kernel = ProductionDaemonFactory::current()
+            .build(config.clone())
+            .unwrap();
+        let lifecycle = kernel.lifecycle();
+        let workspace_slots = kernel.workspace_slots();
+
+        assert!(matches!(
+            kernel.run().await,
+            Err(DaemonError::WorkspaceWriterLease(
+                WorkspaceWriterLeaseError::AlreadyHeld
+            ))
+        ));
+        assert_eq!(
+            lifecycle.observe().phase(),
+            ProductionLifecyclePhase::Stopped
+        );
+        assert!(workspace_slots.is_shutdown());
+        held_last.release().unwrap();
+
+        for (index, record) in records.iter().enumerate() {
+            WorkspaceWriterLease::acquire(
+                &writer_root,
+                crate::fabric::command::WorkspaceId::from_bytes(record.workspace_id),
+                LeaseId::from_bytes([10 + index as u8; 16]),
+                &generations,
+            )
+            .unwrap()
+            .release()
+            .unwrap();
+        }
+        generations.close().unwrap();
+        DaemonLease::acquire(&config).unwrap().release().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts() {
+        let root = tempfile::tempdir().unwrap();
+        let config = config(root.path());
+        let registered = register_operational_workspace(&config, root.path());
+        let discovery_path = config.static_config.runtime_root.join("daemon.json");
+
+        for expected_generation in 1..=2 {
+            let kernel = ProductionDaemonFactory::current()
+                .build(config.clone())
+                .unwrap();
+            assert_eq!(
+                kernel.release().suite().display(),
+                "codefabric-relational-data-fabric@2.2.0"
+            );
+            let lifecycle = kernel.lifecycle();
+            let workspace_slots = kernel.workspace_slots();
+            assert!(!workspace_slots.is_closed());
+            let task = tokio::spawn(kernel.run());
+            wait_for_discovery(&discovery_path, Duration::from_secs(5))
+                .await
+                .unwrap();
+
+            assert!(workspace_slots.is_closed());
+            assert_eq!(workspace_slots.len(), 1);
+            let slot = workspace_slots
+                .slot(crate::fabric::command::WorkspaceId::from_bytes(
+                    registered.workspace_id,
+                ))
+                .expect("kernel-owned workspace slot");
+            assert!(matches!(
+                slot.lease(),
+                Err(crate::fabric::production_kernel::ActiveWorkspaceError::NotInstalled(_))
+            ));
+
+            let response = administer(&discovery_path, AdminCommand::Status)
+                .await
+                .unwrap();
+            assert!(response.accepted);
+            assert_eq!(
+                response.workspace_readiness,
+                "ENDPOINTS_BOUND_BOOTSTRAPPING"
+            );
+            assert_eq!(
+                response.error_code.as_deref(),
+                Some("SEMANTIC_AUTHORITY_BOOTSTRAPPING")
+            );
+            assert_eq!(response.workspaces, [registered.clone()]);
+            assert!(!config.static_config.query_socket_endpoint.exists());
+            assert_eq!(
+                lifecycle.observe().phase(),
+                ProductionLifecyclePhase::EndpointsBoundBootstrapping
+            );
+
+            administer(&discovery_path, AdminCommand::Stop)
+                .await
+                .unwrap();
+            let exit = task.await.unwrap().unwrap();
+            assert!(!exit.drained);
+            assert_eq!(
+                exit.shutdown_steps,
+                [
+                    "mark-draining",
+                    "close-admin-ingress",
+                    "retire-admin-endpoint",
+                    "close-operational-registry",
+                    "close-workspace-slots",
+                    "close-writer-generation-store",
+                    "release-writer-leases",
+                    "release-daemon-lease",
+                    "mark-stopped",
+                ]
+            );
+            assert_eq!(
+                lifecycle.observe().phase(),
+                ProductionLifecyclePhase::Stopped
+            );
+            assert!(workspace_slots.is_shutdown());
+            assert!(!config.static_config.socket_endpoint.exists());
+
+            let generation_store = SqliteWriterGenerationStore::open(
+                &config
+                    .static_config
+                    .state_root
+                    .join("writer-generations.sqlite"),
+            )
+            .unwrap();
+            let observed =
+                crate::fabric::writer_lease::DurableWriterGenerationPort::observe_current(
+                    &generation_store,
+                    crate::fabric::command::WorkspaceId::from_bytes(registered.workspace_id),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(observed.generation.get(), expected_generation);
+        }
     }
 }

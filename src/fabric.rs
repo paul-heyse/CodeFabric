@@ -57,6 +57,8 @@ pub mod explicit_unknown;
 pub mod forward_cutover;
 pub mod graph_program;
 #[cfg(feature = "daemon")]
+pub mod production_kernel;
+#[cfg(feature = "daemon")]
 pub mod programmatic_activation_admission;
 #[cfg(feature = "daemon")]
 pub mod programmatic_activation_command_ports;

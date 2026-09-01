@@ -65,6 +65,15 @@ pub enum SqliteWriterGenerationOpenError {
     UnexpectedSchema(String),
 }
 
+/// Failures while explicitly joining the sole SQLite connection owner.
+#[derive(Debug, Error)]
+pub enum SqliteWriterGenerationCloseError {
+    #[error("writer-generation database connection owner is poisoned")]
+    OwnerPoisoned,
+    #[error("writer-generation database close failed: {0}")]
+    Sqlite(rusqlite::Error),
+}
+
 /// One dedicated temporal database with one mutex-owned writer connection.
 ///
 /// Separate instances may open the same database. `BEGIN IMMEDIATE` and the busy timeout preserve
@@ -122,6 +131,22 @@ impl SqliteWriterGenerationStore {
     #[must_use]
     pub fn database_path(&self) -> &Path {
         &self.database_path
+    }
+
+    /// Consume and close the exact SQLite connection rather than treating ordinary drop as
+    /// shutdown evidence.
+    ///
+    /// # Errors
+    ///
+    /// Reports a poisoned connection owner or SQLite close failure.
+    pub fn close(self) -> Result<(), SqliteWriterGenerationCloseError> {
+        let connection = self
+            .connection
+            .into_inner()
+            .map_err(|_| SqliteWriterGenerationCloseError::OwnerPoisoned)?;
+        connection
+            .close()
+            .map_err(|(_, error)| SqliteWriterGenerationCloseError::Sqlite(error))
     }
 }
 
