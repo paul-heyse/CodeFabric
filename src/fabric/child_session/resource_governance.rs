@@ -23,6 +23,7 @@ use crate::fabric::arrow_result_resource::{
     ArrowResultResourceError, ArrowResultResourcePackage, ResultResourceLease,
 };
 use crate::fabric::command::{EpochId, LeaseId, PrincipalId};
+use crate::fabric::streamed_result_package::SealedStreamedResultPackage;
 
 use super::{ChildResourceLimits, ClosedObjectStoreRegistry};
 
@@ -510,17 +511,46 @@ impl EpochResourceCoordinator {
         package: &ArrowResultResourcePackage,
         observed_at_unix_ms: i64,
     ) -> Result<EpochResultLeasePermit, EpochResourceError> {
-        if all_zero(principal_id.as_bytes()) {
-            return Err(EpochResourceError::InvalidPrincipal);
-        }
         if package.metadata().epoch_id() != self.inner.epoch_id {
             return Err(EpochResourceError::EpochMismatch {
                 expected: self.inner.epoch_id,
                 actual: package.metadata().epoch_id(),
             });
         }
+        let retained_bytes = package.retained_resource_bytes()?;
+        self.retain_result_capacity(principal_id, lease, retained_bytes, observed_at_unix_ms)
+    }
+
+    /// Reserve the exact object-backed page/manifest bytes of a streamed result package.
+    pub fn retain_streamed_result(
+        &self,
+        principal_id: PrincipalId,
+        lease: ResultResourceLease,
+        package: &SealedStreamedResultPackage,
+        observed_at_unix_ms: i64,
+    ) -> Result<EpochResultLeasePermit, EpochResourceError> {
+        if package.epoch_id() != self.inner.epoch_id {
+            return Err(EpochResourceError::EpochMismatch {
+                expected: self.inner.epoch_id,
+                actual: package.epoch_id(),
+            });
+        }
         if package.lease() != lease {
             return Err(EpochResourceError::ResultLeaseMismatch);
+        }
+        let retained_bytes = package.retained_object_bytes();
+        self.retain_result_capacity(principal_id, lease, retained_bytes, observed_at_unix_ms)
+    }
+
+    fn retain_result_capacity(
+        &self,
+        principal_id: PrincipalId,
+        lease: ResultResourceLease,
+        retained_bytes: u64,
+        observed_at_unix_ms: i64,
+    ) -> Result<EpochResultLeasePermit, EpochResourceError> {
+        if all_zero(principal_id.as_bytes()) {
+            return Err(EpochResourceError::InvalidPrincipal);
         }
         if observed_at_unix_ms < lease.issued_at_unix_ms()
             || observed_at_unix_ms >= lease.expires_at_unix_ms()
@@ -539,7 +569,6 @@ impl EpochResourceCoordinator {
                 limit_millis: self.inner.policy.max_result_lease_millis.get(),
             });
         }
-        let retained_bytes = package.retained_resource_bytes()?;
         let mut state = self.lock_state()?;
         if state.live_result_leases >= self.inner.policy.max_live_result_leases.get() {
             return Err(EpochResourceError::ResultLeaseBackpressure {

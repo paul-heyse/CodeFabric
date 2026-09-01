@@ -31,9 +31,10 @@ use datafusion::logical_expr::{
     AggregateUDF, LogicalPlan, LogicalPlanBuilder, ScalarUDF, TableScanBuilder, TableType,
     WindowUDF,
 };
-use datafusion::physical_plan::collect;
+use datafusion::physical_plan::{SendableRecordBatchStream, execute_stream};
 use datafusion::prelude::{SessionConfig, SessionContext};
 use datafusion::variable::{VarProvider, VarType};
+use futures::StreamExt as _;
 use object_store::ObjectStore;
 use url::Url;
 
@@ -664,6 +665,59 @@ pub struct ChildProgramResult {
     observations: CompilationObservations,
     plan: LogicalPlanExecutionObservation,
     cache_use: ChildProgramCacheUse,
+}
+
+/// Native DataFusion execution stream plus the exact compiled-plan observations that produced it.
+///
+/// The stream is intentionally non-cloneable and owns the physical execution. Dropping it aborts
+/// DataFusion work and releases its resources. Callers must consume it into bounded result pages;
+/// there is no production conversion to a complete `Vec<RecordBatch>`.
+pub struct ChildProgramStream {
+    schema: SchemaRef,
+    stream: SendableRecordBatchStream,
+    observations: CompilationObservations,
+    plan: LogicalPlanExecutionObservation,
+    cache_use: ChildProgramCacheUse,
+}
+
+impl fmt::Debug for ChildProgramStream {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ChildProgramStream")
+            .field("schema", &self.schema)
+            .field("observations", &self.observations)
+            .field("plan", &self.plan)
+            .field("cache_use", &self.cache_use)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ChildProgramStream {
+    #[must_use]
+    pub const fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    #[must_use]
+    pub const fn observations(&self) -> &CompilationObservations {
+        &self.observations
+    }
+
+    #[must_use]
+    pub const fn plan_observation(&self) -> LogicalPlanExecutionObservation {
+        self.plan
+    }
+
+    #[must_use]
+    pub const fn cache_use(&self) -> ChildProgramCacheUse {
+        self.cache_use
+    }
+
+    /// Transfer the live DataFusion stream while preserving the already-validated output schema.
+    #[must_use]
+    pub fn into_stream(self) -> SendableRecordBatchStream {
+        self.stream
+    }
 }
 
 /// Exact shared logical-plan-cache disposition for one child program execution.
@@ -1490,10 +1544,10 @@ impl AuthorizedChildSession {
     ///
     /// Rejects any input absent from the child catalog, binding/table drift, relational typing or
     /// planning failure, output-schema drift, and output above the pinned row envelope.
-    pub(crate) async fn execute_relational_program(
+    pub(crate) async fn execute_relational_program_stream(
         &self,
         program: &RelationalProgram,
-    ) -> Result<ChildProgramResult, ChildSessionError> {
+    ) -> Result<ChildProgramStream, ChildSessionError> {
         let context = self.context();
         let probe_limit = self
             .max_output_rows
@@ -1579,32 +1633,33 @@ impl AuthorizedChildSession {
             .query_planner()
             .create_physical_plan(cached.optimized_plan(), &self.state)
             .await?;
-        let batches = collect(physical_plan, self.state.task_ctx()).await?;
         let expected_schema = Arc::clone(cached.output_schema());
         let observations = cached.observations().clone();
         let plan = execution_observation(&cached, cache_outcome);
-        let row_count = batches.iter().map(RecordBatch::num_rows).sum::<usize>();
-        if row_count > self.max_output_rows.get() {
-            return Err(ChildSessionError::ProgramOutputRowLimitExceeded {
-                observed: row_count,
-                maximum: self.max_output_rows.get(),
+        if physical_plan.schema().as_ref() != expected_schema.as_ref() {
+            return Err(ChildSessionError::ProgramSchemaDrift {
+                expected: Arc::clone(&expected_schema),
+                actual: physical_plan.schema(),
             });
         }
-        for batch in &batches {
-            if batch.schema_ref().as_ref() != expected_schema.as_ref() {
-                return Err(ChildSessionError::ProgramSchemaDrift {
-                    expected: Arc::clone(&expected_schema),
-                    actual: batch.schema(),
-                });
-            }
-        }
-        Ok(ChildProgramResult {
+        let stream = execute_stream(physical_plan, self.state.task_ctx())?;
+        Ok(ChildProgramStream {
             schema: expected_schema,
-            batches,
+            stream,
             observations,
             plan,
             cache_use: ChildProgramCacheUse::SharedCache(cache_outcome),
         })
+    }
+
+    /// Test/proof convenience that explicitly materializes a child stream under its row bound.
+    /// Production query delivery uses [`Self::execute_relational_program_stream`] directly.
+    pub(crate) async fn execute_relational_program(
+        &self,
+        program: &RelationalProgram,
+    ) -> Result<ChildProgramResult, ChildSessionError> {
+        self.materialize_program_stream(self.execute_relational_program_stream(program).await?)
+            .await
     }
 
     /// Compile and execute one program with exact request-owned Arrow relations.
@@ -1621,13 +1676,13 @@ impl AuthorizedChildSession {
     /// optimized scan that does not retain the exact request/provider capability, relational
     /// typing or planning failure, output-schema drift, and output above the pinned row envelope.
     #[cfg(feature = "daemon")]
-    pub(crate) async fn execute_relational_program_with_request_inputs(
+    pub(crate) async fn execute_relational_program_stream_with_request_inputs(
         &self,
         program: &RelationalProgram,
         request_inputs: &RequestOwnedRelationCollection,
-    ) -> Result<ChildProgramResult, ChildSessionError> {
+    ) -> Result<ChildProgramStream, ChildSessionError> {
         if request_inputs.is_empty() {
-            return self.execute_relational_program(program).await;
+            return self.execute_relational_program_stream(program).await;
         }
 
         let query_bindings = self
@@ -1714,31 +1769,76 @@ impl AuthorizedChildSession {
             .query_planner()
             .create_physical_plan(query_local_plan.optimized_plan(), &self.state)
             .await?;
-        let batches = collect(physical_plan, self.state.task_ctx()).await?;
         let expected_schema = Arc::clone(query_local_plan.output_schema());
         let observations = query_local_plan.observations().clone();
         let plan = execution_observation(&query_local_plan, LogicalPlanCacheOutcome::Miss);
-        let row_count = batches.iter().map(RecordBatch::num_rows).sum::<usize>();
-        if row_count > self.max_output_rows.get() {
-            return Err(ChildSessionError::ProgramOutputRowLimitExceeded {
-                observed: row_count,
-                maximum: self.max_output_rows.get(),
+        if physical_plan.schema().as_ref() != expected_schema.as_ref() {
+            return Err(ChildSessionError::ProgramSchemaDrift {
+                expected: Arc::clone(&expected_schema),
+                actual: physical_plan.schema(),
             });
         }
-        for batch in &batches {
-            if batch.schema_ref().as_ref() != expected_schema.as_ref() {
-                return Err(ChildSessionError::ProgramSchemaDrift {
-                    expected: Arc::clone(&expected_schema),
-                    actual: batch.schema(),
-                });
-            }
-        }
-        Ok(ChildProgramResult {
+        let stream = execute_stream(physical_plan, self.state.task_ctx())?;
+        Ok(ChildProgramStream {
             schema: expected_schema,
-            batches,
+            stream,
             observations,
             plan,
             cache_use: ChildProgramCacheUse::RequestOwnedAuthorityBypass,
+        })
+    }
+
+    /// Test/proof convenience for request-owned inputs; production delivery remains streaming.
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn execute_relational_program_with_request_inputs(
+        &self,
+        program: &RelationalProgram,
+        request_inputs: &RequestOwnedRelationCollection,
+    ) -> Result<ChildProgramResult, ChildSessionError> {
+        let streamed = self
+            .execute_relational_program_stream_with_request_inputs(program, request_inputs)
+            .await?;
+        self.materialize_program_stream(streamed).await
+    }
+
+    async fn materialize_program_stream(
+        &self,
+        streamed: ChildProgramStream,
+    ) -> Result<ChildProgramResult, ChildSessionError> {
+        let ChildProgramStream {
+            schema,
+            mut stream,
+            observations,
+            plan,
+            cache_use,
+        } = streamed;
+        let mut batches = Vec::new();
+        let mut row_count = 0_usize;
+        while let Some(batch) = stream.next().await {
+            let batch = batch?;
+            if batch.schema_ref().as_ref() != schema.as_ref() {
+                return Err(ChildSessionError::ProgramSchemaDrift {
+                    expected: Arc::clone(&schema),
+                    actual: batch.schema(),
+                });
+            }
+            row_count = row_count
+                .checked_add(batch.num_rows())
+                .ok_or(ChildSessionError::OutputRowProbeOverflow)?;
+            if row_count > self.max_output_rows.get() {
+                return Err(ChildSessionError::ProgramOutputRowLimitExceeded {
+                    observed: row_count,
+                    maximum: self.max_output_rows.get(),
+                });
+            }
+            batches.push(batch);
+        }
+        Ok(ChildProgramResult {
+            schema,
+            batches,
+            observations,
+            plan,
+            cache_use,
         })
     }
 

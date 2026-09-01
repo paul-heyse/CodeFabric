@@ -1,0 +1,20 @@
+id: production-query-streaming-only
+snapshots:
+  ? |
+    async fn execute(frame: DataFrame) {
+        let batches = frame.collect().await.unwrap();
+    }
+  : labels:
+    - source: frame.collect().await
+      style: primary
+      start: 55
+      end: 76
+  ? |
+    struct PublishedResult {
+        batches: Vec<RecordBatch>,
+    }
+  : labels:
+    - source: Vec<RecordBatch>
+      style: primary
+      start: 38
+      end: 54

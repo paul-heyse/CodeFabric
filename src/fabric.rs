@@ -93,6 +93,8 @@ pub mod published_arrow_result;
 #[cfg(feature = "daemon")]
 pub mod query_artifact;
 #[cfg(feature = "daemon")]
+pub mod query_coordinator;
+#[cfg(feature = "daemon")]
 pub mod relation_publication_command_effect;
 #[cfg(feature = "daemon")]
 pub mod relational_query_runtime;
@@ -107,6 +109,8 @@ pub mod rollback_command_effect;
 pub mod source_context;
 #[cfg(feature = "daemon")]
 pub mod source_wave_command_effect;
+#[cfg(feature = "daemon")]
+pub mod streamed_result_package;
 #[cfg(feature = "daemon")]
 pub mod writer_generation_sqlite;
 #[cfg(feature = "daemon")]

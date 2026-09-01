@@ -9,13 +9,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 use arrow_schema::SchemaRef;
 
 use crate::cancellation::Cancellation;
 use crate::relational_program::{
-    CompilationObservations, RelationId, RelationalProgram, RelationalProgramCompiler,
-    RelationalProgramError,
+    CompilationDependency, CompilationObservations, RelationId, RelationalProgram,
+    RelationalProgramCompiler, RelationalProgramError,
 };
 
 use super::admission::{AdmissionError, FabricAdmissionRuntime, FabricQueryLease};
@@ -24,7 +25,8 @@ use super::arrow_result_resource::{
     QueryExecutionPin, ResultCoverage, ResultRelationInput, ResultResourceLease,
 };
 use super::child_session::resource_governance::{
-    EpochResourceCoordinator, EpochResourceError, EpochWorkClass, EpochWorkRequest,
+    EpochResourceCoordinator, EpochResourceError, EpochResultLeasePermit, EpochWorkClass,
+    EpochWorkRequest,
 };
 use super::child_session::{
     ChildRegistryAllowlist, ChildResourceLimits, ChildSessionError, ChildSessionPins,
@@ -38,6 +40,10 @@ use super::published_arrow_result::{
     PublishedResultReadRequest, PublishedResultRegistryError,
 };
 use super::request_owned_relation::RequestOwnedRelationCollection;
+use super::streamed_result_package::{
+    ResultProvenance, SealedStreamedResultPackage, StreamedRelationInput,
+    StreamedResultPackageBuilder, StreamedResultPackageError,
+};
 
 /// Exact table and resource authorization inputs used to derive one reduced child session.
 ///
@@ -256,6 +262,8 @@ pub struct RelationalQueryTransaction {
     request_inputs: BTreeMap<RelationId, Arc<RequestOwnedRelationCollection>>,
     observed_at_unix_ms: i64,
     cancellation: Cancellation,
+    canonical_semantic_response: Option<Arc<[u8]>>,
+    deadline: Option<Instant>,
 }
 
 impl RelationalQueryTransaction {
@@ -313,7 +321,23 @@ impl RelationalQueryTransaction {
             request_inputs: BTreeMap::new(),
             observed_at_unix_ms,
             cancellation,
+            canonical_semantic_response: None,
+            deadline: None,
         })
+    }
+
+    /// Bind the one canonical semantic response envelope owned by the sealed package.
+    #[must_use]
+    pub fn with_canonical_semantic_response(mut self, response: impl Into<Arc<[u8]>>) -> Self {
+        self.canonical_semantic_response = Some(response.into());
+        self
+    }
+
+    /// Bind the caller's already-reduced execution deadline.
+    #[must_use]
+    pub fn with_deadline(mut self, deadline: Instant) -> Self {
+        self.deadline = Some(deadline);
+        self
     }
 
     /// Attach the exact request-owned Arrow relations emitted by the epoch-bound compiler.
@@ -422,6 +446,58 @@ pub struct RelationalQueryPublication {
     descriptor: PublishedArrowResultDescriptor,
     admission_generation: u64,
     outputs: Arc<[RelationalQueryOutputObservation]>,
+}
+
+/// Sealed object-backed publication and the exact epoch/result permits that keep it readable.
+#[derive(Debug)]
+pub struct StreamedRelationalQueryPublication {
+    owner: PublishedResultOwner,
+    lease_token: OpaqueResultLeaseToken,
+    package: SealedStreamedResultPackage,
+    admission_generation: u64,
+    outputs: Arc<[RelationalQueryOutputObservation]>,
+    epoch_lease: FabricQueryLease,
+    resource_lease: EpochResultLeasePermit,
+}
+
+impl StreamedRelationalQueryPublication {
+    #[must_use]
+    pub const fn owner(&self) -> PublishedResultOwner {
+        self.owner
+    }
+
+    #[must_use]
+    pub const fn lease_token(&self) -> OpaqueResultLeaseToken {
+        self.lease_token
+    }
+
+    #[must_use]
+    pub const fn package(&self) -> &SealedStreamedResultPackage {
+        &self.package
+    }
+
+    #[must_use]
+    pub const fn admission_generation(&self) -> u64 {
+        self.admission_generation
+    }
+
+    #[must_use]
+    pub fn output_observations(&self) -> &[RelationalQueryOutputObservation] {
+        &self.outputs
+    }
+
+    /// Release retained epoch/result capacity after a durable tombstone has won the race.
+    pub fn into_released_package(self) -> SealedStreamedResultPackage {
+        let Self {
+            package,
+            epoch_lease,
+            resource_lease,
+            ..
+        } = self;
+        drop(resource_lease);
+        drop(epoch_lease);
+        package
+    }
 }
 
 impl RelationalQueryPublication {
@@ -559,6 +635,8 @@ impl RelationalQueryRuntime {
             request_inputs,
             observed_at_unix_ms,
             cancellation,
+            canonical_semantic_response: _,
+            deadline: _,
         } = transaction;
         let work = resources
             .admit(EpochWorkRequest {
@@ -661,6 +739,196 @@ impl RelationalQueryRuntime {
         })
     }
 
+    /// Execute an admitted query through native DataFusion streams and seal one object-backed
+    /// package before exposing any result authority.
+    ///
+    /// The epoch lease is acquired before semantic compilation by the caller and transferred into
+    /// the successful publication. Every stream is authorized by the same reduced child session,
+    /// and every page is created before the canonical manifest is atomically created last.
+    #[allow(clippy::too_many_lines)]
+    pub async fn execute_admitted_and_seal(
+        &self,
+        epoch_lease: FabricQueryLease,
+        resources: Arc<EpochResourceCoordinator>,
+        transaction: RelationalQueryTransaction,
+        package_builder: &StreamedResultPackageBuilder,
+    ) -> Result<StreamedRelationalQueryPublication, RelationalQueryRuntimeError> {
+        if transaction.owner.workspace_id() != self.workspace_id {
+            return Err(RelationalQueryRuntimeError::WorkspaceNotAuthorized);
+        }
+        if all_zero(transaction.owner.agent_id().as_bytes()) {
+            return Err(RelationalQueryRuntimeError::AgentNotAuthorized);
+        }
+        let admission_generation = epoch_lease.admission_generation();
+        let epoch_id = epoch_lease.epoch_id();
+        if resources.epoch_id() != epoch_id {
+            return Err(RelationalQueryRuntimeError::ResourceEpochMismatch {
+                admitted: epoch_id,
+                coordinator: resources.epoch_id(),
+            });
+        }
+        let epoch = Arc::clone(epoch_lease.epoch());
+        let RelationalQueryTransaction {
+            owner,
+            query_execution,
+            authorization,
+            outputs,
+            result_lease,
+            lease_token,
+            result_limits: _,
+            request_inputs,
+            observed_at_unix_ms,
+            cancellation,
+            canonical_semantic_response,
+            deadline,
+        } = transaction;
+        let canonical_semantic_response = canonical_semantic_response
+            .ok_or(RelationalQueryRuntimeError::CanonicalSemanticResponseMissing)?;
+        let deadline = deadline.ok_or(RelationalQueryRuntimeError::QueryDeadlineMissing)?;
+        let max_output_rows = u64::try_from(authorization.max_output_rows())
+            .map_err(|_| RelationalQueryRuntimeError::ResultCountOverflow)?;
+        let work = resources
+            .admit(EpochWorkRequest {
+                epoch_id,
+                principal_id: owner.agent_id(),
+                class: EpochWorkClass::InteractiveQuery,
+                cancellation: cancellation.clone(),
+            })
+            .await?;
+        let execution_resources = Arc::clone(&resources);
+        let builder = package_builder.clone();
+        let seal_cancellation = cancellation.clone();
+        let (package, observations) = work
+            .run(async move {
+                let child = epoch
+                    .authorized_child_session(
+                        authorization.into_child_policy(epoch_id)?,
+                        &execution_resources,
+                    )
+                    .await?;
+                let mut relation_streams = Vec::with_capacity(outputs.len());
+                let mut compiled_outputs = Vec::with_capacity(outputs.len());
+                for output in outputs {
+                    let coverage = output.coverage.ok_or_else(|| {
+                        RelationalQueryRuntimeError::CompletenessUndeclared(
+                            output.relation_id.as_str().to_owned(),
+                        )
+                    })?;
+                    let session_relation =
+                        RelationalProgramCompiler::resolve_output_relation_with_bindings(
+                            epoch.program_bindings(),
+                            &output.program,
+                        )?;
+                    if session_relation != output.relation_id {
+                        return Err(RelationalQueryRuntimeError::OutputRelationMismatch {
+                            advertised: output.relation_id.as_str().to_owned(),
+                            session_bound: session_relation.as_str().to_owned(),
+                        });
+                    }
+                    let streamed =
+                        if let Some(request_inputs) = request_inputs.get(&output.relation_id) {
+                            child
+                                .execute_relational_program_stream_with_request_inputs(
+                                    &output.program,
+                                    request_inputs.as_ref(),
+                                )
+                                .await?
+                        } else {
+                            child
+                                .execute_relational_program_stream(&output.program)
+                                .await?
+                        };
+                    let schema = Arc::clone(streamed.schema());
+                    let compilation = streamed.observations().clone();
+                    let provenance = compilation_provenance(&compilation);
+                    compiled_outputs.push((
+                        output.relation_id.clone(),
+                        schema.clone(),
+                        compilation,
+                    ));
+                    relation_streams.push(StreamedRelationInput {
+                        relation_id: output.relation_id,
+                        schema,
+                        stream: streamed.into_stream(),
+                        max_rows: max_output_rows,
+                        coverage,
+                        provenance,
+                    });
+                }
+                let package = builder
+                    .seal(
+                        epoch_id,
+                        query_execution,
+                        &canonical_semantic_response,
+                        relation_streams,
+                        result_lease,
+                        &seal_cancellation,
+                        deadline,
+                    )
+                    .await?;
+                let manifest_relations = package
+                    .manifest()
+                    .relations
+                    .iter()
+                    .map(|relation| (relation.relation_id.as_str(), relation))
+                    .collect::<BTreeMap<_, _>>();
+                let observations = compiled_outputs
+                    .into_iter()
+                    .map(|(relation_id, schema, compilation)| {
+                        let manifest =
+                            manifest_relations
+                                .get(relation_id.as_str())
+                                .ok_or_else(|| {
+                                    RelationalQueryRuntimeError::SealedRelationMissing(
+                                        relation_id.as_str().to_owned(),
+                                    )
+                                })?;
+                        Ok(RelationalQueryOutputObservation {
+                            relation_id,
+                            schema,
+                            row_count: manifest.row_count,
+                            batch_count: manifest.page_count,
+                            compilation,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, RelationalQueryRuntimeError>>()?;
+                Ok::<_, RelationalQueryRuntimeError>((package, observations))
+            })
+            .await??;
+        work.checkpoint()?;
+        drop(work);
+        let resource_lease = match resources.retain_streamed_result(
+            owner.agent_id(),
+            result_lease,
+            &package,
+            observed_at_unix_ms,
+        ) {
+            Ok(permit) => permit,
+            Err(error) => {
+                package.clone().delete_objects().await?;
+                return Err(error.into());
+            }
+        };
+        if cancellation.is_cancelled() || Instant::now() >= deadline {
+            drop(resource_lease);
+            package.clone().delete_objects().await?;
+            return Err(if cancellation.is_cancelled() {
+                EpochResourceError::Cancelled.into()
+            } else {
+                RelationalQueryRuntimeError::QueryDeadlineExceeded
+            });
+        }
+        Ok(StreamedRelationalQueryPublication {
+            owner,
+            lease_token,
+            package,
+            admission_generation,
+            outputs: Arc::from(observations),
+            epoch_lease,
+            resource_lease,
+        })
+    }
+
     /// Read one owner-bound manifest or relation chunk.
     pub fn read_chunk(
         &self,
@@ -698,6 +966,34 @@ const fn all_zero<const N: usize>(value: &[u8; N]) -> bool {
     true
 }
 
+fn compilation_provenance(observations: &CompilationObservations) -> Vec<ResultProvenance> {
+    observations
+        .dependencies
+        .iter()
+        .map(|dependency| match dependency {
+            CompilationDependency::SessionAuthority(identity) => ResultProvenance {
+                kind: "session_authority".to_owned(),
+                identity: identity.clone(),
+            },
+            CompilationDependency::Relation(identity) => ResultProvenance {
+                kind: "relation".to_owned(),
+                identity: identity.as_str().to_owned(),
+            },
+            CompilationDependency::Field(identity) => ResultProvenance {
+                kind: "field".to_owned(),
+                identity: identity.as_str().to_owned(),
+            },
+            CompilationDependency::Primitive {
+                primitive_id,
+                implementation_id,
+            } => ResultProvenance {
+                kind: format!("primitive:{}", primitive_id.as_str()),
+                identity: implementation_id.clone(),
+            },
+        })
+        .collect()
+}
+
 /// Phase-specific failures from the relational query composition boundary.
 #[derive(Debug, thiserror::Error)]
 pub enum RelationalQueryRuntimeError {
@@ -716,6 +1012,12 @@ pub enum RelationalQueryRuntimeError {
     },
     #[error("INVALID_REQUEST_SCHEMA:QUERY_EXECUTION_PIN")]
     QueryExecutionPinMissing,
+    #[error("INVALID_REQUEST_SCHEMA:CANONICAL_SEMANTIC_RESPONSE_MISSING")]
+    CanonicalSemanticResponseMissing,
+    #[error("INVALID_REQUEST_SCHEMA:QUERY_DEADLINE_MISSING")]
+    QueryDeadlineMissing,
+    #[error("QUERY_DEADLINE_EXCEEDED")]
+    QueryDeadlineExceeded,
     #[error("INVALID_REQUEST_SCHEMA:QUERY_AUTHORIZATION_PIN:{0}")]
     MissingAuthorizationPin(&'static str),
     #[error("INVALID_REQUEST_SCHEMA:QUERY_AUTHORIZATION_TABLES_EMPTY")]
@@ -745,6 +1047,8 @@ pub enum RelationalQueryRuntimeError {
     },
     #[error("INTERNAL_INVARIANT_VIOLATION:QUERY_RESULT_COUNT_OVERFLOW")]
     ResultCountOverflow,
+    #[error("INTERNAL_INVARIANT_VIOLATION:SEALED_RESULT_RELATION_MISSING:{0}")]
+    SealedRelationMissing(String),
     #[error("REQUEST_INPUT_AUTHORITY_INVALID:request-owned relation collection is empty")]
     RequestInputsEmpty,
     #[error("REQUEST_INPUT_AUTHORITY_INVALID:multi-output request input attachment is ambiguous")]
@@ -763,6 +1067,8 @@ pub enum RelationalQueryRuntimeError {
     ArrowResult(#[from] ArrowResultResourceError),
     #[error(transparent)]
     PublishedResult(#[from] PublishedResultRegistryError),
+    #[error(transparent)]
+    StreamedResult(#[from] StreamedResultPackageError),
     #[error(transparent)]
     ResourceGovernance(#[from] EpochResourceError),
 }

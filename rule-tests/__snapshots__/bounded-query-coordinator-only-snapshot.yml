@@ -1,0 +1,29 @@
+id: bounded-query-coordinator-only
+snapshots:
+  ? |
+    fn execute() {
+        tokio::spawn(async move { run_query().await });
+    }
+  : labels:
+    - source: tokio::spawn(async move { run_query().await })
+      style: primary
+      start: 19
+      end: 65
+  ? |
+    fn execute() {
+        let barrier = FreshnessBarrier::default();
+    }
+  : labels:
+    - source: FreshnessBarrier::default()
+      style: primary
+      start: 33
+      end: 60
+  ? |
+    struct Runtime {
+        query_tasks: DashMap<QueryId, JoinHandle<()>>,
+    }
+  : labels:
+    - source: DashMap<QueryId, JoinHandle<()>>
+      style: primary
+      start: 34
+      end: 66

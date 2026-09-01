@@ -1,0 +1,23 @@
+id: production-query-streaming-only
+valid:
+  - |
+      async fn execute(plan: Arc<dyn ExecutionPlan>, task: Arc<TaskContext>) {
+          let stream = execute_stream(plan, task).unwrap();
+          publish_pages(stream).await;
+      }
+  - |
+      #[cfg(test)]
+      mod tests {
+          async fn proof(frame: DataFrame) {
+              let batches = frame.collect().await.unwrap();
+          }
+      }
+invalid:
+  - |
+      async fn execute(frame: DataFrame) {
+          let batches = frame.collect().await.unwrap();
+      }
+  - |
+      struct PublishedResult {
+          batches: Vec<RecordBatch>,
+      }

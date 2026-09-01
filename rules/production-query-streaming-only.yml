@@ -1,0 +1,21 @@
+id: production-query-streaming-only
+language: Rust
+severity: error
+message: Production semantic-query delivery must consume DataFusion streams into bounded Arrow pages.
+note: Whole-result DataFusion collection and process-local RecordBatch result vectors are proof-only conveniences, never production delivery authority.
+files:
+  - src/fabric/relational_query_runtime.rs
+  - src/fabric/streamed_result_package.rs
+rule:
+  all:
+    - any:
+        - all:
+            - kind: await_expression
+            - regex: '\.(collect|collect_partitioned)\s*\(\)\s*\.await'
+        - all:
+            - kind: generic_type
+            - regex: 'Vec\s*<\s*RecordBatch\s*>'
+    - not:
+        inside:
+          pattern: "mod tests { $$$BODY }"
+          stopBy: end

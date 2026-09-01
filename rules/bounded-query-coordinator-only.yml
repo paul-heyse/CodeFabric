@@ -1,0 +1,20 @@
+id: bounded-query-coordinator-only
+language: Rust
+severity: error
+message: Production semantic-query work must be admitted and owned by the one bounded QueryCoordinator.
+note: Independent task spawning, default freshness barriers, and ad-hoc concurrent query registries bypass capacity and restart authority.
+files:
+  - src/fabric/relational_query_runtime.rs
+rule:
+  all:
+    - any:
+        - pattern: tokio::spawn($$$ARGS)
+        - pattern: tokio::task::spawn($$$ARGS)
+        - pattern: FreshnessBarrier::default()
+        - all:
+            - kind: generic_type
+            - regex: '(HashMap|DashMap)\s*<[^>]*(Query|Task|Event|Result)'
+    - not:
+        inside:
+          pattern: "mod tests { $$$BODY }"
+          stopBy: end

@@ -346,6 +346,27 @@ semantic-request-program-check:
     cargo nextest run --locked --lib -E 'test(/(all_eight_released_forms_compile_from_typed_program_rows|epoch_bound_ingress_consumes_every_typed_relation_row_once|epoch_bound_direct_compiler_lowers_exact_programs_returns_and_handoffs)/)' --no-tests=fail
     cargo nextest run --locked --lib -E 'test(/(all_eight_epoch_bound_forms_execute_through_one_real_authorized_child|relational_program_executes_only_through_authorized_child_inputs)/)' --no-tests=fail
 
+[doc("Validate full-meaning idempotency, bound cursors, manifest-last pages, and exact package reopen")]
+[group('test')]
+query-result-package-contract-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/wp36_int_/)' --no-tests=fail
+
+[doc("Execute authorized semantic programs as bounded DataFusion streams and independent Arrow pages")]
+[group('test')]
+scheduled-streamed-semantic-query-check:
+    cargo nextest run --locked --lib -E 'test(/wp36_beh_/) | test(all_eight_epoch_bound_forms_execute_through_one_real_authorized_child)' --no-tests=fail
+
+[doc("Reject coordinator, canonicality, capacity, terminal, create-only, and materialization bypasses")]
+[group('test')]
+query-admission-materialization-bypass-rejection-check:
+    cargo nextest run --locked --lib -E 'test(/wp36_neg_/)' --no-tests=fail
+    ast-grep test --filter 'production-query-streaming-only|bounded-query-coordinator-only'
+
+[doc("Prove query cancellation cleanup, retention release, expiry, and LOST-on-restart behavior")]
+[group('test')]
+query-retention-cancellation-restart-check:
+    cargo nextest run --locked --lib -E 'test(/wp36_ops_/)' --no-tests=fail
+
 [doc("Validate the exact production workspace factory, typed inputs, ports, and release pins")]
 [group('test')]
 production-composition-contract-integrity-check:

@@ -1,0 +1,26 @@
+id: bounded-query-coordinator-only
+valid:
+  - |
+      async fn execute(coordinator: &QueryCoordinator, operation: NormalizedQueryOperation) {
+          let accepted = coordinator.accept(operation, now()).await.unwrap();
+      }
+  - |
+      #[cfg(test)]
+      mod tests {
+          fn fixture() {
+              let barrier = FreshnessBarrier::default();
+          }
+      }
+invalid:
+  - |
+      fn execute() {
+          tokio::spawn(async move { run_query().await });
+      }
+  - |
+      fn execute() {
+          let barrier = FreshnessBarrier::default();
+      }
+  - |
+      struct Runtime {
+          query_tasks: DashMap<QueryId, JoinHandle<()>>,
+      }
