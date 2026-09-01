@@ -62,11 +62,12 @@ enum ProviderScopeKind {
 }
 
 enum ProviderEventKind {
+  reserved 4;
+  reserved "PROVIDER_EVENT_KIND_OBSERVATION_CHUNK";
   PROVIDER_EVENT_KIND_UNSPECIFIED = 0;
   PROVIDER_EVENT_KIND_ACCEPTED = 1;
   PROVIDER_EVENT_KIND_PROGRESS = 2;
   PROVIDER_EVENT_KIND_SCOPE_BEGIN = 3;
-  PROVIDER_EVENT_KIND_OBSERVATION_CHUNK = 4;
   PROVIDER_EVENT_KIND_SCOPE_END = 5;
   PROVIDER_EVENT_KIND_TERMINAL = 6;
   PROVIDER_EVENT_KIND_CANCEL_ACKNOWLEDGED = 7;
@@ -79,13 +80,6 @@ enum CancelAcknowledgementState {
   CANCEL_ACKNOWLEDGEMENT_STATE_CANCELLED = 3;
   CANCEL_ACKNOWLEDGEMENT_STATE_ALREADY_TERMINAL = 4;
   CANCEL_ACKNOWLEDGEMENT_STATE_FORCE_TERMINATED = 5;
-}
-
-// These numeric values are the AC-G-36 protocol-wide credit limits.
-enum CreditControlLimit {
-  CREDIT_CONTROL_LIMIT_UNSPECIFIED = 0;
-  CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS = 4;
-  CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB = 16;
 }
 
 // Only Arrow IPC metadata V5 is admitted by the released relation protocol.
@@ -199,17 +193,6 @@ message ProviderScopeBeginEvent {
   ProviderScope scope = 2;
 }
 
-message ProviderObservationChunkEvent {
-  ProviderEventHeader header = 1;
-  ProviderScope scope = 2;
-  uint32 observation_family_code = 3;
-  bytes arrow_ipc = 4;
-  optional BlobReference payload_reference = 5;
-  string schema_digest = 6;
-  uint64 row_count = 7;
-  string chunk_digest = 8;
-}
-
 message ProviderScopeEndEvent {
   ProviderEventHeader header = 1;
   ProviderScope scope = 2;
@@ -238,11 +221,12 @@ message CancelAcknowledgedEvent {
 }
 
 message ProviderEvent {
+  reserved 4;
+  reserved "observation_chunk";
   oneof event {
     ProviderAcceptedEvent accepted = 1;
     ProviderProgressEvent progress = 2;
     ProviderScopeBeginEvent scope_begin = 3;
-    ProviderObservationChunkEvent observation_chunk = 4;
     ProviderScopeEndEvent scope_end = 5;
     ProviderTerminalEvent terminal = 6;
     CancelAcknowledgedEvent cancel_acknowledged = 7;
@@ -262,17 +246,6 @@ message CancelAcknowledgement {
   optional ProviderRunState terminal_state = 4;
   repeated string cleaning_up_components = 5;
   bool forced_termination = 6;
-}
-
-message ChunkAccepted {
-  uint64 sequence = 1;
-  uint64 next_credit_bytes = 2;
-  uint32 next_credit_chunks = 3;
-}
-
-message ChunkRejected {
-  uint64 sequence = 1;
-  string error_code = 2;
 }
 
 // Fixed-width application identities. Protobuf carries the bytes; each process

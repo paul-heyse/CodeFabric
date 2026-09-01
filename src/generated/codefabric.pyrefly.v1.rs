@@ -19,7 +19,7 @@ pub struct Hello {
     #[prost(uint64, tag = "8")]
     pub maximum_frame_bytes: u64,
     #[prost(uint64, tag = "9")]
-    pub maximum_arrow_chunk_bytes: u64,
+    pub maximum_arrow_ipc_bytes: u64,
     #[prost(string, tag = "10")]
     pub sandbox_profile_digest: ::prost::alloc::string::String,
 }
@@ -42,7 +42,7 @@ pub struct HelloAck {
     #[prost(uint64, tag = "8")]
     pub maximum_frame_bytes: u64,
     #[prost(uint64, tag = "9")]
-    pub maximum_arrow_chunk_bytes: u64,
+    pub maximum_arrow_ipc_bytes: u64,
     #[prost(string, tag = "10")]
     pub sandbox_profile_digest: ::prost::alloc::string::String,
 }
@@ -65,6 +65,8 @@ pub struct OpenContextRequest {
     pub maximum_contexts: u32,
     #[prost(uint64, tag = "8")]
     pub maximum_memory_mib: u64,
+    #[prost(string, tag = "9")]
+    pub sandbox_profile_digest: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OpenContextResponse {
@@ -74,6 +76,8 @@ pub struct OpenContextResponse {
     pub context_manifest_digest: ::prost::alloc::string::String,
     #[prost(int64, tag = "3")]
     pub opened_at_unix_ms: i64,
+    #[prost(string, tag = "4")]
+    pub sandbox_profile_digest: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ModuleRequest {
@@ -117,7 +121,7 @@ pub struct AnalyzeModulesRequest {
     #[prost(string, tag = "11")]
     pub output_schema_bundle_digest: ::prost::alloc::string::String,
     #[prost(uint32, tag = "12")]
-    pub initial_chunk_credits: u32,
+    pub initial_frame_credits: u32,
     #[prost(uint64, tag = "13")]
     pub initial_credit_bytes: u64,
     #[prost(string, tag = "14")]
@@ -129,7 +133,7 @@ pub struct AnalyzeModulesRequest {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnalyzeCommand {
-    #[prost(oneof = "analyze_command::Command", tags = "1, 2, 3, 4, 5")]
+    #[prost(oneof = "analyze_command::Command", tags = "1, 4, 5")]
     pub command: ::core::option::Option<analyze_command::Command>,
 }
 /// Nested message and enum types in `AnalyzeCommand`.
@@ -138,10 +142,6 @@ pub mod analyze_command {
     pub enum Command {
         #[prost(message, tag = "1")]
         Start(super::AnalyzeModulesRequest),
-        #[prost(message, tag = "2")]
-        ChunkAccepted(super::super::super::provider::v1::ChunkAccepted),
-        #[prost(message, tag = "3")]
-        ChunkRejected(super::super::super::provider::v1::ChunkRejected),
         #[prost(message, tag = "4")]
         Cancel(super::CancelRunRequest),
         #[prost(message, tag = "5")]
@@ -164,13 +164,15 @@ pub struct AnalyzeEventHeader {
     pub context_manifest_digest: ::prost::alloc::string::String,
     #[prost(string, tag = "7")]
     pub source_manifest_digest: ::prost::alloc::string::String,
+    #[prost(string, tag = "8")]
+    pub sandbox_profile_digest: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RunAccepted {
     #[prost(message, optional, tag = "1")]
     pub header: ::core::option::Option<AnalyzeEventHeader>,
     #[prost(uint32, tag = "2")]
-    pub granted_chunk_credits: u32,
+    pub granted_frame_credits: u32,
     #[prost(uint64, tag = "3")]
     pub granted_credit_bytes: u64,
 }
@@ -189,25 +191,6 @@ pub struct ModuleBegin {
     pub header: ::core::option::Option<AnalyzeEventHeader>,
     #[prost(string, tag = "2")]
     pub module_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ObservationBatchChunk {
-    #[prost(message, optional, tag = "1")]
-    pub header: ::core::option::Option<AnalyzeEventHeader>,
-    #[prost(string, tag = "2")]
-    pub module_id: ::prost::alloc::string::String,
-    #[prost(uint32, tag = "3")]
-    pub observation_family_code: u32,
-    #[prost(bytes = "vec", tag = "4")]
-    pub arrow_ipc: ::prost::alloc::vec::Vec<u8>,
-    #[prost(message, optional, tag = "5")]
-    pub payload_reference: ::core::option::Option<super::super::provider::v1::BlobReference>,
-    #[prost(string, tag = "6")]
-    pub schema_digest: ::prost::alloc::string::String,
-    #[prost(uint64, tag = "7")]
-    pub row_count: u64,
-    #[prost(string, tag = "8")]
-    pub chunk_digest: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RelationIpcFrameEvent {
@@ -256,7 +239,7 @@ pub struct RunTerminal {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnalyzeEvent {
-    #[prost(oneof = "analyze_event::Event", tags = "1, 2, 3, 4, 5, 6, 7")]
+    #[prost(oneof = "analyze_event::Event", tags = "1, 2, 3, 5, 6, 7")]
     pub event: ::core::option::Option<analyze_event::Event>,
 }
 /// Nested message and enum types in `AnalyzeEvent`.
@@ -269,8 +252,6 @@ pub mod analyze_event {
         RunProgress(super::RunProgress),
         #[prost(message, tag = "3")]
         ModuleBegin(super::ModuleBegin),
-        #[prost(message, tag = "4")]
-        ObservationBatchChunk(super::ObservationBatchChunk),
         #[prost(message, tag = "5")]
         ModuleEnd(super::ModuleEnd),
         #[prost(message, tag = "6")]

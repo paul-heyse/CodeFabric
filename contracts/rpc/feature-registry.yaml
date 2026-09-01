@@ -15,7 +15,7 @@ records:
   - {domain: PYREFLY, bit: 33, feature: MULTI_CONTEXT, requirement: optional, introduced: "1.0"}
   - {domain: RUSTC, bit: 48, feature: CLOSED_OWNER_STREAM, requirement: required, introduced: "1.0"}
   - {domain: RUSTC, bit: 49, feature: PARTIAL_COMPILATION, requirement: disabled, introduced: "2.0"}
-  - {domain: PROVIDER_CONTROL, rule: CREDIT_LIMITS, maximum_outstanding_chunks: 4, maximum_unacknowledged_bytes: 16777216, introduced: "1.0"}
+  - {domain: PROVIDER_CONTROL, rule: CREDIT_LIMITS, maximum_outstanding_frames: 4, maximum_unacknowledged_bytes: 16777216, introduced: "1.0"}
   - {domain: PROVIDER_EVENT, wire_event: ACCEPTED, application_event: ACCEPTED, mapping_version: "1.0"}
   - {domain: PROVIDER_EVENT, wire_event: PROGRESS, application_event: PROGRESS, mapping_version: "1.0"}
   - {domain: PROVIDER_EVENT, wire_event: SCOPE_BEGIN, application_event: SCOPE_BEGIN, mapping_version: "1.0"}

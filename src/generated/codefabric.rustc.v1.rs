@@ -36,7 +36,7 @@ pub struct ExtractorHelloAck {
     #[prost(string, tag = "6")]
     pub sandbox_profile_digest: ::prost::alloc::string::String,
     #[prost(uint32, tag = "7")]
-    pub maximum_outstanding_chunks: u32,
+    pub maximum_outstanding_frames: u32,
     #[prost(uint64, tag = "8")]
     pub maximum_unacknowledged_bytes: u64,
     #[prost(string, tag = "9")]
@@ -111,7 +111,7 @@ pub struct CompilationAccepted {
     #[prost(uint64, tag = "3")]
     pub accepted_generation: u64,
     #[prost(uint32, tag = "4")]
-    pub granted_chunk_credits: u32,
+    pub granted_frame_credits: u32,
     #[prost(uint64, tag = "5")]
     pub granted_credit_bytes: u64,
 }
@@ -141,29 +141,6 @@ pub struct OwnerBegin {
     #[prost(uint32, repeated, tag = "5")]
     pub expected_observation_family_codes: ::prost::alloc::vec::Vec<u32>,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OwnerObservationChunk {
-    #[prost(string, tag = "1")]
-    pub provider_run_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub compilation_unit_id: ::prost::alloc::string::String,
-    #[prost(uint64, tag = "3")]
-    pub sequence: u64,
-    #[prost(string, tag = "4")]
-    pub owner_id: ::prost::alloc::string::String,
-    #[prost(uint32, tag = "5")]
-    pub observation_family_code: u32,
-    #[prost(bytes = "vec", tag = "6")]
-    pub arrow_ipc: ::prost::alloc::vec::Vec<u8>,
-    #[prost(message, optional, tag = "7")]
-    pub payload_reference: ::core::option::Option<super::super::provider::v1::BlobReference>,
-    #[prost(string, tag = "8")]
-    pub schema_digest: ::prost::alloc::string::String,
-    #[prost(uint64, tag = "9")]
-    pub row_count: u64,
-    #[prost(string, tag = "10")]
-    pub chunk_digest: ::prost::alloc::string::String,
-}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OwnerEnd {
     #[prost(string, tag = "1")]
@@ -178,15 +155,6 @@ pub struct OwnerEnd {
     pub family_counts: ::std::collections::HashMap<u32, u64>,
     #[prost(string, tag = "6")]
     pub owner_content_digest: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DiagnosticSummary {
-    #[prost(uint32, tag = "1")]
-    pub error_count: u32,
-    #[prost(uint32, tag = "2")]
-    pub warning_count: u32,
-    #[prost(string, tag = "3")]
-    pub diagnostics_digest: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompilationEnd {
@@ -203,8 +171,6 @@ pub struct CompilationEnd {
     #[prost(message, repeated, tag = "6")]
     pub capability_outcomes:
         ::prost::alloc::vec::Vec<super::super::provider::v1::CapabilityOutcome>,
-    #[prost(message, optional, tag = "7")]
-    pub diagnostic_summary: ::core::option::Option<DiagnosticSummary>,
     #[prost(string, tag = "8")]
     pub overall_stream_digest: ::prost::alloc::string::String,
     #[prost(
@@ -217,7 +183,7 @@ pub struct CompilationEnd {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExtractorCommand {
-    #[prost(oneof = "extractor_command::Command", tags = "1, 2, 3, 4, 5")]
+    #[prost(oneof = "extractor_command::Command", tags = "1, 4, 5")]
     pub command: ::core::option::Option<extractor_command::Command>,
 }
 /// Nested message and enum types in `ExtractorCommand`.
@@ -226,10 +192,6 @@ pub mod extractor_command {
     pub enum Command {
         #[prost(message, tag = "1")]
         CompilationAccepted(super::CompilationAccepted),
-        #[prost(message, tag = "2")]
-        ChunkAccepted(super::super::super::provider::v1::ChunkAccepted),
-        #[prost(message, tag = "3")]
-        ChunkRejected(super::super::super::provider::v1::ChunkRejected),
         #[prost(message, tag = "4")]
         Cancel(super::CancelCompilationRequest),
         #[prost(message, tag = "5")]
@@ -253,7 +215,7 @@ pub struct OwnerRelationIpcFrame {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExtractionEvent {
-    #[prost(oneof = "extraction_event::Event", tags = "2, 3, 4, 5, 6, 7")]
+    #[prost(oneof = "extraction_event::Event", tags = "2, 3, 5, 6, 7")]
     pub event: ::core::option::Option<extraction_event::Event>,
 }
 /// Nested message and enum types in `ExtractionEvent`.
@@ -264,8 +226,6 @@ pub mod extraction_event {
         CompilationBegin(super::CompilationBegin),
         #[prost(message, tag = "3")]
         OwnerBegin(super::OwnerBegin),
-        #[prost(message, tag = "4")]
-        OwnerObservationChunk(super::OwnerObservationChunk),
         #[prost(message, tag = "5")]
         OwnerEnd(super::OwnerEnd),
         #[prost(message, tag = "6")]

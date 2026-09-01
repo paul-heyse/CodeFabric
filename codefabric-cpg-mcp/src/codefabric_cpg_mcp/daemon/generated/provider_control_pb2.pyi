@@ -56,7 +56,6 @@ class ProviderEventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     PROVIDER_EVENT_KIND_ACCEPTED: _ClassVar[ProviderEventKind]
     PROVIDER_EVENT_KIND_PROGRESS: _ClassVar[ProviderEventKind]
     PROVIDER_EVENT_KIND_SCOPE_BEGIN: _ClassVar[ProviderEventKind]
-    PROVIDER_EVENT_KIND_OBSERVATION_CHUNK: _ClassVar[ProviderEventKind]
     PROVIDER_EVENT_KIND_SCOPE_END: _ClassVar[ProviderEventKind]
     PROVIDER_EVENT_KIND_TERMINAL: _ClassVar[ProviderEventKind]
     PROVIDER_EVENT_KIND_CANCEL_ACKNOWLEDGED: _ClassVar[ProviderEventKind]
@@ -69,12 +68,6 @@ class CancelAcknowledgementState(int, metaclass=_enum_type_wrapper.EnumTypeWrapp
     CANCEL_ACKNOWLEDGEMENT_STATE_CANCELLED: _ClassVar[CancelAcknowledgementState]
     CANCEL_ACKNOWLEDGEMENT_STATE_ALREADY_TERMINAL: _ClassVar[CancelAcknowledgementState]
     CANCEL_ACKNOWLEDGEMENT_STATE_FORCE_TERMINATED: _ClassVar[CancelAcknowledgementState]
-
-class CreditControlLimit(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    CREDIT_CONTROL_LIMIT_UNSPECIFIED: _ClassVar[CreditControlLimit]
-    CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS: _ClassVar[CreditControlLimit]
-    CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB: _ClassVar[CreditControlLimit]
 
 class ArrowIpcMetadataVersion(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -131,7 +124,6 @@ PROVIDER_EVENT_KIND_UNSPECIFIED: ProviderEventKind
 PROVIDER_EVENT_KIND_ACCEPTED: ProviderEventKind
 PROVIDER_EVENT_KIND_PROGRESS: ProviderEventKind
 PROVIDER_EVENT_KIND_SCOPE_BEGIN: ProviderEventKind
-PROVIDER_EVENT_KIND_OBSERVATION_CHUNK: ProviderEventKind
 PROVIDER_EVENT_KIND_SCOPE_END: ProviderEventKind
 PROVIDER_EVENT_KIND_TERMINAL: ProviderEventKind
 PROVIDER_EVENT_KIND_CANCEL_ACKNOWLEDGED: ProviderEventKind
@@ -141,9 +133,6 @@ CANCEL_ACKNOWLEDGEMENT_STATE_CANCELLATION_REQUESTED: CancelAcknowledgementState
 CANCEL_ACKNOWLEDGEMENT_STATE_CANCELLED: CancelAcknowledgementState
 CANCEL_ACKNOWLEDGEMENT_STATE_ALREADY_TERMINAL: CancelAcknowledgementState
 CANCEL_ACKNOWLEDGEMENT_STATE_FORCE_TERMINATED: CancelAcknowledgementState
-CREDIT_CONTROL_LIMIT_UNSPECIFIED: CreditControlLimit
-CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS: CreditControlLimit
-CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB: CreditControlLimit
 ARROW_IPC_METADATA_VERSION_UNSPECIFIED: ArrowIpcMetadataVersion
 ARROW_IPC_METADATA_VERSION_V5: ArrowIpcMetadataVersion
 RELATION_IPC_REMAINDER_REASON_UNSPECIFIED: RelationIpcRemainderReason
@@ -312,26 +301,6 @@ class ProviderScopeBeginEvent(_message.Message):
     scope: ProviderScope
     def __init__(self, header: _Optional[_Union[ProviderEventHeader, _Mapping]] = ..., scope: _Optional[_Union[ProviderScope, _Mapping]] = ...) -> None: ...
 
-class ProviderObservationChunkEvent(_message.Message):
-    __slots__ = ("header", "scope", "observation_family_code", "arrow_ipc", "payload_reference", "schema_digest", "row_count", "chunk_digest")
-    HEADER_FIELD_NUMBER: _ClassVar[int]
-    SCOPE_FIELD_NUMBER: _ClassVar[int]
-    OBSERVATION_FAMILY_CODE_FIELD_NUMBER: _ClassVar[int]
-    ARROW_IPC_FIELD_NUMBER: _ClassVar[int]
-    PAYLOAD_REFERENCE_FIELD_NUMBER: _ClassVar[int]
-    SCHEMA_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    ROW_COUNT_FIELD_NUMBER: _ClassVar[int]
-    CHUNK_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    header: ProviderEventHeader
-    scope: ProviderScope
-    observation_family_code: int
-    arrow_ipc: bytes
-    payload_reference: BlobReference
-    schema_digest: str
-    row_count: int
-    chunk_digest: str
-    def __init__(self, header: _Optional[_Union[ProviderEventHeader, _Mapping]] = ..., scope: _Optional[_Union[ProviderScope, _Mapping]] = ..., observation_family_code: _Optional[int] = ..., arrow_ipc: _Optional[bytes] = ..., payload_reference: _Optional[_Union[BlobReference, _Mapping]] = ..., schema_digest: _Optional[str] = ..., row_count: _Optional[int] = ..., chunk_digest: _Optional[str] = ...) -> None: ...
-
 class ProviderScopeEndEvent(_message.Message):
     __slots__ = ("header", "scope", "family_counts", "scope_digest")
     class FamilyCountsEntry(_message.Message):
@@ -386,22 +355,20 @@ class CancelAcknowledgedEvent(_message.Message):
     def __init__(self, header: _Optional[_Union[ProviderEventHeader, _Mapping]] = ..., state: _Optional[_Union[CancelAcknowledgementState, str]] = ...) -> None: ...
 
 class ProviderEvent(_message.Message):
-    __slots__ = ("accepted", "progress", "scope_begin", "observation_chunk", "scope_end", "terminal", "cancel_acknowledged")
+    __slots__ = ("accepted", "progress", "scope_begin", "scope_end", "terminal", "cancel_acknowledged")
     ACCEPTED_FIELD_NUMBER: _ClassVar[int]
     PROGRESS_FIELD_NUMBER: _ClassVar[int]
     SCOPE_BEGIN_FIELD_NUMBER: _ClassVar[int]
-    OBSERVATION_CHUNK_FIELD_NUMBER: _ClassVar[int]
     SCOPE_END_FIELD_NUMBER: _ClassVar[int]
     TERMINAL_FIELD_NUMBER: _ClassVar[int]
     CANCEL_ACKNOWLEDGED_FIELD_NUMBER: _ClassVar[int]
     accepted: ProviderAcceptedEvent
     progress: ProviderProgressEvent
     scope_begin: ProviderScopeBeginEvent
-    observation_chunk: ProviderObservationChunkEvent
     scope_end: ProviderScopeEndEvent
     terminal: ProviderTerminalEvent
     cancel_acknowledged: CancelAcknowledgedEvent
-    def __init__(self, accepted: _Optional[_Union[ProviderAcceptedEvent, _Mapping]] = ..., progress: _Optional[_Union[ProviderProgressEvent, _Mapping]] = ..., scope_begin: _Optional[_Union[ProviderScopeBeginEvent, _Mapping]] = ..., observation_chunk: _Optional[_Union[ProviderObservationChunkEvent, _Mapping]] = ..., scope_end: _Optional[_Union[ProviderScopeEndEvent, _Mapping]] = ..., terminal: _Optional[_Union[ProviderTerminalEvent, _Mapping]] = ..., cancel_acknowledged: _Optional[_Union[CancelAcknowledgedEvent, _Mapping]] = ...) -> None: ...
+    def __init__(self, accepted: _Optional[_Union[ProviderAcceptedEvent, _Mapping]] = ..., progress: _Optional[_Union[ProviderProgressEvent, _Mapping]] = ..., scope_begin: _Optional[_Union[ProviderScopeBeginEvent, _Mapping]] = ..., scope_end: _Optional[_Union[ProviderScopeEndEvent, _Mapping]] = ..., terminal: _Optional[_Union[ProviderTerminalEvent, _Mapping]] = ..., cancel_acknowledged: _Optional[_Union[CancelAcknowledgedEvent, _Mapping]] = ...) -> None: ...
 
 class CancelProviderRunRequest(_message.Message):
     __slots__ = ("provider_run_id", "reason", "idempotency_key")
@@ -428,24 +395,6 @@ class CancelAcknowledgement(_message.Message):
     cleaning_up_components: _containers.RepeatedScalarFieldContainer[str]
     forced_termination: bool
     def __init__(self, provider_run_id: _Optional[str] = ..., state: _Optional[_Union[CancelAcknowledgementState, str]] = ..., acknowledged_at_unix_ms: _Optional[int] = ..., terminal_state: _Optional[_Union[ProviderRunState, str]] = ..., cleaning_up_components: _Optional[_Iterable[str]] = ..., forced_termination: _Optional[bool] = ...) -> None: ...
-
-class ChunkAccepted(_message.Message):
-    __slots__ = ("sequence", "next_credit_bytes", "next_credit_chunks")
-    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
-    NEXT_CREDIT_BYTES_FIELD_NUMBER: _ClassVar[int]
-    NEXT_CREDIT_CHUNKS_FIELD_NUMBER: _ClassVar[int]
-    sequence: int
-    next_credit_bytes: int
-    next_credit_chunks: int
-    def __init__(self, sequence: _Optional[int] = ..., next_credit_bytes: _Optional[int] = ..., next_credit_chunks: _Optional[int] = ...) -> None: ...
-
-class ChunkRejected(_message.Message):
-    __slots__ = ("sequence", "error_code")
-    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
-    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
-    sequence: int
-    error_code: str
-    def __init__(self, sequence: _Optional[int] = ..., error_code: _Optional[str] = ...) -> None: ...
 
 class RelationIpcStreamIdentity(_message.Message):
     __slots__ = ("relation_id", "stream_id", "schema_fingerprint", "source_pin", "context_pin")

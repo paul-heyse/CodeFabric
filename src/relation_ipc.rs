@@ -1747,7 +1747,7 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_keeps_one_schema_and_dictionary_scope() {
+    fn wp34_int_round_trip_keeps_one_schema_and_dictionary_scope() {
         let mut builder = StringDictionaryBuilder::<Int32Type>::new();
         builder.append("alpha").unwrap();
         builder.append("beta").unwrap();
@@ -1831,7 +1831,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_and_out_of_order_sequences_fail_closed() {
+    fn wp34_ops_duplicate_and_out_of_order_sequences_fail_closed() {
         let contract = contract(50, 3);
         let frames = encode_relation_stream(
             &contract,
@@ -1869,7 +1869,7 @@ mod tests {
     }
 
     #[test]
-    fn truncation_and_corruption_are_distinct_typed_failures() {
+    fn wp34_ops_truncation_and_corruption_are_distinct_typed_failures() {
         let contract = contract(60, 2);
         let frames = encode_relation_stream(
             &contract,
@@ -2194,7 +2194,7 @@ mod tests {
     }
 
     #[test]
-    fn flow_control_credit_is_bounded_and_cancellation_is_terminal() {
+    fn wp34_ops_flow_control_credit_is_bounded_and_cancellation_is_terminal() {
         let contract = contract(130, 1);
         let limits = RelationIpcLimits {
             initial_credit_bytes: 32,
@@ -2246,7 +2246,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_count_byte_budget_and_backpressure_are_enforced_before_allocation() {
+    fn wp34_ops_frame_count_byte_budget_and_backpressure_are_enforced_before_allocation() {
         let contract = contract(140, 1);
         let frame_limits = RelationIpcLimits {
             max_payload_bytes_per_frame: 4,
@@ -2334,7 +2334,7 @@ mod tests {
     }
 
     #[test]
-    fn registration_binds_schema_fingerprint_and_exact_arrow_universe() {
+    fn wp34_int_registration_binds_schema_fingerprint_and_exact_arrow_universe() {
         let valid = contract(151, 1);
         assembler_with(&valid);
 
@@ -2361,7 +2361,7 @@ mod tests {
     }
 
     #[test]
-    fn opaque_schema_carriers_are_rejected_before_any_provider_bytes() {
+    fn wp34_neg_opaque_schema_carriers_are_rejected_before_any_provider_bytes() {
         for (marker, field) in [
             (152, Field::new("semantic_payload", DataType::Utf8, false)),
             (153, Field::new("semantic_bytes", DataType::Binary, false)),
@@ -2473,7 +2473,7 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_is_terminal_after_ipc_end_or_coverage_trailer() {
+    fn wp34_ops_cancellation_is_terminal_after_ipc_end_or_coverage_trailer() {
         let contract = contract(158, 1);
         let frames = encode_relation_stream(
             &contract,
@@ -2511,7 +2511,7 @@ mod tests {
 
     #[cfg(feature = "daemon")]
     #[test]
-    fn production_provider_schemas_interoperate_with_the_relation_stream_boundary() {
+    fn wp34_int_production_provider_schemas_interoperate_with_the_relation_stream_boundary() {
         let schemas = crate::pyrefly_service::PyreflyRelation::ALL
             .into_iter()
             .map(|relation| (relation.family_code(), relation.schema()))
@@ -2532,7 +2532,7 @@ mod tests {
     }
 
     #[test]
-    fn raw_json_cannot_masquerade_as_semantic_row_payload() {
+    fn wp34_neg_raw_json_cannot_masquerade_as_semantic_row_payload() {
         let contract = contract(150, 1);
         let json = br#"{"rows":[{"value":1}]}"#.to_vec();
         let mut assembler = assembler_with(&contract);

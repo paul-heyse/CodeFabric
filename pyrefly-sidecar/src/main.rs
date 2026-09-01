@@ -63,7 +63,9 @@ fn run(
             if socket.is_empty() {
                 return Err("Pyrefly endpoint path is empty".to_owned());
             }
-            server::serve(std::path::Path::new(socket))?;
+            let sandbox_profile_digest = std::env::var("CODEFABRIC_SANDBOX_PROFILE_DIGEST")
+                .map_err(|_| "CODEFABRIC_SANDBOX_PROFILE_DIGEST is required".to_owned())?;
+            server::serve(std::path::Path::new(socket), &sandbox_profile_digest)?;
         }
     }
     Ok(())

@@ -806,24 +806,6 @@ pub fn capability_scope_fingerprint(
     fingerprint.finalize()
 }
 
-/// Derive the Rust compiler capability coverage fingerprint.
-#[must_use]
-pub fn rustc_capability_scope_fingerprint(
-    workspace_id: [u8; 16],
-    analysis_context_id: [u8; 16],
-    source_generation: i64,
-    owner_id: [u8; 16],
-    chunk_digest: &str,
-) -> [u8; 32] {
-    let mut fingerprint = semantic_fingerprint(SemanticFingerprintDomain::RustcCapabilityScope);
-    fingerprint.update(&workspace_id);
-    fingerprint.update(&analysis_context_id);
-    fingerprint.update(&source_generation.to_be_bytes());
-    fingerprint.update(&owner_id);
-    fingerprint.update(chunk_digest.as_bytes());
-    fingerprint.finalize()
-}
-
 /// Derive the canonical fact-evidence identity used by every ingest lane.
 #[must_use]
 pub fn fact_evidence_id(

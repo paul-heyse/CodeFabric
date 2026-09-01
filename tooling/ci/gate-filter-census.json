@@ -207,8 +207,20 @@
       "command": "cargo nextest run --locked --lib -E 'test(/(round_trip_keeps_one_schema_and_dictionary_scope|registration_binds_schema_fingerprint_and_exact_arrow_universe|production_provider_schemas_interoperate_with_the_relation_stream_boundary|workspace_transaction_aggregates_all_four_exact_provider_lanes|observation_service_rejects_mismatched_launch_plan_binding_before_listen)/)' --no-tests=fail"
     },
     {
+      "recipe": "provider-relation-descriptor-contract-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/wp34_int_/)' --no-tests=fail"
+    },
+    {
       "recipe": "exact-provider-batch-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(exact_provider_native_relations_are_typed_and_source_pinned|incremental_run_emits_structural_changed_ranges|workspace_transaction_aggregates_all_four_exact_provider_lanes|accepted_rustc_zero_fact_relation_remains_a_proved_empty_batch|orchestrated_clean_and_incremental_generations_emit_equal_arrow_semantics)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/wp34_beh_/)' --no-tests=fail"
+    },
+    {
+      "recipe": "provider-gap-schema-shortcut-rejection-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/wp34_neg_/)' --no-tests=fail"
+    },
+    {
+      "recipe": "relation-ipc-provider-operations-check",
+      "command": "CODEFABRIC_PYREFLY_SIDECAR_BIN=\"$CF_ROOT/target/debug/codefabric-pyrefly-sidecar\" cargo nextest run --locked --lib -E 'test(/wp34_ops_/)' --no-tests=fail"
     },
     {
       "recipe": "provider-admission-exclusivity-check",

@@ -20,12 +20,13 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 use thiserror::Error;
 
 use crate::cancellation::Cancellation;
+use crate::fabric::production_kernel::CompiledProviderAuthority;
+use crate::production_provider_recipe::{CompiledProviderExecutionProfile, CompiledProviderLane};
 use crate::provider_raw_kinds::{
     ProviderRawKindDisposition, RUFF_PYTHON_FRONTEND, RuffPythonInventory,
     ruff_python_node_kind_entry, ruff_python_token_kind_entry,
 };
 use crate::provider_types::{ProviderBoundaryError, ProviderBoundaryMap, ProviderText};
-use crate::registries::{PROVIDER_RESOURCE_PROFILES, ProviderResourceProfileEntry};
 use crate::tree_sitter_adapter::{RawSyntaxFact, SyntaxOccurrenceId, TreeSitterSnapshot};
 
 mod callables;
@@ -443,7 +444,7 @@ struct RuffLimits {
 }
 
 impl RuffLimits {
-    const fn from_profile(profile: &ProviderResourceProfileEntry) -> Self {
+    const fn from_profile(profile: CompiledProviderExecutionProfile) -> Self {
         Self {
             max_input_bytes: profile.max_input_bytes,
             max_work_units: profile.max_work_units,
@@ -483,17 +484,16 @@ impl RuffAdapter {
     ///
     /// Returns a version mismatch if the release identity or profile is not the exact supported
     /// Ruff frontend.
-    pub fn new() -> Result<Self, RuffAdapterError> {
+    pub(crate) fn new(
+        compiled_authority: &CompiledProviderAuthority,
+    ) -> Result<Self, RuffAdapterError> {
         validate_runtime_inventory(&RUFF_PYTHON_FRONTEND)?;
-        let profile = PROVIDER_RESOURCE_PROFILES
-            .iter()
-            .find(|profile| profile.profile_id == "in-process-syntax-standard")
-            .ok_or_else(|| {
-                RuffAdapterError::ProviderVersionMismatch(
-                    "in-process-syntax-standard profile absent".into(),
-                )
-            })?;
-        if !profile.provider_ids.contains(&"ruff-python") || profile.max_parser_workers == 0 {
+        let profile = compiled_authority.execution_profile(CompiledProviderLane::Ruff);
+        if profile.provider_id != "ruff-python"
+            || profile.placement != "IN_PROCESS"
+            || profile.resource_profile_id != "in-process-syntax-standard"
+            || profile.max_parser_workers == 0
+        {
             return Err(RuffAdapterError::ProviderVersionMismatch(
                 "Ruff resource profile is not runnable".into(),
             ));
@@ -1820,9 +1820,15 @@ mod tests {
     use std::fmt::Write as _;
 
     use super::*;
+    use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::tree_sitter_adapter::{TreeSitterAdapter, TreeSitterLanguage};
 
     type ConfigureBound = fn(&mut RuffLimits);
+
+    fn ruff_adapter() -> Result<RuffAdapter, RuffAdapterError> {
+        let release = CompiledSemanticRelease::current();
+        RuffAdapter::new(release.provider_authority())
+    }
 
     fn provider_text(source: &str) -> ProviderText {
         ProviderText {
@@ -1848,7 +1854,8 @@ mod tests {
     }
 
     fn tree_snapshot(revision: u64, source: &ProviderText) -> TreeSitterSnapshot {
-        TreeSitterAdapter::new(TreeSitterLanguage::Python)
+        let release = CompiledSemanticRelease::current();
+        TreeSitterAdapter::new(release.provider_authority(), TreeSitterLanguage::Python)
             .unwrap()
             .parse_full(revision, source.clone(), &Cancellation::default())
             .unwrap()
@@ -1886,7 +1893,7 @@ mod tests {
         tree: &TreeSitterSnapshot,
         configure: impl FnOnce(&mut RuffLimits),
     ) -> Result<RuffSnapshot, RuffAdapterError> {
-        let mut adapter = RuffAdapter::new().unwrap();
+        let mut adapter = ruff_adapter().unwrap();
         configure(&mut adapter.limits);
         adapter.parse(1, source.clone(), tree, &Cancellation::default())
     }
@@ -2102,7 +2109,7 @@ mod tests {
             let revision = case["revision"].as_u64().unwrap();
             let text = provider_text(case["source"].as_str().unwrap());
             let tree = tree_snapshot(revision, &text);
-            let snapshot = RuffAdapter::new()
+            let snapshot = ruff_adapter()
                 .unwrap()
                 .parse(revision, text, &tree, &Cancellation::default())
                 .unwrap();
@@ -2150,7 +2157,7 @@ mod tests {
 
         let text = provider_text(RICH_SOURCE);
         let tree = tree_snapshot(1, &text);
-        let mut adapter = RuffAdapter::new().unwrap();
+        let mut adapter = ruff_adapter().unwrap();
         let snapshot = adapter
             .parse(1, text, &tree, &Cancellation::default())
             .unwrap();
@@ -2262,7 +2269,7 @@ mod tests {
     fn wp31_structural_acceptance() {
         let text = provider_text(RICH_SOURCE);
         let tree = tree_snapshot(1, &text);
-        let snapshot = RuffAdapter::new()
+        let snapshot = ruff_adapter()
             .unwrap()
             .parse(1, text, &tree, &Cancellation::default())
             .unwrap();
@@ -2331,7 +2338,7 @@ mod tests {
 
         let latin1 = latin1_provider_text();
         let latin1_tree = tree_snapshot(1, &latin1);
-        let latin1_snapshot = RuffAdapter::new()
+        let latin1_snapshot = ruff_adapter()
             .unwrap()
             .parse(1, latin1, &latin1_tree, &Cancellation::default())
             .unwrap();
@@ -2387,7 +2394,7 @@ mod tests {
         );
         let text = provider_text(ROLE_SOURCE);
         let tree = tree_snapshot(1, &text);
-        let snapshot = RuffAdapter::new()
+        let snapshot = ruff_adapter()
             .unwrap()
             .parse(1, text, &tree, &Cancellation::default())
             .unwrap();
@@ -2496,7 +2503,7 @@ mod tests {
 
         let doc_text = provider_text(DOC_SOURCE);
         let doc_tree = tree_snapshot(1, &doc_text);
-        let doc_snapshot = RuffAdapter::new()
+        let doc_snapshot = ruff_adapter()
             .unwrap()
             .parse(1, doc_text.clone(), &doc_tree, &Cancellation::default())
             .unwrap();
@@ -2540,7 +2547,7 @@ mod tests {
     fn wp31_exact_limit_and_identity_acceptance() {
         let source = provider_text("value = call(1)\n");
         let tree = tree_snapshot(1, &source);
-        let baseline = RuffAdapter::new()
+        let baseline = ruff_adapter()
             .unwrap()
             .parse(1, source.clone(), &tree, &Cancellation::default())
             .unwrap();
@@ -2586,7 +2593,7 @@ mod tests {
             let mut evidence = tree.clone();
             mutate(&mut evidence);
             assert_eq!(
-                RuffAdapter::new().unwrap().parse(
+                ruff_adapter().unwrap().parse(
                     1,
                     source.clone(),
                     &evidence,
@@ -2596,7 +2603,7 @@ mod tests {
             );
         }
 
-        let mut progress = RuffAdapter::new().unwrap();
+        let mut progress = ruff_adapter().unwrap();
         progress.limits.max_work_units = 5;
         assert_eq!(
             progress.check_progress(Instant::now(), 5, &Cancellation::default()),
@@ -2608,7 +2615,7 @@ mod tests {
         );
         let cancellation = Cancellation::with_check_interval(2);
         cancellation.cancel();
-        let mut interval = RuffAdapter::new().unwrap();
+        let mut interval = ruff_adapter().unwrap();
         interval.limits.cancellation_check_interval = 2;
         assert_eq!(
             interval.check_progress(Instant::now(), 1, &cancellation),
@@ -2619,7 +2626,7 @@ mod tests {
             Err(RuffAdapterError::Cancelled)
         );
 
-        let mut rejected = RuffAdapter::new().unwrap();
+        let mut rejected = ruff_adapter().unwrap();
         assert_eq!(
             rejected.reject::<()>(RuffAdapterError::InputLimit),
             Err(RuffAdapterError::InputLimit)
@@ -2664,7 +2671,7 @@ mod tests {
 
         let malformed = provider_text("def broken(:\n    pass\n");
         let malformed_tree = tree_snapshot(1, &malformed);
-        let malformed_snapshot = RuffAdapter::new()
+        let malformed_snapshot = ruff_adapter()
             .unwrap()
             .parse(1, malformed, &malformed_tree, &Cancellation::default())
             .unwrap();
@@ -2686,7 +2693,7 @@ mod tests {
 
         let good = provider_text("value = 1\n");
         let good_tree = tree_snapshot(1, &good);
-        let mut adapter = RuffAdapter::new().unwrap();
+        let mut adapter = ruff_adapter().unwrap();
         let accepted = adapter
             .parse(1, good, &good_tree, &Cancellation::default())
             .unwrap();
@@ -2723,7 +2730,7 @@ mod tests {
         );
         assert_eq!(adapter.active_snapshot(), Some(&accepted));
 
-        let mut bounded = RuffAdapter::new().unwrap();
+        let mut bounded = ruff_adapter().unwrap();
         bounded.limits.max_output_records = 1;
         assert_eq!(
             bounded.parse(2, replacement, &replacement_tree, &Cancellation::default()),
@@ -2756,7 +2763,7 @@ mod tests {
         for (configure, expected) in bound_cases {
             let source = provider_text("value = call(1)\n");
             let tree = tree_snapshot(1, &source);
-            let mut bounded = RuffAdapter::new().unwrap();
+            let mut bounded = ruff_adapter().unwrap();
             configure(&mut bounded.limits);
             assert_eq!(
                 bounded.parse(1, source, &tree, &Cancellation::default()),
@@ -2767,7 +2774,7 @@ mod tests {
 
         let source = provider_text("def broken(:\n    pass\n");
         let tree = tree_snapshot(1, &source);
-        let mut diagnostic_bounded = RuffAdapter::new().unwrap();
+        let mut diagnostic_bounded = ruff_adapter().unwrap();
         diagnostic_bounded.limits.max_diagnostics = 0;
         assert_eq!(
             diagnostic_bounded.parse(1, source, &tree, &Cancellation::default()),
@@ -2779,7 +2786,7 @@ mod tests {
     fn wp31_operational_acceptance() {
         let text = provider_text(RICH_SOURCE);
         let tree = tree_snapshot(1, &text);
-        let mut adapter = RuffAdapter::new().unwrap();
+        let mut adapter = ruff_adapter().unwrap();
         let snapshot = adapter
             .parse(1, text, &tree, &Cancellation::default())
             .unwrap();
@@ -2797,7 +2804,7 @@ mod tests {
         }
         let repetitive = provider_text(&repetitive_source);
         let tree = tree_snapshot(1, &repetitive);
-        let repetitive_snapshot = RuffAdapter::new()
+        let repetitive_snapshot = ruff_adapter()
             .unwrap()
             .parse(1, repetitive, &tree, &Cancellation::default())
             .unwrap();

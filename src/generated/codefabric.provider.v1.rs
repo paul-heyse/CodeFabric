@@ -143,25 +143,6 @@ pub struct ProviderScopeBeginEvent {
     #[prost(message, optional, tag = "2")]
     pub scope: ::core::option::Option<ProviderScope>,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ProviderObservationChunkEvent {
-    #[prost(message, optional, tag = "1")]
-    pub header: ::core::option::Option<ProviderEventHeader>,
-    #[prost(message, optional, tag = "2")]
-    pub scope: ::core::option::Option<ProviderScope>,
-    #[prost(uint32, tag = "3")]
-    pub observation_family_code: u32,
-    #[prost(bytes = "vec", tag = "4")]
-    pub arrow_ipc: ::prost::alloc::vec::Vec<u8>,
-    #[prost(message, optional, tag = "5")]
-    pub payload_reference: ::core::option::Option<BlobReference>,
-    #[prost(string, tag = "6")]
-    pub schema_digest: ::prost::alloc::string::String,
-    #[prost(uint64, tag = "7")]
-    pub row_count: u64,
-    #[prost(string, tag = "8")]
-    pub chunk_digest: ::prost::alloc::string::String,
-}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ProviderScopeEndEvent {
     #[prost(message, optional, tag = "1")]
@@ -206,7 +187,7 @@ pub struct CancelAcknowledgedEvent {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ProviderEvent {
-    #[prost(oneof = "provider_event::Event", tags = "1, 2, 3, 4, 5, 6, 7")]
+    #[prost(oneof = "provider_event::Event", tags = "1, 2, 3, 5, 6, 7")]
     pub event: ::core::option::Option<provider_event::Event>,
 }
 /// Nested message and enum types in `ProviderEvent`.
@@ -219,8 +200,6 @@ pub mod provider_event {
         Progress(super::ProviderProgressEvent),
         #[prost(message, tag = "3")]
         ScopeBegin(super::ProviderScopeBeginEvent),
-        #[prost(message, tag = "4")]
-        ObservationChunk(super::ProviderObservationChunkEvent),
         #[prost(message, tag = "5")]
         ScopeEnd(super::ProviderScopeEndEvent),
         #[prost(message, tag = "6")]
@@ -252,22 +231,6 @@ pub struct CancelAcknowledgement {
     pub cleaning_up_components: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(bool, tag = "6")]
     pub forced_termination: bool,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ChunkAccepted {
-    #[prost(uint64, tag = "1")]
-    pub sequence: u64,
-    #[prost(uint64, tag = "2")]
-    pub next_credit_bytes: u64,
-    #[prost(uint32, tag = "3")]
-    pub next_credit_chunks: u32,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ChunkRejected {
-    #[prost(uint64, tag = "1")]
-    pub sequence: u64,
-    #[prost(string, tag = "2")]
-    pub error_code: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RelationIpcStreamIdentity {
@@ -564,7 +527,6 @@ pub enum ProviderEventKind {
     Accepted = 1,
     Progress = 2,
     ScopeBegin = 3,
-    ObservationChunk = 4,
     ScopeEnd = 5,
     Terminal = 6,
     CancelAcknowledged = 7,
@@ -580,7 +542,6 @@ impl ProviderEventKind {
             Self::Accepted => "PROVIDER_EVENT_KIND_ACCEPTED",
             Self::Progress => "PROVIDER_EVENT_KIND_PROGRESS",
             Self::ScopeBegin => "PROVIDER_EVENT_KIND_SCOPE_BEGIN",
-            Self::ObservationChunk => "PROVIDER_EVENT_KIND_OBSERVATION_CHUNK",
             Self::ScopeEnd => "PROVIDER_EVENT_KIND_SCOPE_END",
             Self::Terminal => "PROVIDER_EVENT_KIND_TERMINAL",
             Self::CancelAcknowledged => "PROVIDER_EVENT_KIND_CANCEL_ACKNOWLEDGED",
@@ -593,7 +554,6 @@ impl ProviderEventKind {
             "PROVIDER_EVENT_KIND_ACCEPTED" => Some(Self::Accepted),
             "PROVIDER_EVENT_KIND_PROGRESS" => Some(Self::Progress),
             "PROVIDER_EVENT_KIND_SCOPE_BEGIN" => Some(Self::ScopeBegin),
-            "PROVIDER_EVENT_KIND_OBSERVATION_CHUNK" => Some(Self::ObservationChunk),
             "PROVIDER_EVENT_KIND_SCOPE_END" => Some(Self::ScopeEnd),
             "PROVIDER_EVENT_KIND_TERMINAL" => Some(Self::Terminal),
             "PROVIDER_EVENT_KIND_CANCEL_ACKNOWLEDGED" => Some(Self::CancelAcknowledged),
@@ -637,35 +597,6 @@ impl CancelAcknowledgementState {
             "CANCEL_ACKNOWLEDGEMENT_STATE_CANCELLED" => Some(Self::Cancelled),
             "CANCEL_ACKNOWLEDGEMENT_STATE_ALREADY_TERMINAL" => Some(Self::AlreadyTerminal),
             "CANCEL_ACKNOWLEDGEMENT_STATE_FORCE_TERMINATED" => Some(Self::ForceTerminated),
-            _ => None,
-        }
-    }
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum CreditControlLimit {
-    Unspecified = 0,
-    MaxOutstandingChunks = 4,
-    MaxUnacknowledgedMib = 16,
-}
-impl CreditControlLimit {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            Self::Unspecified => "CREDIT_CONTROL_LIMIT_UNSPECIFIED",
-            Self::MaxOutstandingChunks => "CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS",
-            Self::MaxUnacknowledgedMib => "CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "CREDIT_CONTROL_LIMIT_UNSPECIFIED" => Some(Self::Unspecified),
-            "CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS" => Some(Self::MaxOutstandingChunks),
-            "CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB" => Some(Self::MaxUnacknowledgedMib),
             _ => None,
         }
     }

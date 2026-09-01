@@ -54,7 +54,7 @@ def production_messages() -> dict[str, Message]:
         ),
         "pyrefly_hello": pyrefly.Hello(
             protocol_major=1,
-            maximum_arrow_chunk_bytes=1_048_576,
+            maximum_arrow_ipc_bytes=1_048_576,
         ),
         "rustc_accepted": rustc.CompilationAccepted(
             provider_run_id="run:test",
@@ -134,8 +134,6 @@ def test_wp10_structural_acceptance_is_closed_and_registry_aligned() -> None:
     assert sequence.type == sequence.TYPE_UINT64
     assert cpg.FRESHNESS_POLICY_REQUIRE_CURRENT_FOR_TARGETS == 3
     assert provider.PROVIDER_RUN_STATE_PROTOCOL_ERROR == 100
-    assert provider.CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS == 4
-    assert provider.CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB == 16
     resource_profile_id = provider.ProviderJobSpec.DESCRIPTOR.fields_by_name["resource_profile_id"]
     assert resource_profile_id.number == 15
     assert resource_profile_id.type == resource_profile_id.TYPE_STRING

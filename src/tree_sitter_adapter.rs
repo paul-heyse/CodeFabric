@@ -16,13 +16,14 @@ use tree_sitter::{
 };
 
 use crate::cancellation::Cancellation;
+use crate::fabric::production_kernel::CompiledProviderAuthority;
+use crate::production_provider_recipe::{CompiledProviderExecutionProfile, CompiledProviderLane};
 use crate::provider_raw_kinds::{
     ProviderGrammarInventory, ProviderGrammarKind, ProviderRawKindDisposition,
     TREE_SITTER_PYTHON_GRAMMAR, TREE_SITTER_RECOVERY_QUERY, TREE_SITTER_RUST_GRAMMAR,
     tree_sitter_raw_kind_entry,
 };
 use crate::provider_types::{ProviderBoundaryError, ProviderBoundaryMap, ProviderText};
-use crate::registries::{PROVIDER_RESOURCE_PROFILES, ProviderResourceProfileEntry};
 
 /// Closed language selection for the two Wave-4 complete-CST adapters.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -198,7 +199,7 @@ struct TreeSitterLimits {
 }
 
 impl TreeSitterLimits {
-    fn from_profile(profile: &ProviderResourceProfileEntry) -> Self {
+    const fn from_profile(profile: CompiledProviderExecutionProfile) -> Self {
         Self {
             max_input_bytes: profile.max_input_bytes,
             max_work_units: profile.max_work_units,
@@ -299,7 +300,10 @@ impl TreeSitterAdapter {
     /// Returns a version mismatch for any ABI, node, field, source metadata, or
     /// fingerprint drift, and `InvalidQuery` if the governed recovery query no
     /// longer compiles for the exact grammar.
-    pub fn new(language_choice: TreeSitterLanguage) -> Result<Self, TreeSitterAdapterError> {
+    pub(crate) fn new(
+        compiled_authority: &CompiledProviderAuthority,
+        language_choice: TreeSitterLanguage,
+    ) -> Result<Self, TreeSitterAdapterError> {
         let (language, node_types, inventory) = language_choice.runtime();
         validate_runtime_inventory(&language, node_types, inventory)?;
         let mut parser = Parser::new();
@@ -308,15 +312,10 @@ impl TreeSitterAdapter {
             .map_err(|error| TreeSitterAdapterError::ProviderVersionMismatch(error.to_string()))?;
         let query = Query::new(&language, TREE_SITTER_RECOVERY_QUERY)
             .map_err(|error| TreeSitterAdapterError::InvalidQuery(error.to_string()))?;
-        let profile = PROVIDER_RESOURCE_PROFILES
-            .iter()
-            .find(|profile| profile.profile_id == "in-process-syntax-standard")
-            .ok_or_else(|| {
-                TreeSitterAdapterError::ProviderVersionMismatch(
-                    "in-process-syntax-standard profile absent".into(),
-                )
-            })?;
-        if !profile.provider_ids.contains(&"tree-sitter")
+        let profile = compiled_authority.execution_profile(CompiledProviderLane::TreeSitter);
+        if profile.provider_id != "tree-sitter"
+            || profile.placement != "IN_PROCESS"
+            || profile.resource_profile_id != "in-process-syntax-standard"
             || profile.max_parser_workers == 0
             || profile.max_retained_tree_revisions == 0
         {
@@ -922,8 +921,13 @@ fn point_at(text: &str, byte: usize) -> Result<Point, TreeSitterAdapterError> {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
+    use crate::fabric::production_kernel::CompiledSemanticRelease;
+
+    fn current_release_adapter(language: TreeSitterLanguage) -> TreeSitterAdapter {
+        let release = CompiledSemanticRelease::current();
+        TreeSitterAdapter::new(release.provider_authority(), language).unwrap()
+    }
 
     fn provider_text(text: &str) -> ProviderText {
         ProviderText {
@@ -1016,7 +1020,7 @@ mod tests {
     fn wp30_behavioral_acceptance() {
         for case in fixture()["cases"].as_array().unwrap() {
             let language = fixture_language(&case["language"]);
-            let mut adapter = TreeSitterAdapter::new(language).unwrap();
+            let mut adapter = current_release_adapter(language);
             let inventory = *adapter.inventory();
             let snapshot = adapter
                 .parse_full(
@@ -1084,7 +1088,7 @@ mod tests {
             let new_fragment = edit_case["new_fragment"].as_str().unwrap();
             let start = old.rfind(old_fragment).unwrap();
             assert_eq!(start, new.rfind(new_fragment).unwrap());
-            let mut incremental = TreeSitterAdapter::new(language).unwrap();
+            let mut incremental = current_release_adapter(language);
             incremental
                 .parse_full(1, provider_text(old), &Cancellation::default())
                 .unwrap();
@@ -1100,8 +1104,7 @@ mod tests {
                     &Cancellation::default(),
                 )
                 .unwrap();
-            let fully_parsed = TreeSitterAdapter::new(language)
-                .unwrap()
+            let fully_parsed = current_release_adapter(language)
                 .parse_full(2, provider_text(new), &Cancellation::default())
                 .unwrap();
             assert_eq!(incrementally_parsed.facts, fully_parsed.facts);
@@ -1114,8 +1117,7 @@ mod tests {
             );
         }
 
-        let latin1 = TreeSitterAdapter::new(TreeSitterLanguage::Python)
-            .unwrap()
+        let latin1 = current_release_adapter(TreeSitterLanguage::Python)
             .parse_full(1, latin1_provider_text(), &Cancellation::default())
             .unwrap();
         assert_eq!(latin1.facts.first().unwrap().end_byte, 29);
@@ -1301,11 +1303,11 @@ mod tests {
         let tree = parser.parse("def broken(:\n", None).unwrap();
         let query = Query::new(&language, TREE_SITTER_RECOVERY_QUERY).unwrap();
         let mut cursor = QueryCursor::new();
+        let release = CompiledSemanticRelease::current();
         let limits = TreeSitterLimits::from_profile(
-            PROVIDER_RESOURCE_PROFILES
-                .iter()
-                .find(|profile| profile.profile_id == "in-process-syntax-standard")
-                .unwrap(),
+            release
+                .provider_authority()
+                .execution_profile(CompiledProviderLane::TreeSitter),
         );
         let mut work_units = 0;
         assert!(matches!(
@@ -1343,7 +1345,7 @@ mod tests {
         let malformed = String::from_utf8_lossy(&[b'f', b'n', b' ', 0xff, b'(']).into_owned();
         for language in [TreeSitterLanguage::Python, TreeSitterLanguage::Rust] {
             let result = std::panic::catch_unwind(|| {
-                TreeSitterAdapter::new(language).unwrap().parse_full(
+                current_release_adapter(language).parse_full(
                     1,
                     provider_text(&malformed),
                     &Cancellation::default(),
@@ -1352,7 +1354,7 @@ mod tests {
             assert!(result.is_ok());
             assert!(result.unwrap().is_ok());
         }
-        let mut adapter = TreeSitterAdapter::new(TreeSitterLanguage::Rust).unwrap();
+        let mut adapter = current_release_adapter(TreeSitterLanguage::Rust);
         adapter
             .parse_full(1, provider_text("fn main() {}\n"), &Cancellation::default())
             .unwrap();
@@ -1401,7 +1403,7 @@ mod tests {
             Some(AbortReason::Cancelled)
         );
 
-        let mut adapter = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
+        let mut adapter = current_release_adapter(TreeSitterLanguage::Python);
         let complete = adapter
             .parse_full(1, provider_text("value = 1\n"), &Cancellation::default())
             .unwrap();
@@ -1425,14 +1427,14 @@ mod tests {
 
         let standard_limits = adapter.limits;
         let exact_input = "x = 1\n";
-        let mut exact_input_adapter = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
+        let mut exact_input_adapter = current_release_adapter(TreeSitterLanguage::Python);
         exact_input_adapter.limits.max_input_bytes = u64::try_from(exact_input.len()).unwrap();
         assert!(
             exact_input_adapter
                 .parse_full(1, provider_text(exact_input), &Cancellation::default())
                 .is_ok()
         );
-        let mut over_input_adapter = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
+        let mut over_input_adapter = current_release_adapter(TreeSitterLanguage::Python);
         over_input_adapter.limits.max_input_bytes =
             u64::try_from(exact_input.len().saturating_sub(1)).unwrap();
         assert_eq!(

@@ -1,6 +1,6 @@
 //! Released protocol bindings shared with the stable daemon.
 
-#[allow(clippy::all, clippy::pedantic)]
+#[allow(clippy::all, clippy::pedantic, dead_code)]
 pub(crate) mod generated {
     pub(crate) mod codefabric {
         pub(crate) mod provider {

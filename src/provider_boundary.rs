@@ -181,7 +181,7 @@ pub enum ContractDisposition {
 /// Required behavior when a normally available provider family cannot complete.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnavailableBehavior {
-    pub status: TerminalStatus,
+    pub allowed_statuses: Vec<TerminalStatus>,
     pub allowed_reasons: Vec<RemainderReason>,
 }
 
@@ -603,7 +603,10 @@ fn validate_contract_row(row: &ProviderBoundaryContractRow) -> Result<(), Provid
         ContractDisposition::IntentionalRemainder {
             reason: RemainderReason::Unsupported,
         } if row.authority == ProviderAuthorityRole::ForbiddenProviderNative
-            && row.unavailable_behavior.status == TerminalStatus::Partial
+            && row
+                .unavailable_behavior
+                .allowed_statuses
+                .contains(&TerminalStatus::Partial)
             && row
                 .unavailable_behavior
                 .allowed_reasons
@@ -675,30 +678,36 @@ fn validate_field_roles(field: &ProviderBoundaryField) -> Result<(), ProviderBou
 fn validate_unavailable_behavior(
     behavior: &UnavailableBehavior,
 ) -> Result<(), ProviderBoundaryError> {
-    if behavior.allowed_reasons.is_empty() {
+    if behavior.allowed_statuses.is_empty() || behavior.allowed_reasons.is_empty() {
         return Err(ProviderBoundaryError::InvalidUnavailableBehavior);
     }
     if behavior
-        .allowed_reasons
-        .iter()
-        .enumerate()
-        .any(|(index, reason)| behavior.allowed_reasons[..index].contains(reason))
+        .allowed_statuses
+        .contains(&TerminalStatus::Complete)
+        || behavior
+            .allowed_statuses
+            .iter()
+            .enumerate()
+            .any(|(index, status)| behavior.allowed_statuses[..index].contains(status))
+        || behavior
+            .allowed_reasons
+            .iter()
+            .enumerate()
+            .any(|(index, reason)| behavior.allowed_reasons[..index].contains(reason))
     {
         return Err(ProviderBoundaryError::InvalidUnavailableBehavior);
     }
-    match behavior.status {
-        TerminalStatus::Complete => Err(ProviderBoundaryError::InvalidUnavailableBehavior),
-        TerminalStatus::Partial
-            if !behavior.allowed_reasons.contains(&RemainderReason::Unknown) =>
-        {
-            Ok(())
-        }
-        TerminalStatus::Unknown if behavior.allowed_reasons.contains(&RemainderReason::Unknown) => {
-            Ok(())
-        }
-        TerminalStatus::Partial | TerminalStatus::Unknown => {
-            Err(ProviderBoundaryError::InvalidUnavailableBehavior)
-        }
+    let supports_partial = behavior.allowed_statuses.contains(&TerminalStatus::Partial)
+        && behavior
+            .allowed_reasons
+            .iter()
+            .any(|reason| *reason != RemainderReason::Unknown);
+    let supports_unknown = behavior.allowed_statuses.contains(&TerminalStatus::Unknown)
+        && behavior.allowed_reasons.contains(&RemainderReason::Unknown);
+    if supports_partial || supports_unknown {
+        Ok(())
+    } else {
+        Err(ProviderBoundaryError::InvalidUnavailableBehavior)
     }
 }
 
@@ -904,7 +913,7 @@ fn validate_actual_unavailable(
     trailer: &CoverageTrailer,
     behavior: &UnavailableBehavior,
 ) -> Result<(), ProviderBoundaryError> {
-    if trailer.status != behavior.status
+    if !behavior.allowed_statuses.contains(&trailer.status)
         || trailer
             .remainders
             .iter()
@@ -1196,7 +1205,7 @@ mod tests {
 
     fn unavailable() -> UnavailableBehavior {
         UnavailableBehavior {
-            status: TerminalStatus::Partial,
+            allowed_statuses: vec![TerminalStatus::Partial],
             allowed_reasons: vec![
                 RemainderReason::ProviderUnavailable,
                 RemainderReason::ResourceLimit,
@@ -1386,7 +1395,7 @@ mod tests {
     fn provider_declared_unknown_and_missing_relation_are_distinct() {
         let mut row = required_row(47, "python.module_resolver");
         row.unavailable_behavior = UnavailableBehavior {
-            status: TerminalStatus::Unknown,
+            allowed_statuses: vec![TerminalStatus::Unknown],
             allowed_reasons: vec![RemainderReason::Unknown],
         };
         let contract = contract(row.clone());
@@ -1529,7 +1538,7 @@ mod tests {
             reason: RemainderReason::Unsupported,
         };
         row.unavailable_behavior = UnavailableBehavior {
-            status: TerminalStatus::Partial,
+            allowed_statuses: vec![TerminalStatus::Partial],
             allowed_reasons: vec![RemainderReason::Unsupported],
         };
         let contract = contract(row.clone());

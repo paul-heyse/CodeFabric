@@ -10,6 +10,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use arrow_array::RecordBatch;
 use arrow_ipc::reader::StreamReader;
 use futures::{Stream, stream};
 use prost::Message;
@@ -18,10 +19,11 @@ use tonic::service::InterceptorLayer;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
+use crate::fabric::production_kernel::CompiledProviderAuthority;
+use crate::production_provider_recipe::CompiledProviderLane;
 use crate::registries::RustcFeatureMask;
-use crate::registries::{PROVIDER_ENTRIES, PROVIDER_RESOURCE_PROFILES};
 use crate::rpc::generated::codefabric::provider::v1::{
-    CancelAcknowledgement, CancelAcknowledgementState, ChunkRejected, ProviderRunState,
+    CancelAcknowledgement, CancelAcknowledgementState, ProviderRunState,
 };
 use crate::rpc::generated::codefabric::rustc::v1::extraction_event::Event;
 use crate::rpc::generated::codefabric::rustc::v1::extractor_command::Command;
@@ -29,8 +31,8 @@ use crate::rpc::generated::codefabric::rustc::v1::rustc_extractor_server::RustcE
 use crate::rpc::generated::codefabric::rustc::v1::rustc_extractor_server::RustcExtractorServer;
 use crate::rpc::generated::codefabric::rustc::v1::{
     CancelCompilationRequest, CompilationBegin, CompilationEnd, ExtractionEvent, ExtractorCommand,
-    ExtractorHello, ExtractorHelloAck, OwnerBegin, OwnerEnd, OwnerObservationChunk,
-    OwnerRelationIpcFrame, RejectionRuleErrorCode,
+    ExtractorHello, ExtractorHelloAck, OwnerBegin, OwnerEnd, OwnerRelationIpcFrame,
+    RejectionRuleErrorCode,
 };
 use crate::rpc::{AuthorizedUnixStream, SameUserInterceptor, negotiate_feature_bits};
 
@@ -56,8 +58,8 @@ use crate::rustc_relation_schema::{RustcRelation, schema_bundle_digest};
 
 include!("digest_frames.rs");
 
-/// AC-G-31 maximum number of chunks a wrapper may have in flight.
-pub const MAX_OUTSTANDING_CHUNKS: u32 = 4;
+/// AC-G-31 maximum number of relation-IPC payload frames a wrapper may have in flight.
+pub const MAX_OUTSTANDING_FRAMES: u32 = 4;
 /// AC-G-31 maximum unacknowledged payload bytes per compilation.
 pub const MAX_UNACKNOWLEDGED_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_DECODED_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
@@ -108,38 +110,32 @@ fn valid_identifier(value: &str) -> bool {
 
 /// Digest an inline Arrow IPC payload with the canonical `b3:` framing.
 #[must_use]
-pub fn arrow_chunk_digest(bytes: &[u8]) -> String {
+pub fn arrow_ipc_digest(bytes: &[u8]) -> String {
     digest(bytes)
 }
 
-fn validate_typed_relation_chunk(chunk: &OwnerObservationChunk) -> Result<(), Status> {
-    let relation =
-        RustcRelation::from_family_code(chunk.observation_family_code).ok_or_else(|| {
-            Status::invalid_argument(
-                "rustc observation family is not a pinned typed relation contract",
-            )
-        })?;
-    if chunk.payload_reference.is_some()
-        || chunk.arrow_ipc.is_empty()
-        || chunk.arrow_ipc.len() as u64 > MAX_UNACKNOWLEDGED_BYTES
-        || chunk.row_count > MAX_RELATION_ROWS
-        || !chunk.arrow_ipc.ends_with(&IPC_STREAM_EOS)
-        || chunk.schema_digest != relation.schema_digest()
+fn validate_accepted_relation(relation: &AcceptedRustcRelation) -> Result<(), Status> {
+    if relation.arrow_ipc.is_empty()
+        || relation.arrow_ipc.len() as u64 > MAX_UNACKNOWLEDGED_BYTES
+        || relation.row_count > MAX_RELATION_ROWS
+        || !relation.arrow_ipc.ends_with(&IPC_STREAM_EOS)
+        || relation.schema_digest != relation.relation.schema_digest()
+        || relation.arrow_ipc_digest != arrow_ipc_digest(&relation.arrow_ipc)
     {
         return Err(Status::invalid_argument(
             "rustc relation violates its inline Arrow stream contract",
         ));
     }
-    crate::relation_ipc::validate_arrow_ipc_profile(&chunk.arrow_ipc).map_err(|error| {
+    crate::relation_ipc::validate_arrow_ipc_profile(&relation.arrow_ipc).map_err(|error| {
         Status::invalid_argument(format!(
             "rustc relation differs from the pinned Arrow IPC profile: {error}"
         ))
     })?;
     let mut reader =
-        StreamReader::try_new(Cursor::new(&chunk.arrow_ipc), None).map_err(|error| {
+        StreamReader::try_new(Cursor::new(&relation.arrow_ipc), None).map_err(|error| {
             Status::invalid_argument(format!("invalid rustc Arrow stream: {error}"))
         })?;
-    if reader.schema().as_ref() != relation.schema().as_ref() {
+    if reader.schema().as_ref() != relation.relation.schema().as_ref() {
         return Err(Status::invalid_argument(
             "rustc relation schema differs from the application-owned contract",
         ));
@@ -154,7 +150,8 @@ fn validate_typed_relation_chunk(chunk: &OwnerObservationChunk) -> Result<(), St
         .transpose()
         .map_err(|error| Status::invalid_argument(format!("invalid rustc Arrow batch: {error}")))?
         .is_some()
-        || u64::try_from(batch.num_rows()).unwrap_or(u64::MAX) != chunk.row_count
+        || u64::try_from(batch.num_rows()).unwrap_or(u64::MAX) != relation.row_count
+        || batch != relation.batch
     {
         return Err(Status::invalid_argument(
             "rustc relation must contain exactly one declared-size Arrow batch",
@@ -163,11 +160,11 @@ fn validate_typed_relation_chunk(chunk: &OwnerObservationChunk) -> Result<(), St
     Ok(())
 }
 
-/// Compute the governed owner-content digest from a begin record and ordered chunks.
+/// Compute the governed owner-content digest from a begin record and ordered relations.
 #[must_use]
-pub fn owner_content_digest(begin: &OwnerBegin, chunks: &[OwnerObservationChunk]) -> String {
+pub fn owner_content_digest(begin: &OwnerBegin, relations: &[AcceptedRustcRelation]) -> String {
     let mut fields = vec![begin.encode_to_vec()];
-    fields.extend(chunks.iter().map(Message::encode_to_vec));
+    fields.extend(relations.iter().map(AcceptedRustcRelation::digest_frame));
     digest_frames(b"codefabric.rustc.owner-content.v1\0", fields)
 }
 
@@ -270,11 +267,39 @@ impl RustcProtocolPolicy {
     }
 }
 
-/// One completely verified compiler owner and its Arrow observation chunks.
+/// One completely verified application-owned compiler relation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AcceptedRustcRelation {
+    pub relation: RustcRelation,
+    pub logical_sequence: u64,
+    pub schema_digest: String,
+    pub row_count: u64,
+    pub arrow_ipc_digest: String,
+    pub arrow_ipc: Vec<u8>,
+    pub batch: RecordBatch,
+}
+
+impl AcceptedRustcRelation {
+    fn digest_frame(&self) -> Vec<u8> {
+        digest_frames(
+            b"codefabric.rustc.owner-relation.v1\0",
+            [
+                self.logical_sequence.to_be_bytes().to_vec(),
+                self.relation.family_code().to_be_bytes().to_vec(),
+                self.schema_digest.as_bytes().to_vec(),
+                self.row_count.to_be_bytes().to_vec(),
+                self.arrow_ipc_digest.as_bytes().to_vec(),
+            ],
+        )
+        .into_bytes()
+    }
+}
+
+/// One completely verified compiler owner and its application-owned Arrow relations.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AcceptedRustcOwner {
     pub begin: OwnerBegin,
-    pub chunks: Vec<OwnerObservationChunk>,
+    pub relations: Vec<AcceptedRustcRelation>,
     pub end: OwnerEnd,
 }
 
@@ -443,7 +468,7 @@ struct OpenOwner {
     begin: OwnerBegin,
     expected_families: BTreeSet<u32>,
     observed_counts: BTreeMap<u32, u64>,
-    chunks: Vec<OwnerObservationChunk>,
+    relations: Vec<AcceptedRustcRelation>,
     relation_by_stream: BTreeMap<StreamId, RustcRelation>,
     logical_sequence_by_stream: BTreeMap<StreamId, u64>,
     next_ack_sequence: BTreeMap<StreamId, u64>,
@@ -577,7 +602,7 @@ impl RunValidator {
             begin,
             expected_families,
             observed_counts: BTreeMap::new(),
-            chunks: Vec::new(),
+            relations: Vec::new(),
             relation_by_stream,
             logical_sequence_by_stream: BTreeMap::new(),
             next_ack_sequence,
@@ -717,29 +742,31 @@ impl RunValidator {
                 .logical_sequence_by_stream
                 .remove(&stream_id)
                 .ok_or_else(|| Status::failed_precondition("relation terminal lacks its open"))?;
-            let row_count = u64::try_from(assembled.batches[0].num_rows()).unwrap_or(u64::MAX);
+            let batch = assembled
+                .batches
+                .into_iter()
+                .next()
+                .expect("single batch checked above");
+            let row_count = u64::try_from(batch.num_rows()).unwrap_or(u64::MAX);
             let arrow_ipc = assembled.ipc_bytes;
-            let chunk = OwnerObservationChunk {
-                provider_run_id: relation_frame.provider_run_id,
-                compilation_unit_id: relation_frame.compilation_unit_id,
-                sequence: logical_sequence,
-                owner_id: relation_frame.owner_id,
-                observation_family_code: relation_frame.observation_family_code,
-                chunk_digest: arrow_chunk_digest(&arrow_ipc),
-                arrow_ipc,
-                payload_reference: None,
+            let accepted_relation = AcceptedRustcRelation {
+                relation,
+                logical_sequence,
                 schema_digest: relation.schema_digest(),
                 row_count,
+                arrow_ipc_digest: arrow_ipc_digest(&arrow_ipc),
+                arrow_ipc,
+                batch,
             };
-            validate_typed_relation_chunk(&chunk)?;
+            validate_accepted_relation(&accepted_relation)?;
             if owner
                 .observed_counts
-                .insert(chunk.observation_family_code, chunk.row_count)
+                .insert(relation.family_code(), accepted_relation.row_count)
                 .is_some()
             {
                 return Err(Status::already_exists("relation terminal is duplicated"));
             }
-            owner.chunks.push(chunk);
+            owner.relations.push(accepted_relation);
         }
         self.next_sequence = self
             .next_sequence
@@ -798,17 +825,17 @@ impl RunValidator {
             .collect::<BTreeMap<_, _>>();
         if end.owner_id != owner_id
             || reported_counts != owner.observed_counts
-            || end.owner_content_digest != owner_content_digest(&owner.begin, &owner.chunks)
+            || end.owner_content_digest != owner_content_digest(&owner.begin, &owner.relations)
         {
             return Err(Status::data_loss(
-                "owner counts or content digest differ from accepted chunks",
+                "owner counts or content digest differ from accepted relations",
             ));
         }
         self.next_sequence += 1;
         self.events.push(event);
         self.owners.push(AcceptedRustcOwner {
             begin: owner.begin,
-            chunks: owner.chunks,
+            relations: owner.relations,
             end,
         });
         Ok(())
@@ -969,7 +996,8 @@ impl RustcObservationService {
     /// # Errors
     ///
     /// Rejects incomplete identities, malformed digests, and already-expired policies.
-    pub fn new(
+    pub(crate) fn new(
+        compiled_authority: &CompiledProviderAuthority,
         policy: RustcProtocolPolicy,
         admission: RustcRunAdmission,
         trust_binding: RustCompilationProtocolBinding,
@@ -1003,23 +1031,17 @@ impl RustcObservationService {
                     "rustc launch-plan binding differs from protocol admission: {error}"
                 ))
             })?;
-        let provider = PROVIDER_ENTRIES
-            .iter()
-            .find(|provider| provider.provider_id == "rustc-mir")
-            .ok_or_else(|| Status::failed_precondition("rustc provider registry is absent"))?;
-        let profile = PROVIDER_RESOURCE_PROFILES
-            .iter()
-            .find(|profile| profile.profile_id == admission.resource_profile_id)
-            .ok_or_else(|| Status::failed_precondition("rustc resource profile is absent"))?;
-        if provider.placement != "COMPILER_GROUP"
-            || provider.resource_profile_id != profile.profile_id
-            || !profile.provider_ids.contains(&provider.provider_id)
+        let profile = compiled_authority.execution_profile(CompiledProviderLane::Rustc);
+        if profile.provider_id != "rustc-mir"
+            || profile.placement != "COMPILER_GROUP"
+            || profile.resource_profile_id != admission.resource_profile_id
+            || profile.max_parser_workers == 0
         {
             return Err(Status::failed_precondition(
                 "rustc provider resource-profile binding differs",
             ));
         }
-        let (accepted, receiver) = mpsc::channel(MAX_OUTSTANDING_CHUNKS as usize);
+        let (accepted, receiver) = mpsc::channel(MAX_OUTSTANDING_FRAMES as usize);
         Ok((
             Self {
                 policy,
@@ -1224,7 +1246,7 @@ impl RustcObservationService {
                         provider_run_id: begin.provider_run_id.clone(),
                         compilation_unit_id: begin.compilation_unit_id.clone(),
                         accepted_generation: begin.source_generation,
-                        granted_chunk_credits: MAX_OUTSTANDING_CHUNKS,
+                        granted_frame_credits: MAX_OUTSTANDING_FRAMES,
                         granted_credit_bytes: MAX_UNACKNOWLEDGED_BYTES,
                     },
                 )),
@@ -1255,19 +1277,6 @@ impl RustcObservationService {
                                 return Err(error);
                             }
                         }
-                    }
-                    Some(Event::OwnerObservationChunk(chunk)) => {
-                        let _ = output
-                            .send(Ok(ExtractorCommand {
-                                command: Some(Command::ChunkRejected(ChunkRejected {
-                                    sequence: chunk.sequence,
-                                    error_code: "LEGACY_WHOLE_RELATION_CHUNK_REJECTED".to_owned(),
-                                })),
-                            }))
-                            .await;
-                        return Err(Status::failed_precondition(
-                            "legacy whole-relation Arrow chunks are no longer admitted",
-                        ));
                     }
                     Some(Event::OwnerEnd(end)) => {
                         validator.accept_owner_end(end, event)?;
@@ -1369,7 +1378,8 @@ impl OwnedRustcLaunchMaterial {
 /// source/context/toolchain drift, missing or failed protocol terminals, transport failure, and
 /// any receipt/compiler-stream mismatch. All failures remove the private socket and return no
 /// semantic result.
-pub async fn run_untrusted_rustc_provider_lifecycle(
+pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
+    compiled_authority: &CompiledProviderAuthority,
     lifecycle: UntrustedRustcProviderLifecycle<'_>,
 ) -> Result<Vec<TrustQualifiedRustcCompilation>, RustcProviderLifecycleError> {
     if lifecycle.trust_policy.trust_mode != RustCompilationTrustMode::UntrustedSandboxed {
@@ -1392,6 +1402,7 @@ pub async fn run_untrusted_rustc_provider_lifecycle(
     let profile = lifecycle.sandbox_profile.clone();
     let private_paths = lifecycle.private_paths.clone();
     execute_prepared_rustc_lifecycle(
+        compiled_authority,
         plan,
         lifecycle.private_paths.extractor_socket_path.clone(),
         lifecycle.protocol_policy,
@@ -1418,6 +1429,7 @@ pub async fn run_untrusted_rustc_provider_lifecycle(
 }
 
 async fn execute_prepared_rustc_lifecycle<F, Fut>(
+    compiled_authority: &CompiledProviderAuthority,
     plan: RustCompilationLaunchPlan,
     socket: PathBuf,
     protocol_policy: RustcProtocolPolicy,
@@ -1431,7 +1443,7 @@ where
 {
     let binding = plan.protocol_binding()?;
     let (service, mut accepted_receiver) =
-        RustcObservationService::new(protocol_policy, run_admission, binding)
+        RustcObservationService::new(compiled_authority, protocol_policy, run_admission, binding)
             .map_err(RustcProviderLifecycleError::Protocol)?;
     let listener = bind_rustc_uds(&socket)?;
     let monitor = service.clone();
@@ -1660,7 +1672,7 @@ impl RustcExtractor for RustcObservationService {
             daemon_build: self.policy.daemon_build.clone(),
             output_schema_bundle_digest: self.policy.output_schema_bundle_digest.clone(),
             sandbox_profile_digest: self.policy.sandbox_profile_digest.clone(),
-            maximum_outstanding_chunks: MAX_OUTSTANDING_CHUNKS,
+            maximum_outstanding_frames: MAX_OUTSTANDING_FRAMES,
             maximum_unacknowledged_bytes: MAX_UNACKNOWLEDGED_BYTES,
             accepted_resource_profile_id: self.admission.resource_profile_id.clone(),
             provider_deadline_unix_ms: self.policy.provider_deadline_unix_ms,
@@ -1673,7 +1685,7 @@ impl RustcExtractor for RustcObservationService {
         &self,
         request: Request<tonic::Streaming<ExtractionEvent>>,
     ) -> Result<Response<Self::ObserveStream>, Status> {
-        let (sender, receiver) = mpsc::channel((MAX_OUTSTANDING_CHUNKS + 2) as usize);
+        let (sender, receiver) = mpsc::channel((MAX_OUTSTANDING_FRAMES + 2) as usize);
         let service = self.clone();
         tokio::spawn(async move {
             if let Err(error) = service
@@ -1696,12 +1708,10 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
+    use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::provider_sandbox::{ProviderTrustProfile, SandboxProbeObservation};
-    use crate::rpc::generated::codefabric::provider::v1::BlobReference;
     use crate::rpc::generated::codefabric::rustc::v1::rustc_extractor_client::RustcExtractorClient;
-    use crate::rpc::generated::codefabric::rustc::v1::{
-        CompilerOwnerKey, DiagnosticSummary, PackageTargetIdentity,
-    };
+    use crate::rpc::generated::codefabric::rustc::v1::{CompilerOwnerKey, PackageTargetIdentity};
     use crate::rust_compilation_trust::{
         RustCompilationContextPins, RustCompilationResourceLimits, RustExecutableExtensionPolicy,
     };
@@ -1958,7 +1968,7 @@ mod tests {
         ExtractionEvent { event: Some(event) }
     }
 
-    fn typed_relation_chunk(relation: RustcRelation) -> OwnerObservationChunk {
+    fn typed_relation(relation: RustcRelation) -> AcceptedRustcRelation {
         let schema = relation.schema();
         let batch = RecordBatch::new_empty(Arc::clone(&schema));
         let mut arrow_ipc = Vec::new();
@@ -1967,17 +1977,14 @@ mod tests {
             writer.write(&batch).unwrap();
             writer.finish().unwrap();
         }
-        OwnerObservationChunk {
-            provider_run_id: "run:test".to_owned(),
-            compilation_unit_id: "unit:test".to_owned(),
-            sequence: 2,
-            owner_id: "owner:test".to_owned(),
-            observation_family_code: relation.family_code(),
+        AcceptedRustcRelation {
+            relation,
+            logical_sequence: 2,
             schema_digest: relation.schema_digest(),
             row_count: 0,
-            chunk_digest: arrow_chunk_digest(&arrow_ipc),
+            arrow_ipc_digest: arrow_ipc_digest(&arrow_ipc),
             arrow_ipc,
-            payload_reference: None,
+            batch,
         }
     }
 
@@ -2010,7 +2017,7 @@ mod tests {
                 event(Event::OwnerBegin(owner_begin.clone())),
             )
             .unwrap();
-        let chunk = typed_relation_chunk(relation);
+        let relation_payload = typed_relation(relation);
         let identity = crate::relation_ipc_contract::relation_wire_identity(
             relation.relation_id(),
             &relation.schema_digest(),
@@ -2022,9 +2029,9 @@ mod tests {
         .unwrap();
         let frames = crate::relation_ipc_proto::encode_relation_frames(
             identity,
-            &chunk.arrow_ipc,
+            &relation_payload.arrow_ipc,
             1,
-            chunk.row_count,
+            relation_payload.row_count,
             &crate::relation_ipc_proto::RelationCoverage::complete(1),
         )
         .unwrap();
@@ -2054,11 +2061,11 @@ mod tests {
                 assert!(!acknowledgement.cancelled);
             }
         }
-        let chunk = validator
+        let accepted_relation = validator
             .open_owner
             .as_ref()
             .unwrap()
-            .chunks
+            .relations
             .first()
             .unwrap()
             .clone();
@@ -2068,7 +2075,7 @@ mod tests {
             sequence: validator.next_sequence,
             owner_id: "owner:test".to_owned(),
             family_counts: [(relation.family_code(), 0)].into_iter().collect(),
-            owner_content_digest: owner_content_digest(&owner_begin, &[chunk]),
+            owner_content_digest: owner_content_digest(&owner_begin, &[accepted_relation]),
         };
         validator
             .accept_owner_end(owner_end.clone(), event(Event::OwnerEnd(owner_end)))
@@ -2080,11 +2087,6 @@ mod tests {
             compiler_exit_status: 0,
             closed_owner_set_digest: closed_owner_set_digest(&validator.owners),
             capability_outcomes: Vec::new(),
-            diagnostic_summary: Some(DiagnosticSummary {
-                error_count: 0,
-                warning_count: 0,
-                diagnostics_digest: b3("diagnostics"),
-            }),
             overall_stream_digest: String::new(),
             terminal_state: ProviderRunState::Succeeded as i32,
             rejection_error: None,
@@ -2154,11 +2156,13 @@ mod tests {
         events: Vec<ExtractionEvent>,
         tolerate_stream_failure: bool,
     ) -> Result<Vec<TrustQualifiedRustcCompilation>, RustcProviderLifecycleError> {
+        let release = CompiledSemanticRelease::current();
         let plan = lifecycle_plan(harness);
         let socket = harness.paths.extractor_socket_path.clone();
         let policy = harness.protocol_policy.clone();
         let admission = harness.admission.clone();
         execute_prepared_rustc_lifecycle(
+            release.provider_authority(),
             plan,
             harness.paths.extractor_socket_path.clone(),
             harness.protocol_policy.clone(),
@@ -2177,7 +2181,7 @@ mod tests {
     }
 
     #[test]
-    fn wp35_behavioral_acceptance() {
+    fn wp34_beh_accepted_rustc_relation_stream_decodes_to_application_owned_batch() {
         let (validator, mut end) = accepted_stream();
         let mut events = validator.events.clone();
         events.push(event(Event::CompilationEnd(end.clone())));
@@ -2186,11 +2190,11 @@ mod tests {
             .finish(end.clone(), event(Event::CompilationEnd(end)), false)
             .unwrap();
         assert_eq!(completed.owners.len(), 1);
-        assert_eq!(completed.owners[0].chunks.len(), 1);
+        assert_eq!(completed.owners[0].relations.len(), 1);
     }
 
     #[test]
-    fn relation_payload_cancellation_is_acknowledged_and_never_reconciled() {
+    fn wp34_ops_relation_payload_cancellation_is_acknowledged_and_never_reconciled() {
         let (policy, admission, begin) = fixture();
         let first = event(Event::CompilationBegin(begin.clone()));
         let binding = trust_binding(&policy, &admission);
@@ -2200,7 +2204,7 @@ mod tests {
         validator
             .accept_owner_begin(owner_begin.clone(), event(Event::OwnerBegin(owner_begin)))
             .unwrap();
-        let chunk = typed_relation_chunk(relation);
+        let relation_payload = typed_relation(relation);
         let identity = crate::relation_ipc_contract::relation_wire_identity(
             relation.relation_id(),
             &relation.schema_digest(),
@@ -2212,7 +2216,7 @@ mod tests {
         .unwrap();
         let frames = crate::relation_ipc_proto::encode_relation_frames(
             identity,
-            &chunk.arrow_ipc,
+            &relation_payload.arrow_ipc,
             1,
             0,
             &crate::relation_ipc_proto::RelationCoverage::complete(1),
@@ -2268,11 +2272,6 @@ mod tests {
             compiler_exit_status: 0,
             closed_owner_set_digest: closed_owner_set_digest(&[]),
             capability_outcomes: Vec::new(),
-            diagnostic_summary: Some(DiagnosticSummary {
-                error_count: 0,
-                warning_count: 0,
-                diagnostics_digest: b3("cancelled"),
-            }),
             overall_stream_digest: String::new(),
             terminal_state: ProviderRunState::Cancelled as i32,
             rejection_error: None,
@@ -2287,7 +2286,7 @@ mod tests {
     }
 
     #[test]
-    fn wp35_negative_zero_state() {
+    fn wp34_ops_rustc_failed_terminal_and_owner_digest_corruption_are_rejected() {
         let (validator, mut end) = accepted_stream();
         end.compiler_exit_status = 1;
         assert_eq!(
@@ -2317,7 +2316,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_relation_ingress_rejects_unknown_and_opaque_referenced_payloads() {
+    fn wp34_neg_typed_relation_ingress_rejects_schema_and_payload_corruption() {
         let (policy, admission, begin) = fixture();
         let first = event(Event::CompilationBegin(begin.clone()));
         let binding = trust_binding(&policy, &admission);
@@ -2334,35 +2333,35 @@ mod tests {
             tonic::Code::InvalidArgument
         );
 
-        let mut unknown = typed_relation_chunk(RustcRelation::MirBody);
-        unknown.observation_family_code = 70;
+        let mut wrong_schema = typed_relation(RustcRelation::MirBody);
+        wrong_schema.schema_digest = RustcRelation::MirBlock.schema_digest();
         assert_eq!(
-            validate_typed_relation_chunk(&unknown).unwrap_err().code(),
+            validate_accepted_relation(&wrong_schema)
+                .unwrap_err()
+                .code(),
             tonic::Code::InvalidArgument
         );
 
-        let mut referenced = typed_relation_chunk(RustcRelation::MirBody);
-        referenced.arrow_ipc.clear();
-        referenced.payload_reference = Some(BlobReference {
-            blob_id: "opaque-payload".to_owned(),
-            content_digest: referenced.chunk_digest.clone(),
-            byte_length: 1,
-            read_only_uri: "file:opaque-payload".to_owned(),
-        });
+        let mut corrupt = typed_relation(RustcRelation::MirBody);
+        corrupt.arrow_ipc.clear();
         assert_eq!(
-            validate_typed_relation_chunk(&referenced)
-                .unwrap_err()
-                .code(),
+            validate_accepted_relation(&corrupt).unwrap_err().code(),
             tonic::Code::InvalidArgument
         );
     }
 
     #[tokio::test]
-    async fn wp35_operational_acceptance_handshake_and_cancel_are_single_authority() {
+    async fn rustc_handshake_and_cancellation_share_one_admission_authority() {
         let (policy, admission, begin) = fixture();
         let binding = trust_binding(&policy, &admission);
-        let (service, _accepted) =
-            RustcObservationService::new(policy.clone(), admission.clone(), binding).unwrap();
+        let release = CompiledSemanticRelease::current();
+        let (service, _accepted) = RustcObservationService::new(
+            release.provider_authority(),
+            policy.clone(),
+            admission.clone(),
+            binding,
+        )
+        .unwrap();
         let hello = ExtractorHello {
             protocol_major: 1,
             protocol_minor: 0,
@@ -2383,7 +2382,7 @@ mod tests {
             ack.accepted_resource_profile_id,
             admission.resource_profile_id
         );
-        assert_eq!(ack.maximum_outstanding_chunks, MAX_OUTSTANDING_CHUNKS);
+        assert_eq!(ack.maximum_outstanding_frames, MAX_OUTSTANDING_FRAMES);
 
         let (commands, _receiver) = mpsc::channel(2);
         service.active.lock().await.insert(
@@ -2423,7 +2422,13 @@ mod tests {
             &policy.toolchain_identity_digest,
         );
 
-        let Err(error) = RustcObservationService::new(policy, admission, mismatched) else {
+        let release = CompiledSemanticRelease::current();
+        let Err(error) = RustcObservationService::new(
+            release.provider_authority(),
+            policy,
+            admission,
+            mismatched,
+        ) else {
             panic!("a mismatched launch-plan binding must fail before the endpoint is usable");
         };
         assert_eq!(error.code(), tonic::Code::FailedPrecondition);
@@ -2433,20 +2438,24 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn orchestrated_untrusted_accounting_failure_never_executes_host_cargo() {
         let harness = lifecycle_harness();
-        let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
-            trust_policy: &harness.trust_policy,
-            sandbox_capabilities: &harness.capabilities,
-            sandbox_profile: &harness.profile,
-            compilation_inputs: &harness.inputs,
-            private_paths: &harness.paths,
-            compilation_request: &harness.request,
-            protocol_policy: harness.protocol_policy.clone(),
-            run_admission: harness.admission.clone(),
-            allowed_uid: harness.allowed_uid,
-            launch_material: ProviderSandboxLaunchMaterial::DarwinProfile(Path::new(
-                "/not-consumed-without-kernel-accounting",
-            )),
-        })
+        let release = CompiledSemanticRelease::current();
+        let result = run_untrusted_rustc_provider_lifecycle(
+            release.provider_authority(),
+            UntrustedRustcProviderLifecycle {
+                trust_policy: &harness.trust_policy,
+                sandbox_capabilities: &harness.capabilities,
+                sandbox_profile: &harness.profile,
+                compilation_inputs: &harness.inputs,
+                private_paths: &harness.paths,
+                compilation_request: &harness.request,
+                protocol_policy: harness.protocol_policy.clone(),
+                run_admission: harness.admission.clone(),
+                allowed_uid: harness.allowed_uid,
+                launch_material: ProviderSandboxLaunchMaterial::DarwinProfile(Path::new(
+                    "/not-consumed-without-kernel-accounting",
+                )),
+            },
+        )
         .await
         .unwrap_err();
 
@@ -2467,20 +2476,24 @@ mod tests {
             lifecycle_limits(),
             RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
         );
-        let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
-            trust_policy: &trusted_local,
-            sandbox_capabilities: &harness.capabilities,
-            sandbox_profile: &harness.profile,
-            compilation_inputs: &harness.inputs,
-            private_paths: &harness.paths,
-            compilation_request: &harness.request,
-            protocol_policy: harness.protocol_policy.clone(),
-            run_admission: harness.admission.clone(),
-            allowed_uid: harness.allowed_uid,
-            launch_material: ProviderSandboxLaunchMaterial::DarwinProfile(Path::new(
-                "/trusted-local-bypass",
-            )),
-        })
+        let release = CompiledSemanticRelease::current();
+        let result = run_untrusted_rustc_provider_lifecycle(
+            release.provider_authority(),
+            UntrustedRustcProviderLifecycle {
+                trust_policy: &trusted_local,
+                sandbox_capabilities: &harness.capabilities,
+                sandbox_profile: &harness.profile,
+                compilation_inputs: &harness.inputs,
+                private_paths: &harness.paths,
+                compilation_request: &harness.request,
+                protocol_policy: harness.protocol_policy.clone(),
+                run_admission: harness.admission.clone(),
+                allowed_uid: harness.allowed_uid,
+                launch_material: ProviderSandboxLaunchMaterial::DarwinProfile(Path::new(
+                    "/trusted-local-bypass",
+                )),
+            },
+        )
         .await
         .unwrap_err();
 
@@ -2523,7 +2536,9 @@ mod tests {
         mismatched.analysis_context_id = "context:changed".into();
         let invoked = Arc::new(AtomicBool::new(false));
         let observed_invocation = Arc::clone(&invoked);
+        let release = CompiledSemanticRelease::current();
         let result = execute_prepared_rustc_lifecycle(
+            release.provider_authority(),
             lifecycle_plan(&harness),
             harness.paths.extractor_socket_path.clone(),
             harness.protocol_policy.clone(),
@@ -2567,12 +2582,12 @@ mod tests {
         let semantic_payloads = |runs: &[TrustQualifiedRustcCompilation]| {
             runs.iter()
                 .flat_map(|run| &run.accepted().owners)
-                .flat_map(|owner| &owner.chunks)
-                .map(|chunk| {
+                .flat_map(|owner| &owner.relations)
+                .map(|relation| {
                     (
-                        chunk.observation_family_code,
-                        chunk.schema_digest.clone(),
-                        chunk.arrow_ipc.clone(),
+                        relation.relation.family_code(),
+                        relation.schema_digest.clone(),
+                        relation.arrow_ipc.clone(),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -2593,8 +2608,14 @@ mod tests {
         let (mut policy, admission, _) = fixture();
         policy.sandbox_profile_digest = format!("sha256:{}", "ab".repeat(32));
         let binding = trust_binding(&policy, &admission);
-        let (service, _accepted) =
-            RustcObservationService::new(policy, admission.clone(), binding).unwrap();
+        let release = CompiledSemanticRelease::current();
+        let (service, _accepted) = RustcObservationService::new(
+            release.provider_authority(),
+            policy,
+            admission.clone(),
+            binding,
+        )
+        .unwrap();
         let (first_sender, mut first_commands) = mpsc::channel(2);
         let (second_sender, mut second_commands) = mpsc::channel(2);
         {

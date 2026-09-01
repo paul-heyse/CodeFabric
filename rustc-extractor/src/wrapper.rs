@@ -31,9 +31,8 @@ use crate::protocol::generated::codefabric::rustc::v1::extraction_event::Event;
 use crate::protocol::generated::codefabric::rustc::v1::extractor_command::Command;
 use crate::protocol::generated::codefabric::rustc::v1::rustc_extractor_client::RustcExtractorClient;
 use crate::protocol::generated::codefabric::rustc::v1::{
-    CompilationBegin, CompilationEnd, CompilerOwnerKey, DiagnosticSummary, ExtractionEvent,
-    ExtractorHello, OwnerBegin, OwnerEnd, OwnerObservationChunk, OwnerRelationIpcFrame,
-    PackageTargetIdentity, RejectionRuleErrorCode,
+    CompilationBegin, CompilationEnd, CompilerOwnerKey, ExtractionEvent, ExtractorHello,
+    OwnerBegin, OwnerEnd, OwnerRelationIpcFrame, PackageTargetIdentity, RejectionRuleErrorCode,
 };
 use crate::relation_ipc_contract::relation_wire_identity;
 use crate::relation_ipc_proto::{
@@ -441,14 +440,38 @@ fn encode_relation(
             .map_err(|error| format!("failed to encode rustc Arrow IPC: {error}"))?;
     }
     if bytes.len() > MAX_RELATION_IPC_BYTES {
-        return Err("rustc Arrow IPC chunk exceeds the protocol credit limit".to_owned());
+        return Err("rustc relation-IPC stream exceeds the protocol byte limit".to_owned());
     }
     Ok(bytes)
 }
 
-fn owner_content_digest(begin: &OwnerBegin, chunks: &[OwnerObservationChunk]) -> String {
-    let fields =
-        std::iter::once(begin.encode_to_vec()).chain(chunks.iter().map(Message::encode_to_vec));
+struct OwnerRelationDigest {
+    relation: RustcRelation,
+    logical_sequence: u64,
+    schema_digest: String,
+    row_count: u64,
+    arrow_ipc_digest: String,
+}
+
+impl OwnerRelationDigest {
+    fn digest_frame(&self) -> Vec<u8> {
+        digest_frames(
+            b"codefabric.rustc.owner-relation.v1\0",
+            [
+                self.logical_sequence.to_be_bytes().to_vec(),
+                self.relation.family_code().to_be_bytes().to_vec(),
+                self.schema_digest.as_bytes().to_vec(),
+                self.row_count.to_be_bytes().to_vec(),
+                self.arrow_ipc_digest.as_bytes().to_vec(),
+            ],
+        )
+        .into_bytes()
+    }
+}
+
+fn owner_content_digest(begin: &OwnerBegin, relations: &[OwnerRelationDigest]) -> String {
+    let fields = std::iter::once(begin.encode_to_vec())
+        .chain(relations.iter().map(OwnerRelationDigest::digest_frame));
     digest_frames(b"codefabric.rustc.owner-content.v1\0", fields)
 }
 
@@ -655,7 +678,7 @@ fn run_protocol(
             || acknowledgement.output_schema_bundle_digest != schema_bundle_digest()
             || !valid_sandbox_profile_digest(&acknowledgement.sandbox_profile_digest)
             || acknowledgement.accepted_resource_profile_id != environment.resource_profile_id
-            || acknowledgement.maximum_outstanding_chunks != 4
+            || acknowledgement.maximum_outstanding_frames != 4
             || acknowledgement.maximum_unacknowledged_bytes != MAX_RELATION_IPC_BYTES as u64
         {
             return Err(
@@ -714,7 +737,7 @@ fn run_protocol(
             if accepted.provider_run_id == environment.provider_run_id
                 && accepted.compilation_unit_id == compilation_unit_id
                 && accepted.accepted_generation == environment.source_generation
-                && accepted.granted_chunk_credits == 4
+                && accepted.granted_frame_credits == 4
                 && accepted.granted_credit_bytes == MAX_RELATION_IPC_BYTES as u64 => {}
         Command::Cancel(_) => cancelled.store(true, Ordering::Release),
         _ => return Err("daemon did not accept the compilation begin".to_owned()),
@@ -781,23 +804,18 @@ fn run_protocol(
                 source_file_id: &source_file_id,
                 source_content_digest,
             };
-            let mut chunks = Vec::with_capacity(owner.relations.len());
+            let mut relation_digests = Vec::with_capacity(owner.relations.len());
             let mut family_counts = HashMap::new();
             for relation in &owner.relations {
                 let arrow_ipc = encode_relation(owner, relation, &context)?;
                 let row_count = u64::try_from(relation.rows.len()).unwrap_or(u64::MAX);
                 let logical_sequence = sequence;
-                let chunk = OwnerObservationChunk {
-                    provider_run_id: environment.provider_run_id.clone(),
-                    compilation_unit_id: compilation_unit_id.clone(),
-                    sequence: logical_sequence,
-                    owner_id: owner_id.clone(),
-                    observation_family_code: relation.relation.family_code(),
-                    chunk_digest: b3(&arrow_ipc),
-                    arrow_ipc: arrow_ipc.clone(),
-                    payload_reference: None,
+                let relation_digest = OwnerRelationDigest {
+                    relation: relation.relation,
+                    logical_sequence,
                     schema_digest: relation.relation.schema_digest(),
                     row_count,
+                    arrow_ipc_digest: b3(&arrow_ipc),
                 };
                 let relation_identity = relation_wire_identity(
                     relation.relation.relation_id(),
@@ -879,10 +897,6 @@ fn run_protocol(
                                 cancelled.store(true, Ordering::Release);
                                 break;
                             }
-                            Command::ChunkAccepted(_) | Command::ChunkRejected(_) => {
-                                return Err("daemon returned legacy whole-relation chunk control"
-                                    .to_owned());
-                            }
                             Command::CompilationAccepted(_) => {
                                 return Err(
                                     "daemon returned an invalid rustc relation acknowledgement"
@@ -896,7 +910,7 @@ fn run_protocol(
                     break;
                 }
                 family_counts.insert(relation.relation.family_code(), row_count);
-                chunks.push(chunk);
+                relation_digests.push(relation_digest);
             }
             if cancelled.load(Ordering::Acquire) {
                 break;
@@ -907,7 +921,7 @@ fn run_protocol(
                 sequence,
                 owner_id,
                 family_counts,
-                owner_content_digest: owner_content_digest(&owner_begin, &chunks),
+                owner_content_digest: owner_content_digest(&owner_begin, &relation_digests),
             };
             send_event(
                 &event_sender,
@@ -953,11 +967,6 @@ fn run_protocol(
                 "UNAVAILABLE_COMPILE".to_owned()
             },
         }],
-        diagnostic_summary: Some(DiagnosticSummary {
-            error_count: u32::from(compiler_exit_status != 0),
-            warning_count: 0,
-            diagnostics_digest: b3(b""),
-        }),
         overall_stream_digest: String::new(),
         terminal_state: terminal_state as i32,
         rejection_error: (terminal_state == ProviderRunState::Failed)
@@ -1198,7 +1207,7 @@ mod tests {
                     daemon_build: "codefabricd-test".to_owned(),
                     output_schema_bundle_digest: schema_bundle_digest(),
                     sandbox_profile_digest: b3(b"sandbox"),
-                    maximum_outstanding_chunks: 4,
+                    maximum_outstanding_frames: 4,
                     maximum_unacknowledged_bytes: MAX_RELATION_IPC_BYTES as u64,
                     accepted_resource_profile_id: hello.resource_profile_id,
                     provider_deadline_unix_ms: self.deadline_unix_ms,
@@ -1228,7 +1237,7 @@ mod tests {
                                             provider_run_id: begin.provider_run_id,
                                             compilation_unit_id: begin.compilation_unit_id,
                                             accepted_generation: begin.source_generation,
-                                            granted_chunk_credits: 4,
+                                            granted_frame_credits: 4,
                                             granted_credit_bytes: MAX_RELATION_IPC_BYTES as u64,
                                         },
                                     )),
@@ -1278,7 +1287,7 @@ mod tests {
     }
 
     #[test]
-    fn wp35_structural_acceptance() {
+    fn wp34_beh_rustc_exact_relation_schema_and_values_are_application_owned() {
         let owner = OwnedRustcOwner {
             qualified_name: "fixture".to_owned(),
             owner_kind: "COMPILATION".to_owned(),
@@ -1323,12 +1332,53 @@ mod tests {
         assert_eq!(first, second);
         let mut reader = StreamReader::try_new(Cursor::new(&first), None).unwrap();
         assert_eq!(reader.schema(), RustcRelation::Compilation.schema());
-        assert_eq!(reader.next().unwrap().unwrap().num_rows(), 1);
+        let batch = reader.next().unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        let text = |name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap_or_else(|| panic!("missing {name}"))
+                .as_any()
+                .downcast_ref::<arrow_array::StringArray>()
+                .unwrap_or_else(|| panic!("{name} is not Utf8"))
+                .value(0)
+        };
+        let number = |name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap_or_else(|| panic!("missing {name}"))
+                .as_any()
+                .downcast_ref::<arrow_array::UInt64Array>()
+                .unwrap_or_else(|| panic!("{name} is not UInt64"))
+                .value(0)
+        };
+        assert_eq!(text("provider_run_id"), "run:test");
+        assert_eq!(text("compilation_unit_id"), "unit:test");
+        assert_eq!(text("owner_id"), "owner:test");
+        assert_eq!(text("source_file_id"), "file:test");
+        assert_eq!(text("crate_name"), "fixture");
+        assert_eq!(number("source_generation"), 7);
+        assert_eq!(number("local_item_count"), 3);
+        assert_eq!(number("body_owner_count"), 1);
+        let source_digest = batch
+            .column_by_name("source_content_digest")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow_array::FixedSizeBinaryArray>()
+            .unwrap();
+        assert_eq!(source_digest.value(0), [9; 32]);
+        let is_local = batch
+            .column_by_name("is_local_crate")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow_array::BooleanArray>()
+            .unwrap();
+        assert!(is_local.value(0));
         assert!(reader.next().is_none());
     }
 
     #[test]
-    fn zero_fact_relation_is_a_schema_carrying_arrow_batch() {
+    fn wp34_beh_zero_fact_relation_is_a_schema_carrying_arrow_batch() {
         let owner = OwnedRustcOwner {
             qualified_name: "fixture::caller".to_owned(),
             owner_kind: "MIR_BODY".to_owned(),
@@ -1360,7 +1410,7 @@ mod tests {
 
     #[test]
     #[allow(clippy::too_many_lines)]
-    fn wp35_operational_acceptance() {
+    fn wp34_ops_rustc_relation_ipc_process_round_trip_is_exact_and_repeatable() {
         let temporary = tempfile::tempdir().unwrap();
         let socket = temporary.path().join("rustc.sock");
         let events = Arc::new(StdMutex::new(Vec::new()));
@@ -1480,9 +1530,9 @@ mod tests {
             Some(Event::CompilationEnd(_))
         ));
         assert!(
-            !observed
+            observed
                 .iter()
-                .any(|event| matches!(event.event, Some(Event::OwnerObservationChunk(_))))
+                .any(|event| matches!(event.event, Some(Event::OwnerRelationIpcFrame(_))))
         );
         let first_end = observed
             .iter()

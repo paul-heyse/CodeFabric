@@ -6,7 +6,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use arrow_array::{Array as _, FixedSizeBinaryArray, RecordBatch, StringArray, UInt64Array};
 use hyper_util::rt::TokioIo;
@@ -16,6 +17,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Endpoint;
 use tower::service_fn;
 
+use crate::cancellation::Cancellation;
+use crate::fabric::production_kernel::CompiledProviderAuthority;
+use crate::production_provider_recipe::CompiledProviderLane;
+use crate::provider_sandbox::{
+    ProviderProcessGroupChild, ProviderTrustProfile, SandboxCapabilityMatrix, SandboxMechanism,
+};
 use crate::relation_ipc::{
     FlowControlAck, FrameHeader, RelationIpcAssembler, RelationIpcFrame, RelationIpcLimits,
     StreamId,
@@ -44,8 +51,6 @@ use relation_schema::schema_digests;
 
 const PYREFLY_SOURCE_DIGEST: &str =
     "b3:1b9e72144644d1b3df0bdca564496566238543dfb7f576980a8408714327fc3e";
-pub(crate) const SANDBOX_PROFILE_DIGEST: &str =
-    "b3:8a663d1d6ddbcf830a09e28c7ee6bcd65b433fd9b69b597dbe99f02c78ce8e15";
 const REQUIRED_FEATURE_BITS: u64 = (1_u64 << 17) | (1_u64 << 32);
 const OPTIONAL_FEATURE_BITS: u64 = 1_u64 << 33;
 const MAX_UNACKNOWLEDGED_BYTES: u64 = 16 * 1024 * 1024;
@@ -82,6 +87,7 @@ pub struct PyreflyRunRequest {
     pub modules: Vec<PyreflyModuleInput>,
     pub requested_capability_codes: Vec<u32>,
     pub deadline_unix_ms: i64,
+    pub sandbox_profile_digest: String,
     pub output_schema_bundle_digest: String,
 }
 
@@ -92,13 +98,8 @@ pub struct AcceptedPyreflyModule {
     pub module_name: String,
     pub canonical_file_id: [u8; 16],
     pub source_bytes: Vec<u8>,
-    pub arrow_ipc: Vec<u8>,
-    pub batch: RecordBatch,
-    pub schema_digest: String,
-    pub chunk_digest: String,
     pub module_digest: String,
-    /// Target-route typed relations. The singular fields above carry only the module-context
-    /// relation during the bounded predecessor migration; they never contain semantic JSON.
+    /// Complete target-route application-owned relation set.
     pub relations: Vec<AcceptedPyreflyRelation>,
 }
 
@@ -109,7 +110,7 @@ pub struct AcceptedPyreflyRelation {
     pub arrow_ipc: Vec<u8>,
     pub batch: RecordBatch,
     pub schema_digest: String,
-    pub chunk_digest: String,
+    pub arrow_ipc_digest: String,
     pub row_count: u64,
 }
 
@@ -152,13 +153,176 @@ pub enum PyreflyServiceError {
     Protocol(String),
     #[error("Pyrefly observation Arrow IPC failed: {0}")]
     Arrow(String),
-    #[error("Pyrefly run was cancelled after sidecar acknowledgement")]
+    #[error("Pyrefly run was cancelled and its disposable sidecar process was joined")]
     Cancelled,
+    #[error(
+        "Pyrefly run exceeded its release-owned deadline and its disposable sidecar process was joined"
+    )]
+    TimedOut,
+    #[error("Pyrefly disposable sidecar process could not be terminated and joined: {0}")]
+    ProcessTermination(String),
+    #[error("the exact untrusted Pyrefly containment profile is unavailable")]
+    TrustUnavailable,
     #[error("Pyrefly source read failed at {path}: {source}")]
     Io {
         path: PathBuf,
         source: std::io::Error,
     },
+}
+
+/// Exact incomplete provider outcome returned instead of an accepted Pyrefly batch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PyreflyRunGap {
+    Cancelled,
+    TimedOut,
+    ProcessFailure,
+    TrustUnavailable,
+}
+
+impl PyreflyServiceError {
+    /// Translate process lifecycle failures into the exact provider-lane gap category.
+    #[must_use]
+    pub const fn run_gap(&self) -> Option<PyreflyRunGap> {
+        match self {
+            Self::Cancelled => Some(PyreflyRunGap::Cancelled),
+            Self::TimedOut => Some(PyreflyRunGap::TimedOut),
+            Self::ProcessTermination(_) | Self::Transport(_) => Some(PyreflyRunGap::ProcessFailure),
+            Self::TrustUnavailable => Some(PyreflyRunGap::TrustUnavailable),
+            Self::Invalid(_) | Self::Protocol(_) | Self::Arrow(_) | Self::Io { .. } => None,
+        }
+    }
+}
+
+/// One contained, run-disposable Pyrefly process created by the sole provider sandbox launcher.
+///
+/// The process-group child has no public constructor and therefore cannot be substituted with an
+/// arbitrary PID. Cancellation or deadline consumes this owner, terminates the complete group,
+/// waits for emptiness, and prevents any result from entering admission.
+pub(crate) struct DisposablePyreflySidecarProcess {
+    child: Option<ProviderProcessGroupChild>,
+    socket: PathBuf,
+    cancellation_grace: Duration,
+    maximum_wall_time: Duration,
+    analysis_started: Arc<AtomicBool>,
+    sandbox_profile_digest: String,
+}
+
+impl DisposablePyreflySidecarProcess {
+    /// Bind one launcher-owned process group to the exact compiled Pyrefly recipe and private UDS.
+    pub(crate) fn try_new(
+        compiled_authority: &CompiledProviderAuthority,
+        child: ProviderProcessGroupChild,
+        socket: PathBuf,
+    ) -> Result<Self, PyreflyServiceError> {
+        let profile = compiled_authority.execution_profile(CompiledProviderLane::Pyrefly);
+        let sandbox_profile_digest = child.sandbox_profile_digest().to_owned();
+        if profile.provider_id != "pyrefly-python"
+            || profile.placement != "SIDECAR"
+            || profile.resource_profile_id != RESOURCE_PROFILE_ID
+            || profile.max_parser_workers == 0
+            || !socket.is_absolute()
+        {
+            return Err(PyreflyServiceError::Invalid(
+                "compiled Pyrefly process authority or private socket is invalid".to_owned(),
+            ));
+        }
+        if child.trust_profile()
+            != crate::provider_sandbox::ProviderTrustProfile::UntrustedSandboxed
+            || !valid_sandbox_profile_digest(&sandbox_profile_digest)
+        {
+            return Err(PyreflyServiceError::TrustUnavailable);
+        }
+        Ok(Self {
+            child: Some(child),
+            socket,
+            cancellation_grace: Duration::from_millis(u64::from(profile.cancellation_ack_millis)),
+            maximum_wall_time: Duration::from_millis(profile.max_wall_millis),
+            analysis_started: Arc::new(AtomicBool::new(false)),
+            sandbox_profile_digest,
+        })
+    }
+
+    /// Clone the real protocol acceptance signal for supervision and cancellation evidence.
+    #[must_use]
+    pub(crate) fn analysis_started_signal(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.analysis_started)
+    }
+
+    async fn terminate_and_join(&mut self) -> Result<(), PyreflyServiceError> {
+        let Some(mut child) = self.child.take() else {
+            return Ok(());
+        };
+        let grace = self.cancellation_grace;
+        let socket = self.socket.clone();
+        tokio::task::spawn_blocking(move || {
+            child.terminate_group()?;
+            if !child.wait_group_empty(grace)? {
+                child.kill_group()?;
+            }
+            if !child.wait_group_empty(grace)? {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Pyrefly process group remained live after unconditional termination",
+                ));
+            }
+            let _ = child.wait();
+            let _ = std::fs::remove_file(socket);
+            Ok::<(), std::io::Error>(())
+        })
+        .await
+        .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?
+        .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))
+    }
+}
+
+fn require_exact_pyrefly_containment(
+    compiled_authority: &CompiledProviderAuthority,
+    matrix: &SandboxCapabilityMatrix,
+) -> Result<SandboxMechanism, PyreflyServiceError> {
+    let profile = compiled_authority.execution_profile(CompiledProviderLane::Pyrefly);
+    let row = matrix
+        .row(ProviderTrustProfile::UntrustedSandboxed)
+        .ok_or(PyreflyServiceError::TrustUnavailable)?;
+    if profile.provider_id != "pyrefly-python"
+        || profile.placement != "SIDECAR"
+        || profile.resource_profile_id != RESOURCE_PROFILE_ID
+        || !row.available
+        || row.mechanism == SandboxMechanism::None
+    {
+        return Err(PyreflyServiceError::TrustUnavailable);
+    }
+    Ok(row.mechanism)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PyreflyStopCause {
+    Cancelled,
+    TimedOut,
+}
+
+fn now_unix_millis() -> i64 {
+    i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(i64::MAX)
+}
+
+async fn wait_for_pyrefly_stop(
+    cancellation: &Cancellation,
+    deadline_unix_ms: i64,
+) -> PyreflyStopCause {
+    loop {
+        if cancellation.is_cancelled() {
+            return PyreflyStopCause::Cancelled;
+        }
+        if now_unix_millis() >= deadline_unix_ms {
+            return PyreflyStopCause::TimedOut;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
 }
 
 fn b3(bytes: &[u8]) -> String {
@@ -169,6 +333,12 @@ fn valid_digest(value: &str) -> bool {
     value.len() == 67
         && value.starts_with("b3:")
         && value[3..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_sandbox_profile_digest(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn parse_digest(value: &str) -> Result<[u8; 32], PyreflyServiceError> {
@@ -258,7 +428,7 @@ fn expected_module_digest(
     for relation in relations {
         bytes.extend_from_slice(&relation.relation.family_code().to_be_bytes());
         bytes.extend_from_slice(relation.schema_digest.as_bytes());
-        bytes.extend_from_slice(relation.chunk_digest.as_bytes());
+        bytes.extend_from_slice(relation.arrow_ipc_digest.as_bytes());
         bytes.extend_from_slice(&relation.row_count.to_be_bytes());
     }
     b3(&bytes)
@@ -272,6 +442,7 @@ fn header_matches(header: &AnalyzeEventHeader, request: &PyreflyRunRequest, sequ
         && header.sequence == sequence
         && header.context_manifest_digest == b3(&request.context_manifest)
         && header.source_manifest_digest == request.source_manifest_digest
+        && header.sandbox_profile_digest == request.sandbox_profile_digest
 }
 
 struct AdmittedImmutableBlob {
@@ -322,11 +493,41 @@ fn read_immutable_blob(
 /// Rejects malformed inputs, transport/handshake drift, stream correlation or sequence errors,
 /// invalid Arrow IPC, and any non-success terminal.
 #[allow(clippy::too_many_lines)] // One sidecar stream validator keeps every ordered correlation and terminal check adjacent.
-pub async fn analyze_pyrefly_uds(
-    socket: &Path,
+pub(crate) async fn analyze_pyrefly_uds(
+    mut process: DisposablePyreflySidecarProcess,
     request: &PyreflyRunRequest,
+    cancellation: &Cancellation,
 ) -> Result<AcceptedPyreflyRun, PyreflyServiceError> {
-    analyze_pyrefly_uds_inner(socket, request, None).await
+    if request.sandbox_profile_digest != process.sandbox_profile_digest {
+        process.terminate_and_join().await?;
+        return Err(PyreflyServiceError::TrustUnavailable);
+    }
+    let socket = process.socket.clone();
+    process.analysis_started.store(false, Ordering::Release);
+    let analysis = analyze_pyrefly_uds_inner(
+        &socket,
+        request,
+        None,
+        Some(Arc::clone(&process.analysis_started)),
+    );
+    let release_deadline = now_unix_millis()
+        .saturating_add(i64::try_from(process.maximum_wall_time.as_millis()).unwrap_or(i64::MAX));
+    let stop = wait_for_pyrefly_stop(cancellation, request.deadline_unix_ms.min(release_deadline));
+    tokio::pin!(analysis);
+    tokio::pin!(stop);
+    let outcome = tokio::select! {
+        biased;
+        result = &mut analysis => Ok(result),
+        cause = &mut stop => {
+            Err(cause)
+        }
+    };
+    process.terminate_and_join().await?;
+    match outcome {
+        Ok(result) => result,
+        Err(PyreflyStopCause::Cancelled) => Err(PyreflyServiceError::Cancelled),
+        Err(PyreflyStopCause::TimedOut) => Err(PyreflyServiceError::TimedOut),
+    }
 }
 
 #[allow(clippy::too_many_lines)] // One sidecar stream validator keeps every ordered correlation and terminal check adjacent.
@@ -334,6 +535,7 @@ async fn analyze_pyrefly_uds_inner(
     socket: &Path,
     request: &PyreflyRunRequest,
     cancellation: Option<crate::cancellation::Cancellation>,
+    analysis_started: Option<Arc<AtomicBool>>,
 ) -> Result<AcceptedPyreflyRun, PyreflyServiceError> {
     if request.modules.is_empty()
         || request.modules.len() > MAX_MODULES_PER_RUN
@@ -343,6 +545,7 @@ async fn analyze_pyrefly_uds_inner(
         || request.canonical_workspace_id == [0; 16]
         || request.canonical_analysis_context_id == [0; 16]
         || !valid_digest(&request.source_manifest_digest)
+        || !valid_sandbox_profile_digest(&request.sandbox_profile_digest)
         || request.output_schema_bundle_digest != schema_bundle_digest()
     {
         return Err(PyreflyServiceError::Invalid(
@@ -403,8 +606,8 @@ async fn analyze_pyrefly_uds_inner(
             supported_python_versions: vec!["3.14".to_owned()],
             observation_schema_digests: relation_schema_digests.clone(),
             maximum_frame_bytes: 4 * 1024 * 1024,
-            maximum_arrow_chunk_bytes: 64 * 1024 * 1024,
-            sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
+            maximum_arrow_ipc_bytes: 64 * 1024 * 1024,
+            sandbox_profile_digest: request.sandbox_profile_digest.clone(),
         })
         .await
         .map_err(|error| PyreflyServiceError::Protocol(error.to_string()))?
@@ -414,7 +617,7 @@ async fn analyze_pyrefly_uds_inner(
         || acknowledgement.negotiated_feature_bits != REQUIRED_FEATURE_BITS | OPTIONAL_FEATURE_BITS
         || acknowledgement.pyrefly_source_digest != PYREFLY_SOURCE_DIGEST
         || acknowledgement.observation_schema_digests != relation_schema_digests
-        || acknowledgement.sandbox_profile_digest != SANDBOX_PROFILE_DIGEST
+        || acknowledgement.sandbox_profile_digest != request.sandbox_profile_digest
     {
         return Err(PyreflyServiceError::Protocol(
             "handshake acknowledgement identity differs".to_owned(),
@@ -430,11 +633,15 @@ async fn analyze_pyrefly_uds_inner(
             resource_profile_id: RESOURCE_PROFILE_ID.to_owned(),
             maximum_contexts: 4,
             maximum_memory_mib: 4096,
+            sandbox_profile_digest: request.sandbox_profile_digest.clone(),
         })
         .await
         .map_err(|error| PyreflyServiceError::Protocol(error.to_string()))?
         .into_inner();
-    if opened.context_handle.is_empty() || opened.context_manifest_digest != context_digest {
+    if opened.context_handle.is_empty()
+        || opened.context_manifest_digest != context_digest
+        || opened.sandbox_profile_digest != request.sandbox_profile_digest
+    {
         return Err(PyreflyServiceError::Protocol(
             "opened context identity differs".to_owned(),
         ));
@@ -466,9 +673,9 @@ async fn analyze_pyrefly_uds_inner(
             requested_capability_codes: request.requested_capability_codes.clone(),
             deadline_unix_ms: request.deadline_unix_ms,
             output_schema_bundle_digest: request.output_schema_bundle_digest.clone(),
-            initial_chunk_credits: 4,
+            initial_frame_credits: 4,
             initial_credit_bytes: MAX_UNACKNOWLEDGED_BYTES,
-            sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
+            sandbox_profile_digest: request.sandbox_profile_digest.clone(),
             trust_profile: TRUST_PROFILE.to_owned(),
             resource_profile_id: RESOURCE_PROFILE_ID.to_owned(),
         })),
@@ -531,6 +738,7 @@ async fn analyze_pyrefly_uds_inner(
         })
     });
     let mut sequence = 0_u64;
+    let mut analysis_progress_seen = false;
     let mut accepted = Vec::new();
     let mut open_module: Option<String> = None;
     let mut pending: Option<PendingPyreflyModule> = None;
@@ -552,7 +760,7 @@ async fn analyze_pyrefly_uds_inner(
                 })?;
                 if sequence != 0
                     || !header_matches(&header, request, sequence)
-                    || event.granted_chunk_credits != 4
+                    || event.granted_frame_credits != 4
                     || event.granted_credit_bytes != MAX_UNACKNOWLEDGED_BYTES
                 {
                     return Err(PyreflyServiceError::Protocol(
@@ -565,7 +773,8 @@ async fn analyze_pyrefly_uds_inner(
                 let header = event.header.ok_or_else(|| {
                     PyreflyServiceError::Protocol("module-begin header is absent".to_owned())
                 })?;
-                if open_module.is_some()
+                if !analysis_progress_seen
+                    || open_module.is_some()
                     || pending.is_some()
                     || !header_matches(&header, request, sequence)
                 {
@@ -820,7 +1029,7 @@ async fn analyze_pyrefly_uds_inner(
                     let accepted = AcceptedPyreflyRelation {
                         relation,
                         schema_digest: relation.schema_digest(),
-                        chunk_digest: b3(&arrow_ipc),
+                        arrow_ipc_digest: b3(&arrow_ipc),
                         arrow_ipc,
                         batch,
                         row_count,
@@ -838,18 +1047,15 @@ async fn analyze_pyrefly_uds_inner(
                     }
                 }
             }
-            Event::ObservationBatchChunk(_) => {
-                return Err(PyreflyServiceError::Protocol(
-                    "legacy whole-relation Arrow chunks are no longer admitted".to_owned(),
-                ));
-            }
             Event::ModuleEnd(event) => {
                 sequence += 1;
                 let header = event.header.ok_or_else(|| {
                     PyreflyServiceError::Protocol("module-end header is absent".to_owned())
                 })?;
                 let module = pending.take().ok_or_else(|| {
-                    PyreflyServiceError::Protocol("module ended without a chunk".to_owned())
+                    PyreflyServiceError::Protocol(
+                        "module ended without a complete relation stream".to_owned(),
+                    )
                 })?;
                 module.assembler.finish().map_err(|error| {
                     PyreflyServiceError::Protocol(format!(
@@ -909,10 +1115,6 @@ async fn analyze_pyrefly_uds_inner(
                     module_name,
                     canonical_file_id: module.canonical_file_id,
                     source_bytes: module.source_bytes,
-                    arrow_ipc: context.arrow_ipc.clone(),
-                    batch: context.batch.clone(),
-                    schema_digest: context.schema_digest.clone(),
-                    chunk_digest: context.chunk_digest.clone(),
                     module_digest: event.module_digest,
                     relations,
                 });
@@ -960,11 +1162,12 @@ async fn analyze_pyrefly_uds_inner(
                 if open_module.is_some()
                     || pending.is_some()
                     || terminal.is_some()
+                    || !analysis_progress_seen
                     || !header_matches(&header, request, sequence)
                     || event.ordered_module_digests != ordered_module_digests
                     || event.overall_digest != expected_overall_digest
                     || event.rechecked_module_ids != expected_rechecked
-                    || event.sandbox_profile_digest != SANDBOX_PROFILE_DIGEST
+                    || event.sandbox_profile_digest != request.sandbox_profile_digest
                     || event.trust_profile != TRUST_PROFILE
                     || !((terminal_state == WireProviderRunState::Succeeded && success_outcomes)
                         || (accepted_cancellation && cancelled_outcomes))
@@ -986,7 +1189,29 @@ async fn analyze_pyrefly_uds_inner(
                     event.trust_profile,
                 ));
             }
-            Event::RunProgress(_) => {}
+            Event::RunProgress(event) => {
+                sequence += 1;
+                let header = event.header.ok_or_else(|| {
+                    PyreflyServiceError::Protocol("progress header is absent".to_owned())
+                })?;
+                if analysis_progress_seen
+                    || open_module.is_some()
+                    || pending.is_some()
+                    || !accepted.is_empty()
+                    || terminal.is_some()
+                    || !header_matches(&header, request, sequence)
+                    || event.completed_modules != 0
+                    || usize::try_from(event.total_modules).ok() != Some(request.modules.len())
+                {
+                    return Err(PyreflyServiceError::Protocol(
+                        "analysis-start progress identity or module census differs".to_owned(),
+                    ));
+                }
+                if let Some(analysis_started) = &analysis_started {
+                    analysis_started.store(true, Ordering::Release);
+                }
+                analysis_progress_seen = true;
+            }
         }
     }
     let (
@@ -1043,6 +1268,12 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
+    use crate::fabric::production_kernel::CompiledSemanticRelease;
+    use crate::provider_sandbox::{
+        GeneratedSandboxProfile, ProviderLaunchRequest, ProviderProcessLimits,
+        ProviderSandboxLaunchMaterial, ProviderSandboxLauncher, ProviderTrustProfile,
+        SandboxCapabilityMatrix, SandboxMechanism,
+    };
     use crate::rpc::generated::codefabric::provider::v1::{
         CancelAcknowledgement, CapabilityOutcome,
     };
@@ -1052,8 +1283,8 @@ mod tests {
     };
     use crate::rpc::generated::codefabric::pyrefly::v1::{
         AnalyzeEvent, CloseContextRequest, CloseContextResponse, HelloAck, ModuleBegin,
-        OpenContextResponse, RelationIpcFrameEvent, RunAccepted, RunTerminal, ShutdownRequest,
-        ShutdownResponse,
+        OpenContextResponse, RelationIpcFrameEvent, RunAccepted, RunProgress, RunTerminal,
+        ShutdownRequest, ShutdownResponse,
     };
 
     #[derive(Clone, Copy)]
@@ -1081,8 +1312,8 @@ mod tests {
                 supported_python_versions: request.supported_python_versions,
                 observation_schema_digests: request.observation_schema_digests,
                 maximum_frame_bytes: request.maximum_frame_bytes,
-                maximum_arrow_chunk_bytes: request.maximum_arrow_chunk_bytes,
-                sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
+                maximum_arrow_ipc_bytes: request.maximum_arrow_ipc_bytes,
+                sandbox_profile_digest: request.sandbox_profile_digest,
             }))
         }
 
@@ -1095,6 +1326,7 @@ mod tests {
                 context_handle: "malformed-context".to_owned(),
                 context_manifest_digest: request.context_manifest_digest,
                 opened_at_unix_ms: 1,
+                sandbox_profile_digest: request.sandbox_profile_digest,
             }))
         }
 
@@ -1121,6 +1353,7 @@ mod tests {
                 sequence,
                 context_manifest_digest: start.context_manifest_digest.clone(),
                 source_manifest_digest: self.source_manifest_digest.clone(),
+                sandbox_profile_digest: start.sandbox_profile_digest.clone(),
             };
             let accepted_generation = if matches!(self.mode, MalformedMode::StaleGeneration) {
                 start.source_generation.saturating_sub(1)
@@ -1130,15 +1363,22 @@ mod tests {
             let mut events = vec![AnalyzeEvent {
                 event: Some(MockEvent::RunAccepted(RunAccepted {
                     header: Some(header(0, accepted_generation)),
-                    granted_chunk_credits: 4,
+                    granted_frame_credits: 4,
                     granted_credit_bytes: MAX_UNACKNOWLEDGED_BYTES,
                 })),
             }];
             if !matches!(self.mode, MalformedMode::StaleGeneration) {
                 let module_id = start.modules[0].module_id.clone();
                 events.push(AnalyzeEvent {
-                    event: Some(MockEvent::ModuleBegin(ModuleBegin {
+                    event: Some(MockEvent::RunProgress(RunProgress {
                         header: Some(header(1, start.source_generation)),
+                        completed_modules: 0,
+                        total_modules: u32::try_from(start.modules.len()).unwrap(),
+                    })),
+                });
+                events.push(AnalyzeEvent {
+                    event: Some(MockEvent::ModuleBegin(ModuleBegin {
+                        header: Some(header(2, start.source_generation)),
                         module_id: module_id.clone(),
                     })),
                 });
@@ -1146,7 +1386,7 @@ mod tests {
                     MalformedMode::MissingModuleEnd => {
                         events.push(AnalyzeEvent {
                             event: Some(MockEvent::RunTerminal(RunTerminal {
-                                header: Some(header(2, start.source_generation)),
+                                header: Some(header(3, start.source_generation)),
                                 ordered_module_digests: Vec::new(),
                                 capability_outcomes: start
                                     .requested_capability_codes
@@ -1165,7 +1405,7 @@ mod tests {
                                     .iter()
                                     .map(|module| module.module_id.clone())
                                     .collect(),
-                                sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
+                                sandbox_profile_digest: start.sandbox_profile_digest.clone(),
                                 trust_profile: TRUST_PROFILE.to_owned(),
                             })),
                         });
@@ -1209,7 +1449,7 @@ mod tests {
                         open.arrow_type_universe = "arrow-array@60.0.0".to_owned();
                         events.push(AnalyzeEvent {
                             event: Some(MockEvent::RelationIpcFrame(RelationIpcFrameEvent {
-                                header: Some(header(2, start.source_generation)),
+                                header: Some(header(3, start.source_generation)),
                                 module_id,
                                 observation_family_code: relation.family_code(),
                                 frame: Some(frame),
@@ -1290,13 +1530,14 @@ mod tests {
             }],
             requested_capability_codes: vec![90],
             deadline_unix_ms: i64::MAX,
+            sandbox_profile_digest: format!("sha256:{}", "11".repeat(32)),
             output_schema_bundle_digest: schema_bundle_digest(),
         }
     }
 
     #[tokio::test]
     #[allow(clippy::too_many_lines)] // Three adversarial servers exercise the production stream validator end to end.
-    async fn pyrefly_stale_generation_rejection_falsification() {
+    async fn wp34_ops_pyrefly_stale_generation_rejection_falsification() {
         let directory = tempfile::tempdir().unwrap();
         let request = malformed_request(directory.path());
         let mut failures = Vec::new();
@@ -1327,7 +1568,9 @@ mod tests {
                     })
                     .await
             });
-            let error = analyze_pyrefly_uds(&socket, &request).await.unwrap_err();
+            let error = analyze_pyrefly_uds_inner(&socket, &request, None, None)
+                .await
+                .unwrap_err();
             failures.push(error.to_string());
             let _ = shutdown_sender.send(());
             server.await.unwrap().unwrap();
@@ -1341,5 +1584,188 @@ mod tests {
             3,
             "no malformed stream reached an accepted run"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn wp34_ops_real_pyrefly_analysis_cancellation_joins_disposable_process() {
+        let executable = std::env::var("CODEFABRIC_PYREFLY_SIDECAR_BIN")
+            .expect("WP34 OPS must build and select the real Pyrefly sidecar binary");
+        let executable = std::fs::canonicalize(executable)
+            .expect("selected Pyrefly sidecar binary must exist exactly");
+        assert!(executable.is_file());
+        let release = CompiledSemanticRelease::current();
+        let matrix = SandboxCapabilityMatrix::probe_current_host();
+        match require_exact_pyrefly_containment(release.provider_authority(), &matrix) {
+            Err(error) => {
+                assert!(matches!(error, PyreflyServiceError::TrustUnavailable));
+                assert_eq!(error.run_gap(), Some(PyreflyRunGap::TrustUnavailable));
+            }
+            Ok(mechanism) => {
+                assert_eq!(
+                    mechanism,
+                    SandboxMechanism::DarwinSeatbelt,
+                    "an available Linux row is impossible until the compiled seccomp policy and delegated cgroup are release-owned launch material"
+                );
+                #[cfg(not(target_os = "macos"))]
+                panic!("only the exact Darwin containment path can currently be advertised");
+                #[cfg(target_os = "macos")]
+                {
+                    let root = tempfile::tempdir().unwrap();
+                    let workspace = root.path().join("workspace");
+                    let output = root.path().join("output");
+                    for path in [&workspace, &output] {
+                        std::fs::create_dir(path).unwrap();
+                    }
+                    let dependencies = executable
+                        .parent()
+                        .expect("sidecar binary has a dependency root");
+                    let profile = GeneratedSandboxProfile::generate(
+                        ProviderTrustProfile::UntrustedSandboxed,
+                        mechanism,
+                        &workspace,
+                        dependencies,
+                        &output,
+                    )
+                    .unwrap();
+                    let materialized_profile =
+                        profile.materialize(&root.path().join("profiles")).unwrap();
+                    let socket = output.join("pyrefly-cancel.sock");
+                    let child = ProviderSandboxLauncher::new(matrix)
+                        .launch(
+                            &ProviderLaunchRequest {
+                                host_executable: executable.clone(),
+                                contained_executable: executable,
+                                arguments: vec![
+                                    "--serve".to_owned(),
+                                    format!("unix://{}", socket.display()),
+                                ],
+                                environment: BTreeMap::from([(
+                                    "PATH".to_owned(),
+                                    "/usr/bin:/bin".to_owned(),
+                                )]),
+                                output_root: profile.output_root.clone(),
+                                limits: ProviderProcessLimits {
+                                    cpu_seconds: 60,
+                                    open_files: 128,
+                                    address_space_bytes: 8 * 1024 * 1024 * 1024,
+                                    output_file_bytes: 512 * 1024 * 1024,
+                                    process_count: 32,
+                                },
+                            },
+                            &profile,
+                            ProviderSandboxLaunchMaterial::DarwinProfile(&materialized_profile),
+                        )
+                        .unwrap();
+                    let process = DisposablePyreflySidecarProcess::try_new(
+                        release.provider_authority(),
+                        child,
+                        socket.clone(),
+                    )
+                    .unwrap();
+                    tokio::time::timeout(Duration::from_secs(10), async {
+                        while !socket.exists() {
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                        }
+                    })
+                    .await
+                    .expect("real Pyrefly sidecar did not bind its private socket");
+
+                    let source_text = (0..20_000)
+                        .map(|index| {
+                            format!(
+                                "class Item{index}:\n    value: int = {index}\n\ndef use_{index}(item: Item{index}) -> int:\n    return item.value\n"
+                            )
+                        })
+                        .collect::<String>();
+                    let source_path = workspace.join("module.py");
+                    std::fs::write(&source_path, source_text.as_bytes()).unwrap();
+                    let mut request = malformed_request(root.path());
+                    request.provider_run_id = "run-real-cancel".to_owned();
+                    request.source_snapshot_lease_id = "lease-real-cancel".to_owned();
+                    request.deadline_unix_ms = now_unix_millis() + 60_000;
+                    request.sandbox_profile_digest = profile.sha256_digest.clone();
+                    request.modules[0] = PyreflyModuleInput {
+                        module_id: "module-real-cancel".to_owned(),
+                        module_name: "real_cancel".to_owned(),
+                        file_id: crate::identity::encode_public_id(
+                            crate::identity::IdentityDomain::SourceFile,
+                            None,
+                            [0x77; 16],
+                        )
+                        .unwrap(),
+                        source_blob_path: source_path.clone(),
+                        content_digest: b3(&std::fs::read(source_path).unwrap()),
+                    };
+                    let started = process.analysis_started_signal();
+                    let cancellation = Cancellation::with_check_interval(1);
+                    let cancel = cancellation.clone();
+                    let cancellation_task = tokio::spawn(async move {
+                        tokio::time::timeout(Duration::from_secs(30), async {
+                            while !started.load(Ordering::Acquire) {
+                                tokio::time::sleep(Duration::from_millis(1)).await;
+                            }
+                        })
+                        .await
+                        .expect("real Pyrefly producer never entered blocking analysis");
+                        cancel.cancel();
+                    });
+                    let started_at = std::time::Instant::now();
+                    let error = analyze_pyrefly_uds(process, &request, &cancellation)
+                        .await
+                        .expect_err("cancelled real analysis must not return an accepted batch");
+                    cancellation_task.await.unwrap();
+                    assert!(matches!(error, PyreflyServiceError::Cancelled));
+                    assert_eq!(error.run_gap(), Some(PyreflyRunGap::Cancelled));
+                    assert!(!socket.exists());
+                    assert!(started_at.elapsed() < Duration::from_secs(20));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wp34_neg_trusted_local_pyrefly_process_substitution_is_rejected() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        let dependencies = root.path().join("dependencies");
+        let output = root.path().join("output");
+        for path in [&workspace, &dependencies, &output] {
+            std::fs::create_dir(path).unwrap();
+        }
+        let profile = GeneratedSandboxProfile::generate(
+            ProviderTrustProfile::TrustedLocal,
+            SandboxMechanism::None,
+            &workspace,
+            &dependencies,
+            &output,
+        )
+        .unwrap();
+        let child = ProviderSandboxLauncher::new(SandboxCapabilityMatrix::probe_current_host())
+            .launch(
+                &ProviderLaunchRequest {
+                    host_executable: "/bin/sleep".into(),
+                    contained_executable: "/bin/sleep".into(),
+                    arguments: vec!["30".to_owned()],
+                    environment: BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]),
+                    output_root: profile.output_root.clone(),
+                    limits: ProviderProcessLimits {
+                        cpu_seconds: 30,
+                        open_files: 16,
+                        address_space_bytes: 64 * 1024 * 1024,
+                        output_file_bytes: 1024,
+                        process_count: 4,
+                    },
+                },
+                &profile,
+                ProviderSandboxLaunchMaterial::None,
+            )
+            .unwrap();
+        let release = CompiledSemanticRelease::current();
+        let result = DisposablePyreflySidecarProcess::try_new(
+            release.provider_authority(),
+            child,
+            output.join("pyrefly.sock"),
+        );
+        assert!(matches!(result, Err(PyreflyServiceError::TrustUnavailable)));
     }
 }

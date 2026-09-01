@@ -558,7 +558,7 @@ fn wp10_operational_acceptance() {
     assert!(decoded.resource_profile_id.is_empty());
     round_trip(&Hello {
         protocol_major: 1,
-        maximum_arrow_chunk_bytes: 1_048_576,
+        maximum_arrow_ipc_bytes: 1_048_576,
         ..Hello::default()
     });
     round_trip(&CompilationAccepted {

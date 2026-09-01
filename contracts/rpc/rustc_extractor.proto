@@ -66,7 +66,7 @@ message ExtractorHelloAck {
   string daemon_build = 4;
   string output_schema_bundle_digest = 5;
   string sandbox_profile_digest = 6;
-  uint32 maximum_outstanding_chunks = 7;
+  uint32 maximum_outstanding_frames = 7;
   uint64 maximum_unacknowledged_bytes = 8;
   string accepted_resource_profile_id = 9;
   int64 provider_deadline_unix_ms = 10;
@@ -108,7 +108,7 @@ message CompilationAccepted {
   string provider_run_id = 1;
   string compilation_unit_id = 2;
   uint64 accepted_generation = 3;
-  uint32 granted_chunk_credits = 4;
+  uint32 granted_frame_credits = 4;
   uint64 granted_credit_bytes = 5;
 }
 
@@ -128,19 +128,6 @@ message OwnerBegin {
   repeated uint32 expected_observation_family_codes = 5;
 }
 
-message OwnerObservationChunk {
-  string provider_run_id = 1;
-  string compilation_unit_id = 2;
-  uint64 sequence = 3;
-  string owner_id = 4;
-  uint32 observation_family_code = 5;
-  bytes arrow_ipc = 6;
-  optional codefabric.provider.v1.BlobReference payload_reference = 7;
-  string schema_digest = 8;
-  uint64 row_count = 9;
-  string chunk_digest = 10;
-}
-
 message OwnerEnd {
   string provider_run_id = 1;
   string compilation_unit_id = 2;
@@ -150,30 +137,25 @@ message OwnerEnd {
   string owner_content_digest = 6;
 }
 
-message DiagnosticSummary {
-  uint32 error_count = 1;
-  uint32 warning_count = 2;
-  string diagnostics_digest = 3;
-}
-
 message CompilationEnd {
+  reserved 7;
+  reserved "diagnostic_summary";
   string provider_run_id = 1;
   string compilation_unit_id = 2;
   uint64 sequence = 3;
   int32 compiler_exit_status = 4;
   string closed_owner_set_digest = 5;
   repeated codefabric.provider.v1.CapabilityOutcome capability_outcomes = 6;
-  DiagnosticSummary diagnostic_summary = 7;
   string overall_stream_digest = 8;
   codefabric.provider.v1.ProviderRunState terminal_state = 9;
   optional RejectionRuleErrorCode rejection_error = 10;
 }
 
 message ExtractorCommand {
+  reserved 2, 3;
+  reserved "chunk_accepted", "chunk_rejected";
   oneof command {
     CompilationAccepted compilation_accepted = 1;
-    codefabric.provider.v1.ChunkAccepted chunk_accepted = 2;
-    codefabric.provider.v1.ChunkRejected chunk_rejected = 3;
     CancelCompilationRequest cancel = 4;
     // Only the flow_control_ack variant is valid in the daemon-to-wrapper direction.
     codefabric.provider.v1.RelationIpcFrame relation_ipc_ack = 5;
@@ -192,12 +174,11 @@ message OwnerRelationIpcFrame {
 }
 
 message ExtractionEvent {
-  reserved 1;
-  reserved "compilation_accepted";
+  reserved 1, 4;
+  reserved "compilation_accepted", "owner_observation_chunk";
   oneof event {
     CompilationBegin compilation_begin = 2;
     OwnerBegin owner_begin = 3;
-    OwnerObservationChunk owner_observation_chunk = 4;
     OwnerEnd owner_end = 5;
     CompilationEnd compilation_end = 6;
     OwnerRelationIpcFrame owner_relation_ipc_frame = 7;

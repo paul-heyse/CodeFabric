@@ -31,7 +31,7 @@ message Hello {
   repeated string supported_python_versions = 6;
   repeated string observation_schema_digests = 7;
   uint64 maximum_frame_bytes = 8;
-  uint64 maximum_arrow_chunk_bytes = 9;
+  uint64 maximum_arrow_ipc_bytes = 9;
   string sandbox_profile_digest = 10;
 }
 
@@ -44,7 +44,7 @@ message HelloAck {
   repeated string supported_python_versions = 6;
   repeated string observation_schema_digests = 7;
   uint64 maximum_frame_bytes = 8;
-  uint64 maximum_arrow_chunk_bytes = 9;
+  uint64 maximum_arrow_ipc_bytes = 9;
   string sandbox_profile_digest = 10;
 }
 
@@ -57,12 +57,14 @@ message OpenContextRequest {
   string resource_profile_id = 6;
   uint32 maximum_contexts = 7;
   uint64 maximum_memory_mib = 8;
+  string sandbox_profile_digest = 9;
 }
 
 message OpenContextResponse {
   string context_handle = 1;
   string context_manifest_digest = 2;
   int64 opened_at_unix_ms = 3;
+  string sandbox_profile_digest = 4;
 }
 
 message ModuleRequest {
@@ -87,7 +89,7 @@ message AnalyzeModulesRequest {
   repeated uint32 requested_capability_codes = 9;
   int64 deadline_unix_ms = 10;
   string output_schema_bundle_digest = 11;
-  uint32 initial_chunk_credits = 12;
+  uint32 initial_frame_credits = 12;
   uint64 initial_credit_bytes = 13;
   string sandbox_profile_digest = 14;
   string trust_profile = 15;
@@ -95,10 +97,10 @@ message AnalyzeModulesRequest {
 }
 
 message AnalyzeCommand {
+  reserved 2, 3;
+  reserved "chunk_accepted", "chunk_rejected";
   oneof command {
     AnalyzeModulesRequest start = 1;
-    codefabric.provider.v1.ChunkAccepted chunk_accepted = 2;
-    codefabric.provider.v1.ChunkRejected chunk_rejected = 3;
     CancelRunRequest cancel = 4;
     // Only the flow_control_ack variant is valid in the daemon-to-sidecar direction.
     codefabric.provider.v1.RelationIpcFrame relation_ipc_ack = 5;
@@ -113,11 +115,12 @@ message AnalyzeEventHeader {
   uint64 sequence = 5;
   string context_manifest_digest = 6;
   string source_manifest_digest = 7;
+  string sandbox_profile_digest = 8;
 }
 
 message RunAccepted {
   AnalyzeEventHeader header = 1;
-  uint32 granted_chunk_credits = 2;
+  uint32 granted_frame_credits = 2;
   uint64 granted_credit_bytes = 3;
 }
 
@@ -130,17 +133,6 @@ message RunProgress {
 message ModuleBegin {
   AnalyzeEventHeader header = 1;
   string module_id = 2;
-}
-
-message ObservationBatchChunk {
-  AnalyzeEventHeader header = 1;
-  string module_id = 2;
-  uint32 observation_family_code = 3;
-  bytes arrow_ipc = 4;
-  optional codefabric.provider.v1.BlobReference payload_reference = 5;
-  string schema_digest = 6;
-  uint64 row_count = 7;
-  string chunk_digest = 8;
 }
 
 message RelationIpcFrameEvent {
@@ -170,11 +162,12 @@ message RunTerminal {
 }
 
 message AnalyzeEvent {
+  reserved 4;
+  reserved "observation_batch_chunk";
   oneof event {
     RunAccepted run_accepted = 1;
     RunProgress run_progress = 2;
     ModuleBegin module_begin = 3;
-    ObservationBatchChunk observation_batch_chunk = 4;
     ModuleEnd module_end = 5;
     RunTerminal run_terminal = 6;
     RelationIpcFrameEvent relation_ipc_frame = 7;

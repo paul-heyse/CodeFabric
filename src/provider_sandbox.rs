@@ -1099,7 +1099,10 @@ pub struct ProviderLaunchRequest {
     /// Exact executable spelling inside the selected containment namespace.
     pub contained_executable: PathBuf,
     pub arguments: Vec<String>,
-    /// Complete environment installed after `env_clear`.
+    /// Application-owned environment installed after `env_clear`.
+    ///
+    /// The launcher adds the immutable `CODEFABRIC_SANDBOX_PROFILE_DIGEST` grant from the exact
+    /// generated profile after validating that the caller did not try to supply it.
     pub environment: BTreeMap<String, String>,
     pub output_root: PathBuf,
     pub limits: ProviderProcessLimits,
@@ -1122,13 +1125,20 @@ pub enum ProviderSandboxLaunchMaterial<'a> {
 pub struct ProviderProcessGroupChild {
     child: Child,
     process_group_id: rustix::process::Pid,
+    trust_profile: ProviderTrustProfile,
+    sandbox_profile_digest: String,
     #[cfg(target_os = "linux")]
     run_cgroup: Option<LinuxRunCgroup>,
 }
 
 impl ProviderProcessGroupChild {
     #[cfg(target_os = "linux")]
-    fn new(mut child: Child, run_cgroup: Option<LinuxRunCgroup>) -> Result<Self, SandboxError> {
+    fn new(
+        mut child: Child,
+        run_cgroup: Option<LinuxRunCgroup>,
+        trust_profile: ProviderTrustProfile,
+        sandbox_profile_digest: String,
+    ) -> Result<Self, SandboxError> {
         let process_group_id = i32::try_from(child.id())
             .ok()
             .and_then(rustix::process::Pid::from_raw)
@@ -1149,12 +1159,18 @@ impl ProviderProcessGroupChild {
         Ok(Self {
             child,
             process_group_id,
+            trust_profile,
+            sandbox_profile_digest,
             run_cgroup,
         })
     }
 
     #[cfg(not(target_os = "linux"))]
-    fn new(mut child: Child) -> Result<Self, SandboxError> {
+    fn new(
+        mut child: Child,
+        trust_profile: ProviderTrustProfile,
+        sandbox_profile_digest: String,
+    ) -> Result<Self, SandboxError> {
         let process_group_id = i32::try_from(child.id())
             .ok()
             .and_then(rustix::process::Pid::from_raw)
@@ -1167,6 +1183,8 @@ impl ProviderProcessGroupChild {
         Ok(Self {
             child,
             process_group_id,
+            trust_profile,
+            sandbox_profile_digest,
         })
     }
 
@@ -1203,6 +1221,18 @@ impl ProviderProcessGroupChild {
     #[must_use]
     pub fn process_group_id(&self) -> i32 {
         self.process_group_id.as_raw_nonzero().get()
+    }
+
+    /// Exact trust profile used by the sole launcher when it created this process group.
+    #[must_use]
+    pub const fn trust_profile(&self) -> ProviderTrustProfile {
+        self.trust_profile
+    }
+
+    /// Digest of the generated sandbox profile used by the sole launcher.
+    #[must_use]
+    pub fn sandbox_profile_digest(&self) -> &str {
+        &self.sandbox_profile_digest
     }
 
     /// Read kernel-complete aggregate CPU, memory, and process usage when this child owns a
@@ -1479,6 +1509,7 @@ impl ProviderSandboxLauncher {
             .args(confined)
             .env_clear()
             .envs(&request.environment)
+            .env("CODEFABRIC_SANDBOX_PROFILE_DIGEST", &profile.sha256_digest)
             .current_dir(&request.output_root)
             .stdin(Stdio::null())
             .stdout(if capture_stdout {
@@ -1510,10 +1541,15 @@ impl ProviderSandboxLauncher {
                 let _ = child.wait();
                 return Err(SandboxError::ResourceLimit);
             }
-            return ProviderProcessGroupChild::new(child, run_cgroup);
+            return ProviderProcessGroupChild::new(
+                child,
+                run_cgroup,
+                profile.trust_profile,
+                profile.sha256_digest.clone(),
+            );
         }
         #[cfg(not(target_os = "linux"))]
-        ProviderProcessGroupChild::new(child)
+        ProviderProcessGroupChild::new(child, profile.trust_profile, profile.sha256_digest.clone())
     }
 }
 
@@ -1574,7 +1610,8 @@ fn validate_launch_environment(
             ));
         }
     }
-    const FORBIDDEN_EXACT: [&str; 8] = [
+    const FORBIDDEN_EXACT: [&str; 9] = [
+        "CODEFABRIC_SANDBOX_PROFILE_DIGEST",
         "CARGO_ENCODED_RUSTFLAGS",
         "DYLD_INSERT_LIBRARIES",
         "LD_PRELOAD",
@@ -1808,6 +1845,7 @@ mod tests {
         .unwrap();
         let matrix = SandboxCapabilityMatrix::evaluate(&observation(false));
         let marker = output.join("environment-marker");
+        let profile_marker = output.join("sandbox-profile-marker");
         let mut child = ProviderSandboxLauncher::new(matrix)
             .launch(
                 &ProviderLaunchRequest {
@@ -1815,8 +1853,7 @@ mod tests {
                     contained_executable: "/bin/sh".into(),
                     arguments: vec![
                         "-c".into(),
-                        "printf '%s' \"$CF_TEST_MARKER\" > environment-marker; sleep 30 & wait"
-                            .into(),
+                        "printf '%s' \"$CF_TEST_MARKER\" > environment-marker; printf '%s' \"$CODEFABRIC_SANDBOX_PROFILE_DIGEST\" > sandbox-profile-marker; sleep 30 & wait".into(),
                     ],
                     environment: BTreeMap::from([
                         ("CF_TEST_MARKER".to_owned(), "expected".to_owned()),
@@ -1856,6 +1893,11 @@ mod tests {
         assert!(
             environment_installed,
             "trusted launch did not install the exact declared environment"
+        );
+        assert_eq!(
+            std::fs::read_to_string(profile_marker).unwrap(),
+            profile.sha256_digest,
+            "the sole launcher must inject the actual generated-profile digest"
         );
     }
 
@@ -2057,7 +2099,13 @@ mod tests {
             .stderr(Stdio::null());
         command.process_group(0);
         let child = command.spawn().unwrap();
-        let mut child = ProviderProcessGroupChild::new(child, Some(cgroup)).unwrap();
+        let mut child = ProviderProcessGroupChild::new(
+            child,
+            Some(cgroup),
+            ProviderTrustProfile::TrustedLocal,
+            "sha256:test-cgroup-profile".to_owned(),
+        )
+        .unwrap();
 
         let expected_membership =
             format!("/{}", cgroup_path.file_name().unwrap().to_string_lossy());

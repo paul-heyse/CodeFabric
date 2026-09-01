@@ -26,8 +26,8 @@ use crate::protocol::generated::codefabric::pyrefly::v1::pyrefly_sidecar_server:
 use crate::protocol::generated::codefabric::pyrefly::v1::{
     AnalyzeCommand, AnalyzeEvent, AnalyzeEventHeader, CancelRunRequest, CloseContextRequest,
     CloseContextResponse, Hello, HelloAck, ModuleBegin, ModuleEnd, OpenContextRequest,
-    OpenContextResponse, RelationIpcFrameEvent, RunAccepted, RunTerminal, ShutdownRequest,
-    ShutdownResponse,
+    OpenContextResponse, RelationIpcFrameEvent, RunAccepted, RunProgress, RunTerminal,
+    ShutdownRequest, ShutdownResponse,
 };
 use crate::relation_ipc_contract::{RelationWireIdentity, relation_wire_identity};
 use crate::relation_ipc_proto::{
@@ -35,8 +35,8 @@ use crate::relation_ipc_proto::{
 };
 
 const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
-const MAX_ARROW_CHUNK_BYTES: usize = 64 * 1024 * 1024;
-const MAX_OUTSTANDING_CHUNKS: u32 = 4;
+const MAX_ARROW_IPC_BYTES: usize = 64 * 1024 * 1024;
+const MAX_OUTSTANDING_FRAMES: u32 = 4;
 const MAX_UNACKNOWLEDGED_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CONTEXTS: usize = 4;
 const MAX_MEMORY_MIB: u64 = 4096;
@@ -50,8 +50,6 @@ const RESOURCE_PROFILE_ID: &str = "sidecar-semantic-standard";
 const TRUST_PROFILE: &str = "UNTRUSTED_SANDBOXED";
 const PYREFLY_SOURCE_DIGEST: &str =
     "b3:1b9e72144644d1b3df0bdca564496566238543dfb7f576980a8408714327fc3e";
-const SANDBOX_PROFILE_DIGEST: &str =
-    "b3:8a663d1d6ddbcf830a09e28c7ee6bcd65b433fd9b69b597dbe99f02c78ce8e15";
 
 struct OpenContext {
     workspace_id: String,
@@ -63,7 +61,7 @@ struct OpenContext {
 }
 
 struct CreditState {
-    available_chunks: u32,
+    available_frames: u32,
     available_bytes: u64,
     outstanding: BTreeMap<(Vec<u8>, u64), OutstandingPayload>,
     next_ack_sequence: BTreeMap<Vec<u8>, u64>,
@@ -108,12 +106,16 @@ struct Service {
     contexts: Arc<Mutex<BTreeMap<String, Arc<OpenContext>>>>,
     runs: Arc<Mutex<BTreeMap<String, Arc<ActiveRun>>>>,
     state_root: Arc<PathBuf>,
+    sandbox_profile_digest: Arc<String>,
 }
 
 impl Service {
-    fn new(state_root: &Path) -> Result<Self, String> {
+    fn new(state_root: &Path, sandbox_profile_digest: &str) -> Result<Self, String> {
         if !state_root.is_absolute() {
             return Err("Pyrefly sidecar state root must be absolute".to_owned());
+        }
+        if !valid_sandbox_profile_digest(sandbox_profile_digest) {
+            return Err("Pyrefly sidecar sandbox-profile grant is invalid".to_owned());
         }
         fs::create_dir_all(state_root)
             .map_err(|error| format!("create Pyrefly sidecar state root: {error}"))?;
@@ -121,6 +123,7 @@ impl Service {
             contexts: Arc::new(Mutex::new(BTreeMap::new())),
             runs: Arc::new(Mutex::new(BTreeMap::new())),
             state_root: Arc::new(state_root.to_owned()),
+            sandbox_profile_digest: Arc::new(sandbox_profile_digest.to_owned()),
         })
     }
 }
@@ -145,7 +148,13 @@ fn valid_digest(value: &str) -> bool {
         && value[3..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn validate_hello(hello: &Hello) -> Result<(), Status> {
+fn valid_sandbox_profile_digest(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn validate_hello(hello: &Hello, sandbox_profile_digest: &str) -> Result<(), Status> {
     let expected_schemas = crate::pyrefly_link::schema_digests();
     if hello.protocol_major != 1
         || hello.protocol_minor != 0
@@ -153,8 +162,8 @@ fn validate_hello(hello: &Hello) -> Result<(), Status> {
         || hello.optional_feature_bits & !OPTIONAL_FEATURE_BITS != 0
         || hello.observation_schema_digests != expected_schemas
         || hello.maximum_frame_bytes != u64::try_from(MAX_FRAME_BYTES).unwrap()
-        || hello.maximum_arrow_chunk_bytes != u64::try_from(MAX_ARROW_CHUNK_BYTES).unwrap()
-        || hello.sandbox_profile_digest != SANDBOX_PROFILE_DIGEST
+        || hello.maximum_arrow_ipc_bytes != u64::try_from(MAX_ARROW_IPC_BYTES).unwrap()
+        || hello.sandbox_profile_digest != sandbox_profile_digest
     {
         return Err(Status::failed_precondition(
             "Pyrefly handshake protocol, schema, feature, sandbox, or limit identity differs",
@@ -217,15 +226,15 @@ fn release_relation_credit(
         .values()
         .try_fold(0_u64, |total, payload| total.checked_add(payload.bytes))
         .ok_or("outstanding credit accounting overflowed")?;
-    let maximum_available_chunks = MAX_OUTSTANDING_CHUNKS
+    let maximum_available_frames = MAX_OUTSTANDING_FRAMES
         .checked_sub(u32::try_from(credits.outstanding.len()).unwrap_or(u32::MAX))
-        .ok_or("outstanding chunk accounting exceeds its bound")?;
-    let available_chunks = credits
-        .available_chunks
+        .ok_or("outstanding relation-frame accounting exceeds its bound")?;
+    let available_frames = credits
+        .available_frames
         .checked_add(1)
-        .ok_or("available chunk credit accounting overflowed")?;
-    if available_chunks > maximum_available_chunks {
-        return Err("chunk acknowledgement exceeds the bounded credit window");
+        .ok_or("available relation-frame credit accounting overflowed")?;
+    if available_frames > maximum_available_frames {
+        return Err("relation-frame acknowledgement exceeds the bounded credit window");
     }
     let maximum_available_bytes = MAX_UNACKNOWLEDGED_BYTES
         .checked_sub(outstanding_bytes)
@@ -237,7 +246,7 @@ fn release_relation_credit(
     if available_bytes > maximum_available_bytes {
         return Err("byte acknowledgement exceeds the bounded credit window");
     }
-    credits.available_chunks = available_chunks;
+    credits.available_frames = available_frames;
     credits.available_bytes = available_bytes;
     Ok(())
 }
@@ -280,13 +289,6 @@ async fn receive_run_control(
                     return;
                 }
             }
-            Some(Command::ChunkAccepted(_) | Command::ChunkRejected(_)) => {
-                credits.rejected =
-                    Some("legacy whole-relation chunk control is no longer admitted".into());
-                drop(credits);
-                run.request_cancel(false);
-                return;
-            }
             Some(Command::Cancel(cancel)) => {
                 if cancel.provider_run_id != provider_run_id || cancel.reason.is_empty() {
                     credits.rejected = Some("stream cancellation identity differs".into());
@@ -318,7 +320,7 @@ async fn reserve_relation_credit(
 ) -> Result<(), Status> {
     if bytes > MAX_UNACKNOWLEDGED_BYTES {
         return Err(Status::resource_exhausted(
-            "one Pyrefly chunk exceeds the unacknowledged byte limit",
+            "one Pyrefly relation-IPC payload frame exceeds the unacknowledged byte limit",
         ));
     }
     loop {
@@ -334,8 +336,8 @@ async fn reserve_relation_credit(
             if run.cancelled.load(Ordering::Acquire) {
                 return Err(Status::cancelled("Pyrefly run was cancelled"));
             }
-            if credits.available_chunks > 0 && credits.available_bytes >= bytes {
-                credits.available_chunks -= 1;
+            if credits.available_frames > 0 && credits.available_bytes >= bytes {
+                credits.available_frames -= 1;
                 credits.available_bytes -= bytes;
                 if credits
                     .outstanding
@@ -356,7 +358,7 @@ async fn reserve_relation_credit(
     }
 }
 
-async fn await_all_chunk_acknowledgements(run: &ActiveRun) -> Result<(), Status> {
+async fn await_all_relation_frame_acknowledgements(run: &ActiveRun) -> Result<(), Status> {
     loop {
         let notified = run.credit_notify.notified();
         {
@@ -437,6 +439,7 @@ fn header(
         sequence,
         context_manifest_digest: start.context_manifest_digest.clone(),
         source_manifest_digest: source_manifest_digest.to_owned(),
+        sandbox_profile_digest: start.sandbox_profile_digest.clone(),
     }
 }
 
@@ -484,7 +487,7 @@ fn validate_source(
 impl PyreflySidecar for Service {
     async fn handshake(&self, request: Request<Hello>) -> Result<Response<HelloAck>, Status> {
         let hello = request.into_inner();
-        validate_hello(&hello)?;
+        validate_hello(&hello, &self.sandbox_profile_digest)?;
         Ok(Response::new(HelloAck {
             protocol_major: 1,
             protocol_minor: 0,
@@ -495,8 +498,8 @@ impl PyreflySidecar for Service {
             supported_python_versions: hello.supported_python_versions,
             observation_schema_digests: crate::pyrefly_link::schema_digests(),
             maximum_frame_bytes: u64::try_from(MAX_FRAME_BYTES).unwrap(),
-            maximum_arrow_chunk_bytes: u64::try_from(MAX_ARROW_CHUNK_BYTES).unwrap(),
-            sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
+            maximum_arrow_ipc_bytes: u64::try_from(MAX_ARROW_IPC_BYTES).unwrap(),
+            sandbox_profile_digest: self.sandbox_profile_digest.as_str().to_owned(),
         }))
     }
 
@@ -518,6 +521,7 @@ impl PyreflySidecar for Service {
             || request.resource_profile_id != RESOURCE_PROFILE_ID
             || request.maximum_contexts != u32::try_from(MAX_CONTEXTS).unwrap()
             || request.maximum_memory_mib != MAX_MEMORY_MIB
+            || request.sandbox_profile_digest != *self.sandbox_profile_digest
         {
             return Err(Status::failed_precondition(
                 "Pyrefly context identity, manifest, or lease differs",
@@ -575,6 +579,7 @@ impl PyreflySidecar for Service {
             context_handle: handle,
             context_manifest_digest: request.context_manifest_digest,
             opened_at_unix_ms: now_millis(),
+            sandbox_profile_digest: self.sandbox_profile_digest.as_str().to_owned(),
         }))
     }
 
@@ -623,12 +628,12 @@ impl PyreflySidecar for Service {
             || start.source_generation != lease.source_generation
             || start.source_generation != context.latest_generation.load(Ordering::Acquire)
             || start.deadline_unix_ms <= now_millis()
-            || start.initial_chunk_credits == 0
-            || start.initial_chunk_credits > MAX_OUTSTANDING_CHUNKS
+            || start.initial_frame_credits == 0
+            || start.initial_frame_credits > MAX_OUTSTANDING_FRAMES
             || start.initial_credit_bytes == 0
             || start.initial_credit_bytes > MAX_UNACKNOWLEDGED_BYTES
             || start.output_schema_bundle_digest != crate::pyrefly_link::schema_bundle_digest()
-            || start.sandbox_profile_digest != SANDBOX_PROFILE_DIGEST
+            || start.sandbox_profile_digest != *self.sandbox_profile_digest
             || start.trust_profile != TRUST_PROFILE
             || start.resource_profile_id != RESOURCE_PROFILE_ID
             || start.modules.is_empty()
@@ -646,7 +651,7 @@ impl PyreflySidecar for Service {
             superseded: AtomicBool::new(false),
             terminal: Mutex::new(None),
             credits: Mutex::new(CreditState {
-                available_chunks: start.initial_chunk_credits,
+                available_frames: start.initial_frame_credits,
                 available_bytes: start.initial_credit_bytes,
                 outstanding: BTreeMap::new(),
                 next_ack_sequence: BTreeMap::new(),
@@ -680,13 +685,14 @@ impl PyreflySidecar for Service {
             start.provider_run_id.clone(),
         ));
         let (sender, receiver) = tokio::sync::mpsc::channel(8);
+        let sandbox_profile_digest = Arc::clone(&self.sandbox_profile_digest);
         tokio::spawn(async move {
             let source_manifest = lease.source_manifest_digest.clone();
             let _ = sender
                 .send(Ok(AnalyzeEvent {
                     event: Some(Event::RunAccepted(RunAccepted {
                         header: Some(header(&start, &source_manifest, 0)),
-                        granted_chunk_credits: start.initial_chunk_credits,
+                        granted_frame_credits: start.initial_frame_credits,
                         granted_credit_bytes: start.initial_credit_bytes,
                     })),
                 }))
@@ -720,7 +726,20 @@ impl PyreflySidecar for Service {
                 source_generation: start.source_generation,
             };
             let analysis_context = Arc::clone(&context);
+            let analysis_started = AnalyzeEvent {
+                event: Some(Event::RunProgress(RunProgress {
+                    header: Some(header(&start, &source_manifest, 1)),
+                    completed_modules: 0,
+                    total_modules: u32::try_from(start.modules.len()).unwrap_or(u32::MAX),
+                })),
+            };
+            let progress_sender = sender.clone();
             let analysis = match tokio::task::spawn_blocking(move || {
+                progress_sender
+                    .blocking_send(Ok(analysis_started))
+                    .map_err(|_| {
+                        "Pyrefly analysis receiver closed before producer start".to_owned()
+                    })?;
                 analysis_context
                     .semantic
                     .lock()
@@ -770,13 +789,13 @@ impl PyreflySidecar for Service {
                 let _ = sender
                     .send(Ok(AnalyzeEvent {
                         event: Some(Event::RunTerminal(RunTerminal {
-                            header: Some(header(&start, &source_manifest, 1)),
+                            header: Some(header(&start, &source_manifest, 2)),
                             ordered_module_digests: Vec::new(),
                             capability_outcomes: capability_outcomes(&start, state),
                             overall_digest: b3(&[]),
                             terminal_state: state as i32,
                             rechecked_module_ids: analysis.proven_rechecked_module_ids,
-                            sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
+                            sandbox_profile_digest: sandbox_profile_digest.as_str().to_owned(),
                             trust_profile: TRUST_PROFILE.to_owned(),
                         })),
                     }))
@@ -784,7 +803,7 @@ impl PyreflySidecar for Service {
                 return;
             }
             let rechecked_module_ids = analysis.proven_rechecked_module_ids;
-            let mut sequence = 0_u64;
+            let mut sequence = 1_u64;
             let mut module_digests = Vec::new();
             let mut interrupted = None;
             'modules: for (module, analysis) in start.modules.iter().zip(analysis.modules) {
@@ -929,7 +948,7 @@ impl PyreflySidecar for Service {
                 }
             }
             if interrupted.is_none()
-                && let Err(error) = await_all_chunk_acknowledgements(&run).await
+                && let Err(error) = await_all_relation_frame_acknowledgements(&run).await
             {
                 if let Some(state) = interrupted_state(&run, &context, start.source_generation) {
                     interrupted = Some(state);
@@ -961,7 +980,7 @@ impl PyreflySidecar for Service {
                             overall_digest,
                             terminal_state: state as i32,
                             rechecked_module_ids,
-                            sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
+                            sandbox_profile_digest: sandbox_profile_digest.as_str().to_owned(),
                             trust_profile: TRUST_PROFILE.to_owned(),
                         })),
                     }))
@@ -989,7 +1008,7 @@ impl PyreflySidecar for Service {
                         overall_digest,
                         terminal_state: ProviderRunState::Succeeded as i32,
                         rechecked_module_ids,
-                        sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
+                        sandbox_profile_digest: sandbox_profile_digest.as_str().to_owned(),
                         trust_profile: TRUST_PROFILE.to_owned(),
                     })),
                 }))
@@ -1076,7 +1095,7 @@ impl PyreflySidecar for Service {
     }
 }
 
-pub(crate) fn serve(socket: &Path) -> Result<(), String> {
+pub(crate) fn serve(socket: &Path, sandbox_profile_digest: &str) -> Result<(), String> {
     if socket.exists() {
         return Err("Pyrefly sidecar socket already exists".to_owned());
     }
@@ -1089,7 +1108,7 @@ pub(crate) fn serve(socket: &Path) -> Result<(), String> {
             .parent()
             .ok_or_else(|| "Pyrefly socket has no parent state root".to_owned())?
             .join("pyrefly-state");
-        let service = Service::new(&state_root)?;
+        let service = Service::new(&state_root, sandbox_profile_digest)?;
         let listener = tokio::net::UnixListener::bind(socket)
             .map_err(|error| format!("bind Pyrefly sidecar socket: {error}"))?;
         fs::set_permissions(socket, fs::Permissions::from_mode(0o600))
@@ -1113,6 +1132,9 @@ pub(crate) fn serve(socket: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    const TEST_SANDBOX_PROFILE_DIGEST: &str =
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+
     fn hello() -> Hello {
         Hello {
             protocol_major: 1,
@@ -1123,8 +1145,8 @@ mod tests {
             supported_python_versions: vec!["3.14".to_owned()],
             observation_schema_digests: crate::pyrefly_link::schema_digests(),
             maximum_frame_bytes: u64::try_from(MAX_FRAME_BYTES).unwrap(),
-            maximum_arrow_chunk_bytes: u64::try_from(MAX_ARROW_CHUNK_BYTES).unwrap(),
-            sandbox_profile_digest: SANDBOX_PROFILE_DIGEST.to_owned(),
+            maximum_arrow_ipc_bytes: u64::try_from(MAX_ARROW_IPC_BYTES).unwrap(),
+            sandbox_profile_digest: TEST_SANDBOX_PROFILE_DIGEST.to_owned(),
         }
     }
 
@@ -1139,10 +1161,10 @@ mod tests {
     }
 
     #[test]
-    fn relation_acknowledgements_return_only_explicitly_accepted_credit() {
+    fn wp34_ops_relation_acknowledgements_return_only_explicitly_accepted_credit() {
         let identity = relation_identity();
         let mut credits = CreditState {
-            available_chunks: MAX_OUTSTANDING_CHUNKS - 1,
+            available_frames: MAX_OUTSTANDING_FRAMES - 1,
             available_bytes: MAX_UNACKNOWLEDGED_BYTES - 4,
             outstanding: [(
                 (identity.stream_id.to_vec(), 7),
@@ -1158,11 +1180,11 @@ mod tests {
                 .unwrap();
         release_relation_credit(&mut credits, &accepted).unwrap();
         assert!(credits.outstanding.is_empty());
-        assert_eq!(credits.available_chunks, MAX_OUTSTANDING_CHUNKS);
+        assert_eq!(credits.available_frames, MAX_OUTSTANDING_FRAMES);
         assert_eq!(credits.available_bytes, MAX_UNACKNOWLEDGED_BYTES);
 
         let mut excessive = CreditState {
-            available_chunks: MAX_OUTSTANDING_CHUNKS - 1,
+            available_frames: MAX_OUTSTANDING_FRAMES - 1,
             available_bytes: MAX_UNACKNOWLEDGED_BYTES - 4,
             outstanding: [(
                 (identity.stream_id.to_vec(), 8),
@@ -1192,13 +1214,13 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::too_many_lines)] // Handshake, context fencing, credit stalls, idempotent cancel, and shutdown form one protocol session.
-    async fn pyrefly_protocol_conformance() {
+    async fn wp34_ops_pyrefly_protocol_conformance() {
         let state_root = std::env::temp_dir().join(format!(
             "codefabric-pyrefly-protocol-{}",
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&state_root);
-        let service = Service::new(&state_root).unwrap();
+        let service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
 
         let mut mismatch = hello();
         mismatch.protocol_major = 2;
@@ -1242,6 +1264,7 @@ mod tests {
             resource_profile_id: RESOURCE_PROFILE_ID.to_owned(),
             maximum_contexts: u32::try_from(MAX_CONTEXTS).unwrap(),
             maximum_memory_mib: MAX_MEMORY_MIB,
+            sandbox_profile_digest: TEST_SANDBOX_PROFILE_DIGEST.to_owned(),
         };
         let opened = service
             .open_context(Request::new(open(2)))
@@ -1249,6 +1272,7 @@ mod tests {
             .unwrap()
             .into_inner();
         assert!(!opened.context_handle.is_empty());
+        assert_eq!(opened.sandbox_profile_digest, TEST_SANDBOX_PROFILE_DIGEST);
         assert_eq!(
             service
                 .open_context(Request::new(open(1)))
@@ -1265,7 +1289,7 @@ mod tests {
             superseded: AtomicBool::new(false),
             terminal: Mutex::new(None),
             credits: Mutex::new(CreditState {
-                available_chunks: 1,
+                available_frames: 1,
                 available_bytes: 4,
                 outstanding: BTreeMap::new(),
                 next_ack_sequence: [(relation_identity().stream_id.to_vec(), 0)]
@@ -1298,7 +1322,7 @@ mod tests {
                     .map(|payload| payload.bytes),
                 Some(4)
             );
-            credits.available_chunks = 1;
+            credits.available_frames = 1;
             credits.available_bytes = 4;
         }
         run.credit_notify.notify_waiters();

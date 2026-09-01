@@ -3558,33 +3558,17 @@
           ]
         },
         {
-          "full_name": "codefabric.provider.v1.CreditControlLimit",
-          "options": {},
-          "reserved_names": [],
-          "reserved_ranges": [],
-          "values": [
-            {
-              "name": "CREDIT_CONTROL_LIMIT_UNSPECIFIED",
-              "number": 0,
-              "options": {}
-            },
-            {
-              "name": "CREDIT_CONTROL_LIMIT_MAX_OUTSTANDING_CHUNKS",
-              "number": 4,
-              "options": {}
-            },
-            {
-              "name": "CREDIT_CONTROL_LIMIT_MAX_UNACKNOWLEDGED_MIB",
-              "number": 16,
-              "options": {}
-            }
-          ]
-        },
-        {
           "full_name": "codefabric.provider.v1.ProviderEventKind",
           "options": {},
-          "reserved_names": [],
-          "reserved_ranges": [],
+          "reserved_names": [
+            "PROVIDER_EVENT_KIND_OBSERVATION_CHUNK"
+          ],
+          "reserved_ranges": [
+            {
+              "end_inclusive": 4,
+              "start": 4
+            }
+          ],
           "values": [
             {
               "name": "PROVIDER_EVENT_KIND_UNSPECIFIED",
@@ -3604,11 +3588,6 @@
             {
               "name": "PROVIDER_EVENT_KIND_SCOPE_BEGIN",
               "number": 3,
-              "options": {}
-            },
-            {
-              "name": "PROVIDER_EVENT_KIND_OBSERVATION_CHUNK",
-              "number": 4,
               "options": {}
             },
             {
@@ -4265,91 +4244,6 @@
           "fields": [
             {
               "default_value": null,
-              "has_presence": false,
-              "json_name": "sequence",
-              "label": "LABEL_OPTIONAL",
-              "name": "sequence",
-              "number": 1,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT64",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "nextCreditBytes",
-              "label": "LABEL_OPTIONAL",
-              "name": "next_credit_bytes",
-              "number": 2,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT64",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "nextCreditChunks",
-              "label": "LABEL_OPTIONAL",
-              "name": "next_credit_chunks",
-              "number": 3,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT32",
-              "type_name": ""
-            }
-          ],
-          "full_name": "codefabric.provider.v1.ChunkAccepted",
-          "oneofs": [],
-          "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
-        },
-        {
-          "extension_ranges": [],
-          "fields": [
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "sequence",
-              "label": "LABEL_OPTIONAL",
-              "name": "sequence",
-              "number": 1,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT64",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "errorCode",
-              "label": "LABEL_OPTIONAL",
-              "name": "error_code",
-              "number": 2,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            }
-          ],
-          "full_name": "codefabric.provider.v1.ChunkRejected",
-          "oneofs": [],
-          "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
-        },
-        {
-          "extension_ranges": [],
-          "fields": [
-            {
-              "default_value": null,
               "has_presence": true,
               "json_name": "header",
               "label": "LABEL_OPTIONAL",
@@ -4426,19 +4320,6 @@
             {
               "default_value": null,
               "has_presence": true,
-              "json_name": "observationChunk",
-              "label": "LABEL_OPTIONAL",
-              "name": "observation_chunk",
-              "number": 4,
-              "oneof": "event",
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.provider.v1.ProviderObservationChunkEvent"
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
               "json_name": "scopeEnd",
               "label": "LABEL_OPTIONAL",
               "name": "scope_end",
@@ -4484,8 +4365,15 @@
             }
           ],
           "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
+          "reserved_names": [
+            "observation_chunk"
+          ],
+          "reserved_ranges": [
+            {
+              "end_exclusive": 5,
+              "start": 4
+            }
+          ]
         },
         {
           "extension_ranges": [],
@@ -4851,125 +4739,6 @@
           ],
           "full_name": "codefabric.provider.v1.ProviderJobSpec",
           "oneofs": [],
-          "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
-        },
-        {
-          "extension_ranges": [],
-          "fields": [
-            {
-              "default_value": null,
-              "has_presence": true,
-              "json_name": "header",
-              "label": "LABEL_OPTIONAL",
-              "name": "header",
-              "number": 1,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.provider.v1.ProviderEventHeader"
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
-              "json_name": "scope",
-              "label": "LABEL_OPTIONAL",
-              "name": "scope",
-              "number": 2,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.provider.v1.ProviderScope"
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "observationFamilyCode",
-              "label": "LABEL_OPTIONAL",
-              "name": "observation_family_code",
-              "number": 3,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT32",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "arrowIpc",
-              "label": "LABEL_OPTIONAL",
-              "name": "arrow_ipc",
-              "number": 4,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_BYTES",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
-              "json_name": "payloadReference",
-              "label": "LABEL_OPTIONAL",
-              "name": "payload_reference",
-              "number": 5,
-              "oneof": "_payload_reference",
-              "options": {},
-              "proto3_optional": true,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.provider.v1.BlobReference"
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "schemaDigest",
-              "label": "LABEL_OPTIONAL",
-              "name": "schema_digest",
-              "number": 6,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "rowCount",
-              "label": "LABEL_OPTIONAL",
-              "name": "row_count",
-              "number": 7,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT64",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "chunkDigest",
-              "label": "LABEL_OPTIONAL",
-              "name": "chunk_digest",
-              "number": 8,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            }
-          ],
-          "full_name": "codefabric.provider.v1.ProviderObservationChunkEvent",
-          "oneofs": [
-            {
-              "name": "_payload_reference",
-              "options": {}
-            }
-          ],
           "options": {},
           "reserved_names": [],
           "reserved_ranges": []
@@ -6123,32 +5892,6 @@
             {
               "default_value": null,
               "has_presence": true,
-              "json_name": "chunkAccepted",
-              "label": "LABEL_OPTIONAL",
-              "name": "chunk_accepted",
-              "number": 2,
-              "oneof": "command",
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.provider.v1.ChunkAccepted"
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
-              "json_name": "chunkRejected",
-              "label": "LABEL_OPTIONAL",
-              "name": "chunk_rejected",
-              "number": 3,
-              "oneof": "command",
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.provider.v1.ChunkRejected"
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
               "json_name": "cancel",
               "label": "LABEL_OPTIONAL",
               "name": "cancel",
@@ -6181,8 +5924,20 @@
             }
           ],
           "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
+          "reserved_names": [
+            "chunk_accepted",
+            "chunk_rejected"
+          ],
+          "reserved_ranges": [
+            {
+              "end_exclusive": 3,
+              "start": 2
+            },
+            {
+              "end_exclusive": 4,
+              "start": 3
+            }
+          ]
         },
         {
           "extension_ranges": [],
@@ -6225,19 +5980,6 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.pyrefly.v1.ModuleBegin"
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
-              "json_name": "observationBatchChunk",
-              "label": "LABEL_OPTIONAL",
-              "name": "observation_batch_chunk",
-              "number": 4,
-              "oneof": "event",
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.pyrefly.v1.ObservationBatchChunk"
             },
             {
               "default_value": null,
@@ -6287,8 +6029,15 @@
             }
           ],
           "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
+          "reserved_names": [
+            "observation_batch_chunk"
+          ],
+          "reserved_ranges": [
+            {
+              "end_exclusive": 5,
+              "start": 4
+            }
+          ]
         },
         {
           "extension_ranges": [],
@@ -6378,6 +6127,19 @@
               "label": "LABEL_OPTIONAL",
               "name": "source_manifest_digest",
               "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sandboxProfileDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "sandbox_profile_digest",
+              "number": 8,
               "oneof": null,
               "options": {},
               "proto3_optional": false,
@@ -6540,9 +6302,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "initialChunkCredits",
+              "json_name": "initialFrameCredits",
               "label": "LABEL_OPTIONAL",
-              "name": "initial_chunk_credits",
+              "name": "initial_frame_credits",
               "number": 12,
               "oneof": null,
               "options": {},
@@ -6801,9 +6563,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "maximumArrowChunkBytes",
+              "json_name": "maximumArrowIpcBytes",
               "label": "LABEL_OPTIONAL",
-              "name": "maximum_arrow_chunk_bytes",
+              "name": "maximum_arrow_ipc_bytes",
               "number": 9,
               "oneof": null,
               "options": {},
@@ -6941,9 +6703,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "maximumArrowChunkBytes",
+              "json_name": "maximumArrowIpcBytes",
               "label": "LABEL_OPTIONAL",
-              "name": "maximum_arrow_chunk_bytes",
+              "name": "maximum_arrow_ipc_bytes",
               "number": 9,
               "oneof": null,
               "options": {},
@@ -7213,125 +6975,6 @@
           "fields": [
             {
               "default_value": null,
-              "has_presence": true,
-              "json_name": "header",
-              "label": "LABEL_OPTIONAL",
-              "name": "header",
-              "number": 1,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.pyrefly.v1.AnalyzeEventHeader"
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "moduleId",
-              "label": "LABEL_OPTIONAL",
-              "name": "module_id",
-              "number": 2,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "observationFamilyCode",
-              "label": "LABEL_OPTIONAL",
-              "name": "observation_family_code",
-              "number": 3,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT32",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "arrowIpc",
-              "label": "LABEL_OPTIONAL",
-              "name": "arrow_ipc",
-              "number": 4,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_BYTES",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
-              "json_name": "payloadReference",
-              "label": "LABEL_OPTIONAL",
-              "name": "payload_reference",
-              "number": 5,
-              "oneof": "_payload_reference",
-              "options": {},
-              "proto3_optional": true,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.provider.v1.BlobReference"
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "schemaDigest",
-              "label": "LABEL_OPTIONAL",
-              "name": "schema_digest",
-              "number": 6,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "rowCount",
-              "label": "LABEL_OPTIONAL",
-              "name": "row_count",
-              "number": 7,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT64",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "chunkDigest",
-              "label": "LABEL_OPTIONAL",
-              "name": "chunk_digest",
-              "number": 8,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            }
-          ],
-          "full_name": "codefabric.pyrefly.v1.ObservationBatchChunk",
-          "oneofs": [
-            {
-              "name": "_payload_reference",
-              "options": {}
-            }
-          ],
-          "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
-        },
-        {
-          "extension_ranges": [],
-          "fields": [
-            {
-              "default_value": null,
               "has_presence": false,
               "json_name": "workspaceId",
               "label": "LABEL_OPTIONAL",
@@ -7433,6 +7076,19 @@
               "proto3_optional": false,
               "type": "TYPE_UINT64",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sandboxProfileDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "sandbox_profile_digest",
+              "number": 9,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.pyrefly.v1.OpenContextRequest",
@@ -7481,6 +7137,19 @@
               "options": {},
               "proto3_optional": false,
               "type": "TYPE_INT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sandboxProfileDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "sandbox_profile_digest",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
               "type_name": ""
             }
           ],
@@ -7571,9 +7240,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "grantedChunkCredits",
+              "json_name": "grantedFrameCredits",
               "label": "LABEL_OPTIONAL",
-              "name": "granted_chunk_credits",
+              "name": "granted_frame_credits",
               "number": 2,
               "oneof": null,
               "options": {},
@@ -8109,9 +7778,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "grantedChunkCredits",
+              "json_name": "grantedFrameCredits",
               "label": "LABEL_OPTIONAL",
-              "name": "granted_chunk_credits",
+              "name": "granted_frame_credits",
               "number": 4,
               "oneof": null,
               "options": {},
@@ -8479,19 +8148,6 @@
             },
             {
               "default_value": null,
-              "has_presence": true,
-              "json_name": "diagnosticSummary",
-              "label": "LABEL_OPTIONAL",
-              "name": "diagnostic_summary",
-              "number": 7,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.rustc.v1.DiagnosticSummary"
-            },
-            {
-              "default_value": null,
               "has_presence": false,
               "json_name": "overallStreamDigest",
               "label": "LABEL_OPTIONAL",
@@ -8538,8 +8194,15 @@
             }
           ],
           "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
+          "reserved_names": [
+            "diagnostic_summary"
+          ],
+          "reserved_ranges": [
+            {
+              "end_exclusive": 8,
+              "start": 7
+            }
+          ]
         },
         {
           "extension_ranges": [],
@@ -8621,55 +8284,6 @@
           "fields": [
             {
               "default_value": null,
-              "has_presence": false,
-              "json_name": "errorCount",
-              "label": "LABEL_OPTIONAL",
-              "name": "error_count",
-              "number": 1,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT32",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "warningCount",
-              "label": "LABEL_OPTIONAL",
-              "name": "warning_count",
-              "number": 2,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT32",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "diagnosticsDigest",
-              "label": "LABEL_OPTIONAL",
-              "name": "diagnostics_digest",
-              "number": 3,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            }
-          ],
-          "full_name": "codefabric.rustc.v1.DiagnosticSummary",
-          "oneofs": [],
-          "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
-        },
-        {
-          "extension_ranges": [],
-          "fields": [
-            {
-              "default_value": null,
               "has_presence": true,
               "json_name": "compilationBegin",
               "label": "LABEL_OPTIONAL",
@@ -8693,19 +8307,6 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.rustc.v1.OwnerBegin"
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
-              "json_name": "ownerObservationChunk",
-              "label": "LABEL_OPTIONAL",
-              "name": "owner_observation_chunk",
-              "number": 4,
-              "oneof": "event",
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.rustc.v1.OwnerObservationChunk"
             },
             {
               "default_value": null,
@@ -8756,12 +8357,17 @@
           ],
           "options": {},
           "reserved_names": [
-            "compilation_accepted"
+            "compilation_accepted",
+            "owner_observation_chunk"
           ],
           "reserved_ranges": [
             {
               "end_exclusive": 2,
               "start": 1
+            },
+            {
+              "end_exclusive": 5,
+              "start": 4
             }
           ]
         },
@@ -8780,32 +8386,6 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.rustc.v1.CompilationAccepted"
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
-              "json_name": "chunkAccepted",
-              "label": "LABEL_OPTIONAL",
-              "name": "chunk_accepted",
-              "number": 2,
-              "oneof": "command",
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.provider.v1.ChunkAccepted"
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
-              "json_name": "chunkRejected",
-              "label": "LABEL_OPTIONAL",
-              "name": "chunk_rejected",
-              "number": 3,
-              "oneof": "command",
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.provider.v1.ChunkRejected"
             },
             {
               "default_value": null,
@@ -8842,8 +8422,20 @@
             }
           ],
           "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
+          "reserved_names": [
+            "chunk_accepted",
+            "chunk_rejected"
+          ],
+          "reserved_ranges": [
+            {
+              "end_exclusive": 3,
+              "start": 2
+            },
+            {
+              "end_exclusive": 4,
+              "start": 3
+            }
+          ]
         },
         {
           "extension_ranges": [],
@@ -9056,9 +8648,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "maximumOutstandingChunks",
+              "json_name": "maximumOutstandingFrames",
               "label": "LABEL_OPTIONAL",
-              "name": "maximum_outstanding_chunks",
+              "name": "maximum_outstanding_frames",
               "number": 7,
               "oneof": null,
               "options": {},
@@ -9310,151 +8902,6 @@
           "options": {
             "$wire_hex": "3801"
           },
-          "reserved_names": [],
-          "reserved_ranges": []
-        },
-        {
-          "extension_ranges": [],
-          "fields": [
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "providerRunId",
-              "label": "LABEL_OPTIONAL",
-              "name": "provider_run_id",
-              "number": 1,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "compilationUnitId",
-              "label": "LABEL_OPTIONAL",
-              "name": "compilation_unit_id",
-              "number": 2,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "sequence",
-              "label": "LABEL_OPTIONAL",
-              "name": "sequence",
-              "number": 3,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT64",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "ownerId",
-              "label": "LABEL_OPTIONAL",
-              "name": "owner_id",
-              "number": 4,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "observationFamilyCode",
-              "label": "LABEL_OPTIONAL",
-              "name": "observation_family_code",
-              "number": 5,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT32",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "arrowIpc",
-              "label": "LABEL_OPTIONAL",
-              "name": "arrow_ipc",
-              "number": 6,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_BYTES",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
-              "json_name": "payloadReference",
-              "label": "LABEL_OPTIONAL",
-              "name": "payload_reference",
-              "number": 7,
-              "oneof": "_payload_reference",
-              "options": {},
-              "proto3_optional": true,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.provider.v1.BlobReference"
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "schemaDigest",
-              "label": "LABEL_OPTIONAL",
-              "name": "schema_digest",
-              "number": 8,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "rowCount",
-              "label": "LABEL_OPTIONAL",
-              "name": "row_count",
-              "number": 9,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_UINT64",
-              "type_name": ""
-            },
-            {
-              "default_value": null,
-              "has_presence": false,
-              "json_name": "chunkDigest",
-              "label": "LABEL_OPTIONAL",
-              "name": "chunk_digest",
-              "number": 10,
-              "oneof": null,
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_STRING",
-              "type_name": ""
-            }
-          ],
-          "full_name": "codefabric.rustc.v1.OwnerObservationChunk",
-          "oneofs": [
-            {
-              "name": "_payload_reference",
-              "options": {}
-            }
-          ],
-          "options": {},
           "reserved_names": [],
           "reserved_ranges": []
         },

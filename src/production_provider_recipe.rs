@@ -17,9 +17,10 @@ use crate::fabric::epoch_runtime::FabricSchemaRole;
 use crate::fabric::production_kernel::CompiledProviderAuthority;
 use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
 use crate::provider_admission::{
-    DeclaredCoverageBinding, ExactProgrammaticProviderRuns, ProgrammaticProviderAdmissionOutcome,
-    ProviderAdmissionError, ProviderAdmissionPlan, ProviderAuthorityClass, ProviderCoverageSource,
-    ProviderNativeLane, ProviderRelationBinding, ProviderRelationIdentity, ProviderRelationPurpose,
+    DeclaredCoverageBinding, ExactProgrammaticProviderRuns, ExactProviderLaneRuns,
+    ProgrammaticProviderAdmissionOutcome, ProviderAdmissionError, ProviderAdmissionPlan,
+    ProviderAuthorityClass, ProviderCoverageSource, ProviderNativeLane,
+    ProviderRelationBinding, ProviderRelationIdentity, ProviderRelationPurpose,
     admit_provider_relations_programmatic,
 };
 use crate::provider_boundary::{
@@ -147,22 +148,22 @@ impl ProductionProviderAuthority {
 
 /// Exact application-owned DTOs accepted from the provider adapters.
 ///
-/// An empty slice means the lane did not produce an accepted run. The production recipe still
-/// installs its compiled contract and admission therefore reports every requested family as an
-/// explicit unknown; it never turns absence into a successful empty relation.
+/// Each lane is either an exact non-empty accepted run set or an explicit typed gap. The production
+/// recipe still installs every compiled contract; absence and provider failure therefore become
+/// governed remainder evidence rather than successful empty relations.
 #[derive(Clone, Copy)]
 pub struct ProductionProviderRuns<'a> {
-    native_syntax: &'a [ProviderNativeSyntaxRun],
-    pyrefly: &'a [AcceptedPyreflyRun],
-    rustc: &'a [TrustQualifiedRustcCompilation],
+    native_syntax: ExactProviderLaneRuns<'a, ProviderNativeSyntaxRun>,
+    pyrefly: ExactProviderLaneRuns<'a, AcceptedPyreflyRun>,
+    rustc: ExactProviderLaneRuns<'a, TrustQualifiedRustcCompilation>,
 }
 
 impl<'a> ProductionProviderRuns<'a> {
     #[must_use]
     pub const fn new(
-        native_syntax: &'a [ProviderNativeSyntaxRun],
-        pyrefly: &'a [AcceptedPyreflyRun],
-        rustc: &'a [TrustQualifiedRustcCompilation],
+        native_syntax: ExactProviderLaneRuns<'a, ProviderNativeSyntaxRun>,
+        pyrefly: ExactProviderLaneRuns<'a, AcceptedPyreflyRun>,
+        rustc: ExactProviderLaneRuns<'a, TrustQualifiedRustcCompilation>,
     ) -> Self {
         Self {
             native_syntax,
@@ -229,7 +230,7 @@ pub(crate) fn admit_production_provider_relations(
 
     Ok(admit_provider_relations_programmatic(
         builder,
-        ExactProgrammaticProviderRuns::new(
+        ExactProgrammaticProviderRuns::try_new(
             &tree_sitter_plan,
             &ruff_plan,
             runs.native_syntax,
@@ -237,7 +238,7 @@ pub(crate) fn admit_production_provider_relations(
             runs.pyrefly,
             &rustc_plan,
             runs.rustc,
-        ),
+        )?,
     )?)
 }
 
@@ -247,6 +248,118 @@ pub(crate) enum ProviderRelation {
     NativeSyntax(NativeSyntaxRelation),
     Pyrefly(PyreflyRelation),
     Rustc(RustcRelation),
+}
+
+/// Exact provider execution lane selected by the compiled semantic release.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CompiledProviderLane {
+    TreeSitter,
+    Ruff,
+    Pyrefly,
+    Rustc,
+}
+
+/// Application-owned execution bounds for one exact provider lane.
+///
+/// These values are part of the compiled provider recipe. They are not a second registry and
+/// cannot be selected or replaced without the non-forgeable release authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CompiledProviderExecutionProfile {
+    pub(crate) provider_id: &'static str,
+    pub(crate) placement: &'static str,
+    pub(crate) resource_profile_id: &'static str,
+    pub(crate) max_input_bytes: u64,
+    pub(crate) max_work_units: u64,
+    pub(crate) max_wall_millis: u64,
+    pub(crate) max_visited_nodes: u64,
+    pub(crate) max_traversal_depth: u16,
+    pub(crate) max_output_records: u64,
+    pub(crate) max_output_bytes: u64,
+    pub(crate) max_diagnostics: u16,
+    pub(crate) max_parser_workers: u16,
+    pub(crate) max_retained_tree_revisions: u16,
+    pub(crate) cancellation_check_interval: u32,
+    pub(crate) cancellation_ack_millis: u16,
+}
+
+impl CompiledProviderAuthority {
+    /// Select the exact provider-specific execution recipe compiled into this release.
+    #[must_use]
+    pub(crate) const fn execution_profile(
+        &self,
+        lane: CompiledProviderLane,
+    ) -> CompiledProviderExecutionProfile {
+        match lane {
+            CompiledProviderLane::TreeSitter => CompiledProviderExecutionProfile {
+                provider_id: "tree-sitter",
+                placement: "IN_PROCESS",
+                resource_profile_id: "in-process-syntax-standard",
+                max_input_bytes: 16_777_216,
+                max_work_units: 10_000_000,
+                max_wall_millis: 30_000,
+                max_visited_nodes: 2_000_000,
+                max_traversal_depth: 256,
+                max_output_records: 2_000_000,
+                max_output_bytes: 268_435_456,
+                max_diagnostics: 10_000,
+                max_parser_workers: 4,
+                max_retained_tree_revisions: 2,
+                cancellation_check_interval: 1_024,
+                cancellation_ack_millis: 2_000,
+            },
+            CompiledProviderLane::Ruff => CompiledProviderExecutionProfile {
+                provider_id: "ruff-python",
+                placement: "IN_PROCESS",
+                resource_profile_id: "in-process-syntax-standard",
+                max_input_bytes: 16_777_216,
+                max_work_units: 10_000_000,
+                max_wall_millis: 30_000,
+                max_visited_nodes: 2_000_000,
+                max_traversal_depth: 256,
+                max_output_records: 2_000_000,
+                max_output_bytes: 268_435_456,
+                max_diagnostics: 10_000,
+                max_parser_workers: 4,
+                max_retained_tree_revisions: 2,
+                cancellation_check_interval: 1_024,
+                cancellation_ack_millis: 2_000,
+            },
+            CompiledProviderLane::Pyrefly => CompiledProviderExecutionProfile {
+                provider_id: "pyrefly-python",
+                placement: "SIDECAR",
+                resource_profile_id: "sidecar-semantic-standard",
+                max_input_bytes: 67_108_864,
+                max_work_units: 20_000_000,
+                max_wall_millis: 120_000,
+                max_visited_nodes: 4_000_000,
+                max_traversal_depth: 512,
+                max_output_records: 4_000_000,
+                max_output_bytes: 536_870_912,
+                max_diagnostics: 20_000,
+                max_parser_workers: 2,
+                max_retained_tree_revisions: 1,
+                cancellation_check_interval: 1_024,
+                cancellation_ack_millis: 2_000,
+            },
+            CompiledProviderLane::Rustc => CompiledProviderExecutionProfile {
+                provider_id: "rustc-mir",
+                placement: "COMPILER_GROUP",
+                resource_profile_id: "compiler-semantic-standard",
+                max_input_bytes: 67_108_864,
+                max_work_units: 20_000_000,
+                max_wall_millis: 120_000,
+                max_visited_nodes: 4_000_000,
+                max_traversal_depth: 512,
+                max_output_records: 4_000_000,
+                max_output_bytes: 536_870_912,
+                max_diagnostics: 20_000,
+                max_parser_workers: 2,
+                max_retained_tree_revisions: 1,
+                cancellation_check_interval: 1_024,
+                cancellation_ack_millis: 10_000,
+            },
+        }
+    }
 }
 
 /// Exact semantic roles assigned to one Arrow field by the compiled provider descriptor.
@@ -269,7 +382,8 @@ struct ProviderFieldDescriptor {
 /// Exhaustive application-owned descriptor for one exact provider relation.
 ///
 /// The Arrow schema comes from the provider relation enum's compiled schema authority. Field
-/// roles are closed exact-name mappings: an unclassified field rejects descriptor construction.
+/// roles come from one closed `(relation, field)` table: an unclassified pair rejects descriptor
+/// construction even when another relation contains the same field name.
 #[derive(Clone)]
 pub(crate) struct ProviderRelationDescriptor {
     relation: ProviderRelation,
@@ -567,7 +681,7 @@ fn build_plan(
             authority: relation.authority,
             disposition: ContractDisposition::Required,
             unavailable_behavior: UnavailableBehavior {
-                status: TerminalStatus::Unknown,
+                allowed_statuses: vec![TerminalStatus::Partial, TerminalStatus::Unknown],
                 allowed_reasons: vec![
                     RemainderReason::Unknown,
                     RemainderReason::ProviderUnavailable,
@@ -1049,915 +1163,963 @@ const fn field_role(
     }
 }
 
-fn relation_field_is_compiled(relation: ProviderRelation, name: &str) -> bool {
-    match relation {
-        ProviderRelation::NativeSyntax(relation) => {
-            native_relation_field_is_compiled(relation, name)
-        }
-        ProviderRelation::Pyrefly(relation) => pyrefly_relation_field_is_compiled(relation, name),
-        ProviderRelation::Rustc(relation) => rustc_relation_field_is_compiled(relation, name),
-    }
-}
+// Explicit per-relation field-role authority. Every admitted pair appears in one arm.
+const PROVENANCE_FACT_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::TypedFact,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::NotCanonical,
+    CoordinateRole::None,
+    RetentionPolicy::RetainForProvenance,
+);
+const FILE_IDENTITY_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::Coordinate,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::CanonicalIdentityInput,
+    CoordinateRole::FileIdentity,
+    RetentionPolicy::RetainForProvenance,
+);
+const CONTENT_DIGEST_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::Coordinate,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::OccurrenceIdentityInput,
+    CoordinateRole::ContentDigest,
+    RetentionPolicy::RetainForProvenance,
+);
+const PROVIDER_FACT_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::TypedFact,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::NotCanonical,
+    CoordinateRole::None,
+    RetentionPolicy::RetainProviderNative,
+);
+const DIAGNOSTIC_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::Diagnostic,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::NotCanonical,
+    CoordinateRole::None,
+    RetentionPolicy::RetainDiagnosticBounded,
+);
+const SNAPSHOT_LOCAL_KEY_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::ProviderLocalIdentity,
+    ProviderLocalIdentityRole::SnapshotLocalKey,
+    CanonicalIdentityRole::NotCanonical,
+    CoordinateRole::None,
+    RetentionPolicy::RetainProviderNative,
+);
+const PROVIDER_KIND_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::ProviderNativeKind,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::NotCanonical,
+    CoordinateRole::None,
+    RetentionPolicy::RetainProviderNative,
+);
+const BYTE_START_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::Coordinate,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::OccurrenceIdentityInput,
+    CoordinateRole::ByteStart,
+    RetentionPolicy::RetainForProvenance,
+);
+const BYTE_END_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::Coordinate,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::OccurrenceIdentityInput,
+    CoordinateRole::ByteEnd,
+    RetentionPolicy::RetainForProvenance,
+);
+const PROVIDER_COORDINATE_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::Coordinate,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::NotCanonical,
+    CoordinateRole::ProviderNativeCoordinate,
+    RetentionPolicy::RetainForProvenance,
+);
+const RAW_RENDERING_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::RawProviderRendering,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::NotCanonical,
+    CoordinateRole::None,
+    RetentionPolicy::RetainProviderNative,
+);
+const OCCURRENCE_REFERENCE_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::CanonicalIdentityInput,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::OccurrenceIdentityInput,
+    CoordinateRole::None,
+    RetentionPolicy::RetainForProvenance,
+);
+const CANONICAL_KEY_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::CanonicalIdentityInput,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::CanonicalIdentityInput,
+    CoordinateRole::None,
+    RetentionPolicy::RetainForProvenance,
+);
+const RESPONSE_LOCAL_INDEX_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::ProviderLocalIdentity,
+    ProviderLocalIdentityRole::ResponseLocalIndex,
+    CanonicalIdentityRole::NotCanonical,
+    CoordinateRole::None,
+    RetentionPolicy::RetainProviderNative,
+);
+const NATIVE_STABLE_KEY_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::CanonicalIdentityInput,
+    ProviderLocalIdentityRole::NativeStableKeyEvidence,
+    CanonicalIdentityRole::CanonicalIdentityInput,
+    CoordinateRole::None,
+    RetentionPolicy::RetainForProvenance,
+);
+const HYGIENE_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::Coordinate,
+    ProviderLocalIdentityRole::None,
+    CanonicalIdentityRole::NotCanonical,
+    CoordinateRole::MacroOrHygieneEvidence,
+    RetentionPolicy::RetainForProvenance,
+);
+const COMPILER_LOCAL_INDEX_ROLE: ProviderFieldRole = field_role(
+    FieldMeaning::ProviderLocalIdentity,
+    ProviderLocalIdentityRole::CompilerLocalIndex,
+    CanonicalIdentityRole::NotCanonical,
+    CoordinateRole::None,
+    RetentionPolicy::RetainProviderNative,
+);
 
-fn native_common_field(name: &str) -> bool {
-    matches!(
-        name,
-        "provider_run_id"
-            | "provider_id"
-            | "provider_release"
-            | "analysis_context_id"
-            | "semantic_environment_id"
-            | "file_id"
-            | "content_digest"
-            | "source_generation"
-    )
-}
-
-#[allow(clippy::too_many_lines)]
-fn native_relation_field_is_compiled(relation: NativeSyntaxRelation, name: &str) -> bool {
-    native_common_field(name)
-        || match relation {
-            NativeSyntaxRelation::TreeSitterRun | NativeSyntaxRelation::RuffRun => matches!(
-                name,
-                "provider_revision" | "catalog_id" | "inventory_fingerprint" | "grammar_release"
-            ),
-            NativeSyntaxRelation::TreeSitterCoverage | NativeSyntaxRelation::RuffCoverage => {
-                matches!(
-                    name,
-                    "family"
-                        | "requested_units"
-                        | "completed_units"
-                        | "terminal_status"
-                        | "remainder_reason"
-                )
-            }
-            NativeSyntaxRelation::TreeSitterRemainder | NativeSyntaxRelation::RuffRemainder => {
-                matches!(name, "family" | "reason" | "detail")
-            }
-            NativeSyntaxRelation::TreeSitterCstNode => matches!(
-                name,
-                "provider_local_node_id"
-                    | "parent_provider_local_node_id"
-                    | "raw_kind_id"
-                    | "raw_kind"
-                    | "field_name"
-                    | "start_byte"
-                    | "end_byte"
-                    | "named"
-                    | "extra"
-                    | "error"
-                    | "missing"
-                    | "ordinal"
-                    | "depth"
-                    | "raw_kind_disposition"
-            ),
-            NativeSyntaxRelation::TreeSitterChangedRange => {
-                matches!(name, "range_ordinal" | "start_byte" | "end_byte")
-            }
-            NativeSyntaxRelation::TreeSitterRecoveryDiagnostic => matches!(
-                name,
-                "provider_local_node_id" | "recovery_kind" | "raw_kind" | "start_byte" | "end_byte"
-            ),
-            NativeSyntaxRelation::RuffToken => matches!(
-                name,
-                "token_ordinal"
-                    | "raw_kind_id"
-                    | "raw_kind"
-                    | "token_class"
-                    | "start_byte"
-                    | "end_byte"
-                    | "line"
-                    | "column"
-                    | "spelling_kind"
-                    | "spelling_value"
-                    | "provider_local_ast_id"
-            ),
-            NativeSyntaxRelation::RuffComment => {
-                matches!(
-                    name,
-                    "start_byte" | "end_byte" | "placement" | "block_member"
-                )
-            }
-            NativeSyntaxRelation::RuffDirective => matches!(
-                name,
-                "directive_kind" | "start_byte" | "end_byte" | "provider_local_target_id"
-            ),
-            NativeSyntaxRelation::RuffStringRegion => matches!(
-                name,
-                "start_byte" | "end_byte" | "multiline" | "interpolated" | "provider_local_ast_id"
-            ),
-            NativeSyntaxRelation::RuffDocstring => {
-                matches!(name, "start_byte" | "end_byte" | "provider_local_owner_id")
-            }
-            NativeSyntaxRelation::RuffContinuationLine => name == "start_byte",
-            NativeSyntaxRelation::RuffAstNode => matches!(
-                name,
-                "provider_local_ast_id"
-                    | "parent_provider_local_ast_id"
-                    | "raw_kind_id"
-                    | "raw_kind"
-                    | "ast_category"
-                    | "child_role"
-                    | "start_byte"
-                    | "end_byte"
-                    | "line"
-                    | "column"
-                    | "child_ordinal"
-                    | "source_ordinal"
-                    | "evaluation_ordinal"
-                    | "explicit_parenthesized"
-                    | "raw_kind_disposition"
-            ),
-            NativeSyntaxRelation::RuffParseDiagnostic => matches!(
-                name,
-                "diagnostic_ordinal" | "diagnostic_kind" | "message" | "start_byte" | "end_byte"
-            ),
-            NativeSyntaxRelation::RuffDiagnosticRecoveryEvidence => {
-                matches!(
-                    name,
-                    "diagnostic_ordinal" | "tree_sitter_provider_local_node_id"
-                )
-            }
-            NativeSyntaxRelation::RuffScope => matches!(
-                name,
-                "scope_id" | "parent_scope_id" | "scope_kind" | "name" | "start_byte" | "end_byte"
-            ),
-            NativeSyntaxRelation::RuffBinding => matches!(
-                name,
-                "binding_id"
-                    | "scope_id"
-                    | "name"
-                    | "binding_kind"
-                    | "target_form"
-                    | "start_byte"
-                    | "end_byte"
-            ),
-            NativeSyntaxRelation::RuffReference => matches!(
-                name,
-                "reference_id"
-                    | "scope_id"
-                    | "name"
-                    | "reference_class"
-                    | "resolution"
-                    | "target_id"
-                    | "start_byte"
-                    | "end_byte"
-                    | "unknown_reason"
-            ),
-            NativeSyntaxRelation::RuffUnknownSymbol => {
-                matches!(name, "unknown_symbol_id" | "scope_id" | "name" | "reason")
-            }
-            NativeSyntaxRelation::RuffSemanticEdge => {
-                matches!(name, "subject_id" | "object_id" | "edge_kind")
-            }
-            NativeSyntaxRelation::RuffImport => matches!(
-                name,
-                "import_id"
-                    | "scope_id"
-                    | "import_kind"
-                    | "relative_level"
-                    | "source_name"
-                    | "alias_name"
-                    | "star_import"
-                    | "target_module_id"
-                    | "target_module_name"
-                    | "ruff_qualified_name"
-                    | "resolution"
-                    | "imported_entity_id"
-                    | "imported_name"
-                    | "local_binding_id"
-                    | "unknown_reason"
-                    | "start_byte"
-                    | "end_byte"
-            ),
-            NativeSyntaxRelation::RuffExport => matches!(
-                name,
-                "export_id"
-                    | "name"
-                    | "target_id"
-                    | "reexport"
-                    | "export_status"
-                    | "start_byte"
-                    | "end_byte"
-            ),
-        }
-}
-
-fn pyrefly_common_field(name: &str) -> bool {
-    matches!(
-        name,
-        "provider_run_id"
-            | "analysis_context_id"
-            | "module_id"
-            | "file_id"
-            | "content_digest"
-            | "semantic_environment_id"
-            | "source_generation"
-    )
-}
-
-fn pyrefly_relation_field_is_compiled(relation: PyreflyRelation, name: &str) -> bool {
-    pyrefly_common_field(name)
-        || match relation {
-            PyreflyRelation::ModuleContext => matches!(
-                name,
-                "module_name"
-                    | "provider_release"
-                    | "provider_revision"
-                    | "requested_module_require_tier"
-                    | "dependency_require_tier"
-                    | "source_byte_length"
-                    | "long_lived_context"
-            ),
-            PyreflyRelation::TypeShape => matches!(
-                name,
-                "local_type_index"
-                    | "structural_hash"
-                    | "shape_kind"
-                    | "name"
-                    | "unspecified_type_arg_count"
-                    | "is_staticmethod"
-            ),
-            PyreflyRelation::TypeComponent => matches!(
-                name,
-                "owner_local_type_index"
-                    | "component_role"
-                    | "component_ordinal"
-                    | "referenced_local_type_index"
-            ),
-            PyreflyRelation::TypeTrait => {
-                matches!(name, "owner_local_type_index" | "trait_kind")
-            }
-            PyreflyRelation::LocatedType => matches!(
-                name,
-                "occurrence_ordinal"
-                    | "start_byte"
-                    | "end_byte"
-                    | "local_type_index"
-                    | "type_role"
-                    | "provider_start_line"
-                    | "provider_start_column"
-                    | "provider_end_line"
-                    | "provider_end_column"
-            ),
-            PyreflyRelation::CallTarget => matches!(
-                name,
-                "call_occurrence_ordinal"
-                    | "start_byte"
-                    | "end_byte"
-                    | "target_ordinal"
-                    | "callee_kind"
-                    | "qualified_target"
-                    | "class_name"
-                    | "resolution_state"
-            ),
-            PyreflyRelation::Member => matches!(
-                name,
-                "class_name"
-                    | "member_ordinal"
-                    | "member_name"
-                    | "member_kind"
-                    | "annotation_rendering"
-                    | "annotation_representation"
-                    | "is_final"
-                    | "discovery_basis"
-            ),
-            PyreflyRelation::Diagnostic => matches!(
-                name,
-                "diagnostic_ordinal"
-                    | "rendered_text"
-                    | "structured_fields_available"
-                    | "source_locator_redacted"
-            ),
-            PyreflyRelation::AffectedModule => matches!(
-                name,
-                "affected_module_id"
-                    | "evidence_source"
-                    | "exact_recheck_proven"
-                    | "refresh_policy"
-            ),
-            PyreflyRelation::Coverage => matches!(
-                name,
-                "fact_family"
-                    | "exact_authority_surface"
-                    | "requested_units"
-                    | "completed_units"
-                    | "emitted_rows"
-                    | "completeness"
-                    | "remainder_reason"
-                    | "unknown_semantics"
-            ),
-        }
-}
-
-fn rustc_common_field(name: &str) -> bool {
-    matches!(
-        name,
-        "provider_run_id"
-            | "compilation_unit_id"
-            | "owner_id"
-            | "source_generation"
-            | "source_file_id"
-            | "source_content_digest"
-            | "stable_crate_id"
-            | "def_path_hash"
-    )
-}
-
-#[allow(clippy::too_many_lines)]
-fn rustc_relation_field_is_compiled(relation: RustcRelation, name: &str) -> bool {
-    rustc_common_field(name)
-        || match relation {
-            RustcRelation::Compilation => matches!(
-                name,
-                "crate_name"
-                    | "is_local_crate"
-                    | "local_item_count"
-                    | "body_owner_count"
-                    | "rustc_release"
-                    | "rustc_toolchain"
-                    | "stable_identity_authority"
-                    | "source_hygiene_authority"
-            ),
-            RustcRelation::PublicItem => matches!(
-                name,
-                "qualified_name"
-                    | "item_kind"
-                    | "has_body"
-                    | "is_foreign_item"
-                    | "requires_monomorphization"
-                    | "type_key"
-                    | "span_file"
-                    | "span_start_byte"
-                    | "span_end_byte"
-                    | "span_start_line"
-                    | "span_end_line"
-                    | "span_start_column"
-                    | "span_end_column"
-                    | "expansion_kind"
-                    | "in_external_macro"
-            ),
-            RustcRelation::Type => matches!(
-                name,
-                "type_key"
-                    | "type_kind"
-                    | "definition_path"
-                    | "definition_stable_crate_id"
-                    | "definition_def_path_hash"
-                    | "component_role"
-                    | "component_ordinal"
-                    | "component_type_key"
-                    | "scalar_value"
-                    | "mutability"
-            ),
-            RustcRelation::Instance => matches!(
-                name,
-                "instance_key"
-                    | "definition_path"
-                    | "definition_stable_crate_id"
-                    | "definition_def_path_hash"
-                    | "instance_kind"
-                    | "generic_argument_count"
-                    | "specialized_type_key"
-                    | "has_body"
-                    | "is_foreign_item"
-                    | "mangled_name"
-                    | "resolution_state"
-            ),
-            RustcRelation::MirBody => matches!(
-                name,
-                "block_count"
-                    | "local_count"
-                    | "argument_count"
-                    | "debug_variable_count"
-                    | "spread_argument_local"
-                    | "span_file"
-                    | "span_start_byte"
-                    | "span_end_byte"
-                    | "span_start_line"
-                    | "span_end_line"
-                    | "span_start_column"
-                    | "span_end_column"
-                    | "expansion_kind"
-            ),
-            RustcRelation::MirBlock => {
-                matches!(
-                    name,
-                    "block_index" | "statement_count" | "terminator_kind" | "is_entry"
-                )
-            }
-            RustcRelation::MirLocal => matches!(
-                name,
-                "local_index"
-                    | "local_role"
-                    | "type_key"
-                    | "mutability"
-                    | "span_file"
-                    | "span_start_byte"
-                    | "span_end_byte"
-                    | "span_start_line"
-                    | "span_end_line"
-                    | "span_start_column"
-                    | "span_end_column"
-                    | "expansion_kind"
-            ),
-            RustcRelation::MirPlace => matches!(
-                name,
-                "place_id"
-                    | "block_index"
-                    | "slot_kind"
-                    | "slot_index"
-                    | "occurrence_role"
-                    | "occurrence_ordinal"
-                    | "base_local"
-                    | "projection_ordinal"
-                    | "projection_kind"
-                    | "projection_local_or_field"
-                    | "offset"
-                    | "min_length"
-                    | "slice_to"
-                    | "from_end"
-                    | "projection_type_key"
-            ),
-            RustcRelation::MirOperand => matches!(
-                name,
-                "operand_id"
-                    | "block_index"
-                    | "slot_kind"
-                    | "slot_index"
-                    | "parent_role"
-                    | "operand_ordinal"
-                    | "operand_kind"
-                    | "place_id"
-                    | "type_key"
-                    | "constant_kind"
-                    | "runtime_check_kind"
-            ),
-            RustcRelation::MirRvalue => matches!(
-                name,
-                "block_index"
-                    | "statement_index"
-                    | "rvalue_kind"
-                    | "result_type_key"
-                    | "operator_kind"
-                    | "cast_kind"
-                    | "aggregate_kind"
-                    | "operand_count"
-                    | "source_place_id"
-                    | "region_kind"
-                    | "mutability"
-            ),
-            RustcRelation::MirStatement => matches!(
-                name,
-                "block_index"
-                    | "statement_index"
-                    | "raw_statement_kind"
-                    | "normalized_effect"
-                    | "source_scope"
-                    | "span_file"
-                    | "span_start_byte"
-                    | "span_end_byte"
-                    | "span_start_line"
-                    | "span_end_line"
-                    | "span_start_column"
-                    | "span_end_column"
-                    | "expansion_kind"
-            ),
-            RustcRelation::MirTerminator => matches!(
-                name,
-                "block_index"
-                    | "raw_terminator_kind"
-                    | "source_scope"
-                    | "normal_target_count"
-                    | "unwind_action"
-                    | "assert_message_kind"
-                    | "destination_place_id"
-                    | "span_file"
-                    | "span_start_byte"
-                    | "span_end_byte"
-                    | "span_start_line"
-                    | "span_end_line"
-                    | "span_start_column"
-                    | "span_end_column"
-                    | "expansion_kind"
-            ),
-            RustcRelation::CfgEdge => matches!(
-                name,
-                "source_block"
-                    | "target_block"
-                    | "edge_kind"
-                    | "branch_value_u128"
-                    | "unwind_action"
-            ),
-            RustcRelation::Call => matches!(
-                name,
-                "block_index"
-                    | "callable_operand_id"
-                    | "argument_count"
-                    | "destination_place_id"
-                    | "normal_target"
-                    | "unwind_target"
-                    | "declared_target"
-                    | "declared_stable_crate_id"
-                    | "declared_def_path_hash"
-                    | "resolved_instance_key"
-                    | "dispatch_kind"
-                    | "resolution_confidence"
-            ),
-            RustcRelation::Access => matches!(
-                name,
-                "block_index"
-                    | "slot_kind"
-                    | "slot_index"
-                    | "access_ordinal"
-                    | "place_id"
-                    | "access_kind"
-                    | "type_key"
-                    | "structured_evidence"
-                    | "runtime_effect"
-            ),
-            RustcRelation::Diagnostic => matches!(
-                name,
-                "diagnostic_ordinal"
-                    | "severity"
-                    | "reason_code"
-                    | "message"
-                    | "structured_compiler_diagnostic"
-            ),
-            RustcRelation::Coverage => matches!(
-                name,
-                "fact_family"
-                    | "authority_surface"
-                    | "requested_units"
-                    | "completed_units"
-                    | "emitted_rows"
-                    | "completeness"
-                    | "remainder_count"
-                    | "unknown_semantics"
-            ),
-            RustcRelation::Remainder => {
-                matches!(
-                    name,
-                    "fact_family" | "reason_code" | "authority_surface" | "bounded" | "detail"
-                )
-            }
-        }
-}
-
-/// Resolve one field through the closed v2.2 role table.
-///
-/// Every arm is an exact released field name. There are deliberately no prefix, suffix,
-/// substring, datatype, or provider-metadata fallbacks: a new name must be classified explicitly.
 #[allow(clippy::too_many_lines)]
 fn compiled_provider_field_role(
     relation: ProviderRelation,
     name: &str,
 ) -> Result<ProviderFieldRole, ProductionProviderRecipeError> {
-    if !relation_field_is_compiled(relation, name) {
-        return Err(ProductionProviderRecipeError::UnclassifiedField {
-            relation: relation.relation_identity(),
-            field: name.to_owned(),
-        });
-    }
-    let role = match name {
-        "file_id" | "source_file_id" | "span_file" => field_role(
-            FieldMeaning::Coordinate,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::CanonicalIdentityInput,
-            CoordinateRole::FileIdentity,
-            RetentionPolicy::RetainForProvenance,
-        ),
-        "content_digest" | "source_content_digest" => field_role(
-            FieldMeaning::Coordinate,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::OccurrenceIdentityInput,
-            CoordinateRole::ContentDigest,
-            RetentionPolicy::RetainForProvenance,
-        ),
-        "start_byte" | "span_start_byte" => field_role(
-            FieldMeaning::Coordinate,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::OccurrenceIdentityInput,
-            CoordinateRole::ByteStart,
-            RetentionPolicy::RetainForProvenance,
-        ),
-        "end_byte" | "span_end_byte" => field_role(
-            FieldMeaning::Coordinate,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::OccurrenceIdentityInput,
-            CoordinateRole::ByteEnd,
-            RetentionPolicy::RetainForProvenance,
-        ),
-        "line"
-        | "column"
-        | "provider_start_line"
-        | "provider_start_column"
-        | "provider_end_line"
-        | "provider_end_column"
-        | "span_start_line"
-        | "span_start_column"
-        | "span_end_line"
-        | "span_end_column" => field_role(
-            FieldMeaning::Coordinate,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::NotCanonical,
-            CoordinateRole::ProviderNativeCoordinate,
-            RetentionPolicy::RetainForProvenance,
-        ),
-        "expansion_kind" | "in_external_macro" | "source_hygiene_authority" => field_role(
-            FieldMeaning::Coordinate,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::NotCanonical,
-            CoordinateRole::MacroOrHygieneEvidence,
-            RetentionPolicy::RetainForProvenance,
-        ),
-        "stable_crate_id"
-        | "def_path_hash"
-        | "definition_stable_crate_id"
-        | "definition_def_path_hash"
-        | "declared_stable_crate_id"
-        | "declared_def_path_hash" => field_role(
-            FieldMeaning::CanonicalIdentityInput,
-            ProviderLocalIdentityRole::NativeStableKeyEvidence,
-            CanonicalIdentityRole::CanonicalIdentityInput,
-            CoordinateRole::None,
-            RetentionPolicy::RetainForProvenance,
-        ),
-        "provider_local_node_id"
-        | "parent_provider_local_node_id"
-        | "provider_local_ast_id"
-        | "parent_provider_local_ast_id"
-        | "provider_local_owner_id"
-        | "provider_local_target_id"
-        | "tree_sitter_provider_local_node_id" => field_role(
-            FieldMeaning::ProviderLocalIdentity,
-            ProviderLocalIdentityRole::SnapshotLocalKey,
-            CanonicalIdentityRole::NotCanonical,
-            CoordinateRole::None,
-            RetentionPolicy::RetainProviderNative,
-        ),
-        "local_type_index" | "owner_local_type_index" | "referenced_local_type_index" => {
-            field_role(
-                FieldMeaning::ProviderLocalIdentity,
-                ProviderLocalIdentityRole::ResponseLocalIndex,
-                CanonicalIdentityRole::NotCanonical,
-                CoordinateRole::None,
-                RetentionPolicy::RetainProviderNative,
-            )
+    let role = match relation {
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::TreeSitterRun) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation"
+            | "provider_revision"
+            | "catalog_id"
+            | "inventory_fingerprint"
+            | "grammar_release" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffRun) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation"
+            | "provider_revision"
+            | "catalog_id"
+            | "inventory_fingerprint"
+            | "grammar_release" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::TreeSitterCoverage) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "family" | "requested_units" | "completed_units" | "terminal_status" => {
+                Some(PROVIDER_FACT_ROLE)
+            }
+            "remainder_reason" => Some(DIAGNOSTIC_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffCoverage) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "family" | "requested_units" | "completed_units" | "terminal_status" => {
+                Some(PROVIDER_FACT_ROLE)
+            }
+            "remainder_reason" => Some(DIAGNOSTIC_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::TreeSitterRemainder) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "family" => Some(PROVIDER_FACT_ROLE),
+            "reason" | "detail" => Some(DIAGNOSTIC_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffRemainder) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "family" => Some(PROVIDER_FACT_ROLE),
+            "reason" | "detail" => Some(DIAGNOSTIC_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::TreeSitterCstNode) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "provider_local_node_id" | "parent_provider_local_node_id" => {
+                Some(SNAPSHOT_LOCAL_KEY_ROLE)
+            }
+            "raw_kind_id" | "raw_kind" | "raw_kind_disposition" => Some(PROVIDER_KIND_ROLE),
+            "field_name" | "named" | "extra" | "error" | "missing" | "ordinal" | "depth" => {
+                Some(PROVIDER_FACT_ROLE)
+            }
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::TreeSitterChangedRange) => {
+            match name {
+                "provider_run_id"
+                | "provider_id"
+                | "provider_release"
+                | "analysis_context_id"
+                | "semantic_environment_id"
+                | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+                "file_id" => Some(FILE_IDENTITY_ROLE),
+                "content_digest" => Some(CONTENT_DIGEST_ROLE),
+                "range_ordinal" => Some(PROVIDER_FACT_ROLE),
+                "start_byte" => Some(BYTE_START_ROLE),
+                "end_byte" => Some(BYTE_END_ROLE),
+                _ => None,
+            }
         }
-        "block_index"
-        | "local_index"
-        | "source_scope"
-        | "slot_index"
-        | "statement_index"
-        | "base_local"
-        | "projection_local_or_field"
-        | "source_block"
-        | "target_block"
-        | "normal_target"
-        | "unwind_target" => field_role(
-            FieldMeaning::ProviderLocalIdentity,
-            ProviderLocalIdentityRole::CompilerLocalIndex,
-            CanonicalIdentityRole::NotCanonical,
-            CoordinateRole::None,
-            RetentionPolicy::RetainProviderNative,
-        ),
-        "scope_id" | "parent_scope_id" | "binding_id" | "reference_id" | "target_id"
-        | "unknown_symbol_id" | "subject_id" | "object_id" | "import_id" | "target_module_id"
-        | "imported_entity_id" | "local_binding_id" | "export_id" => field_role(
-            FieldMeaning::CanonicalIdentityInput,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::OccurrenceIdentityInput,
-            CoordinateRole::None,
-            RetentionPolicy::RetainForProvenance,
-        ),
-        "module_id"
-        | "affected_module_id"
-        | "compilation_unit_id"
-        | "owner_id"
-        | "type_key"
-        | "component_type_key"
-        | "specialized_type_key"
-        | "instance_key"
-        | "resolved_instance_key"
-        | "projection_type_key"
-        | "result_type_key"
-        | "place_id"
-        | "source_place_id"
-        | "destination_place_id"
-        | "operand_id"
-        | "callable_operand_id" => field_role(
-            FieldMeaning::CanonicalIdentityInput,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::CanonicalIdentityInput,
-            CoordinateRole::None,
-            RetentionPolicy::RetainForProvenance,
-        ),
-        "raw_kind_id"
-        | "raw_kind"
-        | "raw_kind_disposition"
-        | "recovery_kind"
-        | "token_class"
-        | "spelling_kind"
-        | "ast_category"
-        | "child_role"
-        | "scope_kind"
-        | "binding_kind"
-        | "target_form"
-        | "reference_class"
-        | "edge_kind"
-        | "import_kind"
-        | "directive_kind"
-        | "diagnostic_kind"
-        | "shape_kind"
-        | "trait_kind"
-        | "callee_kind"
-        | "member_kind"
-        | "type_role"
-        | "item_kind"
-        | "type_kind"
-        | "instance_kind"
-        | "terminator_kind"
-        | "local_role"
-        | "projection_kind"
-        | "operand_kind"
-        | "constant_kind"
-        | "aggregate_kind"
-        | "rvalue_kind"
-        | "operator_kind"
-        | "cast_kind"
-        | "raw_statement_kind"
-        | "runtime_check_kind"
-        | "raw_terminator_kind"
-        | "unwind_action"
-        | "dispatch_kind"
-        | "access_kind"
-        | "slot_kind"
-        | "occurrence_role"
-        | "component_role"
-        | "parent_role"
-        | "region_kind"
-        | "assert_message_kind"
-        | "annotation_representation" => field_role(
-            FieldMeaning::ProviderNativeKind,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::NotCanonical,
-            CoordinateRole::None,
-            RetentionPolicy::RetainProviderNative,
-        ),
-        "message"
-        | "detail"
-        | "reason"
-        | "reason_code"
-        | "severity"
-        | "rendered_text"
-        | "remainder_reason"
-        | "unknown_reason"
-        | "unknown_semantics"
-        | "structured_compiler_diagnostic"
-        | "structured_fields_available"
-        | "source_locator_redacted" => field_role(
-            FieldMeaning::Diagnostic,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::NotCanonical,
-            CoordinateRole::None,
-            RetentionPolicy::RetainDiagnosticBounded,
-        ),
-        "spelling_value" | "annotation_rendering" | "scalar_value" | "mangled_name" => field_role(
-            FieldMeaning::RawProviderRendering,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::NotCanonical,
-            CoordinateRole::None,
-            RetentionPolicy::RetainProviderNative,
-        ),
-        "provider_run_id"
-        | "provider_id"
-        | "provider_release"
-        | "provider_revision"
-        | "analysis_context_id"
-        | "semantic_environment_id"
-        | "source_generation"
-        | "rustc_release"
-        | "rustc_toolchain"
-        | "catalog_id"
-        | "inventory_fingerprint"
-        | "grammar_release" => field_role(
-            FieldMeaning::TypedFact,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::NotCanonical,
-            CoordinateRole::None,
-            RetentionPolicy::RetainForProvenance,
-        ),
-        "access_ordinal"
-        | "alias_name"
-        | "argument_count"
-        | "authority_surface"
-        | "block_count"
-        | "block_member"
-        | "body_owner_count"
-        | "bounded"
-        | "branch_value_u128"
-        | "call_occurrence_ordinal"
-        | "child_ordinal"
-        | "class_name"
-        | "completed_units"
-        | "completeness"
-        | "component_ordinal"
-        | "crate_name"
-        | "debug_variable_count"
-        | "declared_target"
-        | "definition_path"
-        | "dependency_require_tier"
-        | "depth"
-        | "diagnostic_ordinal"
-        | "discovery_basis"
-        | "emitted_rows"
-        | "error"
-        | "evaluation_ordinal"
-        | "evidence_source"
-        | "exact_authority_surface"
-        | "exact_recheck_proven"
-        | "explicit_parenthesized"
-        | "export_status"
-        | "extra"
-        | "fact_family"
-        | "family"
-        | "field_name"
-        | "from_end"
-        | "generic_argument_count"
-        | "has_body"
-        | "imported_name"
-        | "interpolated"
-        | "is_entry"
-        | "is_final"
-        | "is_foreign_item"
-        | "is_local_crate"
-        | "is_staticmethod"
-        | "local_count"
-        | "local_item_count"
-        | "long_lived_context"
-        | "member_name"
-        | "member_ordinal"
-        | "min_length"
-        | "missing"
-        | "module_name"
-        | "multiline"
-        | "mutability"
-        | "name"
-        | "named"
-        | "normal_target_count"
-        | "normalized_effect"
-        | "occurrence_ordinal"
-        | "offset"
-        | "operand_count"
-        | "operand_ordinal"
-        | "ordinal"
-        | "placement"
-        | "projection_ordinal"
-        | "qualified_name"
-        | "qualified_target"
-        | "range_ordinal"
-        | "reexport"
-        | "refresh_policy"
-        | "relative_level"
-        | "remainder_count"
-        | "requested_module_require_tier"
-        | "requested_units"
-        | "requires_monomorphization"
-        | "resolution"
-        | "resolution_confidence"
-        | "resolution_state"
-        | "ruff_qualified_name"
-        | "runtime_effect"
-        | "slice_to"
-        | "source_byte_length"
-        | "source_name"
-        | "source_ordinal"
-        | "spread_argument_local"
-        | "stable_identity_authority"
-        | "star_import"
-        | "statement_count"
-        | "structural_hash"
-        | "structured_evidence"
-        | "target_module_name"
-        | "target_ordinal"
-        | "terminal_status"
-        | "token_ordinal"
-        | "unspecified_type_arg_count" => field_role(
-            FieldMeaning::TypedFact,
-            ProviderLocalIdentityRole::None,
-            CanonicalIdentityRole::NotCanonical,
-            CoordinateRole::None,
-            RetentionPolicy::RetainProviderNative,
-        ),
-        _ => {
-            return Err(ProductionProviderRecipeError::UnclassifiedField {
-                relation: relation.relation_identity(),
-                field: name.to_owned(),
-            });
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::TreeSitterRecoveryDiagnostic) => {
+            match name {
+                "provider_run_id"
+                | "provider_id"
+                | "provider_release"
+                | "analysis_context_id"
+                | "semantic_environment_id"
+                | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+                "file_id" => Some(FILE_IDENTITY_ROLE),
+                "content_digest" => Some(CONTENT_DIGEST_ROLE),
+                "provider_local_node_id" => Some(SNAPSHOT_LOCAL_KEY_ROLE),
+                "recovery_kind" | "raw_kind" => Some(PROVIDER_KIND_ROLE),
+                "start_byte" => Some(BYTE_START_ROLE),
+                "end_byte" => Some(BYTE_END_ROLE),
+                _ => None,
+            }
         }
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffToken) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "token_ordinal" => Some(PROVIDER_FACT_ROLE),
+            "raw_kind_id" | "raw_kind" | "token_class" | "spelling_kind" => {
+                Some(PROVIDER_KIND_ROLE)
+            }
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            "line" | "column" => Some(PROVIDER_COORDINATE_ROLE),
+            "spelling_value" => Some(RAW_RENDERING_ROLE),
+            "provider_local_ast_id" => Some(SNAPSHOT_LOCAL_KEY_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffComment) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            "placement" | "block_member" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffDirective) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "directive_kind" => Some(PROVIDER_KIND_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            "provider_local_target_id" => Some(SNAPSHOT_LOCAL_KEY_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffStringRegion) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            "multiline" | "interpolated" => Some(PROVIDER_FACT_ROLE),
+            "provider_local_ast_id" => Some(SNAPSHOT_LOCAL_KEY_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffDocstring) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            "provider_local_owner_id" => Some(SNAPSHOT_LOCAL_KEY_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffContinuationLine) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "start_byte" => Some(PROVIDER_COORDINATE_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffAstNode) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "provider_local_ast_id" | "parent_provider_local_ast_id" => {
+                Some(SNAPSHOT_LOCAL_KEY_ROLE)
+            }
+            "raw_kind_id" | "raw_kind" | "ast_category" | "child_role" | "raw_kind_disposition" => {
+                Some(PROVIDER_KIND_ROLE)
+            }
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            "line" | "column" => Some(PROVIDER_COORDINATE_ROLE),
+            "child_ordinal"
+            | "source_ordinal"
+            | "evaluation_ordinal"
+            | "explicit_parenthesized" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffParseDiagnostic) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "diagnostic_ordinal" => Some(PROVIDER_FACT_ROLE),
+            "diagnostic_kind" => Some(PROVIDER_KIND_ROLE),
+            "message" => Some(DIAGNOSTIC_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffDiagnosticRecoveryEvidence) => {
+            match name {
+                "provider_run_id"
+                | "provider_id"
+                | "provider_release"
+                | "analysis_context_id"
+                | "semantic_environment_id"
+                | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+                "file_id" => Some(FILE_IDENTITY_ROLE),
+                "content_digest" => Some(CONTENT_DIGEST_ROLE),
+                "diagnostic_ordinal" => Some(PROVIDER_FACT_ROLE),
+                "tree_sitter_provider_local_node_id" => Some(SNAPSHOT_LOCAL_KEY_ROLE),
+                _ => None,
+            }
+        }
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffScope) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "scope_id" | "parent_scope_id" => Some(OCCURRENCE_REFERENCE_ROLE),
+            "scope_kind" => Some(PROVIDER_KIND_ROLE),
+            "name" => Some(PROVIDER_FACT_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffBinding) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "binding_id" | "scope_id" => Some(OCCURRENCE_REFERENCE_ROLE),
+            "name" => Some(PROVIDER_FACT_ROLE),
+            "binding_kind" | "target_form" => Some(PROVIDER_KIND_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffReference) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "reference_id" | "scope_id" | "target_id" => Some(OCCURRENCE_REFERENCE_ROLE),
+            "name" | "resolution" => Some(PROVIDER_FACT_ROLE),
+            "reference_class" => Some(PROVIDER_KIND_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            "unknown_reason" => Some(DIAGNOSTIC_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffUnknownSymbol) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "unknown_symbol_id" | "scope_id" => Some(OCCURRENCE_REFERENCE_ROLE),
+            "name" => Some(PROVIDER_FACT_ROLE),
+            "reason" => Some(DIAGNOSTIC_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffSemanticEdge) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "subject_id" | "object_id" => Some(OCCURRENCE_REFERENCE_ROLE),
+            "edge_kind" => Some(PROVIDER_KIND_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffImport) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "import_id" | "scope_id" | "target_module_id" | "imported_entity_id"
+            | "local_binding_id" => Some(OCCURRENCE_REFERENCE_ROLE),
+            "import_kind" => Some(PROVIDER_KIND_ROLE),
+            "relative_level"
+            | "source_name"
+            | "alias_name"
+            | "star_import"
+            | "target_module_name"
+            | "ruff_qualified_name"
+            | "resolution"
+            | "imported_name" => Some(PROVIDER_FACT_ROLE),
+            "unknown_reason" => Some(DIAGNOSTIC_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            _ => None,
+        },
+        ProviderRelation::NativeSyntax(NativeSyntaxRelation::RuffExport) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "export_id" | "target_id" => Some(OCCURRENCE_REFERENCE_ROLE),
+            "name" | "reexport" | "export_status" => Some(PROVIDER_FACT_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::ModuleContext) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation"
+            | "provider_release"
+            | "provider_revision" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "module_name"
+            | "requested_module_require_tier"
+            | "dependency_require_tier"
+            | "source_byte_length"
+            | "long_lived_context" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::TypeShape) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "local_type_index" => Some(RESPONSE_LOCAL_INDEX_ROLE),
+            "structural_hash" | "name" | "unspecified_type_arg_count" | "is_staticmethod" => {
+                Some(PROVIDER_FACT_ROLE)
+            }
+            "shape_kind" => Some(PROVIDER_KIND_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::TypeComponent) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "owner_local_type_index" | "referenced_local_type_index" => {
+                Some(RESPONSE_LOCAL_INDEX_ROLE)
+            }
+            "component_role" => Some(PROVIDER_KIND_ROLE),
+            "component_ordinal" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::TypeTrait) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "owner_local_type_index" => Some(RESPONSE_LOCAL_INDEX_ROLE),
+            "trait_kind" => Some(PROVIDER_KIND_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::LocatedType) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "occurrence_ordinal" => Some(PROVIDER_FACT_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            "local_type_index" => Some(RESPONSE_LOCAL_INDEX_ROLE),
+            "type_role" => Some(PROVIDER_KIND_ROLE),
+            "provider_start_line"
+            | "provider_start_column"
+            | "provider_end_line"
+            | "provider_end_column" => Some(PROVIDER_COORDINATE_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::CallTarget) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "call_occurrence_ordinal"
+            | "target_ordinal"
+            | "qualified_target"
+            | "class_name"
+            | "resolution_state" => Some(PROVIDER_FACT_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            "callee_kind" => Some(PROVIDER_KIND_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::Member) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "class_name" | "member_ordinal" | "member_name" | "is_final" | "discovery_basis" => {
+                Some(PROVIDER_FACT_ROLE)
+            }
+            "member_kind" | "annotation_representation" => Some(PROVIDER_KIND_ROLE),
+            "annotation_rendering" => Some(RAW_RENDERING_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::Diagnostic) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "diagnostic_ordinal" => Some(PROVIDER_FACT_ROLE),
+            "rendered_text" | "structured_fields_available" | "source_locator_redacted" => {
+                Some(DIAGNOSTIC_ROLE)
+            }
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::AffectedModule) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" | "affected_module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "evidence_source" | "exact_recheck_proven" | "refresh_policy" => {
+                Some(PROVIDER_FACT_ROLE)
+            }
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::Coverage) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "fact_family"
+            | "exact_authority_surface"
+            | "requested_units"
+            | "completed_units"
+            | "emitted_rows"
+            | "completeness" => Some(PROVIDER_FACT_ROLE),
+            "remainder_reason" | "unknown_semantics" => Some(DIAGNOSTIC_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::Compilation) => match name {
+            "provider_run_id" | "source_generation" | "rustc_release" | "rustc_toolchain" => {
+                Some(PROVENANCE_FACT_ROLE)
+            }
+            "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "crate_name"
+            | "is_local_crate"
+            | "local_item_count"
+            | "body_owner_count"
+            | "stable_identity_authority" => Some(PROVIDER_FACT_ROLE),
+            "source_hygiene_authority" => Some(HYGIENE_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::PublicItem) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" | "type_key" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "qualified_name" | "has_body" | "is_foreign_item" | "requires_monomorphization" => {
+                Some(PROVIDER_FACT_ROLE)
+            }
+            "item_kind" => Some(PROVIDER_KIND_ROLE),
+            "span_file" | "span_start_byte" | "span_end_byte" => Some(PROVIDER_COORDINATE_ROLE),
+            "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+                Some(PROVIDER_COORDINATE_ROLE)
+            }
+            "expansion_kind" | "in_external_macro" => Some(HYGIENE_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::Type) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" | "type_key" | "component_type_key" => {
+                Some(CANONICAL_KEY_ROLE)
+            }
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id"
+            | "def_path_hash"
+            | "definition_stable_crate_id"
+            | "definition_def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "type_kind" | "component_role" => Some(PROVIDER_KIND_ROLE),
+            "definition_path" | "component_ordinal" | "mutability" => Some(PROVIDER_FACT_ROLE),
+            "scalar_value" => Some(RAW_RENDERING_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::Instance) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" | "instance_key" | "specialized_type_key" => {
+                Some(CANONICAL_KEY_ROLE)
+            }
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id"
+            | "def_path_hash"
+            | "definition_stable_crate_id"
+            | "definition_def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "definition_path"
+            | "generic_argument_count"
+            | "has_body"
+            | "is_foreign_item"
+            | "resolution_state" => Some(PROVIDER_FACT_ROLE),
+            "instance_kind" => Some(PROVIDER_KIND_ROLE),
+            "mangled_name" => Some(RAW_RENDERING_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::MirBody) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "block_count"
+            | "local_count"
+            | "argument_count"
+            | "debug_variable_count"
+            | "spread_argument_local" => Some(PROVIDER_FACT_ROLE),
+            "span_file" | "span_start_byte" | "span_end_byte" => Some(PROVIDER_COORDINATE_ROLE),
+            "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+                Some(PROVIDER_COORDINATE_ROLE)
+            }
+            "expansion_kind" => Some(HYGIENE_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::MirBlock) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "block_index" => Some(COMPILER_LOCAL_INDEX_ROLE),
+            "statement_count" | "is_entry" => Some(PROVIDER_FACT_ROLE),
+            "terminator_kind" => Some(PROVIDER_KIND_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::MirLocal) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" | "type_key" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "local_index" => Some(COMPILER_LOCAL_INDEX_ROLE),
+            "local_role" => Some(PROVIDER_KIND_ROLE),
+            "mutability" => Some(PROVIDER_FACT_ROLE),
+            "span_file" | "span_start_byte" | "span_end_byte" => Some(PROVIDER_COORDINATE_ROLE),
+            "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+                Some(PROVIDER_COORDINATE_ROLE)
+            }
+            "expansion_kind" => Some(HYGIENE_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::MirPlace) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" | "place_id" | "projection_type_key" => {
+                Some(CANONICAL_KEY_ROLE)
+            }
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "block_index" | "slot_index" | "base_local" | "projection_local_or_field" => {
+                Some(COMPILER_LOCAL_INDEX_ROLE)
+            }
+            "slot_kind" | "occurrence_role" | "projection_kind" => Some(PROVIDER_KIND_ROLE),
+            "occurrence_ordinal" | "projection_ordinal" | "offset" | "min_length" | "slice_to"
+            | "from_end" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::MirOperand) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" | "operand_id" | "place_id" | "type_key" => {
+                Some(CANONICAL_KEY_ROLE)
+            }
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "block_index" | "slot_index" => Some(COMPILER_LOCAL_INDEX_ROLE),
+            "slot_kind" | "parent_role" | "operand_kind" | "constant_kind"
+            | "runtime_check_kind" => Some(PROVIDER_KIND_ROLE),
+            "operand_ordinal" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::MirRvalue) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" | "result_type_key" | "source_place_id" => {
+                Some(CANONICAL_KEY_ROLE)
+            }
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "block_index" | "statement_index" => Some(COMPILER_LOCAL_INDEX_ROLE),
+            "rvalue_kind" | "operator_kind" | "cast_kind" | "aggregate_kind" | "region_kind" => {
+                Some(PROVIDER_KIND_ROLE)
+            }
+            "operand_count" | "mutability" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::MirStatement) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "block_index" | "statement_index" | "source_scope" => Some(COMPILER_LOCAL_INDEX_ROLE),
+            "raw_statement_kind" => Some(PROVIDER_KIND_ROLE),
+            "normalized_effect" => Some(PROVIDER_FACT_ROLE),
+            "span_file" | "span_start_byte" | "span_end_byte" => Some(PROVIDER_COORDINATE_ROLE),
+            "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+                Some(PROVIDER_COORDINATE_ROLE)
+            }
+            "expansion_kind" => Some(HYGIENE_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::MirTerminator) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" | "destination_place_id" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "block_index" | "source_scope" => Some(COMPILER_LOCAL_INDEX_ROLE),
+            "raw_terminator_kind" | "unwind_action" | "assert_message_kind" => {
+                Some(PROVIDER_KIND_ROLE)
+            }
+            "normal_target_count" => Some(PROVIDER_FACT_ROLE),
+            "span_file" | "span_start_byte" | "span_end_byte" => Some(PROVIDER_COORDINATE_ROLE),
+            "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+                Some(PROVIDER_COORDINATE_ROLE)
+            }
+            "expansion_kind" => Some(HYGIENE_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::CfgEdge) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "source_block" | "target_block" => Some(COMPILER_LOCAL_INDEX_ROLE),
+            "edge_kind" | "unwind_action" => Some(PROVIDER_KIND_ROLE),
+            "branch_value_u128" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::Call) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id"
+            | "owner_id"
+            | "callable_operand_id"
+            | "destination_place_id"
+            | "resolved_instance_key" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id"
+            | "def_path_hash"
+            | "declared_stable_crate_id"
+            | "declared_def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "block_index" | "normal_target" | "unwind_target" => Some(COMPILER_LOCAL_INDEX_ROLE),
+            "argument_count" | "declared_target" | "resolution_confidence" => {
+                Some(PROVIDER_FACT_ROLE)
+            }
+            "dispatch_kind" => Some(PROVIDER_KIND_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::Access) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" | "place_id" | "type_key" => {
+                Some(CANONICAL_KEY_ROLE)
+            }
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "block_index" | "slot_index" => Some(COMPILER_LOCAL_INDEX_ROLE),
+            "slot_kind" | "access_kind" => Some(PROVIDER_KIND_ROLE),
+            "access_ordinal" | "structured_evidence" | "runtime_effect" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::Diagnostic) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "diagnostic_ordinal" => Some(PROVIDER_FACT_ROLE),
+            "severity" | "reason_code" | "message" | "structured_compiler_diagnostic" => {
+                Some(DIAGNOSTIC_ROLE)
+            }
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::Coverage) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "fact_family" | "authority_surface" | "requested_units" | "completed_units"
+            | "emitted_rows" | "completeness" | "remainder_count" => Some(PROVIDER_FACT_ROLE),
+            "unknown_semantics" => Some(DIAGNOSTIC_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(RustcRelation::Remainder) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "fact_family" | "authority_surface" | "bounded" => Some(PROVIDER_FACT_ROLE),
+            "reason_code" | "detail" => Some(DIAGNOSTIC_ROLE),
+            _ => None,
+        },
     };
-    Ok(role)
+    role.ok_or_else(|| ProductionProviderRecipeError::UnclassifiedField {
+        relation: relation.relation_identity(),
+        field: name.to_owned(),
+    })
 }
 
 fn contract_identity(
@@ -2009,6 +2171,7 @@ fn digest_frame(hasher: &mut blake3::Hasher, bytes: &[u8]) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::path::Path;
 
     use arrow_schema::{DataType, Field, Schema};
@@ -2018,8 +2181,9 @@ mod tests {
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig};
     use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::provider_admission::{
-        ProviderAdmissionUnknownCause, ProviderRegistrationDisposition,
+        ProviderAdmissionUnknownCause, ProviderLaneGap, ProviderRegistrationDisposition,
     };
+    use crate::provider_boundary::{ProviderBoundaryError, validate_provider_boundary_contract};
     use crate::provider_native_syntax::{
         ExactPythonSyntaxRunner, ProviderNativeSourceImage, PythonModuleInput, PythonSyntaxRunPins,
         SyntaxProviderRunPin,
@@ -2046,7 +2210,8 @@ mod tests {
             },
         )
         .unwrap();
-        ExactPythonSyntaxRunner::new()
+        let release = CompiledSemanticRelease::current();
+        ExactPythonSyntaxRunner::new(release.provider_authority())
             .unwrap()
             .run_full(
                 1,
@@ -2097,7 +2262,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn real_tree_sitter_and_ruff_admit_while_missing_external_lanes_stay_unknown() {
+    async fn wp34_beh_real_tree_sitter_and_ruff_admit_while_missing_external_lanes_stay_unknown() {
         let release = CompiledSemanticRelease::current();
         let native = vec![real_native_run()];
         let outcome = admit_production_provider_relations(
@@ -2108,7 +2273,11 @@ mod tests {
             )
             .unwrap(),
             authority(),
-            ProductionProviderRuns::new(&native, &[], &[]),
+            ProductionProviderRuns::new(
+                ExactProviderLaneRuns::Accepted(&native),
+                ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
+                ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
+            ),
         )
         .unwrap();
 
@@ -2157,7 +2326,7 @@ mod tests {
     }
 
     #[test]
-    fn compiled_relation_census_and_schema_contracts_are_exhaustive() {
+    fn wp34_int_compiled_relation_census_and_schema_contracts_are_exhaustive() {
         let release = CompiledSemanticRelease::current();
         let compiled_authority = release.provider_authority();
         let authority = authority();
@@ -2197,7 +2366,83 @@ mod tests {
         );
         assert_eq!(pyrefly.bindings.len(), PyreflyRelation::ALL.len());
         assert_eq!(rustc.bindings.len(), RustcRelation::ALL.len());
-        for plan in [&tree, &ruff, &pyrefly, &rustc] {
+        let plans = [&tree, &ruff, &pyrefly, &rustc];
+        let descriptor_relation_count = plans
+            .into_iter()
+            .map(|plan| plan.contract.rows.len())
+            .sum::<usize>();
+        let descriptor_field_count = plans
+            .into_iter()
+            .flat_map(|plan| &plan.contract.rows)
+            .map(|row| row.relation.fields.len())
+            .sum::<usize>();
+        eprintln!(
+            "WP34 provider descriptor census: {descriptor_relation_count} relations, \
+             {descriptor_field_count} fields"
+        );
+
+        let expected_relations = NativeSyntaxRelation::ALL
+            .into_iter()
+            .map(|relation| relation.as_str())
+            .chain(
+                PyreflyRelation::ALL
+                    .into_iter()
+                    .map(PyreflyRelation::relation_id),
+            )
+            .chain(
+                RustcRelation::ALL
+                    .into_iter()
+                    .map(RustcRelation::relation_id),
+            )
+            .collect::<BTreeSet<_>>();
+        let actual_relations = plans
+            .into_iter()
+            .flat_map(|plan| &plan.contract.rows)
+            .map(|row| row.api_family.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(actual_relations, expected_relations);
+        assert_eq!(actual_relations.len(), descriptor_relation_count);
+
+        let expected_fields = NativeSyntaxRelation::ALL
+            .into_iter()
+            .map(|relation| (relation.as_str(), relation.schema()))
+            .chain(
+                PyreflyRelation::ALL
+                    .into_iter()
+                    .map(|relation| (relation.relation_id(), relation.schema())),
+            )
+            .chain(
+                RustcRelation::ALL
+                    .into_iter()
+                    .map(|relation| (relation.relation_id(), relation.schema())),
+            )
+            .flat_map(|(relation, schema)| {
+                schema
+                    .fields()
+                    .iter()
+                    .enumerate()
+                    .map(move |(ordinal, field)| (relation, ordinal, field.name().to_owned()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<BTreeSet<_>>();
+        let actual_fields = plans
+            .into_iter()
+            .flat_map(|plan| &plan.contract.rows)
+            .flat_map(|row| {
+                row.relation.fields.iter().map(|field| {
+                    (
+                        row.api_family.as_str(),
+                        field.ordinal,
+                        field.field.name().to_owned(),
+                    )
+                })
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(actual_fields, expected_fields);
+        assert_eq!(actual_fields.len(), descriptor_field_count);
+
+        for plan in plans {
+            validate_provider_boundary_contract(&plan.contract, &plan.installer).unwrap();
             assert_eq!(plan.bindings.len(), plan.contract.rows.len());
             for row in &plan.contract.rows {
                 assert_eq!(
@@ -2214,10 +2459,123 @@ mod tests {
                 }
             }
         }
+
+        let rustc_span_fields = rustc
+            .contract
+            .rows
+            .iter()
+            .flat_map(|row| row.relation.fields.iter())
+            .filter(|field| {
+                matches!(
+                    field.field.name().as_str(),
+                    "span_file" | "span_start_byte" | "span_end_byte"
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(!rustc_span_fields.is_empty());
+        assert!(rustc_span_fields.iter().all(|field| {
+            field.meaning == FieldMeaning::Coordinate
+                && field.coordinate == CoordinateRole::ProviderNativeCoordinate
+                && field.canonical_identity == CanonicalIdentityRole::NotCanonical
+        }));
+
+        for plan in [&tree, &ruff, &pyrefly, &rustc] {
+            for row in &plan.contract.rows {
+                let has_file = row
+                    .relation
+                    .fields
+                    .iter()
+                    .any(|field| field.coordinate == CoordinateRole::FileIdentity);
+                let has_digest = row
+                    .relation
+                    .fields
+                    .iter()
+                    .any(|field| field.coordinate == CoordinateRole::ContentDigest);
+                let has_start = row
+                    .relation
+                    .fields
+                    .iter()
+                    .any(|field| field.coordinate == CoordinateRole::ByteStart);
+                let has_end = row
+                    .relation
+                    .fields
+                    .iter()
+                    .any(|field| field.coordinate == CoordinateRole::ByteEnd);
+                assert_eq!(has_start, has_end);
+                assert!(!(has_start || has_end) || (has_file && has_digest));
+                assert!(row.relation.fields.iter().all(|field| {
+                    !matches!(
+                        field.provider_local_identity,
+                        ProviderLocalIdentityRole::SnapshotLocalKey
+                            | ProviderLocalIdentityRole::ResponseLocalIndex
+                            | ProviderLocalIdentityRole::CompilerLocalIndex
+                    ) || field.canonical_identity == CanonicalIdentityRole::NotCanonical
+                }));
+            }
+        }
     }
 
     #[test]
-    fn provider_descriptor_rejects_an_unclassified_field() {
+    fn wp34_neg_provider_gap_schema_shortcuts_and_provider_local_identity_are_rejected() {
+        let release = CompiledSemanticRelease::current();
+        let compiled_authority = release.provider_authority();
+        let exact_authority = authority();
+
+        let mut ruff = native_syntax_plan(
+            compiled_authority,
+            ProviderNativeLane::Ruff,
+            exact_authority.native_syntax,
+        )
+        .unwrap();
+        let continuation = ruff
+            .contract
+            .rows
+            .iter_mut()
+            .find(|row| {
+                row.api_family.as_str() == NativeSyntaxRelation::RuffContinuationLine.as_str()
+            })
+            .unwrap();
+        let start = continuation
+            .relation
+            .fields
+            .iter_mut()
+            .find(|field| field.field.name() == "start_byte")
+            .unwrap();
+        start.coordinate = CoordinateRole::ByteStart;
+        start.canonical_identity = CanonicalIdentityRole::OccurrenceIdentityInput;
+        assert_eq!(
+            validate_provider_boundary_contract(&ruff.contract, &ruff.installer).unwrap_err(),
+            ProviderBoundaryError::CoordinateClosureMissing
+        );
+
+        let mut tree = native_syntax_plan(
+            compiled_authority,
+            ProviderNativeLane::TreeSitter,
+            exact_authority.native_syntax,
+        )
+        .unwrap();
+        let node = tree
+            .contract
+            .rows
+            .iter_mut()
+            .find(|row| row.api_family.as_str() == NativeSyntaxRelation::TreeSitterCstNode.as_str())
+            .unwrap();
+        let local_key = node
+            .relation
+            .fields
+            .iter_mut()
+            .find(|field| field.field.name() == "provider_local_node_id")
+            .unwrap();
+        local_key.meaning = FieldMeaning::CanonicalIdentityInput;
+        local_key.canonical_identity = CanonicalIdentityRole::CanonicalIdentityInput;
+        assert_eq!(
+            validate_provider_boundary_contract(&tree.contract, &tree.installer).unwrap_err(),
+            ProviderBoundaryError::ProviderLocalIdentityPromoted
+        );
+    }
+
+    #[test]
+    fn wp34_neg_provider_descriptor_rejects_an_unclassified_field() {
         let relation = ProviderRelation::NativeSyntax(NativeSyntaxRelation::TreeSitterRun);
         let compiled = relation.schema();
         let mut fields = compiled.fields().iter().cloned().collect::<Vec<_>>();
@@ -2241,7 +2599,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_descriptor_rejects_a_cross_relation_known_field_name() {
+    fn wp34_neg_provider_descriptor_rejects_a_cross_relation_known_field_name() {
         let relation = ProviderRelation::NativeSyntax(NativeSyntaxRelation::TreeSitterChangedRange);
         let compiled = relation.schema();
         let mut fields = compiled.fields().iter().cloned().collect::<Vec<_>>();

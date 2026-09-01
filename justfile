@@ -642,11 +642,31 @@ provider-ipc-contract-integrity-check:
     cd pyrefly-sidecar && cargo test --locked pyrefly_protocol_conformance
     cd rustc-extractor && cargo test --locked wp35_structural_acceptance
 
-[doc("Prove exact typed provider-native Arrow rows and clean/incremental semantic equivalence")]
+[doc("Validate exhaustive provider relation descriptors, exact schemas, and generated IPC identity")]
+[group('test')]
+provider-relation-descriptor-contract-check:
+    cargo nextest run --locked --lib -E 'test(/wp34_int_/)' --no-tests=fail
+    just proto-check
+
+[doc("Prove exact typed provider-native Arrow rows, decoded values, gaps, and incremental semantics")]
 [group('test')]
 exact-provider-batch-check:
-    cargo nextest run --locked --lib -E 'test(/(exact_provider_native_relations_are_typed_and_source_pinned|incremental_run_emits_structural_changed_ranges|workspace_transaction_aggregates_all_four_exact_provider_lanes|accepted_rustc_zero_fact_relation_remains_a_proved_empty_batch|orchestrated_clean_and_incremental_generations_emit_equal_arrow_semantics)/)' --no-tests=fail
-    cd rustc-extractor && cargo test --locked zero_fact_relation_is_a_schema_carrying_arrow_batch
+    cargo nextest run --locked --lib -E 'test(/wp34_beh_/)' --no-tests=fail
+    cd pyrefly-sidecar && cargo test --locked wp34_beh_
+    cd rustc-extractor && cargo test --locked wp34_beh_
+
+[doc("Reject descriptor gaps, empty success, opaque payloads, schema shortcuts, and provider-local canonical identity")]
+[group('test')]
+provider-gap-schema-shortcut-rejection-check:
+    cargo nextest run --locked --lib -E 'test(/wp34_neg_/)' --no-tests=fail
+
+[doc("Exercise relation IPC process faults, truncation, backpressure, cancellation, and cleanup")]
+[group('test')]
+relation-ipc-provider-operations-check:
+    cargo build --locked --manifest-path pyrefly-sidecar/Cargo.toml --bin codefabric-pyrefly-sidecar
+    CODEFABRIC_PYREFLY_SIDECAR_BIN="$CF_ROOT/target/debug/codefabric-pyrefly-sidecar" cargo nextest run --locked --lib -E 'test(/wp34_ops_/)' --no-tests=fail
+    cd pyrefly-sidecar && cargo test --locked wp34_ops_
+    cd rustc-extractor && cargo test --locked wp34_ops_
 
 [doc("Reject incomplete, opaque, corrupt, parallel, or trust-bypassing provider admission")]
 [group('test')]

@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::cancellation::Cancellation;
+use crate::fabric::production_kernel::CompiledSemanticRelease;
 use crate::fabric::{ResultChecksumV2, result_checksum_v2};
 use crate::identity::{
     CbefField, CbefRecord, CbefValue, IdentityDomain, StringNormalization, decode_b3_digest,
@@ -209,7 +210,8 @@ fn run_full(
     source_value: &Value,
     seed: u8,
 ) -> crate::provider_native_syntax::ProviderNativeSyntaxRun {
-    ExactPythonSyntaxRunner::new()
+    let release = CompiledSemanticRelease::current();
+    ExactPythonSyntaxRunner::new(release.provider_authority())
         .expect("exact production Python providers")
         .run_full(
             source.source_generation,
@@ -230,7 +232,9 @@ fn run_incremental(
     target: &ProviderNativeSourceImage,
     target_value: &Value,
 ) -> crate::provider_native_syntax::ProviderNativeSyntaxRun {
-    let mut runner = ExactPythonSyntaxRunner::new().expect("exact production Python providers");
+    let release = CompiledSemanticRelease::current();
+    let mut runner = ExactPythonSyntaxRunner::new(release.provider_authority())
+        .expect("exact production Python providers");
     runner
         .run_full(
             base.source_generation,

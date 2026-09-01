@@ -16,6 +16,7 @@ use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
 use thiserror::Error;
 
 use crate::cancellation::Cancellation;
+use crate::fabric::production_kernel::CompiledProviderAuthority;
 use crate::provider_raw_kinds::ProviderRawKindDisposition;
 use crate::provider_types::ProviderText;
 use crate::ruff_adapter::{
@@ -280,11 +281,13 @@ impl ExactPythonSyntaxRunner {
     ///
     /// Returns provider/API errors when the current pinned runtime cannot execute its documented
     /// exact parser, grammar, token, trivia, index, or typed-AST surfaces.
-    pub fn new() -> Result<Self, ProviderNativeSyntaxError> {
+    pub(crate) fn new(
+        compiled_authority: &CompiledProviderAuthority,
+    ) -> Result<Self, ProviderNativeSyntaxError> {
         exact_syntax_api_probe()?;
         Ok(Self {
-            tree_sitter: TreeSitterAdapter::new(TreeSitterLanguage::Python)?,
-            ruff: RuffAdapter::new()?,
+            tree_sitter: TreeSitterAdapter::new(compiled_authority, TreeSitterLanguage::Python)?,
+            ruff: RuffAdapter::new(compiled_authority)?,
         })
     }
 
@@ -2271,7 +2274,13 @@ mod tests {
     use arrow_array::{Array as _, FixedSizeBinaryArray};
 
     use super::*;
+    use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::provider_types::ProviderText;
+
+    fn runner() -> ExactPythonSyntaxRunner {
+        let release = CompiledSemanticRelease::current();
+        ExactPythonSyntaxRunner::new(release.provider_authority()).unwrap()
+    }
 
     fn source_image(text: &str) -> ProviderNativeSourceImage {
         let bytes = text.as_bytes().to_vec();
@@ -2305,8 +2314,7 @@ mod tests {
 
     fn run(text: &str) -> ProviderNativeSyntaxRun {
         let source = source_image(text);
-        ExactPythonSyntaxRunner::new()
-            .unwrap()
+        runner()
             .run_full(
                 1,
                 &source,
@@ -2321,7 +2329,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_provider_native_relations_are_typed_and_source_pinned() {
+    fn wp34_beh_exact_provider_native_relations_are_typed_and_source_pinned() {
         let run = run(
             "from pkg import value as item\n\ndef f(arg: int):\n    # noqa\n    return item(arg)\n",
         );
@@ -2365,7 +2373,7 @@ mod tests {
     }
 
     #[test]
-    fn compiled_native_relation_schemas_exactly_match_every_emitted_batch() {
+    fn wp34_int_compiled_native_relation_schemas_exactly_match_every_emitted_batch() {
         let run = run("from pkg import value\nresult = value + 1\n");
         assert_eq!(run.relations.len(), NativeSyntaxRelation::ALL.len());
         for relation in NativeSyntaxRelation::ALL {
@@ -2379,7 +2387,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_source_keeps_syntax_and_materializes_semantic_remainders() {
+    fn wp34_beh_invalid_source_keeps_syntax_and_materializes_semantic_remainders() {
         let run = run("def incomplete(value:\n    return value\n");
         assert!(
             run.relation(NativeSyntaxRelation::TreeSitterCstNode)
@@ -2400,10 +2408,10 @@ mod tests {
     }
 
     #[test]
-    fn incremental_run_emits_structural_changed_ranges() {
+    fn wp34_beh_incremental_run_emits_structural_changed_ranges() {
         let source_v1 = source_image("value = 1\n");
         let source_v2 = source_image("value = foo(2)\n");
-        let mut runner = ExactPythonSyntaxRunner::new().unwrap();
+        let mut runner = runner();
         runner
             .run_full(
                 1,

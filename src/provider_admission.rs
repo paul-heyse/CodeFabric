@@ -48,7 +48,8 @@ use crate::relation_ipc::{
 };
 use crate::rustc_relation_schema::RustcRelation;
 use crate::rustc_service::{
-    AcceptedRustcCompilation, AcceptedRustcOwner, TrustQualifiedRustcCompilation,
+    AcceptedRustcCompilation, AcceptedRustcOwner, AcceptedRustcRelation,
+    TrustQualifiedRustcCompilation, arrow_ipc_digest,
 };
 use crate::schema_contract::{FieldIndexMapping, SchemaContract, SchemaContractError, SchemaRole};
 
@@ -209,6 +210,7 @@ struct AcceptedProviderRelationSet {
     source_pin: SourcePin,
     context_pin: ContextPin,
     relations: BTreeMap<ProviderRelationIdentity, ObservedProviderRelation>,
+    gap: Option<ProviderLaneGap>,
 }
 
 impl AcceptedProviderRelationSet {
@@ -256,6 +258,22 @@ impl AcceptedProviderRelationSet {
             source_pin,
             context_pin,
             relations,
+            gap: None,
+        })
+    }
+
+    fn from_gap(
+        source_pin: SourcePin,
+        context_pin: ContextPin,
+        gap: ProviderLaneGap,
+    ) -> Result<Self, ProviderAdmissionError> {
+        require_nonzero(source_pin.0, "source pin")?;
+        require_nonzero(context_pin.0, "context pin")?;
+        Ok(Self {
+            source_pin,
+            context_pin,
+            relations: BTreeMap::new(),
+            gap: Some(gap),
         })
     }
 
@@ -357,7 +375,7 @@ impl AcceptedProviderRelationSet {
     /// Decode the exact WP10 rustc relation streams already accepted by the daemon protocol.
     ///
     /// The source-snapshot and compiler-context digests bind the complete relation set. Each
-    /// chunk is decoded again at this boundary so protocol acceptance cannot substitute a schema,
+    /// relation is decoded again at this boundary so protocol acceptance cannot substitute a schema,
     /// owner, run, compilation unit, or source generation before catalog registration. Zero-row
     /// batches remain present and therefore prove an available family had no facts for an owner.
     ///
@@ -365,7 +383,7 @@ impl AcceptedProviderRelationSet {
     ///
     /// Rejects malformed digest pins, predecessor/unknown family codes on the target route,
     /// Arrow decode/schema/row drift, mixed owner/run/unit/generation columns, or duplicate
-    /// owner-family chunks.
+    /// owner-family relations.
     fn from_rustc(run: &AcceptedRustcCompilation) -> Result<Self, ProviderAdmissionError> {
         let source_pin = parse_b3_pin(
             &run.admission.source_snapshot_manifest_digest,
@@ -433,21 +451,15 @@ fn append_rustc_owner(
             detail: "accepted rustc owner identity is absent".into(),
         })?;
     let mut families = BTreeSet::new();
-    for chunk in &owner.chunks {
-        let relation =
-            RustcRelation::from_family_code(chunk.observation_family_code).ok_or_else(|| {
-                ProviderAdmissionError::InvalidObservedRelation {
-                    relation: format!("provider.rustc.family.{}", chunk.observation_family_code),
-                    detail: "predecessor or unknown family code reached target admission".into(),
-                }
-            })?;
+    for accepted_relation in &owner.relations {
+        let relation = accepted_relation.relation;
         if !families.insert(relation) {
             return Err(ProviderAdmissionError::DuplicateObservedRelation(format!(
                 "{owner_id}:{}",
                 relation.relation_id()
             )));
         }
-        let batch = decode_rustc_chunk(run, owner_id, relation, chunk)?;
+        let batch = decode_rustc_relation(run, owner_id, relation, accepted_relation)?;
         let identity = ProviderRelationIdentity::try_new(relation.relation_id())?;
         grouped
             .entry(identity)
@@ -458,26 +470,24 @@ fn append_rustc_owner(
     Ok(())
 }
 
-fn decode_rustc_chunk(
+fn decode_rustc_relation(
     run: &AcceptedRustcCompilation,
     owner_id: &str,
     relation: RustcRelation,
-    chunk: &crate::rpc::generated::codefabric::rustc::v1::OwnerObservationChunk,
+    accepted: &AcceptedRustcRelation,
 ) -> Result<RecordBatch, ProviderAdmissionError> {
     let relation_name = relation.relation_id();
-    if chunk.provider_run_id != run.admission.provider_run_id
-        || chunk.compilation_unit_id != run.begin.compilation_unit_id
-        || chunk.owner_id != owner_id
-        || chunk.schema_digest != relation.schema_digest()
-        || chunk.payload_reference.is_some()
+    if accepted.relation != relation
+        || accepted.schema_digest != relation.schema_digest()
+        || accepted.arrow_ipc_digest != arrow_ipc_digest(&accepted.arrow_ipc)
     {
         return Err(ProviderAdmissionError::InvalidObservedRelation {
             relation: relation_name.to_owned(),
-            detail: "rustc chunk control identity differs from the accepted run".into(),
+            detail: "rustc relation-stream identity differs from the accepted run".into(),
         });
     }
     let mut reader =
-        StreamReader::try_new(Cursor::new(&chunk.arrow_ipc), None).map_err(|error| {
+        StreamReader::try_new(Cursor::new(&accepted.arrow_ipc), None).map_err(|error| {
             ProviderAdmissionError::InvalidObservedRelation {
                 relation: relation_name.to_owned(),
                 detail: format!("rustc Arrow stream is invalid: {error}"),
@@ -508,7 +518,8 @@ fn decode_rustc_chunk(
             detail: format!("rustc Arrow batch is invalid: {error}"),
         })?
         .is_some()
-        || u64::try_from(batch.num_rows()).ok() != Some(chunk.row_count)
+        || u64::try_from(batch.num_rows()).ok() != Some(accepted.row_count)
+        || batch != accepted.batch
     {
         return Err(ProviderAdmissionError::InvalidObservedRelation {
             relation: relation_name.to_owned(),
@@ -584,6 +595,64 @@ pub enum ProviderAdmissionUnknownCause {
     ProviderDeclared,
 }
 
+/// Application-owned cause for a provider lane that produced no accepted relation set.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProviderLaneGap {
+    RequiredInputAbsent,
+    OptionalInputAbsent,
+    ProviderFailure,
+    CompilationFailure,
+    TrustUnavailable,
+    ResourceLimit,
+    TimedOut,
+    Cancelled,
+    InvalidSource,
+    Unsupported,
+}
+
+impl ProviderLaneGap {
+    const fn terminal_status(self) -> TerminalStatus {
+        match self {
+            Self::RequiredInputAbsent | Self::OptionalInputAbsent => TerminalStatus::Unknown,
+            Self::ProviderFailure
+            | Self::CompilationFailure
+            | Self::TrustUnavailable
+            | Self::ResourceLimit
+            | Self::TimedOut
+            | Self::Cancelled
+            | Self::InvalidSource
+            | Self::Unsupported => TerminalStatus::Partial,
+        }
+    }
+
+    const fn remainder_reason(self) -> RemainderReason {
+        match self {
+            Self::RequiredInputAbsent | Self::OptionalInputAbsent => RemainderReason::Unknown,
+            Self::ProviderFailure | Self::CompilationFailure | Self::TrustUnavailable => {
+                RemainderReason::ProviderUnavailable
+            }
+            Self::ResourceLimit | Self::TimedOut => RemainderReason::ResourceLimit,
+            Self::Cancelled => RemainderReason::Cancelled,
+            Self::InvalidSource => RemainderReason::InvalidSource,
+            Self::Unsupported => RemainderReason::Unsupported,
+        }
+    }
+}
+
+/// One provider lane supplies either at least one accepted application DTO or one exact gap.
+pub enum ExactProviderLaneRuns<'a, T> {
+    Accepted(&'a [T]),
+    Gap(ProviderLaneGap),
+}
+
+impl<T> Copy for ExactProviderLaneRuns<'_, T> {}
+
+impl<T> Clone for ExactProviderLaneRuns<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
 /// Registration disposition derived from the executable boundary report.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProviderRegistrationDisposition {
@@ -609,6 +678,7 @@ pub struct ProviderRelationAdmission {
     pub provider_relation: ProviderRelationIdentity,
     pub api_family: ProviderApiFamily,
     pub disposition: ProviderRegistrationDisposition,
+    pub lane_gap: Option<ProviderLaneGap>,
 }
 
 /// Boundary proof and exact relation dispositions for one provider admission.
@@ -627,25 +697,43 @@ pub struct ProviderAdmissionReport {
 pub struct ExactProgrammaticProviderRuns<'a> {
     tree_sitter_plan: &'a ProviderAdmissionPlan,
     ruff_plan: &'a ProviderAdmissionPlan,
-    native_syntax_runs: &'a [ProviderNativeSyntaxRun],
+    native_syntax_runs: ExactProviderLaneRuns<'a, ProviderNativeSyntaxRun>,
     pyrefly_plan: &'a ProviderAdmissionPlan,
-    pyrefly_runs: &'a [AcceptedPyreflyRun],
+    pyrefly_runs: ExactProviderLaneRuns<'a, AcceptedPyreflyRun>,
     rustc_plan: &'a ProviderAdmissionPlan,
-    rustc_runs: &'a [TrustQualifiedRustcCompilation],
+    rustc_runs: ExactProviderLaneRuns<'a, TrustQualifiedRustcCompilation>,
 }
 
 impl<'a> ExactProgrammaticProviderRuns<'a> {
     #[must_use]
-    pub(crate) const fn new(
+    pub(crate) fn try_new(
         tree_sitter_plan: &'a ProviderAdmissionPlan,
         ruff_plan: &'a ProviderAdmissionPlan,
-        native_syntax_runs: &'a [ProviderNativeSyntaxRun],
+        native_syntax_runs: ExactProviderLaneRuns<'a, ProviderNativeSyntaxRun>,
         pyrefly_plan: &'a ProviderAdmissionPlan,
-        pyrefly_runs: &'a [AcceptedPyreflyRun],
+        pyrefly_runs: ExactProviderLaneRuns<'a, AcceptedPyreflyRun>,
         rustc_plan: &'a ProviderAdmissionPlan,
-        rustc_runs: &'a [TrustQualifiedRustcCompilation],
-    ) -> Self {
-        Self {
+        rustc_runs: ExactProviderLaneRuns<'a, TrustQualifiedRustcCompilation>,
+    ) -> Result<Self, ProviderAdmissionError> {
+        for (lane, empty) in [
+            (
+                ProviderNativeLane::TreeSitter,
+                matches!(native_syntax_runs, ExactProviderLaneRuns::Accepted(runs) if runs.is_empty()),
+            ),
+            (
+                ProviderNativeLane::Pyrefly,
+                matches!(pyrefly_runs, ExactProviderLaneRuns::Accepted(runs) if runs.is_empty()),
+            ),
+            (
+                ProviderNativeLane::Rustc,
+                matches!(rustc_runs, ExactProviderLaneRuns::Accepted(runs) if runs.is_empty()),
+            ),
+        ] {
+            if empty {
+                return Err(ProviderAdmissionError::EmptyAcceptedProviderLane { lane });
+            }
+        }
+        Ok(Self {
             tree_sitter_plan,
             ruff_plan,
             native_syntax_runs,
@@ -653,7 +741,7 @@ impl<'a> ExactProgrammaticProviderRuns<'a> {
             pyrefly_runs,
             rustc_plan,
             rustc_runs,
-        }
+        })
     }
 }
 
@@ -783,6 +871,8 @@ pub enum ProviderAdmissionError {
         lane: ProviderNativeLane,
         relation: String,
     },
+    #[error("exact {lane:?} provider lane supplied an empty accepted-run set instead of a gap")]
+    EmptyAcceptedProviderLane { lane: ProviderNativeLane },
     #[error("exact {lane:?} provider workspace contains duplicate partition {partition}")]
     DuplicateProviderPartition {
         lane: ProviderNativeLane,
@@ -849,11 +939,33 @@ pub enum ProviderAdmissionError {
     ProgrammaticSchema(#[from] ProgrammaticSchemaError),
 }
 
-fn syntax_lane(relation: NativeSyntaxRelation) -> ProviderNativeLane {
-    if relation.as_str().starts_with("provider.tree_sitter.") {
-        ProviderNativeLane::TreeSitter
-    } else {
-        ProviderNativeLane::Ruff
+const fn syntax_lane(relation: NativeSyntaxRelation) -> ProviderNativeLane {
+    match relation {
+        NativeSyntaxRelation::TreeSitterRun
+        | NativeSyntaxRelation::TreeSitterCoverage
+        | NativeSyntaxRelation::TreeSitterRemainder
+        | NativeSyntaxRelation::TreeSitterCstNode
+        | NativeSyntaxRelation::TreeSitterChangedRange
+        | NativeSyntaxRelation::TreeSitterRecoveryDiagnostic => ProviderNativeLane::TreeSitter,
+        NativeSyntaxRelation::RuffRun
+        | NativeSyntaxRelation::RuffCoverage
+        | NativeSyntaxRelation::RuffRemainder
+        | NativeSyntaxRelation::RuffToken
+        | NativeSyntaxRelation::RuffComment
+        | NativeSyntaxRelation::RuffDirective
+        | NativeSyntaxRelation::RuffStringRegion
+        | NativeSyntaxRelation::RuffDocstring
+        | NativeSyntaxRelation::RuffContinuationLine
+        | NativeSyntaxRelation::RuffAstNode
+        | NativeSyntaxRelation::RuffParseDiagnostic
+        | NativeSyntaxRelation::RuffDiagnosticRecoveryEvidence
+        | NativeSyntaxRelation::RuffScope
+        | NativeSyntaxRelation::RuffBinding
+        | NativeSyntaxRelation::RuffReference
+        | NativeSyntaxRelation::RuffUnknownSymbol
+        | NativeSyntaxRelation::RuffSemanticEdge
+        | NativeSyntaxRelation::RuffImport
+        | NativeSyntaxRelation::RuffExport => ProviderNativeLane::Ruff,
     }
 }
 
@@ -1244,23 +1356,44 @@ pub(crate) fn admit_provider_relations_programmatic(
             },
         );
     }
-    let native_syntax = aggregate_native_syntax_runs(
-        runs.native_syntax_runs,
-        runs.tree_sitter_plan.expected_source_pin,
-        runs.tree_sitter_plan.expected_context_pin,
-    )?;
+    let native_syntax = match runs.native_syntax_runs {
+        ExactProviderLaneRuns::Accepted(accepted) => aggregate_native_syntax_runs(
+            accepted,
+            runs.tree_sitter_plan.expected_source_pin,
+            runs.tree_sitter_plan.expected_context_pin,
+        )?,
+        ExactProviderLaneRuns::Gap(gap) => AcceptedProviderRelationSet::from_gap(
+            runs.tree_sitter_plan.expected_source_pin,
+            runs.tree_sitter_plan.expected_context_pin,
+            gap,
+        )?,
+    };
     let tree_sitter = provider_lane_subset(&native_syntax, ProviderNativeLane::TreeSitter)?;
     let ruff = provider_lane_subset(&native_syntax, ProviderNativeLane::Ruff)?;
-    let pyrefly = aggregate_pyrefly_runs(
-        runs.pyrefly_runs,
-        runs.pyrefly_plan.expected_source_pin,
-        runs.pyrefly_plan.expected_context_pin,
-    )?;
-    let rustc = aggregate_rustc_runs(
-        runs.rustc_runs,
-        runs.rustc_plan.expected_source_pin,
-        runs.rustc_plan.expected_context_pin,
-    )?;
+    let pyrefly = match runs.pyrefly_runs {
+        ExactProviderLaneRuns::Accepted(accepted) => aggregate_pyrefly_runs(
+            accepted,
+            runs.pyrefly_plan.expected_source_pin,
+            runs.pyrefly_plan.expected_context_pin,
+        )?,
+        ExactProviderLaneRuns::Gap(gap) => AcceptedProviderRelationSet::from_gap(
+            runs.pyrefly_plan.expected_source_pin,
+            runs.pyrefly_plan.expected_context_pin,
+            gap,
+        )?,
+    };
+    let rustc = match runs.rustc_runs {
+        ExactProviderLaneRuns::Accepted(accepted) => aggregate_rustc_runs(
+            accepted,
+            runs.rustc_plan.expected_source_pin,
+            runs.rustc_plan.expected_context_pin,
+        )?,
+        ExactProviderLaneRuns::Gap(gap) => AcceptedProviderRelationSet::from_gap(
+            runs.rustc_plan.expected_source_pin,
+            runs.rustc_plan.expected_context_pin,
+            gap,
+        )?,
+    };
 
     let plans = [
         (ProviderNativeLane::TreeSitter, runs.tree_sitter_plan),
@@ -1813,6 +1946,13 @@ fn provider_lane_subset(
     observed: &AcceptedProviderRelationSet,
     lane: ProviderNativeLane,
 ) -> Result<AcceptedProviderRelationSet, ProviderAdmissionError> {
+    if let Some(gap) = observed.gap {
+        return AcceptedProviderRelationSet::from_gap(
+            observed.source_pin,
+            observed.context_pin,
+            gap,
+        );
+    }
     let relations = observed
         .relations
         .values()
@@ -2116,12 +2256,11 @@ fn prepare_provider_admission(
 
         // A missing required relation is always an explicit unknown. A provider's stale or
         // contradictory coverage row cannot turn absent Arrow output into completion.
-        let family_coverage =
-            if actual.is_none() && matches!(row.disposition, ContractDisposition::Required) {
-                None
-            } else {
-                coverage_for_binding(binding, observed)?
-            };
+        let family_coverage = if actual.is_none() {
+            observed.gap.map(|gap| provider_gap_trailer(binding, gap))
+        } else {
+            coverage_for_binding(binding, observed)?
+        };
         if let Some(trailer) = family_coverage.clone() {
             coverage_present.insert(binding.api_family.clone());
             coverage.push(ProviderFamilyCoverage {
@@ -2245,6 +2384,7 @@ fn prepare_provider_admission(
             provider_relation: binding.provider_relation.clone(),
             api_family: binding.api_family.clone(),
             disposition,
+            lane_gap: observed.gap,
         });
     }
 
@@ -2648,6 +2788,46 @@ fn conservative_unknown_trailer(requested_units: u64) -> CoverageTrailer {
     }
 }
 
+fn provider_gap_trailer(
+    binding: &ProviderRelationBinding,
+    gap: ProviderLaneGap,
+) -> CoverageTrailer {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"codefabric.provider-lane-gap-scope.v1\0");
+    hasher.update(binding.api_family.as_str().as_bytes());
+    hasher.update(&[0]);
+    hasher.update(binding.provider_relation.as_str().as_bytes());
+    hasher.update(&[provider_lane_gap_code(gap)]);
+    let digest = hasher.finalize();
+    let mut scope = [0_u8; 16];
+    scope.copy_from_slice(&digest.as_bytes()[..16]);
+    CoverageTrailer {
+        status: gap.terminal_status(),
+        requested_units: binding.requested_units,
+        completed_units: 0,
+        remainders: vec![CoverageRemainder {
+            scope: CoverageScope(scope),
+            unit_count: binding.requested_units,
+            reason: gap.remainder_reason(),
+        }],
+    }
+}
+
+const fn provider_lane_gap_code(gap: ProviderLaneGap) -> u8 {
+    match gap {
+        ProviderLaneGap::RequiredInputAbsent => 1,
+        ProviderLaneGap::OptionalInputAbsent => 2,
+        ProviderLaneGap::ProviderFailure => 3,
+        ProviderLaneGap::CompilationFailure => 4,
+        ProviderLaneGap::TrustUnavailable => 5,
+        ProviderLaneGap::ResourceLimit => 6,
+        ProviderLaneGap::TimedOut => 7,
+        ProviderLaneGap::Cancelled => 8,
+        ProviderLaneGap::InvalidSource => 9,
+        ProviderLaneGap::Unsupported => 10,
+    }
+}
+
 fn stream_id(relation: RelationId, source: SourcePin, context: ContextPin) -> StreamId {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"codefabric.provider-admission-stream.v1\0");
@@ -2680,6 +2860,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::cancellation::Cancellation;
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig, FabricSchemaRole};
+    use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::fabric::proof::{
         OracleId, OracleImplementationRef, ProofRunId, ProofTerminalStatus,
         test_relations_with_oracle,
@@ -2701,10 +2882,9 @@ pub(crate) mod tests {
     use crate::rpc::generated::codefabric::provider::v1::ProviderRunState;
     use crate::rpc::generated::codefabric::rustc::v1::{
         CompilationBegin, CompilationEnd, CompilerOwnerKey, OwnerBegin, OwnerEnd,
-        OwnerObservationChunk,
     };
     use crate::rustc_service::{
-        AcceptedRustcCompilation, AcceptedRustcOwner, RustcRunAdmission,
+        AcceptedRustcCompilation, AcceptedRustcOwner, AcceptedRustcRelation, RustcRunAdmission,
         TrustQualifiedRustcCompilation,
     };
 
@@ -2835,7 +3015,7 @@ pub(crate) mod tests {
             authority: ProviderAuthorityRole::Primary,
             disposition: ContractDisposition::Required,
             unavailable_behavior: UnavailableBehavior {
-                status: TerminalStatus::Partial,
+                allowed_statuses: vec![TerminalStatus::Partial],
                 allowed_reasons: vec![
                     RemainderReason::ProviderUnavailable,
                     RemainderReason::ResourceLimit,
@@ -2982,7 +3162,8 @@ pub(crate) mod tests {
         .unwrap();
         let module_name = format!("fixture.module_{marker}");
         let module_path = format!("fixture/module_{marker}.py");
-        ExactPythonSyntaxRunner::new()
+        let release = CompiledSemanticRelease::current();
+        ExactPythonSyntaxRunner::new(release.provider_authority())
             .unwrap()
             .run_full(
                 1,
@@ -3086,17 +3267,13 @@ pub(crate) mod tests {
                 AcceptedPyreflyRelation {
                     relation,
                     schema_digest: relation.schema_digest(),
-                    chunk_digest: crate::integrity::framed_digest(&arrow_ipc),
+                    arrow_ipc_digest: crate::integrity::framed_digest(&arrow_ipc),
                     row_count: 1,
                     batch,
                     arrow_ipc,
                 }
             })
             .collect::<Vec<_>>();
-        let context = relations
-            .iter()
-            .find(|relation| relation.relation == PyreflyRelation::ModuleContext)
-            .unwrap();
         AcceptedPyreflyRun {
             provider_run_id,
             workspace_id: "workspace:provider-admission".to_owned(),
@@ -3109,10 +3286,6 @@ pub(crate) mod tests {
                 module_name,
                 canonical_file_id: [marker; 16],
                 source_bytes,
-                arrow_ipc: context.arrow_ipc.clone(),
-                batch: context.batch.clone(),
-                schema_digest: context.schema_digest.clone(),
-                chunk_digest: context.chunk_digest.clone(),
                 module_digest: digest(marker.wrapping_add(1)),
                 relations,
             }],
@@ -3196,7 +3369,7 @@ pub(crate) mod tests {
                     &owner_id,
                 );
                 let arrow_ipc = ipc_batch(&batch);
-                (relation, arrow_ipc)
+                (relation, batch, arrow_ipc)
             })
             .collect::<Vec<_>>();
         let accepted = AcceptedRustcCompilation::test_only(
@@ -3230,24 +3403,23 @@ pub(crate) mod tests {
                     }),
                     expected_observation_family_codes: relations
                         .iter()
-                        .map(|(relation, _)| relation.family_code())
+                        .map(|(relation, _, _)| relation.family_code())
                         .collect(),
                 },
-                chunks: relations
+                relations: relations
                     .into_iter()
                     .enumerate()
-                    .map(|(index, (relation, arrow_ipc))| OwnerObservationChunk {
-                        provider_run_id: provider_run_id.clone(),
-                        compilation_unit_id: compilation_unit_id.clone(),
-                        sequence: 2 + u64::try_from(index).unwrap(),
-                        owner_id: owner_id.clone(),
-                        observation_family_code: relation.family_code(),
-                        chunk_digest: crate::integrity::framed_digest(&arrow_ipc),
-                        arrow_ipc,
-                        payload_reference: None,
-                        schema_digest: relation.schema_digest(),
-                        row_count: 1,
-                    })
+                    .map(
+                        |(index, (relation, batch, arrow_ipc))| AcceptedRustcRelation {
+                            relation,
+                            logical_sequence: 2 + u64::try_from(index).unwrap(),
+                            schema_digest: relation.schema_digest(),
+                            row_count: 1,
+                            arrow_ipc_digest: arrow_ipc_digest(&arrow_ipc),
+                            arrow_ipc,
+                            batch,
+                        },
+                    )
                     .collect(),
                 end: OwnerEnd::default(),
             }],
@@ -3309,8 +3481,9 @@ pub(crate) mod tests {
                 authority: ProviderAuthorityRole::Primary,
                 disposition: ContractDisposition::Required,
                 unavailable_behavior: UnavailableBehavior {
-                    status: TerminalStatus::Partial,
+                    allowed_statuses: vec![TerminalStatus::Partial, TerminalStatus::Unknown],
                     allowed_reasons: vec![
+                        RemainderReason::Unknown,
                         RemainderReason::ProviderUnavailable,
                         RemainderReason::ResourceLimit,
                         RemainderReason::Cancelled,
@@ -3370,15 +3543,16 @@ pub(crate) mod tests {
 
     impl ExactWorkspaceFixture {
         pub(crate) fn runs(&self) -> ExactProgrammaticProviderRuns<'_> {
-            ExactProgrammaticProviderRuns::new(
+            ExactProgrammaticProviderRuns::try_new(
                 &self.tree_sitter_plan,
                 &self.ruff_plan,
-                &self.native_syntax_runs,
+                ExactProviderLaneRuns::Accepted(&self.native_syntax_runs),
                 &self.pyrefly_plan,
-                &self.pyrefly_runs,
+                ExactProviderLaneRuns::Accepted(&self.pyrefly_runs),
                 &self.rustc_plan,
-                &self.rustc_runs,
+                ExactProviderLaneRuns::Accepted(&self.rustc_runs),
             )
+            .unwrap()
         }
     }
 
@@ -3450,7 +3624,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn workspace_transaction_aggregates_all_four_exact_provider_lanes() {
+    async fn wp34_beh_workspace_transaction_aggregates_all_four_exact_provider_lanes() {
         let fixture = exact_workspace_fixture();
         let outcome =
             admit_provider_relations_programmatic(programmatic_epoch_builder(), fixture.runs())
@@ -3499,22 +3673,20 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn absent_language_lanes_return_explicit_unknowns_without_fake_tables() {
+    async fn wp34_beh_absent_language_lanes_return_explicit_unknowns_without_fake_tables() {
         let fixture = exact_workspace_fixture();
-        let no_syntax = Vec::<ProviderNativeSyntaxRun>::new();
-        let no_pyrefly = Vec::<AcceptedPyreflyRun>::new();
-        let no_rustc = Vec::<TrustQualifiedRustcCompilation>::new();
         let outcome = admit_provider_relations_programmatic(
             programmatic_epoch_builder(),
-            ExactProgrammaticProviderRuns::new(
+            ExactProgrammaticProviderRuns::try_new(
                 &fixture.tree_sitter_plan,
                 &fixture.ruff_plan,
-                &no_syntax,
+                ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
                 &fixture.pyrefly_plan,
-                &no_pyrefly,
+                ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
                 &fixture.rustc_plan,
-                &no_rustc,
-            ),
+                ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
+            )
+            .unwrap(),
         )
         .unwrap();
         for report in [
@@ -3525,10 +3697,11 @@ pub(crate) mod tests {
         ] {
             assert_eq!(report.boundary.status, TerminalStatus::Unknown);
             assert!(report.relations.iter().all(|relation| {
-                relation.disposition
-                    == ProviderRegistrationDisposition::Unknown {
-                        cause: ProviderAdmissionUnknownCause::MissingRelation,
-                    }
+                relation.lane_gap == Some(ProviderLaneGap::RequiredInputAbsent)
+                    && relation.disposition
+                        == ProviderRegistrationDisposition::Unknown {
+                            cause: ProviderAdmissionUnknownCause::MissingRelation,
+                        }
             }));
         }
 
@@ -3548,7 +3721,149 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn duplicate_workspace_partition_is_rejected_before_registration() {
+    fn wp34_beh_provider_lane_gaps_preserve_exact_cause_status_and_remainder() {
+        let fixture = exact_workspace_fixture();
+        for (gap, expected_status, expected_reason) in [
+            (
+                ProviderLaneGap::RequiredInputAbsent,
+                TerminalStatus::Unknown,
+                RemainderReason::Unknown,
+            ),
+            (
+                ProviderLaneGap::OptionalInputAbsent,
+                TerminalStatus::Unknown,
+                RemainderReason::Unknown,
+            ),
+            (
+                ProviderLaneGap::ProviderFailure,
+                TerminalStatus::Partial,
+                RemainderReason::ProviderUnavailable,
+            ),
+            (
+                ProviderLaneGap::CompilationFailure,
+                TerminalStatus::Partial,
+                RemainderReason::ProviderUnavailable,
+            ),
+            (
+                ProviderLaneGap::TrustUnavailable,
+                TerminalStatus::Partial,
+                RemainderReason::ProviderUnavailable,
+            ),
+            (
+                ProviderLaneGap::ResourceLimit,
+                TerminalStatus::Partial,
+                RemainderReason::ResourceLimit,
+            ),
+            (
+                ProviderLaneGap::TimedOut,
+                TerminalStatus::Partial,
+                RemainderReason::ResourceLimit,
+            ),
+            (
+                ProviderLaneGap::Cancelled,
+                TerminalStatus::Partial,
+                RemainderReason::Cancelled,
+            ),
+            (
+                ProviderLaneGap::InvalidSource,
+                TerminalStatus::Partial,
+                RemainderReason::InvalidSource,
+            ),
+            (
+                ProviderLaneGap::Unsupported,
+                TerminalStatus::Partial,
+                RemainderReason::Unsupported,
+            ),
+        ] {
+            let outcome = admit_provider_relations_programmatic(
+                programmatic_epoch_builder(),
+                ExactProgrammaticProviderRuns::try_new(
+                    &fixture.tree_sitter_plan,
+                    &fixture.ruff_plan,
+                    ExactProviderLaneRuns::Accepted(&fixture.native_syntax_runs),
+                    &fixture.pyrefly_plan,
+                    ExactProviderLaneRuns::Gap(gap),
+                    &fixture.rustc_plan,
+                    ExactProviderLaneRuns::Accepted(&fixture.rustc_runs),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            let report = outcome.reports().pyrefly();
+            assert_eq!(report.boundary.status, expected_status);
+            assert!(report.relations.iter().all(|relation| {
+                if relation.lane_gap != Some(gap) {
+                    return false;
+                }
+                match &relation.disposition {
+                    ProviderRegistrationDisposition::Unknown {
+                        cause: ProviderAdmissionUnknownCause::MissingRelation,
+                    } => expected_status == TerminalStatus::Unknown,
+                    ProviderRegistrationDisposition::Remainder { trailer } => {
+                        expected_status == TerminalStatus::Partial
+                            && trailer.status == expected_status
+                            && trailer.completed_units == 0
+                            && trailer.remainders.len() == 1
+                            && trailer.remainders[0].reason == expected_reason
+                            && trailer.remainders[0].unit_count == trailer.requested_units
+                    }
+                    _ => false,
+                }
+            }));
+        }
+    }
+
+    #[test]
+    fn wp34_neg_empty_accepted_provider_lane_is_rejected_before_admission() {
+        let fixture = exact_workspace_fixture();
+        for (lane, runs) in [
+            (
+                ProviderNativeLane::TreeSitter,
+                ExactProgrammaticProviderRuns::try_new(
+                    &fixture.tree_sitter_plan,
+                    &fixture.ruff_plan,
+                    ExactProviderLaneRuns::Accepted(&fixture.native_syntax_runs[..0]),
+                    &fixture.pyrefly_plan,
+                    ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
+                    &fixture.rustc_plan,
+                    ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
+                ),
+            ),
+            (
+                ProviderNativeLane::Pyrefly,
+                ExactProgrammaticProviderRuns::try_new(
+                    &fixture.tree_sitter_plan,
+                    &fixture.ruff_plan,
+                    ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
+                    &fixture.pyrefly_plan,
+                    ExactProviderLaneRuns::Accepted(&fixture.pyrefly_runs[..0]),
+                    &fixture.rustc_plan,
+                    ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
+                ),
+            ),
+            (
+                ProviderNativeLane::Rustc,
+                ExactProgrammaticProviderRuns::try_new(
+                    &fixture.tree_sitter_plan,
+                    &fixture.ruff_plan,
+                    ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
+                    &fixture.pyrefly_plan,
+                    ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
+                    &fixture.rustc_plan,
+                    ExactProviderLaneRuns::Accepted(&fixture.rustc_runs[..0]),
+                ),
+            ),
+        ] {
+            assert!(matches!(
+                runs,
+                Err(ProviderAdmissionError::EmptyAcceptedProviderLane { lane: actual })
+                    if actual == lane
+            ));
+        }
+    }
+
+    #[test]
+    fn wp34_neg_duplicate_workspace_partition_is_rejected_before_registration() {
         let fixture = exact_workspace_fixture();
         let duplicate_syntax = vec![
             exact_native_syntax_run(21, "value = 1\n"),
@@ -3556,15 +3871,16 @@ pub(crate) mod tests {
         ];
         let error = admit_provider_relations_programmatic(
             programmatic_epoch_builder(),
-            ExactProgrammaticProviderRuns::new(
+            ExactProgrammaticProviderRuns::try_new(
                 &fixture.tree_sitter_plan,
                 &fixture.ruff_plan,
-                &duplicate_syntax,
+                ExactProviderLaneRuns::Accepted(&duplicate_syntax),
                 &fixture.pyrefly_plan,
-                &fixture.pyrefly_runs,
+                ExactProviderLaneRuns::Accepted(&fixture.pyrefly_runs),
                 &fixture.rustc_plan,
-                &fixture.rustc_runs,
-            ),
+                ExactProviderLaneRuns::Accepted(&fixture.rustc_runs),
+            )
+            .unwrap(),
         )
         .err()
         .expect("duplicate source partition must fail");
@@ -3578,7 +3894,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn exact_programmatic_admission_rejects_missing_pyrefly_coverage_relation() {
+    fn wp34_neg_exact_programmatic_admission_rejects_missing_pyrefly_coverage_relation() {
         let fixture = exact_workspace_fixture();
         let mut missing_coverage = fixture.pyrefly_runs.clone();
         missing_coverage[0].modules[0]
@@ -3587,15 +3903,16 @@ pub(crate) mod tests {
 
         let error = admit_provider_relations_programmatic(
             programmatic_epoch_builder(),
-            ExactProgrammaticProviderRuns::new(
+            ExactProgrammaticProviderRuns::try_new(
                 &fixture.tree_sitter_plan,
                 &fixture.ruff_plan,
-                &fixture.native_syntax_runs,
+                ExactProviderLaneRuns::Accepted(&fixture.native_syntax_runs),
                 &fixture.pyrefly_plan,
-                &missing_coverage,
+                ExactProviderLaneRuns::Accepted(&missing_coverage),
                 &fixture.rustc_plan,
-                &fixture.rustc_runs,
-            ),
+                ExactProviderLaneRuns::Accepted(&fixture.rustc_runs),
+            )
+            .unwrap(),
         )
         .err()
         .expect("an exact provider run cannot omit its typed coverage relation");
@@ -3610,7 +3927,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn changed_source_or_rustc_receipt_binding_invalidates_workspace_authority() {
+    fn wp34_neg_changed_source_or_rustc_receipt_binding_invalidates_workspace_authority() {
         let fixture = exact_workspace_fixture();
         let changed_syntax = vec![
             exact_native_syntax_run(21, "value = 1\n"),
@@ -3618,15 +3935,16 @@ pub(crate) mod tests {
         ];
         let error = admit_provider_relations_programmatic(
             programmatic_epoch_builder(),
-            ExactProgrammaticProviderRuns::new(
+            ExactProgrammaticProviderRuns::try_new(
                 &fixture.tree_sitter_plan,
                 &fixture.ruff_plan,
-                &changed_syntax,
+                ExactProviderLaneRuns::Accepted(&changed_syntax),
                 &fixture.pyrefly_plan,
-                &fixture.pyrefly_runs,
+                ExactProviderLaneRuns::Accepted(&fixture.pyrefly_runs),
                 &fixture.rustc_plan,
-                &fixture.rustc_runs,
-            ),
+                ExactProviderLaneRuns::Accepted(&fixture.rustc_runs),
+            )
+            .unwrap(),
         )
         .err()
         .expect("changed source partition must change workspace authority");
@@ -3642,15 +3960,16 @@ pub(crate) mod tests {
             .source_snapshot_manifest_digest = digest(99);
         let error = admit_provider_relations_programmatic(
             programmatic_epoch_builder(),
-            ExactProgrammaticProviderRuns::new(
+            ExactProgrammaticProviderRuns::try_new(
                 &fixture.tree_sitter_plan,
                 &fixture.ruff_plan,
-                &fixture.native_syntax_runs,
+                ExactProviderLaneRuns::Accepted(&fixture.native_syntax_runs),
                 &fixture.pyrefly_plan,
-                &fixture.pyrefly_runs,
+                ExactProviderLaneRuns::Accepted(&fixture.pyrefly_runs),
                 &fixture.rustc_plan,
-                &changed_rustc,
-            ),
+                ExactProviderLaneRuns::Accepted(&changed_rustc),
+            )
+            .unwrap(),
         )
         .err()
         .expect("rustc source pins detached from the launcher receipt must fail");
@@ -3661,7 +3980,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cross_provider_relation_and_table_collisions_are_rejected() {
+    fn wp34_neg_cross_provider_relation_and_table_collisions_are_rejected() {
         let fixture = exact_workspace_fixture();
         let mut relation_collision = fixture.ruff_plan.clone();
         relation_collision.bindings[0].provider_relation = fixture.tree_sitter_plan.bindings[0]
@@ -3669,15 +3988,16 @@ pub(crate) mod tests {
             .clone();
         let error = admit_provider_relations_programmatic(
             programmatic_epoch_builder(),
-            ExactProgrammaticProviderRuns::new(
+            ExactProgrammaticProviderRuns::try_new(
                 &fixture.tree_sitter_plan,
                 &relation_collision,
-                &fixture.native_syntax_runs,
+                ExactProviderLaneRuns::Accepted(&fixture.native_syntax_runs),
                 &fixture.pyrefly_plan,
-                &fixture.pyrefly_runs,
+                ExactProviderLaneRuns::Accepted(&fixture.pyrefly_runs),
                 &fixture.rustc_plan,
-                &fixture.rustc_runs,
-            ),
+                ExactProviderLaneRuns::Accepted(&fixture.rustc_runs),
+            )
+            .unwrap(),
         )
         .err()
         .expect("cross-provider relation collision must fail");
@@ -3692,15 +4012,16 @@ pub(crate) mod tests {
             fixture.tree_sitter_plan.bindings[0].table_name.clone();
         let error = admit_provider_relations_programmatic(
             programmatic_epoch_builder(),
-            ExactProgrammaticProviderRuns::new(
+            ExactProgrammaticProviderRuns::try_new(
                 &fixture.tree_sitter_plan,
                 &table_collision,
-                &fixture.native_syntax_runs,
+                ExactProviderLaneRuns::Accepted(&fixture.native_syntax_runs),
                 &fixture.pyrefly_plan,
-                &fixture.pyrefly_runs,
+                ExactProviderLaneRuns::Accepted(&fixture.pyrefly_runs),
                 &fixture.rustc_plan,
-                &fixture.rustc_runs,
-            ),
+                ExactProviderLaneRuns::Accepted(&fixture.rustc_runs),
+            )
+            .unwrap(),
         )
         .err()
         .expect("cross-provider table collision must fail");
@@ -3768,7 +4089,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn accepted_rustc_zero_fact_relation_remains_a_proved_empty_batch() {
+    fn wp34_beh_accepted_rustc_zero_fact_relation_remains_a_proved_empty_batch() {
         let relation = RustcRelation::MirRvalue;
         let batch = RecordBatch::new_empty(relation.schema());
         let mut arrow_ipc = Vec::new();
@@ -3780,17 +4101,14 @@ pub(crate) mod tests {
         let provider_run_id = "run:rustc-provider-admission".to_owned();
         let compilation_unit_id = "unit:rustc-provider-admission".to_owned();
         let owner_id = "owner:rustc-provider-admission".to_owned();
-        let chunk = OwnerObservationChunk {
-            provider_run_id: provider_run_id.clone(),
-            compilation_unit_id: compilation_unit_id.clone(),
-            sequence: 2,
-            owner_id: owner_id.clone(),
-            observation_family_code: relation.family_code(),
-            chunk_digest: digest(31),
-            arrow_ipc,
-            payload_reference: None,
+        let accepted_relation = AcceptedRustcRelation {
+            relation,
+            logical_sequence: 2,
             schema_digest: relation.schema_digest(),
             row_count: 0,
+            arrow_ipc_digest: arrow_ipc_digest(&arrow_ipc),
+            arrow_ipc,
+            batch,
         };
         let owner = AcceptedRustcOwner {
             begin: OwnerBegin {
@@ -3806,7 +4124,7 @@ pub(crate) mod tests {
                 }),
                 expected_observation_family_codes: vec![relation.family_code()],
             },
-            chunks: vec![chunk],
+            relations: vec![accepted_relation],
             end: OwnerEnd::default(),
         };
         let accepted = AcceptedRustcCompilation::test_only(

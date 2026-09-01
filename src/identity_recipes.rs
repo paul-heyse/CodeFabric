@@ -609,7 +609,6 @@ fn field(tag: u16, normalization: RecipeNormalization, value: RecipeValue) -> Re
 pub enum SemanticFingerprintDomain {
     UnframedId16,
     CapabilityScope,
-    RustcCapabilityScope,
     FactEvidence,
     SourceObservation,
     GitTopology,
@@ -625,7 +624,6 @@ impl SemanticFingerprintDomain {
         match self {
             Self::UnframedId16 => b"",
             Self::CapabilityScope => b"codefabric-capability-scope-v1\0",
-            Self::RustcCapabilityScope => b"codefabric.rustc.capability-scope.v1\0",
             Self::FactEvidence => b"codefabric-fact-evidence-v1\0",
             Self::SourceObservation => b"codefabric-source-observation-v1\0",
             Self::GitTopology => b"codefabric.git.topology.v1\0",

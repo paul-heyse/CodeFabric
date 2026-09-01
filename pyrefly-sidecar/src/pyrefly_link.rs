@@ -1482,7 +1482,7 @@ mod tests {
     }
 
     #[test]
-    fn query_slice_emits_typed_relation_streams_and_explicit_remainders() {
+    fn wp34_beh_query_slice_emits_typed_relation_streams_and_explicit_remainders() {
         let root = std::env::temp_dir().join(format!(
             "codefabric-pyrefly-relations-{}",
             std::process::id()
