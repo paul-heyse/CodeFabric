@@ -3,11 +3,11 @@ artifact: implementation-plan
 plan_id: codefabric-execution-proved-relational-data-fabric
 version: v4
 date: 2026-09-01
-status: draft
-design_path: docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v4.md
-design_version: v4
-baseline_commit: f12329f05e3678698ff9a43ec4f69f95f42db12f
-working_tree_digest: 25f3d3e36ffb1df4a140133c48235fc5a2e23fe5cea5ce2ec4a0b6584d5130c9
+status: approved
+design_path: docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v5.md
+design_version: v5
+baseline_commit: 6a76b5cff3d84e8249e5bedaa52a17f2abb816dd
+working_tree_digest: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 state_path: docs/plans/state/codefabric-execution-proved-relational-data-fabric_v4_state.json
 cutover: true
 supersedes_on_activation: docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v3_2026-08-30.md
@@ -15,7 +15,7 @@ supersedes_on_activation: docs/plans/codefabric_execution_proved_relational_data
 
 # CodeFabric execution-proved relational data fabric -- implementation plan v4
 
-This draft successor converts the accepted production daemon, gRPC, and FastMCP boundary review
+This approved successor converts the accepted production supervisor, daemon, gRPC, and FastMCP boundary review
 into one dependency-closed continuation of the relational-data-fabric plan. It preserves the
 traceability identities WP29--WP42, DB09--DB14, and L-20--L-55 while replacing their stale
 composition, cutover, and certification semantics. WP28 and M01 are deliberately absent: they are
@@ -37,9 +37,10 @@ At completion:
 1. A versioned authoritative-suite successor expresses the accepted `FreshActivation` deployment
    profile, lawful genesis, exact activation horizons, clean `codefabric.cpgd.v2` session/resource
    behavior, and revised roadmap order without modifying v2.1 history in place.
-2. `CodeFabricV21Release` is the sole compiled production owner of provider relation/field
-   descriptors, transformations, application analyses, proof construction, producer closure, and
-   all eight semantic request programs. Operational inputs carry only values that genuinely vary.
+2. `CompiledSemanticRelease`, bound to an immutable `SuiteIdentity`, is the sole compiled
+   production owner of provider relation/field descriptors, transformations, application analyses,
+   proof construction, producer closure, and all eight semantic request programs. Operational
+   inputs carry only values that genuinely vary.
 3. Production construction follows legal phase transitions from `PreEpochWorkspace` through
    `CandidateFabric`, `SealedEpoch`, `SelectedEpochRecord`, and `ActiveWorkspace`. Digests bind
    identity/integrity only; they never substitute for construction, execution, or exact readback.
@@ -64,20 +65,26 @@ At completion:
     `ValidateQuery`, `StartQuery`, `WatchQuery`, `CancelQuery`, `ReadResource`, and
     `ReleaseResource`. It has no v1 translator, legacy profile, repeated body authority, overlapping
     watch methods, legacy strings/cursors, or wall-deadline compatibility.
-11. Daemon-minted expiring sessions bind peer, daemon generation, principal, workspace, profile,
-    operation, handle, and resource authority. `OwnedUnixSocket` guards both endpoints; standard
-    Tonic health reports liveness only.
-12. FastMCP performs one eager lifespan handshake over one long-lived `grpc.aio` channel, exposes
+11. One same-package `WorkspaceSupervisor` owns the per-workspace singleton daemon, private
+    rendezvous, operator-owned `AgentLaunchPolicy`, daemon control socketpair, generation, restart,
+    drain, and reap lifecycle. `codefabric mcp serve` attaches to that supervisor and launches one
+    FastMCP adapter with direct host STDIO inheritance and bounded diagnostic stderr; it never
+    starts another daemon or accepts adapter-declared authority.
+12. Daemon-minted expiring sessions bind peer, daemon generation, principal, workspace, profile,
+    operation, handle, and resource authority. `OwnedUnixSocket` guards every filesystem endpoint;
+    standard Tonic health reports liveness only.
+13. FastMCP performs one eager lifespan handshake over one long-lived `grpc.aio` channel, exposes
     exactly four stable tools, reports bounded progress, reads live reference content from Rust,
     and remains strict-Pydantic presentation only. It never becomes an Arrow/DataFusion/Delta or
     semantic JSON processing layer.
-13. The displaced ontology/bootstrap/model/generated-schema/dual-epoch authority and the dormant
+14. The displaced ontology/bootstrap/model/generated-schema/dual-epoch authority and the dormant
     permanent predecessor cutover subsystem reach physical zero state after their last target
     consumers cut over. Reusable writer/fence/idempotency/reconciliation primitives move inward.
-14. A real source mutation passes through the installed `codefabricd` binary, exact providers,
-    native transformations, Delta activation, scheduled query, bounded Arrow pages, generated gRPC,
-    and installed FastMCP STDIO package. Restart, cancellation, retention, security, zero-state,
-    clean reconstruction, and representative resource behavior pass at one trusted HEAD.
+15. A real source mutation passes through `codefabric supervisor serve`, the installed
+    `codefabricd` binary, exact providers, native transformations, Delta activation, scheduled
+    query, bounded Arrow pages, generated gRPC, `codefabric mcp serve`, and the installed FastMCP
+    STDIO package. Restart, cancellation, retention, security, zero-state, clean reconstruction,
+    and representative resource behavior pass at one trusted HEAD.
 
 ### 1.2 Non-goals
 
@@ -94,8 +101,9 @@ At completion:
 - No live `codefabric.cpgd.v1` compatibility, translator, dual service, old-client fixture gate,
   reflection, compression, keepalive, HTTP/2 tuning, or richer status dependency before exact
   target-only need and interop evidence.
-- No new Cargo root, Python processing service, process boundary, or dependency added for code
-  organization alone.
+- No new Cargo root, Python processing service, semantic process boundary, or dependency added for
+  code organization alone. The accepted same-package supervisor and STDIO launcher exist only to own
+  launch authority, descriptor delivery, singleton process lifetime, and joined cleanup.
 - No live authority handoff implementation unless a read-only deployment census discovers a real
   predecessor. That discovery is a design-reopen trigger, not permission to retain dormant code.
 - No state creation, plan activation, production implementation, or deletion in this plan-authoring
@@ -105,9 +113,10 @@ At completion:
 
 The baseline commit and frontmatter working-tree digest identify the planning snapshot only. The
 digest is SHA-256 over `git status --porcelain=v2 -z`; it proves neither correctness nor ownership
-of individual changes. No behavioral comparator baseline was taken or is required. The workspace
-was already heavily dirty, including substantial successor additions and predecessor deletions, so
-every packet must rediscover and reserve its exact impact before editing.
+of individual changes. No behavioral comparator baseline was taken or is required. The user
+committed the accumulated successor work before execution; baseline HEAD `6a76b5c` and an empty
+status digest identify that clean handoff. Every packet must still rediscover and reserve its exact
+impact because current code existence is not completion proof.
 
 Current-tree inspection established that `codefabricd` calls error-only `daemon::serve`, while
 `serve_programmatic` and the real daemon factory have no production caller; first activation is
@@ -116,14 +125,17 @@ materialized; the query proto lacks `GetReference` and opaque sessions; FastMCP 
 synthesizes reference content; and forward-cutover wiring remains reachable. These are planning
 facts, not inherited failures that the target must reproduce.
 
-The plan-authoring `just ci-fast` observation exited 1 on a pre-existing formatting diff in
+The activation-preflight `just root-fmt` observation exited 1 on a pre-existing formatting diff in
 `src/daemon.rs` around programmatic backend construction. It is not a semantic baseline and was not
-repaired here. The first code-editing packet must reconcile that dirty region before claiming an
-edit-local format gate.
+repaired during planning. `just root-check` independently exited 101 because three daemon tests call
+`serve_query_transport` without its current eighth backend argument. WP29 must reconcile both
+production-composition-adjacent defects before claiming its edit-local format/check gates; the
+target need not preserve either failure.
 
 ### 1.4 Execution law
 
-- The accepted v4 review is the immediate design authority for this successor. WP33 must issue a
+- The accepted v5 review, incorporating the v4 forward-only contract and v3 target, is the immediate
+  design authority for this successor. WP33 must issue a
   collision-free versioned authoritative suite before design-bearing code packets begin; it must
   create new artifacts and never edit the declared v2.1 inputs below in place.
 - A packet starts only after every named dependency is complete at an ancestral proving commit,
@@ -162,6 +174,7 @@ plan before activation or continued execution.
 
 | path | sha256 |
 |---|---|
+| docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v5.md | 2c4e819bc416a9fd7fcf5a76928aa17a470a5b296b003e62cf451b170513b7ae |
 | docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v4.md | b3d9633272a931c511118c2ed639d4560184616a31b9aae38562fa4bfc52d8bc |
 | docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-08-31_v3.md | 9e53d7fbcad46e718390324e81b0daf15e3dd4a071f8e6d8e89fa9e405edbe4e |
 | docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v3_2026-08-30.md | 426b018ba33f8e73a1eacdff5c7fa415b367c855e3d588472d8f43706f0560f1 |
@@ -187,9 +200,10 @@ plan before activation or continued execution.
 
 ### 2.1 Planned design-authority evolution
 
-WP33 allocates the next synchronized, collision-free suite version under `SUITE §0` governance.
-`2.2.0`/`v2.2` is an illustrative likely allocation, not permission to collide with intervening
-work. All seven domain roles and the roadmap receive versioned successor files so suite membership
+WP33 allocates synchronized suite version `2.2.0` with filename suffix `v2.2` under `SUITE §0`
+governance. Activation preflight proved that allocation collision-free at baseline HEAD. Any
+intervening collision before WP33 is a replan trigger. All seven domain roles and the roadmap
+receive versioned successor files so suite membership
 remains coherent. SUITE, LIFE, FAB, SRV, and RM receive the accepted substantive changes; ONT, GEN,
 and QRY carry forward unchanged semantics with explicit successor linkage unless review discovers a
 required cross-domain correction.
@@ -232,7 +246,8 @@ Selected capability posture:
 
 Known touch points are discovery seeds, not a must-edit list:
 
-- production composition: `src/bin/codefabricd.rs`, `src/daemon.rs`,
+- production composition and launch: `src/bin/codefabric.rs`, `src/bin/codefabricd.rs`, the
+  same-package supervisor/launcher implementation, `src/daemon.rs`,
   `src/fabric/programmatic_workspace.rs`, `src/fabric/programmatic_query_backend.rs`, `src/lib.rs`,
   `src/fabric.rs`, Cargo features/targets, and daemon integration tests;
 - semantic release/providers: `src/production_provider_recipe.rs`,
@@ -259,7 +274,7 @@ skipped, excluded, unparsed, and package/build candidates; no empty search stand
 
 | ID | Invariant |
 |---|---|
-| I4-01 | One compiled release owns every production semantic constructor; callers supply no alternative production catalog, schema, plan, producer, or proof closure. |
+| I4-01 | One `CompiledSemanticRelease` with immutable `SuiteIdentity` owns every production semantic constructor; callers supply no alternative production catalog, schema, plan, producer, or proof closure. |
 | I4-02 | Only genuinely variable operational/source/policy/access/provider-availability inputs cross the release boundary; absence becomes an explicit gap. |
 | I4-03 | Phase types permit only legal transitions and derive downstream values from prior phases; separately constructed digest-equal values are not authority-equivalent. |
 | I4-04 | Genesis, mutation, activation, and uncertain-outcome recovery use one fenced command actor; there is no direct production seed or blind append retry. |
@@ -281,6 +296,7 @@ skipped, excluded, unparsed, and package/build candidates; no empty search stand
 | I4-20 | The terminal vertical uses the real binary, generated wire, installed adapter package, real source mutation, restart, and one trusted HEAD. |
 | I4-21 | Shutdown joins queries, pages, providers, watchers, commands, stores, sockets, writer leases, and daemon lease in owner order; retained/unsealed work has explicit restart state. |
 | I4-22 | No performance tuning is accepted without a representative workload, semantic equality oracle, environment, distribution, and resource envelope. |
+| I4-23 | One `WorkspaceSupervisor` owns one daemon per workspace, operator-owned launch policy, private rendezvous/control, generation, restart, and joined lifetime; each attach-only `AgentStdioLauncher` launches one presentation adapter with direct host STDIO, allowlisted fixed-fd grant inheritance, and no self-declared authority. |
 
 ### 3.1 V3 packet disposition
 
@@ -326,18 +342,20 @@ Ready, lawful production genesis, or a query vertical until those dependencies j
 
 ### WP33 — Version successor authority and issue independent expectations
 
-**Outcome.** A synchronized authoritative-suite successor records the accepted v4 target, and one
+**Outcome.** A synchronized authoritative-suite successor records the accepted v5 target, and one
 independently reviewed expectation/negative-fixture release defines what later semantic, lifecycle,
 wire-v2, resource, security, and zero-state behavior must prove. No implementation output authors
 its own expected value.
 
 **Dependencies.** None. WP28 and M01 are not implicit dependencies.
 
-**Target invariants.** I4-01--I4-05, I4-09--I4-20, I4-22; P1--P5, P9--P10, P18--P22,
+**Target invariants.** I4-01--I4-05, I4-09--I4-20, I4-22--I4-23; P1--P5, P9--P10, P18--P22,
 P25--P31, P36.
 
-**Design and library references.** Accepted design v4 §§0--5 and incorporated v3 §§6--17; current
-SUITE §§0, 8--13; LIFE §13; FAB §14; SRV §7; RM §0; Protobuf schema/evolution/testing §§0, 7,
+**Design and library references.** Accepted design v5 §§0--7, incorporated v4 §§0--5, and
+incorporated v3 §§6--17; current SUITE §§0, 4, 8--13; LIFE §13; FAB §14; SRV package, handshake,
+service, query, resource, error, lifecycle, and release sections; RM §0; Protobuf
+schema/evolution/testing §§0, 7,
 11--13, 26--30, 37, 39, 44; Tonic §§0, 3--8, 34--35, 39, 43; full-data-fabric principles staticness
 test and P18/P25/P30.
 
@@ -346,12 +364,16 @@ version-chain rules, every current domain frontmatter identity, derived spec ind
 selection, current expectation/evidence transactions, proto allocation history, and hidden/package
 consumers. Known touch: eight new files under `docs/authoritative_design/`, derived
 `docs/spec_index/**`, `contracts/acceptance/relational-fabric-v4/**`, focused expectation/review
-tooling and tests, and `justfile`. Current v2.1 and prior artifacts are read-only.
+tooling and tests, `AGENTS.md`, `scripts/bootstrap.sh`,
+`tooling/ci/authoritative_design_conformance.py`, `tooling/ci/artifact_contracts.py`, their tests,
+and `justfile`. Current v2.1 and prior artifacts are read-only.
 
 **Required changes.**
 
-1. Allocate the next synchronized suite version and copy all seven domain roles plus RM into new,
-   noncolliding artifacts. Preserve predecessor links and immutable prior content.
+1. Allocate suite `codefabric-relational-data-fabric@2.2.0` with `v2.2` filenames and copy all
+   seven domain roles plus RM into new, noncolliding artifacts. Preserve predecessor links and
+   immutable prior content. Derive the unique synchronized terminal suite from the version chain;
+   never require mutation of an immutable ancestor's issuance-time status.
 2. Revise SUITE, LIFE, FAB, SRV, and RM for `FreshActivation`, phase-typed startup, lawful
    `ExpectedHead::Empty` genesis, one exact selected horizon, atomic active workspaces, target-only
    forward repair, and the plan order in §3.2. Carry ONT, GEN, and QRY forward coherently unless the
@@ -359,12 +381,16 @@ tooling and tests, and `justfile`. Current v2.1 and prior artifacts are read-onl
 3. Define `codefabric.cpgd.v2` as the sole production wire package with the nine v4 methods, clean
    typed messages, opaque binary sessions, one relative budget, one content-bound cursor,
    control-only events, typed resource descriptors, and no v1 translator/profile/operability.
-4. Define the minimal inherited supervisor-control record contract for launch-grant registration,
-   revocation, generation advance, and acknowledgement. It carries no semantic query/result data
+4. Define `WorkspaceSupervisor`, `AgentLaunchPolicy`, `codefabric supervisor serve`, attach-only
+   `codefabric mcp serve`, the private `supervisor.sock` rendezvous, daemon control socketpair,
+   adapter launch descriptor, and their singleton/attach/restart/revocation/join state machines.
+   The minimal inherited supervisor-control record contract covers launch-grant registration,
+   revocation, generation advance, and acknowledgement; it carries no semantic query/result data
    and has explicit bounds, ordering, replay, expiry, and loss behavior.
 5. Issue independently authored typed expectations for provider rows/gaps, transformation and
    analysis outputs, all eight query forms, exact activation/readback, lifecycle projections,
-   v2 wire/session/resource behavior, FastMCP projections, recovery, and zero state. Expectations
+   v2 wire/session/resource behavior, supervisor policy/singleton/multi-agent/descriptor/launcher
+   behavior, FastMCP projections, recovery, and zero state. Expectations
    may cite design semantics but may not import production modules or generated target output.
 6. Issue negative fixtures for omitted provider roles, ambiguous producers, authority leaks,
    invalid phase transitions, incoherent horizons, session and cursor tampering, wrong owner/
@@ -400,7 +426,7 @@ freeze and requires downstream execution to stop rather than silently refresh it
 
 **Edit-local gates.** Run `just spec-outline` on every changed authoritative artifact, targeted
 artifact-contract tests, expectation-tool unit tests, `just authoritative-design-conformance-check`,
-and targeted `typos`. Verify v2.1 files are byte-unchanged.
+`just supervisor-launch-contract-check`, and targeted `typos`. Verify v2.1 files are byte-unchanged.
 
 **Packet-local gates.** Add/reshape and run `just successor-authority-expectation-integrity-check`,
 `just independent-expected-relation-review-check`, `just negative-fixture-independence-check`, and
@@ -410,23 +436,24 @@ committed fault.
 **Milestone.** Completes M02 after the successor suite and expectation review are the accepted
 inputs to all dependent packets.
 
-**Replan triggers.** Stop if synchronized versioning cannot express the successor, the new v2
-package cannot own the required functional surface without semantic duplication, the supervisor
-grant root cannot be supported by an authorized launcher, or expectation independence cannot be
-demonstrated.
+**Replan triggers.** Stop if the `2.2.0` allocation collides before issue, synchronized versioning
+cannot express the successor, the new v2 package cannot own the required functional surface
+without semantic duplication, safe allowlisted adapter descriptor inheritance and the accepted
+one-shot-file fallback both fail on a supported platform, operator-owned launch policy cannot be
+provided, or expectation independence cannot be demonstrated.
 
 **Rollback and recovery.** Before suite selection, remove only unselected new candidate artifacts
 and leave v2.1 current. After selection, correct forward with another version; never rewrite the
 selected suite or reinstate v1 operability.
 
-**Conditional exemplars.** A `2.2.0` suite and `v2.2` filenames are illustrative only. A rich-status
-detail schema is permitted only after a bilateral pinned-version probe; otherwise the target uses
-standard status plus one bounded typed trailing-metadata code.
+**Conditional exemplars.** A rich-status detail schema is permitted only after a bilateral
+pinned-version probe; otherwise the target uses standard status plus one bounded typed
+trailing-metadata code.
 
 ### WP29 — Compose an honest phase-typed production kernel
 
 **Outcome.** The real `codefabricd` entry reaches one production `DaemonKernel` built from
-`CodeFabricV21Release`, explicit operational inputs, phase-typed workspace state, one lifecycle
+`CompiledSemanticRelease`, explicit operational inputs, phase-typed workspace state, one lifecycle
 authority, one atomic active-workspace slot, and joined ownership. Before WP32/WP36 close, the
 kernel may be honestly bootstrapping; it cannot report semantic Ready or use a test/default backend.
 
@@ -435,9 +462,9 @@ kernel may be honestly bootstrapping; it cannot report semantic Ready or use a t
 **Target invariants.** I4-01--I4-07, I4-15, I4-17, I4-20--I4-21; P1--P3, P7--P8, P11,
 P16--P17, P23, P27, P32--P35.
 
-**Design and library references.** Design v3 §§6.1--6.5, 6.8 and v4 §§0, 5; successor SUITE/LIFE/
-FAB/RM issued by WP33; DataFusion MOD/CAT/RUN/GOV flows; Tonic §§24--28, 37--40; `arc-swap` selected
-by design LD3-14.
+**Design and library references.** Design v3 §§6.1--6.5, 6.8, v4 §§0, 5, and v5 §§0--3;
+successor SUITE/LIFE/FAB/RM issued by WP33; DataFusion MOD/CAT/RUN/GOV flows; Tonic §§24--28,
+37--40; `arc-swap` selected by design LD3-14.
 
 **Change surface / preflight / known touch.** Trace all callers/constructors of `daemon::serve`,
 `serve_programmatic`, `ProgrammaticWorkspaceRuntimeFactory::build_daemon`, programmatic composition,
@@ -448,7 +475,7 @@ call searches and a hidden-aware textual envelope. Known touch: `src/bin/codefab
 
 **Required changes.**
 
-1. Add the immutable `CodeFabricV21Release`, operational-only workspace registry,
+1. Add the immutable `CompiledSemanticRelease` with its `SuiteIdentity`, operational-only workspace registry,
    `ProductionDaemonFactory`, `ProductionStartupCoordinator`, `LifecycleAuthority`, atomic
    `WorkspaceSlot<Arc<ActiveWorkspace>>`, and `DaemonKernel` ownership boundaries.
 2. Replace broad synchronized construction DTOs with legal phase aggregates. Transitions derive
@@ -609,7 +636,7 @@ excluded from zero-state scanning but may not be imported by build/runtime/packa
 
 ### WP31 — Close compiled release, schema, catalog, and DataFusion authority
 
-**Outcome.** `CodeFabricV21Release` privately and exhaustively constructs provider/field contracts,
+**Outcome.** `CompiledSemanticRelease` privately and exhaustively constructs provider/field contracts,
 typed transformations, application-analysis declarations, proof/producer closure, and all eight
 query programs. One governed DataFusion runtime and plan/provider-derived schemas feed root and
 dependency-closed authorized child sessions; bounded caches remain optimization only.
@@ -634,7 +661,7 @@ semantic query contracts, tests, rules, and just recipes.
 
 **Required changes.**
 
-1. Make `CodeFabricV21Release` the only public production constructor. Provider availability,
+1. Make `CompiledSemanticRelease` the only public production constructor. Provider availability,
    source/repository identity, explicit policy/access/resource limits, roots, and credentials are
    its variable inputs; schemas, programs, closures, and producer functions are private outputs.
 2. Replace name-substring semantic inference with exhaustive provider relation enums and
@@ -1081,17 +1108,19 @@ declared memory bound.
 
 ### WP37 — Deliver the real daemon, gRPC v2, and FastMCP vertical
 
-**Outcome.** The actual `codefabricd` process serves the clean `codefabric.cpgd.v2` contract over
-owned UDS endpoints, authenticates supervisor grants and daemon sessions, exposes honest lifecycle
-and bounded resources, and is consumed by one eager-session installed FastMCP STDIO package. One
-real source-to-FastMCP vertical proves the assembled target; v1 and shortcut serving are absent.
+**Outcome.** `codefabric supervisor serve` owns one actual `codefabricd` process per workspace and
+serves the clean `codefabric.cpgd.v2` contract over owned UDS endpoints. Attach-only `codefabric
+mcp serve` launches one eager-session installed FastMCP process per authorized agent, inherits host
+stdin/stdout directly, and supplies daemon-consumed launch grants without adapter-declared claims. One real
+source-to-FastMCP vertical and a concurrent two-agent/one-daemon vertical prove the assembled
+target; v1, per-agent daemons, and shortcut serving are absent.
 
 **Dependencies.** WP29, WP30, WP31, WP32, WP33, WP34, WP35, and WP36.
 
-**Target invariants.** I4-01--I4-22; P1--P36.
+**Target invariants.** I4-01--I4-23; P1--P36.
 
 **Design and library references.** Design v3 §§6.1, 6.4, 6.8, 8--10, 13.4, 14.4--14.7 and
-LD3-07--LD3-12, LD3-14 as amended by design v4 §§0--5; successor LIFE/SRV/FAB/QRY; Tonic §§0,
+LD3-07--LD3-12, LD3-14 as amended by design v4 §§0--5 and v5 §§0--7; successor LIFE/SRV/FAB/QRY; Tonic §§0,
 6--8, 12--29, 34--40, 43; grpcio §§8--10, 13--19, 21, 23, 26--30, 35--37; Protobuf §§4--18,
 26--30, 37--44; FastMCP §§4--14, 21--22, 29--30, 32--35; Pydantic §§5--10, 16--21, 26, 34,
 36, 40, 48.
@@ -1100,10 +1129,12 @@ LD3-07--LD3-12, LD3-14 as amended by design v4 §§0--5; successor LIFE/SRV/FAB/
 Rust/Python generators and bindings, every service/client method, metadata/interceptor, peer
 credential, socket bind/unlink, daemon/admin startup, health, errors, deadlines, chunks, Python
 channel/client/result/resource/server/settings/models, FastMCP tools/resources/lifespan/progress,
-STDIO/package tests, service/package configuration, and v1 consumers. Known touch includes
+STDIO/package tests, service/package configuration, supervisor policy/rendezvous/lease/restart,
+child descriptor inheritance, process groups, host registration, and v1 consumers. Known touch includes
 `contracts/rpc/cpg_query_service*.proto`, `tooling/proto/**`, generated outputs, `src/rpc.rs`,
+`src/bin/codefabric.rs`, `src/bin/codefabricd.rs`, the same-package supervisor/launcher implementation,
 `src/daemon.rs`, `src/query_service.rs`, the full adapter domain, integration tests, rules, package
-metadata/lock, Cargo manifest/lock, justfile, and CI.
+metadata/lock, Cargo manifest/lock, service/host configuration, justfile, and CI.
 
 **Required changes.**
 
@@ -1113,32 +1144,56 @@ metadata/lock, Cargo manifest/lock, justfile, and CI.
 2. Add one `codefabric.cpgd.v2` proto and perform source, descriptor, Rust generation, Python
    generation, service/client, package, and test changes in one atomic transaction. Implement the
    nine v4 RPCs and standard health; do not register v1 or a translator.
-3. Implement the minimal inherited supervisor-control socketpair and single-use launch grants.
-   Handshake consumes a binary bootstrap capability and mints an expiring session bound to peer,
-   daemon/supervisor generation, principal, workspaces, operations, profiles, host bounds,
-   revocation generation, and expiry.
-4. Carry verified UDS peer identity in Tonic request extensions and reauthorize every method,
+3. Implement `codefabric supervisor serve` as the one persistent `WorkspaceSupervisor` for a
+   workspace. It safely owns the private runtime root, singleton lease/live probe,
+   `supervisor.sock`, one `codefabricd` child/process group, bounded restart generation, drain,
+   joined shutdown, and stale recovery. It maps the unnamed daemon-control socketpair endpoint to
+   daemon stdin through safe `OwnedFd`/`Stdio`; `codefabricd serve` rejects startup without the
+   authenticated control hello.
+4. Implement `codefabric mcp serve` as an attach-only `AgentStdioLauncher`. The supervisor resolves
+   an operator-owned strict `AgentLaunchPolicy`; the invocation may narrow but cannot expand its
+   principal/workspaces/operations/profiles/bounds/expiry. Register each single-use grant and await
+   daemon acknowledgement before delivering it over the allowlisted inherited adapter launch
+   descriptor at fixed fd 3. Inherit host MCP stdin/stdout directly so the launcher never reads or
+   writes protocol bytes; bound piped diagnostics to stderr, propagate signals/deadlines, and
+   join/reap the adapter. It never starts a daemon.
+5. Compile-probe and process-probe exact `command-fds` 0.3.3 with Tokio support on Linux and macOS
+   as the safe maintained fixed-FD inheritance API while first-party `unsafe_code` remains denied.
+   Create descriptor pairs close-on-exec and allowlist only fd 3. Never toggle `CLOEXEC` around
+   spawn in the multithreaded supervisor. If the probe fails on a supported launcher, select only the accepted
+   no-follow, owner-verified `0600` one-shot-file fallback and prove immediate unlink/read-once
+   behavior. Handshake consumes each binary bootstrap capability and mints an expiring session
+   bound to peer, daemon/supervisor generation, principal, workspaces, operations, profiles, host
+   bounds, revocation generation, and expiry.
+6. Carry verified UDS peer identity in Tonic request extensions and reauthorize every method,
    query, handle, and resource. Body correlation IDs grant no authority. Reserve transport capacity
    for handshake/status/cancel/release so heavy streams cannot starve control.
-5. Add `OwnedUnixSocket` for admin and query endpoints: private no-symlink parent, type/owner/mode
+7. Add `OwnedUnixSocket` for supervisor, admin, and query endpoints: private no-symlink parent,
+   type/owner/mode
    checks, live probe, stale-only unlink under lease, final permissions, recorded device/inode/
    generation, and replacement-inode-safe shutdown unlink.
-6. Serve health as process/service liveness only. Derive one remaining-budget model through Python
+8. Serve health as process/service liveness only. Derive one remaining-budget model through Python
    timeout, gRPC deadline, queue/freshness/execution/write/read/cleanup. Map outer errors by standard
    status plus the probed typed detail/metadata code; never parse or expose prose/secrets.
-7. Implement `WatchQuery` at-least-once resume and `ReadResource` bounded chunk/range streaming.
+9. Implement `WatchQuery` at-least-once resume and `ReadResource` bounded chunk/range streaming.
    Dropping a watch stops observation, not work; cancellation uses `CancelQuery`; reconnect creates
    one channel, re-handshakes, and watches the accepted query without resubmitting.
-8. Build FastMCP lifespan with strict settings, one channel/stub/session manager, bounded readiness
+10. Build FastMCP lifespan with strict settings, one channel/stub/session manager, bounded readiness
    wait, handshake/profile/reference-index validation, and unconditional close. Honest
    `BOOTSTRAPPING` may yield; incompatibility/authentication/transport failure may not.
-9. Register exactly four tools and bounded manifest/page/reference resources. Use
+11. Register exactly four tools and bounded manifest/page/reference resources. Use
    `Context.report_progress`; keep MCP call, RPC attempt, daemon query, epoch, package, resource, and
    lease IDs distinct. Python forwards bytes and validates presentation only.
-10. Launch the real binary and installed adapter package for a real workspace source mutation:
+12. Launch the real supervisor, daemon, launcher, and installed adapter package for a real workspace
+    source mutation:
     exact provider batches/gaps -> transformations/proof -> Delta genesis/activation -> atomic
     workspace -> scheduled query -> streamed package -> v2 UDS -> FastMCP response/resource.
-11. Delete v1 runtime bindings/services/clients/package payload/operability tests, overlapping
+13. Prove two concurrent launcher/adapter pairs share one daemon PID and one active workspace while
+    retaining separate principals, grants, sessions, query watches, resource leases, and cleanup.
+    Adapter exit revokes its launch/session scope without silently canceling accepted work. Daemon
+    generation change sends a replacement single-use grant over the inherited launch channel,
+    re-handshakes, and resumes watch without resubmitting the query.
+14. Delete v1 runtime bindings/services/clients/package payload/operability tests, overlapping
     Stream/Attach and Read/ReleaseResult routes, repeated body authority, lazy handshake, local
     reference synthesis, one-chunk joins, default/in-process backends, blind socket removal, static
     adapter registries, and Python semantic processing.
@@ -1172,22 +1227,30 @@ release, socket replacement, shutdown, and restart reconstruction.
 **Edit-local gates.** Rust and adapter format/check/lint/tests, `proto-check`, `proto-repro-check`,
 real UDS interop, generated descriptor assertions, targeted rules (`owned-uds-lifecycle-only`,
 `daemon-production-composition-only`, `adapter-live-reference-only`), `adapter-stdio-test`, package
-inspection, and stable graph/feature gates when dependencies change.
+inspection, `just supervisor-launch-contract-check`, `just supervisor-launch-platform-check`, and
+stable graph/feature gates when dependencies change.
 
-**Packet-local gates.** Run the four packet recipes against actual subprocesses. The positive gate
-must launch `codefabricd` and the installed adapter package; `ProbeService`, injected Rust backends,
-and Python stub daemons are permitted only as lower-layer tests and cannot satisfy completion.
+**Packet-local gates.** Run the four packet recipes against actual subprocesses. The integrity,
+behavior, negative, and operations recipes respectively incorporate
+`supervisor-launch-rendezvous-integrity-check`, `shared-daemon-multi-agent-launch-check`,
+`launch-grant-fd-inheritance-rejection-check`, and `supervisor-generation-restart-join-check`.
+The positive gate must launch the supervisor, `codefabricd`, two launcher/adapter instances, and the
+installed adapter package; `ProbeService`, injected Rust backends, and Python stub daemons are
+permitted only as lower-layer tests and cannot satisfy completion.
 
 **Milestone.** Completes M05 with WP29/WP30, closes DB11, and opens release evidence.
 
-**Replan triggers.** Stop if the supervisor grant root cannot be safely delivered by a supported
-launcher, UDS peer identity cannot reach async authorization, the v2 service duplicates semantic
+**Replan triggers.** Stop if both safe allowlisted descriptor delivery and the accepted one-shot
+file fallback fail on a supported launcher, operator-owned launch policy cannot be provided, UDS
+peer identity cannot reach async authorization, the v2 service duplicates semantic
 authority, FastMCP cannot bound materialized resources, or the real four-domain process topology
 cannot meet cancellation/shutdown ownership.
 
-**Rollback and recovery.** Failed startup leaves admission closed and removes only owned endpoints.
-Old daemon-generation sessions fail; reconnect re-handshakes. Accepted unsealed work becomes
-`LOST`, sealed resources follow lease policy, and no v1/default service is selected.
+**Rollback and recovery.** Failed or partial supervisor/daemon/adapter startup leaves admission
+closed, revokes unused grants, joins children, and removes only owned endpoints. Old
+daemon-generation sessions fail; a surviving adapter receives a fresh grant and reconnects without
+resubmitting accepted work. Accepted unsealed work becomes `LOST`, sealed resources follow lease
+policy, and no v1/default service is selected.
 
 **Conditional exemplars.** Adopt `tonic-health` after its exact compile probe. Adopt
 `tonic-types`/`grpcio-status` only if a bilateral runtime probe justifies richer typed details;
@@ -1202,7 +1265,7 @@ not decide semantic acceptance.
 
 **Dependencies.** WP37.
 
-**Target invariants.** I4-01--I4-22; P9--P10, P18--P22, P24--P30, P36.
+**Target invariants.** I4-01--I4-23; P9--P10, P18--P22, P24--P30, P36.
 
 **Design and library references.** Design v3 §§14--15, 17 and v4 §5; successor SUITE proof/release
 contracts; DataFusion/Arrow and Delta TST families selected by WP31--WP37; Tonic §39.10, grpcio §26,
@@ -1219,9 +1282,9 @@ jobs.
 
 1. Freeze WP33 expectations/review identities and map each release claim to typed input, decoded
    expected output, negative case, causal fault, owning packet oracle, and limitation.
-2. Execute provider, transformation, analysis, all eight query, activation, lifecycle, v2 wire,
-   session/security, resource, FastMCP, recovery, and zero-state claims through WP37's production
-   processes.
+2. Execute provider, transformation, analysis, all eight query, activation, lifecycle, supervisor
+   policy/singleton/multi-agent/fixed-descriptor launch, v2 wire, session/security, resource,
+   FastMCP, recovery, and zero-state claims through WP37's production processes.
 3. Compare decoded rows/schema/order/null/unknown/coverage/provenance, typed control states, exact
    table versions/horizon, and strict public projections. Digest/count assertions remain secondary
    integrity/limit checks.
@@ -1376,7 +1439,7 @@ permit tuning only when a predeclared resource envelope and semantic equality ju
 
 **Dependencies.** WP39.
 
-**Target invariants.** I4-01--I4-22; P9--P10, P18--P25, P27--P30, P36.
+**Target invariants.** I4-01--I4-23; P9--P10, P18--P25, P27--P30, P36.
 
 **Design and library references.** Design v3 §§14--15, 17 and v4 §5; successor SUITE release gate;
 DataFusion/Arrow TST-01--TST-14, Delta release gate App. D, Tonic performance/testing §§38--39,
@@ -1461,7 +1524,7 @@ unknown outcomes, and contains no dormant predecessor handoff/cutover machinery.
 
 **Dependencies.** WP40.
 
-**Target invariants.** I4-03--I4-07, I4-11--I4-21; P3, P9--P11, P16--P18, P20--P25,
+**Target invariants.** I4-03--I4-07, I4-11--I4-21, I4-23; P3, P9--P11, P16--P18, P20--P25,
 P27--P30, P32--P35.
 
 **Design and library references.** Design v3 §§11.1--11.3, 13.5, 14.8 and v4 §§0, 4--5;
@@ -1554,9 +1617,9 @@ an independent implementation-review acceptance. Only then may the plan state be
 
 **Dependencies.** WP41.
 
-**Target invariants.** I4-01--I4-22; P1--P36.
+**Target invariants.** I4-01--I4-23; P1--P36.
 
-**Design and library references.** Accepted design v4 and incorporated v3 target; successor
+**Design and library references.** Accepted design v5 with incorporated v4/v3 target; successor
 authoritative suite and RM; all selected library alignment/release/test gates; repository evidence,
 state, review, and completion policies.
 
@@ -1579,7 +1642,7 @@ CI, final review artifact, and only defects discovered by final execution.
    and performance-limit gates.
 4. Rerun the real source-mutation -> `codefabricd` -> v2 grpc.aio -> installed FastMCP STDIO
    vertical, cancellation, shutdown, restart, exact reconstruction, and live reference change.
-5. Obtain an independent `implementation-review` against design v4, successor suite, this plan,
+5. Obtain an independent `implementation-review` against design v5, successor suite, this plan,
    state, implementation, library decisions, decommission, and actual behavior. Resolve every
    blocking finding at a new trusted HEAD and rerun affected plus terminal gates.
 6. Prove all DB09--DB14 retained/history exclusions are exact and non-live, and that old ontology/
@@ -1643,7 +1706,7 @@ latest ancestral packet commit at which every exit condition is rerun. M01 does 
 
 **Dependencies.** WP33.
 
-**Exit.** One synchronized successor suite incorporates design v4; `codefabric.cpgd.v2` is the sole
+**Exit.** One synchronized successor suite incorporates design v5; `codefabric.cpgd.v2` is the sole
 target wire authority; independently reviewed expectations and negative fixtures are immutable;
 v2.1/v1/v3 inputs remain byte-stable non-live history; WP28/M01 and old-client operability have no
 dependency edge.
@@ -1670,10 +1733,12 @@ behavioral/failure/resource gates. DB09 and DB10 are closed.
 
 **Dependencies.** WP37.
 
-**Exit.** Actual `codefabricd`, owned UDS, supervisor grants/sessions, `codefabric.cpgd.v2`, generated
-grpc.aio client, and installed FastMCP STDIO package pass one source-to-resource vertical,
-bootstrapping/readiness, security, cancellation, reconnect, shutdown, and restart. V1 runtime and
-shortcut serving are absent; DB11 is closed.
+**Exit.** Actual `codefabric supervisor serve`, its one `codefabricd`, owned supervisor/admin/query
+UDS endpoints, operator launch policy, grants/sessions, `codefabric.cpgd.v2`, generated grpc.aio
+client, attach-only `codefabric mcp serve`, and two installed FastMCP STDIO processes pass one
+source-to-resource vertical plus a one-daemon/many-agent vertical, bootstrapping/readiness,
+descriptor isolation, security, cancellation, reconnect, shutdown, and restart. V1 runtime,
+per-agent daemons, and shortcut serving are absent; DB11 is closed.
 
 ### M06 — Independent evidence, total purge, and measured release candidate are accepted
 
@@ -1829,7 +1894,7 @@ underlying exit code, nonzero selection, discriminating fault, and evidence arti
 | Packet proof | `just successor-all-packet-oracles-check`; parsed `just packet-oracle-check <WP>` for WP29--WP42 | Four substantive categories per active packet, nonzero selection/fault, no hard-coded count or stale recipe. |
 | Composition/lifecycle | `just programmatic-production-composition-check`; `just programmatic-runtime-lifecycle-check`; `just fresh-activation-target-authority-check` | Real binary, one lifecycle, lawful exact authority, target-only activation/restart. |
 | DataFusion/Arrow/Delta | `just datafusion-plan-schema-cache-check`; `just exact-provider-batch-check`; `just analysis-producer-semantic-check`; `just scheduled-streamed-semantic-query-check`; `just delta-exact-reconstruction-v4-check`; `just candidate-free-recovery-check` | Exhaustive compiled release, native authorized execution, exact gaps/rows, bounded pages/packages, exact durable selection/recovery. |
-| Wire/session/UDS/FastMCP | `just public-lifecycle-wire-contract-integrity-check`; `just lifecycle-production-vertical-check`; `just session-uds-presentation-boundary-rejection-check`; `just resource-cancellation-recovery-check`; `just proto-check`; `just proto-repro-check`; `just adapter-stdio-test` | Sole v2 contract, generated Rust/Python parity, grants/sessions/owned sockets, four tools/live references, real installed-package vertical. |
+| Supervisor/wire/session/UDS/FastMCP | `just supervisor-launch-contract-check`; `just supervisor-launch-platform-check`; `just public-lifecycle-wire-contract-integrity-check`; `just lifecycle-production-vertical-check`; `just session-uds-presentation-boundary-rejection-check`; `just resource-cancellation-recovery-check`; `just proto-check`; `just proto-repro-check`; `just adapter-stdio-test` | One supervisor/daemon, attach-only multi-agent launch, safe descriptor inheritance, sole v2 contract, generated Rust/Python parity, grants/sessions/owned sockets, four tools/live references, real installed-package vertical. |
 | Evidence/reconstruction | `just first-principles-production-behavior-check`; `just causal-fault-discrimination-check`; `just clean-reconstruction-evidence-check`; `just history-comparator-independence-check` | Independent decoded values/faults and clean rebuild decide semantics; history is unnecessary. |
 | Purge/activation | `just remaining-live-authority-zero-state-check`; `just post-purge-package-build-operations-check`; `just fresh-activation-zero-state-check`; `just fresh-activation-reconciliation-check`; `just successor-final-zero-state-check` | DB09--DB14 and L-20--L-55 physically closed, sole target ownership and forward repair. |
 | Performance/resources | `just daemon-boundary-bench`; `just release-evidence-matrix-integrity-check` | Representative workloads meet declared envelope with semantic equality and recorded limitations; no folklore tuning. |
@@ -1851,8 +1916,9 @@ underlying exit code, nonzero selection, discriminating fault, and evidence arti
    serialization.
 5. Execute WP36 after WP32 and WP35, then run the joined M04 gate.
 6. Execute WP37 as one production vertical. Internal implementation order is lifecycle/workspace,
-   coordinator/results, v2 descriptor, supervisor/session, owned UDS/health/errors, Python client,
-   FastMCP, then full process proof; none is separately complete.
+   coordinator/results, v2 descriptor, supervisor singleton/policy/control, attach-only STDIO launcher
+   and descriptor channel, session/owned UDS/health/errors, Python client, FastMCP, then one-daemon/
+   two-agent full process proof; none is separately complete.
 7. Execute WP38, WP39, and WP40 in order. Evidence precedes purge; purge precedes post-purge
    measurement/certification.
 8. Execute WP41 FreshActivation and delete dormant handoff machinery only after target-only proof.
@@ -1891,7 +1957,7 @@ external runtime/socket/target concerns.
 | Recovery needs a process-local candidate, stored catalog clone, cache, or digest equality. | Reopen durability classification; remain fail-closed. |
 | Native DataFusion cannot preserve field identity/order/authorization closure at the selected rung. | Produce the failing native control and review the next extension rung; no parallel evaluator. |
 | Bounded page encoding/publication cannot atomically seal on a supported store without whole-result copy. | Reopen result-sink/page topology; do not raise memory limits or materialize the result. |
-| Supervisor grant/session root cannot be supported by an authorized launcher. | Reopen local authentication/launch design; do not fall back to reusable env/argv/repository tokens. |
+| Safe allowlisted descriptor delivery and the accepted private one-shot-file fallback both fail on a supported launcher, or deployment cannot provide operator-owned launch policy. | Reopen local authentication/launch design; do not fall back to reusable env/argv/repository tokens, self-declared claims, or per-agent daemons. |
 | V2 control/resource contract cannot express a required functional capability without semantic duplication. | Version the design/package; do not restore v1 or add opaque JSON/`Any` semantics. |
 | FastMCP gains a genuinely streaming resource API or no longer materializes resource values. | Reassess page/resource boundary with executable library evidence. |
 | A real deployed predecessor is discovered. | Stop FreshActivation and design a separate one-shot AuthorityHandoff; do not activate dormant controller code. |
@@ -1908,11 +1974,11 @@ The packet dependencies and four-category faults are the controls; they may not 
 
 ## 12. Activation and completion boundary
 
-This draft is ready for independent `plan-audit`; it is not active or executable state. Approval
-does not itself change the current suite, plan pointer, or state. Activation must:
+This independently audited and approved plan is not active or executable state until the atomic
+activation transaction changes the plan pointer and creates its state. Activation must:
 
 1. verify this file and every declared input;
-2. verify the accepted design v4 and supersession chain;
+2. verify the accepted design v5 and supersession chain;
 3. create a fresh schema-v2 state at the declared v4 path with WP29--WP42 only;
 4. create no WP28/M01 entry and migrate no v3 completion/proving commit;
 5. atomically point the active plan to this exact artifact; and
