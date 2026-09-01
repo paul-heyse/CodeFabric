@@ -168,7 +168,7 @@ STRUCTURAL_ROOTS = {
 }
 NEGATIVE_FIXTURE = "tooling/ci/fixtures/wp30-live-legacy-route.rs"
 ACTIVATION_RESIDUE_MANIFEST = "tooling/ci/wp30_activation_residue.json"
-EXPECTED_ACTIVATION_RESIDUE = frozenset(
+EXPECTED_RETAINED_ACTIVATION_RESIDUE = frozenset(
     {
         "ActivatedEpochReceipt",
         "ActivationCacheOutcome",
@@ -177,8 +177,12 @@ EXPECTED_ACTIVATION_RESIDUE = frozenset(
         "DeltaActivationRuntimeAuthority",
         "ProgrammaticDeltaRuntime",
         "ProgrammaticDeltaRuntimePorts",
-        "ProgrammaticWorkspaceReleasePins",
         "ProgrammaticWorkspaceRuntime",
+    }
+)
+EXPECTED_DISPOSED_ACTIVATION_RESIDUE = frozenset(
+    {
+        "ProgrammaticWorkspaceReleasePins",
         "ProgrammaticWorkspaceStartupObservation",
         "WorkspaceEpochQueryAuthorityRegistry",
     }
@@ -550,11 +554,28 @@ def validate_negative_fixture(root: Path) -> int:
     return len(findings)
 
 
+def disposed_activation_residue_violations(
+    root: Path, symbols: Iterable[str], live_rust_paths: Iterable[str]
+) -> list[str]:
+    """Return exact live Rust paths that reintroduce disposed activation authority."""
+    violations: list[str] = []
+    for symbol in sorted(set(symbols)):
+        for candidate in sorted(set(live_rust_paths)):
+            if re.search(
+                rf"\b{re.escape(symbol)}\b",
+                (root / candidate).read_text(encoding="utf-8"),
+            ):
+                violations.append(
+                    f"disposed activation residue {symbol} remains live in {candidate}"
+                )
+    return violations
+
+
 def validate_activation_residue(root: Path) -> int:
-    """Require a complete symbol-to-consumer-to-WP32 disposition for retained residue."""
+    """Require exact retained residue and prove disposed WP32 authority remains absent."""
     path = root / ACTIVATION_RESIDUE_MANIFEST
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema") != "codefabric.wp30.activation-residue.v1":
+    if payload.get("schema") != "codefabric.wp30.activation-residue.v2":
         raise Wp30ZeroStateError("activation residue manifest has the wrong schema")
     if payload.get("owner_packet") != "WP32":
         raise Wp30ZeroStateError(
@@ -564,7 +585,7 @@ def validate_activation_residue(root: Path) -> int:
     if not isinstance(entries, list):
         raise Wp30ZeroStateError("activation residue entries must be a list")
     symbols = {entry.get("symbol") for entry in entries if isinstance(entry, dict)}
-    if symbols != EXPECTED_ACTIVATION_RESIDUE or len(entries) != len(symbols):
+    if symbols != EXPECTED_RETAINED_ACTIVATION_RESIDUE or len(entries) != len(symbols):
         raise Wp30ZeroStateError(
             "activation residue symbols differ from the exact reviewed WP32 handoff"
         )
@@ -587,6 +608,49 @@ def validate_activation_residue(root: Path) -> int:
             raise Wp30ZeroStateError(
                 f"activation residue symbol {symbol} is absent from declared path {source}"
             )
+
+    disposed = payload.get("disposed")
+    if not isinstance(disposed, list):
+        raise Wp30ZeroStateError("disposed activation residue must be a list")
+    disposed_symbols = {
+        entry.get("symbol") for entry in disposed if isinstance(entry, dict)
+    }
+    if disposed_symbols != EXPECTED_DISPOSED_ACTIVATION_RESIDUE or len(disposed) != len(
+        disposed_symbols
+    ):
+        raise Wp30ZeroStateError(
+            "disposed activation residue differs from the exact reviewed WP32 closure"
+        )
+    live_rust_paths = [
+        candidate
+        for candidate in current_files(root)
+        if candidate.endswith(".rs")
+        and any(
+            candidate == scope or candidate.startswith(f"{scope}/")
+            for scope in STRUCTURAL_ROOTS["rust"]
+        )
+    ]
+    for entry in disposed:
+        symbol = entry["symbol"]
+        former_path = entry.get("former_path")
+        disposition = entry.get("disposition")
+        replacement = entry.get("replacement")
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (former_path, disposition, replacement)
+        ):
+            raise Wp30ZeroStateError(
+                f"disposed activation mapping is incomplete for {symbol}"
+            )
+        if disposition != "removed":
+            raise Wp30ZeroStateError(
+                f"disposed activation residue {symbol} is not marked removed"
+            )
+    violations = disposed_activation_residue_violations(
+        root, disposed_symbols, live_rust_paths
+    )
+    if violations:
+        raise Wp30ZeroStateError(violations[0])
     return len(entries)
 
 

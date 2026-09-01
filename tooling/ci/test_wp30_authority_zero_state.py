@@ -11,6 +11,7 @@ from tooling.ci.wp30_authority_zero_state import (
     archive_member_violations,
     cargo_payload_inventory,
     classify_files,
+    disposed_activation_residue_violations,
     retired_text_violations,
     validate_activation_residue,
     validate_negative_fixture,
@@ -92,5 +93,22 @@ def test_neg_fixture_path_remains_a_regular_non_imported_file() -> None:
     assert path.is_file()
 
 
-def test_int_activation_residue_has_exact_wp32_disposition() -> None:
-    assert validate_activation_residue(ROOT) == 11
+def test_int_activation_residue_has_exact_retained_and_disposed_wp32_state() -> None:
+    assert validate_activation_residue(ROOT) == 8
+
+
+def test_neg_disposed_activation_authority_cannot_reappear_in_live_rust(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    live = source / "live.rs"
+    live.write_text("struct ProgrammaticWorkspaceReleasePins;\n", encoding="utf-8")
+    assert disposed_activation_residue_violations(
+        tmp_path, {"ProgrammaticWorkspaceReleasePins"}, {"src/live.rs"}
+    ) == [
+        (
+            "disposed activation residue ProgrammaticWorkspaceReleasePins remains live in "
+            "src/live.rs"
+        )
+    ]
