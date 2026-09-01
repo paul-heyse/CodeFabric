@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v5.md",
   "baseline_commit": "6a76b5cff3d84e8249e5bedaa52a17f2abb816dd",
   "status": "executing",
-  "current_packet": "WP36",
+  "current_packet": "WP37",
   "packets": {
     "WP33": {
       "status": "complete",
@@ -74,10 +74,15 @@
       "blockers": []
     },
     "WP36": {
-      "status": "not_started",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "4449febd59c36f9835f21b92c6eac534211eb057",
+      "deviations": [
+        "The target runtime retains canonical semantic response bytes only as a small bounded control envelope; the structural streaming rule therefore rejects whole-result DataFusion collection and Vec<RecordBatch> ownership without incorrectly banning that bounded control value.",
+        "All four packet oracles, default and featureless all-target checks, exact graph validation, gate-filter census, and both new structural-rule tests/scans pass. The repository-wide governance aggregate remains red on sixteen pre-existing findings in provider adapters, predecessor cutover source reads, and older source-text tests outside the WP36 change surface; no WP36 rule was weakened to conceal them."
+      ],
+      "failed_approaches": [
+        "The first production-query streaming rule also rejected every Arc<[u8]> and iterator collect, including the bounded canonical response envelope and non-result observation collection. It was narrowed to the actual whole-result await and RecordBatch-vector hazards while retaining executable positive and negative rule fixtures."
+      ],
       "blockers": []
     },
     "WP37": {
@@ -141,9 +146,11 @@
       "blockers": []
     },
     "M04": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "4449febd59c36f9835f21b92c6eac534211eb057",
+      "deviations": [
+        "The milestone closes on native execute_stream delivery, independently decodable manifest-last Arrow pages, exact package reopen, and one durable bounded coordinator; content hashes remain integrity checks and never replace programmatic semantic proof."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -178,9 +185,11 @@
       "blockers": []
     },
     "DB10": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
+      "status": "complete",
+      "proving_commit": "4449febd59c36f9835f21b92c6eac534211eb057",
+      "deviations": [
+        "Production target query execution now transfers native DataFusion streams directly into bounded create-only result pages and manifest-last packages; materializing helpers remain explicitly proof-only until the transport cutover and purge packets remove predecessor serving code."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -222,11 +231,11 @@
     "WP32 closed exact durable reconstruction for the complete selected semantic relation vector, including an older selected version, decoded-row equivalence, release-owned reconstruction, candidate-free recovery, and receipt nonauthority at ce4dfbf62efa74ff43c779a036b6a828df497061.",
     "Isolate the packet-ready WP34 provider descriptor, relation IPC, admission, gap, and trust change surface into an atomic proving commit and record that commit only after rerunning its four named oracles.",
     "WP35 closed the release-owned producer census, typed analyses, executable decoded proof closure, cancellation, and substantive fixed-point/resource oracle at c58f98be94990b2608992247885ce2a0950e7237.",
-    "Implement WP36 query coordination, streamed page sealing, result packages, retention, and cancellation; all four packet recipes are currently absent.",
+    "WP36 closed full-meaning idempotency, global/workspace/principal admission, durable control-only restart state, native DataFusion streaming, bounded manifest-last Arrow pages, exact package reopen, cancellation cleanup, and retention at 4449febd59c36f9835f21b92c6eac534211eb057.",
     "Implement WP37's real supervisor, public gRPC v2 UDS service, and presentation-only FastMCP vertical; replace placeholder recipes and add the missing boundary-rejection recipe.",
     "Create and execute the still-missing WP38 through WP42 packet oracles only as their dependency-closed implementation surfaces land."
   ],
   "plan_deviations": [],
-  "next_action": "Implement WP36 query coordination, streamed page sealing, immutable result packages, retention, and cancellation; run its four packet oracles and then close M04 and DB10.",
-  "updated_at": "2026-09-01T18:05:29Z"
+  "next_action": "Implement WP37's target-only supervisor, public gRPC v2 UDS service, and presentation-only FastMCP vertical over the WP36 coordinator and streamed package authority; run all four WP37 packet oracles and close M05 and DB11.",
+  "updated_at": "2026-09-01T18:43:51Z"
 }
