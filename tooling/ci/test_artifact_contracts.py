@@ -12,6 +12,7 @@ import pytest
 
 from tooling.ci.artifact_contracts import (
     DEFAULT_PLAN,
+    JUST_RECIPE,
     REVIEW_REQUIREMENTS,
     ROOT,
     ArtifactContractError,
@@ -35,6 +36,11 @@ from tooling.ci.artifact_contracts import (
 )
 
 STATE = ROOT / str(parse_frontmatter(DEFAULT_PLAN)["state_path"])
+
+
+def test_required_recipe_parser_accepts_only_command_literals() -> None:
+    text = "Run `just root-check` and update just recipes without inventing one."
+    assert JUST_RECIPE.findall(text) == ["root-check"]
 
 
 def test_review_artifact_vocabulary_matches_documented_schema() -> None:

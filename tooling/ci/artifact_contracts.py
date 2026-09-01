@@ -172,7 +172,9 @@ INPUT_ROW = re.compile(
     r"^\|\s*(?P<path>[^|`][^|]*?)\s*\|\s*(?P<digest>[0-9a-f]{64})\s*\|$"
 )
 ORACLE = re.compile(r"Executable oracle:\s*`([^`]+)`")
-JUST_RECIPE = re.compile(r"\bjust\s+([a-z][a-z0-9-]*)")
+# Only command literals are operational dependencies. Prose such as "just recipes"
+# describes the repository surface and must not invent a recipe named ``recipes``.
+JUST_RECIPE = re.compile(r"`just\s+([a-z][a-z0-9-]*)\b")
 
 
 class ArtifactContractError(ValueError):
