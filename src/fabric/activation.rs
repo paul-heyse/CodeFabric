@@ -132,6 +132,14 @@ impl ActivationAttempt {
         self.validated.execution_owner()
     }
 
+    /// Exact transaction already proved by the durable reducer state, when this token was
+    /// reconstructed for recovery rather than issued for initial execution.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn prepared_transaction(self) -> Option<TransactionRef> {
+        self.validated.prepared_transaction()
+    }
+
     #[cfg(test)]
     pub(crate) const fn for_test(
         command: FabricCommand,
@@ -288,7 +296,7 @@ activation_identity!(
     PolicySetRef
 );
 activation_identity!(
-    /// Model-owned compatibility class used for admission and rollback.
+    /// Application-owned compatibility class used for admission and rollback.
     CompatibilityClassRef
 );
 activation_identity!(
@@ -511,7 +519,7 @@ impl ActivationControlRelationPin {
     }
 }
 
-/// Failure to bind a DataFusion session to one model-derived control relation.
+/// Failure to bind a DataFusion session to one application-owned control relation.
 #[derive(Debug, thiserror::Error)]
 pub enum ActivationControlBindingError {
     #[error("activation-control session ID is empty")]
@@ -548,9 +556,12 @@ impl ActivationOrdinal {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FabricEpochPins {
     pub epoch: EpochId,
-    pub compiler_release: super::command::CompilerReleaseRef,
-    pub model_head: super::command::ModelHeadRef,
+    pub input_release: super::command::InputReleaseRef,
+    pub program_release: super::command::ProgramReleaseRef,
+    pub application_release: super::command::ApplicationReleaseRef,
+    pub source_authority: super::command::SourceAuthorityRef,
     pub source_generation: SourceGeneration,
+    pub provider_release: super::command::ProviderReleaseRef,
     pub provider_set: super::command::ProviderSetRef,
     pub table_versions: TableVersionSetRef,
     pub overlay_segments: OverlaySegmentSetRef,
@@ -563,14 +574,20 @@ impl FabricEpochPins {
     #[cfg(feature = "daemon")]
     fn command_pins_match(self, command: &FabricCommand) -> bool {
         let CommandPins {
-            compiler_release,
-            model_head,
+            input_release,
+            program_release,
+            application_release,
+            source_authority,
             source_generation,
+            provider_release,
             provider_set,
         } = command.pins;
-        self.compiler_release == compiler_release
-            && self.model_head == model_head
+        self.input_release == input_release
+            && self.program_release == program_release
+            && self.application_release == application_release
+            && self.source_authority == source_authority
             && self.source_generation == source_generation
+            && self.provider_release == provider_release
             && self.provider_set == provider_set
             && self.resource_envelope == command.resources
     }
@@ -839,7 +856,7 @@ pub struct DurableActivationCommit {
     pub transaction: TransactionRef,
 }
 
-/// Decoded model-owned activation-control row.
+/// Decoded application-owned activation-control row.
 ///
 /// Backend-commit and readback references are deliberately absent because they
 /// are post-commit evidence. They are reconstructed from the row plus
@@ -935,9 +952,12 @@ impl DurableActivationRow {
         digest.frame(self.execution_fence.lease_id.as_bytes());
         digest.frame(&self.execution_fence.generation.get().to_be_bytes());
         digest.frame(self.pins.epoch.as_bytes());
-        digest.frame(self.pins.compiler_release.as_bytes());
-        digest.frame(self.pins.model_head.as_bytes());
+        digest.frame(self.pins.input_release.as_bytes());
+        digest.frame(self.pins.program_release.as_bytes());
+        digest.frame(self.pins.application_release.as_bytes());
+        digest.frame(self.pins.source_authority.as_bytes());
         digest.frame(&self.pins.source_generation.get().to_be_bytes());
+        digest.frame(self.pins.provider_release.as_bytes());
         digest.frame(self.pins.provider_set.as_bytes());
         digest.frame(self.pins.table_versions.as_bytes());
         digest.frame(self.pins.overlay_segments.as_bytes());
@@ -1450,8 +1470,8 @@ mod tests {
 
     use super::*;
     use crate::fabric::command::{
-        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CompilerReleaseRef,
-        IdempotencyKey, LeaseId, ModelHeadRef, PrincipalId, ProviderSetRef,
+        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, IdempotencyKey,
+        InputReleaseRef, LeaseId, PrincipalId, ProgramReleaseRef, ProviderSetRef,
         RollbackAuthorizationRef, WriterGeneration,
     };
     use crate::schema_contract::FieldIndexMapping;
@@ -1585,8 +1605,13 @@ mod tests {
                 generation: WriterGeneration::new(generation).unwrap(),
             },
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes(id32(5)),
-                model_head: ModelHeadRef::from_bytes(id32(6)),
+                input_release: InputReleaseRef::from_bytes(id32(5)),
+                program_release: ProgramReleaseRef::from_bytes(id32(6)),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    id32(6),
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(id32(6)),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(id32(6)),
                 source_generation: SourceGeneration::new(7),
                 provider_set: ProviderSetRef::from_bytes(id32(8)),
             },
@@ -1608,8 +1633,11 @@ mod tests {
     fn pins(command: &FabricCommand, target: EpochId, proof_seed: u8) -> FabricEpochPins {
         FabricEpochPins {
             epoch: target,
-            compiler_release: command.pins.compiler_release,
-            model_head: command.pins.model_head,
+            input_release: command.pins.input_release,
+            program_release: command.pins.program_release,
+            application_release: command.pins.application_release,
+            source_authority: command.pins.source_authority,
+            provider_release: command.pins.provider_release,
             source_generation: command.pins.source_generation,
             provider_set: command.pins.provider_set,
             table_versions: TableVersionSetRef::from_bytes(id32(11)),

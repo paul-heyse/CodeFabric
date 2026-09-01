@@ -644,9 +644,9 @@ mod tests {
     use super::*;
     use crate::fabric::command::{
         ActorId, AuthorizationDecision, AuthorizationRef, CommandFailure, CommandIdentity,
-        CommandOwnership, CommandPins, CommandRecord, CompilerReleaseRef, DiagnosticRef, EpochId,
-        ExecutionOwner, ExpectedHead, FabricCommand, FabricCommandPayload, FailureClass,
-        FailureCode, IdempotencyKey, LeaseId, ModelHeadRef, PrincipalId, ProofReceiptRef,
+        CommandOwnership, CommandPins, CommandRecord, DiagnosticRef, EpochId, ExecutionOwner,
+        ExpectedHead, FabricCommand, FabricCommandPayload, FailureClass, FailureCode,
+        IdempotencyKey, InputReleaseRef, LeaseId, PrincipalId, ProgramReleaseRef, ProofReceiptRef,
         ProviderSetRef, ReconciliationEvidenceRef, ReconciliationObservation, ReductionContext,
         ResourceEnvelopeRef, SourceGeneration, TransactionRef,
     };
@@ -943,8 +943,17 @@ mod tests {
             expected_head: ExpectedHead::Empty,
             writer_fence,
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes([0x24; 32]),
-                model_head: ModelHeadRef::from_bytes([0x25; 32]),
+                input_release: InputReleaseRef::from_bytes([0x24; 32]),
+                program_release: ProgramReleaseRef::from_bytes([0x25; 32]),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    [0x25; 32],
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(
+                    [0x25; 32],
+                ),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(
+                    [0x25; 32],
+                ),
                 source_generation: SourceGeneration::new(0),
                 provider_set: ProviderSetRef::from_bytes([0x26; 32]),
             },

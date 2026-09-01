@@ -11,8 +11,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::model_generated::identity_recipes as recipes;
-pub use crate::model_generated::identity_recipes::SemanticFingerprintDomain;
+use crate::identity_recipes as recipes;
+pub use crate::identity_recipes::SemanticFingerprintDomain;
 use unicode_casefold::UnicodeCaseFold as _;
 use unicode_normalization::UnicodeNormalization as _;
 
@@ -44,6 +44,12 @@ pub enum IdentityDomain {
     SourceContext = 15,
     UnknownRemainder = 16,
     RootAuthorization = 17,
+    PathResult = 18,
+    ObjectiveInputSet = 19,
+    ObjectiveGroup = 20,
+    QuerySourceContext = 21,
+    AccessScope = 22,
+    ResultArtifactV2 = 23,
 }
 
 impl IdentityDomain {
@@ -67,6 +73,12 @@ impl IdentityDomain {
             15 => Ok(Self::SourceContext),
             16 => Ok(Self::UnknownRemainder),
             17 => Ok(Self::RootAuthorization),
+            18 => Ok(Self::PathResult),
+            19 => Ok(Self::ObjectiveInputSet),
+            20 => Ok(Self::ObjectiveGroup),
+            21 => Ok(Self::QuerySourceContext),
+            22 => Ok(Self::AccessScope),
+            23 => Ok(Self::ResultArtifactV2),
             _ => Err(IdentityError::UnknownDomain(code)),
         }
     }
@@ -89,6 +101,40 @@ impl IdentityDomain {
             Self::SourceContext => "source-context",
             Self::UnknownRemainder => "unknown",
             Self::RootAuthorization => "root-authorization",
+            Self::PathResult => "path",
+            Self::ObjectiveInputSet => "input-set",
+            Self::ObjectiveGroup => "group",
+            Self::QuerySourceContext => "context",
+            Self::AccessScope => "access-scope",
+            Self::ResultArtifactV2 => "artifact",
+        }
+    }
+
+    const fn contract_name(self) -> &'static str {
+        match self {
+            Self::Workspace => "WORKSPACE",
+            Self::Repository => "REPOSITORY",
+            Self::Worktree => "WORKTREE",
+            Self::AnalysisContext => "ANALYSIS_CONTEXT",
+            Self::ContextSet => "CONTEXT_SET",
+            Self::SourceFile => "SOURCE_FILE",
+            Self::Owner => "OWNER",
+            Self::Entity => "ENTITY",
+            Self::RelationFact => "RELATION_FACT",
+            Self::PropertyFact => "PROPERTY_FACT",
+            Self::Type => "TYPE",
+            Self::Publication => "PUBLICATION",
+            Self::ServingSnapshot => "SERVING_SNAPSHOT",
+            Self::ResultArtifact => "RESULT_ARTIFACT",
+            Self::SourceContext => "SOURCE_CONTEXT",
+            Self::UnknownRemainder => "UNKNOWN_REMAINDER",
+            Self::RootAuthorization => "ROOT_AUTHORIZATION",
+            Self::PathResult => "PATH_RESULT",
+            Self::ObjectiveInputSet => "OBJECTIVE_INPUT_SET",
+            Self::ObjectiveGroup => "OBJECTIVE_GROUP",
+            Self::QuerySourceContext => "QUERY_SOURCE_CONTEXT",
+            Self::AccessScope => "ACCESS_SCOPE",
+            Self::ResultArtifactV2 => "RESULT_ARTIFACT_V2",
         }
     }
 
@@ -134,6 +180,24 @@ impl CbefTypeCode {
             11 => Ok(Self::Map),
             12 => Ok(Self::TaggedUnion),
             _ => Err(IdentityError::UnknownTypeCode(code)),
+        }
+    }
+
+    const fn contract_name(self) -> &'static str {
+        match self {
+            Self::Absent => "ABSENT",
+            Self::Bytes => "BYTES",
+            Self::Utf8 => "UTF8",
+            Self::RawPath => "RAW_PATH",
+            Self::Unsigned => "UNSIGNED",
+            Self::Signed => "SIGNED",
+            Self::Boolean => "BOOLEAN",
+            Self::Id => "ID",
+            Self::Digest => "DIGEST",
+            Self::OrderedList => "ORDERED_LIST",
+            Self::Set => "SET",
+            Self::Map => "MAP",
+            Self::TaggedUnion => "TAGGED_UNION",
         }
     }
 }
@@ -217,6 +281,49 @@ pub struct DerivedIdentity {
     pub id: [u8; 16],
     pub full_digest: [u8; 32],
     pub preimage: Vec<u8>,
+}
+
+/// Reproducible output of one released typed CBEF-v1 public-ID recipe.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CbefPublicIdentity {
+    domain: IdentityDomain,
+    field_evidence: Vec<serde_json::Value>,
+    excluded: Vec<String>,
+    pub public_id: String,
+    pub canonical_preimage: Vec<u8>,
+    pub full_digest: [u8; 32],
+}
+
+/// Compatibility name retained for query-result callers while its implementation is CBEF-v1.
+pub type CanonicalPublicIdentity = CbefPublicIdentity;
+
+impl CbefPublicIdentity {
+    /// Project the complete released identity recipe for response evidence.
+    #[must_use]
+    pub fn recipe_evidence(&self) -> serde_json::Value {
+        serde_json::json!({
+            "recipe_version": "CBEF-v1",
+            "contract": {
+                "artifact_id": "codefabric.identity.cbef-v1",
+                "version": "1.1"
+            },
+            "record_domain": {
+                "code": self.domain as u16,
+                "name": self.domain.contract_name()
+            },
+            "fields": self.field_evidence,
+            "canonical_preimage_hex": lower_hex(&self.canonical_preimage),
+            "digest": {
+                "algorithm": "BLAKE3-256",
+                "mode": "unkeyed",
+                "full_digest_hex": lower_hex(&self.full_digest),
+                "id_derivation": "first 16 digest bytes",
+                "text_encoding": "lowercase hexadecimal"
+            },
+            "excluded": self.excluded,
+            "output_id": self.public_id,
+        })
+    }
 }
 
 /// Stable identity/path validation failures.
@@ -597,9 +704,56 @@ pub fn derive_identity(record: &CbefRecord) -> Result<DerivedIdentity, IdentityE
     })
 }
 
-/// Registry-selected semantic fingerprint construction. The domain bytes are
-/// generated from the governed fingerprint-domain registry; callers may add
-/// only the record's declared fields in their declared order.
+pub(crate) fn derive_public_recipe_identity(
+    record: recipes::RecipeRecord,
+    field_values: Vec<(&'static str, serde_json::Value)>,
+    excluded: &[&str],
+) -> Result<CbefPublicIdentity, IdentityError> {
+    derive_public_recipe_identity_with_kind(record, None, field_values, excluded)
+}
+
+pub(crate) fn derive_public_recipe_identity_with_kind(
+    record: recipes::RecipeRecord,
+    kind_slug: Option<&str>,
+    field_values: Vec<(&'static str, serde_json::Value)>,
+    excluded: &[&str],
+) -> Result<CbefPublicIdentity, IdentityError> {
+    let record = recipe_record(record)?;
+    if record.fields.len() != field_values.len() {
+        return Err(IdentityError::Scalar);
+    }
+    let identity = derive_identity(&record)?;
+    let field_evidence = record
+        .fields
+        .iter()
+        .zip(field_values)
+        .map(|(field, (name, value))| {
+            let type_code = field.value.type_code();
+            Ok(serde_json::json!({
+                "tag": field.tag,
+                "name": name,
+                "type_code": {
+                    "code": type_code as u8,
+                    "name": type_code.contract_name(),
+                },
+                "value": value,
+                "payload_hex": lower_hex(&encode_payload(&field.value)?),
+            }))
+        })
+        .collect::<Result<Vec<_>, IdentityError>>()?;
+    Ok(CbefPublicIdentity {
+        domain: record.domain,
+        field_evidence,
+        excluded: excluded.iter().map(|value| (*value).to_owned()).collect(),
+        public_id: encode_public_id(record.domain, kind_slug, identity.id)?,
+        canonical_preimage: identity.preimage,
+        full_digest: identity.full_digest,
+    })
+}
+
+/// Application-selected semantic fingerprint construction. The domain bytes are
+/// supplied by the typed identity recipe; callers may add only the record's
+/// declared fields in their declared order.
 pub struct SemanticFingerprintBuilder(blake3::Hasher);
 
 impl SemanticFingerprintBuilder {
@@ -626,7 +780,7 @@ impl SemanticFingerprintBuilder {
     }
 }
 
-/// Begin a semantic fingerprint for one generated registry domain.
+/// Begin a semantic fingerprint for one application-owned domain.
 #[must_use]
 pub fn semantic_fingerprint(domain: SemanticFingerprintDomain) -> SemanticFingerprintBuilder {
     let mut hasher = blake3::Hasher::new();
@@ -1046,7 +1200,7 @@ pub fn source_relation_identity(
     derive_recipe_identity(record)
 }
 
-fn derive_recipe_identity(record: recipes::RecipeRecord) -> Result<DerivedIdentity, IdentityError> {
+fn recipe_record(record: recipes::RecipeRecord) -> Result<CbefRecord, IdentityError> {
     let domain = IdentityDomain::from_code(record.domain_code)?;
     let fields = record
         .fields
@@ -1058,7 +1212,11 @@ fn derive_recipe_identity(record: recipes::RecipeRecord) -> Result<DerivedIdenti
             })
         })
         .collect::<Result<Vec<_>, IdentityError>>()?;
-    derive_identity(&CbefRecord { domain, fields })
+    Ok(CbefRecord { domain, fields })
+}
+
+fn derive_recipe_identity(record: recipes::RecipeRecord) -> Result<DerivedIdentity, IdentityError> {
+    derive_identity(&recipe_record(record)?)
 }
 
 fn recipe_value(
@@ -1067,24 +1225,13 @@ fn recipe_value(
 ) -> Result<CbefValue, IdentityError> {
     let string_normalization = match normalization {
         recipes::RecipeNormalization::None => StringNormalization::None,
-        recipes::RecipeNormalization::Nfc => StringNormalization::Nfc,
-        recipes::RecipeNormalization::Nfkc => StringNormalization::Nfkc,
         recipes::RecipeNormalization::AsciiLower => StringNormalization::AsciiLower,
-        recipes::RecipeNormalization::PythonIdentifierNfkc => {
-            StringNormalization::PythonIdentifierNfkc
-        }
-        recipes::RecipeNormalization::RustCanonical => StringNormalization::RustCanonical,
     };
     Ok(match value {
-        recipes::RecipeValue::Absent => CbefValue::Absent,
         recipes::RecipeValue::Bytes(value) => CbefValue::Bytes(value),
         recipes::RecipeValue::Utf8(value) => CbefValue::Utf8 {
             value,
             normalization: string_normalization,
-        },
-        recipes::RecipeValue::RawPath(platform_code, bytes) => CbefValue::RawPath {
-            platform_code,
-            bytes,
         },
         recipes::RecipeValue::Unsigned(value) => CbefValue::Unsigned(value),
         recipes::RecipeValue::Signed(value) => CbefValue::Signed(value),
@@ -1094,31 +1241,357 @@ fn recipe_value(
         recipes::RecipeValue::OrderedList(values) => CbefValue::OrderedList(
             values
                 .into_iter()
-                .map(|value| recipe_value(value, recipes::RecipeNormalization::None))
-                .collect::<Result<_, _>>()?,
+                .map(|value| recipe_value(value, normalization))
+                .collect::<Result<Vec<_>, _>>()?,
         ),
         recipes::RecipeValue::Set(values) => CbefValue::Set(
             values
                 .into_iter()
-                .map(|value| recipe_value(value, recipes::RecipeNormalization::None))
-                .collect::<Result<_, _>>()?,
+                .map(|value| recipe_value(value, normalization))
+                .collect::<Result<Vec<_>, _>>()?,
         ),
-        recipes::RecipeValue::Map(values) => CbefValue::Map(
-            values
+        recipes::RecipeValue::Map(entries) => CbefValue::Map(
+            entries
                 .into_iter()
                 .map(|(key, value)| {
                     Ok((
-                        recipe_value(key, recipes::RecipeNormalization::None)?,
-                        recipe_value(value, recipes::RecipeNormalization::None)?,
+                        recipe_value(key, normalization)?,
+                        recipe_value(value, normalization)?,
                     ))
                 })
-                .collect::<Result<_, IdentityError>>()?,
+                .collect::<Result<Vec<_>, IdentityError>>()?,
         ),
         recipes::RecipeValue::TaggedUnion(variant, value) => CbefValue::TaggedUnion {
             variant,
             value: Box::new(recipe_value(*value, recipes::RecipeNormalization::None)?),
         },
     })
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthorizedSourceRangeIdentityInput {
+    pub source_file_id: String,
+    pub start_byte: u64,
+    pub end_byte: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccessScopeIdentityInput {
+    pub workspace_id: String,
+    pub policy_identity: String,
+    pub principal_id: String,
+    pub agent_id: String,
+    pub credential_digest: String,
+    pub role: String,
+    pub operation: String,
+    pub allowed_relations: Vec<String>,
+    pub allowed_columns: BTreeMap<String, Vec<String>>,
+    pub allowed_functions: Vec<String>,
+    pub allowed_extensions: Vec<String>,
+    pub allowed_variables: Vec<String>,
+    pub allowed_object_stores: Vec<String>,
+    pub allowed_metadata: Vec<String>,
+    pub row_policies: Vec<String>,
+    pub execution_posture: Vec<String>,
+    pub source_access: bool,
+    pub source_file_ids: Vec<String>,
+    pub authorized_ranges: Vec<AuthorizedSourceRangeIdentityInput>,
+}
+
+fn canonical_text_set(values: &[String]) -> Result<Vec<String>, IdentityError> {
+    if values.iter().any(|value| {
+        value.is_empty()
+            || value.trim() != value
+            || value.len() > 512
+            || value.chars().any(char::is_control)
+    }) {
+        return Err(IdentityError::Scalar);
+    }
+    let mut values = values.to_vec();
+    values.sort();
+    if values.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(IdentityError::ContainerOrder);
+    }
+    Ok(values)
+}
+
+fn text_set_recipe(values: &[String]) -> Result<recipes::RecipeValue, IdentityError> {
+    Ok(recipes::RecipeValue::Set(
+        canonical_text_set(values)?
+            .into_iter()
+            .map(recipes::RecipeValue::Utf8)
+            .collect(),
+    ))
+}
+
+/// Issue the complete authorization grant vector as one typed CBEF access-scope identity.
+///
+/// Empty grant families remain explicit empty sets. Credentials contribute only their digest;
+/// no raw credential or token enters identity evidence.
+///
+/// # Errors
+///
+/// Rejects malformed public IDs/digests, noncanonical ranges, invalid text, or a recipe mismatch.
+pub fn issue_access_scope_identity(
+    input: &AccessScopeIdentityInput,
+) -> Result<CbefPublicIdentity, IdentityError> {
+    let workspace_id = decode_public_id(IdentityDomain::Workspace, None, &input.workspace_id)?;
+    let principal_id = decode_public_id_prefix("principal", &input.principal_id)?;
+    let agent_id = decode_public_id_prefix("agent", &input.agent_id)?;
+    let credential_digest = decode_b3_digest(&input.credential_digest)?;
+    if input.policy_identity.is_empty()
+        || input.policy_identity.trim() != input.policy_identity
+        || input.policy_identity.len() > 512
+    {
+        return Err(IdentityError::Scalar);
+    }
+    let role = input.role.to_ascii_lowercase();
+    let operation = input.operation.to_ascii_lowercase();
+    if !input.role.is_ascii()
+        || !input.operation.is_ascii()
+        || !valid_slug(&role)
+        || !valid_slug(&operation)
+    {
+        return Err(IdentityError::Scalar);
+    }
+    let relations = canonical_text_set(&input.allowed_relations)?;
+    let functions = canonical_text_set(&input.allowed_functions)?;
+    let extensions = canonical_text_set(&input.allowed_extensions)?;
+    let variables = canonical_text_set(&input.allowed_variables)?;
+    let object_stores = canonical_text_set(&input.allowed_object_stores)?;
+    let metadata = canonical_text_set(&input.allowed_metadata)?;
+    let row_policies = canonical_text_set(&input.row_policies)?;
+    let execution_posture = canonical_text_set(&input.execution_posture)?;
+    let mut columns = BTreeMap::new();
+    for (relation, allowed) in &input.allowed_columns {
+        if relation.is_empty() || relation.trim() != relation || relation.len() > 512 {
+            return Err(IdentityError::Scalar);
+        }
+        columns.insert(relation.clone(), canonical_text_set(allowed)?);
+    }
+    let mut source_files = input
+        .source_file_ids
+        .iter()
+        .map(|value| {
+            Ok((
+                value.clone(),
+                decode_public_id(IdentityDomain::SourceFile, None, value)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, IdentityError>>()?;
+    source_files.sort_by(|left, right| left.1.cmp(&right.1));
+    if source_files.windows(2).any(|pair| pair[0].1 == pair[1].1) {
+        return Err(IdentityError::ContainerOrder);
+    }
+    let mut ranges = input
+        .authorized_ranges
+        .iter()
+        .map(|range| {
+            if range.start_byte >= range.end_byte {
+                return Err(IdentityError::Scalar);
+            }
+            Ok((
+                decode_public_id(IdentityDomain::SourceFile, None, &range.source_file_id)?,
+                range.start_byte,
+                range.end_byte,
+                range.source_file_id.clone(),
+            ))
+        })
+        .collect::<Result<Vec<_>, IdentityError>>()?;
+    ranges.sort();
+    if ranges.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(IdentityError::ContainerOrder);
+    }
+    let record = recipes::access_scope(recipes::AccessScopeFields {
+        workspace_id: recipes::RecipeValue::Id(workspace_id),
+        policy_identity: recipes::RecipeValue::Utf8(input.policy_identity.clone()),
+        principal_id: recipes::RecipeValue::Id(principal_id),
+        agent_id: recipes::RecipeValue::Id(agent_id),
+        credential_digest: recipes::RecipeValue::Digest(credential_digest),
+        role: recipes::RecipeValue::Utf8(role.clone()),
+        operation: recipes::RecipeValue::Utf8(operation.clone()),
+        allowed_relations: text_set_recipe(&relations)?,
+        allowed_columns: recipes::RecipeValue::Map(
+            columns
+                .iter()
+                .map(|(relation, allowed)| {
+                    Ok((
+                        recipes::RecipeValue::Utf8(relation.clone()),
+                        text_set_recipe(allowed)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, IdentityError>>()?,
+        ),
+        allowed_functions: text_set_recipe(&functions)?,
+        allowed_extensions: text_set_recipe(&extensions)?,
+        allowed_variables: text_set_recipe(&variables)?,
+        allowed_object_stores: text_set_recipe(&object_stores)?,
+        allowed_metadata: text_set_recipe(&metadata)?,
+        row_policies: text_set_recipe(&row_policies)?,
+        execution_posture: text_set_recipe(&execution_posture)?,
+        source_access: recipes::RecipeValue::Boolean(input.source_access),
+        source_file_ids: recipes::RecipeValue::Set(
+            source_files
+                .iter()
+                .map(|(_, id)| recipes::RecipeValue::Id(*id))
+                .collect(),
+        ),
+        authorized_ranges: recipes::RecipeValue::Set(
+            ranges
+                .iter()
+                .map(|(file_id, start, end, _)| {
+                    recipes::RecipeValue::OrderedList(vec![
+                        recipes::RecipeValue::Id(*file_id),
+                        recipes::RecipeValue::Unsigned(start.to_be_bytes().to_vec()),
+                        recipes::RecipeValue::Unsigned(end.to_be_bytes().to_vec()),
+                    ])
+                })
+                .collect(),
+        ),
+    })
+    .map_err(|_| IdentityError::Scalar)?;
+    derive_public_recipe_identity(
+        record,
+        vec![
+            ("workspace_id", serde_json::json!(input.workspace_id)),
+            ("policy_identity", serde_json::json!(input.policy_identity)),
+            ("principal_id", serde_json::json!(input.principal_id)),
+            ("agent_id", serde_json::json!(input.agent_id)),
+            (
+                "credential_digest",
+                serde_json::json!(input.credential_digest),
+            ),
+            ("role", serde_json::json!(role)),
+            ("operation", serde_json::json!(operation)),
+            ("allowed_relations", serde_json::json!(relations)),
+            ("allowed_columns", serde_json::json!(columns)),
+            ("allowed_functions", serde_json::json!(functions)),
+            ("allowed_extensions", serde_json::json!(extensions)),
+            ("allowed_variables", serde_json::json!(variables)),
+            ("allowed_object_stores", serde_json::json!(object_stores)),
+            ("allowed_metadata", serde_json::json!(metadata)),
+            ("row_policies", serde_json::json!(row_policies)),
+            ("execution_posture", serde_json::json!(execution_posture)),
+            ("source_access", serde_json::json!(input.source_access)),
+            (
+                "source_file_ids",
+                serde_json::json!(
+                    source_files
+                        .iter()
+                        .map(|(value, _)| value)
+                        .collect::<Vec<_>>()
+                ),
+            ),
+            (
+                "authorized_ranges",
+                serde_json::json!(
+                    ranges
+                        .iter()
+                        .map(|(_, start, end, file)| serde_json::json!([file, start, end]))
+                        .collect::<Vec<_>>()
+                ),
+            ),
+        ],
+        &[
+            "derived child catalog",
+            "bound physical plan",
+            "resource limits",
+            "mutable request counters",
+        ],
+    )
+}
+
+/// Build the stable resource URI for one domain-23 result artifact.
+///
+/// # Errors
+///
+/// Rejects any workspace or artifact identity outside its exact public-ID domain.
+pub fn result_artifact_resource_uri(
+    workspace_id: &str,
+    artifact_id: &str,
+) -> Result<String, IdentityError> {
+    let workspace = decode_public_id(IdentityDomain::Workspace, None, workspace_id)?;
+    let artifact = decode_public_id(IdentityDomain::ResultArtifactV2, None, artifact_id)?;
+    Ok(format!(
+        "codefabric-result://{}/{}",
+        lower_hex(&workspace),
+        lower_hex(&artifact)
+    ))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResultArtifactIdentityInput {
+    pub workspace_id: String,
+    pub owning_agent_id: String,
+    pub fabric_epoch_id: String,
+    pub snapshot_id: String,
+    pub canonical_response_checksum: String,
+    pub format: String,
+    pub format_version: String,
+}
+
+/// Issue one result-artifact identity from ownership, exact epoch/snapshot, response checksum,
+/// and format identity.
+///
+/// # Errors
+///
+/// Rejects malformed public IDs/digests, noncanonical text, or a recipe mismatch.
+pub fn issue_result_artifact_identity(
+    input: &ResultArtifactIdentityInput,
+) -> Result<CbefPublicIdentity, IdentityError> {
+    let workspace_id = decode_public_id(IdentityDomain::Workspace, None, &input.workspace_id)?;
+    let fabric_epoch_id = decode_public_id_prefix("fabric-epoch", &input.fabric_epoch_id)?;
+    let snapshot_id = decode_public_id(IdentityDomain::ServingSnapshot, None, &input.snapshot_id)?;
+    let checksum = decode_b3_digest(&input.canonical_response_checksum)?;
+    let format = input.format.to_ascii_lowercase();
+    if [
+        input.owning_agent_id.as_str(),
+        format.as_str(),
+        input.format_version.as_str(),
+    ]
+    .into_iter()
+    .any(|value| {
+        value.is_empty()
+            || value.trim() != value
+            || value.len() > 512
+            || value.chars().any(char::is_control)
+    }) || !input.format.is_ascii()
+    {
+        return Err(IdentityError::Scalar);
+    }
+    let record = recipes::result_artifact_v2(recipes::ResultArtifactV2Fields {
+        workspace_id: recipes::RecipeValue::Id(workspace_id),
+        owning_agent_id: recipes::RecipeValue::Utf8(input.owning_agent_id.clone()),
+        fabric_epoch_id: recipes::RecipeValue::Id(fabric_epoch_id),
+        snapshot_id: recipes::RecipeValue::Id(snapshot_id),
+        canonical_response_checksum: recipes::RecipeValue::Digest(checksum),
+        format: recipes::RecipeValue::Utf8(format.clone()),
+        format_version: recipes::RecipeValue::Utf8(input.format_version.clone()),
+    })
+    .map_err(|_| IdentityError::Scalar)?;
+    derive_public_recipe_identity(
+        record,
+        vec![
+            ("workspace_id", serde_json::json!(input.workspace_id)),
+            ("owning_agent_id", serde_json::json!(input.owning_agent_id)),
+            ("fabric_epoch_id", serde_json::json!(input.fabric_epoch_id)),
+            ("snapshot_id", serde_json::json!(input.snapshot_id)),
+            (
+                "canonical_response_checksum",
+                serde_json::json!(input.canonical_response_checksum),
+            ),
+            ("format", serde_json::json!(format)),
+            ("format_version", serde_json::json!(input.format_version)),
+        ],
+        &[
+            "resource URI",
+            "physical storage path",
+            "publication generation",
+            "lease identity and expiry",
+            "mutable access counters",
+            "transport-specific emitted byte checksum",
+        ],
+    )
 }
 
 /// AC-G-11 root-authorization fields whose CBEF digest is persisted as the fingerprint.
@@ -1243,6 +1716,57 @@ fn decode_lower_hex_16(value: &str) -> Result<[u8; 16], IdentityError> {
             .map_err(|_| IdentityError::PublicId)?;
     }
     Ok(decoded)
+}
+
+pub(crate) fn decode_b3_digest(value: &str) -> Result<[u8; 32], IdentityError> {
+    let payload = value.strip_prefix("b3:").ok_or(IdentityError::PublicId)?;
+    if payload.len() != 64
+        || !payload
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    {
+        return Err(IdentityError::PublicId);
+    }
+    let mut decoded = [0; 32];
+    for (index, pair) in payload.as_bytes().as_chunks::<2>().0.iter().enumerate() {
+        decoded[index] = u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16)
+            .map_err(|_| IdentityError::PublicId)?;
+    }
+    Ok(decoded)
+}
+
+pub(crate) fn decode_public_id_any_kind(
+    expected_domain: IdentityDomain,
+    value: &str,
+) -> Result<[u8; 16], IdentityError> {
+    if !expected_domain.requires_kind_slug() {
+        return decode_public_id(expected_domain, None, value);
+    }
+    let parts = value.split(':').collect::<Vec<_>>();
+    let [prefix, kind, payload] = parts.as_slice() else {
+        return Err(IdentityError::PublicId);
+    };
+    if *prefix != expected_domain.public_prefix() || !valid_slug(kind) {
+        return Err(IdentityError::PublicId);
+    }
+    decode_lower_hex_16(payload)
+}
+
+pub(crate) fn decode_public_id_prefix(
+    expected_prefix: &str,
+    value: &str,
+) -> Result<[u8; 16], IdentityError> {
+    if !valid_slug(expected_prefix) {
+        return Err(IdentityError::PublicId);
+    }
+    let parts = value.split(':').collect::<Vec<_>>();
+    let [prefix, payload] = parts.as_slice() else {
+        return Err(IdentityError::PublicId);
+    };
+    if *prefix != expected_prefix {
+        return Err(IdentityError::PublicId);
+    }
+    decode_lower_hex_16(payload)
 }
 
 fn valid_slug(value: &str) -> bool {
@@ -1994,6 +2518,120 @@ mod tests {
     }
 
     #[test]
+    fn query_access_scope_and_result_artifact_known_answers() {
+        let mut allowed_columns = BTreeMap::new();
+        allowed_columns.insert(
+            "canonical.fact".to_owned(),
+            vec!["object".to_owned(), "subject".to_owned()],
+        );
+        allowed_columns.insert("canonical.entity".to_owned(), Vec::new());
+        let access = issue_access_scope_identity(&AccessScopeIdentityInput {
+            workspace_id: format!("workspace:{}", "00".repeat(16)),
+            policy_identity: "policy:r1".to_owned(),
+            principal_id: format!("principal:{}", "99".repeat(16)),
+            agent_id: format!("agent:{}", "aa".repeat(16)),
+            credential_digest: format!("b3:{}", "bb".repeat(32)),
+            role: "Reader".to_owned(),
+            operation: "Retrieve-Source".to_owned(),
+            allowed_relations: vec!["canonical.fact".to_owned(), "canonical.entity".to_owned()],
+            allowed_columns,
+            allowed_functions: Vec::new(),
+            allowed_extensions: vec!["ext:z".to_owned(), "ext:a".to_owned()],
+            allowed_variables: Vec::new(),
+            allowed_object_stores: Vec::new(),
+            allowed_metadata: vec!["provenance".to_owned()],
+            row_policies: vec!["row:r1".to_owned()],
+            execution_posture: Vec::new(),
+            source_access: true,
+            source_file_ids: vec![
+                format!("file:{}", "67".repeat(16)),
+                format!("file:{}", "66".repeat(16)),
+            ],
+            authorized_ranges: vec![
+                AuthorizedSourceRangeIdentityInput {
+                    source_file_id: format!("file:{}", "67".repeat(16)),
+                    start_byte: 10,
+                    end_byte: 20,
+                },
+                AuthorizedSourceRangeIdentityInput {
+                    source_file_id: format!("file:{}", "66".repeat(16)),
+                    start_byte: 0,
+                    end_byte: 5,
+                },
+            ],
+        })
+        .expect("domain-22 access scope KAT");
+        assert_eq!(
+            access.public_id,
+            "access-scope:5d86ae403fbac4e230b0476ec727ae8c"
+        );
+        assert_eq!(
+            lower_hex(&access.full_digest),
+            "5d86ae403fbac4e230b0476ec727ae8cb16514dbcfae5c3c3189e3d8f8ed64bf"
+        );
+        let access_evidence = access.recipe_evidence();
+        assert_eq!(
+            access_evidence["record_domain"],
+            serde_json::json!({
+                "code": 22,
+                "name": "ACCESS_SCOPE"
+            })
+        );
+        assert_eq!(access_evidence["fields"].as_array().unwrap().len(), 19);
+        assert_eq!(
+            access_evidence["excluded"],
+            serde_json::json!([
+                "derived child catalog",
+                "bound physical plan",
+                "resource limits",
+                "mutable request counters"
+            ])
+        );
+
+        let artifact = issue_result_artifact_identity(&ResultArtifactIdentityInput {
+            workspace_id: format!("workspace:{}", "00".repeat(16)),
+            owning_agent_id: "wp33-production-oracle".to_owned(),
+            fabric_epoch_id: format!("fabric-epoch:{}", "11".repeat(16)),
+            snapshot_id: format!("snapshot:{}", "11".repeat(16)),
+            canonical_response_checksum:
+                "b3:fe5096419f3a2062a6786446f379e0b7fc1855b15cfa2923ae7fb6f61b3e8b1a".to_owned(),
+            format: "arrow-ipc".to_owned(),
+            format_version: "V5".to_owned(),
+        })
+        .expect("domain-23 result artifact KAT");
+        assert_eq!(
+            artifact.public_id,
+            "artifact:2ca46f80a6cc347aff4c1d014a421c96"
+        );
+        assert_eq!(
+            lower_hex(&artifact.full_digest),
+            "2ca46f80a6cc347aff4c1d014a421c9681dbd894e768e786533a3065f2ef94b3"
+        );
+        let evidence = artifact.recipe_evidence();
+        assert_eq!(evidence["recipe_version"], "CBEF-v1");
+        assert_eq!(evidence["contract"]["version"], "1.1");
+        assert_eq!(
+            evidence["record_domain"],
+            serde_json::json!({
+                "code": 23,
+                "name": "RESULT_ARTIFACT_V2"
+            })
+        );
+        assert_eq!(
+            evidence["canonical_preimage_hex"],
+            "434649440100170007000107000000100000000000000000000000000000000000020200000016777033332d70726f64756374696f6e2d6f7261636c650003070000001011111111111111111111111111111111000407000000101111111111111111111111111111111100050800000020fe5096419f3a2062a6786446f379e0b7fc1855b15cfa2923ae7fb6f61b3e8b1a000602000000096172726f772d697063000702000000025635"
+        );
+        assert_eq!(
+            result_artifact_resource_uri(
+                &format!("workspace:{}", "00".repeat(16)),
+                &artifact.public_id
+            )
+            .unwrap(),
+            "codefabric-result://00000000000000000000000000000000/2ca46f80a6cc347aff4c1d014a421c96"
+        );
+    }
+
+    #[test]
     fn wp55_behavioral_acceptance() {
         let workspace_id = [0x11; 16];
         let analysis_context_id = [0x22; 16];
@@ -2268,6 +2906,12 @@ mod tests {
     fn wp07_structural_acceptance() {
         assert_eq!(IdentityDomain::UnknownRemainder as u16, 16);
         assert_eq!(IdentityDomain::RootAuthorization as u16, 17);
+        assert_eq!(IdentityDomain::PathResult as u16, 18);
+        assert_eq!(IdentityDomain::ObjectiveInputSet as u16, 19);
+        assert_eq!(IdentityDomain::ObjectiveGroup as u16, 20);
+        assert_eq!(IdentityDomain::QuerySourceContext as u16, 21);
+        assert_eq!(IdentityDomain::AccessScope as u16, 22);
+        assert_eq!(IdentityDomain::ResultArtifactV2 as u16, 23);
         assert_eq!(TypeConstructor::BoundVariable as u16 + 1, 35);
         let codes = (0_u8..=12)
             .map(CbefTypeCode::from_code)

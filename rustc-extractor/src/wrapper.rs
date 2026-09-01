@@ -25,6 +25,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Endpoint;
 use tower::service_fn;
 
+use crate::protocol::RUST_MIR_CAPABILITY_CODE;
 use crate::protocol::generated::codefabric::provider::v1::{CapabilityOutcome, ProviderRunState};
 use crate::protocol::generated::codefabric::rustc::v1::extraction_event::Event;
 use crate::protocol::generated::codefabric::rustc::v1::extractor_command::Command;
@@ -34,7 +35,6 @@ use crate::protocol::generated::codefabric::rustc::v1::{
     ExtractorHello, OwnerBegin, OwnerEnd, OwnerObservationChunk, OwnerRelationIpcFrame,
     PackageTargetIdentity, RejectionRuleErrorCode,
 };
-use crate::protocol::generated::registries::{CAPABILITY_CODES, CAPABILITY_IDS};
 use crate::relation_ipc_contract::relation_wire_identity;
 use crate::relation_ipc_proto::{
     RelationCoverage, decode_flow_control_ack, encode_relation_frames,
@@ -42,7 +42,7 @@ use crate::relation_ipc_proto::{
 use crate::rustc_link::{OwnedCell, OwnedRow, OwnedRustcOwner, OwnedRustcRelation};
 use crate::rustc_relation_schema::{RustcRelation, schema_bundle_digest};
 
-include!("generated/digest_frames.rs");
+include!("digest_frames.rs");
 
 const MAX_RELATION_IPC_BYTES: usize = 16 * 1024 * 1024;
 const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
@@ -75,14 +75,6 @@ impl From<String> for WrapperError {
     fn from(detail: String) -> Self {
         Self::protocol(detail)
     }
-}
-
-fn rust_mir_capability_code() -> Result<u32, String> {
-    CAPABILITY_IDS
-        .iter()
-        .zip(CAPABILITY_CODES)
-        .find_map(|(candidate, code)| (*candidate == "RUST_MIR").then_some(u32::from(*code)))
-        .ok_or_else(|| "generated RUST_MIR capability allocation is absent".to_owned())
 }
 
 #[derive(Clone, Debug)]
@@ -588,7 +580,7 @@ fn run_protocol(
         .map_err(|error| format!("failed to read compiler source input: {error}"))?;
     let invocation_digest =
         normalized_invocation_digest(real_rustc, arguments, &source, &source_bytes);
-    let rust_mir_capability_code = rust_mir_capability_code()?;
+    let rust_mir_capability_code = RUST_MIR_CAPABILITY_CODE;
     let target = target_identity(&argument_strings, &invocation_digest);
     let compilation_unit_id = format!(
         "unit:{}",
@@ -891,7 +883,7 @@ fn run_protocol(
                                 return Err("daemon returned legacy whole-relation chunk control"
                                     .to_owned());
                             }
-                            _ => {
+                            Command::CompilationAccepted(_) => {
                                 return Err(
                                     "daemon returned an invalid rustc relation acknowledgement"
                                         .to_owned(),
@@ -1163,7 +1155,7 @@ mod tests {
                     assert_eq!(frame.status, RelationIpcTerminalStatus::Complete as i32);
                     assert_eq!(frame.requested_units, 1);
                     assert_eq!(frame.completed_units, 1);
-                    assert!(frame.remainders.is_empty());
+                    assert_eq!(frame.remainders.len(), 0);
                     relation.saw_coverage = true;
                 }
                 Frame::Terminal(frame) => {
@@ -1401,10 +1393,12 @@ mod tests {
         });
         ready_receiver.recv().unwrap();
 
-        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("tests/golden/codefabric-golden-v1/workspace/rust/src/lib.rs");
+        let source = temporary.path().join("wrapper-probe.rs");
+        std::fs::write(
+            &source,
+            b"pub fn normalized_total(mut values: Vec<i64>) -> i64 { values.sort_unstable(); values.into_iter().sum() }\n",
+        )
+        .unwrap();
         let output = temporary.path().join("output");
         std::fs::create_dir_all(&output).unwrap();
         let sysroot = ProcessCommand::new("rustup")

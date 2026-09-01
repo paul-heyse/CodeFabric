@@ -1,1 +1,0 @@
-{"providers":["source-substrate","tree-sitter","ruff-python","rustc-mir"],"terminal_manifest_required":true,"profile":"gate-b-v1"}

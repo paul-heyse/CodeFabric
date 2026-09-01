@@ -2,7 +2,7 @@
 //!
 //! [`SchemaContractTableProvider`] is intentionally a transparent adapter: it
 //! preserves a native provider's scan plan and metadata claims, while adding
-//! the model-derived schema checks and structured observations owned by the
+//! the application-owned schema checks and structured observations owned by the
 //! fabric. It does not synthesize pushdown, constraints, statistics, ordering,
 //! partitioning, defaults, or table definitions.
 
@@ -10,6 +10,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
 
+use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::{ScanArgs, ScanResult, Session, TableProvider};
@@ -20,10 +21,40 @@ use datafusion::logical_expr::{Expr, LogicalPlan, TableProviderFilterPushDown, T
 use datafusion::physical_expr::expressions::{cast, col as physical_col};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::projection::{ProjectionExec, ProjectionExpr};
+use datafusion::prelude::SessionContext;
 
 use crate::schema_contract::{
     SchemaCompatibility, SchemaContract, SchemaContractError, SchemaPhase, SchemaRole,
 };
+
+/// Exact-provider read request admitted by the internal DataFusion adapter.
+///
+/// The closed request shape prevents fabric callers from acquiring a raw context, optimizer,
+/// planner, or physical plan merely to inspect an exact-version provider.
+pub(crate) struct ProviderReadRequest {
+    pub provider: Arc<dyn TableProvider>,
+    pub filter: Option<Expr>,
+    pub projection: Option<Vec<Expr>>,
+    pub limit: Option<usize>,
+}
+
+/// Collect one exact-provider read without exposing DataFusion session or action APIs.
+pub(crate) async fn collect_provider(
+    request: ProviderReadRequest,
+) -> Result<Vec<RecordBatch>, DataFusionError> {
+    let context = SessionContext::new();
+    let mut frame = context.read_table(request.provider)?;
+    if let Some(filter) = request.filter {
+        frame = frame.filter(filter)?;
+    }
+    if let Some(projection) = request.projection {
+        frame = frame.select(projection)?;
+    }
+    if let Some(limit) = request.limit {
+        frame = frame.limit(0, Some(limit))?;
+    }
+    frame.collect().await
+}
 
 /// Lossless planning arguments observed at the schema-bound provider boundary.
 ///
@@ -138,8 +169,9 @@ impl From<SchemaContractError> for ProviderContractError {
 /// Delta reconstructs physical Arrow schemas from its log and Parquet files.
 /// This adapter preserves the native scan/statistics provider while restoring
 /// application-owned field metadata and fixed-width identity meaning at the
-/// logical boundary. It accepts only direct, name-preserving mappings so an
-/// optimizer-visible scan cannot silently reorder or synthesize a field.
+/// logical boundary. It accepts only direct, name-preserving mapped fields so an
+/// optimizer-visible scan cannot silently reorder or synthesize a field. Storage-only envelope
+/// fields may remain unmapped; they never enter the provider's logical schema.
 pub struct SchemaContractStorageProvider {
     contract: Arc<SchemaContract>,
     inner: Arc<dyn TableProvider>,
@@ -166,30 +198,12 @@ impl SchemaContractStorageProvider {
         inner: Arc<dyn TableProvider>,
     ) -> Result<Self, ProviderContractError> {
         validate_native_storage_schema(contract.storage_schema(), &inner.schema())?;
-        if contract.logical_schema().fields().len() != contract.storage_schema().fields().len() {
-            return Err(ProviderContractError::StorageSchemaDrift {
-                detail: "logical and storage field counts differ".to_owned(),
-            });
-        }
-        for (logical_index, (logical, storage)) in contract
-            .logical_schema()
-            .fields()
-            .iter()
-            .zip(contract.storage_schema().fields())
-            .enumerate()
-        {
-            let direct = contract.map_projection(&[logical_index])?.first().copied()
-                == Some(logical_index)
-                && contract
-                    .map_filter_indices(&[logical_index])?
-                    .first()
-                    .copied()
-                    == Some(logical_index)
-                && contract
-                    .map_statistics_indices(&[logical_index])?
-                    .first()
-                    .copied()
-                    == Some(logical_index);
+        for (logical_index, logical) in contract.logical_schema().fields().iter().enumerate() {
+            let projection = contract.map_projection(&[logical_index])?[0];
+            let filter = contract.map_filter_indices(&[logical_index])?[0];
+            let statistics = contract.map_statistics_indices(&[logical_index])?[0];
+            let storage = contract.storage_schema().field(projection);
+            let direct = filter == projection && statistics == projection;
             let supported_type = logical.data_type() == storage.data_type()
                 || matches!(
                     (logical.data_type(), storage.data_type()),
@@ -300,7 +314,7 @@ impl TableProvider for SchemaContractStorageProvider {
     }
 
     fn constraints(&self) -> Option<&Constraints> {
-        self.inner.constraints()
+        Some(self.contract.constraints().as_ref())
     }
 
     fn table_type(&self) -> TableType {
@@ -322,13 +336,16 @@ impl TableProvider for SchemaContractStorageProvider {
             .iter()
             .map(Self::storage_filter)
             .collect::<datafusion::common::Result<Vec<_>>>()?;
-        let storage_projection = projection
-            .map(|projection| self.contract.map_projection(projection))
-            .transpose()
+        let logical_projection = projection.cloned().unwrap_or_else(|| {
+            (0..self.contract.logical_schema().fields().len()).collect::<Vec<_>>()
+        });
+        let storage_projection = self
+            .contract
+            .map_projection(&logical_projection)
             .map_err(|error| DataFusionError::External(Box::new(error)))?;
         let plan = self
             .inner
-            .scan(state, storage_projection.as_ref(), &storage_filters, limit)
+            .scan(state, Some(&storage_projection), &storage_filters, limit)
             .await?;
         self.reattach_logical_schema(plan, projection.map(Vec::as_slice))
     }
@@ -347,13 +364,16 @@ impl TableProvider for SchemaContractStorageProvider {
                     .collect::<datafusion::common::Result<Vec<_>>>()
             })
             .transpose()?;
-        let storage_projection = args
-            .projection()
-            .map(|projection| self.contract.map_projection(projection))
-            .transpose()
+        let logical_projection = args.projection().map_or_else(
+            || (0..self.contract.logical_schema().fields().len()).collect::<Vec<_>>(),
+            <[usize]>::to_vec,
+        );
+        let storage_projection = self
+            .contract
+            .map_projection(&logical_projection)
             .map_err(|error| DataFusionError::External(Box::new(error)))?;
         let storage_args = ScanArgs::default()
-            .with_projection(storage_projection.as_deref())
+            .with_projection(Some(storage_projection.as_slice()))
             .with_filters(storage_filters.as_deref())
             .with_limit(args.limit())
             .with_statistics_requests(args.statistics_requests());
@@ -376,7 +396,25 @@ impl TableProvider for SchemaContractStorageProvider {
     }
 
     fn statistics(&self) -> Option<Statistics> {
-        self.inner.statistics()
+        let statistics = self.inner.statistics()?;
+        let logical_indices =
+            (0..self.contract.logical_schema().fields().len()).collect::<Vec<_>>();
+        let storage_indices = self
+            .contract
+            .map_statistics_indices(&logical_indices)
+            .expect("validated schema-contract statistics mappings remain total");
+        let Some(column_statistics) = storage_indices
+            .iter()
+            .map(|index| statistics.column_statistics.get(*index).cloned())
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Some(Statistics::new_unknown(self.contract.logical_schema()));
+        };
+        Some(Statistics {
+            num_rows: statistics.num_rows,
+            total_byte_size: statistics.total_byte_size,
+            column_statistics,
+        })
     }
 }
 
@@ -439,7 +477,7 @@ impl fmt::Debug for SchemaContractTableProvider {
 }
 
 impl SchemaContractTableProvider {
-    /// Bind an exact native provider to a model-derived schema contract.
+    /// Bind an exact native provider to an application-owned schema contract.
     ///
     /// # Errors
     ///
@@ -784,7 +822,7 @@ mod tests {
         let schema = logical_schema();
         let contract = Arc::new(
             SchemaContract::try_new(
-                "model.test_relation.v1",
+                "application.test_relation.v1",
                 datafusion::common::TableReference::bare("test_relation"),
                 Arc::clone(&schema),
                 Arc::clone(&schema),
@@ -913,7 +951,7 @@ mod tests {
         assert_eq!(observed.len(), 1);
         assert_eq!(
             observed[0].source_schema_identity(),
-            "model.test_relation.v1"
+            "application.test_relation.v1"
         );
         assert_eq!(observed[0].projection(), Some(projection.as_slice()));
         assert_eq!(observed[0].filters(), Some(filters.as_slice()));

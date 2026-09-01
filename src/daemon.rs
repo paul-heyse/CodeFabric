@@ -8,37 +8,33 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rusqlite::OptionalExtension as _;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::oneshot;
 
-use crate::contracts::index::model_artifact_index;
-use crate::contracts::models::DeploymentProfileDocument;
-use crate::coordinator::{
-    CoordinatorError, WorkspaceCoordinatorManager, WorkspaceHealthStatus,
-    persisted_workspace_health,
+use crate::contracts::deployment_profile::DeploymentProfileDocument;
+use crate::fabric::forward_cutover::{CutoverAdmission, CutoverPhase, DurableCutoverState};
+use crate::fabric::programmatic_query_backend::{
+    ProgrammaticSemanticQueryBackend, ProgrammaticSemanticQueryBackendError,
+    ProgrammaticSemanticQueryPorts,
 };
-use crate::fabric::{CommonRepositoryRecord, FabricError, bootstrap_workspace_with_repository};
-use crate::golden_corpus::{CorpusError, core_source_v1_coverage, current_released_corpus_root};
-use crate::identity::{IdentityDomain, encode_public_id};
-use crate::ontology_activation::{
-    OntologyActivationCoordinator, OntologyCandidateStageError, OntologyCandidateSubmission,
+use crate::fabric::programmatic_workspace::{
+    ProgrammaticCommandRecoveryError, ProgrammaticDaemonComposition,
+    ProgrammaticDaemonCompositionShutdownError,
 };
-use crate::operational_store::{OperationalReaderFactory, OperationalStore, OperationalStoreError};
+use crate::fabric::published_arrow_result::PublishedArrowResultRegistry;
+use crate::forward_cutover_controller::{
+    ProductionCutoverStatus, ProductionForwardCutoverController,
+};
 use crate::query_service::{
     ProductionQueryService, QueryAuthorization, QueryTransportError, ResultArtifactStore,
-    WorkspaceQueryBackend, serve_query_uds,
+    SemanticQueryBackend, serve_query_uds,
 };
-use crate::registries::WorkspaceRegistryLifecycle;
 use crate::rpc::SameUserInterceptor;
 use crate::rpc::generated::codefabric::cpgd::v1::{WorkspaceClaim, WorkspaceReadiness};
-use crate::workspace_registry::{
-    RelinkProof, RemovalPolicy, WorkspaceRecord, WorkspaceRegistry, WorkspaceRegistryError,
-    WorkspaceSourceRegistration,
-};
+use crate::workspace_registry::{RelinkProof, RemovalPolicy, WorkspaceRecord};
 
 const CONFIG_MAX_BYTES: u64 = 262_144;
 const ADMIN_MESSAGE_MAX_BYTES: usize = 65_536;
@@ -64,10 +60,6 @@ pub struct StaticConfig {
     pub query_capability_token_file: PathBuf,
     /// Operational database filename, relative to the state root.
     pub operational_database: PathBuf,
-    /// Packaged contract bundle/index location.
-    pub bundle_index: PathBuf,
-    /// Closed toolchain identity location.
-    pub toolchain_identity: PathBuf,
     /// Exact sandbox policy from the released deployment profile.
     pub sandbox_policy: String,
     /// Hard-limit profile selected at startup.
@@ -234,6 +226,7 @@ pub struct DaemonDiscovery {
 #[serde(rename_all = "snake_case")]
 pub enum AdminCommand {
     Status,
+    CutoverStatus,
     Stop,
     Drain,
 }
@@ -274,12 +267,6 @@ pub enum WorkspaceAdminCommand {
     Reconcile {
         workspace_id: [u8; 16],
     },
-    ActivateCandidate {
-        workspace_id: [u8; 16],
-        submission: Box<OntologyCandidateSubmission>,
-        administrative_key: Vec<u8>,
-        request_key: String,
-    },
     Remove {
         workspace_id: [u8; 16],
         policy: RemovalPolicy,
@@ -295,6 +282,22 @@ pub enum AdminEnvelope {
     Workspace(WorkspaceAdminCommand),
 }
 
+/// Released non-secret workspace-health response shape.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceHealthStatus {
+    pub workspace_id: String,
+    pub lifecycle: String,
+    pub source_trust: String,
+    pub event_stream_health: String,
+    pub git_acceleration: String,
+    pub source_generation: u64,
+    pub inventory_digest: Option<String>,
+    pub active_snapshot: Option<String>,
+    pub readiness: String,
+    pub reconciliation_count: u64,
+}
+
 /// Liveness response kept distinct from workspace readiness.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -305,7 +308,22 @@ pub struct AdminResponse {
     pub shutdown_mode: Option<String>,
     pub workspaces: Vec<WorkspaceRecord>,
     pub workspace_health: Vec<WorkspaceHealthStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cutover_status: Option<Vec<CutoverAdminStatus>>,
     pub error_code: Option<String>,
+}
+
+/// Read-only projection of the durable cutover journal plus current platform observation.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CutoverAdminStatus {
+    pub workspace_id: [u8; 16],
+    pub durable_phase: String,
+    pub durable_event_id: Option<String>,
+    pub durable_sequence: Option<u64>,
+    pub admission: String,
+    pub code: String,
+    pub remediation: String,
 }
 
 /// Ordered evidence returned after a joined daemon shutdown.
@@ -326,6 +344,10 @@ pub enum DaemonError {
     },
     #[error("invalid daemon configuration: {0}")]
     Config(String),
+    #[error(
+        "production serving requires an explicitly constructed programmatic daemon composition"
+    )]
+    ProgrammaticCompositionRequired,
     #[error("daemon singleton lease is already held")]
     LeaseHeld,
     #[error("administrative protocol failure: {0}")]
@@ -336,17 +358,13 @@ pub enum DaemonError {
         detail: String,
     },
     #[error(transparent)]
-    OperationalStore(#[from] OperationalStoreError),
-    #[error(transparent)]
-    Coordinator(#[from] CoordinatorError),
-    #[error(transparent)]
-    WorkspaceRegistry(#[from] WorkspaceRegistryError),
-    #[error(transparent)]
-    Fabric(#[from] FabricError),
-    #[error(transparent)]
     QueryTransport(#[from] QueryTransportError),
     #[error(transparent)]
-    Corpus(#[from] CorpusError),
+    ProgrammaticBackend(#[from] ProgrammaticSemanticQueryBackendError),
+    #[error(transparent)]
+    ProgrammaticCommandRecovery(#[from] ProgrammaticCommandRecoveryError),
+    #[error("programmatic daemon composition shutdown failed: {0}")]
+    ProgrammaticCompositionShutdown(#[from] ProgrammaticDaemonCompositionShutdownError),
 }
 
 fn record_shutdown_step<E: std::fmt::Display>(
@@ -514,22 +532,89 @@ fn now_millis() -> Result<u128, DaemonError> {
         .map_err(|error| DaemonError::Admin(format!("system clock before Unix epoch: {error}")))
 }
 
-fn open_operational_store_with_provider_recovery(
-    path: &Path,
-) -> Result<OperationalStore, DaemonError> {
-    let mut store = OperationalStore::open(path)?;
-    store.validate_ontology_activation_recovery()?;
-    let recovered_at = now_millis()?.to_string();
-    let recovered_provider_runs = store.recover_incomplete_provider_runs(&recovered_at)?;
-    tracing::info!(
-        recovered_provider_runs,
-        lifecycle = "provider-recovery",
-        "reconciled non-terminal provider runs before admission"
-    );
-    Ok(store)
+fn cutover_admin_statuses(statuses: Vec<ProductionCutoverStatus>) -> Vec<CutoverAdminStatus> {
+    statuses
+        .into_iter()
+        .map(|observed| {
+            let (durable_phase, durable_event_id, durable_sequence) =
+                match observed.status.durable_state {
+                    DurableCutoverState::NotStarted => ("not_started".to_owned(), None, None),
+                    DurableCutoverState::At {
+                        phase,
+                        event_id,
+                        sequence,
+                    } => {
+                        let phase = match phase {
+                            CutoverPhase::TargetProved => "target_proved",
+                            CutoverPhase::PredecessorFenced => "predecessor_fenced",
+                            CutoverPhase::TargetServing => "target_serving",
+                            CutoverPhase::TargetMutating => "target_mutating",
+                            CutoverPhase::Complete => "complete",
+                        };
+                        (
+                            phase.to_owned(),
+                            Some(crate::integrity::frame_digest(*event_id.as_bytes())),
+                            Some(sequence),
+                        )
+                    }
+                };
+            let admission = match observed.status.admission {
+                CutoverAdmission::Closed => "closed",
+                CutoverAdmission::TargetReadOnly => "target_read_only",
+                CutoverAdmission::TargetReadWrite => "target_read_write",
+            };
+            CutoverAdminStatus {
+                workspace_id: *observed.workspace_id.as_bytes(),
+                durable_phase,
+                durable_event_id,
+                durable_sequence,
+                admission: admission.to_owned(),
+                code: observed.status.code.to_owned(),
+                remediation: observed.status.remediation.to_owned(),
+            }
+        })
+        .collect()
 }
 
-fn discovery(config: &DaemonConfig) -> Result<DaemonDiscovery, DaemonError> {
+fn programmatic_public_bundle_versions(
+    composition: &ProgrammaticDaemonComposition,
+) -> Result<BTreeMap<String, String>, DaemonError> {
+    let mut versions = BTreeMap::new();
+    for (_, workspace) in composition.workspaces() {
+        let workspace_id = workspace
+            .public_workspace_id()
+            .map_err(|error| DaemonError::Admin(error.to_string()))?;
+        let releases = workspace.startup_observation().releases;
+        for (release_kind, release_pin) in [
+            ("input", *releases.input_release().as_bytes()),
+            ("program", *releases.program_release().as_bytes()),
+            ("provider", *releases.provider_release().as_bytes()),
+            ("application", *releases.application_release().as_bytes()),
+            ("source-authority", *releases.source_authority().as_bytes()),
+        ] {
+            let key = format!("codefabric.programmatic.{workspace_id}.{release_kind}");
+            if versions
+                .insert(key, crate::integrity::frame_digest(release_pin))
+                .is_some()
+            {
+                return Err(DaemonError::Admin(
+                    "programmatic discovery release identity is duplicated".to_owned(),
+                ));
+            }
+        }
+    }
+    if versions.is_empty() {
+        return Err(DaemonError::Admin(
+            "programmatic discovery has no explicit workspace releases".to_owned(),
+        ));
+    }
+    Ok(versions)
+}
+
+fn discovery(
+    config: &DaemonConfig,
+    public_bundle_versions: BTreeMap<String, String>,
+) -> Result<DaemonDiscovery, DaemonError> {
     let startup_time_unix_ms = now_millis()?;
     let pid = std::process::id();
     let mut identity = crate::identity::semantic_fingerprint(
@@ -545,13 +630,6 @@ fn discovery(config: &DaemonConfig) -> Result<DaemonDiscovery, DaemonError> {
             .as_encoded_bytes(),
     );
     let daemon_instance_id = crate::integrity::frame_digest(identity.finalize())[3..35].to_owned();
-    let public_bundle_versions = model_artifact_index()
-        .map_err(|error| DaemonError::Admin(format!("artifact index: {error}")))?
-        .artifacts
-        .iter()
-        .filter(|artifact| artifact.artifact_kind == "bundle-manifest")
-        .map(|artifact| (artifact.artifact_id.clone(), artifact.version.clone()))
-        .collect();
     Ok(DaemonDiscovery {
         daemon_instance_id,
         pid,
@@ -596,476 +674,6 @@ async fn write_response(
         .map_err(|source| DaemonError::Admin(format!("response write: {source}")))
 }
 
-fn workspace_readiness(health: &[WorkspaceHealthStatus]) -> String {
-    if health.is_empty() {
-        "NO_WORKSPACES_READY"
-    } else if health
-        .iter()
-        .any(|workspace| workspace.readiness == "READY")
-    {
-        "WORKSPACES_READY"
-    } else {
-        "WORKSPACE_BOOTSTRAPPING"
-    }
-    .to_owned()
-}
-
-#[allow(clippy::too_many_lines)] // One exhaustive admin dispatcher keeps command authority visible.
-async fn execute_workspace_command(
-    store: &Arc<Mutex<OperationalStore>>,
-    coordinators: &mut WorkspaceCoordinatorManager,
-    state_root: &Path,
-    command: WorkspaceAdminCommand,
-) -> AdminResponse {
-    let coordinator_bootstrap = match &command {
-        WorkspaceAdminCommand::Enable { workspace_id }
-        | WorkspaceAdminCommand::Reconcile { workspace_id } => Some(*workspace_id),
-        _ => None,
-    };
-    let stop_workspace = match &command {
-        WorkspaceAdminCommand::Disable { workspace_id }
-        | WorkspaceAdminCommand::Remove { workspace_id, .. } => Some(*workspace_id),
-        _ => None,
-    };
-    let result: Result<Vec<WorkspaceRecord>, String> = {
-        let mut store = store.lock().await;
-        match command {
-            WorkspaceAdminCommand::ActivateCandidate { .. } => {
-                unreachable!("activation is owned by the cancellable request task")
-            }
-            other => execute_workspace_command_inner(&mut store, other)
-                .map_err(|error| workspace_error_code(&error).to_owned()),
-        }
-    };
-    match result {
-        Ok(workspaces) => {
-            if let Some(workspace_id) = stop_workspace
-                && coordinators.stop(workspace_id).await.is_err()
-            {
-                return internal_admin_response();
-            }
-            if let Some(workspace_id) = coordinator_bootstrap {
-                let handle = match coordinators.handle(workspace_id) {
-                    Some(handle) => handle,
-                    None => match coordinators.spawn(workspace_id).await {
-                        Ok(handle) => handle,
-                        Err(_) => return internal_admin_response(),
-                    },
-                };
-                if let Err(error) = handle.bootstrap().await {
-                    return coordinator_admin_response(&error);
-                }
-            }
-            if bootstrap_fabrics(state_root, store, &workspaces)
-                .await
-                .is_err()
-            {
-                return internal_admin_response();
-            }
-            match health_response(store).await {
-                Ok((workspace_readiness, workspace_health)) => AdminResponse {
-                    accepted: true,
-                    daemon_liveness: "LIVE".to_owned(),
-                    workspace_readiness,
-                    shutdown_mode: None,
-                    workspaces,
-                    workspace_health,
-                    error_code: None,
-                },
-                Err(_) => internal_admin_response(),
-            }
-        }
-        Err(error) => AdminResponse {
-            accepted: false,
-            daemon_liveness: "LIVE".to_owned(),
-            workspace_readiness: "UNCHANGED".to_owned(),
-            shutdown_mode: None,
-            workspaces: Vec::new(),
-            workspace_health: Vec::new(),
-            error_code: Some(error),
-        },
-    }
-}
-
-/// Drop guard that couples task lifetime to cooperative activation cancellation.
-struct ActivationCancellationGuard {
-    cancellation: crate::cancellation::Cancellation,
-    armed: bool,
-}
-
-impl ActivationCancellationGuard {
-    fn new(cancellation: crate::cancellation::Cancellation) -> Self {
-        Self {
-            cancellation,
-            armed: true,
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for ActivationCancellationGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            self.cancellation.cancel();
-        }
-    }
-}
-
-fn activation_cancelled_error() -> OntologyCandidateStageError {
-    OntologyCandidateStageError::Candidate(
-        crate::ontology_candidate::CandidateClosureError::Session(
-            crate::governed_session::GovernedSessionError::Gate(
-                crate::ontology_gate::OntologyGateError::Resource(
-                    crate::ontology_gate::GateResourceFailure::Cancelled,
-                ),
-            ),
-        ),
-    )
-}
-
-/// Run one activation from prepare through the short durable commit under a caller-owned token.
-async fn execute_activation_command(
-    store: &Arc<Mutex<OperationalStore>>,
-    workspace_id: [u8; 16],
-    submission: OntologyCandidateSubmission,
-    administrative_key: &[u8],
-    request_key: &str,
-    cancellation: &crate::cancellation::Cancellation,
-) -> AdminResponse {
-    let requested_at = now_millis()
-        .ok()
-        .and_then(|value| i64::try_from(value).ok())
-        .unwrap_or(i64::MAX);
-    let prepared = {
-        let mut store = store.lock().await;
-        OntologyActivationCoordinator::prepare_submission(
-            &mut store,
-            workspace_id,
-            submission,
-            administrative_key,
-            request_key,
-            requested_at,
-        )
-    };
-    let result = match prepared {
-        Ok(crate::ontology_activation::OntologyActivationPreparation::Replay(_)) => Ok(()),
-        Ok(crate::ontology_activation::OntologyActivationPreparation::Pending(prepared)) => {
-            match OntologyActivationCoordinator::prove_prepared(
-                *prepared,
-                &crate::ontology_gate::GateResourceEnvelope::default(),
-                cancellation,
-            )
-            .await
-            {
-                Ok(_) if cancellation.is_cancelled() => Err(activation_cancelled_error()),
-                Ok(proved) => {
-                    let mut store = store.lock().await;
-                    if cancellation.is_cancelled() {
-                        Err(activation_cancelled_error())
-                    } else {
-                        OntologyActivationCoordinator::commit_prepared(&mut store, &proved)
-                            .map(|_| ())
-                    }
-                }
-                Err(error) => {
-                    cancellation.cancel();
-                    Err(error)
-                }
-            }
-        }
-        Err(error) => Err(error),
-    };
-    if let Err(error) = result {
-        tracing::warn!(
-            error = %error,
-            error_code = ontology_submission_error_code(&error),
-            "ontology candidate submission rejected"
-        );
-        return AdminResponse {
-            accepted: false,
-            daemon_liveness: "LIVE".to_owned(),
-            workspace_readiness: "UNCHANGED".to_owned(),
-            shutdown_mode: None,
-            workspaces: Vec::new(),
-            workspace_health: Vec::new(),
-            error_code: Some(ontology_submission_error_code(&error).to_owned()),
-        };
-    }
-    match health_response(store).await {
-        Ok((workspace_readiness, workspace_health)) => AdminResponse {
-            accepted: true,
-            daemon_liveness: "LIVE".to_owned(),
-            workspace_readiness,
-            shutdown_mode: None,
-            workspaces: Vec::new(),
-            workspace_health,
-            error_code: None,
-        },
-        Err(_) => internal_admin_response(),
-    }
-}
-
-/// Own one activation request until response, disconnect, shutdown cancellation, or task drop.
-async fn serve_activation_request(
-    mut stream: UnixStream,
-    store: Arc<Mutex<OperationalStore>>,
-    workspace_id: [u8; 16],
-    submission: OntologyCandidateSubmission,
-    administrative_key: Vec<u8>,
-    request_key: String,
-    cancellation: crate::cancellation::Cancellation,
-) {
-    let activation = execute_activation_command(
-        &store,
-        workspace_id,
-        submission,
-        &administrative_key,
-        &request_key,
-        &cancellation,
-    );
-    let Some(response) = Box::pin(await_owned_activation(
-        &mut stream,
-        &cancellation,
-        activation,
-    ))
-    .await
-    else {
-        tracing::info!(
-            request_key,
-            "activation owner disconnected; proof cancelled"
-        );
-        return;
-    };
-    if let Err(error) = write_response(&mut stream, &response).await {
-        tracing::warn!(request_key, error = %error, "activation response could not be delivered");
-    }
-}
-
-/// Couple a request stream and task lifetime to one activation future.
-async fn await_owned_activation<F>(
-    stream: &mut UnixStream,
-    cancellation: &crate::cancellation::Cancellation,
-    activation: F,
-) -> Option<AdminResponse>
-where
-    F: std::future::Future<Output = AdminResponse>,
-{
-    let mut guard = ActivationCancellationGuard::new(cancellation.clone());
-    tokio::pin!(activation);
-    let mut unexpected_input = [0_u8; 1];
-    let response = tokio::select! {
-        biased;
-        observed = stream.read(&mut unexpected_input) => {
-            cancellation.cancel();
-            let _ = (&mut activation).await;
-            match observed {
-                Ok(0) => tracing::debug!("activation owner disconnected"),
-                Ok(_) => tracing::warn!("activation owner sent trailing protocol bytes"),
-                Err(error) => tracing::warn!(error = %error, "activation owner stream failed"),
-            }
-            return None;
-        }
-        response = &mut activation => response,
-    };
-    guard.disarm();
-    Some(response)
-}
-
-fn common_repository_record(
-    readers: &OperationalReaderFactory,
-    repository_id: Option<[u8; 16]>,
-) -> Result<Option<CommonRepositoryRecord>, DaemonError> {
-    let Some(repository_id) = repository_id else {
-        return Ok(None);
-    };
-    let reader = readers.open()?;
-    let row = reader
-        .with_connection(|connection| {
-            connection
-                .query_row(
-                    "SELECT common_dir_path_bytes, common_dir_path_display, object_format_code, trust_policy_fingerprint, updated_at FROM common_repository_state WHERE repository_id=?1",
-                    [repository_id.as_slice()],
-                    |row| {
-                        Ok((
-                            row.get::<_, Vec<u8>>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, i64>(2)?,
-                            row.get::<_, Vec<u8>>(3)?,
-                            row.get::<_, String>(4)?,
-                        ))
-                    },
-                )
-                .optional()
-        })
-        .map_err(OperationalStoreError::from)?;
-    let Some((path_bytes, path_display, object_format, fingerprint, updated_at)) = row else {
-        return Ok(None);
-    };
-    let trust_policy_fingerprint = fingerprint.try_into().map_err(|_| {
-        DaemonError::Admin("persisted repository trust fingerprint has invalid width".into())
-    })?;
-    let object_format_code = i16::try_from(object_format).map_err(|_| {
-        DaemonError::Admin("persisted repository object format is out of range".into())
-    })?;
-    Ok(Some(CommonRepositoryRecord {
-        repository_id,
-        common_dir_path_bytes: path_bytes,
-        common_dir_path_display: path_display,
-        object_format_code,
-        trust_policy_fingerprint,
-        updated_at,
-    }))
-}
-
-async fn bootstrap_fabrics(
-    state_root: &Path,
-    store: &Arc<Mutex<OperationalStore>>,
-    workspaces: &[WorkspaceRecord],
-) -> Result<(), DaemonError> {
-    let readers = store.lock().await.reader_factory();
-    for workspace in workspaces {
-        if workspace.status == WorkspaceRegistryLifecycle::Removed {
-            continue;
-        }
-        let repository = common_repository_record(&readers, workspace.repository_id)?;
-        bootstrap_workspace_with_repository(state_root, workspace, repository.as_ref()).await?;
-    }
-    Ok(())
-}
-
-async fn health_response(
-    store: &Arc<Mutex<OperationalStore>>,
-) -> Result<(String, Vec<WorkspaceHealthStatus>), DaemonError> {
-    let health = {
-        let store = store.lock().await;
-        persisted_workspace_health(&store)?
-    };
-    Ok((workspace_readiness(&health), health))
-}
-
-fn coordinator_admin_response(error: &CoordinatorError) -> AdminResponse {
-    AdminResponse {
-        accepted: false,
-        daemon_liveness: "LIVE".to_owned(),
-        workspace_readiness: "WORKSPACE_BOOTSTRAPPING".to_owned(),
-        shutdown_mode: None,
-        workspaces: Vec::new(),
-        workspace_health: Vec::new(),
-        error_code: Some(
-            if matches!(error, CoordinatorError::SourceChanged) {
-                "WORKSPACE_BOOTSTRAPPING"
-            } else {
-                "INTERNAL"
-            }
-            .to_owned(),
-        ),
-    }
-}
-
-fn internal_admin_response() -> AdminResponse {
-    AdminResponse {
-        accepted: false,
-        daemon_liveness: "LIVE".to_owned(),
-        workspace_readiness: "UNKNOWN".to_owned(),
-        shutdown_mode: None,
-        workspaces: Vec::new(),
-        workspace_health: Vec::new(),
-        error_code: Some("INTERNAL".to_owned()),
-    }
-}
-
-fn execute_workspace_command_inner(
-    store: &mut OperationalStore,
-    command: WorkspaceAdminCommand,
-) -> Result<Vec<WorkspaceRecord>, WorkspaceRegistryError> {
-    let mut registry = WorkspaceRegistry::new(store);
-    Ok(match command {
-        WorkspaceAdminCommand::Add { root } => {
-            vec![registry.add(&root, WorkspaceSourceRegistration::Directory)?]
-        }
-        WorkspaceAdminCommand::List => registry.list()?,
-        WorkspaceAdminCommand::Show { workspace_id } => vec![registry.show(workspace_id)?],
-        WorkspaceAdminCommand::Relink {
-            workspace_id,
-            new_root,
-            proof,
-        } => vec![registry.relink(workspace_id, &new_root, &proof)?],
-        WorkspaceAdminCommand::Configure {
-            workspace_id,
-            profile_manifest,
-        } => {
-            let metadata = fs::symlink_metadata(&profile_manifest).map_err(|error| {
-                WorkspaceRegistryError::Root(format!("profile manifest: {error}"))
-            })?;
-            if !metadata.is_file()
-                || metadata.file_type().is_symlink()
-                || metadata.len() > 1_048_576
-            {
-                return Err(WorkspaceRegistryError::Root(
-                    "profile manifest must be a bounded non-symlink file".into(),
-                ));
-            }
-            let bytes = fs::read(&profile_manifest).map_err(|error| {
-                WorkspaceRegistryError::Root(format!("profile manifest: {error}"))
-            })?;
-            vec![registry.configure(workspace_id, crate::integrity::digest_bytes(&bytes))?]
-        }
-        WorkspaceAdminCommand::Enable { workspace_id } => vec![registry.enable(workspace_id)?],
-        WorkspaceAdminCommand::Disable { workspace_id } => vec![registry.disable(workspace_id)?],
-        WorkspaceAdminCommand::Reconcile { workspace_id } => {
-            vec![registry.reconcile(workspace_id)?]
-        }
-        WorkspaceAdminCommand::ActivateCandidate { .. } => unreachable!(
-            "ontology activation is handled by the sole durable owner route before registry dispatch"
-        ),
-        WorkspaceAdminCommand::Remove {
-            workspace_id,
-            policy,
-            purge_confirmations,
-        } => vec![registry.remove(workspace_id, policy, purge_confirmations)?],
-    })
-}
-
-const fn ontology_activation_error_code(error: &OperationalStoreError) -> &'static str {
-    match error {
-        OperationalStoreError::OntologyActivation(_)
-        | OperationalStoreError::OntologyActivationOutcomeUnknown { .. } => {
-            "ONTOLOGY_ACTIVATION_TRANSACTION_INVALID"
-        }
-        _ => "INTERNAL",
-    }
-}
-
-const fn ontology_submission_error_code(error: &OntologyCandidateStageError) -> &'static str {
-    match error {
-        OntologyCandidateStageError::Store(error) => ontology_activation_error_code(error),
-        OntologyCandidateStageError::Candidate(_)
-        | OntologyCandidateStageError::Snapshot(_)
-        | OntologyCandidateStageError::Program(_)
-        | OntologyCandidateStageError::Session(_) => "ONTOLOGY_CANDIDATE_PROOF_INVALID",
-    }
-}
-
-const fn workspace_error_code(error: &WorkspaceRegistryError) -> &'static str {
-    match error {
-        WorkspaceRegistryError::StateTransitionViolation { .. }
-        | WorkspaceRegistryError::DuplicateAdministrativeKey
-        | WorkspaceRegistryError::ActiveLease => "STATE_TRANSITION_VIOLATION",
-        WorkspaceRegistryError::Root(_)
-        | WorkspaceRegistryError::NotFound(_)
-        | WorkspaceRegistryError::RelinkProof => "WORKSPACE_NOT_AUTHORIZED",
-        WorkspaceRegistryError::PurgeConfirmation => "INVALID_REQUEST_SCHEMA",
-        WorkspaceRegistryError::Store(_)
-        | WorkspaceRegistryError::Identity(_)
-        | WorkspaceRegistryError::AnalysisContext(_)
-        | WorkspaceRegistryError::Sqlite(_)
-        | WorkspaceRegistryError::Persisted(_) => "INTERNAL",
-    }
-}
-
 fn query_capability_token(config: &StaticConfig) -> Result<Vec<u8>, DaemonError> {
     let path = config.config_root.join(&config.query_capability_token_file);
     let metadata = fs::symlink_metadata(&path).map_err(|source| DaemonError::Io {
@@ -1093,35 +701,6 @@ fn query_capability_token(config: &StaticConfig) -> Result<Vec<u8>, DaemonError>
     Ok(token)
 }
 
-fn workspace_claim(record: &WorkspaceRecord) -> Result<WorkspaceClaim, DaemonError> {
-    Ok(WorkspaceClaim {
-        workspace_id: encode_public_id(IdentityDomain::Workspace, None, record.workspace_id)
-            .map_err(|error| DaemonError::Admin(error.to_string()))?,
-        repository_id: record
-            .repository_id
-            .map(|id| encode_public_id(IdentityDomain::Repository, None, id))
-            .transpose()
-            .map_err(|error| DaemonError::Admin(error.to_string()))?,
-        worktree_id: record
-            .worktree_id
-            .map(|id| encode_public_id(IdentityDomain::Worktree, None, id))
-            .transpose()
-            .map_err(|error| DaemonError::Admin(error.to_string()))?,
-        workspace_kind: if record.repository_id.is_some() {
-            "git-worktree"
-        } else {
-            "non-git-root"
-        }
-        .to_owned(),
-        readiness: if record.status == WorkspaceRegistryLifecycle::Ready {
-            WorkspaceReadiness::Ready
-        } else {
-            WorkspaceReadiness::Bootstrapping
-        } as i32,
-        permission_claims: vec!["query".to_owned()],
-    })
-}
-
 /// Run the local administrative service until a joined stop or no-work drain completes.
 ///
 /// # Errors
@@ -1129,21 +708,145 @@ fn workspace_claim(record: &WorkspaceRecord) -> Result<WorkspaceClaim, DaemonErr
 /// Returns startup, permission, socket, protocol, or joined-shutdown failures.
 #[allow(clippy::too_many_lines)] // The ordered lifecycle is kept visible as one joined sequence.
 pub async fn serve(config: DaemonConfig) -> Result<DaemonExit, DaemonError> {
-    serve_with_query_backend(
+    config.validate()?;
+    Err(DaemonError::ProgrammaticCompositionRequired)
+}
+
+/// Run the production daemon over one fully constructed programmatic composition.
+///
+/// This is the only production serving entry that can open query ingress. The caller must first
+/// construct every workspace from exact typed inputs and durable activation authority. The
+/// composition remains owned until the daemon has closed its endpoints and joined workers, then
+/// its admission and command runtimes are shut down even when serving fails.
+///
+/// # Errors
+///
+/// Returns composition, identity, daemon lifecycle, or joined-cleanup failures. No default
+/// workspace, bootstrap catalog, or empty-success backend is synthesized.
+pub async fn serve_programmatic(
+    config: DaemonConfig,
+    mut composition: ProgrammaticDaemonComposition,
+    ports: ProgrammaticSemanticQueryPorts,
+) -> Result<DaemonExit, DaemonError> {
+    let serve_result = async {
+        let mut claims = Vec::with_capacity(composition.workspaces().len());
+        for (_, workspace) in composition.workspaces() {
+            let startup = workspace.startup_observation();
+            tracing::info!(
+                factory_id = startup.factory_id,
+                workspace_id = ?startup.workspace_id,
+                epoch_id = ?startup.epoch_id,
+                activation_event_id = ?startup.activation_event_id,
+                active_fence = ?startup.active_fence,
+                source_generation = startup.source_generation,
+                provider_set_pin = ?startup.provider_set_pin,
+                overlay_segment_set_pin = ?startup.overlay_segment_set_pin,
+                policy_set_pin = ?startup.policy_set_pin,
+                proof_receipt_pin = ?startup.proof_receipt_pin,
+                activation_control_root = %startup.activation_control_root,
+                activation_control_version = startup.activation_control_version,
+                input_release = ?startup.releases.input_release(),
+                program_release = ?startup.releases.program_release(),
+                provider_release = ?startup.releases.provider_release(),
+                application_release = ?startup.releases.application_release(),
+                source_authority = ?startup.releases.source_authority(),
+                program_catalog_pin = ?startup.program_catalog_pin,
+                execution_catalog_pin = ?startup.execution_catalog_pin,
+                program_release_pin = ?startup.program_release_pin,
+                producer_closure_proof_pin = ?startup.producer_closure_proof_pin,
+                request_owned_relation_limits_pin = ?startup.request_owned_relation_limits_pin,
+                resource_policy_pin = ?startup.resource_policy_pin,
+                runtime_configuration = %startup.runtime_configuration,
+                schema_authority = %startup.schema_authority,
+                relation_count = startup.relation_count,
+                table_versions = ?startup.table_versions,
+                "programmatic workspace composition admitted"
+            );
+            claims.push(WorkspaceClaim {
+                workspace_id: workspace
+                    .public_workspace_id()
+                    .map_err(|error| DaemonError::Admin(error.to_string()))?,
+                repository_id: None,
+                worktree_id: None,
+                workspace_kind: "programmatic".to_owned(),
+                readiness: WorkspaceReadiness::Ready as i32,
+                permission_claims: vec!["query".to_owned()],
+            });
+        }
+        let cutover_configured = ProductionForwardCutoverController::open_if_configured(&config)
+            .map_err(|error| DaemonError::Config(error.to_string()))?
+            .is_some();
+        let backend = Arc::new(if cutover_configured || !composition.command_runtimes_ready() {
+            ProgrammaticSemanticQueryBackend::try_new_staged(&composition, ports)?
+        } else {
+            ProgrammaticSemanticQueryBackend::try_new(&composition, ports)?
+        });
+        let published_results = Arc::clone(backend.published_results());
+        serve_with_programmatic_query_backend(
+            config,
+            Arc::clone(&backend),
+            claims,
+            None,
+            published_results,
+            &composition,
+            Some(backend),
+        )
+        .await
+    }
+    .await;
+    let shutdown_result = composition.shutdown().await;
+    match (serve_result, shutdown_result) {
+        (Ok(mut exit), Ok(())) => {
+            exit.shutdown_steps.push("close-programmatic-composition");
+            Ok(exit)
+        }
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error.into()),
+        (Err(error), Err(cleanup)) => Err(DaemonError::Shutdown {
+            completed_steps: Vec::new(),
+            detail: format!("{error}; programmatic composition cleanup also failed: {cleanup}"),
+        }),
+    }
+}
+
+/// Serve an already-composed programmatic fabric without selecting any bootstrap/default path.
+///
+/// The supplied result registry must be the daemon-wide registry retained by the programmatic
+/// workspace factory and relational backend. Legacy workspace/model/ontology administrative
+/// ingress is rejected rather than being translated into an unregistered second mutation path.
+pub(crate) async fn serve_with_programmatic_query_backend<B: SemanticQueryBackend>(
+    config: DaemonConfig,
+    query_backend: Arc<B>,
+    additional_claims: Vec<WorkspaceClaim>,
+    query_allowed_uid_override: Option<u32>,
+    published_results: Arc<PublishedArrowResultRegistry>,
+    composition: &ProgrammaticDaemonComposition,
+    staged_backend: Option<Arc<ProgrammaticSemanticQueryBackend>>,
+) -> Result<DaemonExit, DaemonError> {
+    let public_bundle_versions = programmatic_public_bundle_versions(composition)?;
+    serve_query_transport(
         config,
-        Arc::new(WorkspaceQueryBackend::default()),
-        Vec::new(),
-        None,
+        query_backend,
+        additional_claims,
+        query_allowed_uid_override,
+        Some(published_results),
+        Some(composition),
+        public_bundle_versions,
+        staged_backend,
     )
     .await
 }
 
 #[allow(clippy::too_many_lines)] // The ordered lifecycle is kept visible as one joined sequence.
-pub(crate) async fn serve_with_query_backend(
+async fn serve_query_transport<B: SemanticQueryBackend>(
     config: DaemonConfig,
-    query_backend: Arc<WorkspaceQueryBackend>,
+    query_backend: Arc<B>,
     additional_claims: Vec<WorkspaceClaim>,
     query_allowed_uid_override: Option<u32>,
+    published_results: Option<Arc<PublishedArrowResultRegistry>>,
+    programmatic_composition: Option<&ProgrammaticDaemonComposition>,
+    public_bundle_versions: BTreeMap<String, String>,
+    staged_backend: Option<Arc<ProgrammaticSemanticQueryBackend>>,
 ) -> Result<DaemonExit, DaemonError> {
     config.validate()?;
     for root in [
@@ -1153,39 +856,28 @@ pub(crate) async fn serve_with_query_backend(
     ] {
         private_directory(root)?;
     }
-    let lease = DaemonLease::acquire(&config)?;
-    let operational_database = config
-        .static_config
-        .state_root
-        .join(&config.static_config.operational_database);
-    let operational_store = Arc::new(Mutex::new(open_operational_store_with_provider_recovery(
-        &operational_database,
-    )?));
-    let mut coordinators = WorkspaceCoordinatorManager::new(
-        Arc::clone(&operational_store),
-        config.static_config.state_root.clone(),
-    )?;
-    coordinators.restore_and_bootstrap().await?;
-    let workspaces = {
-        let mut store = operational_store.lock().await;
-        WorkspaceRegistry::new(&mut store).list()?
-    };
-    let mut claims = workspaces
-        .iter()
-        .filter(|workspace| workspace.status != WorkspaceRegistryLifecycle::Removed)
-        .map(|workspace| {
-            workspace_claim(workspace).map(|claim| (claim.workspace_id.clone(), claim))
-        })
-        .collect::<Result<BTreeMap<_, _>, _>>()?;
-    for claim in additional_claims {
-        claims.insert(claim.workspace_id.clone(), claim);
+    if public_bundle_versions.is_empty()
+        || public_bundle_versions
+            .iter()
+            .any(|(bundle, version)| bundle.trim().is_empty() || version.trim().is_empty())
+    {
+        return Err(DaemonError::Config(
+            "released discovery identities must be explicit and non-empty".to_owned(),
+        ));
     }
-    bootstrap_fabrics(
-        &config.static_config.state_root,
-        &operational_store,
-        &workspaces,
-    )
-    .await?;
+    let cutover_controller = ProductionForwardCutoverController::open_if_configured(&config)
+        .map_err(|error| DaemonError::Config(error.to_string()))?;
+    let lease = DaemonLease::acquire(&config)?;
+    let mut claims = BTreeMap::new();
+    for claim in additional_claims {
+        let workspace_id = claim.workspace_id.clone();
+        if claims.insert(workspace_id.clone(), claim).is_some() {
+            return Err(DaemonError::Config(format!(
+                "workspace claim {workspace_id} is duplicated"
+            )));
+        }
+    }
+    let admitted_workspace_count = claims.len();
     if config.static_config.socket_endpoint.exists() {
         fs::remove_file(&config.static_config.socket_endpoint).map_err(|source| {
             DaemonError::Io {
@@ -1225,8 +917,6 @@ pub(crate) async fn serve_with_query_backend(
     let query_token = query_capability_token(&config.static_config)?;
     let query_authorization = QueryAuthorization::new(&query_token, claims.into_values().collect())
         .map_err(|status| DaemonError::Config(status.to_string()))?;
-    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let coverage = core_source_v1_coverage(&current_released_corpus_root(repository_root)?)?;
     let result_root = config.static_config.state_root.join("query-results");
     let query_service = ProductionQueryService::new(
         query_backend,
@@ -1235,10 +925,13 @@ pub(crate) async fn serve_with_query_backend(
             source,
         })?,
         query_authorization,
-        crate::lifecycle::FreshnessBarrier::default(),
+        crate::freshness::FreshnessBarrier::default(),
         Duration::from_secs(2),
-    )
-    .with_core_source_coverage(coverage);
+    );
+    let query_service = match published_results {
+        Some(published_results) => query_service.with_published_results(published_results),
+        None => query_service,
+    };
     let (query_shutdown, query_shutdown_receiver) = oneshot::channel();
     let query_socket = config.static_config.query_socket_endpoint.clone();
     let query_allowed_uid = query_allowed_uid_override.unwrap_or(allowed_uid);
@@ -1264,17 +957,64 @@ pub(crate) async fn serve_with_query_backend(
             "query service did not bind its configured endpoint".to_owned(),
         ));
     }
-    lease.publish(&discovery(&config)?)?;
+    let mut published_discovery = discovery(&config, public_bundle_versions)?;
+    lease.publish(&published_discovery)?;
+    let startup_admission = async {
+        if let Some(composition) = programmatic_composition
+            && !composition.command_runtimes_ready()
+            && !composition.retry_pending_command_recovery().await?
+        {
+            return Err(DaemonError::Admin(
+                "programmatic command recovery remained pending after live endpoint readback"
+                    .to_owned(),
+            ));
+        }
+        if let Some(controller) = &cutover_controller {
+            let composition = programmatic_composition.ok_or_else(|| {
+                DaemonError::Config(
+                    "configured cutover requires the production programmatic composition"
+                        .to_owned(),
+                )
+            })?;
+            controller
+                .require_target_read_write(&config, composition)
+                .await
+                .map_err(|error| {
+                    DaemonError::Config(format!(
+                        "forward-cutover production admission failed closed: {error}"
+                    ))
+                })?;
+        }
+        if let Some(backend) = &staged_backend {
+            let composition = programmatic_composition.ok_or_else(|| {
+                DaemonError::Config(
+                    "staged query backend has no programmatic composition authority".to_owned(),
+                )
+            })?;
+            if !composition.command_runtimes_ready() {
+                return Err(DaemonError::Admin(
+                    "staged query backend cannot open before command recovery".to_owned(),
+                ));
+            }
+            backend.open_after_startup_authority();
+        }
+        published_discovery.basic_readiness = true;
+        lease.publish(&published_discovery)?;
+        Ok(())
+    }
+    .await;
+    if let Err(error) = startup_admission {
+        let _ = query_shutdown.send(());
+        let _ = query_task.await;
+        let _ = fs::remove_file(&config.static_config.socket_endpoint);
+        if config.static_config.query_socket_endpoint.exists() {
+            let _ = fs::remove_file(&config.static_config.query_socket_endpoint);
+        }
+        return Err(error);
+    }
     tracing::info!(lifecycle = "serve", "daemon administrative ingress opened");
 
-    let mut activation_tasks = tokio::task::JoinSet::new();
-    let mut activation_cancellations = Vec::new();
     let drained = loop {
-        while let Some(completed) = activation_tasks.try_join_next() {
-            if let Err(error) = completed {
-                tracing::warn!(error = %error, "activation request task failed");
-            }
-        }
         let (mut stream, _) = listener
             .accept()
             .await
@@ -1290,59 +1030,91 @@ pub(crate) async fn serve_with_query_backend(
             AdminEnvelope::Daemon(request) => {
                 let shutdown_mode = match request.command {
                     AdminCommand::Status => None,
+                    AdminCommand::CutoverStatus => None,
                     AdminCommand::Stop => Some("stop".to_owned()),
                     AdminCommand::Drain => Some("drain".to_owned()),
                 };
-                let (workspace_readiness, workspace_health) =
-                    health_response(&operational_store).await?;
+                let workspace_readiness = if admitted_workspace_count == 0 {
+                    "NO_WORKSPACES_READY"
+                } else {
+                    "WORKSPACES_READY"
+                }
+                .to_owned();
+                let (accepted, workspace_readiness, cutover_status, error_code) = if request.command
+                    == AdminCommand::CutoverStatus
+                {
+                    match (&cutover_controller, programmatic_composition) {
+                        (Some(controller), Some(composition)) => {
+                            match controller.operator_statuses(&config, composition).await {
+                                Ok(statuses) => {
+                                    let accepted = statuses.iter().all(|status| {
+                                        status.status.admission == CutoverAdmission::TargetReadWrite
+                                    });
+                                    let error_code =
+                                        (!accepted).then(|| "CUTOVER_ADMISSION_CLOSED".to_owned());
+                                    (
+                                        accepted,
+                                        if accepted {
+                                            "CUTOVER_TARGET_READ_WRITE"
+                                        } else {
+                                            "CUTOVER_ADMISSION_CLOSED"
+                                        }
+                                        .to_owned(),
+                                        Some(cutover_admin_statuses(statuses)),
+                                        error_code,
+                                    )
+                                }
+                                Err(error) => {
+                                    tracing::warn!(%error, "cutover status observation failed closed");
+                                    (
+                                        false,
+                                        "CUTOVER_OBSERVATION_FAILED".to_owned(),
+                                        None,
+                                        Some("CUTOVER_OBSERVATION_FAILED".to_owned()),
+                                    )
+                                }
+                            }
+                        }
+                        _ => (
+                            false,
+                            "CUTOVER_DEPLOYMENT_NOT_CONFIGURED".to_owned(),
+                            None,
+                            Some("CUTOVER_DEPLOYMENT_NOT_CONFIGURED".to_owned()),
+                        ),
+                    }
+                } else {
+                    (true, workspace_readiness, None, None)
+                };
                 (
                     AdminResponse {
-                        accepted: true,
+                        accepted,
                         daemon_liveness: "LIVE".to_owned(),
                         workspace_readiness,
                         shutdown_mode: shutdown_mode.clone(),
                         workspaces: Vec::new(),
-                        workspace_health,
-                        error_code: None,
+                        workspace_health: Vec::new(),
+                        cutover_status,
+                        error_code,
                     },
                     shutdown_mode,
                 )
             }
-            AdminEnvelope::Workspace(WorkspaceAdminCommand::ActivateCandidate {
-                workspace_id,
-                submission,
-                administrative_key,
-                request_key,
-            }) => {
-                let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
-                activation_cancellations.push(cancellation.clone());
-                activation_tasks.spawn(serve_activation_request(
-                    stream,
-                    Arc::clone(&operational_store),
-                    workspace_id,
-                    *submission,
-                    administrative_key,
-                    request_key,
-                    cancellation,
-                ));
-                continue;
-            }
-            AdminEnvelope::Workspace(command) => (
-                execute_workspace_command(
-                    &operational_store,
-                    &mut coordinators,
-                    &config.static_config.state_root,
-                    command,
-                )
-                .await,
+            AdminEnvelope::Workspace(_) => (
+                AdminResponse {
+                    accepted: false,
+                    daemon_liveness: "LIVE".to_owned(),
+                    workspace_readiness: "UNCHANGED".to_owned(),
+                    shutdown_mode: None,
+                    workspaces: Vec::new(),
+                    workspace_health: Vec::new(),
+                    cutover_status: None,
+                    error_code: Some("PROGRAMMATIC_COMMAND_INGRESS_REQUIRED".to_owned()),
+                },
                 None,
             ),
         };
         write_response(&mut stream, &response).await?;
         if let Some(mode) = shutdown_mode {
-            for cancellation in &activation_cancellations {
-                cancellation.cancel();
-            }
             break mode == "drain";
         }
     };
@@ -1354,9 +1126,23 @@ pub(crate) async fn serve_with_query_backend(
         Ok::<(), std::convert::Infallible>(()),
     )?;
     drop(listener);
-    for cancellation in &activation_cancellations {
-        cancellation.cancel();
-    }
+    let initial_programmatic_admission_result =
+        programmatic_composition.map_or(Ok(()), |composition| {
+            composition
+                .close_query_admission()
+                .map_err(|error| error.to_string())
+        });
+    let programmatic_command_result = match programmatic_composition {
+        Some(composition) => {
+            let result = composition
+                .shutdown_commands()
+                .await
+                .map_err(|error| error.to_string());
+            steps.push("drain-programmatic-commands");
+            result
+        }
+        None => Ok(()),
+    };
     let _ = query_shutdown.send(());
     record_shutdown_step(
         &mut steps,
@@ -1367,28 +1153,28 @@ pub(crate) async fn serve_with_query_backend(
         .await
         .map_err(|error| error.to_string())
         .and_then(|result| result.map_err(|error| error.to_string()));
-    let coordinator_result = coordinators
-        .shutdown_all()
-        .await
-        .map_err(|error| error.to_string());
-    let mut activation_result = Ok(());
-    while let Some(result) = activation_tasks.join_next().await {
-        if let Err(error) = result {
-            activation_result = Err(error.to_string());
-        }
-    }
+    // A command may already own the activation barrier when shutdown begins. Joining the command
+    // actor before retrying admission closure lets its commit/readback path settle the exact head.
+    let programmatic_admission_result = match initial_programmatic_admission_result {
+        Ok(()) => Ok(()),
+        Err(initial) => programmatic_composition.map_or(Err(initial.clone()), |composition| {
+            composition.close_query_admission().map_err(|retry| {
+                format!("initial admission close failed: {initial}; retry failed: {retry}")
+            })
+        }),
+    };
     record_shutdown_step(
         &mut steps,
         "await-workers",
-        query_result.and(coordinator_result).and(activation_result),
+        programmatic_admission_result
+            .and(programmatic_command_result)
+            .and(query_result),
     )?;
-    let durable_close = operational_store
-        .lock()
-        .await
-        .checkpoint()
-        .map_err(|error| error.to_string());
-    record_shutdown_step(&mut steps, "close-durable-stores", durable_close)?;
-    drop(operational_store);
+    record_shutdown_step(
+        &mut steps,
+        "close-durable-stores",
+        Ok::<(), std::convert::Infallible>(()),
+    )?;
     let retire_endpoints = fs::remove_file(&config.static_config.socket_endpoint).and_then(|()| {
         if config.static_config.query_socket_endpoint.exists() {
             fs::remove_file(&config.static_config.query_socket_endpoint)
@@ -1493,44 +1279,47 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::registries::FreshnessState;
 
-    #[tokio::test]
-    async fn ontology_activation_owner_disconnect_cancels_before_response() {
-        let (mut server, client) = UnixStream::pair().expect("admin stream pair");
-        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
-        let observed = cancellation.clone();
-        let activation = async move {
-            while !observed.is_cancelled() {
-                tokio::task::yield_now().await;
+    struct TestQueryBackend;
+
+    #[async_trait::async_trait]
+    impl SemanticQueryBackend for TestQueryBackend {
+        fn validate_execution_request(
+            &self,
+            _request: &crate::semantic_query_contract::ParsedSemanticRequest,
+        ) -> Result<(), crate::semantic_query_contract::SemanticQueryError> {
+            Ok(())
+        }
+
+        async fn execute(
+            &self,
+            _request: crate::semantic_query_contract::ParsedSemanticRequest,
+            _freshness: FreshnessState,
+            _cancellation: crate::cancellation::Cancellation,
+            _context: crate::query_service::SemanticBackendExecutionContext,
+            artifacts: crate::fabric::QueryExecutionArtifactAccumulator,
+        ) -> crate::query_service::SemanticBackendOutcome {
+            artifacts.set_failure("test_backend");
+            crate::query_service::SemanticBackendOutcome::Failed {
+                error: crate::semantic_query_contract::SemanticQueryError::Invalid(
+                    "test backend has no workspace".to_owned(),
+                ),
+                evidence: artifacts.snapshot(),
             }
-            internal_admin_response()
-        };
-        drop(client);
-        assert!(
-            await_owned_activation(&mut server, &cancellation, activation)
-                .await
-                .is_none()
-        );
-        assert!(cancellation.is_cancelled());
-    }
+        }
 
-    #[tokio::test]
-    async fn ontology_activation_task_drop_cancels_owned_proof() {
-        let (mut server, _client) = UnixStream::pair().expect("admin stream pair");
-        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
-        let task_cancellation = cancellation.clone();
-        let task = tokio::spawn(async move {
-            await_owned_activation(
-                &mut server,
-                &task_cancellation,
-                std::future::pending::<AdminResponse>(),
-            )
-            .await
-        });
-        tokio::task::yield_now().await;
-        task.abort();
-        let _ = task.await;
-        assert!(cancellation.is_cancelled());
+        async fn public_snapshot(
+            &self,
+            _workspace_id: &str,
+        ) -> Result<
+            crate::semantic_query_contract::SemanticSnapshotResponse,
+            crate::semantic_query_contract::SemanticQueryError,
+        > {
+            Err(crate::semantic_query_contract::SemanticQueryError::Invalid(
+                "test backend has no workspace".to_owned(),
+            ))
+        }
     }
 
     #[test]
@@ -1555,53 +1344,6 @@ mod tests {
         assert_eq!(completed, ["stop-admission", "drain-queries"]);
     }
 
-    #[test]
-    fn provider_run_daemon_startup_recovery() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("operational.sqlite");
-        let mut store = OperationalStore::open(&path).unwrap();
-        for (byte, state) in [
-            (0x31, crate::registries::ProviderRunState::Queued),
-            (0x32, crate::registries::ProviderRunState::Running),
-        ] {
-            store
-                .record_provider_run(&crate::operational_store::ProviderRunRecord {
-                    provider_run_id: vec![byte; 16],
-                    workspace_id: vec![0x33; 16],
-                    analysis_context_id: vec![0x34; 16],
-                    wave_id: vec![0x35; 16],
-                    provider_code: 40,
-                    owner_id: None,
-                    build_unit_id: None,
-                    source_generation: 1,
-                    input_fingerprint: vec![byte; 32],
-                    output_fingerprint: None,
-                    sandbox_profile_digest: Some(format!("b3:{}", "36".repeat(32))),
-                    state_code: i64::from(state as u16),
-                    accepted_at: "1".into(),
-                    terminal_at: None,
-                    diagnostic_id: None,
-                })
-                .unwrap();
-        }
-        drop(store);
-
-        let recovered = open_operational_store_with_provider_recovery(&path).unwrap();
-        let non_terminal = recovered
-            .reader_factory()
-            .open()
-            .unwrap()
-            .with_connection(|connection| {
-                connection.query_row(
-                    "SELECT COUNT(*) FROM provider_run WHERE terminal_at IS NULL",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
-            })
-            .unwrap();
-        assert_eq!(non_terminal, 0);
-    }
-
     fn config(root: &Path) -> DaemonConfig {
         private_directory(&root.join("config")).unwrap();
         let token = root.join("config/query.capability");
@@ -1617,10 +1359,6 @@ mod tests {
                 query_socket_endpoint: root.join("runtime/query.sock"),
                 query_capability_token_file: PathBuf::from("query.capability"),
                 operational_database: PathBuf::from("operational.sqlite3"),
-                bundle_index: PathBuf::from(
-                    "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json",
-                ),
-                toolchain_identity: PathBuf::from("contracts/toolchain/toolchain-identity.json"),
                 sandbox_policy: "required-for-untrusted".to_owned(),
                 hard_limit_profile: "daemon-default-v1".to_owned(),
                 supported_platform_profile: "local-workstation-v1".to_owned(),
@@ -1632,6 +1370,13 @@ mod tests {
                 maintenance_schedule: "daily-idle".to_owned(),
             },
         }
+    }
+
+    fn released_wire_compatibility_versions() -> BTreeMap<String, String> {
+        BTreeMap::from([(
+            "codefabric.released-wire-compatibility".to_owned(),
+            "1.3".to_owned(),
+        )])
     }
 
     fn write_config(root: &Path, extra: &str) -> PathBuf {
@@ -1651,8 +1396,6 @@ socket_endpoint = {socket:?}
 query_socket_endpoint = {query_socket:?}
 query_capability_token_file = "query.capability"
 operational_database = "operational.sqlite3"
-bundle_index = "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/model_artifact_index.json"
-toolchain_identity = "contracts/toolchain/toolchain-identity.json"
 sandbox_policy = "required-for-untrusted"
 hard_limit_profile = "daemon-default-v1"
 supported_platform_profile = "local-workstation-v1"
@@ -1752,7 +1495,7 @@ maintenance_schedule = "daily-idle"
             Err(DaemonError::Config(_))
         ));
 
-        let discovery = discovery(&config).unwrap();
+        let discovery = discovery(&config, released_wire_compatibility_versions()).unwrap();
         let value = serde_json::to_value(&discovery).unwrap();
         let keys = value
             .as_object()
@@ -1793,7 +1536,15 @@ maintenance_schedule = "daily-idle"
         let root = tempfile::tempdir().unwrap();
         let config = config(root.path());
         let discovery_path = config.static_config.runtime_root.join("daemon.json");
-        let task = tokio::spawn(serve(config.clone()));
+        let task = tokio::spawn(serve_query_transport(
+            config.clone(),
+            Arc::new(TestQueryBackend),
+            Vec::new(),
+            None,
+            None,
+            None,
+            released_wire_compatibility_versions(),
+        ));
         wait_for_discovery(&discovery_path, Duration::from_secs(5))
             .await
             .unwrap();
@@ -1809,6 +1560,19 @@ maintenance_schedule = "daily-idle"
         assert_eq!(status.workspace_readiness, "NO_WORKSPACES_READY");
         assert!(status.accepted);
         assert!(status.shutdown_mode.is_none());
+        let legacy_mutation = administer_workspace(
+            &discovery_path,
+            WorkspaceAdminCommand::Add {
+                root: root.path().join("legacy-workspace"),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!legacy_mutation.accepted);
+        assert_eq!(
+            legacy_mutation.error_code.as_deref(),
+            Some("PROGRAMMATIC_COMMAND_INGRESS_REQUIRED")
+        );
 
         let drained = administer(&discovery_path, AdminCommand::Drain)
             .await
@@ -1833,7 +1597,15 @@ maintenance_schedule = "daily-idle"
         let root = tempfile::tempdir().unwrap();
         let config = config(root.path());
         let discovery_path = config.static_config.runtime_root.join("daemon.json");
-        let task = tokio::spawn(serve(config));
+        let task = tokio::spawn(serve_query_transport(
+            config,
+            Arc::new(TestQueryBackend),
+            Vec::new(),
+            None,
+            None,
+            None,
+            released_wire_compatibility_versions(),
+        ));
         wait_for_discovery(&discovery_path, Duration::from_secs(5))
             .await
             .unwrap();
@@ -1853,5 +1625,46 @@ maintenance_schedule = "daily-idle"
                 "release-singleton-lease",
             ]
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn wp41_prod_neg_cutover_status_admin_path_fails_closed_without_deployment() {
+        let root = tempfile::tempdir().unwrap();
+        let config = config(root.path());
+        let discovery_path = config.static_config.runtime_root.join("daemon.json");
+        let task = tokio::spawn(serve_query_transport(
+            config,
+            Arc::new(TestQueryBackend),
+            Vec::new(),
+            None,
+            None,
+            None,
+            released_wire_compatibility_versions(),
+        ));
+        wait_for_discovery(&discovery_path, Duration::from_secs(5))
+            .await
+            .unwrap();
+        let status = administer(&discovery_path, AdminCommand::CutoverStatus)
+            .await
+            .unwrap();
+        assert!(!status.accepted);
+        assert_eq!(
+            status.error_code.as_deref(),
+            Some("CUTOVER_DEPLOYMENT_NOT_CONFIGURED")
+        );
+        assert!(status.cutover_status.is_none());
+        administer(&discovery_path, AdminCommand::Stop)
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn production_serve_requires_programmatic_composition() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            serve(config(root.path())).await,
+            Err(DaemonError::ProgrammaticCompositionRequired)
+        ));
     }
 }

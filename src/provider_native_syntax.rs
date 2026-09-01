@@ -48,7 +48,6 @@ const RUFF_PROVIDER_RELEASE: &str =
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SyntaxProviderRunPin {
     pub provider_run_id: [u8; 16],
-    pub model_epoch_id: [u8; 32],
     pub analysis_context_id: [u8; 32],
     pub semantic_environment_id: [u8; 32],
 }
@@ -240,7 +239,7 @@ impl ProviderNativeSyntaxRun {
 pub enum ProviderNativeSyntaxError {
     #[error("source image is not an exact valid Python source image: {0}")]
     InvalidSource(&'static str),
-    #[error("Tree-sitter and Ruff runs do not share one model epoch and analysis context")]
+    #[error("Tree-sitter and Ruff runs do not share one analysis context and semantic environment")]
     MixedRunContext,
     #[error("provider snapshot does not match the immutable source image: {0}")]
     SnapshotMismatch(&'static str),
@@ -342,8 +341,7 @@ fn semantic_result(
 }
 
 fn validate_run_pins(pins: PythonSyntaxRunPins) -> Result<(), ProviderNativeSyntaxError> {
-    if pins.tree_sitter.model_epoch_id != pins.ruff.model_epoch_id
-        || pins.tree_sitter.analysis_context_id != pins.ruff.analysis_context_id
+    if pins.tree_sitter.analysis_context_id != pins.ruff.analysis_context_id
         || pins.tree_sitter.semantic_environment_id != pins.ruff.semantic_environment_id
     {
         return Err(ProviderNativeSyntaxError::MixedRunContext);
@@ -1002,7 +1000,7 @@ fn ruff_token_batch(pin: RelationPin<'_>, ruff: &RuffSnapshot) -> Result<RecordB
             Arc::new(UInt16Array::from_iter_values(
                 rows.iter().map(|row| row.raw_kind_id),
             )),
-            utf8(rows, |row| Some(row.raw_kind)),
+            utf8(rows, |row| Some(row.raw_kind.as_str())),
             utf8(rows, |row| Some(ruff_token_class(row.class))),
             Arc::new(UInt64Array::from_iter_values(
                 rows.iter().map(|row| row.start_byte),
@@ -1301,7 +1299,7 @@ fn ruff_ast_batch(pin: RelationPin<'_>, ruff: &RuffSnapshot) -> Result<RecordBat
             Arc::new(UInt16Array::from_iter_values(
                 rows.iter().map(|row| row.raw_kind_id),
             )),
-            utf8(rows, |row| Some(row.raw_kind)),
+            utf8(rows, |row| Some(row.raw_kind.as_str())),
             utf8(rows, |row| Some(ruff_ast_category(row.category))),
             utf8(rows, |row| row.child_role.map(ruff_child_role)),
             Arc::new(UInt64Array::from_iter_values(
@@ -1929,12 +1927,6 @@ fn common_fields() -> Vec<Field> {
             "provider-release",
         ),
         typed_field(
-            "model_epoch_id",
-            DataType::FixedSizeBinary(32),
-            false,
-            "model-epoch-id",
-        ),
-        typed_field(
             "analysis_context_id",
             DataType::FixedSizeBinary(32),
             false,
@@ -1973,7 +1965,6 @@ fn common_columns(pin: RelationPin<'_>, row_count: usize) -> Vec<ArrayRef> {
             pin.provider_release,
             row_count,
         ))),
-        fixed32_repeat(&pin.run.model_epoch_id, row_count),
         fixed32_repeat(&pin.run.analysis_context_id, row_count),
         fixed32_repeat(&pin.run.semantic_environment_id, row_count),
         fixed16_repeat(&pin.source.file_id, row_count),
@@ -1988,7 +1979,10 @@ fn common_columns(pin: RelationPin<'_>, row_count: usize) -> Vec<ArrayRef> {
 fn typed_field(name: &str, data_type: DataType, nullable: bool, meaning: &str) -> Field {
     Field::new(name, data_type, nullable).with_metadata(HashMap::from([
         ("codefabric.meaning".to_owned(), meaning.to_owned()),
-        ("codefabric.semantic_payload".to_owned(), "typed".to_owned()),
+        (
+            "codefabric.semantic_representation".to_owned(),
+            "typed-arrow-field".to_owned(),
+        ),
     ]))
 }
 
@@ -2284,13 +2278,11 @@ mod tests {
         PythonSyntaxRunPins {
             tree_sitter: SyntaxProviderRunPin {
                 provider_run_id: [10; 16],
-                model_epoch_id: [11; 32],
                 analysis_context_id: [12; 32],
                 semantic_environment_id: [13; 32],
             },
             ruff: SyntaxProviderRunPin {
                 provider_run_id: [20; 16],
-                model_epoch_id: [11; 32],
                 analysis_context_id: [12; 32],
                 semantic_environment_id: [13; 32],
             },
@@ -2329,6 +2321,10 @@ mod tests {
             assert!(batch.column_by_name("provider_run_id").is_some());
             assert!(batch.column_by_name("file_id").is_some());
             assert!(batch.column_by_name("content_digest").is_some());
+            assert!(
+                batch.column_by_name("model_epoch_id").is_none(),
+                "provider-native observations must not claim predecessor model authority"
+            );
             assert!(batch.schema().fields().iter().all(|field| !matches!(
                 field.data_type(),
                 DataType::Binary | DataType::LargeBinary

@@ -5,35 +5,22 @@ set -euo pipefail
 umask 077
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
-required_version="0.17.0"
+# shellcheck source=../tooling/rust-tool-versions.env
+source "$repo_root/tooling/rust-tool-versions.env"
+# shellcheck source=sccache-paths.sh
+source "$repo_root/scripts/sccache-paths.sh"
+required_version="$SCCACHE_VERSION"
 cache_size_bytes="42949672960"
 service_label="com.codefabric.sccache"
 configuration_changed=0
-
-case "$(uname -s)" in
-  Darwin)
-    socket_dir="/private/tmp/codefabric-sccache"
-    cache_dir="$HOME/Library/Caches/CodeFabric/sccache"
-    config_dir="$HOME/Library/Application Support/CodeFabric/sccache"
-    config_file="$config_dir/config"
-    service_file="$HOME/Library/LaunchAgents/${service_label}.plist"
-    log_dir="$HOME/Library/Logs/CodeFabric"
-    ;;
-  Linux)
-    socket_dir="/tmp/codefabric-sccache"
-    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/codefabric/sccache"
-    config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/codefabric/sccache"
-    config_file="$config_dir/config"
-    service_file="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/${service_label}.service"
-    log_dir="${XDG_STATE_HOME:-$HOME/.local/state}/codefabric"
-    ;;
-  *)
-    printf 'CodeFabric sccache service supports macOS and Linux.\n' >&2
-    exit 1
-    ;;
-esac
-
-socket_file="$socket_dir/server.sock"
+socket_dir="$CF_SCCACHE_SOCKET_DIR"
+socket_file="$CF_SCCACHE_SOCKET_FILE"
+cache_dir="$CF_SCCACHE_CACHE_DIR"
+config_dir="$CF_SCCACHE_CONFIG_DIR"
+config_file="$CF_SCCACHE_CONFIG_FILE"
+service_file="$CF_SCCACHE_SERVICE_FILE"
+log_dir="$CF_SCCACHE_LOG_DIR"
+entrypoint="$repo_root/scripts/sccache-service-entrypoint.sh"
 
 sccache_bin="$(command -v sccache || true)"
 rustup_bin="$HOME/.cargo/bin/rustup"
@@ -56,11 +43,53 @@ require_tools() {
     printf 'rustup is missing\n' >&2
     exit 1
   fi
+  command -v jq >/dev/null 2>&1 || { printf 'jq is missing\n' >&2; exit 1; }
 }
 
 prepare_directories() {
   mkdir -p "$socket_dir" "$cache_dir" "$config_dir" "$log_dir" "$(dirname "$service_file")"
   chmod 700 "$socket_dir" "$cache_dir" "$config_dir" "$log_dir"
+}
+
+validate_socket_directory() {
+  local owner_id
+  if [ "$(uname -s)" = Darwin ]; then
+    owner_id="$(stat -f '%u' "$socket_dir")"
+  else
+    owner_id="$(stat -c '%u' "$socket_dir")"
+  fi
+  [ "$owner_id" = "$(id -u)" ] || {
+    printf 'refusing socket directory owned by uid %s: %s\n' "$owner_id" "$socket_dir" >&2
+    exit 1
+  }
+
+  if [ -L "$socket_file" ]; then
+    # Recover from a stale or previous symlink endpoint. Stop the exact managed unit
+    # before replacing only that link with the allowlisted socket itself.
+    if [ "$(uname -s)" = Darwin ]; then
+      launchctl bootout "gui/$(id -u)" "$service_file" >/dev/null 2>&1 || true
+    else
+      systemctl --user stop "$service_label" >/dev/null 2>&1 || true
+    fi
+    unlink "$socket_file"
+  elif [ -e "$socket_file" ] && [ ! -S "$socket_file" ]; then
+    printf 'refusing to replace non-socket sccache endpoint: %s\n' "$socket_file" >&2
+    exit 1
+  fi
+}
+
+acquire_setup_lock() {
+  local attempt
+  setup_lock="$config_dir/.setup-lock"
+  for attempt in $(seq 1 100); do
+    if mkdir "$setup_lock" 2>/dev/null; then
+      trap 'rmdir "$setup_lock" 2>/dev/null || true' EXIT HUP INT TERM
+      return 0
+    fi
+    sleep 0.1
+  done
+  printf 'another CodeFabric sccache setup is active: %s\n' "$setup_lock" >&2
+  exit 1
 }
 
 toml_escape() {
@@ -101,8 +130,9 @@ xml_escape() {
 
 write_launch_agent() {
   local temporary_service="${service_file}.tmp.$$"
-  local escaped_bin escaped_socket escaped_config escaped_stdout escaped_stderr
+  local escaped_bin escaped_entrypoint escaped_socket escaped_config escaped_stdout escaped_stderr
   escaped_bin="$(xml_escape "$sccache_bin")"
+  escaped_entrypoint="$(xml_escape "$entrypoint")"
   escaped_socket="$(xml_escape "$socket_file")"
   escaped_config="$(xml_escape "$config_file")"
   escaped_stdout="$(xml_escape "$log_dir/sccache.stdout.log")"
@@ -112,7 +142,8 @@ write_launch_agent() {
     printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
     printf '%s\n' '<plist version="1.0"><dict>'
     printf '  <key>Label</key><string>%s</string>\n' "$service_label"
-    printf '  <key>ProgramArguments</key><array><string>%s</string></array>\n' "$escaped_bin"
+    printf '  <key>ProgramArguments</key><array><string>%s</string><string>%s</string><string>%s</string></array>\n' \
+      "$escaped_entrypoint" "$escaped_bin" "$escaped_socket"
     printf '%s\n' '  <key>EnvironmentVariables</key><dict>'
     printf '%s\n' '    <key>SCCACHE_START_SERVER</key><string>1</string>'
     printf '%s\n' '    <key>SCCACHE_NO_DAEMON</key><string>1</string>'
@@ -133,14 +164,14 @@ write_launch_agent() {
   replace_if_changed "$temporary_service" "$service_file"
 }
 
-write_systemd_user_service() {
-  local temporary_service="${service_file}.tmp.$$"
+emit_systemd_user_service() {
   {
     printf '%s\n' '[Unit]'
     printf '%s\n' 'Description=CodeFabric sccache service'
-    printf '%s\n' 'After=default.target'
     printf '\n[Service]\n'
-    printf 'ExecStart=%s\n' "$sccache_bin"
+    printf '%s\n' 'Type=simple'
+    printf '%s\n' 'UMask=0077'
+    printf 'ExecStart=%s %s %s\n' "$entrypoint" "$sccache_bin" "$socket_file"
     printf 'Environment=SCCACHE_START_SERVER=1\n'
     printf 'Environment=SCCACHE_NO_DAEMON=1\n'
     printf 'Environment=SCCACHE_IDLE_TIMEOUT=0\n'
@@ -148,20 +179,38 @@ write_systemd_user_service() {
     printf 'Environment="SCCACHE_CONF=%s"\n' "$config_file"
     printf '%s\n' 'Restart=on-failure' 'RestartSec=2'
     printf '\n[Install]\nWantedBy=default.target\n'
-  } >"$temporary_service"
+  }
+}
+
+write_systemd_user_service() {
+  local temporary_service="${service_file}.tmp.$$"
+  emit_systemd_user_service >"$temporary_service"
   chmod 600 "$temporary_service"
   replace_if_changed "$temporary_service" "$service_file"
+}
+
+validate_installed_service_definition() {
+  [ -f "$service_file" ] || {
+    printf 'sccache is not provisioned: missing service definition %s\n' "$service_file" >&2
+    return 1
+  }
+
+  if [ "$(uname -s)" = Linux ] && ! cmp -s "$service_file" <(emit_systemd_user_service); then
+    printf 'installed sccache service definition does not match the repository contract: %s\n' \
+      "$service_file" >&2
+    printf 'Run `just setup-sccache` from a host user session to migrate it atomically.\n' >&2
+    return 1
+  fi
 }
 
 restart_service() {
   if [ "$(uname -s)" = Darwin ]; then
     launchctl bootout "gui/$(id -u)" "$service_file" >/dev/null 2>&1 || true
-    [ ! -S "$socket_file" ] || unlink "$socket_file"
     launchctl bootstrap "gui/$(id -u)" "$service_file"
     launchctl kickstart -k "gui/$(id -u)/$service_label"
   else
     systemctl --user daemon-reload
-    systemctl --user enable --now "$service_label"
+    systemctl --user enable "$service_label"
     systemctl --user restart "$service_label"
   fi
 
@@ -183,12 +232,60 @@ stats_json() {
   service_env "$sccache_bin" --show-adv-stats --stats-format json
 }
 
+check_cargo_probe_cache() {
+  local cargo_probe_cache="${1:-$repo_root/target/.rustc_info.json}"
+  [ -f "$cargo_probe_cache" ] || return 0
+
+  # Cargo caches both successful and failed compiler-discovery output. The outer
+  # rustc fingerprint follows compiler/wrapper identity, not the mutable health of the
+  # supervised sccache endpoint, so a repaired service does not invalidate an earlier
+  # wrapper failure. Invalid JSON is not treated as poison because Cargo discards an
+  # unreadable cache itself; only a well-formed cached sccache failure is actionable.
+  if jq -e '
+    [
+      (.outputs // {})[]?
+      | select(.success == false)
+      | ((.stdout // "") + "\n" + (.stderr // ""))
+      | select(test("sccache|sccache-wrapper\\.sh"; "i"))
+    ]
+    | any
+  ' "$cargo_probe_cache" >/dev/null 2>&1; then
+    printf 'Cargo cached a failed sccache compiler probe in %s.\n' "$cargo_probe_cache" >&2
+    printf 'Remove only this generated probe cache, then retry:\n' >&2
+    printf '  rm -- %q\n' "$cargo_probe_cache" >&2
+    printf 'Do not run `cargo clean`; no other Cargo artifacts need removal.\n' >&2
+    return 1
+  fi
+}
+
 doctor() {
   require_tools
-  [ -f "$config_file" ] || { printf 'missing sccache config: %s\n' "$config_file" >&2; exit 1; }
-  [ -S "$socket_file" ] || { printf 'missing sccache socket: %s\n' "$socket_file" >&2; exit 1; }
+  [ -f "$config_file" ] || {
+    printf 'sccache is not provisioned: missing config %s\n' "$config_file" >&2
+    printf 'Run `just setup-sccache` from a host user session with access to the service manager.\n' >&2
+    exit 1
+  }
+  validate_installed_service_definition || exit 1
+  [ -S "$socket_file" ] || {
+    printf 'sccache service is not running: missing socket %s\n' "$socket_file" >&2
+    printf 'Run `just setup-sccache` from a host user session; if already installed, run `just sccache-restart`.\n' >&2
+    exit 1
+  }
+  [ ! -L "$socket_file" ] || {
+    printf 'sccache has an unsupported symlink endpoint at %s\n' "$socket_file" >&2
+    printf 'Run `just setup-sccache` once from a host user session.\n' >&2
+    exit 1
+  }
   grep -Fxq 'client_side_mode = true' "$config_file" || {
     printf 'sccache client-side default is not configured\n' >&2
+    exit 1
+  }
+  grep -Fxq "dir = \"$(toml_escape "$cache_dir")\"" "$config_file" || {
+    printf 'sccache cache directory contract drifted: expected %s\n' "$cache_dir" >&2
+    exit 1
+  }
+  grep -Fxq "size = $cache_size_bytes" "$config_file" || {
+    printf 'sccache configured cache size drifted: expected %s\n' "$cache_size_bytes" >&2
     exit 1
   }
   if grep -Eq '^basedirs[[:space:]]*=' "$config_file"; then
@@ -202,29 +299,36 @@ doctor() {
   max_size="$(printf '%s' "$stats" | jq -r '.max_cache_size')"
   errors="$(printf '%s' "$stats" | jq '([.stats.cache_errors.counts[]?] | add // 0) + (.stats.cache_read_errors // 0) + (.stats.cache_write_errors // 0)')"
   timeouts="$(printf '%s' "$stats" | jq -r '.stats.cache_timeouts')"
+  [ "$max_size" = "$cache_size_bytes" ] || {
+    printf 'sccache cache-size contract drifted: expected %s, found %s\n' \
+      "$cache_size_bytes" "$max_size" >&2; exit 1;
+  }
   percent=$(( cache_size * 100 / max_size ))
   capacity_state="within-limit"
   if [ "$percent" -ge 95 ]; then
     capacity_state="bounded-lru-near-limit"
   fi
 
-  [ "$(printf '%s' "$stats" | jq -r '.version')" = "$required_version" ]
-  [ "$max_size" = "$cache_size_bytes" ]
-  [ "$(printf '%s' "$stats" | jq -r '.basedirs | length')" -eq 0 ]
+  [ "$(printf '%s' "$stats" | jq -r '.version')" = "$required_version" ] || {
+    printf 'running sccache server is not version %s\n' "$required_version" >&2; exit 1;
+  }
+  [ "$(printf '%s' "$stats" | jq -r '.basedirs | length')" -eq 0 ] || {
+    printf 'sccache basedirs must remain empty for Rust 0.17.0\n' >&2; exit 1;
+  }
 
   printf 'sccache %s healthy: UDS=%s cache=%s%% (%s) client-side=default historical-errors=%s timeouts=%s\n' \
     "$required_version" "$socket_file" "$percent" "$capacity_state" "$errors" "$timeouts"
 }
 
 canary() {
-  require_tools
-  [ -S "$socket_file" ] || { printf 'run `just setup-sccache` first\n' >&2; exit 1; }
+  doctor >/dev/null
+  check_cargo_probe_cache
   local before after hit_delta error_delta timeout_delta rustc_bin output_root
   before="$(stats_json | jq -r '.stats.cache_hits.counts.Rust // 0')"
   local errors_before timeouts_before errors_after timeouts_after
   errors_before="$(stats_json | jq '([.stats.cache_errors.counts[]?] | add // 0) + (.stats.cache_read_errors // 0) + (.stats.cache_write_errors // 0)')"
   timeouts_before="$(stats_json | jq -r '.stats.cache_timeouts // 0')"
-  rustc_bin="$($rustup_bin which rustc --toolchain stable)"
+  rustc_bin="$($rustup_bin which rustc --toolchain "$CODEFABRIC_STABLE_TOOLCHAIN")"
   output_root="$repo_root/target/agent/sccache-canary"
   mkdir -p "$output_root/one" "$output_root/two"
   "$repo_root/scripts/sccache-wrapper.sh" "$rustc_bin" \
@@ -254,12 +358,14 @@ canary() {
 }
 
 install_service() {
-  local initial_install=0
+  local initial_install=0 should_canary=0
   if [ ! -f "$config_file" ] || [ ! -f "$service_file" ]; then
     initial_install=1
   fi
   require_tools
   prepare_directories
+  acquire_setup_lock
+  validate_socket_directory
   configuration_changed=0
   write_config
   if [ "$(uname -s)" = Darwin ]; then
@@ -268,10 +374,11 @@ install_service() {
     write_systemd_user_service
   fi
   if [ "$configuration_changed" -ne 0 ] || ! doctor >/dev/null 2>&1; then
+    should_canary=1
     restart_service
   fi
   doctor
-  if [ "$initial_install" -ne 0 ]; then
+  if [ "$initial_install" -ne 0 ] || [ "$should_canary" -ne 0 ]; then
     canary
   fi
 }
@@ -279,18 +386,23 @@ install_service() {
 case "${1:-}" in
   install | setup) install_service ;;
   refresh) install_service ;;
-  restart) require_tools; prepare_directories; restart_service; doctor ;;
+  restart) require_tools; prepare_directories; acquire_setup_lock; validate_socket_directory; restart_service; doctor ;;
   doctor) doctor ;;
   canary) canary ;;
   stats) service_env "$sccache_bin" --show-adv-stats ;;
   stats-json) stats_json ;;
   zero-stats) service_env "$sccache_bin" --zero-stats ;;
+  cargo-probe-cache-check) check_cargo_probe_cache "${2:-}" ;;
+  render-systemd)
+    [ "$(uname -s)" = Linux ] || { printf 'render-systemd applies only to Linux\n' >&2; exit 64; }
+    emit_systemd_user_service
+    ;;
   paths)
     printf 'socket=%s\nconfig=%s\ncache=%s\nservice=%s\n' \
       "$socket_file" "$config_file" "$cache_dir" "$service_file"
     ;;
   *)
-    printf 'usage: %s {install|refresh|restart|doctor|canary|stats|stats-json|zero-stats|paths}\n' "$0" >&2
+    printf 'usage: %s {install|refresh|restart|doctor|canary|stats|stats-json|zero-stats|cargo-probe-cache-check|paths|render-systemd}\n' "$0" >&2
     exit 64
     ;;
 esac

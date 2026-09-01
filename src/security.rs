@@ -1,6 +1,6 @@
 //! Keyed security hashes, isolated from semantic identity and content integrity.
 
-pub use crate::model_generated::identity_recipes::SecurityMacDomain;
+pub use crate::identity_recipes::SecurityMacDomain;
 
 /// A keyed BLAKE3 MAC-like construction for local bearer material.
 ///

@@ -39,15 +39,6 @@ pub enum PythonCfgKind {
 }
 
 impl PythonCfgKind {
-    pub(crate) const fn code(self) -> i16 {
-        match self {
-            Self::Module => 10,
-            Self::Function => 20,
-            Self::AsyncFunction => 30,
-            Self::Lambda => 40,
-        }
-    }
-
     const fn identity_discriminator(self) -> u8 {
         match self {
             Self::Module => 10,
@@ -76,23 +67,6 @@ pub enum PythonCfgNodeKind {
 }
 
 impl PythonCfgNodeKind {
-    pub(crate) const fn code(self) -> i16 {
-        match self {
-            Self::Entry => 10,
-            Self::Exit => 20,
-            Self::BasicBlock => 30,
-            Self::ExpressionOperation => 40,
-            Self::StatementOperation => 50,
-            Self::Branch => 60,
-            Self::Switch => 70,
-            Self::LoopHeader => 80,
-            Self::ReturnPoint => 90,
-            Self::ExceptionalExit => 100,
-            Self::SuspendPoint => 110,
-            Self::ResumePoint => 120,
-        }
-    }
-
     const fn terminal(self) -> bool {
         matches!(self, Self::Exit | Self::ExceptionalExit)
     }
@@ -3159,49 +3133,6 @@ values = [f(x) for x in source() if predicate(x)]
                 edge.target_node_id == header && edge.kind == PythonCfgEdgeKind::LoopBack
             }));
         }
-        #[cfg(feature = "daemon")]
-        {
-            let projection = crate::python_semantic::project_ruff_semantic_batch(
-                crate::fact_ingest::FactScope {
-                    workspace_id: [1; 16],
-                    analysis_context_id: [2; 16],
-                    source_generation: 7,
-                    owner_id: [3; 16],
-                },
-                [4; 16],
-                &batch,
-            )
-            .expect("canonical CFG projection");
-            assert_eq!(
-                projection.batch(280).expect("cfg_graph").batch().num_rows(),
-                batch.cfgs.len()
-            );
-            assert_eq!(
-                projection
-                    .batch(290)
-                    .expect("cfg_node_detail")
-                    .batch()
-                    .num_rows(),
-                batch.cfg_nodes.len()
-            );
-            assert_eq!(
-                projection
-                    .batch(300)
-                    .expect("cfg_edge_detail")
-                    .batch()
-                    .num_rows(),
-                batch.cfg_edges.len()
-            );
-            let relation_batch = projection.batch(110).expect("relation").batch();
-            let relation_codes = relation_batch
-                .column_by_name("relation_kind_code")
-                .expect("relation kind column")
-                .as_any()
-                .downcast_ref::<arrow::array::Int32Array>()
-                .expect("int32 relation kinds");
-            assert!(relation_codes.values().contains(&480));
-            assert!(relation_codes.values().iter().all(|code| *code != 70));
-        }
     }
 
     #[test]
@@ -3211,32 +3142,6 @@ values = [f(x) for x in source() if predicate(x)]
             validate_python_cfg(cfg, &batch.cfg_nodes, &batch.cfg_edges).expect("valid CFG facts");
         }
         assert!(batch.cfg_nodes.iter().all(|node| node.ordinal >= 0));
-        #[cfg(feature = "daemon")]
-        {
-            let projection = crate::python_semantic::project_ruff_semantic_batch(
-                crate::fact_ingest::FactScope {
-                    workspace_id: [5; 16],
-                    analysis_context_id: [6; 16],
-                    source_generation: 8,
-                    owner_id: [7; 16],
-                },
-                [8; 16],
-                &batch,
-            )
-            .expect("canonical CFG projection");
-            for table_code in [280, 290, 300] {
-                assert!(
-                    projection
-                        .batch(table_code)
-                        .expect("CFG table")
-                        .batch()
-                        .schema()
-                        .fields()
-                        .iter()
-                        .all(|field| !field.name().contains("node_index"))
-                );
-            }
-        }
     }
 
     #[test]

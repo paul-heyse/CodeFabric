@@ -1,4 +1,4 @@
-//! Persisted AC-G-09/10 workspace registrations driven by generated lifecycle tables.
+//! Persisted AC-G-09/10 workspace registrations driven by application-owned lifecycle tables.
 
 use std::fs;
 use std::os::unix::ffi::OsStrExt as _;
@@ -19,9 +19,9 @@ use crate::identity::{
 };
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 use crate::registries::{
-    EventStreamHealth, GitAccelerationStatus, SnapshotLeaseState, SourceTrustState,
+    EventStreamHealth, GitAccelerationStatus, SourceTrustState,
     WORKSPACE_REGISTRY_LIFECYCLE_TRANSITIONS, WORKSPACE_REGISTRY_LIFECYCLE_VALUES,
-    WorkspaceLifecycle, WorkspaceRegistryLifecycle, generated_transition, registry_state_name,
+    WorkspaceLifecycle, WorkspaceRegistryLifecycle, operational_transition, registry_state_name,
 };
 
 const DEFAULT_DISCLOSURE_RULES: [&str; 1] = ["metadata"];
@@ -59,7 +59,7 @@ pub enum RelinkProof {
     },
 }
 
-/// Persisted workspace registration projected from the generated operational schema.
+/// Persisted workspace registration projected from the operational schema.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceRecord {
@@ -208,8 +208,6 @@ pub enum WorkspaceRegistryError {
     RelinkProof,
     #[error("purge requires two explicit confirmations")]
     PurgeConfirmation,
-    #[error("workspace has active snapshot or result-artifact leases")]
-    ActiveLease,
     #[error("workspace record has invalid persisted data: {0}")]
     Persisted(String),
 }
@@ -258,28 +256,6 @@ impl<'store> WorkspaceRegistry<'store> {
                 workspace: random_registration_nonce()?,
                 repository: random_registration_nonce()?,
                 worktree: random_registration_nonce()?,
-            },
-        )
-    }
-
-    /// Register a deterministic directory identity for executable compatibility fixtures.
-    ///
-    /// Production registration always uses [`Self::add`] and fresh entropy. This narrow seam is
-    /// compiled only for tests and the compatibility-probe profile so immutable golden outputs
-    /// can pin application identities without depending on process randomness.
-    #[cfg(any(test, feature = "compatibility-probes"))]
-    pub(crate) fn add_directory_fixture(
-        &mut self,
-        root: &Path,
-        workspace_nonce: [u8; 16],
-    ) -> Result<WorkspaceRecord, WorkspaceRegistryError> {
-        self.add_with_nonces(
-            root,
-            WorkspaceSourceRegistration::Directory,
-            RegistrationNonces {
-                workspace: workspace_nonce,
-                repository: [0; 16],
-                worktree: [0; 16],
             },
         )
     }
@@ -385,11 +361,11 @@ impl<'store> WorkspaceRegistry<'store> {
                 params![workspace.id.as_slice(), nonces.workspace.as_slice(), &administrative_key, &authorized.bytes, &authorized.display, &authorized.file_identity, authorized.platform_code, &authorized.case_mode, &disclosure_bytes, repository_id.as_ref().map(<[u8; 16]>::as_slice), worktree_id.as_ref().map(<[u8; 16]>::as_slice), authorization_fingerprint.as_slice(), context_fingerprint.as_slice(), WorkspaceRegistryLifecycle::Registering as u16, &now],
             )?;
             transaction.execute(
-                "INSERT INTO workspace_generation(workspace_id, source_generation, admitted_event_sequence, reconciled_event_sequence, durable_generation, active_pointer_generation, updated_at) VALUES (?1, 0, 0, 0, 0, 0, ?2)",
+                "INSERT INTO workspace_generation(workspace_id, source_generation, admitted_event_sequence, reconciled_event_sequence, durable_generation, updated_at) VALUES (?1, 0, 0, 0, 0, ?2)",
                 params![workspace.id.as_slice(), &now],
             )?;
             transaction.execute(
-                "INSERT INTO worktree_state(workspace_id, worktree_id, repository_id, work_dir_path_bytes, work_dir_path_display, git_dir_path_bytes, git_dir_path_display, lifecycle_state_code, source_trust_state_code, event_stream_health_code, git_acceleration_status_code, active_snapshot_id, analysis_context_set_id, source_generation, event_watermark, newest_dirty_generation, durable_generation, reconcile_required, updated_at, last_diagnostic_id) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, ?7, ?8, ?9, NULL, ?10, 0, 0, 0, 0, 0, ?11, NULL)",
+                "INSERT INTO worktree_state(workspace_id, worktree_id, repository_id, work_dir_path_bytes, work_dir_path_display, git_dir_path_bytes, git_dir_path_display, lifecycle_state_code, source_trust_state_code, event_stream_health_code, git_acceleration_status_code, analysis_context_set_id, source_generation, event_watermark, newest_dirty_generation, durable_generation, reconcile_required, updated_at, last_diagnostic_id) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, ?7, ?8, ?9, ?10, 0, 0, 0, 0, 0, ?11, NULL)",
                 params![workspace.id.as_slice(), worktree_id.as_ref().map(<[u8; 16]>::as_slice), repository_id.as_ref().map(<[u8; 16]>::as_slice), &authorized.bytes, &authorized.display, WorkspaceLifecycle::Bootstrapping as u16, SourceTrustState::Unverified as u16, EventStreamHealth::Healthy as u16, if worktree_id.is_some() { GitAccelerationStatus::GitScanning as u16 } else { GitAccelerationStatus::NotAGitWorktree as u16 }, context_set_id.as_slice(), &now],
             )?;
             transition_workspace(
@@ -450,11 +426,11 @@ impl<'store> WorkspaceRegistry<'store> {
             .ok_or_else(|| WorkspaceRegistryError::NotFound(public_workspace_id(workspace_id)))
     }
 
-    /// Enable a disabled registration through generated OPENING into BOOTSTRAPPING.
+    /// Enable a disabled registration through the registered OPENING state into BOOTSTRAPPING.
     ///
     /// # Errors
     ///
-    /// Returns a generated transition or store error.
+    /// Returns an operational transition or store error.
     pub fn enable(
         &mut self,
         workspace_id: [u8; 16],
@@ -486,7 +462,7 @@ impl<'store> WorkspaceRegistry<'store> {
     ///
     /// # Errors
     ///
-    /// Returns a generated transition or store error.
+    /// Returns an operational transition or store error.
     pub fn disable(
         &mut self,
         workspace_id: [u8; 16],
@@ -625,11 +601,11 @@ impl<'store> WorkspaceRegistry<'store> {
         })
     }
 
-    /// Retire a disabled/failed registration, optionally purging unleased operational data.
+    /// Retire a disabled/failed registration, optionally purging operational data.
     ///
     /// # Errors
     ///
-    /// Returns a confirmation, lease, transition, not-found, or store error.
+    /// Returns a confirmation, transition, not-found, or store error.
     pub fn remove(
         &mut self,
         workspace_id: [u8; 16],
@@ -641,9 +617,6 @@ impl<'store> WorkspaceRegistry<'store> {
         }
         let now = timestamp()?;
         self.store.write_transaction(|transaction| {
-            if policy == RemovalPolicy::PurgeData && active_lease_count(transaction, workspace_id)? != 0 {
-                return Err(WorkspaceRegistryError::ActiveLease);
-            }
             transition_workspace(transaction, workspace_id, "remove", "no-active-leases", &now)?;
             if policy == RemovalPolicy::PurgeData {
                 purge_workspace_operational_data(transaction, workspace_id)?;
@@ -763,7 +736,7 @@ fn transition_workspace(
         .ok_or_else(|| WorkspaceRegistryError::NotFound(public_workspace_id(workspace_id)))?;
     let prior_state = registry_state_name(WORKSPACE_REGISTRY_LIFECYCLE_VALUES, status_code)
         .ok_or_else(|| WorkspaceRegistryError::Persisted("unknown workspace status code".into()))?;
-    let transition = generated_transition(
+    let transition = operational_transition(
         WORKSPACE_REGISTRY_LIFECYCLE_TRANSITIONS,
         prior_state,
         event,
@@ -981,23 +954,6 @@ fn strict_descendant(parent: &[u8], child: &[u8]) -> Option<Vec<u8>> {
         .map(ToOwned::to_owned)
 }
 
-fn active_lease_count(
-    transaction: &Transaction<'_>,
-    workspace_id: [u8; 16],
-) -> Result<i64, WorkspaceRegistryError> {
-    Ok(transaction.query_row(
-        "SELECT COUNT(*) FROM snapshot_lease
-         WHERE workspace_id=?1 AND state_code IN (?2, ?3, ?4)",
-        params![
-            workspace_id.as_slice(),
-            SnapshotLeaseState::Active as u16,
-            SnapshotLeaseState::Releasing as u16,
-            SnapshotLeaseState::Orphaned as u16,
-        ],
-        |row| row.get(0),
-    )?)
-}
-
 fn purge_workspace_operational_data(
     transaction: &Transaction<'_>,
     workspace_id: [u8; 16],
@@ -1008,9 +964,6 @@ fn purge_workspace_operational_data(
         "provider_run",
         "update_wave_item",
         "update_wave",
-        "hot_overlay_manifest",
-        "serving_snapshot_manifest",
-        "active_snapshot",
         "worktree_state",
         "workspace_generation",
         "credential_metadata",
@@ -1135,7 +1088,7 @@ mod tests {
             let record = registry.enable(record.workspace_id).unwrap();
             assert_eq!(record.status, WorkspaceRegistryLifecycle::Bootstrapping);
             assert!(
-                generated_transition(
+                operational_transition(
                     WORKSPACE_REGISTRY_LIFECYCLE_TRANSITIONS,
                     "BOOTSTRAPPING",
                     "not-a-valid-snapshot-event",
@@ -1144,7 +1097,7 @@ mod tests {
                 .is_err()
             );
             assert_eq!(
-                generated_transition(
+                operational_transition(
                     WORKSPACE_REGISTRY_LIFECYCLE_TRANSITIONS,
                     "BOOTSTRAPPING",
                     "first-snapshot-active",
@@ -1169,44 +1122,6 @@ mod tests {
             registry.remove(workspace_id, RemovalPolicy::PurgeData, 1),
             Err(WorkspaceRegistryError::PurgeConfirmation)
         ));
-        registry
-            .store
-            .write_transaction(|transaction| {
-                transaction.execute(
-                    "INSERT INTO snapshot_lease(
-                       lease_id, lease_kind_code, workspace_id, snapshot_id,
-                       base_publication_id, required_delta_versions_bytes,
-                       requires_overlay, agent_instance_id, created_at,
-                       last_heartbeat_at, expires_at, state_code,
-                       process_instance_id, orphaned_at, artifact_expires_at,
-                       source_blob_lease_id
-                     ) VALUES (?1, 10, ?2, ?3, ?4, X'7b7d', 0, NULL,
-                               1, 1, 300, 10, ?5, NULL, NULL, NULL)",
-                    params![
-                        [0x81_u8; 16].as_slice(),
-                        workspace_id.as_slice(),
-                        [0x82_u8; 16].as_slice(),
-                        [0x83_u8; 16].as_slice(),
-                        [0x84_u8; 16].as_slice()
-                    ],
-                )?;
-                Ok::<(), WorkspaceRegistryError>(())
-            })
-            .unwrap();
-        assert!(matches!(
-            registry.remove(workspace_id, RemovalPolicy::PurgeData, 2),
-            Err(WorkspaceRegistryError::ActiveLease)
-        ));
-        registry
-            .store
-            .write_transaction(|transaction| {
-                transaction.execute(
-                    "DELETE FROM snapshot_lease WHERE workspace_id=?1",
-                    [workspace_id.as_slice()],
-                )?;
-                Ok::<(), WorkspaceRegistryError>(())
-            })
-            .unwrap();
         let removed = registry
             .remove(workspace_id, RemovalPolicy::PurgeData, 2)
             .unwrap();
@@ -1426,7 +1341,7 @@ mod tests {
 
         for transition in WORKSPACE_REGISTRY_LIFECYCLE_TRANSITIONS {
             assert_eq!(
-                generated_transition(
+                operational_transition(
                     WORKSPACE_REGISTRY_LIFECYCLE_TRANSITIONS,
                     transition.from,
                     transition.event,

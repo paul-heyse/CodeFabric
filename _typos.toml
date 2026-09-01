@@ -60,7 +60,3 @@ WRONLY = "WRONLY"
 # gix-dir names its byte-native repository-relative path field `rela_path`.
 # This is a pinned upstream public API identifier and cannot be renamed locally.
 rela = "rela"
-
-# `odf_*` is the accepted executable-oracle namespace for the ontology-compiled data-fabric
-# program. It is a stable plan/test identifier prefix, not prose or a misspelling of "of".
-odf = "odf"

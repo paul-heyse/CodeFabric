@@ -10,14 +10,15 @@ ignores:
   - src/daemon.rs
   - src/identity.rs
   - src/operational_store.rs
-  # These modules read authored functional authorities and candidate artifacts,
-  # never live workspace source.
-  - src/functional_scenario.rs
-  - src/gate_b_candidate/functional_candidate.rs
-  # The ontology program store reads only generated package artifacts below its private root.
-  - src/ontology_program.rs
   - src/contracts/**/*.rs
-  - src/bin/codefabric_model/**/*.rs
+  # These modules inspect daemon-owned table state, never live workspace source.
+  - src/fabric/delta_commit_reconciliation.rs
+  - src/fabric/delta_semantic_read.rs
+  - src/fabric/delta_write.rs
+  # Host-containment probes and private compiler artifacts are operational inputs,
+  # not source-authority reads.
+  - src/provider_sandbox.rs
+  - src/rust_compilation_trust.rs
 rule:
   all:
     - any:
@@ -36,15 +37,6 @@ rule:
     - not:
         inside:
           any:
-            # The golden corpus is an owner-accepted contract input, never workspace source.
-            - pattern: 'fn read($PATH: &Path) -> Result<Vec<u8>, CorpusError> { $$$BODY }'
-            # A Gate B candidate reads governed contract inputs and review artifacts, never
-            # workspace source; scenario workspace bytes still flow through secure_path.
-            - pattern: 'fn read_candidate_input($PATH: &Path) -> Result<Vec<u8>, GateBCandidateError> { $$$BODY }'
-            # The functional golden is an authored contract authority, not a live workspace.
-            - pattern: 'fn read_functional_authority_input($PATH: &Path) -> Result<Vec<u8>, FunctionalGoldenError> { $$$BODY }'
-            # Authored Gate B anchors are contract authorities, not workspace input.
-            - pattern: 'fn authored_call_range($CONTRACT: &crate::functional_golden::FunctionalGoldenContract, $SOURCE: &str, $ANCHOR: &str, $CALL: &str) -> Result<(u64, u64, u64, u64), GateBCandidateError> { $$$BODY }'
             # Provider launchers receive only securely captured, content-addressed source blobs.
             - pattern: 'fn read_immutable_blob($INPUT: &PyreflyModuleInput) -> Result<AdmittedImmutableBlob, PyreflyServiceError> { $$$BODY }'
             # Provider views read back daemon-owned immutable copies and manifests after

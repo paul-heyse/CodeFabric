@@ -618,14 +618,15 @@ mod tests {
     };
     use crate::fabric::command::{
         ActorId, AdmissionContext, AuthorizationDecision, AuthorizationRef, CommandEvent,
-        CommandIdentity, CommandOwnership, CommandPins, CommandReducer, CompilerReleaseRef,
-        DiagnosticRef, EpochId, ExpectedHead, FabricCommand, FabricCommandPayload, FailureClass,
-        FailureCode, IdempotencyKey, LeaseId, ModelHeadRef, OperationId, OperationSelectionRef,
-        PrincipalId, ProofReceiptRef, ProviderSetRef, ResourceEnvelopeRef, RetentionPolicyRef,
-        SourceGeneration, UnknownCommitReason, WorkspaceId, WriterFence, WriterGeneration,
+        CommandIdentity, CommandOwnership, CommandPins, CommandReducer, DiagnosticRef, EpochId,
+        ExpectedHead, FabricCommand, FabricCommandPayload, FailureClass, FailureCode,
+        IdempotencyKey, InputReleaseRef, LeaseId, OperationId, OperationSelectionRef, PrincipalId,
+        ProgramReleaseRef, ProofReceiptRef, ProviderSetRef, ResourceEnvelopeRef,
+        RetentionPolicyRef, SourceGeneration, UnknownCommitReason, WorkspaceId, WriterFence,
+        WriterGeneration,
     };
     use crate::fabric::delta_exact::ExactDeltaPin;
-    use crate::fabric::epoch::FabricEpochRuntimeConfig;
+    use crate::fabric::epoch_runtime::FabricEpochRuntimeConfig;
     use crate::fabric::programmatic_epoch::{
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
@@ -693,8 +694,17 @@ mod tests {
             expected_head: ExpectedHead::Empty,
             writer_fence,
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes(id32(seed.wrapping_add(7))),
-                model_head: ModelHeadRef::from_bytes(id32(seed.wrapping_add(8))),
+                input_release: InputReleaseRef::from_bytes(id32(seed.wrapping_add(7))),
+                program_release: ProgramReleaseRef::from_bytes(id32(seed.wrapping_add(8))),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    id32(seed.wrapping_add(8)),
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(id32(
+                    seed.wrapping_add(8),
+                )),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(id32(
+                    seed.wrapping_add(8),
+                )),
                 source_generation: SourceGeneration::new(u64::from(seed) + 9),
                 provider_set: ProviderSetRef::from_bytes(id32(seed.wrapping_add(10))),
             },
@@ -706,8 +716,11 @@ mod tests {
         };
         let pins = FabricEpochPins {
             epoch: epoch_id,
-            compiler_release: command.pins.compiler_release,
-            model_head: command.pins.model_head,
+            input_release: command.pins.input_release,
+            program_release: command.pins.program_release,
+            application_release: command.pins.application_release,
+            source_authority: command.pins.source_authority,
+            provider_release: command.pins.provider_release,
             source_generation: command.pins.source_generation,
             provider_set: command.pins.provider_set,
             table_versions: candidate.observation_publication().table_version_set_ref(),

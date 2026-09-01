@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_execution_proved_relational_data_fabric_design_v3_2026-08-30.md",
   "baseline_commit": "db67f7cbbd1ce96e7d7a98a790a0a5ef246fbc34",
   "status": "executing",
-  "current_packet": "WP29",
+  "current_packet": "WP33",
   "packets": {
     "WP28": {
       "status": "invalidated",
@@ -25,187 +25,248 @@
       ],
       "failed_approaches": [],
       "blockers": [
-        "Production programmatic workspace composition, concrete daemon routing, and focused lifecycle proof are not yet complete."
+        "A trusted proving commit is not recorded."
       ]
     },
     "WP30": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP31": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP32": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP33": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
-      "failed_approaches": [],
-      "blockers": []
+      "failed_approaches": [
+        "The accepted expectation issuance was frozen before the installed successor producer authority reached its current shape and cannot remain acceptance authority without reissuance and independent review."
+      ],
+      "blockers": [
+        "Claims 001, 003, 005, 007, 010, 011, 012, 013, 015, and 016 require reissuance and a new independent review after their identities are frozen.",
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP34": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP33 expectation authority is not yet trusted for downstream closure.",
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP35": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP33 expectation authority is not yet trusted for downstream closure.",
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP36": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP37": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP38": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Production-bound evidence remains incomplete and cannot be admitted until the corrected WP33 issuance receives an independent review.",
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP39": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "The post-purge package graph does not yet expose a coherent compatibility-probes feature boundary for the programmatic graph implementation.",
+        "WP38 remains incomplete.",
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP40": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "The release, security/resource, and clean-recovery evidence matrices require trusted WP38 evidence and WP39 package closure.",
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP41": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "The reconciliation barrier is incomplete and is not yet persistent admission authority.",
+        "Production supervisor observations, exact command and Delta bindings, boot identity proof, restart revocation, and the four named packet recipes remain to be completed.",
+        "A trusted proving commit is not recorded."
+      ]
     },
     "WP42": {
       "status": "not_started",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP41 is incomplete and the terminal certification recipes and trusted certification HEAD do not yet exist."
+      ]
     }
   },
   "milestones": {
     "M01": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The milestone's WP28 governance scope is excluded by the owner and must not be reported as completed."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "M02": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Its packet proving commits are not recorded."
+      ]
     },
     "M03": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Its packet proving commits are not recorded."
+      ]
     },
     "M04": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP33 expectation authority is not trusted and the milestone's proving commits are not recorded."
+      ]
     },
     "M05": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP38 evidence, WP39 package closure, and WP40 release evidence remain incomplete."
+      ]
     },
     "M06": {
       "status": "not_started",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP41 and WP42 are incomplete."
+      ]
     }
   },
   "decommission_batches": {
     "DB09": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "A trusted proving commit is not recorded."
+      ]
     },
     "DB10": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "A trusted proving commit is not recorded."
+      ]
     },
     "DB11": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "The owning WP32 and WP37 proving commits are not recorded."
+      ]
     },
     "DB12": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "WP33 and WP38 evidence authority remains incomplete, and a trusted proving commit is not recorded."
+      ]
     },
     "DB13": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "The post-purge package feature graph remains incoherent, and a trusted proving commit is not recorded."
+      ]
     },
     "DB14": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Persistent fencing, real supervisor and reboot proof, predecessor revocation, and final certification remain incomplete."
+      ]
     }
   },
   "baseline_failures": [],
@@ -213,9 +274,33 @@
     {
       "kind": "runtime_native_durability_classification",
       "summary": "Without WP28's standalone ledger, durable-versus-transient decisions must remain explicit in typed runtime contracts and executable tests: exact-version Delta histories and epoch-selected immutable Arrow segments carry proof-bearing state, while bounded DataFusion caches and execution buffers remain rebuildable non-authority."
+    },
+    {
+      "kind": "successor_expectation_reissuance",
+      "summary": "The WP33 expectation issuance must be regenerated and independently reviewed after changes to installed successor producer authority before downstream evidence can be admitted."
+    },
+    {
+      "kind": "programmatic_graph_feature_boundary",
+      "summary": "The compatibility-probes feature graph must explicitly enable the programmatic graph dependency or gate that implementation behind its owning feature."
+    },
+    {
+      "kind": "production_forward_cutover_authority",
+      "summary": "WP41 must bind persistent reconciliation, real production supervisor observations, boot and release identity, exact command and Delta authority, fencing, and restart revocation rather than test-only or boolean substitutes."
+    },
+    {
+      "kind": "sandbox_host_matrix_reconciliation",
+      "summary": "The host-containment oracle must stop referencing a deleted predecessor path and final certification must remain fail-closed until the required sandbox escape matrix is available."
+    },
+    {
+      "kind": "terminal_certification_surface",
+      "summary": "WP42's four named recipes and one-HEAD certification artifact must be implemented only after forward cutover is complete."
     }
   ],
   "plan_deviations": [
+    {
+      "kind": "owner_authorized_successor_native_oracle_reconciliation",
+      "summary": "The owner directed execution to treat stale packet pass conditions as oracle defects when they would undo beneficial successor architecture. Acceptance must prove the accepted design through current programmatic behavior; content digests remain only where they are genuine immutable identity or integrity contracts and may not replace executable semantic proof, frozen counts, or predecessor agreement."
+    },
     {
       "kind": "owner_waived_wp28_and_accounting_prerequisite",
       "summary": "The owner explicitly directed execution to ignore WP28 and prioritize the functioning programmatic DataFusion, Arrow, and Delta fabric over successor-ledger and legacy-comparison ceremony. WP28 is invalidated, not complete; its dependency edges are treated as removed for execution readiness, while the accepted design, exact APIs, runtime contracts, and first-principles tests remain binding."
@@ -225,6 +310,6 @@
       "summary": "The separately authored approved plan recorded a stale digest for its accepted design file. Activation rebound the declared digest to the current accepted design v3 bytes after confirming the plan and design describe the same programmatic-authority target; no design behavior or packet content was changed."
     }
   ],
-  "next_action": "Implement WP29 production composition directly from ProgrammaticFabricEpoch authority, then delete the bootstrap and dual-epoch production route under WP30.",
-  "updated_at": "2026-08-30T23:58:22Z"
+  "next_action": "Finish and format tooling/ci/reissue_wp33_r3.py; reissue Claims 001, 003, 005, 007, 010, 011, 012, 013, 015, and 016; obtain an independent review; then rerun all four WP33 acceptance recipes before resuming WP38 binding.",
+  "updated_at": "2026-08-31T21:42:48Z"
 }

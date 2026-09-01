@@ -30,7 +30,7 @@ def test_required_values_are_enforced() -> None:
 
 
 def test_environment_values_are_converted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CODEFABRIC_CPG_DAEMON_TARGET", "tcp://127.0.0.1:50051")
+    monkeypatch.setenv("CODEFABRIC_CPG_DAEMON_TARGET", "unix:///tmp/codefabric.sock")
     monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "workspace-main")
     monkeypatch.setenv("CODEFABRIC_AGENT_INSTANCE_ID", "agent-primary")
     monkeypatch.setenv("CODEFABRIC_CPG_CAPABILITY_TOKEN", "test-secret")
@@ -101,8 +101,12 @@ def test_numeric_ranges_are_enforced(field: str, value: object) -> None:
 
 
 def test_daemon_scheme_is_restricted() -> None:
-    with pytest.raises(ValidationError, match="must use unix:// or tcp://"):
+    with pytest.raises(ValidationError, match="must use unix:/// with an absolute socket path"):
         required_settings(daemon_target="https://example.invalid")
+    with pytest.raises(ValidationError, match="must use unix:/// with an absolute socket path"):
+        required_settings(daemon_target="tcp://127.0.0.1:50051")
+    with pytest.raises(ValidationError, match="must use unix:/// with an absolute socket path"):
+        required_settings(daemon_target="unix://relative.sock")
 
 
 def test_settings_are_frozen_and_secrets_are_redacted() -> None:

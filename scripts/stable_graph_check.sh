@@ -87,15 +87,11 @@ printf '%s' "$root_shape" | jq -e '
   and .rust_version == "1.95.0"
   and .crate_types == ["rlib"]
   and (.features | has("contracts-tooling") | not)
+  and (.features | has("model-compiler") | not)
+  and (.features | has("provider-inventory-tooling") | not)
+  and (.features | has("tempfile") | not)
   and .features["contract-models"] == ["canonical-json", "dep:serde_yaml_ng"]
-  and (.features["model-compiler"] | sort) == ([
-    "contract-models",
-    "dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema",
-    "dep:blake3", "dep:gix", "dep:notify-debouncer-full", "dep:petgraph",
-    "dep:rustix", "dep:serde", "dep:serde_json",
-    "dep:serde_json_canonicalizer", "dep:serde_yaml_ng", "dep:tempfile",
-    "dep:thiserror", "dep:toml"
-  ] | sort)
+  and (.features["data-fabric"] | index("dep:petgraph")) != null
   and (.features["fact-generation"] | sort) == ([
     "contract-models", "dep:blake3", "dep:petgraph", "dep:rayon", "dep:ruff_python_ast",
     "dep:ruff_python_index", "dep:ruff_python_parser", "dep:ruff_python_semantic", "dep:ruff_python_trivia",
@@ -106,6 +102,7 @@ printf '%s' "$root_shape" | jq -e '
     "contract-models", "dep:blake3", "dep:gix", "dep:rusqlite", "dep:rustix",
     "dep:thiserror", "dep:url"
   ] | sort)
+  and (.features["daemon"] | index("dep:petgraph")) == null
   and .features.default == ["local-workstation"]
 ' >/dev/null || fail "root package boundary drifted: $root_shape"
 rg -q '^resolver = "3"$' Cargo.toml || fail 'Cargo resolver 3 is not declared'
@@ -205,21 +202,14 @@ require_in_tree "$contract_tree" serde_yaml_ng 'contract-models graph'
 forbid_in_tree "$contract_tree" 'datafusion.*|deltalake.*|arrow.*|pyo3|tonic|rusqlite|gix|prost.*|tempfile' \
   'contract-models graph'
 
-model_tree="$(cargo_tree --no-default-features --features model-compiler)"
-for package in arrow-array arrow-ipc arrow-schema gix notify-debouncer-full petgraph rustix serde_yaml_ng tempfile; do
-  require_in_tree "$model_tree" "$package" 'model-compiler graph'
-done
-forbid_in_tree "$model_tree" 'datafusion.*|deltalake.*|arrow|pyo3|tonic|rusqlite|ruff_python_.*|tree-sitter.*|prost.*' \
-  'model-compiler graph'
-
 s3_tree="$(cargo_tree --no-default-features --features s3-storage)"
 require_in_tree "$s3_tree" deltalake-aws 's3-storage graph'
 require_in_tree "$s3_tree" aws-config 's3-storage graph'
 
 target_dir="$(printf '%s' "$metadata" | jq -r '.target_directory')"
-sidecar_target="$(cd pyrefly-sidecar && cargo metadata --format-version 1 --no-deps | jq -r '.target_directory')"
-extractor_target="$(cd rustc-extractor && cargo +nightly metadata --format-version 1 --no-deps | jq -r '.target_directory')"
+sidecar_target="$(cd pyrefly-sidecar && cargo metadata --locked --format-version 1 --no-deps | jq -r '.target_directory')"
+extractor_target="$(cd rustc-extractor && cargo +nightly-2026-08-18 metadata --locked --format-version 1 --no-deps | jq -r '.target_directory')"
 [ "$target_dir" = "$sidecar_target" ] || fail 'root and sidecar must share the repository target cache'
 [ "$target_dir" != "$extractor_target" ] || fail 'nightly extractor must use its isolated target cache'
 
-printf 'stable graph check passed: model compiler and contract models are narrow, production and S3 boundaries are explicit\n'
+printf 'stable graph check passed: retired model compiler is absent and contract, production, and S3 boundaries are explicit\n'

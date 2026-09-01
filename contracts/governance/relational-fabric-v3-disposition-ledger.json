@@ -1,0 +1,34 @@
+{
+  "artifact_id": "codefabric.governance.relational-fabric-v3-disposition-ledger",
+  "schema_version": 1,
+  "plan_path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v3_2026-08-30.md",
+  "covered_l_range": {
+    "first": 20,
+    "last": 55
+  },
+  "covered_db_range": {
+    "first": 9,
+    "last": 13
+  },
+  "history_exclusions": {
+    "retained_history_globs": [
+      "docs/designs/**",
+      "docs/plans/**",
+      "docs/reviews/**",
+      "docs/authoritative_design/*_v1.3.md",
+      "docs/authoritative_design/*_v2.0.md"
+    ],
+    "released_evidence_globs": [
+      "contracts/acceptance/released-artifact-census-v1.json"
+    ],
+    "non_executable_reference_globs": [
+      "docs/library_ref/**"
+    ]
+  },
+  "oracles": {
+    "integrity": "legacy-disposition-artifact-integrity-check",
+    "retained_behavior": "retained-target-post-purge-behavior-check",
+    "negative": "remaining-legacy-zero-state-check",
+    "package_operations": "post-purge-package-build-operations-check"
+  }
+}

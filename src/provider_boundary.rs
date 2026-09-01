@@ -197,7 +197,7 @@ pub struct ProviderBoundaryField {
     pub retention: RetentionPolicy,
 }
 
-/// Arrow relation and model-derived schema identity for one API family.
+/// Arrow relation and application-owned schema identity for one API family.
 #[derive(Clone, Debug)]
 pub struct ProviderArrowRelationContract {
     pub relation_id: RelationId,

@@ -100,7 +100,7 @@ fn parse_b3(value: &str) -> Result<[u8; 32], &'static str> {
         return Err("relation pin is not lowercase hexadecimal");
     }
     let mut output = [0_u8; 32];
-    for (index, bytes) in hexadecimal.as_bytes().chunks_exact(2).enumerate() {
+    for (index, bytes) in hexadecimal.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         output[index] = (hex_nibble(bytes[0]) << 4) | hex_nibble(bytes[1]);
     }
     Ok(output)

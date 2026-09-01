@@ -1,6 +1,6 @@
 //! Accepted gRPC query handles and immutable canonical result artifacts.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::future::Future;
 use std::io::{Read as _, Write as _};
@@ -8,8 +8,6 @@ use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
-#[cfg(test)]
-use std::sync::atomic::AtomicU8;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -17,30 +15,30 @@ use async_trait::async_trait;
 use futures::{Stream, stream};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::{Mutex, Notify, RwLock};
+use tokio::sync::{Mutex, Notify};
 use tonic::service::InterceptorLayer;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 use tracing::Instrument as _;
 
+use crate::fabric::arrow_result_resource::QueryExecutionPin;
+use crate::fabric::command::{LeaseId, PrincipalId, WorkspaceId};
 use crate::fabric::published_arrow_result::{
     OpaqueResultLeaseToken, PublishedArrowResultDescriptor, PublishedArrowResultRegistry,
     PublishedArtifactId, PublishedReleaseOutcome, PublishedResultAccess, PublishedResultOwner,
     PublishedResultReadRequest, PublishedResultRegistryError, PublishedResultResourceId,
 };
+use crate::fabric::relational_query_runtime::RelationalQueryPublication;
 use crate::fabric::{
-    FabricTable, QueryExecutionArtifactAccumulator, QueryExecutionArtifactEvidence,
-    QueryExecutionContext, QueryPlanArtifact, ServingQuerySession,
+    QueryExecutionArtifactAccumulator, QueryExecutionArtifactEvidence, QueryExecutionContext,
 };
-#[cfg(test)]
-use crate::fabric::{QueryArtifactStage, QueryArtifactStageState};
-use crate::golden_corpus::CoreSourceCoverage;
-use crate::identity::{SemanticFingerprintDomain, semantic_fingerprint};
+use crate::freshness::{FreshnessAdmission, FreshnessBarrier, FreshnessError, FreshnessState};
+use crate::identity::{
+    IdentityDomain, SemanticFingerprintDomain, decode_public_id, semantic_fingerprint,
+};
 use crate::integrity::{frame_digest, framed_digest};
-use crate::lifecycle::{FreshnessAdmission, FreshnessBarrier, FreshnessState};
 use crate::operational_store::{OperationalStore, QueryExecutionTerminalRecord};
 use crate::registries::CpgdFeatureMask;
-use crate::registries::QUERY_FORM_VALUES;
 use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_server::CpgQueryService;
 use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_server::CpgQueryServiceServer;
 use crate::rpc::generated::codefabric::cpgd::v1::query_event::Event;
@@ -48,7 +46,7 @@ use crate::rpc::generated::codefabric::cpgd::v1::{
     ArtifactReadyEvent, AttachQueryRequest, BundleIdentity, CancelQueryRequest,
     CancelQueryResponse, CancellationState, DeliveryPreference, EffectiveLimitsProfile,
     HandshakeRequest, HandshakeResponse, HostCapabilityProfile, PayloadCompression, QueryEvent,
-    QueryEventHeader, QueryExecutionState, QueryStatusSummary, ReadResultRequest, ReadinessSummary,
+    QueryEventHeader, QueryExecutionState, ReadResultRequest, ReadinessSummary,
     ReleaseResultRequest, ReleaseResultResponse, ResultChunk, SchemaFingerprint,
     SnapshotPinnedEvent, StartQueryRequest, StartQueryResponse, StatusRequest, StatusResponse,
     StreamQueryRequest, TerminalEvent, ValidateQueryRequest, ValidateQueryResponse, WorkspaceClaim,
@@ -58,19 +56,23 @@ use crate::rpc::{
     AuthorizedUnixStream, MAX_CONTROL_MESSAGE_BYTES, MAX_PAYLOAD_CHUNK_BYTES, SameUserInterceptor,
     negotiate_feature_bits,
 };
-use crate::security::{
-    KeyedAuthenticator, SecurityMacDomain, authenticator_hex, local_token_digest,
-};
-#[cfg(test)]
-use crate::semantic_query::ExecutedSemanticResponse;
-use crate::semantic_query::QueryForm;
-use crate::semantic_query::{
-    FreshnessPolicy, SemanticQueryError, SemanticSnapshotResponse, SemanticTerminalOutcome,
-    ValidatedSemanticRequest, execute_request_in_context, require_registered_executors,
-    snapshot_response, validate_request,
+use crate::security::{KeyedAuthenticator, SecurityMacDomain, local_token_digest};
+use crate::semantic_query_contract::QueryForm;
+use crate::semantic_query_contract::{
+    FreshnessPolicy, ParsedSemanticRequest, SemanticQueryError, SemanticSnapshotResponse,
+    parse_request,
 };
 
 const RESULT_LEASE_SECONDS: i64 = 1_800;
+const MAX_AGENT_INSTANCE_ID_BYTES: usize = 256;
+const PRINCIPAL_DERIVATION_DOMAIN: &[u8] = b"codefabric.query-principal.v1\0";
+const EXECUTION_PIN_DERIVATION_DOMAIN: &[u8] = b"codefabric.query-execution-pin.v1\0";
+const RESULT_LEASE_ID_DERIVATION_DOMAIN: &[u8] = b"codefabric.result-lease-id.v1\0";
+const ARROW_RESULT_TOKEN_CONTEXT: &[u8] = b"codefabric.published-arrow-result-token.v1\0";
+const PROGRAMMATIC_QUERY_CONTRACT_ID: &str = "codefabric.programmatic-query-contract";
+const PROGRAMMATIC_QUERY_CONTRACT_VERSION: &str = "programmatic-v1";
+const PROGRAMMATIC_QUERY_CONTRACT_DIGEST_DOMAIN: &[u8] =
+    b"codefabric.programmatic-query-contract.v1\0";
 const PUBLISHED_RESULT_DESCRIPTOR_MEDIA_TYPE: &str =
     "application/vnd.codefabric.arrow-result-package+json";
 
@@ -131,15 +133,6 @@ fn execution_identity(request: &StartQueryRequest, sequence: u64, accepted_at: i
     format!("execution:{}", &framed_digest(&input)[3..35])
 }
 
-#[derive(Clone, Debug)]
-struct ResultArtifact {
-    id: String,
-    checksum: String,
-    lease_token: String,
-    lease_expires_at_unix_ms: i64,
-    bytes: Arc<[u8]>,
-}
-
 /// Durable terminal phase of one query execution artifact bundle.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -158,49 +151,10 @@ pub struct PersistedQueryArtifactBundle {
     pub execution: QueryExecutionContext,
     pub phase: QueryArtifactPhase,
     pub evidence: QueryExecutionArtifactEvidence,
-    pub plan_artifacts: Vec<QueryPlanArtifact>,
     pub result_artifact_id: Option<String>,
     pub public_error_code: Option<String>,
     pub created_at_unix_ms: i64,
     pub expires_at_unix_ms: i64,
-}
-
-/// Bounded operator explanation joining one exact Delta commit to the executions that read it.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct VersionExplanation {
-    pub table_code: i16,
-    pub table_name: String,
-    pub delta_version: u64,
-    pub delta_commit_info: serde_json::Value,
-    pub executions: Vec<PersistedQueryArtifactBundle>,
-    pub scanned_artifact_count: usize,
-}
-
-/// Closed deterministic failure seams for terminal-artifact durability tests.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u8)]
-pub enum QueryArtifactFaultPoint {
-    ResultInsertion = 1,
-    PrimaryPayloadPersistence = 2,
-    TerminalJournalCommit = 3,
-}
-
-impl QueryArtifactFaultPoint {
-    pub const ALL: [Self; 3] = [
-        Self::ResultInsertion,
-        Self::PrimaryPayloadPersistence,
-        Self::TerminalJournalCommit,
-    ];
-
-    #[must_use]
-    pub const fn code(self) -> &'static str {
-        match self {
-            Self::ResultInsertion => "QUERY_RESULT_INSERTION",
-            Self::PrimaryPayloadPersistence => "QUERY_PRIMARY_PAYLOAD_PERSISTENCE",
-            Self::TerminalJournalCommit => "QUERY_TERMINAL_JOURNAL_COMMIT",
-        }
-    }
 }
 
 /// Restart reconciliation evidence for the terminal journal and its payload projections.
@@ -215,8 +169,6 @@ pub struct ResultArtifactStore {
     root: PathBuf,
     lease_secret: [u8; 32],
     terminal_journal: Arc<std::sync::Mutex<OperationalStore>>,
-    #[cfg(test)]
-    fault_point: Arc<AtomicU8>,
 }
 
 impl ResultArtifactStore {
@@ -237,24 +189,9 @@ impl ResultArtifactStore {
             root,
             lease_secret,
             terminal_journal: Arc::new(std::sync::Mutex::new(terminal_journal)),
-            #[cfg(test)]
-            fault_point: Arc::new(AtomicU8::new(0)),
         };
         store.reconcile_terminal_artifacts()?;
         Ok(store)
-    }
-
-    #[cfg(test)]
-    fn inject_fault(&self, fault_point: Option<QueryArtifactFaultPoint>) {
-        self.fault_point.store(
-            fault_point.map_or(0, |fault_point| fault_point as u8),
-            Ordering::Release,
-        );
-    }
-
-    #[cfg(test)]
-    fn fault_is(&self, fault_point: QueryArtifactFaultPoint) -> bool {
-        self.fault_point.load(Ordering::Acquire) == fault_point as u8
     }
 
     fn reconcile_terminal_artifacts(&self) -> Result<QueryArtifactRecoveryReport, std::io::Error> {
@@ -370,10 +307,6 @@ impl ResultArtifactStore {
         let bundle_checksum = framed_digest(&bytes);
         let final_path = self.query_artifact_path(&bundle_checksum);
         let primary = (|| -> Result<(), Status> {
-            #[cfg(test)]
-            if self.fault_is(QueryArtifactFaultPoint::PrimaryPayloadPersistence) {
-                return Err(Status::internal("injected primary query payload failure"));
-            }
             if final_path.exists() {
                 let existing = fs::read(&final_path)
                     .map_err(|_| Status::internal("query artifact read failed"))?;
@@ -451,12 +384,6 @@ impl ResultArtifactStore {
             created_at: persisted.created_at_unix_ms,
             expires_at: persisted.expires_at_unix_ms,
         };
-        #[cfg(test)]
-        if self.fault_is(QueryArtifactFaultPoint::TerminalJournalCommit) {
-            return Err(Status::unavailable(
-                "injected query terminal journal commit failure",
-            ));
-        }
         self.terminal_journal
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -552,149 +479,188 @@ impl ResultArtifactStore {
         }
         Ok(removed)
     }
-
-    /// Explain one committed table version from Delta history and retained query artifacts.
-    ///
-    /// The scan is bounded so the administrative/status path cannot become an unbounded query.
-    ///
-    /// # Errors
-    ///
-    /// Returns a gRPC status when the table/version is absent, history is unreadable, or the
-    /// retained artifact census exceeds the operator bound.
-    pub async fn explain_version(
-        &self,
-        table: &FabricTable,
-        delta_version: u64,
-    ) -> Result<VersionExplanation, Status> {
-        const MAX_EXPLAIN_ARTIFACTS: usize = 4_096;
-        let spec = crate::schema_registry::table_spec(table.table_code)
-            .ok_or_else(|| Status::not_found("table code is not registered"))?;
-        let mut historical = table.delta.clone();
-        historical
-            .load_version(delta_version)
-            .await
-            .map_err(|_| Status::not_found("Delta version is not available"))?;
-        let commit = historical
-            .history(Some(1))
-            .await
-            .map_err(|_| Status::internal("Delta history lookup failed"))?
-            .next()
-            .ok_or_else(|| Status::data_loss("Delta version has no commit-info action"))?;
-        let delta_commit_info = serde_json::to_value(commit)
-            .map_err(|_| Status::internal("Delta commit-info serialization failed"))?;
-
-        let records = self
-            .terminal_journal
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .query_execution_terminals(MAX_EXPLAIN_ARTIFACTS + 1)
-            .map_err(|_| Status::unavailable("query terminal journal census failed"))?;
-        if records.len() > MAX_EXPLAIN_ARTIFACTS {
-            return Err(Status::resource_exhausted(
-                "query artifact explanation scan exceeds the bounded census",
-            ));
-        }
-        let scanned_artifact_count = records.len();
-        let mut executions = Vec::new();
-        for record in records {
-            let table_versions: BTreeMap<u16, u64> =
-                serde_json::from_slice(&record.source_table_versions_bytes)
-                    .map_err(|_| Status::data_loss("query terminal table pins are malformed"))?;
-            if table_versions
-                .get(&u16::try_from(table.table_code).unwrap_or(u16::MAX))
-                .copied()
-                == Some(delta_version)
-            {
-                executions.push(self.read_query_artifact(&record.execution_id)?);
-            }
-        }
-        executions.sort_by(|left, right| {
-            left.execution
-                .execution_id
-                .cmp(&right.execution.execution_id)
-        });
-        Ok(VersionExplanation {
-            table_code: table.table_code,
-            table_name: spec.name.to_owned(),
-            delta_version,
-            delta_commit_info,
-            executions,
-            scanned_artifact_count,
-        })
-    }
-
-    fn insert(
-        &self,
-        bytes: Vec<u8>,
-        agent_id: &str,
-        workspace_id: &str,
-        snapshot_id: &str,
-    ) -> Result<ResultArtifact, Status> {
-        #[cfg(test)]
-        if self.fault_is(QueryArtifactFaultPoint::ResultInsertion) {
-            return Err(Status::internal("injected result insertion failure"));
-        }
-        let checksum = framed_digest(&bytes);
-        let mut identity = semantic_fingerprint(SemanticFingerprintDomain::ResultArtifact);
-        for field in [workspace_id, agent_id, snapshot_id, checksum.as_str()] {
-            identity.update(&(field.len() as u64).to_be_bytes());
-            identity.update(field.as_bytes());
-        }
-        let identity = identity.finalize();
-        let id = format!("result:{}", &frame_digest(identity)[3..35]);
-        let final_path = self.root.join(format!("{}.json", &checksum[3..]));
-        if final_path.exists() {
-            let existing = fs::read(&final_path)
-                .map_err(|_| Status::internal("result artifact read failed"))?;
-            if existing != bytes {
-                return Err(Status::data_loss("result artifact identity collision"));
-            }
-        } else {
-            let temporary =
-                self.root
-                    .join(format!(".{}.{}.tmp", &checksum[3..], std::process::id()));
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&temporary)
-                .map_err(|_| Status::internal("result staging failed"))?;
-            file.write_all(&bytes)
-                .and_then(|()| file.sync_all())
-                .map_err(|_| Status::internal("result staging write failed"))?;
-            fs::rename(&temporary, &final_path)
-                .map_err(|_| Status::internal("result artifact publication failed"))?;
-        }
-        let mut lease = KeyedAuthenticator::new(&self.lease_secret, SecurityMacDomain::ResultLease);
-        lease.update(id.as_bytes());
-        lease.update(agent_id.as_bytes());
-        lease.update(workspace_id.as_bytes());
-        let lease_token = format!("lease:{}", authenticator_hex(lease.finalize()));
-        Ok(ResultArtifact {
-            id,
-            checksum,
-            lease_token,
-            lease_expires_at_unix_ms: now_millis().saturating_add(RESULT_LEASE_SECONDS * 1_000),
-            bytes: bytes.into(),
-        })
-    }
 }
 
 #[async_trait]
 pub trait SemanticQueryBackend: Send + Sync + 'static {
+    /// Apply the execution-capability policy owned by this backend.
+    ///
+    /// The service supplies only a strictly decoded, canonical released envelope. The backend is
+    /// authoritative for semantic typing and whether the request has a complete executable
+    /// realization in its installed epoch/catalog; a generated predecessor registry is not
+    /// service authority.
+    fn validate_execution_request(
+        &self,
+        request: &ParsedSemanticRequest,
+    ) -> Result<(), SemanticQueryError>;
+
     async fn execute(
         &self,
-        request: ValidatedSemanticRequest,
+        request: ParsedSemanticRequest,
         freshness: FreshnessState,
         cancellation: crate::cancellation::Cancellation,
-        execution: QueryExecutionContext,
+        context: SemanticBackendExecutionContext,
         artifacts: QueryExecutionArtifactAccumulator,
-    ) -> SemanticTerminalOutcome;
+    ) -> SemanticBackendOutcome;
 
     async fn public_snapshot(
         &self,
         workspace_id: &str,
     ) -> Result<SemanticSnapshotResponse, SemanticQueryError>;
+}
+
+/// Authenticated delivery identity and immutable execution authorities supplied to one backend.
+///
+/// The agent/workspace strings are the exact identities already authenticated and authorized by
+/// the RPC boundary. The registry is the daemon-wide instance also used by `ReadResult` and
+/// `ReleaseResult`; a relational backend must publish into this instance rather than constructing
+/// an isolated result registry.
+#[derive(Clone, Debug)]
+pub struct SemanticBackendExecutionContext {
+    execution: QueryExecutionContext,
+    agent_instance_id: Arc<str>,
+    workspace_id: Arc<str>,
+    owner: PublishedResultOwner,
+    query_execution_pin: QueryExecutionPin,
+    result_lease_id: LeaseId,
+    result_lease_token: OpaqueResultLeaseToken,
+    published_results: Arc<PublishedArrowResultRegistry>,
+}
+
+impl SemanticBackendExecutionContext {
+    fn new(
+        execution: QueryExecutionContext,
+        agent_instance_id: impl Into<Arc<str>>,
+        workspace_id: impl Into<Arc<str>>,
+        owner: PublishedResultOwner,
+        query_execution_pin: QueryExecutionPin,
+        result_lease_id: LeaseId,
+        result_lease_token: OpaqueResultLeaseToken,
+        published_results: Arc<PublishedArrowResultRegistry>,
+    ) -> Self {
+        Self {
+            execution,
+            agent_instance_id: agent_instance_id.into(),
+            workspace_id: workspace_id.into(),
+            owner,
+            query_execution_pin,
+            result_lease_id,
+            result_lease_token,
+            published_results,
+        }
+    }
+
+    #[must_use]
+    pub const fn execution(&self) -> &QueryExecutionContext {
+        &self.execution
+    }
+
+    #[must_use]
+    pub fn agent_instance_id(&self) -> &str {
+        &self.agent_instance_id
+    }
+
+    #[must_use]
+    pub fn workspace_id(&self) -> &str {
+        &self.workspace_id
+    }
+
+    /// Return the typed owner established from the authenticated credential and workspace claim.
+    #[must_use]
+    pub const fn owner(&self) -> PublishedResultOwner {
+        self.owner
+    }
+
+    /// Return the deterministic execution pin for the accepted query and authenticated owner.
+    #[must_use]
+    pub const fn query_execution_pin(&self) -> QueryExecutionPin {
+        self.query_execution_pin
+    }
+
+    /// Return the distinct internal lease identity allocated for this result publication.
+    #[must_use]
+    pub const fn result_lease_id(&self) -> LeaseId {
+        self.result_lease_id
+    }
+
+    /// Return the opaque serving credential allocated for this result publication.
+    #[must_use]
+    pub const fn result_lease_token(&self) -> OpaqueResultLeaseToken {
+        self.result_lease_token
+    }
+
+    #[must_use]
+    pub fn published_results(&self) -> Arc<PublishedArrowResultRegistry> {
+        Arc::clone(&self.published_results)
+    }
+}
+
+/// Successful relational publication plus the control metadata needed by the RPC boundary.
+///
+/// Semantic rows remain owned by the Arrow registry. This value carries no row serialization and
+/// deliberately keeps the separately issued opaque lease credential out of the public descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublishedArrowSemanticSuccess {
+    publication: RelationalQueryPublication,
+    lease_token: OpaqueResultLeaseToken,
+    snapshot: SemanticSnapshotResponse,
+    evidence: QueryExecutionArtifactEvidence,
+}
+
+impl PublishedArrowSemanticSuccess {
+    #[must_use]
+    pub const fn new(
+        publication: RelationalQueryPublication,
+        lease_token: OpaqueResultLeaseToken,
+        snapshot: SemanticSnapshotResponse,
+        evidence: QueryExecutionArtifactEvidence,
+    ) -> Self {
+        Self {
+            publication,
+            lease_token,
+            snapshot,
+            evidence,
+        }
+    }
+
+    #[must_use]
+    pub const fn publication(&self) -> &RelationalQueryPublication {
+        &self.publication
+    }
+
+    #[must_use]
+    pub const fn descriptor(&self) -> &PublishedArrowResultDescriptor {
+        self.publication.descriptor()
+    }
+
+    #[must_use]
+    pub const fn lease_token(&self) -> &OpaqueResultLeaseToken {
+        &self.lease_token
+    }
+
+    #[must_use]
+    pub const fn snapshot(&self) -> &SemanticSnapshotResponse {
+        &self.snapshot
+    }
+
+    #[must_use]
+    pub const fn evidence(&self) -> &QueryExecutionArtifactEvidence {
+        &self.evidence
+    }
+}
+
+/// Closed terminal outcome of the programmatic relational backend.
+#[derive(Debug)]
+pub enum SemanticBackendOutcome {
+    PublishedArrow(PublishedArrowSemanticSuccess),
+    Failed {
+        error: SemanticQueryError,
+        evidence: QueryExecutionArtifactEvidence,
+    },
+    Cancelled {
+        error: SemanticQueryError,
+        evidence: QueryExecutionArtifactEvidence,
+    },
 }
 
 /// Capability-token identity and the exact workspace claims granted to one adapter profile.
@@ -758,12 +724,17 @@ impl QueryAuthorization {
         &self,
         request: &HandshakeRequest,
     ) -> Result<Vec<WorkspaceClaim>, Status> {
+        validate_agent_instance_id(&request.agent_instance_id)?;
+        if request.adapter_instance_id != request.agent_instance_id {
+            return Err(Status::unauthenticated(
+                "adapter and agent instance identities differ",
+            ));
+        }
         let proof = request
             .credential_proof
             .as_ref()
             .ok_or_else(|| Status::unauthenticated("capability proof is missing"))?;
-        if proof.credential_id.is_empty()
-            || request.agent_instance_id.is_empty()
+        if proof.credential_id != request.agent_instance_id
             || !constant_time_equal(
                 &self.token_digest,
                 &capability_digest(&proof.capability_token),
@@ -773,6 +744,15 @@ impl QueryAuthorization {
         }
         if request.desired_workspace_ids.is_empty() {
             return Err(Status::invalid_argument("desired workspace set is empty"));
+        }
+        let desired = request
+            .desired_workspace_ids
+            .iter()
+            .collect::<BTreeSet<_>>();
+        if desired.len() != request.desired_workspace_ids.len() {
+            return Err(Status::invalid_argument(
+                "desired workspace set contains duplicates",
+            ));
         }
         request
             .desired_workspace_ids
@@ -802,6 +782,149 @@ impl QueryAuthorization {
             .map(|_| ())
             .ok_or_else(|| Status::permission_denied("workspace action is not authorized"))
     }
+
+    /// Derive the backend-only execution capabilities from an already installed local
+    /// authorization. Kept crate-private so production composition tests and the RPC boundary use
+    /// the same derivation without exposing raw result-lease construction outside the daemon.
+    pub(crate) fn backend_execution_context(
+        &self,
+        execution: QueryExecutionContext,
+        agent_instance_id: &str,
+        workspace_id: &str,
+        published_results: Arc<PublishedArrowResultRegistry>,
+    ) -> Result<SemanticBackendExecutionContext, Status> {
+        validate_agent_instance_id(agent_instance_id)?;
+        let workspace_bytes = decode_public_id(IdentityDomain::Workspace, None, workspace_id)
+            .map_err(|_| Status::failed_precondition("authorized workspace identity is invalid"))?;
+        let workspace = WorkspaceId::from_bytes(workspace_bytes);
+
+        let principal_digest = keyed_context_digest(
+            &self.token_digest,
+            PRINCIPAL_DERIVATION_DOMAIN,
+            &[agent_instance_id.as_bytes()],
+        );
+        let principal_bytes = first_16(principal_digest);
+        if principal_bytes.iter().all(|byte| *byte == 0) {
+            return Err(Status::internal(
+                "authenticated principal derivation produced a reserved identity",
+            ));
+        }
+        let principal = PrincipalId::from_bytes(principal_bytes);
+        let owner = PublishedResultOwner::new(workspace, principal);
+
+        let query_execution_digest = keyed_context_digest(
+            &self.token_digest,
+            EXECUTION_PIN_DERIVATION_DOMAIN,
+            &[
+                workspace.as_bytes(),
+                principal.as_bytes(),
+                execution.execution_id.as_bytes(),
+                execution.semantic_request_id.as_bytes(),
+                execution.mcp_call_id.as_bytes(),
+            ],
+        );
+        let query_execution_pin = QueryExecutionPin::from_bytes(query_execution_digest);
+        let lease_bytes = first_16(keyed_context_digest(
+            &self.token_digest,
+            RESULT_LEASE_ID_DERIVATION_DOMAIN,
+            &[query_execution_pin.as_bytes()],
+        ));
+        if lease_bytes.iter().all(|byte| *byte == 0) {
+            return Err(Status::internal(
+                "result lease derivation produced a reserved identity",
+            ));
+        }
+        let result_lease_id = LeaseId::from_bytes(lease_bytes);
+        let mut token = KeyedAuthenticator::new(&self.token_digest, SecurityMacDomain::ResultLease);
+        for field in [
+            ARROW_RESULT_TOKEN_CONTEXT,
+            workspace.as_bytes(),
+            principal.as_bytes(),
+            query_execution_pin.as_bytes(),
+            result_lease_id.as_bytes(),
+        ] {
+            token.update(&(field.len() as u64).to_be_bytes());
+            token.update(field);
+        }
+        let result_lease_token = OpaqueResultLeaseToken::try_from_bytes(token.finalize())
+            .map_err(|_| Status::internal("result lease token derivation failed"))?;
+
+        Ok(SemanticBackendExecutionContext::new(
+            execution,
+            agent_instance_id,
+            workspace_id,
+            owner,
+            query_execution_pin,
+            result_lease_id,
+            result_lease_token,
+            published_results,
+        ))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NegotiatedQuerySession {
+    host_profile_digest: String,
+    authorized_workspaces: BTreeSet<String>,
+}
+
+impl NegotiatedQuerySession {
+    fn new(host_profile_digest: String, claims: &[WorkspaceClaim]) -> Self {
+        Self {
+            host_profile_digest,
+            authorized_workspaces: claims
+                .iter()
+                .map(|claim| claim.workspace_id.clone())
+                .collect(),
+        }
+    }
+
+    fn authorize(
+        &self,
+        workspace_id: &str,
+        host_profile_digest: Option<&str>,
+    ) -> Result<(), Status> {
+        if !self.authorized_workspaces.contains(workspace_id) {
+            return Err(Status::permission_denied(
+                "workspace is outside the negotiated session",
+            ));
+        }
+        if host_profile_digest.is_some_and(|digest| digest != self.host_profile_digest) {
+            return Err(Status::failed_precondition(
+                "query host profile differs from the negotiated session",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn validate_agent_instance_id(value: &str) -> Result<(), Status> {
+    if value.is_empty()
+        || value.len() > MAX_AGENT_INSTANCE_ID_BYTES
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+    {
+        return Err(Status::invalid_argument(
+            "agent instance identity is empty, oversized, or noncanonical",
+        ));
+    }
+    Ok(())
+}
+
+fn keyed_context_digest(key: &[u8; 32], domain: &[u8], fields: &[&[u8]]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new_keyed(key);
+    hasher.update(domain);
+    for field in fields {
+        hasher.update(&(field.len() as u64).to_be_bytes());
+        hasher.update(field);
+    }
+    *hasher.finalize().as_bytes()
+}
+
+fn first_16(value: [u8; 32]) -> [u8; 16] {
+    let mut prefix = [0; 16];
+    prefix.copy_from_slice(&value[..16]);
+    prefix
 }
 
 fn capability_digest(token: &[u8]) -> [u8; 32] {
@@ -967,117 +1090,6 @@ struct PublicServiceLimits {
     maximum_concurrent_queries: u32,
 }
 
-#[async_trait]
-impl SemanticQueryBackend for ServingQuerySession {
-    async fn execute(
-        &self,
-        request: ValidatedSemanticRequest,
-        freshness: FreshnessState,
-        cancellation: crate::cancellation::Cancellation,
-        execution: QueryExecutionContext,
-        artifacts: QueryExecutionArtifactAccumulator,
-    ) -> SemanticTerminalOutcome {
-        execute_request_in_context(self, request, freshness, cancellation, execution, artifacts)
-            .await
-    }
-
-    async fn public_snapshot(
-        &self,
-        workspace_id: &str,
-    ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
-        let manifest = self.snapshot_manifest();
-        if manifest.body.workspace_id != workspace_id {
-            return Err(SemanticQueryError::Invalid(
-                "status workspace differs from the pinned snapshot".to_owned(),
-            ));
-        }
-        Ok(snapshot_response(&manifest, FreshnessState::Current))
-    }
-}
-
-/// Production workspace router over genuine snapshot-leased serving sessions.
-#[derive(Debug, Default)]
-pub struct WorkspaceQueryBackend {
-    sessions: RwLock<BTreeMap<String, Arc<ServingQuerySession>>>,
-}
-
-impl WorkspaceQueryBackend {
-    /// Install or atomically replace the exact leased session for one workspace.
-    ///
-    /// # Errors
-    ///
-    /// Reserved for session-admission failures as the workspace router gains durable admission.
-    pub async fn install(
-        &self,
-        session: Arc<ServingQuerySession>,
-    ) -> Result<(), SemanticQueryError> {
-        let workspace_id = session.snapshot_manifest().body.workspace_id;
-        self.sessions.write().await.insert(workspace_id, session);
-        Ok(())
-    }
-
-    #[must_use]
-    pub async fn active_workspace_count(&self) -> usize {
-        self.sessions.read().await.len()
-    }
-
-    async fn session(
-        &self,
-        workspace_id: &str,
-    ) -> Result<Arc<ServingQuerySession>, SemanticQueryError> {
-        self.sessions
-            .read()
-            .await
-            .get(workspace_id)
-            .cloned()
-            .ok_or_else(|| {
-                SemanticQueryError::Invalid(
-                    "workspace has no active snapshot-leased query session".to_owned(),
-                )
-            })
-    }
-}
-
-#[async_trait]
-impl SemanticQueryBackend for WorkspaceQueryBackend {
-    async fn execute(
-        &self,
-        request: ValidatedSemanticRequest,
-        freshness: FreshnessState,
-        cancellation: crate::cancellation::Cancellation,
-        execution: QueryExecutionContext,
-        artifacts: QueryExecutionArtifactAccumulator,
-    ) -> SemanticTerminalOutcome {
-        let session = match self.session(&request.request.workspace_id).await {
-            Ok(session) => session,
-            Err(error) => {
-                artifacts.set_failure("snapshot_binding");
-                return SemanticTerminalOutcome::Failed {
-                    error,
-                    evidence: artifacts.snapshot(),
-                };
-            }
-        };
-        execute_request_in_context(
-            session.as_ref(),
-            request,
-            freshness,
-            cancellation,
-            execution,
-            artifacts,
-        )
-        .await
-    }
-
-    async fn public_snapshot(
-        &self,
-        workspace_id: &str,
-    ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
-        let session = self.session(workspace_id).await?;
-        SemanticQueryBackend::public_snapshot(session.as_ref(), workspace_id).await
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 struct QueryHandleState {
     events: Vec<QueryEvent>,
@@ -1101,15 +1113,13 @@ pub struct ProductionQueryService<B> {
     backend: Arc<B>,
     authorization: QueryAuthorization,
     artifacts: Arc<ResultArtifactStore>,
-    artifact_records: Arc<Mutex<BTreeMap<String, ResultArtifact>>>,
     published_results: Arc<PublishedArrowResultRegistry>,
     handles: Arc<Mutex<BTreeMap<String, Arc<QueryHandle>>>>,
     idempotency: Arc<Mutex<BTreeMap<String, String>>>,
-    host_profile_digests: Arc<Mutex<BTreeMap<String, String>>>,
+    negotiated_sessions: Arc<Mutex<BTreeMap<String, NegotiatedQuerySession>>>,
     freshness: FreshnessBarrier,
     freshness_timeout: std::time::Duration,
-    query_bundle: BundleIdentity,
-    core_source_coverage: Option<CoreSourceCoverage>,
+    query_contract: BundleIdentity,
     tasks: Arc<Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>>,
     execution_sequence: AtomicU64,
 }
@@ -1122,36 +1132,33 @@ fn valid_bundle_digest(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn query_bundle_identity() -> BundleIdentity {
-    let authority: serde_json::Value = serde_json::from_str(include_str!(
-        "../contracts/bundles/query-language-bundle.json"
-    ))
-    .expect("generated query-language bundle must be valid JSON");
-    let string = |field: &str| {
-        authority[field]
-            .as_str()
-            .unwrap_or_else(|| panic!("query-language bundle is missing {field}"))
-            .to_owned()
+fn query_contract_digest<'a>(forms: impl IntoIterator<Item = &'a str>) -> String {
+    let mut preimage = Vec::from(PROGRAMMATIC_QUERY_CONTRACT_DIGEST_DOMAIN);
+    for form in forms {
+        let bytes = form.as_bytes();
+        preimage.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        preimage.extend_from_slice(bytes);
+    }
+    framed_digest(&preimage)
+}
+
+/// Project the typed programmatic query contract into the released `BundleIdentity` wire
+/// envelope. The Protobuf field name is retained for compatibility; no generated bundle,
+/// package, registry, or runtime-selected model participates in query authority.
+fn programmatic_query_contract_identity() -> BundleIdentity {
+    let identity = BundleIdentity {
+        bundle_id: PROGRAMMATIC_QUERY_CONTRACT_ID.to_owned(),
+        bundle_version: PROGRAMMATIC_QUERY_CONTRACT_VERSION.to_owned(),
+        bundle_digest: query_contract_digest(QueryForm::ALL.into_iter().map(QueryForm::slug)),
     };
-    let bundle = BundleIdentity {
-        bundle_id: string("artifact_id"),
-        bundle_version: string("bundle_version"),
-        bundle_digest: string("bundle_digest"),
-    };
-    assert_eq!(
-        bundle.bundle_id, "codefabric.bundles.query-language-bundle",
-        "query-language bundle identity is unexpected"
-    );
-    assert!(valid_bundle_digest(&bundle.bundle_digest));
-    bundle
+    assert!(valid_bundle_digest(&identity.bundle_digest));
+    identity
 }
 
 fn supported_query_forms() -> Vec<String> {
-    QUERY_FORM_VALUES
-        .iter()
-        .filter_map(|entry| QueryForm::try_from(entry.code).ok())
-        .filter(|form| form.executor_registered())
-        .map(|form| form.registry_slug().to_owned())
+    QueryForm::ALL
+        .into_iter()
+        .map(|form| form.slug().to_owned())
         .collect()
 }
 
@@ -1167,24 +1174,16 @@ impl<B> ProductionQueryService<B> {
             backend,
             authorization,
             artifacts: Arc::new(artifacts),
-            artifact_records: Arc::new(Mutex::new(BTreeMap::new())),
             published_results: Arc::new(PublishedArrowResultRegistry::new()),
             handles: Arc::new(Mutex::new(BTreeMap::new())),
             idempotency: Arc::new(Mutex::new(BTreeMap::new())),
-            host_profile_digests: Arc::new(Mutex::new(BTreeMap::new())),
+            negotiated_sessions: Arc::new(Mutex::new(BTreeMap::new())),
             freshness,
             freshness_timeout,
-            query_bundle: query_bundle_identity(),
-            core_source_coverage: None,
+            query_contract: programmatic_query_contract_identity(),
             tasks: Arc::new(Mutex::new(BTreeMap::new())),
             execution_sequence: AtomicU64::new(0),
         }
-    }
-
-    #[must_use]
-    pub fn with_core_source_coverage(mut self, coverage: CoreSourceCoverage) -> Self {
-        self.core_source_coverage = Some(coverage);
-        self
     }
 
     /// Install the daemon-wide Arrow result registry used by the relational publication path.
@@ -1231,11 +1230,12 @@ async fn cancel_active_queries(
             suppress_terminal_claim(&handle).await;
             continue;
         }
+        let sequence = next_event_sequence(&handle).await;
         append_terminal(
             &handle,
             QueryEvent {
                 event: Some(Event::Terminal(TerminalEvent {
-                    header: None,
+                    header: Some(event_header(&handle.execution.execution_id, sequence, None)),
                     execution_state: QueryExecutionState::Cancelled as i32,
                     availability_state: "UNAVAILABLE".to_owned(),
                     freshness_state: "UNKNOWN".to_owned(),
@@ -1390,10 +1390,10 @@ fn public_boundary_error(
     detail: &str,
 ) -> PublicBoundaryError {
     let entry = crate::registries::public_error(name)
-        .expect("RPC boundary error identity must be registry generated");
+        .expect("RPC boundary error identity must be registered");
     let phase =
         crate::registries::registry_state_name(crate::registries::PHASE_VALUES, phase as u16)
-            .expect("generated phase has a registry name");
+            .expect("registered phase has a stable wire name");
     let canonical_record_json = serde_json::to_string(&PublicErrorRecord {
         code: entry.code,
         name: entry.name,
@@ -1425,7 +1425,6 @@ fn terminal_query_artifact(
         workspace_id: workspace_id.to_owned(),
         execution: evidence.execution.clone(),
         phase,
-        plan_artifacts: evidence.plan_artifacts.clone(),
         evidence,
         result_artifact_id,
         public_error_code,
@@ -1488,6 +1487,12 @@ async fn append_terminal(handle: &QueryHandle, event: QueryEvent, state: QueryEx
         drop(current);
         handle.changed.notify_waiters();
     }
+}
+
+async fn next_event_sequence(handle: &QueryHandle) -> u64 {
+    u64::try_from(handle.state.lock().await.events.len())
+        .unwrap_or(u64::MAX)
+        .saturating_add(1)
 }
 
 async fn suppress_terminal_claim(handle: &QueryHandle) {
@@ -1581,14 +1586,302 @@ async fn finalize_unsuccessful_query(
     .await;
 }
 
+fn published_success_access(success: &PublishedArrowSemanticSuccess) -> PublishedResultAccess {
+    PublishedResultAccess {
+        artifact_id: success.descriptor().artifact_id,
+        owner: success.descriptor().owner,
+        lease_token: *success.lease_token(),
+    }
+}
+
+fn release_published_success(
+    published_results: &PublishedArrowResultRegistry,
+    success: &PublishedArrowSemanticSuccess,
+) {
+    let _ = published_results.release(published_success_access(success), now_millis());
+}
+
+fn validate_published_success(
+    published_results: &PublishedArrowResultRegistry,
+    handle: &QueryHandle,
+    success: &PublishedArrowSemanticSuccess,
+) -> Result<(), Status> {
+    if success.evidence().execution != handle.execution {
+        return Err(Status::failed_precondition(
+            "published result execution evidence differs from the accepted query",
+        ));
+    }
+    if success.snapshot().workspace_id != handle.workspace_id {
+        return Err(Status::permission_denied(
+            "published result snapshot differs from the authorized workspace",
+        ));
+    }
+    let workspace_id = decode_public_id(IdentityDomain::Workspace, None, &handle.workspace_id)
+        .map_err(|_| Status::failed_precondition("authorized workspace identity is invalid"))?;
+    if success.descriptor().owner.workspace_id().as_bytes() != &workspace_id {
+        return Err(Status::permission_denied(
+            "published result owner differs from the authorized workspace",
+        ));
+    }
+    published_results
+        .read_chunk(PublishedResultReadRequest {
+            access: published_success_access(success),
+            resource_id: success.descriptor().manifest.authorization_resource_id,
+            observed_at_unix_ms: now_millis(),
+            offset: 0,
+            max_bytes: 1,
+        })
+        .map(|_| ())
+        .map_err(published_result_status)
+}
+
+fn published_result_state(
+    completion: crate::fabric::arrow_result_resource::ResultCompleteness,
+) -> (&'static str, &'static str) {
+    match completion {
+        crate::fabric::arrow_result_resource::ResultCompleteness::Complete => {
+            ("AVAILABLE", "COMPLETE")
+        }
+        crate::fabric::arrow_result_resource::ResultCompleteness::Partial => ("PARTIAL", "PARTIAL"),
+        crate::fabric::arrow_result_resource::ResultCompleteness::Unknown => {
+            ("PARTIAL", "INDETERMINATE")
+        }
+    }
+}
+
+async fn finalize_published_query(
+    artifacts: &ResultArtifactStore,
+    published_results: &PublishedArrowResultRegistry,
+    handle: &QueryHandle,
+    query_id: &str,
+    success: PublishedArrowSemanticSuccess,
+) {
+    if let Err(error) = validate_published_success(published_results, handle, &success) {
+        let freshness = success.snapshot.freshness_state;
+        release_published_success(published_results, &success);
+        let mut evidence = success.evidence;
+        evidence.lifecycle_phase = "published_result_validation".to_owned();
+        evidence.failing_stage = Some("published_result_validation".to_owned());
+        finalize_unsuccessful_query(
+            artifacts,
+            handle,
+            query_id,
+            evidence,
+            QueryArtifactPhase::Failed,
+            public_boundary_error(
+                "INTERNAL",
+                crate::registries::Phase::Execution,
+                error.message(),
+            ),
+            freshness,
+        )
+        .await;
+        return;
+    }
+
+    let PublishedArrowSemanticSuccess {
+        publication,
+        lease_token,
+        snapshot,
+        mut evidence,
+    } = success;
+    let descriptor = publication.descriptor();
+    let snapshot_id = snapshot.snapshot_id.clone();
+    let snapshot_bytes = match serde_json::to_value(&snapshot)
+        .map_err(|error| error.to_string())
+        .and_then(|value| {
+            crate::contracts::jcs::canonicalize_value(&value).map_err(|error| error.to_string())
+        }) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            evidence.lifecycle_phase = "terminal_persistence".to_owned();
+            evidence.failing_stage = Some("snapshot_metadata_encoding".to_owned());
+            let access = PublishedResultAccess {
+                artifact_id: descriptor.artifact_id,
+                owner: descriptor.owner,
+                lease_token,
+            };
+            let _ = published_results.release(access, now_millis());
+            finalize_unsuccessful_query(
+                artifacts,
+                handle,
+                query_id,
+                evidence,
+                QueryArtifactPhase::Failed,
+                public_boundary_error("INTERNAL", crate::registries::Phase::Execution, &error),
+                snapshot.freshness_state,
+            )
+            .await;
+            return;
+        }
+    };
+    let artifact_event = match published_arrow_artifact_ready_event(
+        event_header(query_id, 2, Some(snapshot_id.clone())),
+        descriptor,
+        &lease_token,
+    ) {
+        Ok(event) => event,
+        Err(error) => {
+            evidence.lifecycle_phase = "terminal_persistence".to_owned();
+            evidence.failing_stage = Some("result_descriptor_encoding".to_owned());
+            let access = PublishedResultAccess {
+                artifact_id: descriptor.artifact_id,
+                owner: descriptor.owner,
+                lease_token,
+            };
+            let _ = published_results.release(access, now_millis());
+            finalize_unsuccessful_query(
+                artifacts,
+                handle,
+                query_id,
+                evidence,
+                QueryArtifactPhase::Failed,
+                public_boundary_error(
+                    "INTERNAL",
+                    crate::registries::Phase::Execution,
+                    error.message(),
+                ),
+                snapshot.freshness_state,
+            )
+            .await;
+            return;
+        }
+    };
+    let artifact_id = descriptor.artifact_id.public_id();
+    let descriptor_checksum = artifact_event.result_descriptor_checksum.clone();
+    let result_rows = descriptor.total_rows;
+    // The terminal count describes semantic Arrow result bytes, not the control manifest or
+    // schema metadata carried separately in the package descriptor. Keeping the two projections
+    // identical lets a presentation adapter detect substitution without reinterpreting either.
+    let result_bytes = descriptor.total_ipc_bytes;
+    let (availability_state, completeness_state) = published_result_state(descriptor.completion);
+    if evidence.snapshot_id.is_none() {
+        evidence.snapshot_id = Some(snapshot_id.clone());
+    }
+    let Ok(persisted_phase) = artifacts.persist_query_artifact(&terminal_query_artifact(
+        &handle.workspace_id,
+        evidence,
+        QueryArtifactPhase::Succeeded,
+        Some(artifact_id.clone()),
+        None,
+    )) else {
+        let access = PublishedResultAccess {
+            artifact_id: descriptor.artifact_id,
+            owner: descriptor.owner,
+            lease_token,
+        };
+        let _ = published_results.release(access, now_millis());
+        suppress_terminal_claim(handle).await;
+        return;
+    };
+    if persisted_phase != QueryArtifactPhase::Succeeded {
+        let access = PublishedResultAccess {
+            artifact_id: descriptor.artifact_id,
+            owner: descriptor.owner,
+            lease_token,
+        };
+        let _ = published_results.release(access, now_millis());
+        append_terminal(
+            handle,
+            QueryEvent {
+                event: Some(Event::Terminal(TerminalEvent {
+                    header: Some(event_header(query_id, 1, Some(snapshot_id))),
+                    execution_state: QueryExecutionState::Failed as i32,
+                    availability_state: "UNAVAILABLE".to_owned(),
+                    freshness_state: "UNKNOWN".to_owned(),
+                    limit_state: "NOT_APPLIED".to_owned(),
+                    dependency_state: "SATISFIED".to_owned(),
+                    canonical_response_checksum: None,
+                    canonical_error_record_json: Some(
+                        public_boundary_error(
+                            "INTERNAL",
+                            crate::registries::Phase::Execution,
+                            "primary query artifact publication failed; fallback terminal envelope committed",
+                        )
+                        .canonical_record_json
+                        .into_bytes(),
+                    ),
+                    artifact_id: None,
+                    result_row_count: 0,
+                    result_byte_count: 0,
+                    cleanup_state: "COMPLETE".to_owned(),
+                    semantic_execution_state: "FAILED".to_owned(),
+                    completeness_state: "UNAVAILABLE".to_owned(),
+                    truncated: false,
+                    query_statuses: Vec::new(),
+                    notices: Vec::new(),
+                })),
+            },
+            QueryExecutionState::Failed,
+        )
+        .await;
+        return;
+    }
+
+    let events = vec![
+        QueryEvent {
+            event: Some(Event::SnapshotPinned(SnapshotPinnedEvent {
+                header: Some(event_header(query_id, 1, Some(snapshot_id.clone()))),
+                metadata_checksum: framed_digest(&snapshot_bytes),
+                canonical_public_snapshot_metadata_json: snapshot_bytes,
+            })),
+        },
+        QueryEvent {
+            event: Some(Event::ArtifactReady(artifact_event)),
+        },
+        QueryEvent {
+            event: Some(Event::Terminal(TerminalEvent {
+                header: Some(event_header(query_id, 3, Some(snapshot_id))),
+                execution_state: QueryExecutionState::Succeeded as i32,
+                availability_state: availability_state.to_owned(),
+                freshness_state: crate::registries::registry_state_name(
+                    crate::registries::FRESHNESS_STATE_VALUES,
+                    snapshot.freshness_state as u16,
+                )
+                .expect("registered freshness state")
+                .to_owned(),
+                limit_state: "NOT_APPLIED".to_owned(),
+                dependency_state: "READY".to_owned(),
+                canonical_response_checksum: Some(descriptor_checksum),
+                canonical_error_record_json: None,
+                artifact_id: Some(artifact_id),
+                result_row_count: result_rows,
+                result_byte_count: result_bytes,
+                cleanup_state: "RETAINED_BY_LEASE".to_owned(),
+                semantic_execution_state: "COMPLETE".to_owned(),
+                completeness_state: completeness_state.to_owned(),
+                truncated: false,
+                query_statuses: Vec::new(),
+                notices: Vec::new(),
+            })),
+        },
+    ];
+    let mut state = handle.state.lock().await;
+    if state.terminal_state.is_none() && !handle.cancelled.load(Ordering::Acquire) {
+        state.events.extend(events);
+        state.terminal_state = Some(QueryExecutionState::Succeeded);
+        drop(state);
+        handle.changed.notify_waiters();
+    } else {
+        drop(state);
+        let access = PublishedResultAccess {
+            artifact_id: descriptor.artifact_id,
+            owner: descriptor.owner,
+            lease_token,
+        };
+        let _ = published_results.release(access, now_millis());
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // One spawned query owns this complete immutable execution context and terminal sequence.
 async fn execute_accepted_query<B: SemanticQueryBackend>(
     backend: Arc<B>,
     artifacts: Arc<ResultArtifactStore>,
-    artifact_records: Arc<Mutex<BTreeMap<String, ResultArtifact>>>,
+    published_results: Arc<PublishedArrowResultRegistry>,
+    backend_context: SemanticBackendExecutionContext,
     handle: Arc<QueryHandle>,
     query_id: String,
-    validated: ValidatedSemanticRequest,
+    validated: ParsedSemanticRequest,
     deadline_unix_ms: i64,
     freshness: FreshnessBarrier,
     freshness_timeout: std::time::Duration,
@@ -1606,6 +1899,10 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
             FreshnessPolicy::CurrentRequired => FreshnessAdmission::RequireCurrent,
             FreshnessPolicy::WaitForCurrent => FreshnessAdmission::AwaitLatest,
             FreshnessPolicy::BestAvailableSnapshot => FreshnessAdmission::BestAvailable,
+            FreshnessPolicy::AwaitLatest => FreshnessAdmission::AwaitLatest,
+            FreshnessPolicy::RequireCurrentForTargets
+            | FreshnessPolicy::RequireSourceCurrent
+            | FreshnessPolicy::RequireSemanticCurrent => FreshnessAdmission::RequireCurrent,
         };
         match freshness
             .admit_query(admission, freshness_timeout.min(request_timeout))
@@ -1622,7 +1919,7 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                         validated,
                         admitted_freshness,
                         cancellation,
-                        handle.execution.clone(),
+                        backend_context,
                         handle.artifacts.clone(),
                     ),
                 )
@@ -1636,29 +1933,30 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                     )),
                 }
             }
-            Err(crate::lifecycle::LifecycleError::Stale) => Err(public_boundary_error(
+            Err(FreshnessError::Stale) => Err(public_boundary_error(
                 "CURRENT_FACTS_UNAVAILABLE",
                 crate::registries::Phase::PolicyValidation,
                 "current source state is not available",
             )),
-            Err(crate::lifecycle::LifecycleError::Unavailable) => Err(public_boundary_error(
+            Err(FreshnessError::Unavailable) => Err(public_boundary_error(
                 "CURRENT_FACTS_UNAVAILABLE",
                 crate::registries::Phase::PolicyValidation,
                 "workspace source is unavailable",
             )),
-            Err(error) => Err(public_boundary_error(
-                "INTERNAL",
-                crate::registries::Phase::PolicyValidation,
-                &error.to_string(),
-            )),
         }
     };
     if handle.cancelled.load(Ordering::Acquire) {
+        if let Ok(SemanticBackendOutcome::PublishedArrow(success)) = &executed {
+            release_published_success(&published_results, success);
+        }
         return;
     }
-    let (executed, evidence) = match executed {
-        Ok(SemanticTerminalOutcome::Succeeded { response, evidence }) => (response, evidence),
-        Ok(SemanticTerminalOutcome::Failed { error, evidence }) => {
+    match executed {
+        Ok(SemanticBackendOutcome::PublishedArrow(success)) => {
+            finalize_published_query(&artifacts, &published_results, &handle, &query_id, success)
+                .await;
+        }
+        Ok(SemanticBackendOutcome::Failed { error, evidence }) => {
             let boundary = public_boundary_error(
                 "INTERNAL",
                 crate::registries::Phase::Execution,
@@ -1674,9 +1972,8 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                 freshness.state(),
             )
             .await;
-            return;
         }
-        Ok(SemanticTerminalOutcome::Cancelled { error, evidence }) => {
+        Ok(SemanticBackendOutcome::Cancelled { error, evidence }) => {
             let boundary = public_boundary_error(
                 "CANCELLED",
                 crate::registries::Phase::Execution,
@@ -1692,7 +1989,6 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                 freshness.state(),
             )
             .await;
-            return;
         }
         Err(error) => {
             finalize_unsuccessful_query(
@@ -1705,229 +2001,11 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(
                 freshness.state(),
             )
             .await;
-            return;
         }
-    };
-    let snapshot_id = executed.response.snapshot.snapshot_id.clone();
-    let artifact = match artifacts.insert(
-        executed.canonical_bytes,
-        &handle.agent_instance_id,
-        &handle.workspace_id,
-        &snapshot_id,
-    ) {
-        Ok(artifact) => artifact,
-        Err(error) => {
-            let mut failed_evidence = evidence;
-            "result_artifact_persistence".clone_into(&mut failed_evidence.lifecycle_phase);
-            failed_evidence.failing_stage = Some("result_insertion".to_owned());
-            let boundary = public_boundary_error(
-                "INTERNAL",
-                crate::registries::Phase::Execution,
-                error.message(),
-            );
-            finalize_unsuccessful_query(
-                &artifacts,
-                &handle,
-                &query_id,
-                failed_evidence,
-                QueryArtifactPhase::Failed,
-                boundary,
-                freshness.state(),
-            )
-            .await;
-            return;
-        }
-    };
-    if handle.cancelled.load(Ordering::Acquire) {
-        return;
-    }
-    let snapshot_bytes = match serde_json::to_value(&executed.response.snapshot)
-        .map_err(|error| error.to_string())
-        .and_then(|value| {
-            crate::contracts::jcs::canonicalize_value(&value).map_err(|error| error.to_string())
-        }) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            let mut failed_evidence = evidence;
-            "terminal_persistence".clone_into(&mut failed_evidence.lifecycle_phase);
-            failed_evidence.failing_stage = Some("snapshot_metadata_encoding".to_owned());
-            finalize_unsuccessful_query(
-                &artifacts,
-                &handle,
-                &query_id,
-                failed_evidence,
-                QueryArtifactPhase::Failed,
-                public_boundary_error("INTERNAL", crate::registries::Phase::Execution, &error),
-                freshness.state(),
-            )
-            .await;
-            return;
-        }
-    };
-    let Ok(persisted_phase) = artifacts.persist_query_artifact(&terminal_query_artifact(
-        &handle.workspace_id,
-        evidence,
-        QueryArtifactPhase::Succeeded,
-        Some(artifact.id.clone()),
-        None,
-    )) else {
-        suppress_terminal_claim(&handle).await;
-        return;
-    };
-    if persisted_phase != QueryArtifactPhase::Succeeded {
-        let boundary = public_boundary_error(
-            "INTERNAL",
-            crate::registries::Phase::Execution,
-            "primary query artifact publication failed; fallback terminal envelope committed",
-        );
-        append_terminal(
-            &handle,
-            QueryEvent {
-                event: Some(Event::Terminal(TerminalEvent {
-                    header: Some(event_header(&query_id, 1, Some(snapshot_id.clone()))),
-                    execution_state: QueryExecutionState::Failed as i32,
-                    availability_state: "UNAVAILABLE".to_owned(),
-                    freshness_state: "UNKNOWN".to_owned(),
-                    limit_state: "NOT_APPLIED".to_owned(),
-                    dependency_state: "SATISFIED".to_owned(),
-                    canonical_response_checksum: None,
-                    canonical_error_record_json: Some(boundary.canonical_record_json.into_bytes()),
-                    artifact_id: None,
-                    result_row_count: 0,
-                    result_byte_count: 0,
-                    cleanup_state: "COMPLETE".to_owned(),
-                    semantic_execution_state: "FAILED".to_owned(),
-                    completeness_state: "UNAVAILABLE".to_owned(),
-                    truncated: false,
-                    query_statuses: Vec::new(),
-                    notices: Vec::new(),
-                })),
-            },
-            QueryExecutionState::Failed,
-        )
-        .await;
-        return;
-    }
-    artifact_records
-        .lock()
-        .await
-        .insert(artifact.id.clone(), artifact.clone());
-    let events = vec![
-        QueryEvent {
-            event: Some(Event::SnapshotPinned(SnapshotPinnedEvent {
-                header: Some(event_header(&query_id, 1, Some(snapshot_id.clone()))),
-                metadata_checksum: framed_digest(&snapshot_bytes),
-                canonical_public_snapshot_metadata_json: snapshot_bytes,
-            })),
-        },
-        QueryEvent {
-            event: Some(Event::ArtifactReady(ArtifactReadyEvent {
-                header: Some(event_header(&query_id, 2, Some(snapshot_id))),
-                artifact_id: artifact.id.clone(),
-                artifact_checksum: artifact.checksum.clone(),
-                content_type: "application/json".to_owned(),
-                encoding: PayloadCompression::Identity as i32,
-                lease_expires_at_unix_ms: artifact.lease_expires_at_unix_ms,
-                lease_token: artifact.lease_token.clone(),
-                canonical_result_descriptor_json: Vec::new(),
-                result_descriptor_checksum: String::new(),
-                result_contract_version: String::new(),
-                arrow_release: String::new(),
-            })),
-        },
-        QueryEvent {
-            event: Some(Event::Terminal(TerminalEvent {
-                header: Some(event_header(&query_id, 3, None)),
-                execution_state: QueryExecutionState::Succeeded as i32,
-                availability_state: crate::registries::registry_state_name(
-                    crate::registries::QUERY_AVAILABILITY_STATE_VALUES,
-                    executed.response.availability_state as u16,
-                )
-                .expect("generated query availability state")
-                .to_owned(),
-                freshness_state: crate::registries::registry_state_name(
-                    crate::registries::FRESHNESS_STATE_VALUES,
-                    executed.response.freshness_state as u16,
-                )
-                .expect("generated freshness state")
-                .to_owned(),
-                limit_state: crate::registries::registry_state_name(
-                    crate::registries::LIMIT_STATE_VALUES,
-                    executed.response.limit_state as u16,
-                )
-                .expect("generated limit state")
-                .to_owned(),
-                dependency_state: crate::registries::registry_state_name(
-                    crate::registries::DEPENDENCY_STATE_VALUES,
-                    crate::registries::DependencyState::Ready as u16,
-                )
-                .expect("generated dependency state")
-                .to_owned(),
-                canonical_response_checksum: Some(artifact.checksum.clone()),
-                canonical_error_record_json: None,
-                artifact_id: Some(artifact.id.clone()),
-                result_row_count: executed
-                    .response
-                    .query_results
-                    .iter()
-                    .map(|result| result.output_row_count as u64)
-                    .sum(),
-                result_byte_count: artifact.bytes.len() as u64,
-                cleanup_state: "RETAINED_BY_LEASE".to_owned(),
-                semantic_execution_state: crate::registries::registry_state_name(
-                    crate::registries::QUERY_EXECUTION_STATE_VALUES,
-                    executed.response.execution_state as u16,
-                )
-                .expect("generated query execution state")
-                .to_owned(),
-                completeness_state: crate::registries::registry_state_name(
-                    crate::registries::COMPLETENESS_STATE_VALUES,
-                    executed.response.completeness_state as u16,
-                )
-                .expect("generated completeness state")
-                .to_owned(),
-                truncated: executed.response.limit_state
-                    == crate::registries::LimitState::ExplicitLimitReached,
-                query_statuses: executed
-                    .response
-                    .query_results
-                    .iter()
-                    .map(|result| QueryStatusSummary {
-                        query_id: result.query_id.clone(),
-                        execution_state: crate::registries::registry_state_name(
-                            crate::registries::QUERY_EXECUTION_STATE_VALUES,
-                            result.execution_state as u16,
-                        )
-                        .expect("generated query execution state")
-                        .to_owned(),
-                        canonical_error_record_json: result.errors.first().and_then(|error| {
-                            crate::contracts::jcs::canonicalize_value(
-                                &serde_json::to_value(error).ok()?,
-                            )
-                            .ok()
-                        }),
-                        notices: result.notices.clone(),
-                    })
-                    .collect(),
-                notices: executed
-                    .response
-                    .query_results
-                    .iter()
-                    .flat_map(|result| result.notices.iter().cloned())
-                    .collect(),
-            })),
-        },
-    ];
-    let mut state = handle.state.lock().await;
-    if state.terminal_state.is_none() && !handle.cancelled.load(Ordering::Acquire) {
-        state.events.extend(events);
-        state.terminal_state = Some(QueryExecutionState::Succeeded);
-        drop(state);
-        handle.changed.notify_waiters();
     }
 }
 
-#[allow(clippy::too_many_lines)] // One generated service implementation keeps the RPC boundary exhaustive.
+#[allow(clippy::too_many_lines)] // One service implementation keeps the RPC boundary exhaustive.
 #[tonic::async_trait]
 impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
     async fn handshake(
@@ -1969,15 +2047,15 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             CpgdFeatureMask::SUPPORTED,
             CpgdFeatureMask::REQUIRED,
         )?;
-        self.host_profile_digests.lock().await.insert(
-            request.agent_instance_id.clone(),
-            derived_host_profile_digest,
-        );
         let active_snapshot = self
             .backend
             .public_snapshot(&claims[0].workspace_id)
             .await
             .map_err(|error| Status::failed_precondition(error.to_string()))?;
+        self.negotiated_sessions.lock().await.insert(
+            request.agent_instance_id.clone(),
+            NegotiatedQuerySession::new(derived_host_profile_digest, &claims),
+        );
         let capability_codes = ["SOURCE_BYTES", "SOURCE_INVENTORY"]
             .into_iter()
             .filter_map(crate::registries::capability_code)
@@ -1991,7 +2069,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             negotiated_semantic_query_version: "1.3".to_owned(),
             negotiated_feature_bits: negotiated.bits(),
             negotiated_compression: PayloadCompression::Identity as i32,
-            installed_bundles: vec![self.query_bundle.clone()],
+            installed_bundles: vec![self.query_contract.clone()],
             active_schema_fingerprints: vec![SchemaFingerprint {
                 schema_id: "codefabric.snapshot.base-table-versions".to_owned(),
                 version: "1".to_owned(),
@@ -2016,48 +2094,21 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         request: Request<StatusRequest>,
     ) -> Result<Response<StatusResponse>, Status> {
         let request = request.into_inner();
+        validate_agent_instance_id(&request.agent_instance_id)?;
         self.authorization
             .authorize_workspace(&request.workspace_id, WorkspacePermission::Query)?;
+        self.negotiated_sessions
+            .lock()
+            .await
+            .get(&request.agent_instance_id)
+            .ok_or_else(|| Status::failed_precondition("query session handshake is absent"))?
+            .authorize(&request.workspace_id, None)?;
         let snapshot = self
             .backend
             .public_snapshot(&request.workspace_id)
             .await
             .map_err(|error| Status::failed_precondition(error.to_string()))?;
-        let mut capability_statuses = Vec::new();
-        if let Some(coverage) = &self.core_source_coverage {
-            capability_statuses.push(BTreeMap::from([
-                ("capability_code".to_owned(), "CORE_SOURCE_V1".to_owned()),
-                ("capability_state".to_owned(), "CURRENT".to_owned()),
-                ("reason_code".to_owned(), "NOT_APPLICABLE".to_owned()),
-                ("diagnostic_id".to_owned(), "NOT_APPLICABLE".to_owned()),
-                (
-                    "precision_profile".to_owned(),
-                    coverage.precision_profile.to_owned(),
-                ),
-                (
-                    "coverage_profile_id".to_owned(),
-                    coverage.coverage_profile_id.clone(),
-                ),
-                (
-                    "coverage_profile_digest".to_owned(),
-                    coverage.coverage_profile_digest.clone(),
-                ),
-                (
-                    "scenario_count".to_owned(),
-                    coverage.scenario_ids.len().to_string(),
-                ),
-                (
-                    "scenario_ids".to_owned(),
-                    coverage
-                        .scenario_ids
-                        .iter()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(","),
-                ),
-            ]));
-        }
-        capability_statuses.extend(snapshot.capability_summaries.clone());
+        let capability_statuses = snapshot.capability_summaries.clone();
         let status = PublicStatusView {
             ready: true,
             workspace_id: request.workspace_id.clone(),
@@ -2104,21 +2155,20 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         let request = request.into_inner();
         self.authorization
             .authorize_workspace(&request.workspace_id, WorkspacePermission::Query)?;
-        if self
-            .host_profile_digests
+        self.negotiated_sessions
             .lock()
             .await
             .get(&request.agent_instance_id)
-            .is_none_or(|digest| digest != &request.host_capability_profile_digest)
-        {
-            return Err(Status::failed_precondition(
-                "query host profile was not validated by the handshake",
-            ));
-        }
+            .ok_or_else(|| Status::failed_precondition("query session handshake is absent"))?
+            .authorize(
+                &request.workspace_id,
+                Some(&request.host_capability_profile_digest),
+            )?;
         validate_checksum(&request.request_checksum, &request.canonical_request_json)?;
-        let validated = validate_request(&request.canonical_request_json)
+        let validated = parse_request(&request.canonical_request_json)
             .map_err(|error| Status::invalid_argument(error.to_string()))?;
-        require_registered_executors(&validated)
+        self.backend
+            .validate_execution_request(&validated)
             .map_err(|error| Status::failed_precondition(error.to_string()))?;
         if validated.request.workspace_id != request.workspace_id {
             return Err(Status::invalid_argument(
@@ -2143,17 +2193,15 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         let request = request.into_inner();
         self.authorization
             .authorize_workspace(&request.workspace_id, WorkspacePermission::Query)?;
-        if self
-            .host_profile_digests
+        self.negotiated_sessions
             .lock()
             .await
             .get(&request.agent_instance_id)
-            .is_none_or(|digest| digest != &request.host_capability_profile_digest)
-        {
-            return Err(Status::failed_precondition(
-                "query host profile was not validated by the handshake",
-            ));
-        }
+            .ok_or_else(|| Status::failed_precondition("query session handshake is absent"))?
+            .authorize(
+                &request.workspace_id,
+                Some(&request.host_capability_profile_digest),
+            )?;
         if request.deadline_unix_ms <= now_millis() {
             return Err(Status::deadline_exceeded("query deadline elapsed"));
         }
@@ -2201,9 +2249,10 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             }));
         }
         validate_checksum(&request.request_checksum, &request.canonical_request_json)?;
-        let validated = validate_request(&request.canonical_request_json)
+        let validated = parse_request(&request.canonical_request_json)
             .map_err(|error| Status::invalid_argument(error.to_string()))?;
-        require_registered_executors(&validated)
+        self.backend
+            .validate_execution_request(&validated)
             .map_err(|error| Status::failed_precondition(error.to_string()))?;
         if validated.request.workspace_id != request.workspace_id {
             return Err(Status::invalid_argument(
@@ -2228,6 +2277,12 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             semantic_request_id: semantic_request_id.clone(),
             mcp_call_id: request.mcp_call_id.clone(),
         };
+        let backend_context = self.authorization.backend_execution_context(
+            execution.clone(),
+            &request.agent_instance_id,
+            &request.workspace_id,
+            Arc::clone(&self.published_results),
+        )?;
         let resume_token = self.artifacts.query_handle_token(
             SecurityMacDomain::QueryResumeToken,
             &query_id,
@@ -2268,7 +2323,8 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
             execute_accepted_query(
                 Arc::clone(&self.backend),
                 Arc::clone(&self.artifacts),
-                Arc::clone(&self.artifact_records),
+                Arc::clone(&self.published_results),
+                backend_context,
                 Arc::clone(&handle),
                 query_id.clone(),
                 validated,
@@ -2324,6 +2380,12 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         let request = request.into_inner();
         self.authorization
             .authorize_workspace(&request.workspace_id, WorkspacePermission::Query)?;
+        self.negotiated_sessions
+            .lock()
+            .await
+            .get(&request.agent_instance_id)
+            .ok_or_else(|| Status::failed_precondition("query session handshake is absent"))?
+            .authorize(&request.workspace_id, None)?;
         let handle = self
             .handles
             .lock()
@@ -2365,6 +2427,12 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         let request = request.into_inner();
         self.authorization
             .authorize_workspace(&request.workspace_id, WorkspacePermission::Query)?;
+        self.negotiated_sessions
+            .lock()
+            .await
+            .get(&request.agent_instance_id)
+            .ok_or_else(|| Status::failed_precondition("query session handshake is absent"))?
+            .authorize(&request.workspace_id, None)?;
         let Some(handle) = self
             .handles
             .lock()
@@ -2411,11 +2479,12 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 None,
                 Some("CANCELLED".to_owned()),
             ))?;
+        let sequence = next_event_sequence(&handle).await;
         append_terminal(
             &handle,
             QueryEvent {
                 event: Some(Event::Terminal(TerminalEvent {
-                    header: Some(event_header(&request.daemon_query_id, 1, None)),
+                    header: Some(event_header(&request.daemon_query_id, sequence, None)),
                     execution_state: QueryExecutionState::Cancelled as i32,
                     availability_state: "UNAVAILABLE".to_owned(),
                     freshness_state: "UNKNOWN".to_owned(),
@@ -2473,85 +2542,45 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 "maximum result bytes must be positive",
             ));
         }
-        if !request.authorization_resource_id.is_empty() {
-            let access = published_access(
-                &request.artifact_id,
-                &request.lease_token,
-                request.owner.as_ref(),
-            )?;
-            let resource_id =
-                PublishedResultResourceId::try_from_public_id(&request.authorization_resource_id)
-                    .map_err(published_result_status)?;
-            let chunk = self
-                .published_results
-                .read_chunk(PublishedResultReadRequest {
-                    access,
-                    resource_id,
-                    observed_at_unix_ms: now_millis(),
-                    offset: request.offset,
-                    max_bytes: maximum,
-                })
-                .map_err(published_result_status)?;
-            let payload = chunk.bytes.to_vec();
-            let event = ResultChunk {
-                artifact_id: request.artifact_id,
-                offset: chunk.offset,
-                uncompressed_length: u64::try_from(payload.len()).unwrap_or(u64::MAX),
-                payload_checksum: framed_digest(&payload),
-                payload,
-                artifact_checksum: String::new(),
-                content_type: chunk.media_type.to_owned(),
-                encoding: PayloadCompression::Identity as i32,
-                final_chunk: chunk.complete,
-                lease_expires_at_unix_ms: chunk.lease_expires_at_unix_ms,
-                authorization_resource_id: chunk.resource_id.public_id(),
-                next_offset: chunk.next_offset,
-                total_length: chunk.total_length,
-                content_checksum: frame_digest(chunk.content_checksum),
-            };
-            return Ok(Response::new(Box::pin(stream::once(
-                async move { Ok(event) },
-            ))));
-        }
-        if request.owner.is_some() {
+        if request.authorization_resource_id.is_empty() || request.owner.is_none() {
             return Err(Status::invalid_argument(
-                "legacy result reads cannot carry an Arrow result owner",
+                "Arrow result reads require an owner and authorization resource",
             ));
         }
-        let records = self.artifact_records.lock().await;
-        let artifact = records
-            .get(&request.artifact_id)
-            .ok_or_else(|| Status::not_found("result artifact not found"))?;
-        if artifact.lease_token != request.lease_token {
-            return Err(Status::permission_denied("result lease token differs"));
-        }
-        if artifact.lease_expires_at_unix_ms <= now_millis() {
-            return Err(Status::failed_precondition("result lease has expired"));
-        }
-        let offset = usize::try_from(request.offset)
-            .map_err(|_| Status::out_of_range("result offset is invalid"))?;
-        if offset > artifact.bytes.len() {
-            return Err(Status::out_of_range(
-                "result offset exceeds artifact length",
-            ));
-        }
-        let end = offset.saturating_add(maximum).min(artifact.bytes.len());
-        let payload = artifact.bytes[offset..end].to_vec();
+        let access = published_access(
+            &request.artifact_id,
+            &request.lease_token,
+            request.owner.as_ref(),
+        )?;
+        let resource_id =
+            PublishedResultResourceId::try_from_public_id(&request.authorization_resource_id)
+                .map_err(published_result_status)?;
+        let chunk = self
+            .published_results
+            .read_chunk(PublishedResultReadRequest {
+                access,
+                resource_id,
+                observed_at_unix_ms: now_millis(),
+                offset: request.offset,
+                max_bytes: maximum,
+            })
+            .map_err(published_result_status)?;
+        let payload = chunk.bytes.to_vec();
         let event = ResultChunk {
-            artifact_id: artifact.id.clone(),
-            offset: request.offset,
-            uncompressed_length: payload.len() as u64,
+            artifact_id: request.artifact_id,
+            offset: chunk.offset,
+            uncompressed_length: u64::try_from(payload.len()).unwrap_or(u64::MAX),
             payload_checksum: framed_digest(&payload),
             payload,
-            artifact_checksum: artifact.checksum.clone(),
-            content_type: "application/json".to_owned(),
+            artifact_checksum: String::new(),
+            content_type: chunk.media_type.to_owned(),
             encoding: PayloadCompression::Identity as i32,
-            final_chunk: end == artifact.bytes.len(),
-            lease_expires_at_unix_ms: artifact.lease_expires_at_unix_ms,
-            authorization_resource_id: String::new(),
-            next_offset: u64::try_from(end).unwrap_or(u64::MAX),
-            total_length: u64::try_from(artifact.bytes.len()).unwrap_or(u64::MAX),
-            content_checksum: artifact.checksum.clone(),
+            final_chunk: chunk.complete,
+            lease_expires_at_unix_ms: chunk.lease_expires_at_unix_ms,
+            authorization_resource_id: chunk.resource_id.public_id(),
+            next_offset: chunk.next_offset,
+            total_length: chunk.total_length,
+            content_checksum: frame_digest(chunk.content_checksum),
         };
         Ok(Response::new(Box::pin(stream::once(
             async move { Ok(event) },
@@ -2563,1523 +2592,164 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         request: Request<ReleaseResultRequest>,
     ) -> Result<Response<ReleaseResultResponse>, Status> {
         let request = request.into_inner();
-        if request.owner.is_some() {
-            let access = published_access(
-                &request.artifact_id,
-                &request.lease_token,
-                request.owner.as_ref(),
-            )?;
-            let state = self
-                .published_results
-                .release(access, now_millis())
-                .map_err(published_result_status)?;
-            let release_state = match state {
-                PublishedReleaseOutcome::Released => "released",
-                PublishedReleaseOutcome::AlreadyReleased => "already_released",
-            };
-            return Ok(Response::new(ReleaseResultResponse {
-                artifact_id: request.artifact_id,
-                released: true,
-                remaining_lease_expires_at_unix_ms: None,
-                release_state: release_state.to_owned(),
-            }));
-        }
-        let mut records = self.artifact_records.lock().await;
-        let released = records
-            .get(&request.artifact_id)
-            .is_some_and(|artifact| artifact.lease_token == request.lease_token);
-        if released {
-            records.remove(&request.artifact_id);
-        }
+        let access = published_access(
+            &request.artifact_id,
+            &request.lease_token,
+            request.owner.as_ref(),
+        )?;
+        let state = self
+            .published_results
+            .release(access, now_millis())
+            .map_err(published_result_status)?;
+        let release_state = match state {
+            PublishedReleaseOutcome::Released => "released",
+            PublishedReleaseOutcome::AlreadyReleased => "already_released",
+        };
         Ok(Response::new(ReleaseResultResponse {
             artifact_id: request.artifact_id,
-            released,
+            released: true,
             remaining_lease_expires_at_unix_ms: None,
-            release_state: if released {
-                "released".to_owned()
-            } else {
-                String::new()
-            },
+            release_state: release_state.to_owned(),
         }))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::MetadataExt as _;
-
-    use hyper_util::rt::TokioIo;
-    use tokio::net::UnixStream;
-    use tokio::sync::oneshot;
-    use tonic::transport::Endpoint;
-    use tower::service_fn;
-
     use super::*;
+    use crate::rpc::generated::codefabric::cpgd::v1::CredentialProof;
 
     #[test]
-    fn wp61_structural_acceptance() {
-        use crate::registries::{PUBLIC_ERROR_ENTRIES, PUBLIC_ERROR_IDS, Phase};
+    fn programmatic_query_contract_identity_is_typed_ordered_and_causal() {
+        let identity = programmatic_query_contract_identity();
+        let released_forms = QueryForm::ALL
+            .into_iter()
+            .map(QueryForm::slug)
+            .collect::<Vec<_>>();
 
-        assert_eq!(PUBLIC_ERROR_ENTRIES.len(), PUBLIC_ERROR_IDS.len());
-        for (entry, name) in PUBLIC_ERROR_ENTRIES.iter().zip(PUBLIC_ERROR_IDS) {
-            assert_eq!(entry.name, *name);
-            let boundary = public_boundary_error(entry.name, Phase::Execution, "fixture");
-            assert_eq!(boundary.status.code(), grpc_code(entry.grpc_status));
-            let record: serde_json::Value =
-                serde_json::from_str(&boundary.canonical_record_json).unwrap();
-            assert_eq!(record["code"], entry.code);
-            assert_eq!(record["severity"], entry.severity);
-            assert_eq!(record["retryability"], entry.retryability);
-            assert_eq!(record["grpc_status"], entry.grpc_status);
-            assert_eq!(record["mcp_mapping"], entry.mcp_mapping);
-        }
-    }
-
-    #[test]
-    fn wp62_operational_acceptance() {
-        use crate::registries::Phase;
-
-        let rejection = public_boundary_error(
-            "INVALID_REQUEST_SCHEMA",
-            Phase::LogicalPlanning,
-            "unapproved table in bound plan",
-        );
-        assert_eq!(rejection.status.code(), tonic::Code::InvalidArgument);
-        let record: serde_json::Value =
-            serde_json::from_str(&rejection.canonical_record_json).unwrap();
-        assert_eq!(record["name"], "INVALID_REQUEST_SCHEMA");
-        assert_eq!(record["phase"], "LOGICAL_PLANNING");
-        assert_eq!(record["grpc_status"], "INVALID_ARGUMENT");
-
-        let profile = effective_limits_profile();
+        assert_eq!(identity.bundle_id, PROGRAMMATIC_QUERY_CONTRACT_ID);
+        assert_eq!(identity.bundle_version, PROGRAMMATIC_QUERY_CONTRACT_VERSION);
         assert_eq!(
-            profile.profile_digest,
-            limits_profile_digest([
-                profile.maximum_control_message_bytes,
-                profile.maximum_payload_chunk_bytes,
-                profile.maximum_inline_response_bytes,
-                u64::from(profile.maximum_concurrent_queries),
-                u64::from(profile.query_orphan_replay_seconds),
-            ])
+            identity.bundle_digest,
+            query_contract_digest(released_forms.iter().copied())
         );
         assert_ne!(
-            profile.profile_digest,
-            limits_profile_digest([
-                profile.maximum_control_message_bytes + 1,
-                profile.maximum_payload_chunk_bytes,
-                profile.maximum_inline_response_bytes,
-                u64::from(profile.maximum_concurrent_queries),
-                u64::from(profile.query_orphan_replay_seconds),
-            ])
+            identity.bundle_digest,
+            query_contract_digest(released_forms.iter().rev().copied()),
+            "presentation order is part of the released contract"
+        );
+
+        let mut changed_forms = released_forms;
+        changed_forms[0] = "changed query form";
+        assert_ne!(
+            identity.bundle_digest,
+            query_contract_digest(changed_forms),
+            "changing a typed query form must change the advertised contract identity"
         );
     }
 
-    #[test]
-    fn wp56_operational_acceptance() {
-        let bundle = query_bundle_identity();
-        assert_eq!(bundle.bundle_id, "codefabric.bundles.query-language-bundle");
-        assert_eq!(bundle.bundle_version, "1.0");
-        assert_eq!(
-            supported_query_forms(),
-            vec![
-                "find code entities",
-                "retrieve facts about code",
-                "follow code relationships",
-                "find connecting fact paths",
-                "match a code fact pattern",
-                "combine result sets",
-                "summarize objective facts",
-                "retrieve source and syntax context",
-            ]
-        );
-    }
-    use crate::rpc::generated::codefabric::cpgd::v1::cpg_query_service_client::CpgQueryServiceClient;
-    use crate::rpc::generated::codefabric::cpgd::v1::{CredentialProof, VersionRange};
-    use crate::semantic_query::{
-        QueryResultRecord, SemanticQueryResponse, SemanticSnapshotResponse,
-    };
-
-    struct FakeBackend;
-
-    struct BlockingBackend {
-        started: Arc<Notify>,
-        release: Arc<Notify>,
-        cancelled: Arc<Notify>,
-    }
-
-    fn authorization() -> QueryAuthorization {
-        QueryAuthorization::new(
-            b"test-capability-token",
-            vec![WorkspaceClaim {
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                repository_id: None,
-                worktree_id: None,
-                workspace_kind: "directory".to_owned(),
-                readiness: WorkspaceReadiness::Ready as i32,
-                permission_claims: vec!["query".to_owned()],
-            }],
-        )
-        .unwrap()
-    }
-
-    fn fake_snapshot(freshness: FreshnessState) -> SemanticSnapshotResponse {
-        SemanticSnapshotResponse {
-            snapshot_id: "snapshot:00000000000000000000000000000000".to_owned(),
-            workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
+    fn query_claim(workspace_id: &str) -> WorkspaceClaim {
+        WorkspaceClaim {
+            workspace_id: workspace_id.to_owned(),
             repository_id: None,
             worktree_id: None,
-            source_generation: 1,
-            source_inventory_digest: framed_digest(b"inventory"),
-            durable_base_publication: "publication:00000000000000000000000000000000".to_owned(),
-            base_table_version_digest: framed_digest(b"tables"),
-            overlay_generation: 0,
-            overlay_checksum: framed_digest(b"overlay"),
-            analysis_context_set_id: "context-set:00000000000000000000000000000000".to_owned(),
-            analysis_context_ids: vec!["context:source".to_owned()],
-            freshness_state: freshness,
-            source_trust_state: "CURRENT_BYTES_VERIFIED".to_owned(),
-            event_stream_health: "HEALTHY".to_owned(),
-            git_acceleration_status: "NOT_REQUIRED".to_owned(),
-            git_operation_summary: None,
-            pending_update_count: 0,
-            ontology_version: "1.3".to_owned(),
-            schema_bundle_version: "1.0".to_owned(),
-            provider_bundle_version: "1.0".to_owned(),
-            derivation_bundle_version: "1.0".to_owned(),
-            query_language_version: "1.3".to_owned(),
-            capability_summaries: Vec::new(),
-            diagnostic_references: Vec::new(),
+            workspace_kind: "programmatic".to_owned(),
+            readiness: WorkspaceReadiness::Ready as i32,
+            permission_claims: vec!["query".to_owned()],
         }
     }
 
-    #[async_trait]
-    impl SemanticQueryBackend for FakeBackend {
-        async fn execute(
-            &self,
-            request: ValidatedSemanticRequest,
-            freshness: FreshnessState,
-            _cancellation: crate::cancellation::Cancellation,
-            _execution: QueryExecutionContext,
-            artifacts: QueryExecutionArtifactAccumulator,
-        ) -> SemanticTerminalOutcome {
-            let response = SemanticQueryResponse {
-                specification: "composable semantic CPG fact query response",
-                version: "1.3",
-                semantic_request_id: request.request.semantic_request_id,
-                execution_state: crate::registries::QueryExecutionState::Complete,
-                availability_state: crate::registries::QueryAvailabilityState::Available,
-                completeness_state: crate::registries::CompletenessState::Complete,
-                freshness_state: freshness,
-                limit_state: crate::registries::LimitState::NotApplied,
-                successful_query_count: 1,
-                failed_query_count: 0,
-                not_executed_dependency_count: 0,
-                snapshot: fake_snapshot(freshness),
-                entities: BTreeMap::new(),
-                facts: BTreeMap::new(),
-                paths: BTreeMap::new(),
-                groups: BTreeMap::new(),
-                source_contexts: BTreeMap::new(),
-                query_results: vec![QueryResultRecord {
-                    query_id: "q1".to_owned(),
-                    request: crate::semantic_query::QueryForm::FindEntities,
-                    execution_state: crate::registries::QueryExecutionState::Complete,
-                    availability_state: crate::registries::QueryAvailabilityState::Available,
-                    completeness_state: crate::registries::CompletenessState::Complete,
-                    freshness_state: freshness,
-                    limit_state: crate::registries::LimitState::NotApplied,
-                    dependency_state: crate::registries::DependencyState::Ready,
-                    resolved_semantics: BTreeMap::new(),
-                    entity_ids: Vec::new(),
-                    fact_ids: Vec::new(),
-                    path_ids: Vec::new(),
-                    group_ids: Vec::new(),
-                    source_context_ids: Vec::new(),
-                    coverage: BTreeMap::new(),
-                    errors: Vec::new(),
-                    notices: Vec::new(),
-                    output_row_count: 1,
-                    result_checksum: framed_digest(b"row"),
-                }],
-                errors: Vec::new(),
-            };
-            let canonical_bytes = crate::contracts::jcs::canonicalize_value(
-                &serde_json::to_value(&response).unwrap(),
-            )
-            .unwrap();
-            artifacts.set_phase("complete");
-            SemanticTerminalOutcome::Succeeded {
-                evidence: artifacts.snapshot(),
-                response: Box::new(ExecutedSemanticResponse {
-                    response_digest: framed_digest(&canonical_bytes),
-                    response,
-                    canonical_bytes,
-                    plan_artifacts: Vec::new(),
-                }),
-            }
-        }
-
-        async fn public_snapshot(
-            &self,
-            workspace_id: &str,
-        ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
-            let snapshot = fake_snapshot(FreshnessState::Current);
-            if snapshot.workspace_id != workspace_id {
-                return Err(SemanticQueryError::Invalid("workspace differs".to_owned()));
-            }
-            Ok(snapshot)
-        }
-    }
-
-    #[async_trait]
-    impl SemanticQueryBackend for BlockingBackend {
-        async fn execute(
-            &self,
-            request: ValidatedSemanticRequest,
-            freshness: FreshnessState,
-            cancellation: crate::cancellation::Cancellation,
-            execution: QueryExecutionContext,
-            artifacts: QueryExecutionArtifactAccumulator,
-        ) -> SemanticTerminalOutcome {
-            self.started.notify_one();
-            loop {
-                tokio::select! {
-                    () = self.release.notified() => break,
-                    () = tokio::time::sleep(std::time::Duration::from_millis(5)) => {
-                        if cancellation.is_cancelled() {
-                            self.cancelled.notify_one();
-                            artifacts.set_phase("cancelled");
-                            artifacts.set_failure("cancellation");
-                            return SemanticTerminalOutcome::Cancelled {
-                                error: SemanticQueryError::Invalid("query cancelled".to_owned()),
-                                evidence: artifacts.snapshot(),
-                            };
-                        }
-                    }
-                }
-            }
-            SemanticQueryBackend::execute(
-                &FakeBackend,
-                request,
-                freshness,
-                cancellation,
-                execution,
-                artifacts,
-            )
-            .await
-        }
-
-        async fn public_snapshot(
-            &self,
-            workspace_id: &str,
-        ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
-            SemanticQueryBackend::public_snapshot(&FakeBackend, workspace_id).await
-        }
-    }
-
-    fn canonical_request() -> Vec<u8> {
-        crate::contracts::jcs::canonicalize_slice(br#"{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"rpc-gate-b","workspace_id":"workspace:00000000000000000000000000000000","freshness_policy":"best_available_snapshot","queries":[{"query_id":"q1","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{"limit":{"maximum_results":1}}}],"response_projection":null,"cost_budget":{"maximum_rows":1}}"#).unwrap()
-    }
-
-    fn canonical_current_required_request() -> Vec<u8> {
-        crate::contracts::jcs::canonicalize_slice(br#"{"specification":"composable semantic CPG fact query","version":"1.3","semantic_request_id":"rpc-current","workspace_id":"workspace:00000000000000000000000000000000","freshness_policy":"current_required","queries":[{"query_id":"q1","request":"find code entities","label":null,"looking_for":"syntax nodes","return":{"limit":{"maximum_results":1}}}],"response_projection":null,"cost_budget":{"maximum_rows":1}}"#).unwrap()
-    }
-
-    fn test_host_profile() -> HostCapabilityProfile {
-        let mut profile = HostCapabilityProfile {
-            delivery_modes: vec![
-                DeliveryPreference::Inline as i32,
-                DeliveryPreference::Resource as i32,
-                DeliveryPreference::Auto as i32,
-            ],
-            compression_algorithms: vec![PayloadCompression::Identity as i32],
-            supports_resource_links: true,
-            supports_trace_context: true,
-            maximum_frame_bytes: 1_048_576,
-            profile_digest: String::new(),
-        };
-        profile.profile_digest = host_capability_profile_digest(&profile).unwrap();
-        profile
-    }
-
-    fn handshake_for(token: &[u8], agent_instance_id: &str) -> HandshakeRequest {
+    fn handshake_request(
+        agent_instance_id: &str,
+        desired_workspace_ids: Vec<String>,
+    ) -> HandshakeRequest {
         HandshakeRequest {
-            rpc_versions: Some(VersionRange {
-                minimum: "1.0".to_owned(),
-                maximum: "1.0".to_owned(),
-            }),
-            semantic_query_versions: Some(VersionRange {
-                minimum: "1.3".to_owned(),
-                maximum: "1.3".to_owned(),
-            }),
-            required_feature_bits: CpgdFeatureMask::REQUIRED.bits(),
-            optional_feature_bits: CpgdFeatureMask::SUPPORTED
-                .missing_from(CpgdFeatureMask::REQUIRED)
-                .bits(),
-            desired_workspace_ids: vec!["workspace:00000000000000000000000000000000".to_owned()],
-            host_capabilities: Some(test_host_profile()),
+            adapter_instance_id: agent_instance_id.to_owned(),
+            desired_workspace_ids,
             credential_proof: Some(CredentialProof {
-                credential_id: "test-credential".to_owned(),
-                capability_token: token.to_vec(),
+                credential_id: agent_instance_id.to_owned(),
+                capability_token: b"wp37-session-capability".to_vec(),
             }),
             agent_instance_id: agent_instance_id.to_owned(),
             ..HandshakeRequest::default()
         }
     }
 
-    fn handshake(token: &[u8]) -> HandshakeRequest {
-        handshake_for(token, "test-agent")
-    }
-
-    fn start_request(agent_instance_id: &str) -> StartQueryRequest {
-        StartQueryRequest {
-            agent_instance_id: agent_instance_id.to_owned(),
-            host_capability_profile_digest: test_host_profile().profile_digest,
-            ..StartQueryRequest::default()
-        }
-    }
-
-    async fn register_host<B: SemanticQueryBackend>(
-        service: &ProductionQueryService<B>,
-        agent_instance_id: &str,
-    ) {
-        service
-            .handshake(Request::new(handshake_for(
-                b"test-capability-token",
-                agent_instance_id,
-            )))
-            .await
-            .unwrap();
-    }
-
-    async fn start_test_query<B: SemanticQueryBackend>(
-        service: &ProductionQueryService<B>,
-        agent_instance_id: &str,
-        idempotency_key: &str,
-    ) -> StartQueryResponse {
-        let canonical = canonical_request();
-        service
-            .start_query(Request::new(StartQueryRequest {
-                agent_instance_id: agent_instance_id.to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                semantic_query_version: "1.3".to_owned(),
-                canonical_request_json: canonical.clone(),
-                request_checksum: framed_digest(&canonical),
-                delivery_preference: DeliveryPreference::Resource as i32,
-                deadline_unix_ms: now_millis() + 60_000,
-                idempotency_key: idempotency_key.to_owned(),
-                payload_compression: PayloadCompression::Identity as i32,
-                ..start_request(agent_instance_id)
-            }))
-            .await
-            .unwrap()
-            .into_inner()
-    }
-
-    fn staged_terminal_evidence(
-        execution_id: &str,
-        failing_stage: &str,
-        partial: bool,
-    ) -> QueryExecutionArtifactEvidence {
-        let execution = QueryExecutionContext {
-            execution_id: execution_id.to_owned(),
-            semantic_request_id: format!("request:{execution_id}"),
-            mcp_call_id: format!("mcp:{execution_id}"),
-        };
-        let artifacts = QueryExecutionArtifactAccumulator::new(execution);
-        artifacts.set_phase(format!("failed_after_{failing_stage}"));
-        artifacts.set_failure(failing_stage);
-        for stage in [
-            "binding",
-            "logical_planning",
-            "logical_optimization",
-            "physical_planning",
-            "physical_execution",
-        ] {
-            let reached = stage == failing_stage
-                || (failing_stage == "first_batch" && stage == "physical_execution")
-                || (failing_stage == "stream_drop" && stage == "physical_execution");
-            if reached {
-                artifacts.record_stage(QueryArtifactStage {
-                    block_id: "request".to_owned(),
-                    stage: if matches!(failing_stage, "first_batch" | "stream_drop") {
-                        "physical_execution".to_owned()
-                    } else {
-                        stage.to_owned()
-                    },
-                    state: if partial {
-                        QueryArtifactStageState::Partial
-                    } else {
-                        QueryArtifactStageState::UnavailableWithReason
-                    },
-                    artifact: partial.then(|| "exact physical plan with metrics".to_owned()),
-                    unavailable_reason: Some(format!("injected failure after {failing_stage}")),
-                    metrics: partial
-                        .then(|| ("output_batches".to_owned(), 1))
-                        .into_iter()
-                        .collect(),
-                });
-                break;
-            }
-            artifacts.record_stage(QueryArtifactStage {
-                block_id: "request".to_owned(),
-                stage: stage.to_owned(),
-                state: QueryArtifactStageState::Complete,
-                artifact: Some(format!("captured {stage}")),
-                unavailable_reason: None,
-                metrics: BTreeMap::new(),
-            });
-        }
-        artifacts.snapshot()
-    }
-
-    fn failure_bundle(
-        workspace_id: &str,
-        evidence: QueryExecutionArtifactEvidence,
-    ) -> PersistedQueryArtifactBundle {
-        terminal_query_artifact(
-            workspace_id,
-            evidence,
-            QueryArtifactPhase::Failed,
-            None,
-            Some("INTERNAL".to_owned()),
+    #[test]
+    fn public_lifecycle_identity_contract_rejects_substitution_and_duplicate_workspaces() {
+        let authorization = QueryAuthorization::new(
+            b"wp37-session-capability",
+            vec![query_claim("workspace-a"), query_claim("workspace-b")],
         )
-    }
+        .expect("closed authorization");
 
-    struct CountingBackend {
-        executions: Arc<AtomicU64>,
-        fail: bool,
-    }
+        let accepted = authorization
+            .authorize_handshake(&handshake_request(
+                "agent-a",
+                vec!["workspace-a".to_owned()],
+            ))
+            .expect("bound handshake");
+        assert_eq!(accepted, [query_claim("workspace-a")]);
 
-    #[async_trait]
-    impl SemanticQueryBackend for CountingBackend {
-        async fn execute(
-            &self,
-            request: ValidatedSemanticRequest,
-            freshness: FreshnessState,
-            cancellation: crate::cancellation::Cancellation,
-            execution: QueryExecutionContext,
-            artifacts: QueryExecutionArtifactAccumulator,
-        ) -> SemanticTerminalOutcome {
-            self.executions.fetch_add(1, Ordering::AcqRel);
-            if self.fail {
-                artifacts.set_phase("logical_planning");
-                artifacts.set_failure("logical_planning");
-                artifacts.record_stage(QueryArtifactStage {
-                    block_id: "request".to_owned(),
-                    stage: "logical_planning".to_owned(),
-                    state: QueryArtifactStageState::UnavailableWithReason,
-                    artifact: None,
-                    unavailable_reason: Some("counted injected failure".to_owned()),
-                    metrics: BTreeMap::new(),
-                });
-                return SemanticTerminalOutcome::Failed {
-                    error: SemanticQueryError::Invalid("counted injected failure".to_owned()),
-                    evidence: artifacts.snapshot(),
-                };
-            }
-            SemanticQueryBackend::execute(
-                &FakeBackend,
-                request,
-                freshness,
-                cancellation,
-                execution,
-                artifacts,
-            )
-            .await
-        }
-
-        async fn public_snapshot(
-            &self,
-            workspace_id: &str,
-        ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
-            SemanticQueryBackend::public_snapshot(&FakeBackend, workspace_id).await
-        }
-    }
-
-    #[test]
-    fn query_failure_artifact_closure() {
-        let root = tempfile::tempdir().unwrap();
-        let store = ResultArtifactStore::new(root.path().to_path_buf()).unwrap();
-        let workspace_id = "workspace:00000000000000000000000000000000";
-        let stage_cases = [
-            ("binding", false),
-            ("logical_planning", false),
-            ("logical_optimization", false),
-            ("physical_planning", false),
-            ("first_batch", true),
-            ("stream_drop", true),
-        ];
-        for (ordinal, (stage, partial)) in stage_cases.into_iter().enumerate() {
-            let execution_id = format!("execution:closure-{ordinal}");
-            let evidence = staged_terminal_evidence(&execution_id, stage, partial);
-            store
-                .persist_query_artifact(&failure_bundle(workspace_id, evidence))
-                .unwrap();
-            let persisted = store.read_query_artifact(&execution_id).unwrap();
-            assert_eq!(persisted.phase, QueryArtifactPhase::Failed);
-            assert_eq!(persisted.evidence.failing_stage.as_deref(), Some(stage));
-            let physical = persisted
-                .evidence
-                .stages
-                .iter()
-                .find(|candidate| candidate.stage == "physical_execution")
-                .unwrap();
-            if partial {
-                assert_eq!(physical.state, QueryArtifactStageState::Partial);
-                assert_eq!(physical.metrics.get("output_batches"), Some(&1));
-            }
-        }
-
-        let result_execution = "execution:closure-result-insertion";
-        store.inject_fault(Some(QueryArtifactFaultPoint::ResultInsertion));
+        let mut wrong_adapter = handshake_request("agent-a", vec!["workspace-a".to_owned()]);
+        wrong_adapter.adapter_instance_id = "agent-b".to_owned();
         assert_eq!(
-            store
-                .insert(vec![1], "agent", workspace_id, "snapshot")
-                .unwrap_err()
-                .code(),
-            tonic::Code::Internal
-        );
-        store.inject_fault(None);
-        let result_evidence = staged_terminal_evidence(result_execution, "result_insertion", false);
-        store
-            .persist_query_artifact(&failure_bundle(workspace_id, result_evidence))
-            .unwrap();
-        assert_eq!(
-            store
-                .read_query_artifact(result_execution)
-                .unwrap()
-                .evidence
-                .failing_stage
-                .as_deref(),
-            Some("result_insertion")
-        );
-
-        let payload_execution = "execution:closure-primary-payload";
-        let payload_evidence =
-            staged_terminal_evidence(payload_execution, "response_encoding", false);
-        let success = terminal_query_artifact(
-            workspace_id,
-            payload_evidence,
-            QueryArtifactPhase::Succeeded,
-            Some("result:fallback".to_owned()),
-            None,
-        );
-        store.inject_fault(Some(QueryArtifactFaultPoint::PrimaryPayloadPersistence));
-        assert_eq!(
-            store.persist_query_artifact(&success).unwrap(),
-            QueryArtifactPhase::Failed
-        );
-        store.inject_fault(None);
-        let payload = store.read_query_artifact(payload_execution).unwrap();
-        assert_eq!(payload.phase, QueryArtifactPhase::Failed);
-        assert_eq!(
-            payload.evidence.failing_stage.as_deref(),
-            Some("artifact_persistence")
-        );
-        assert_eq!(
-            store
-                .terminal_journal
-                .lock()
-                .unwrap()
-                .query_execution_terminals(100)
-                .unwrap()
-                .len(),
-            8
-        );
-    }
-
-    #[tokio::test]
-    async fn query_terminal_journal_authority() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../contracts/fixtures/query-terminal-envelopes-v1.json"
-        ))
-        .unwrap();
-        assert_eq!(fixture["artifact_schema_version"], "2.0");
-        assert_eq!(fixture["scenarios"].as_array().unwrap().len(), 6);
-        assert_eq!(
-            fixture["stage_state_values"],
-            serde_json::json!([
-                "NOT_REACHED",
-                "AVAILABLE",
-                "PARTIAL",
-                "COMPLETE",
-                "UNAVAILABLE_WITH_REASON"
-            ])
-        );
-        let root = tempfile::tempdir().unwrap();
-        let service = ProductionQueryService::new(
-            Arc::new(FakeBackend),
-            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
-        );
-        register_host(&service, "journal-agent").await;
-        let started = start_test_query(&service, "journal-agent", "terminal-journal").await;
-        let events = service
-            .stream_query(Request::new(StreamQueryRequest {
-                daemon_query_id: started.daemon_query_id.clone(),
-                resume_token: started.resume_token,
-                after_sequence: 0,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        let events = futures::StreamExt::collect::<Vec<_>>(events).await;
-        assert!(matches!(
-            events.last().unwrap().as_ref().unwrap().event.as_ref(),
-            Some(Event::Terminal(_))
-        ));
-        let journal = service.artifacts.terminal_journal.lock().unwrap();
-        let record = journal
-            .read_query_execution_terminal(&started.daemon_query_id)
-            .unwrap()
-            .unwrap();
-        assert!(
-            journal
-                .query_execution_terminal_lease_matches(&record)
-                .unwrap()
-        );
-        assert_eq!(record.payload_status, "PRIMARY_AVAILABLE");
-        let payload_uri = record.primary_payload_uri.as_ref().unwrap();
-        assert!(payload_uri.ends_with(&format!(
-            "{}.json",
-            record.bundle_checksum.trim_start_matches("b3:")
-        )));
-        drop(journal);
-        let bundle = service
-            .artifacts
-            .read_query_artifact(&started.daemon_query_id)
-            .unwrap();
-        assert!(bundle.evidence.stages.iter().all(|stage| matches!(
-            stage.state,
-            QueryArtifactStageState::NotReached
-                | QueryArtifactStageState::Available
-                | QueryArtifactStageState::Partial
-                | QueryArtifactStageState::Complete
-                | QueryArtifactStageState::UnavailableWithReason
-        )));
-    }
-
-    #[tokio::test]
-    async fn query_artifact_no_diagnostic_reexecution() {
-        for fail in [false, true] {
-            let root = tempfile::tempdir().unwrap();
-            let executions = Arc::new(AtomicU64::new(0));
-            let service = ProductionQueryService::new(
-                Arc::new(CountingBackend {
-                    executions: Arc::clone(&executions),
-                    fail,
-                }),
-                ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-                authorization(),
-                FreshnessBarrier::default(),
-                std::time::Duration::from_secs(2),
-            );
-            let agent = if fail { "count-fail" } else { "count-success" };
-            register_host(&service, agent).await;
-            let started = start_test_query(&service, agent, agent).await;
-            let events = service
-                .stream_query(Request::new(StreamQueryRequest {
-                    daemon_query_id: started.daemon_query_id,
-                    resume_token: started.resume_token,
-                    after_sequence: 0,
-                }))
-                .await
-                .unwrap()
-                .into_inner();
-            let _events = futures::StreamExt::collect::<Vec<_>>(events).await;
-            assert_eq!(executions.load(Ordering::Acquire), 1);
-        }
-
-        let root = tempfile::tempdir().unwrap();
-        let store = ResultArtifactStore::new(root.path().to_path_buf()).unwrap();
-        let evidence = staged_terminal_evidence("execution:idempotent", "binding", false);
-        let artifact = failure_bundle("workspace:00000000000000000000000000000000", evidence);
-        store.persist_query_artifact(&artifact).unwrap();
-        store.persist_query_artifact(&artifact).unwrap();
-        let mut conflicting = artifact;
-        conflicting.phase = QueryArtifactPhase::Cancelled;
-        assert_eq!(
-            store
-                .persist_query_artifact(&conflicting)
-                .unwrap_err()
-                .code(),
-            tonic::Code::AlreadyExists
-        );
-        let record = store
-            .terminal_journal
-            .lock()
-            .unwrap()
-            .read_query_execution_terminal("execution:idempotent")
-            .unwrap()
-            .unwrap();
-        fs::remove_file(record.primary_payload_uri.unwrap()).unwrap();
-        assert_eq!(
-            store
-                .read_query_artifact("execution:idempotent")
-                .unwrap_err()
-                .code(),
-            tonic::Code::DataLoss
-        );
-
-        let journal_evidence =
-            staged_terminal_evidence("execution:journal-fault", "binding", false);
-        store.inject_fault(Some(QueryArtifactFaultPoint::TerminalJournalCommit));
-        assert_eq!(
-            store
-                .persist_query_artifact(&failure_bundle(
-                    "workspace:00000000000000000000000000000000",
-                    journal_evidence,
-                ))
-                .unwrap_err()
-                .code(),
-            tonic::Code::Unavailable
-        );
-        store.inject_fault(None);
-        assert_eq!(
-            store
-                .read_query_artifact("execution:journal-fault")
-                .unwrap_err()
-                .code(),
-            tonic::Code::NotFound
-        );
-    }
-
-    #[test]
-    fn query_artifact_failure_operational_gate() {
-        let root = tempfile::tempdir().unwrap();
-        let execution_id = "execution:restart-recovery";
-        {
-            let store = ResultArtifactStore::new(root.path().to_path_buf()).unwrap();
-            let evidence = staged_terminal_evidence(execution_id, "stream_drop", true);
-            store
-                .persist_query_artifact(&failure_bundle(
-                    "workspace:00000000000000000000000000000000",
-                    evidence,
-                ))
-                .unwrap();
-            fs::write(root.path().join(".result.crash.tmp"), b"staged").unwrap();
-            fs::write(
-                root.path().join("query-plan-artifacts/.payload.crash.tmp"),
-                b"staged",
-            )
-            .unwrap();
-        }
-        let recovered = ResultArtifactStore::new(root.path().to_path_buf()).unwrap();
-        assert!(!root.path().join(".result.crash.tmp").exists());
-        assert!(
-            !root
-                .path()
-                .join("query-plan-artifacts/.payload.crash.tmp")
-                .exists()
-        );
-        let recovered_bundle = recovered.read_query_artifact(execution_id).unwrap();
-        assert_eq!(recovered_bundle.phase, QueryArtifactPhase::Failed);
-        assert_eq!(
-            recovered_bundle.evidence.failing_stage.as_deref(),
-            Some("stream_drop")
-        );
-    }
-
-    #[tokio::test]
-    async fn wp67_behavioral_acceptance() {
-        let root = tempfile::tempdir().unwrap();
-        let service = ProductionQueryService::new(
-            Arc::new(FakeBackend),
-            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
-        );
-
-        let mut incomplete = handshake_for(b"test-capability-token", "wp67-agent");
-        incomplete.required_feature_bits = CpgdFeatureMask::NONE.bits();
-        incomplete.optional_feature_bits = CpgdFeatureMask::SUPPORTED
-            .missing_from(CpgdFeatureMask::QUERY_RESUME)
-            .bits();
-        let status = service
-            .handshake(Request::new(incomplete))
-            .await
-            .unwrap_err();
-        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
-
-        register_host(&service, "wp67-agent").await;
-        let started = start_test_query(&service, "wp67-agent", "wp67-forged-resume").await;
-        let mut legacy_unkeyed = blake3::Hasher::new();
-        legacy_unkeyed.update(b"codefabric.query.resume.v1\0");
-        legacy_unkeyed.update(started.daemon_query_id.as_bytes());
-        let status = service
-            .stream_query(Request::new(StreamQueryRequest {
-                daemon_query_id: started.daemon_query_id,
-                resume_token: legacy_unkeyed.finalize().as_bytes().to_vec(),
-                after_sequence: 0,
-            }))
-            .await
-            .err()
-            .expect("the legacy public derivation must not authenticate");
-        assert_eq!(status.code(), tonic::Code::PermissionDenied);
-    }
-
-    #[tokio::test]
-    async fn wp67_negative_zero_state() {
-        let root = tempfile::tempdir().unwrap();
-        let backend = Arc::new(BlockingBackend {
-            started: Arc::new(Notify::new()),
-            release: Arc::new(Notify::new()),
-            cancelled: Arc::new(Notify::new()),
-        });
-        let service = ProductionQueryService::new(
-            Arc::clone(&backend),
-            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
-        );
-        register_host(&service, "wp67-cancel-agent").await;
-        let started = start_test_query(&service, "wp67-cancel-agent", "wp67-distinct-token").await;
-        backend.started.notified().await;
-        assert_ne!(started.resume_token, started.cancel_token);
-
-        let status = service
-            .cancel_query(Request::new(CancelQueryRequest {
-                daemon_query_id: started.daemon_query_id.clone(),
-                cancel_token: started.resume_token.clone(),
-                agent_instance_id: "wp67-cancel-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                reason: "wrong token class".to_owned(),
-            }))
-            .await
-            .unwrap_err();
-        assert_eq!(status.code(), tonic::Code::PermissionDenied);
-
-        let expired = ResultArtifact {
-            id: "artifact:wp67-expired".to_owned(),
-            checksum: framed_digest(b"expired"),
-            lease_token: "expired-lease".to_owned(),
-            lease_expires_at_unix_ms: now_millis() - 1,
-            bytes: Arc::from(b"expired".as_slice()),
-        };
-        service
-            .artifact_records
-            .lock()
-            .await
-            .insert(expired.id.clone(), expired.clone());
-        let status = service
-            .read_result(Request::new(ReadResultRequest {
-                artifact_id: expired.id,
-                offset: 0,
-                maximum_bytes: Some(1),
-                lease_token: expired.lease_token,
-                accepted_compression: PayloadCompression::Identity as i32,
-                authorization_resource_id: String::new(),
-                owner: None,
-            }))
-            .await
-            .err()
-            .expect("an expired result lease must not produce a stream");
-        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
-
-        service
-            .cancel_query(Request::new(CancelQueryRequest {
-                daemon_query_id: started.daemon_query_id,
-                cancel_token: started.cancel_token,
-                agent_instance_id: "wp67-cancel-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                reason: "test cleanup".to_owned(),
-            }))
-            .await
-            .unwrap();
-        backend.release.notify_one();
-    }
-
-    #[tokio::test]
-    async fn wp67_operational_acceptance() {
-        assert_eq!(CpgdFeatureMask::REQUIRED, CpgdFeatureMask::QUERY_RESUME);
-        assert!(
-            QueryAuthorization::new(
-                b"test-capability-token",
-                vec![WorkspaceClaim {
-                    workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                    repository_id: None,
-                    worktree_id: None,
-                    workspace_kind: "directory".to_owned(),
-                    readiness: WorkspaceReadiness::Ready as i32,
-                    permission_claims: vec!["status-only".to_owned()],
-                }],
-            )
-            .is_err()
-        );
-
-        let mut reordered_profile = test_host_profile();
-        reordered_profile.delivery_modes.reverse();
-        assert_eq!(
-            host_capability_profile_digest(&reordered_profile).unwrap(),
-            reordered_profile.profile_digest
-        );
-
-        let root = tempfile::tempdir().unwrap();
-        let service = ProductionQueryService::new(
-            Arc::new(FakeBackend),
-            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
-        );
-        let handshake = service
-            .handshake(Request::new(handshake_for(
-                b"test-capability-token",
-                "wp67-operational-agent",
-            )))
-            .await
-            .unwrap()
-            .into_inner();
-        assert_ne!(
-            handshake.negotiated_feature_bits & CpgdFeatureMask::REQUIRED.bits(),
-            0
-        );
-        let started =
-            start_test_query(&service, "wp67-operational-agent", "wp67-operational").await;
-        assert_eq!(started.resume_token.len(), 32);
-        assert_eq!(started.cancel_token.len(), 32);
-        assert_ne!(started.resume_token, started.cancel_token);
-    }
-
-    #[tokio::test]
-    async fn wp39_structural_acceptance() {
-        let root = tempfile::tempdir().unwrap();
-        let socket = root.path().join("query.sock");
-        let service = ProductionQueryService::new(
-            Arc::new(FakeBackend),
-            ResultArtifactStore::new(root.path().join("results")).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
-        );
-        let allowed_uid = fs::metadata(root.path()).unwrap().uid();
-        let (shutdown, shutdown_receiver) = oneshot::channel();
-        let server_socket = socket.clone();
-        let server = tokio::spawn(async move {
-            serve_query_uds(&server_socket, allowed_uid, service, async {
-                let _ = shutdown_receiver.await;
-            })
-            .await
-        });
-        while !socket.exists() {
-            tokio::task::yield_now().await;
-        }
-        let connector_socket = socket.clone();
-        let channel = Endpoint::try_from("http://[::]:50051")
-            .unwrap()
-            .connect_with_connector(service_fn(move |_| {
-                let connector_socket = connector_socket.clone();
-                async move {
-                    UnixStream::connect(connector_socket)
-                        .await
-                        .map(TokioIo::new)
-                }
-            }))
-            .await
-            .unwrap();
-        let mut client = CpgQueryServiceClient::new(channel);
-        assert_eq!(
-            client
-                .handshake(handshake(b"wrong-capability-token"))
-                .await
-                .unwrap_err()
+            authorization
+                .authorize_handshake(&wrong_adapter)
+                .expect_err("adapter substitution")
                 .code(),
             tonic::Code::Unauthenticated
         );
-        let response = client
-            .handshake(handshake(b"test-capability-token"))
-            .await
-            .unwrap()
-            .into_inner();
-        assert_eq!(response.authorized_workspaces.len(), 1);
-        assert_eq!(response.negotiated_rpc_version, "1.0");
-        shutdown.send(()).unwrap();
-        server.await.unwrap().unwrap();
-        assert!(!socket.exists());
-    }
 
-    #[tokio::test]
-    async fn wp39_behavioral_acceptance() {
-        let root = tempfile::tempdir().unwrap();
-        let service = ProductionQueryService::new(
-            Arc::new(FakeBackend),
-            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
-        );
-        register_host(&service, "test-agent").await;
-        let canonical = canonical_request();
-        let started = service
-            .start_query(Request::new(StartQueryRequest {
-                agent_instance_id: "test-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                semantic_query_version: "1.3".to_owned(),
-                canonical_request_json: canonical.clone(),
-                request_checksum: framed_digest(&canonical),
-                delivery_preference: DeliveryPreference::Resource as i32,
-                deadline_unix_ms: now_millis() + 60_000,
-                idempotency_key: "same-request".to_owned(),
-                payload_compression: PayloadCompression::Identity as i32,
-                ..start_request("test-agent")
-            }))
-            .await
-            .unwrap()
-            .into_inner();
+        let mut wrong_credential = handshake_request("agent-a", vec!["workspace-a".to_owned()]);
+        wrong_credential
+            .credential_proof
+            .as_mut()
+            .expect("credential")
+            .credential_id = "agent-b".to_owned();
         assert_eq!(
-            started.query_execution_state,
-            QueryExecutionState::Accepted as i32
-        );
-        let events = service
-            .stream_query(Request::new(StreamQueryRequest {
-                daemon_query_id: started.daemon_query_id,
-                resume_token: started.resume_token,
-                after_sequence: 0,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        let events = futures::StreamExt::collect::<Vec<_>>(events).await;
-        assert_eq!(events.len(), 3);
-        assert!(matches!(
-            events[0].as_ref().unwrap().event.as_ref(),
-            Some(Event::SnapshotPinned(_))
-        ));
-        assert!(matches!(
-            events[2].as_ref().unwrap().event.as_ref(),
-            Some(Event::Terminal(_))
-        ));
-        let artifact = service
-            .artifact_records
-            .lock()
-            .await
-            .values()
-            .next()
-            .cloned()
-            .unwrap();
-        let result = service
-            .read_result(Request::new(ReadResultRequest {
-                artifact_id: artifact.id,
-                offset: 0,
-                maximum_bytes: Some(MAX_PAYLOAD_CHUNK_BYTES as u64),
-                lease_token: artifact.lease_token,
-                accepted_compression: PayloadCompression::Identity as i32,
-                authorization_resource_id: String::new(),
-                owner: None,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        let chunks = futures::StreamExt::collect::<Vec<_>>(result).await;
-        assert_eq!(chunks.len(), 1);
-        assert!(chunks[0].as_ref().unwrap().final_chunk);
-    }
-
-    #[tokio::test]
-    async fn wp65_operational_acceptance() {
-        let root = tempfile::tempdir().unwrap();
-        let service = ProductionQueryService::new(
-            Arc::new(FakeBackend),
-            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
-        );
-        register_host(&service, "artifact-agent").await;
-        let canonical = canonical_request();
-        let started = service
-            .start_query(Request::new(StartQueryRequest {
-                agent_instance_id: "artifact-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                mcp_call_id: "mcp-call-65".to_owned(),
-                rpc_attempt_id: "rpc-attempt-65".to_owned(),
-                semantic_request_id: Some("rpc-gate-b".to_owned()),
-                semantic_query_version: "1.3".to_owned(),
-                canonical_request_json: canonical.clone(),
-                request_checksum: framed_digest(&canonical),
-                delivery_preference: DeliveryPreference::Resource as i32,
-                deadline_unix_ms: now_millis() + 60_000,
-                idempotency_key: "wp65-persist".to_owned(),
-                payload_compression: PayloadCompression::Identity as i32,
-                ..start_request("artifact-agent")
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        let execution_id = started.daemon_query_id.clone();
-        let events = service
-            .stream_query(Request::new(StreamQueryRequest {
-                daemon_query_id: started.daemon_query_id,
-                resume_token: started.resume_token,
-                after_sequence: 0,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        let events = futures::StreamExt::collect::<Vec<_>>(events).await;
-        assert_eq!(events.len(), 3);
-
-        let persisted = service
-            .artifacts
-            .read_query_artifact(&execution_id)
-            .unwrap();
-        assert_eq!(persisted.phase, QueryArtifactPhase::Succeeded);
-        assert_eq!(persisted.execution.semantic_request_id, "rpc-gate-b");
-        assert_eq!(persisted.execution.mcp_call_id, "mcp-call-65");
-        assert!(persisted.result_artifact_id.is_some());
-        assert!(persisted.expires_at_unix_ms > persisted.created_at_unix_ms);
-        assert_eq!(
-            service
-                .artifacts
-                .prune_expired_query_artifacts(persisted.created_at_unix_ms)
-                .unwrap(),
-            0
-        );
-        assert_eq!(
-            service
-                .artifacts
-                .prune_expired_query_artifacts(persisted.expires_at_unix_ms)
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            service
-                .artifacts
-                .read_query_artifact(&execution_id)
-                .unwrap_err()
+            authorization
+                .authorize_handshake(&wrong_credential)
+                .expect_err("credential substitution")
                 .code(),
-            tonic::Code::DataLoss
+            tonic::Code::Unauthenticated
         );
-    }
 
-    #[tokio::test]
-    async fn wp65_negative_zero_state() {
-        let root = tempfile::tempdir().unwrap();
-        let backend = Arc::new(BlockingBackend {
-            started: Arc::new(Notify::new()),
-            release: Arc::new(Notify::new()),
-            cancelled: Arc::new(Notify::new()),
-        });
-        let service = ProductionQueryService::new(
-            Arc::clone(&backend),
-            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
+        let duplicated = handshake_request(
+            "agent-a",
+            vec!["workspace-a".to_owned(), "workspace-a".to_owned()],
         );
-        register_host(&service, "cancel-agent").await;
-        let canonical = canonical_request();
-        let started = service
-            .start_query(Request::new(StartQueryRequest {
-                agent_instance_id: "cancel-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                mcp_call_id: "mcp-cancel-65".to_owned(),
-                semantic_query_version: "1.3".to_owned(),
-                canonical_request_json: canonical.clone(),
-                request_checksum: framed_digest(&canonical),
-                delivery_preference: DeliveryPreference::Resource as i32,
-                deadline_unix_ms: now_millis() + 60_000,
-                idempotency_key: "wp65-cancel".to_owned(),
-                payload_compression: PayloadCompression::Identity as i32,
-                ..start_request("cancel-agent")
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        backend.started.notified().await;
-        service
-            .cancel_query(Request::new(CancelQueryRequest {
-                daemon_query_id: started.daemon_query_id.clone(),
-                cancel_token: started.cancel_token,
-                agent_instance_id: "cancel-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                reason: "drop the stream".to_owned(),
-            }))
-            .await
-            .unwrap();
-        let artifact = service
-            .artifacts
-            .read_query_artifact(&started.daemon_query_id)
-            .unwrap();
-        assert_eq!(artifact.phase, QueryArtifactPhase::Cancelled);
-        assert_eq!(artifact.public_error_code.as_deref(), Some("CANCELLED"));
-        assert!(artifact.plan_artifacts.is_empty());
-        assert!(artifact.result_artifact_id.is_none());
-        backend.release.notify_one();
-    }
-
-    #[tokio::test]
-    async fn wp39_negative_zero_state() {
-        let root = tempfile::tempdir().unwrap();
-        let service = ProductionQueryService::new(
-            Arc::new(FakeBackend),
-            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
-        );
-        register_host(&service, "test-agent").await;
-        let canonical = canonical_request();
-        let status = service
-            .start_query(Request::new(StartQueryRequest {
-                agent_instance_id: "test-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                canonical_request_json: canonical,
-                request_checksum: framed_digest(b"wrong"),
-                delivery_preference: DeliveryPreference::Inline as i32,
-                deadline_unix_ms: now_millis() - 1,
-                idempotency_key: "expired".to_owned(),
-                payload_compression: PayloadCompression::Identity as i32,
-                ..start_request("test-agent")
-            }))
-            .await
-            .unwrap_err();
-        assert_eq!(status.code(), tonic::Code::DeadlineExceeded);
-    }
-
-    #[tokio::test]
-    async fn wp39_operational_acceptance() {
-        let root = tempfile::tempdir().unwrap();
-        let backend = Arc::new(BlockingBackend {
-            started: Arc::new(Notify::new()),
-            release: Arc::new(Notify::new()),
-            cancelled: Arc::new(Notify::new()),
-        });
-        let service = ProductionQueryService::new(
-            Arc::clone(&backend),
-            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
-        );
-        register_host(&service, "test-agent").await;
-        let canonical = canonical_request();
-        let started = service
-            .start_query(Request::new(StartQueryRequest {
-                agent_instance_id: "test-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                semantic_query_version: "1.3".to_owned(),
-                canonical_request_json: canonical.clone(),
-                request_checksum: framed_digest(&canonical),
-                delivery_preference: DeliveryPreference::Resource as i32,
-                deadline_unix_ms: now_millis() + 60_000,
-                idempotency_key: "cancel-request".to_owned(),
-                payload_compression: PayloadCompression::Identity as i32,
-                ..start_request("test-agent")
-            }))
-            .await
-            .unwrap()
-            .into_inner();
         assert_eq!(
-            started.query_execution_state,
-            QueryExecutionState::Accepted as i32
+            authorization
+                .authorize_handshake(&duplicated)
+                .expect_err("duplicate workspace")
+                .code(),
+            tonic::Code::InvalidArgument
         );
-        backend.started.notified().await;
-        let cancelled = service
-            .cancel_query(Request::new(CancelQueryRequest {
-                daemon_query_id: started.daemon_query_id.clone(),
-                cancel_token: started.cancel_token.clone(),
-                agent_instance_id: "test-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                reason: "test cancellation".to_owned(),
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        assert_eq!(cancelled.state, CancellationState::Cancelled as i32);
-        let events = service
-            .stream_query(Request::new(StreamQueryRequest {
-                daemon_query_id: started.daemon_query_id,
-                resume_token: started.resume_token,
-                after_sequence: 0,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        let events = futures::StreamExt::collect::<Vec<_>>(events).await;
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            events[0].as_ref().unwrap().event.as_ref(),
-            Some(Event::Terminal(value))
-                if value.execution_state == QueryExecutionState::Cancelled as i32
-        ));
-        backend.release.notify_one();
-        tokio::task::yield_now().await;
-        assert!(service.artifact_records.lock().await.is_empty());
-    }
-
-    async fn query_client(socket: PathBuf) -> CpgQueryServiceClient<tonic::transport::Channel> {
-        let channel = Endpoint::try_from("http://[::]:50051")
-            .unwrap()
-            .connect_with_connector(service_fn(move |_| {
-                let socket = socket.clone();
-                async move { UnixStream::connect(socket).await.map(TokioIo::new) }
-            }))
-            .await
-            .unwrap();
-        CpgQueryServiceClient::new(channel)
     }
 
     #[test]
-    fn wp63_structural_acceptance() {
-        fn implements_backend<T: SemanticQueryBackend>() {}
-        fn implements_rpc<T: CpgQueryService>() {}
-
-        implements_backend::<WorkspaceQueryBackend>();
-        implements_rpc::<ProductionQueryService<WorkspaceQueryBackend>>();
-        let backend = WorkspaceQueryBackend::default();
-        assert_eq!(backend.sessions.try_read().unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn wp63_negative_zero_state() {
-        let root = tempfile::tempdir().unwrap();
-        let socket = root.path().join("query.sock");
-        let service = ProductionQueryService::new(
-            Arc::new(FakeBackend),
-            ResultArtifactStore::new(root.path().join("results")).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
+    fn negotiated_query_session_binds_workspace_and_host_profile() {
+        let session = NegotiatedQuerySession::new(
+            "b3:host-profile".to_owned(),
+            &[query_claim("workspace-a")],
         );
-        let allowed_uid = fs::metadata(root.path()).unwrap().uid().saturating_add(1);
-        let (shutdown, shutdown_receiver) = oneshot::channel();
-        let server_socket = socket.clone();
-        let server = tokio::spawn(async move {
-            serve_query_uds(&server_socket, allowed_uid, service, async {
-                let _ = shutdown_receiver.await;
-            })
-            .await
-        });
-        while !socket.exists() {
-            tokio::task::yield_now().await;
-        }
-        let mut client = query_client(socket.clone()).await;
-        let status = client
-            .handshake(handshake(b"test-capability-token"))
-            .await
-            .unwrap_err();
-        assert_ne!(status.code(), tonic::Code::Ok);
-        assert!(!status.message().is_empty());
-        shutdown.send(()).unwrap();
-        server.await.unwrap().unwrap();
-        assert!(!socket.exists());
-    }
-
-    #[tokio::test]
-    async fn wp63_operational_acceptance() {
-        let root = tempfile::tempdir().unwrap();
-        let socket = root.path().join("query.sock");
-        let backend = Arc::new(BlockingBackend {
-            started: Arc::new(Notify::new()),
-            release: Arc::new(Notify::new()),
-            cancelled: Arc::new(Notify::new()),
-        });
-        let service = ProductionQueryService::new(
-            Arc::clone(&backend),
-            ResultArtifactStore::new(root.path().join("results")).unwrap(),
-            authorization(),
-            FreshnessBarrier::default(),
-            std::time::Duration::from_secs(2),
+        session
+            .authorize("workspace-a", Some("b3:host-profile"))
+            .expect("exact session identity");
+        assert_eq!(
+            session
+                .authorize("workspace-b", Some("b3:host-profile"))
+                .expect_err("workspace substitution")
+                .code(),
+            tonic::Code::PermissionDenied
         );
-        let allowed_uid = fs::metadata(root.path()).unwrap().uid();
-        let (shutdown, shutdown_receiver) = oneshot::channel();
-        let server_socket = socket.clone();
-        let server = tokio::spawn(async move {
-            serve_query_uds(&server_socket, allowed_uid, service, async {
-                let _ = shutdown_receiver.await;
-            })
-            .await
-        });
-        while !socket.exists() {
-            tokio::task::yield_now().await;
-        }
-        let mut client = query_client(socket.clone()).await;
-        client
-            .handshake(handshake(b"test-capability-token"))
-            .await
-            .unwrap();
-        let canonical = canonical_request();
-        client
-            .start_query(StartQueryRequest {
-                agent_instance_id: "test-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                semantic_query_version: "1.3".to_owned(),
-                canonical_request_json: canonical.clone(),
-                request_checksum: framed_digest(&canonical),
-                delivery_preference: DeliveryPreference::Resource as i32,
-                deadline_unix_ms: now_millis() + 60_000,
-                idempotency_key: "daemon-shutdown-cancellation".to_owned(),
-                payload_compression: PayloadCompression::Identity as i32,
-                ..start_request("test-agent")
-            })
-            .await
-            .unwrap();
-        backend.started.notified().await;
-        drop(client);
-        shutdown.send(()).unwrap();
-        tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            backend.cancelled.notified(),
-        )
-        .await
-        .expect("in-flight backend observed daemon cancellation");
-        server.await.unwrap().unwrap();
-        assert!(!socket.exists());
-    }
-
-    #[tokio::test]
-    async fn wp45_strict_current_query_is_rejected_before_backend_execution() {
-        let root = tempfile::tempdir().unwrap();
-        let freshness = FreshnessBarrier::default();
-        let _ = freshness.admit();
-        let service = ProductionQueryService::new(
-            Arc::new(FakeBackend),
-            ResultArtifactStore::new(root.path().to_path_buf()).unwrap(),
-            authorization(),
-            freshness,
-            std::time::Duration::from_millis(50),
+        assert_eq!(
+            session
+                .authorize("workspace-a", Some("b3:other-profile"))
+                .expect_err("profile substitution")
+                .code(),
+            tonic::Code::FailedPrecondition
         );
-        register_host(&service, "test-agent").await;
-        let canonical = canonical_current_required_request();
-        let started = service
-            .start_query(Request::new(StartQueryRequest {
-                agent_instance_id: "test-agent".to_owned(),
-                workspace_id: "workspace:00000000000000000000000000000000".to_owned(),
-                semantic_query_version: "1.3".to_owned(),
-                canonical_request_json: canonical.clone(),
-                request_checksum: framed_digest(&canonical),
-                delivery_preference: DeliveryPreference::Resource as i32,
-                deadline_unix_ms: now_millis() + 1_000,
-                idempotency_key: "strict-stale".to_owned(),
-                payload_compression: PayloadCompression::Identity as i32,
-                ..start_request("test-agent")
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        let events = service
-            .stream_query(Request::new(StreamQueryRequest {
-                daemon_query_id: started.daemon_query_id,
-                resume_token: started.resume_token,
-                after_sequence: 0,
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        let events = futures::StreamExt::collect::<Vec<_>>(events).await;
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            events[0].as_ref().unwrap().event.as_ref(),
-            Some(Event::Terminal(value))
-                if value.execution_state == QueryExecutionState::Failed as i32
-                    && value.freshness_state == "POTENTIALLY_STALE"
-        ));
-        assert!(service.artifact_records.lock().await.is_empty());
     }
 }

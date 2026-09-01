@@ -1,1 +1,0 @@
-{"scenario_id":"060_rust_compile_failure_and_recovery","edits":["break-rust","repair-rust"],"expected_terminal":"CURRENT"}

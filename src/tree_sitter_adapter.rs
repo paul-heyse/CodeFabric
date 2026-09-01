@@ -17,8 +17,9 @@ use tree_sitter::{
 
 use crate::cancellation::Cancellation;
 use crate::provider_raw_kinds::{
-    ProviderGrammarInventory, ProviderRawKindDisposition, TREE_SITTER_PYTHON_GRAMMAR,
-    TREE_SITTER_RECOVERY_QUERY, TREE_SITTER_RUST_GRAMMAR,
+    ProviderGrammarInventory, ProviderGrammarKind, ProviderRawKindDisposition,
+    TREE_SITTER_PYTHON_GRAMMAR, TREE_SITTER_RECOVERY_QUERY, TREE_SITTER_RUST_GRAMMAR,
+    tree_sitter_raw_kind_entry,
 };
 use crate::provider_types::{ProviderBoundaryError, ProviderBoundaryMap, ProviderText};
 use crate::registries::{PROVIDER_RESOURCE_PROFILES, ProviderResourceProfileEntry};
@@ -280,6 +281,7 @@ impl AbortReason {
 /// One worker-owned parser/query-cursor pair and its bounded revision cache.
 pub struct TreeSitterAdapter {
     parser: Parser,
+    language: Language,
     query: Query,
     query_cursor: QueryCursor,
     inventory: &'static ProviderGrammarInventory,
@@ -289,8 +291,8 @@ pub struct TreeSitterAdapter {
 }
 
 impl TreeSitterAdapter {
-    /// Construct and fully validate the selected runtime grammar against the
-    /// generated provider catalog before accepting source.
+    /// Construct and fully validate the selected exact-pinned runtime grammar before accepting
+    /// source.
     ///
     /// # Errors
     ///
@@ -324,6 +326,7 @@ impl TreeSitterAdapter {
         }
         Ok(Self {
             parser,
+            language,
             query,
             query_cursor: QueryCursor::new(),
             inventory,
@@ -395,7 +398,7 @@ impl TreeSitterAdapter {
         self.metrics
     }
 
-    /// The exact generated grammar identity validated at startup.
+    /// The exact application-owned grammar identity validated at startup.
     #[must_use]
     pub const fn inventory(&self) -> &'static ProviderGrammarInventory {
         self.inventory
@@ -508,6 +511,7 @@ impl TreeSitterAdapter {
         };
         let (facts, mut metrics, recovery_nodes) = match walk_tree(
             &tree,
+            &self.language,
             self.inventory,
             &boundaries,
             self.limits,
@@ -567,102 +571,60 @@ impl TreeSitterAdapter {
     }
 }
 
-#[cfg(feature = "daemon")]
-impl crate::provider_runtime::ProviderAdapter for TreeSitterAdapter {
-    fn run(
-        &self,
-        job: crate::provider_runtime::ProviderJob,
-        events: crate::provider_runtime::ProviderEventSink,
-        cancellation: Cancellation,
-    ) -> Result<
-        crate::provider_runtime::ProviderCompletion,
-        crate::provider_runtime::ProviderRuntimeError,
-    > {
-        let crate::provider_runtime::ProviderDirectWork::TreeSitter { revision, text } =
-            job.direct_work
-        else {
-            return Err(crate::provider_runtime::ProviderRuntimeError::Adapter {
-                code: "TREE_SITTER_DIRECT_WORK_ABSENT".into(),
-            });
-        };
-        let language = match self.inventory.catalog_id {
-            "tree-sitter-python-0-25-0" => TreeSitterLanguage::Python,
-            "tree-sitter-rust-0-24-2" => TreeSitterLanguage::Rust,
-            _ => {
-                return Err(crate::provider_runtime::ProviderRuntimeError::Adapter {
-                    code: "TREE_SITTER_CATALOG_UNSUPPORTED".into(),
-                });
-            }
-        };
-        let mut direct = Self::new(language).map_err(|error| {
-            crate::provider_runtime::ProviderRuntimeError::Adapter {
-                code: error.to_string(),
-            }
-        })?;
-        let snapshot = direct
-            .parse_full(revision, text, &cancellation)
-            .map_err(
-                |error| crate::provider_runtime::ProviderRuntimeError::Adapter {
-                    code: error.to_string(),
-                },
-            )?;
-        events.begin_provider_facts(
-            format!("{};{}", snapshot.catalog_id, snapshot.grammar_fingerprint),
-            std::collections::BTreeMap::new(),
-            0,
-        )?;
-        let output_records = u64::try_from(snapshot.facts.len()).unwrap_or(u64::MAX);
-        events.send_progress(output_records, output_records, "tree-sitter-complete")?;
-        let mut fingerprint = Vec::new();
-        fingerprint.extend_from_slice(snapshot.provider_image_fingerprint.as_bytes());
-        fingerprint.extend_from_slice(snapshot.catalog_id.as_bytes());
-        fingerprint.extend_from_slice(&output_records.to_be_bytes());
-        Ok(crate::provider_runtime::ProviderCompletion {
-            state: crate::registries::ProviderRunState::Succeeded,
-            output_fingerprint: crate::integrity::digest_bytes(&fingerprint),
-            diagnostic_code: None,
-        })
-    }
-}
-
 fn validate_runtime_inventory(
     language: &Language,
     node_types: &str,
     inventory: &ProviderGrammarInventory,
 ) -> Result<(), TreeSitterAdapterError> {
+    let expected = match inventory.grammar {
+        ProviderGrammarKind::Python => &TREE_SITTER_PYTHON_GRAMMAR,
+        ProviderGrammarKind::Rust => &TREE_SITTER_RUST_GRAMMAR,
+    };
+    if inventory != expected {
+        return Err(version_mismatch("application grammar identity"));
+    }
     if language.abi_version() != inventory.grammar_abi {
         return Err(version_mismatch("grammar ABI"));
     }
-    if language.node_kind_count().saturating_add(2) != inventory.raw_kinds.len() {
-        return Err(version_mismatch("raw kind count"));
+    if language.node_kind_count() == 0 || language.node_kind_count() > usize::from(u16::MAX) {
+        return Err(version_mismatch("live raw kind count"));
     }
-    let runtime_kind_ids = (0..language.node_kind_count())
-        .map(|id| u16::try_from(id).map_err(|_| version_mismatch("raw kind ID")))
-        .chain([Ok(u16::MAX - 1), Ok(u16::MAX)]);
-    for (id, entry) in runtime_kind_ids.zip(inventory.raw_kinds) {
-        let id = id?;
-        if entry.raw_kind_id != id
-            || language.node_kind_for_id(id) != Some(entry.raw_name)
-            || language.node_kind_is_named(id) != entry.named
-            || language.node_kind_is_visible(id) != entry.visible
-            || language.node_kind_is_supertype(id) != entry.supertype
-        {
-            return Err(version_mismatch("raw kind inventory"));
+    for id in 0..language.node_kind_count() {
+        let id = u16::try_from(id).map_err(|_| version_mismatch("live raw kind ID"))?;
+        let entry = tree_sitter_raw_kind_entry(language, inventory, id)
+            .ok_or_else(|| version_mismatch("live raw kind"))?;
+        if entry.raw_name.is_empty() || entry.raw_kind_id != id {
+            return Err(version_mismatch("live raw kind identity"));
         }
     }
-    if language.field_count() != inventory.fields.len() {
-        return Err(version_mismatch("field count"));
+    for (id, expected_name) in [(u16::MAX - 1, "_ERROR"), (u16::MAX, "ERROR")] {
+        let entry = tree_sitter_raw_kind_entry(language, inventory, id)
+            .ok_or_else(|| version_mismatch("live recovery kind"))?;
+        if entry.raw_name != expected_name {
+            return Err(version_mismatch("live recovery kind identity"));
+        }
     }
-    for entry in inventory.fields {
-        if language.field_name_for_id(entry.field_id) != Some(entry.field_name) {
-            return Err(version_mismatch("field inventory"));
+    if language.field_count() == 0 || language.field_count() > usize::from(u16::MAX) {
+        return Err(version_mismatch("live field count"));
+    }
+    for id in 1..=language.field_count() {
+        let id = u16::try_from(id).map_err(|_| version_mismatch("live field ID"))?;
+        let name = language
+            .field_name_for_id(id)
+            .ok_or_else(|| version_mismatch("live field"))?;
+        if name.is_empty()
+            || !language
+                .field_id_for_name(name)
+                .is_some_and(|observed| observed.get() == id)
+        {
+            return Err(version_mismatch("live field identity"));
         }
     }
     if checksum(node_types.as_bytes()) != inventory.node_types_digest {
         return Err(version_mismatch("NODE_TYPES digest"));
     }
-    if checksum(inventory.query_bundle_canonical_json) != inventory.query_bundle_digest {
-        return Err(version_mismatch("query bundle digest"));
+    if checksum(TREE_SITTER_RECOVERY_QUERY.as_bytes()) != inventory.recovery_query_digest {
+        return Err(version_mismatch("recovery query digest"));
     }
     Ok(())
 }
@@ -681,6 +643,7 @@ type RecoveryNode = (usize, usize, bool, bool, u16);
 #[allow(clippy::too_many_lines)] // Iterative cursor ownership and all budget checks remain in one traversal.
 fn walk_tree(
     tree: &Tree,
+    language: &Language,
     inventory: &ProviderGrammarInventory,
     boundaries: &ProviderBoundaryMap,
     limits: TreeSitterLimits,
@@ -729,13 +692,9 @@ fn walk_tree(
             return Err(TreeSitterAdapterError::Cancelled);
         }
         let node = cursor.node();
-        let entry = inventory
-            .raw_kinds
-            .binary_search_by_key(&node.kind_id(), |entry| entry.raw_kind_id)
-            .ok()
-            .and_then(|index| inventory.raw_kinds.get(index))
+        let entry = tree_sitter_raw_kind_entry(language, inventory, node.kind_id())
             .ok_or_else(|| version_mismatch("runtime node kind absent"))?;
-        if !runtime_node_matches(node.kind(), node.is_named(), entry.raw_name, entry.named) {
+        if !runtime_node_matches(node.kind(), node.is_named(), &entry.raw_name, entry.named) {
             return Err(version_mismatch("runtime node identity"));
         }
         let start_byte = boundaries.original(node.start_byte())?;
@@ -772,7 +731,7 @@ fn walk_tree(
             return Err(TreeSitterAdapterError::DiagnosticLimit);
         }
         let field_name = cursor.field_name().map(str::to_owned);
-        let raw_kind = entry.raw_name.to_owned();
+        let raw_kind = entry.raw_name;
         let fact_bytes = u64::try_from(
             std::mem::size_of::<RawSyntaxFact>()
                 .saturating_add(raw_kind.len())
@@ -1074,14 +1033,11 @@ mod tests {
             );
             assert!(!snapshot.facts.is_empty());
             assert!(snapshot.facts.iter().all(|fact| {
-                inventory
-                    .raw_kinds
-                    .binary_search_by_key(&fact.raw_kind_id, |entry| entry.raw_kind_id)
-                    .ok()
-                    .and_then(|index| inventory.raw_kinds.get(index))
+                tree_sitter_raw_kind_entry(&adapter.language, &inventory, fact.raw_kind_id)
                     .is_some_and(|entry| {
                         entry.raw_name == fact.raw_kind
                             && entry.normalized_kind_code == fact.normalized_kind.0
+                            && entry.disposition == fact.disposition
                     })
             }));
             assert_eq!(
@@ -1171,49 +1127,50 @@ mod tests {
     fn wp30_negative_zero_state() {
         let (language, node_types, expected) = TreeSitterLanguage::Python.runtime();
         assert!(validate_runtime_inventory(&language, node_types, expected).is_ok());
+        for id in (0..language.node_kind_count())
+            .map(|id| u16::try_from(id).unwrap())
+            .chain([u16::MAX - 1, u16::MAX])
+        {
+            let observed = tree_sitter_raw_kind_entry(&language, expected, id).unwrap();
+            assert_eq!(observed.raw_kind_id, id);
+            assert_eq!(
+                language.node_kind_for_id(id),
+                Some(observed.raw_name.as_str())
+            );
+            assert_eq!(language.node_kind_is_named(id), observed.named);
+            assert_eq!(language.node_kind_is_visible(id), observed.visible);
+            assert_eq!(language.node_kind_is_supertype(id), observed.supertype);
+        }
+        for id in 1..=language.field_count() {
+            let id = u16::try_from(id).unwrap();
+            let name = language.field_name_for_id(id).unwrap();
+            assert!(
+                language
+                    .field_id_for_name(name)
+                    .is_some_and(|observed| observed.get() == id)
+            );
+        }
+
         let mut drifted = *expected;
         drifted.grammar_abi = drifted.grammar_abi.saturating_add(1);
         assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
         drifted = *expected;
-        drifted.raw_kinds = &expected.raw_kinds[1..];
+        drifted.catalog_id = "tree-sitter-python-drift";
         assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
-        let raw_mutations: [fn(&mut crate::provider_raw_kinds::ProviderRawKindEntry); 5] = [
-            |entry: &mut crate::provider_raw_kinds::ProviderRawKindEntry| {
-                entry.raw_kind_id = entry.raw_kind_id.saturating_add(1);
-            },
-            |entry: &mut crate::provider_raw_kinds::ProviderRawKindEntry| {
-                entry.raw_name = "catalog-drift";
-            },
-            |entry: &mut crate::provider_raw_kinds::ProviderRawKindEntry| {
-                entry.named = !entry.named;
-            },
-            |entry: &mut crate::provider_raw_kinds::ProviderRawKindEntry| {
-                entry.visible = !entry.visible;
-            },
-            |entry: &mut crate::provider_raw_kinds::ProviderRawKindEntry| {
-                entry.supertype = !entry.supertype;
-            },
-        ];
-        for mutate in raw_mutations {
-            let mut raw_kinds = expected.raw_kinds.to_vec();
-            mutate(&mut raw_kinds[0]);
-            drifted = *expected;
-            drifted.raw_kinds = Box::leak(raw_kinds.into_boxed_slice());
-            assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
-        }
         drifted = *expected;
-        drifted.fields = &expected.fields[1..];
+        drifted.provider_version = "tree-sitter=drift";
         assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
-        let mut fields = expected.fields.to_vec();
-        fields[0].field_id = fields[0].field_id.saturating_add(1);
         drifted = *expected;
-        drifted.fields = Box::leak(fields.into_boxed_slice());
+        drifted.runtime_inventory_fingerprint = "b3:drift";
+        assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
+        drifted = *expected;
+        drifted.grammar = ProviderGrammarKind::Rust;
         assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
         drifted = *expected;
         drifted.node_types_digest = "b3:catalog-drift";
         assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
         drifted = *expected;
-        drifted.query_bundle_canonical_json = b"{}";
+        drifted.recovery_query_digest = "b3:recovery-query-drift";
         assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
 
         let bad_lengths = ProviderText {

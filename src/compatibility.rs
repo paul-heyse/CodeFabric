@@ -37,7 +37,7 @@ pub async fn provider_row_count() -> datafusion::error::Result<usize> {
     let batch = RecordBatch::try_new(Arc::clone(&schema), vec![values])?;
     let provider = MemTable::try_new(schema, vec![vec![batch]])?;
     let batches =
-        crate::governed_session::collect_provider(crate::governed_session::ProviderReadRequest {
+        crate::fabric::provider::collect_provider(crate::fabric::provider::ProviderReadRequest {
             provider: Arc::new(provider),
             filter: None,
             projection: None,

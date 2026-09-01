@@ -7,14 +7,59 @@ import struct
 import unicodedata
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from enum import IntEnum
 
 import blake3
-
-from .model_registries import IdentityDomain, TypeCode
 
 _MAGIC = b"CFID"
 _FORMAT_VERSION = 1
 SOURCE_CONTEXT_ID = b"\xff" * 16
+
+
+class IdentityDomain(IntEnum):
+    """Append-only CBEF public-identity domain allocation."""
+
+    WORKSPACE = 1
+    REPOSITORY = 2
+    WORKTREE = 3
+    ANALYSIS_CONTEXT = 4
+    CONTEXT_SET = 5
+    SOURCE_FILE = 6
+    OWNER = 7
+    ENTITY = 8
+    RELATION_FACT = 9
+    PROPERTY_FACT = 10
+    TYPE = 11
+    PUBLICATION = 12
+    SERVING_SNAPSHOT = 13
+    RESULT_ARTIFACT = 14
+    SOURCE_CONTEXT = 15
+    UNKNOWN_REMAINDER = 16
+    ROOT_AUTHORIZATION = 17
+    PATH_RESULT = 18
+    OBJECTIVE_INPUT_SET = 19
+    OBJECTIVE_GROUP = 20
+    QUERY_SOURCE_CONTEXT = 21
+    ACCESS_SCOPE = 22
+    RESULT_ARTIFACT_V2 = 23
+
+
+class TypeCode(IntEnum):
+    """Append-only CBEF value-type allocation."""
+
+    ABSENT = 0
+    BYTES = 1
+    UTF8 = 2
+    RAW_PATH = 3
+    UNSIGNED = 4
+    SIGNED = 5
+    BOOLEAN = 6
+    ID = 7
+    DIGEST = 8
+    ORDERED_LIST = 9
+    SET = 10
+    MAP = 11
+    TAGGED_UNION = 12
 
 
 class IdentityError(ValueError):

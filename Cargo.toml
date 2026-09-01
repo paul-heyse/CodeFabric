@@ -32,32 +32,6 @@ contract-models = [
     "canonical-json",
     "dep:serde_yaml_ng",
 ]
-model-compiler = [
-    "contract-models",
-    "dep:arrow-array",
-    "dep:arrow-ipc",
-    "dep:arrow-schema",
-    "dep:blake3",
-    "dep:gix",
-    "dep:notify-debouncer-full",
-    "dep:petgraph",
-    "dep:rustix",
-    "dep:serde",
-    "dep:serde_json",
-    "dep:serde_json_canonicalizer",
-    "dep:serde_yaml_ng",
-    "dep:tempfile",
-    "dep:thiserror",
-    "dep:toml",
-]
-provider-inventory-tooling = [
-    "dep:ruff_python_ast",
-    "dep:serde",
-    "dep:serde_json",
-    "dep:tree-sitter",
-    "dep:tree-sitter-python",
-    "dep:tree-sitter-rust",
-]
 data-fabric = [
     "canonical-json",
     "contract-models",
@@ -78,6 +52,7 @@ data-fabric = [
     "dep:futures",
     "dep:object_store",
     "dep:parquet",
+    "dep:petgraph",
     "dep:tracing",
     "dep:tokio",
     "dep:url",
@@ -119,7 +94,6 @@ daemon = [
     "rpc",
     "dep:notify-debouncer-full",
     "dep:hyper-util",
-    "dep:petgraph",
     "dep:sha2",
     "dep:tokio-stream",
     "dep:toml",
@@ -173,7 +147,6 @@ serde_json = { version = "=1.0.151", features = ["arbitrary_precision"], optiona
 serde_json_canonicalizer = { version = "=0.3.2", optional = true }
 serde_yaml_ng = { version = "=0.10.0", optional = true }
 sha2 = { version = "=0.11.0", optional = true }
-tempfile = { version = "=3.27.0", optional = true }
 thiserror = { version = "=2.0.20", optional = true }
 unicode-casefold = { version = "=0.2.0", optional = true }
 unicode-normalization = { version = "=0.1.25", optional = true }
@@ -217,21 +190,6 @@ path = "tooling/proto/generate.rs"
 required-features = ["proto-tooling"]
 
 [[bin]]
-name = "codefabric-model"
-path = "src/bin/codefabric_model/main.rs"
-required-features = ["model-compiler"]
-
-[[bin]]
-name = "codefabric-provider-inventory"
-path = "tooling/model/provider_inventory.rs"
-required-features = ["provider-inventory-tooling"]
-
-[[bin]]
-name = "codefabric-model-schema-consumer"
-path = "tooling/model/schema_consumer.rs"
-required-features = ["data-fabric"]
-
-[[bin]]
 name = "codefabricd"
 path = "src/bin/codefabricd.rs"
 required-features = ["daemon"]
@@ -240,11 +198,6 @@ required-features = ["daemon"]
 name = "codefabric"
 path = "src/bin/codefabric.rs"
 required-features = ["daemon"]
-
-[[bin]]
-name = "codefabric-gate-b-candidate"
-path = "tooling/gate_b_candidate.rs"
-required-features = ["local-workstation"]
 
 [lints.rust]
 unsafe_code = "deny"

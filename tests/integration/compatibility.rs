@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use codefabric::compatibility;
-use serde_json::Value;
 
 fn repository_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
@@ -132,50 +131,7 @@ fn data_fabric_current_reference_routing_contract() {
 }
 
 #[test]
-fn data_fabric_gate_b_empty_differential() {
-    let root = repository_root();
-    let corpus = codefabric::golden_corpus::current_released_corpus_root(&root)
-        .expect("resolve owner-accepted current golden corpus");
-    let execution = codefabric::golden_corpus::execute_gate_b_artifacts(&corpus)
-        .expect("execute all Gate-B fact contracts");
-    assert_eq!(execution.artifact_digests.len(), 11);
-    let rebuild: Value = serde_json::from_slice(
-        &fs::read(corpus.join("expected/rebuild_comparison/gate-b.json"))
-            .expect("read Gate-B rebuild contract"),
-    )
-    .expect("decode Gate-B rebuild contract");
-    assert_eq!(rebuild["comparison"], "canonical-effective-state");
-    assert_eq!(rebuild["physical_delta_layout_ignored"], true);
-    assert_eq!(rebuild["operational_ids_ignored"], true);
-
-    let identity: Value = serde_json::from_slice(
-        &fs::read(root.join("contracts/generated/model/governance/toolchain-identity.json"))
-            .expect("read G-07 toolchain identity"),
-    )
-    .expect("decode G-07 toolchain identity");
-    let data_fabric = &identity["data_fabric"];
-    assert_eq!(data_fabric["datafusion_version"], "55.0.0");
-    assert_eq!(data_fabric["arrow_version"], "59.2.0");
-    assert_eq!(data_fabric["parquet_version"], "59.2.0");
-    assert_eq!(
-        data_fabric["delta_rs_git_rev"],
-        "43a0cf10a313e5077c48637ad786a05359136bbb"
-    );
-}
-
-#[test]
-fn wp06_behavioral_release_equivalence() {
-    data_fabric_target_stack_release_contract();
-    data_fabric_gate_b_empty_differential();
-}
-
-#[test]
 fn wp06_structural_old_authority_zero_state() {
     data_fabric_old_live_authority_zero_state();
     data_fabric_current_reference_routing_contract();
-}
-
-#[test]
-fn wp06_negative_fact_differential() {
-    data_fabric_gate_b_empty_differential();
 }

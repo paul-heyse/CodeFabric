@@ -8,21 +8,33 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
+use arrow_array::builder::FixedSizeBinaryBuilder;
 use arrow_array::{ArrayRef, BooleanArray, Int64Array, RecordBatch, StringArray};
 use arrow_schema::{ArrowError, DataType, Field, FieldRef, Schema, SchemaRef};
-use datafusion::catalog::TableProvider;
-use datafusion::common::tree_node::TreeNodeRecursion;
+use async_trait::async_trait;
+use datafusion::catalog::{Session, TableProvider};
+use datafusion::common::metadata::FieldMetadata;
+use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 use datafusion::common::{Column, DFSchema, DFSchemaRef, DataFusionError, TableReference};
 #[cfg(test)]
 use datafusion::datasource::MemTable;
 use datafusion::datasource::{ViewTable, provider_as_source};
 use datafusion::execution::context::{SessionContext, SessionState};
+use datafusion::execution::session_state::SessionStateBuilder;
 use datafusion::logical_expr::logical_plan::Projection;
-use datafusion::logical_expr::{Expr, LogicalPlan, LogicalPlanBuilder, TableType};
+use datafusion::logical_expr::{
+    Expr, LogicalPlan, LogicalPlanBuilder, TableProviderFilterPushDown, TableType, Volatility,
+};
+use datafusion::physical_expr::expressions::Column as PhysicalColumn;
+use datafusion::physical_plan::metrics::MetricValue;
+use datafusion::physical_plan::projection::{ProjectionExec, ProjectionExpr};
+use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties, execute_stream};
+use futures::StreamExt as _;
 use thiserror::Error;
 
 use super::command::EpochId;
 use super::id16_array;
+use super::{ResultChecksumError, result_checksum_v2};
 use crate::schema_contract::{
     FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY, SEMANTIC_ROLE_METADATA_KEY,
     SchemaContract, SchemaContractError, SchemaRole,
@@ -61,6 +73,359 @@ impl ProgrammaticTransformationId {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+/// Application-owned semantic version of one transformation contract.
+///
+/// `0.0.0` is reserved as an uninitialized sentinel and is rejected when the
+/// transformation is registered.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TransformationSemanticVersion {
+    major: u16,
+    minor: u16,
+    patch: u16,
+}
+
+impl TransformationSemanticVersion {
+    #[must_use]
+    pub const fn new(major: u16, minor: u16, patch: u16) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+        }
+    }
+
+    #[must_use]
+    pub const fn major(self) -> u16 {
+        self.major
+    }
+
+    #[must_use]
+    pub const fn minor(self) -> u16 {
+        self.minor
+    }
+
+    #[must_use]
+    pub const fn patch(self) -> u16 {
+        self.patch
+    }
+
+    const fn is_sentinel(self) -> bool {
+        self.major == 0 && self.minor == 0 && self.patch == 0
+    }
+}
+
+/// Bounded execution resource class declared by a transformation.
+///
+/// The values are contract limits, not scheduler hints. A zero bound is
+/// rejected at registration rather than being interpreted as unlimited.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TransformationResourceClass {
+    BoundedInMemory {
+        max_rows: u64,
+        max_memory_bytes: u64,
+    },
+    BoundedSpillable {
+        max_rows: u64,
+        max_memory_bytes: u64,
+        max_spill_bytes: u64,
+    },
+}
+
+impl TransformationResourceClass {
+    #[must_use]
+    pub const fn max_rows(self) -> u64 {
+        match self {
+            Self::BoundedInMemory { max_rows, .. } | Self::BoundedSpillable { max_rows, .. } => {
+                max_rows
+            }
+        }
+    }
+
+    #[must_use]
+    pub const fn max_memory_bytes(self) -> u64 {
+        match self {
+            Self::BoundedInMemory {
+                max_memory_bytes, ..
+            }
+            | Self::BoundedSpillable {
+                max_memory_bytes, ..
+            } => max_memory_bytes,
+        }
+    }
+
+    #[must_use]
+    pub const fn max_spill_bytes(self) -> Option<u64> {
+        match self {
+            Self::BoundedInMemory { .. } => None,
+            Self::BoundedSpillable {
+                max_spill_bytes, ..
+            } => Some(max_spill_bytes),
+        }
+    }
+}
+
+/// Reproducibility promise made by one transformation.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TransformationDeterminismPolicy {
+    /// The row multiset is deterministic for pinned inputs; row order is not semantic.
+    DeterministicSet,
+    /// Both values and the declared output ordering are deterministic for pinned inputs.
+    DeterministicSequence,
+    /// The transformation explicitly contains volatile semantics.
+    Volatile,
+}
+
+/// Direction of one declared output ordering key.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TransformationSortDirection {
+    Ascending,
+    Descending,
+}
+
+/// Null placement of one declared output ordering key.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TransformationNullPlacement {
+    First,
+    Last,
+}
+
+/// One stable field-identity key in an ordered transformation result.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TransformationOrderingKey {
+    field_id: ProgrammaticFieldId,
+    direction: TransformationSortDirection,
+    null_placement: TransformationNullPlacement,
+}
+
+impl TransformationOrderingKey {
+    #[must_use]
+    pub const fn new(
+        field_id: ProgrammaticFieldId,
+        direction: TransformationSortDirection,
+        null_placement: TransformationNullPlacement,
+    ) -> Self {
+        Self {
+            field_id,
+            direction,
+            null_placement,
+        }
+    }
+
+    #[must_use]
+    pub const fn field_id(&self) -> &ProgrammaticFieldId {
+        &self.field_id
+    }
+
+    #[must_use]
+    pub const fn direction(&self) -> TransformationSortDirection {
+        self.direction
+    }
+
+    #[must_use]
+    pub const fn null_placement(&self) -> TransformationNullPlacement {
+        self.null_placement
+    }
+}
+
+/// Whether result order is semantic and, if so, the exact output-field keys.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TransformationOrderingPolicy {
+    Unordered,
+    ByOutputFields(Arc<[TransformationOrderingKey]>),
+}
+
+/// Whether a transformation may invoke bounded native recursive semantics.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TransformationRecursionPolicy {
+    Forbidden,
+    Bounded { max_iterations: u32 },
+}
+
+/// Digest identity of the producer/build provenance for a transformation.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TransformationProvenanceIdentity([u8; 32]);
+
+impl TransformationProvenanceIdentity {
+    #[must_use]
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// Digest identity of the immutable release supplying a transformation.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TransformationReleaseIdentity([u8; 32]);
+
+impl TransformationReleaseIdentity {
+    #[must_use]
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// Provenance closure roots for one transformation implementation.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TransformationProvenance {
+    provenance_identity: TransformationProvenanceIdentity,
+    release_identity: TransformationReleaseIdentity,
+}
+
+impl TransformationProvenance {
+    #[must_use]
+    pub const fn new(
+        provenance_identity: TransformationProvenanceIdentity,
+        release_identity: TransformationReleaseIdentity,
+    ) -> Self {
+        Self {
+            provenance_identity,
+            release_identity,
+        }
+    }
+
+    #[must_use]
+    pub const fn provenance_identity(&self) -> TransformationProvenanceIdentity {
+        self.provenance_identity
+    }
+
+    #[must_use]
+    pub const fn release_identity(&self) -> TransformationReleaseIdentity {
+        self.release_identity
+    }
+}
+
+/// Immutable application authority for one typed transformation.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ProgrammaticTransformationContract {
+    semantic_id: ProgrammaticTransformationId,
+    semantic_version: TransformationSemanticVersion,
+    resource_class: TransformationResourceClass,
+    determinism_policy: TransformationDeterminismPolicy,
+    ordering_policy: TransformationOrderingPolicy,
+    recursion_policy: TransformationRecursionPolicy,
+    provenance: TransformationProvenance,
+}
+
+impl ProgrammaticTransformationContract {
+    #[must_use]
+    pub const fn new(
+        semantic_id: ProgrammaticTransformationId,
+        semantic_version: TransformationSemanticVersion,
+        resource_class: TransformationResourceClass,
+        determinism_policy: TransformationDeterminismPolicy,
+        ordering_policy: TransformationOrderingPolicy,
+        recursion_policy: TransformationRecursionPolicy,
+        provenance: TransformationProvenance,
+    ) -> Self {
+        Self {
+            semantic_id,
+            semantic_version,
+            resource_class,
+            determinism_policy,
+            ordering_policy,
+            recursion_policy,
+            provenance,
+        }
+    }
+
+    #[must_use]
+    pub const fn semantic_id(&self) -> &ProgrammaticTransformationId {
+        &self.semantic_id
+    }
+
+    #[must_use]
+    pub const fn semantic_version(&self) -> TransformationSemanticVersion {
+        self.semantic_version
+    }
+
+    #[must_use]
+    pub const fn resource_class(&self) -> TransformationResourceClass {
+        self.resource_class
+    }
+
+    #[must_use]
+    pub const fn determinism_policy(&self) -> TransformationDeterminismPolicy {
+        self.determinism_policy
+    }
+
+    #[must_use]
+    pub const fn ordering_policy(&self) -> &TransformationOrderingPolicy {
+        &self.ordering_policy
+    }
+
+    #[must_use]
+    pub const fn recursion_policy(&self) -> TransformationRecursionPolicy {
+        self.recursion_policy
+    }
+
+    #[must_use]
+    pub const fn provenance(&self) -> TransformationProvenance {
+        self.provenance
+    }
+
+    /// Application-owned fingerprint over every semantic contract field.
+    ///
+    /// DataFusion plan display/hash output is deliberately absent because it
+    /// is engine-version-local diagnostic material, not semantic authority.
+    #[must_use]
+    pub fn authority_identity(&self) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"codefabric.programmatic-transformation-contract.v1");
+        update_contract_frame(&mut hasher, self.semantic_id.as_str().as_bytes());
+        hasher.update(&self.semantic_version.major.to_be_bytes());
+        hasher.update(&self.semantic_version.minor.to_be_bytes());
+        hasher.update(&self.semantic_version.patch.to_be_bytes());
+        hasher.update(&[resource_class_tag(self.resource_class)]);
+        hasher.update(&self.resource_class.max_rows().to_be_bytes());
+        hasher.update(&self.resource_class.max_memory_bytes().to_be_bytes());
+        match self.resource_class.max_spill_bytes() {
+            Some(max_spill_bytes) => {
+                hasher.update(&[1]);
+                hasher.update(&max_spill_bytes.to_be_bytes());
+            }
+            None => {
+                hasher.update(&[0]);
+            }
+        }
+        hasher.update(&[determinism_policy_tag(self.determinism_policy)]);
+        match &self.ordering_policy {
+            TransformationOrderingPolicy::Unordered => {
+                hasher.update(&[0]);
+            }
+            TransformationOrderingPolicy::ByOutputFields(keys) => {
+                hasher.update(&[1]);
+                hasher.update(&u64::try_from(keys.len()).unwrap_or(u64::MAX).to_be_bytes());
+                for key in keys.iter() {
+                    update_contract_frame(&mut hasher, key.field_id.as_str().as_bytes());
+                    hasher.update(&[sort_direction_tag(key.direction)]);
+                    hasher.update(&[null_placement_tag(key.null_placement)]);
+                }
+            }
+        }
+        match self.recursion_policy {
+            TransformationRecursionPolicy::Forbidden => {
+                hasher.update(&[0]);
+            }
+            TransformationRecursionPolicy::Bounded { max_iterations } => {
+                hasher.update(&[1]);
+                hasher.update(&max_iterations.to_be_bytes());
+            }
+        }
+        hasher.update(self.provenance.provenance_identity.as_bytes());
+        hasher.update(self.provenance.release_identity.as_bytes());
+        *hasher.finalize().as_bytes()
     }
 }
 
@@ -262,7 +627,16 @@ impl TransformationInputs {
 /// Implementations receive only dependency plans resolved from the candidate catalog.
 /// They return DataFusion's native [`LogicalPlan`], never SQL or a serialized plan.
 pub trait ProgrammaticTransformation: Send + Sync {
-    fn id(&self) -> &ProgrammaticTransformationId;
+    /// Return the complete application-owned semantic and execution contract.
+    ///
+    /// There is intentionally no default contract: every implementation must
+    /// provide exact authority rather than inheriting placeholder metadata.
+    fn contract(&self) -> &ProgrammaticTransformationContract;
+
+    fn id(&self) -> &ProgrammaticTransformationId {
+        self.contract().semantic_id()
+    }
+
     fn output(&self) -> &TransformationOutput;
     fn dependencies(&self) -> &[ProgrammaticRelationId];
     fn build(&self, inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError>;
@@ -325,6 +699,11 @@ pub enum ProvenanceObservation {
     },
     Transformation {
         relation_id: ProgrammaticRelationId,
+        contract: Arc<ProgrammaticTransformationContract>,
+        logical_plan: Arc<LogicalPlan>,
+    },
+    ObservationView {
+        relation_id: ProgrammaticRelationId,
         transformation_id: ProgrammaticTransformationId,
         logical_plan: Arc<LogicalPlan>,
     },
@@ -336,7 +715,8 @@ impl ProvenanceObservation {
         match self {
             Self::Provider { relation_id, .. }
             | Self::SystemObservation { relation_id, .. }
-            | Self::Transformation { relation_id, .. } => relation_id,
+            | Self::Transformation { relation_id, .. }
+            | Self::ObservationView { relation_id, .. } => relation_id,
         }
     }
 
@@ -345,7 +725,19 @@ impl ProvenanceObservation {
     pub fn logical_plan(&self) -> Option<&LogicalPlan> {
         match self {
             Self::Provider { .. } | Self::SystemObservation { .. } => None,
-            Self::Transformation { logical_plan, .. } => Some(logical_plan),
+            Self::Transformation { logical_plan, .. }
+            | Self::ObservationView { logical_plan, .. } => Some(logical_plan),
+        }
+    }
+
+    /// Return the complete application contract only for an application transformation.
+    #[must_use]
+    pub fn transformation_contract(&self) -> Option<&ProgrammaticTransformationContract> {
+        match self {
+            Self::Transformation { contract, .. } => Some(contract),
+            Self::Provider { .. }
+            | Self::SystemObservation { .. }
+            | Self::ObservationView { .. } => None,
         }
     }
 }
@@ -391,6 +783,7 @@ pub struct SealedRelationBinding {
 pub struct SealedProgrammaticSchemaAssembly {
     session: SessionContext,
     relations: BTreeMap<ProgrammaticRelationId, SealedRelationBinding>,
+    observation_fixed_point: ObservationFixedPointEvidence,
     #[cfg(test)]
     observations: CandidateAssemblyObservations,
 }
@@ -417,6 +810,12 @@ impl SealedProgrammaticSchemaAssembly {
         &self.observations
     }
 
+    /// Iteration and conservatively measured resources for the self-observed catalog fixed point.
+    #[must_use]
+    pub const fn observation_fixed_point(&self) -> ObservationFixedPointEvidence {
+        self.observation_fixed_point
+    }
+
     /// Resolve a stable relation identity directly to its table and executable contract.
     #[must_use]
     pub fn relation(&self, relation_id: &ProgrammaticRelationId) -> Option<&SealedRelationBinding> {
@@ -433,7 +832,7 @@ impl SealedProgrammaticSchemaAssembly {
     }
 }
 
-/// Ownership-transfer product for later `FabricEpochBuilder` integration.
+/// Ownership-transfer product for programmatic epoch integration.
 pub struct ProgrammaticSchemaParts {
     session: SessionContext,
     relations: BTreeMap<ProgrammaticRelationId, SealedRelationBinding>,
@@ -468,6 +867,11 @@ enum RegisteredOrigin {
     #[cfg(test)]
     SystemObservation,
     Transformation {
+        contract: Arc<ProgrammaticTransformationContract>,
+        dependencies: Arc<[ProgrammaticRelationId]>,
+        plan: Arc<LogicalPlan>,
+    },
+    ObservationView {
         transformation_id: ProgrammaticTransformationId,
         dependencies: Arc<[ProgrammaticRelationId]>,
         plan: Arc<LogicalPlan>,
@@ -478,6 +882,124 @@ struct RegisteredRelation {
     table_reference: TableReference,
     contract: Arc<SchemaContract>,
     origin: RegisteredOrigin,
+}
+
+/// A native DataFusion view whose physical scan reattaches the exact Arrow
+/// metadata advertised by its application-owned logical plan.
+///
+/// DataFusion 55 derives a `ViewTable` scan's physical schema from the view's
+/// input providers. That is correct for values, but schema-level identity
+/// metadata attached by [`output_identity_boundary`] otherwise disappears
+/// before record-batch execution. This transparent adapter delegates view
+/// planning and uses DataFusion's native identity [`ProjectionExec`] to make
+/// the advertised identity an executable batch boundary as well.
+#[derive(Debug)]
+struct IdentityPreservingViewTable {
+    inner: ViewTable,
+    schema: SchemaRef,
+}
+
+impl IdentityPreservingViewTable {
+    fn new(plan: LogicalPlan) -> Self {
+        let schema = Arc::clone(plan.schema().inner());
+        Self {
+            inner: ViewTable::new(plan, None),
+            schema,
+        }
+    }
+
+    fn projected_schema(
+        &self,
+        projection: Option<&Vec<usize>>,
+    ) -> Result<SchemaRef, DataFusionError> {
+        projection.map_or_else(
+            || Ok(Arc::clone(&self.schema)),
+            |indices| Ok(Arc::new(self.schema.project(indices)?)),
+        )
+    }
+
+    fn logical_plan(&self) -> &LogicalPlan {
+        self.inner.logical_plan()
+    }
+}
+
+#[async_trait]
+impl TableProvider for IdentityPreservingViewTable {
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::View
+    }
+
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> Result<Vec<TableProviderFilterPushDown>, DataFusionError> {
+        self.inner.supports_filters_pushdown(filters)
+    }
+
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+        // `ViewTable::scan` recursively creates and fully optimizes a physical plan. The outer
+        // TableScan planner then runs the same physical optimizer over the returned subtree. In
+        // DataFusion 55 that can make `JoinSelection` see hash joins whose post-optimization
+        // dynamic filters are already attached, which is both an invalid optimizer order and a
+        // hard planning error. Plan the nested view with the exact same session authorities but
+        // no inner physical rules; the outer candidate-session pass remains the single complete
+        // physical optimization and applies every correctness/resource rule to the whole tree.
+        let candidate_state = state
+            .as_any()
+            .downcast_ref::<SessionState>()
+            .ok_or_else(|| {
+                DataFusionError::Plan(
+                    "programmatic views require the candidate SessionState authority".to_owned(),
+                )
+            })?;
+        let nested_state = SessionStateBuilder::new_from_existing(candidate_state.clone())
+            .with_physical_optimizer_rules(Vec::new())
+            .build();
+        let physical = self
+            .inner
+            .scan(&nested_state, projection, filters, limit)
+            .await?;
+        let target = self.projected_schema(projection)?;
+        let input = physical.schema();
+        if input.fields().len() != target.fields().len() {
+            return Err(DataFusionError::Plan(format!(
+                "programmatic view physical field count {} differs from its declared count {}",
+                input.fields().len(),
+                target.fields().len()
+            )));
+        }
+        let expressions = target
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(index, field)| ProjectionExpr {
+                expr: Arc::new(PhysicalColumn::new(input.field(index).name(), index)),
+                alias: field.name().to_owned(),
+            })
+            .collect::<Vec<_>>();
+        Ok(Arc::new(ProjectionExec::try_new_with_schema_metadata(
+            expressions,
+            physical,
+            target.as_ref(),
+        )?))
+    }
+}
+
+fn registered_view_logical_plan(provider: &dyn TableProvider) -> Option<LogicalPlan> {
+    provider
+        .downcast_ref::<IdentityPreservingViewTable>()
+        .map(|view| view.logical_plan().clone())
+        .or_else(|| provider.get_logical_plan().map(|plan| plan.into_owned()))
 }
 
 const OBSERVATION_SOURCE_IDENTITY: &str = "programmatic-schema-assembly-v1";
@@ -509,9 +1031,126 @@ pub(crate) struct PreparedObservationRelationSpec {
     pub(crate) contract: Arc<SchemaContract>,
 }
 
+/// Deterministic resource envelope for self-observed catalog fixed-point materialization.
+///
+/// Every bound is nonzero. Rows and Arrow array-size bytes are limited both per relation and
+/// across the complete observation family so a single large relation and many individually-small
+/// relations both fail closed before historicization or sealing. Array-size bytes use
+/// [`RecordBatch::get_array_memory_size`], a conservative estimate that can count shared buffers
+/// more than once; overestimation is intentional for this fail-closed envelope.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObservationFixedPointPolicy {
+    max_iterations: u32,
+    max_rows_per_relation: u64,
+    max_total_rows: u64,
+    max_bytes_per_relation: u64,
+    max_total_bytes: u64,
+}
+
+impl ObservationFixedPointPolicy {
+    /// Construct a complete nonzero fixed-point and materialization envelope.
+    pub fn try_new(
+        max_iterations: u32,
+        max_rows_per_relation: u64,
+        max_total_rows: u64,
+        max_bytes_per_relation: u64,
+        max_total_bytes: u64,
+    ) -> Result<Self, ObservationFixedPointPolicyError> {
+        for (field, value) in [
+            ("max_iterations", u64::from(max_iterations)),
+            ("max_rows_per_relation", max_rows_per_relation),
+            ("max_total_rows", max_total_rows),
+            ("max_bytes_per_relation", max_bytes_per_relation),
+            ("max_total_bytes", max_total_bytes),
+        ] {
+            if value == 0 {
+                return Err(ObservationFixedPointPolicyError::ZeroBound { field });
+            }
+        }
+        Ok(Self {
+            max_iterations,
+            max_rows_per_relation,
+            max_total_rows,
+            max_bytes_per_relation,
+            max_total_bytes,
+        })
+    }
+
+    /// Stable workstation policy used by the target epoch builder.
+    #[must_use]
+    pub fn production() -> Self {
+        Self::try_new(8, 1_000_000, 5_000_000, 256 << 20, 512 << 20)
+            .expect("the static production observation policy is nonzero")
+    }
+
+    #[must_use]
+    pub const fn max_iterations(self) -> u32 {
+        self.max_iterations
+    }
+
+    #[must_use]
+    pub const fn max_rows_per_relation(self) -> u64 {
+        self.max_rows_per_relation
+    }
+
+    #[must_use]
+    pub const fn max_total_rows(self) -> u64 {
+        self.max_total_rows
+    }
+
+    #[must_use]
+    pub const fn max_bytes_per_relation(self) -> u64 {
+        self.max_bytes_per_relation
+    }
+
+    #[must_use]
+    pub const fn max_total_bytes(self) -> u64 {
+        self.max_total_bytes
+    }
+}
+
+/// Invalid observation fixed-point policy rejected before a candidate session exists.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ObservationFixedPointPolicyError {
+    #[error("observation fixed-point policy bound {field} must be nonzero")]
+    ZeroBound { field: &'static str },
+}
+
+/// Iteration and conservatively measured resource evidence for the observation fixed point.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObservationFixedPointEvidence {
+    iterations: u32,
+    relation_count: usize,
+    total_rows: u64,
+    total_bytes: u64,
+}
+
+impl ObservationFixedPointEvidence {
+    #[must_use]
+    pub const fn iterations(self) -> u32 {
+        self.iterations
+    }
+
+    #[must_use]
+    pub const fn relation_count(self) -> usize {
+        self.relation_count
+    }
+
+    #[must_use]
+    pub const fn total_rows(self) -> u64 {
+        self.total_rows
+    }
+
+    #[must_use]
+    pub const fn total_bytes(self) -> u64 {
+        self.total_bytes
+    }
+}
+
 /// Mutable builder for one dependency-closed candidate catalog.
 pub struct ProgrammaticSchemaAssembly {
     session: SessionContext,
+    observation_policy: ObservationFixedPointPolicy,
     registered: BTreeMap<ProgrammaticRelationId, RegisteredRelation>,
     pending: BTreeMap<ProgrammaticRelationId, Arc<dyn ProgrammaticTransformation>>,
     transformations: BTreeMap<ProgrammaticTransformationId, ProgrammaticRelationId>,
@@ -522,8 +1161,40 @@ impl ProgrammaticSchemaAssembly {
     /// Start from the exact candidate `SessionState` later transferred to the epoch.
     #[must_use]
     pub fn new(candidate_state: SessionState) -> Self {
+        Self::with_observation_policy(candidate_state, ObservationFixedPointPolicy::production())
+    }
+
+    /// Start a candidate with an explicit validated observation fixed-point envelope.
+    #[must_use]
+    pub fn with_observation_policy(
+        candidate_state: SessionState,
+        observation_policy: ObservationFixedPointPolicy,
+    ) -> Self {
+        // DataFusion 55's logical `optimize_projections` and physical
+        // `ProjectionPushdown` rules treat a metadata-only identity projection
+        // as removable. The former drops schema metadata; the latter either
+        // drops field metadata or fails its own schema check. Retain every other
+        // native optimizer while keeping the application-owned identity boundary
+        // visible through logical, physical, batch, and view phases.
+        let logical_rules = candidate_state
+            .optimizers()
+            .iter()
+            .filter(|rule| rule.name() != "optimize_projections")
+            .cloned()
+            .collect();
+        let physical_rules = candidate_state
+            .physical_optimizers()
+            .iter()
+            .filter(|rule| rule.name() != "ProjectionPushdown")
+            .cloned()
+            .collect();
+        let candidate_state = SessionStateBuilder::new_from_existing(candidate_state)
+            .with_optimizer_rules(logical_rules)
+            .with_physical_optimizer_rules(physical_rules)
+            .build();
         Self {
             session: SessionContext::new_with_state(candidate_state),
+            observation_policy,
             registered: BTreeMap::new(),
             pending: BTreeMap::new(),
             transformations: BTreeMap::new(),
@@ -625,6 +1296,7 @@ impl ProgrammaticSchemaAssembly {
             });
         }
         validate_output_field_identities(transformation.id(), transformation.output().fields())?;
+        validate_transformation_contract(transformation.contract(), transformation.output())?;
         let mut dependencies = BTreeSet::new();
         for dependency in transformation.dependencies() {
             validate_relation_id(dependency)?;
@@ -734,7 +1406,7 @@ impl ProgrammaticSchemaAssembly {
                 actual: Arc::clone(plan.schema().inner()),
             });
         }
-        let provider = Arc::new(ViewTable::new(plan.clone(), None));
+        let provider = Arc::new(IdentityPreservingViewTable::new(plan.clone()));
         self.session.register_table(
             spec.table_reference.clone(),
             provider as Arc<dyn TableProvider>,
@@ -746,7 +1418,7 @@ impl ProgrammaticSchemaAssembly {
             RegisteredRelation {
                 table_reference: spec.table_reference,
                 contract: spec.contract,
-                origin: RegisteredOrigin::Transformation {
+                origin: RegisteredOrigin::ObservationView {
                     transformation_id,
                     dependencies,
                     plan: Arc::new(plan),
@@ -802,7 +1474,7 @@ impl ProgrammaticSchemaAssembly {
                 relation_id: relation_id.clone(),
             }
         })?;
-        let RegisteredOrigin::Transformation {
+        let RegisteredOrigin::ObservationView {
             transformation_id,
             dependencies,
             ..
@@ -821,7 +1493,7 @@ impl ProgrammaticSchemaAssembly {
             });
         }
         let table_reference = registered.table_reference.clone();
-        let origin = RegisteredOrigin::Transformation {
+        let origin = RegisteredOrigin::ObservationView {
             transformation_id: transformation_id.clone(),
             dependencies: Arc::clone(dependencies),
             plan: Arc::new(plan.clone()),
@@ -837,7 +1509,7 @@ impl ProgrammaticSchemaAssembly {
         }
         self.session.register_table(
             table_reference,
-            Arc::new(ViewTable::new(plan, None)) as Arc<dyn TableProvider>,
+            Arc::new(IdentityPreservingViewTable::new(plan)) as Arc<dyn TableProvider>,
         )?;
         self.registered
             .get_mut(relation_id)
@@ -884,6 +1556,7 @@ impl ProgrammaticSchemaAssembly {
         let specs = self.observation_relation_specs()?;
         let (_, observations) = self.observe_live_catalog().await?;
         let batches = build_observation_batches(epoch_id, &observations, &specs)?;
+        enforce_observation_materialization(&self.observation_policy, 1, &batches)?;
         specs
             .into_iter()
             .map(|spec| {
@@ -908,21 +1581,34 @@ impl ProgrammaticSchemaAssembly {
         epoch_id: EpochId,
         installed_observation_batches: BTreeMap<ProgrammaticRelationId, RecordBatch>,
     ) -> Result<SealedProgrammaticSchemaAssembly, ProgrammaticSchemaError> {
-        let (relations, observations) = self.observe_live_catalog().await?;
-        let final_observation_batches = build_observation_batches(
-            epoch_id,
-            &observations,
-            &self.observation_relation_specs()?,
+        enforce_observation_materialization(
+            &self.observation_policy,
+            1,
+            &installed_observation_batches,
         )?;
-        if installed_observation_batches != final_observation_batches {
-            return Err(ProgrammaticSchemaError::ObservationSelfInclusionDrift);
+        let specs = self.observation_relation_specs()?;
+        let mut previous = installed_observation_batches;
+        for iteration in 2..=self.observation_policy.max_iterations() {
+            let (relations, observations) = self.observe_live_catalog().await?;
+            let current = build_observation_batches(epoch_id, &observations, &specs)?;
+            let fixed_point =
+                enforce_observation_materialization(&self.observation_policy, iteration, &current)?;
+            if previous == current {
+                return Ok(SealedProgrammaticSchemaAssembly {
+                    session: self.session,
+                    relations,
+                    observation_fixed_point: fixed_point,
+                    #[cfg(test)]
+                    observations,
+                });
+            }
+            previous = current;
         }
-        Ok(SealedProgrammaticSchemaAssembly {
-            session: self.session,
-            relations,
-            #[cfg(test)]
-            observations,
-        })
+        Err(
+            ProgrammaticSchemaError::ObservationFixedPointIterationsExceeded {
+                limit: self.observation_policy.max_iterations(),
+            },
+        )
     }
 
     fn ensure_binding_available(
@@ -1061,6 +1747,7 @@ impl ProgrammaticSchemaAssembly {
                 actual: actual_references,
             });
         }
+        validate_transformation_plan_policy(transformation.contract(), &raw_plan)?;
 
         let analyzed_plan = self.session.state().optimize(&raw_plan).map_err(|source| {
             ProgrammaticSchemaError::TransformationAnalysis {
@@ -1080,6 +1767,13 @@ impl ProgrammaticSchemaAssembly {
                 actual: actual_schema,
             });
         }
+        prove_transformation_execution_contract(
+            &self.session,
+            transformation.contract(),
+            transformation.output(),
+            &installed_plan,
+        )
+        .await?;
 
         let mappings = (0..actual_schema.fields().len())
             .map(|index| FieldIndexMapping::direct(index, index))
@@ -1091,7 +1785,7 @@ impl ProgrammaticSchemaAssembly {
             Arc::clone(&actual_schema),
             mappings,
         )?);
-        let view = Arc::new(ViewTable::new(installed_plan.clone(), None));
+        let view = Arc::new(IdentityPreservingViewTable::new(installed_plan.clone()));
         self.session.register_table(
             transformation.output().table_reference().clone(),
             view as Arc<dyn TableProvider>,
@@ -1103,7 +1797,7 @@ impl ProgrammaticSchemaAssembly {
                 table_reference: transformation.output().table_reference().clone(),
                 contract,
                 origin: RegisteredOrigin::Transformation {
-                    transformation_id: transformation.id().clone(),
+                    contract: Arc::new(transformation.contract().clone()),
                     dependencies: Arc::from(transformation.dependencies()),
                     plan: Arc::new(installed_plan),
                 },
@@ -1127,6 +1821,7 @@ impl ProgrammaticSchemaAssembly {
         let (_, mut observations) = self.observe_live_catalog().await?;
         append_system_observations(&mut observations, &specs)?;
         let batches = build_observation_batches(epoch_id, &observations, &specs)?;
+        enforce_observation_materialization(&self.observation_policy, 1, &batches)?;
         Ok(specs
             .into_iter()
             .map(|spec| PreparedObservationRelation {
@@ -1187,17 +1882,18 @@ impl ProgrammaticSchemaAssembly {
             .build()?;
             let actual_datafusion_schema = Arc::clone(scan_plan.schema());
 
-            let origin = match &registered.origin {
-                RegisteredOrigin::Provider => RelationOrigin::Provider,
-                #[cfg(test)]
-                RegisteredOrigin::SystemObservation => RelationOrigin::SystemObservation,
-                RegisteredOrigin::Transformation { plan, .. } => {
-                    let observed_plan = provider.get_logical_plan().ok_or_else(|| {
-                        ProgrammaticSchemaError::ViewPlanUnavailable {
+            let validate_registered_view =
+                |plan: &LogicalPlan| {
+                    // `LogicalPlanBuilder::scan` inlines any provider whose public
+                    // `get_logical_plan` returns a plan. Inlining bypasses the
+                    // physical metadata boundary required by transformations, so
+                    // application-owned views retain the plan privately and expose
+                    // it to this observation path through a concrete downcast.
+                    let observed_plan = registered_view_logical_plan(provider.as_ref())
+                        .ok_or_else(|| ProgrammaticSchemaError::ViewPlanUnavailable {
                             relation_id: relation_id.clone(),
-                        }
-                    })?;
-                    if observed_plan.as_ref() != plan.as_ref() {
+                        })?;
+                    if &observed_plan != plan {
                         return Err(ProgrammaticSchemaError::ViewPlanDrift {
                             relation_id: relation_id.clone(),
                         });
@@ -1207,6 +1903,18 @@ impl ProgrammaticSchemaAssembly {
                             relation_id: relation_id.clone(),
                         });
                     }
+                    Ok(())
+                };
+            let origin = match &registered.origin {
+                RegisteredOrigin::Provider => RelationOrigin::Provider,
+                #[cfg(test)]
+                RegisteredOrigin::SystemObservation => RelationOrigin::SystemObservation,
+                RegisteredOrigin::Transformation { plan, .. } => {
+                    validate_registered_view(plan)?;
+                    RelationOrigin::Transformation
+                }
+                RegisteredOrigin::ObservationView { plan, .. } => {
+                    validate_registered_view(plan)?;
                     RelationOrigin::Transformation
                 }
             };
@@ -1255,17 +1963,43 @@ impl ProgrammaticSchemaAssembly {
                         });
                 }
                 RegisteredOrigin::Transformation {
+                    contract,
+                    dependencies,
+                    ..
+                } => {
+                    let observed_plan = registered_view_logical_plan(provider.as_ref())
+                        .expect("the transformation view plan was checked above");
+                    observations
+                        .provenance
+                        .push(ProvenanceObservation::Transformation {
+                            relation_id: relation_id.clone(),
+                            contract: Arc::clone(contract),
+                            logical_plan: Arc::new(observed_plan),
+                        });
+                    observations
+                        .dependencies
+                        .extend(
+                            dependencies
+                                .iter()
+                                .enumerate()
+                                .map(|(ordinal, dependency)| DependencyObservation {
+                                    transformation_id: contract.semantic_id().clone(),
+                                    output_relation_id: relation_id.clone(),
+                                    input_relation_id: dependency.clone(),
+                                    ordinal,
+                                }),
+                        );
+                }
+                RegisteredOrigin::ObservationView {
                     transformation_id,
                     dependencies,
                     ..
                 } => {
-                    let observed_plan = provider
-                        .get_logical_plan()
-                        .expect("the transformation view plan was checked above")
-                        .into_owned();
+                    let observed_plan = registered_view_logical_plan(provider.as_ref())
+                        .expect("the observation view plan was checked above");
                     observations
                         .provenance
-                        .push(ProvenanceObservation::Transformation {
+                        .push(ProvenanceObservation::ObservationView {
                             relation_id: relation_id.clone(),
                             transformation_id: transformation_id.clone(),
                             logical_plan: Arc::new(observed_plan),
@@ -1316,6 +2050,120 @@ fn validate_transformation_id(
     Ok(())
 }
 
+fn validate_transformation_contract(
+    contract: &ProgrammaticTransformationContract,
+    output: &TransformationOutput,
+) -> Result<(), ProgrammaticSchemaError> {
+    let transformation_id = contract.semantic_id();
+    if contract.semantic_version().is_sentinel() {
+        return Err(
+            ProgrammaticSchemaError::SentinelTransformationSemanticVersion {
+                transformation_id: transformation_id.clone(),
+            },
+        );
+    }
+    let resource_class = contract.resource_class();
+    if resource_class.max_rows() == 0
+        || resource_class.max_memory_bytes() == 0
+        || resource_class.max_spill_bytes() == Some(0)
+        || i64::try_from(resource_class.max_rows()).is_err()
+        || i64::try_from(resource_class.max_memory_bytes()).is_err()
+        || resource_class
+            .max_spill_bytes()
+            .is_some_and(|bound| i64::try_from(bound).is_err())
+    {
+        return Err(
+            ProgrammaticSchemaError::InvalidTransformationResourceBounds {
+                transformation_id: transformation_id.clone(),
+                resource_class,
+            },
+        );
+    }
+    if contract.provenance().provenance_identity().as_bytes() == &[0; 32] {
+        return Err(
+            ProgrammaticSchemaError::SentinelTransformationProvenanceIdentity {
+                transformation_id: transformation_id.clone(),
+            },
+        );
+    }
+    if contract.provenance().release_identity().as_bytes() == &[0; 32] {
+        return Err(
+            ProgrammaticSchemaError::SentinelTransformationReleaseIdentity {
+                transformation_id: transformation_id.clone(),
+            },
+        );
+    }
+    if matches!(
+        contract.recursion_policy(),
+        TransformationRecursionPolicy::Bounded { max_iterations: 0 }
+    ) {
+        return Err(
+            ProgrammaticSchemaError::InvalidTransformationRecursionBound {
+                transformation_id: transformation_id.clone(),
+            },
+        );
+    }
+
+    match (contract.determinism_policy(), contract.ordering_policy()) {
+        (
+            TransformationDeterminismPolicy::DeterministicSet,
+            TransformationOrderingPolicy::ByOutputFields(_),
+        )
+        | (
+            TransformationDeterminismPolicy::DeterministicSequence,
+            TransformationOrderingPolicy::Unordered,
+        ) => {
+            return Err(
+                ProgrammaticSchemaError::IncompatibleTransformationPolicies {
+                    transformation_id: transformation_id.clone(),
+                    determinism_policy: contract.determinism_policy(),
+                    ordering_policy: contract.ordering_policy().clone(),
+                },
+            );
+        }
+        (
+            TransformationDeterminismPolicy::DeterministicSet
+            | TransformationDeterminismPolicy::DeterministicSequence
+            | TransformationDeterminismPolicy::Volatile,
+            TransformationOrderingPolicy::Unordered
+            | TransformationOrderingPolicy::ByOutputFields(_),
+        ) => {}
+    }
+
+    if let TransformationOrderingPolicy::ByOutputFields(keys) = contract.ordering_policy() {
+        if keys.is_empty() {
+            return Err(ProgrammaticSchemaError::EmptyTransformationOrdering {
+                transformation_id: transformation_id.clone(),
+            });
+        }
+        let output_fields = output
+            .fields()
+            .iter()
+            .map(TransformationFieldIdentity::field_id)
+            .collect::<BTreeSet<_>>();
+        let mut ordered_fields = BTreeSet::new();
+        for key in keys.iter() {
+            if !output_fields.contains(key.field_id()) {
+                return Err(
+                    ProgrammaticSchemaError::UnknownTransformationOrderingField {
+                        transformation_id: transformation_id.clone(),
+                        field_id: key.field_id().clone(),
+                    },
+                );
+            }
+            if !ordered_fields.insert(key.field_id().clone()) {
+                return Err(
+                    ProgrammaticSchemaError::DuplicateTransformationOrderingField {
+                        transformation_id: transformation_id.clone(),
+                        field_id: key.field_id().clone(),
+                    },
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_full_reference(reference: &TableReference) -> Result<(), ProgrammaticSchemaError> {
     if !matches!(reference, TableReference::Full { .. }) {
         return Err(ProgrammaticSchemaError::UnqualifiedTableReference {
@@ -1334,6 +2182,422 @@ fn scan_references(plan: &LogicalPlan) -> Result<BTreeSet<TableReference>, DataF
         Ok(TreeNodeRecursion::Continue)
     })?;
     Ok(references)
+}
+
+fn validate_transformation_plan_policy(
+    contract: &ProgrammaticTransformationContract,
+    plan: &LogicalPlan,
+) -> Result<(), ProgrammaticSchemaError> {
+    let mut recursive_nodes = 0_usize;
+    let mut highest_volatility = Volatility::Immutable;
+    plan.apply_with_subqueries(|node| {
+        if matches!(node, LogicalPlan::RecursiveQuery(_)) {
+            recursive_nodes = recursive_nodes.saturating_add(1);
+        }
+        for expression in node.expressions() {
+            expression.apply(|candidate| {
+                let volatility = match candidate {
+                    Expr::ScalarVariable(..) => Volatility::Volatile,
+                    Expr::ScalarFunction(function) => function.func.signature().volatility,
+                    Expr::AggregateFunction(function) => function.func.signature().volatility,
+                    Expr::WindowFunction(function) => function.fun.signature().volatility,
+                    Expr::HigherOrderFunction(function) => function.func.signature().volatility,
+                    _ => Volatility::Immutable,
+                };
+                highest_volatility = highest_volatility.max(volatility);
+                Ok(TreeNodeRecursion::Continue)
+            })?;
+        }
+        Ok(TreeNodeRecursion::Continue)
+    })
+    .map_err(|source| ProgrammaticSchemaError::TransformationAnalysis {
+        transformation_id: contract.semantic_id().clone(),
+        source,
+    })?;
+
+    match contract.recursion_policy() {
+        TransformationRecursionPolicy::Forbidden if recursive_nodes != 0 => {
+            return Err(ProgrammaticSchemaError::TransformationRecursionForbidden {
+                transformation_id: contract.semantic_id().clone(),
+            });
+        }
+        TransformationRecursionPolicy::Bounded { .. } if recursive_nodes == 0 => {
+            return Err(
+                ProgrammaticSchemaError::TransformationRecursionDeclarationInert {
+                    transformation_id: contract.semantic_id().clone(),
+                },
+            );
+        }
+        TransformationRecursionPolicy::Bounded { max_iterations } => {
+            // DataFusion 55's native RecursiveQueryExec repeats until the working
+            // table is empty and exposes no iteration limit. A row LIMIT cannot
+            // prove or enforce an iteration bound, so fail closed until the native
+            // planner/executor supplies that contract.
+            return Err(ProgrammaticSchemaError::BoundedNativeRecursionUnavailable {
+                transformation_id: contract.semantic_id().clone(),
+                max_iterations,
+            });
+        }
+        TransformationRecursionPolicy::Forbidden => {}
+    }
+
+    match contract.determinism_policy() {
+        TransformationDeterminismPolicy::DeterministicSet
+        | TransformationDeterminismPolicy::DeterministicSequence
+            if highest_volatility != Volatility::Immutable =>
+        {
+            Err(
+                ProgrammaticSchemaError::NonImmutableTransformationExpression {
+                    transformation_id: contract.semantic_id().clone(),
+                },
+            )
+        }
+        TransformationDeterminismPolicy::Volatile
+            if highest_volatility == Volatility::Immutable =>
+        {
+            Err(
+                ProgrammaticSchemaError::VolatileTransformationDeclarationInert {
+                    transformation_id: contract.semantic_id().clone(),
+                },
+            )
+        }
+        TransformationDeterminismPolicy::DeterministicSet
+        | TransformationDeterminismPolicy::DeterministicSequence
+        | TransformationDeterminismPolicy::Volatile => Ok(()),
+    }
+}
+
+async fn prove_transformation_execution_contract(
+    session: &SessionContext,
+    contract: &ProgrammaticTransformationContract,
+    output: &TransformationOutput,
+    plan: &LogicalPlan,
+) -> Result<(), ProgrammaticSchemaError> {
+    let first = execute_transformation_proof_once(session, contract, output, plan).await?;
+    if contract.determinism_policy() == TransformationDeterminismPolicy::Volatile {
+        return Ok(());
+    }
+    let first_identity = transformation_execution_identity(contract, plan, &first)?;
+    drop(first);
+
+    // A new physical plan is deliberate: deterministic authority is proved
+    // across two executions, while physical operators and their metrics remain
+    // per-execution state rather than a cached result or physical plan.
+    let second = execute_transformation_proof_once(session, contract, output, plan).await?;
+    let second_identity = transformation_execution_identity(contract, plan, &second)?;
+    if first_identity != second_identity {
+        return Err(ProgrammaticSchemaError::TransformationNotDeterministic {
+            transformation_id: contract.semantic_id().clone(),
+        });
+    }
+    Ok(())
+}
+
+async fn execute_transformation_proof_once(
+    session: &SessionContext,
+    contract: &ProgrammaticTransformationContract,
+    output: &TransformationOutput,
+    plan: &LogicalPlan,
+) -> Result<Vec<RecordBatch>, ProgrammaticSchemaError> {
+    // Prove the same native ViewTable scan path installed in the candidate
+    // catalog, rather than executing the view definition as a detached plan.
+    // This forces DataFusion to reconcile the provider's advertised schema and
+    // its physical output exactly as a later consumer will observe them.
+    let proof_view = Arc::new(IdentityPreservingViewTable::new(plan.clone()));
+    let proof_plan = LogicalPlanBuilder::scan(
+        output.table_reference().clone(),
+        provider_as_source(proof_view as Arc<dyn TableProvider>),
+        None,
+    )?
+    .build()?;
+    let physical = session
+        .state()
+        .create_physical_plan(&proof_plan)
+        .await
+        .map_err(
+            |source| ProgrammaticSchemaError::TransformationPhysicalPlanning {
+                transformation_id: contract.semantic_id().clone(),
+                source,
+            },
+        )?;
+    validate_transformation_output_ordering(contract, output, &physical)?;
+
+    let mut stream =
+        execute_stream(Arc::clone(&physical), session.task_ctx()).map_err(|source| {
+            ProgrammaticSchemaError::TransformationExecution {
+                transformation_id: contract.semantic_id().clone(),
+                source,
+            }
+        })?;
+    let expected_schema = proof_plan.schema().inner();
+    let resource_class = contract.resource_class();
+    let mut rows = 0_u64;
+    let mut output_bytes = 0_u64;
+    let mut batches = Vec::new();
+    while let Some(batch) = stream.next().await {
+        let batch = batch.map_err(|source| ProgrammaticSchemaError::TransformationExecution {
+            transformation_id: contract.semantic_id().clone(),
+            source,
+        })?;
+        if batch.schema_ref().as_ref() != expected_schema.as_ref() {
+            return Err(
+                ProgrammaticSchemaError::TransformationExecutionSchemaMismatch {
+                    transformation_id: contract.semantic_id().clone(),
+                    expected: Arc::clone(expected_schema),
+                    actual: batch.schema(),
+                },
+            );
+        }
+        rows = rows
+            .checked_add(u64::try_from(batch.num_rows()).unwrap_or(u64::MAX))
+            .ok_or_else(
+                || ProgrammaticSchemaError::TransformationResourceCounterOverflow {
+                    transformation_id: contract.semantic_id().clone(),
+                },
+            )?;
+        if rows > resource_class.max_rows() {
+            return Err(ProgrammaticSchemaError::TransformationOutputRowsExceeded {
+                transformation_id: contract.semantic_id().clone(),
+                limit: resource_class.max_rows(),
+                observed: rows,
+            });
+        }
+        output_bytes = output_bytes
+            .checked_add(u64::try_from(batch.get_array_memory_size()).unwrap_or(u64::MAX))
+            .ok_or_else(
+                || ProgrammaticSchemaError::TransformationResourceCounterOverflow {
+                    transformation_id: contract.semantic_id().clone(),
+                },
+            )?;
+        enforce_transformation_memory_bound(contract, output_bytes, &physical)?;
+        enforce_transformation_spill_bound(contract, &physical)?;
+        batches.push(batch);
+    }
+    enforce_transformation_memory_bound(contract, output_bytes, &physical)?;
+    enforce_transformation_spill_bound(contract, &physical)?;
+    Ok(batches)
+}
+
+fn validate_transformation_output_ordering(
+    contract: &ProgrammaticTransformationContract,
+    output: &TransformationOutput,
+    physical: &Arc<dyn ExecutionPlan>,
+) -> Result<(), ProgrammaticSchemaError> {
+    let TransformationOrderingPolicy::ByOutputFields(expected_keys) = contract.ordering_policy()
+    else {
+        return Ok(());
+    };
+    let partition_count = physical.output_partitioning().partition_count();
+    if partition_count != 1 {
+        return Err(ProgrammaticSchemaError::TransformationOrderingNotGlobal {
+            transformation_id: contract.semantic_id().clone(),
+            partition_count,
+        });
+    }
+    let Some(actual_ordering) = physical.output_ordering() else {
+        return Err(
+            ProgrammaticSchemaError::TransformationOrderingNotSatisfied {
+                transformation_id: contract.semantic_id().clone(),
+            },
+        );
+    };
+    if actual_ordering.len() < expected_keys.len() {
+        return Err(
+            ProgrammaticSchemaError::TransformationOrderingNotSatisfied {
+                transformation_id: contract.semantic_id().clone(),
+            },
+        );
+    }
+    for (expected, actual) in expected_keys.iter().zip(actual_ordering.iter()) {
+        let expected_index = output
+            .fields()
+            .iter()
+            .position(|field| field.field_id() == expected.field_id())
+            .expect("ordering fields were validated against the output contract");
+        let Some(actual_column) = actual.expr.downcast_ref::<PhysicalColumn>() else {
+            return Err(
+                ProgrammaticSchemaError::TransformationOrderingNotSatisfied {
+                    transformation_id: contract.semantic_id().clone(),
+                },
+            );
+        };
+        let expected_descending = expected.direction() == TransformationSortDirection::Descending;
+        let expected_nulls_first = expected.null_placement() == TransformationNullPlacement::First;
+        if actual_column.index() != expected_index
+            || actual.options.descending != expected_descending
+            || actual.options.nulls_first != expected_nulls_first
+        {
+            return Err(
+                ProgrammaticSchemaError::TransformationOrderingNotSatisfied {
+                    transformation_id: contract.semantic_id().clone(),
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
+fn enforce_transformation_memory_bound(
+    contract: &ProgrammaticTransformationContract,
+    output_bytes: u64,
+    physical: &Arc<dyn ExecutionPlan>,
+) -> Result<(), ProgrammaticSchemaError> {
+    let observed = output_bytes.max(observed_physical_memory_bytes(physical.as_ref()));
+    let limit = contract.resource_class().max_memory_bytes();
+    if observed > limit {
+        return Err(ProgrammaticSchemaError::TransformationMemoryBytesExceeded {
+            transformation_id: contract.semantic_id().clone(),
+            limit,
+            observed,
+        });
+    }
+    Ok(())
+}
+
+fn observed_physical_memory_bytes(plan: &dyn ExecutionPlan) -> u64 {
+    let local = plan.metrics().map_or(0_u64, |metrics| {
+        let mut current = 0_u64;
+        let mut peak = 0_u64;
+        for metric in metrics.iter() {
+            match metric.value() {
+                MetricValue::CurrentMemoryUsage(gauge) => {
+                    current = current.saturating_add(gauge.value() as u64);
+                }
+                MetricValue::PeakMemoryUsage { gauge, .. } => {
+                    peak = peak.saturating_add(gauge.value() as u64);
+                }
+                _ => {}
+            }
+        }
+        current.max(peak)
+    });
+    plan.children().iter().fold(local, |observed, child| {
+        observed.saturating_add(observed_physical_memory_bytes(child.as_ref()))
+    })
+}
+
+fn enforce_transformation_spill_bound(
+    contract: &ProgrammaticTransformationContract,
+    physical: &Arc<dyn ExecutionPlan>,
+) -> Result<(), ProgrammaticSchemaError> {
+    let (spill_count, spilled_bytes) = observed_physical_spill(physical.as_ref());
+    match contract.resource_class() {
+        TransformationResourceClass::BoundedInMemory { .. } if spill_count != 0 => {
+            Err(ProgrammaticSchemaError::TransformationUnexpectedSpill {
+                transformation_id: contract.semantic_id().clone(),
+                spill_count,
+                spilled_bytes,
+            })
+        }
+        TransformationResourceClass::BoundedSpillable {
+            max_spill_bytes, ..
+        } if spilled_bytes > max_spill_bytes => {
+            Err(ProgrammaticSchemaError::TransformationSpillBytesExceeded {
+                transformation_id: contract.semantic_id().clone(),
+                limit: max_spill_bytes,
+                observed: spilled_bytes,
+            })
+        }
+        TransformationResourceClass::BoundedInMemory { .. }
+        | TransformationResourceClass::BoundedSpillable { .. } => Ok(()),
+    }
+}
+
+fn observed_physical_spill(plan: &dyn ExecutionPlan) -> (u64, u64) {
+    let (mut spill_count, mut spilled_bytes) = plan.metrics().map_or((0, 0), |metrics| {
+        (
+            metrics.spill_count().unwrap_or_default() as u64,
+            metrics.spilled_bytes().unwrap_or_default() as u64,
+        )
+    });
+    for child in plan.children() {
+        let (child_count, child_bytes) = observed_physical_spill(child.as_ref());
+        spill_count = spill_count.saturating_add(child_count);
+        spilled_bytes = spilled_bytes.saturating_add(child_bytes);
+    }
+    (spill_count, spilled_bytes)
+}
+
+#[derive(Eq, PartialEq)]
+enum TransformationExecutionIdentity {
+    Set(String),
+    Sequence([u8; 32]),
+}
+
+fn transformation_execution_identity(
+    contract: &ProgrammaticTransformationContract,
+    plan: &LogicalPlan,
+    batches: &[RecordBatch],
+) -> Result<TransformationExecutionIdentity, ProgrammaticSchemaError> {
+    let maximum_encoding_bytes = usize::try_from(contract.resource_class().max_memory_bytes())
+        .map_err(
+            |_| ProgrammaticSchemaError::TransformationResourceCounterOverflow {
+                transformation_id: contract.semantic_id().clone(),
+            },
+        )?;
+    match contract.determinism_policy() {
+        TransformationDeterminismPolicy::DeterministicSet => result_checksum_v2(
+            plan.schema().inner().as_ref(),
+            batches,
+            maximum_encoding_bytes,
+        )
+        .map(|result| TransformationExecutionIdentity::Set(result.checksum))
+        .map_err(
+            |source| ProgrammaticSchemaError::TransformationDeterminismProof {
+                transformation_id: contract.semantic_id().clone(),
+                source,
+            },
+        ),
+        TransformationDeterminismPolicy::DeterministicSequence => {
+            ordered_execution_identity(plan.schema().inner().as_ref(), batches)
+                .map(TransformationExecutionIdentity::Sequence)
+                .map_err(
+                    |source| ProgrammaticSchemaError::TransformationDeterminismProof {
+                        transformation_id: contract.semantic_id().clone(),
+                        source,
+                    },
+                )
+        }
+        TransformationDeterminismPolicy::Volatile => {
+            unreachable!("volatile transformations are executed once without comparison")
+        }
+    }
+}
+
+fn ordered_execution_identity(
+    schema: &Schema,
+    batches: &[RecordBatch],
+) -> Result<[u8; 32], ResultChecksumError> {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"codefabric.programmatic-transformation-sequence-proof.v1");
+    let converter = arrow_row::RowConverter::new(
+        schema
+            .fields()
+            .iter()
+            .map(|field| arrow_row::SortField::new(field.data_type().clone()))
+            .collect(),
+    )?;
+    let mut row_count = 0_u64;
+    for batch in batches {
+        let batch_rows =
+            u64::try_from(batch.num_rows()).map_err(|_| ResultChecksumError::ResourceLimit)?;
+        row_count = row_count
+            .checked_add(batch_rows)
+            .ok_or(ResultChecksumError::ResourceLimit)?;
+        if schema.fields().is_empty() {
+            for _ in 0..batch.num_rows() {
+                hasher.update(&0_u64.to_be_bytes());
+            }
+            continue;
+        }
+        let rows = converter.convert_columns(batch.columns())?;
+        for row in &rows {
+            hasher.update(&(row.data().len() as u64).to_be_bytes());
+            hasher.update(row.data());
+        }
+    }
+    hasher.update(&row_count.to_be_bytes());
+    Ok(*hasher.finalize().as_bytes())
 }
 
 /// Add identity metadata to a schema otherwise derived wholly from the analyzed plan.
@@ -1369,8 +2633,12 @@ fn output_identity_boundary(
                 semantic_role.to_string(),
             );
         }
-        expressions
-            .push(Expr::Column(Column::from((qualifier, field))).alias(field.name().to_owned()));
+        expressions.push(
+            Expr::Column(Column::from((qualifier, field))).alias_with_metadata(
+                field.name().to_owned(),
+                Some(FieldMetadata::from(metadata.clone())),
+            ),
+        );
         fields.push((
             None,
             Arc::new(field.as_ref().clone().with_metadata(metadata)),
@@ -1416,7 +2684,10 @@ pub(crate) fn observation_view_identity_boundary(
         .iter()
         .zip(expected.fields())
         .map(|((qualifier, field), expected)| {
-            Expr::Column(Column::from((qualifier, field))).alias(expected.name().to_owned())
+            Expr::Column(Column::from((qualifier, field))).alias_with_metadata(
+                expected.name().to_owned(),
+                Some(FieldMetadata::from(expected.metadata().clone())),
+            )
         })
         .collect::<Vec<_>>();
     Ok(LogicalPlan::Projection(Projection::try_new_with_schema(
@@ -1671,6 +2942,96 @@ fn observation_relation_specs(
                     true,
                     "system.programmatic_provenance_observation.transformation_id",
                 ),
+                (
+                    "semantic_version_major",
+                    DataType::Int64,
+                    true,
+                    "system.programmatic_provenance_observation.semantic_version_major",
+                ),
+                (
+                    "semantic_version_minor",
+                    DataType::Int64,
+                    true,
+                    "system.programmatic_provenance_observation.semantic_version_minor",
+                ),
+                (
+                    "semantic_version_patch",
+                    DataType::Int64,
+                    true,
+                    "system.programmatic_provenance_observation.semantic_version_patch",
+                ),
+                (
+                    "resource_class",
+                    DataType::Utf8,
+                    true,
+                    "system.programmatic_provenance_observation.resource_class",
+                ),
+                (
+                    "resource_max_rows",
+                    DataType::Int64,
+                    true,
+                    "system.programmatic_provenance_observation.resource_max_rows",
+                ),
+                (
+                    "resource_max_memory_bytes",
+                    DataType::Int64,
+                    true,
+                    "system.programmatic_provenance_observation.resource_max_memory_bytes",
+                ),
+                (
+                    "resource_max_spill_bytes",
+                    DataType::Int64,
+                    true,
+                    "system.programmatic_provenance_observation.resource_max_spill_bytes",
+                ),
+                (
+                    "determinism_policy",
+                    DataType::Utf8,
+                    true,
+                    "system.programmatic_provenance_observation.determinism_policy",
+                ),
+                (
+                    "ordering_policy",
+                    DataType::Utf8,
+                    true,
+                    "system.programmatic_provenance_observation.ordering_policy",
+                ),
+                (
+                    "ordering_key_count",
+                    DataType::Int64,
+                    true,
+                    "system.programmatic_provenance_observation.ordering_key_count",
+                ),
+                (
+                    "recursion_policy",
+                    DataType::Utf8,
+                    true,
+                    "system.programmatic_provenance_observation.recursion_policy",
+                ),
+                (
+                    "recursion_max_iterations",
+                    DataType::Int64,
+                    true,
+                    "system.programmatic_provenance_observation.recursion_max_iterations",
+                ),
+                (
+                    "provenance_identity",
+                    DataType::FixedSizeBinary(32),
+                    true,
+                    "system.programmatic_provenance_observation.provenance_identity",
+                ),
+                (
+                    "release_identity",
+                    DataType::FixedSizeBinary(32),
+                    true,
+                    "system.programmatic_provenance_observation.release_identity",
+                ),
+                (
+                    "contract_authority_identity",
+                    DataType::FixedSizeBinary(32),
+                    true,
+                    "system.programmatic_provenance_observation.contract_authority_identity",
+                ),
             ],
         ),
     ];
@@ -1705,9 +3066,8 @@ fn observation_relation_specs(
                 logical_schema
                     .fields()
                     .iter()
-                    .enumerate()
-                    .map(|(ordinal, field)| {
-                        if ordinal == 0 {
+                    .map(|field| {
+                        if matches!(field.data_type(), DataType::FixedSizeBinary(_)) {
                             Arc::new(
                                 Field::new(field.name(), DataType::Binary, field.is_nullable())
                                     .with_metadata(field.metadata().clone()),
@@ -1774,6 +3134,66 @@ fn append_system_observations(
             });
     }
     Ok(())
+}
+
+fn enforce_observation_materialization(
+    policy: &ObservationFixedPointPolicy,
+    iteration: u32,
+    batches: &BTreeMap<ProgrammaticRelationId, RecordBatch>,
+) -> Result<ObservationFixedPointEvidence, ProgrammaticSchemaError> {
+    if iteration == 0 || iteration > policy.max_iterations() {
+        return Err(
+            ProgrammaticSchemaError::ObservationFixedPointIterationsExceeded {
+                limit: policy.max_iterations(),
+            },
+        );
+    }
+    let mut total_rows = 0_u64;
+    let mut total_bytes = 0_u64;
+    for (relation_id, batch) in batches {
+        let rows = u64::try_from(batch.num_rows())
+            .map_err(|_| ProgrammaticSchemaError::ObservationResourceCounterOverflow)?;
+        let bytes = u64::try_from(batch.get_array_memory_size())
+            .map_err(|_| ProgrammaticSchemaError::ObservationResourceCounterOverflow)?;
+        if rows > policy.max_rows_per_relation() {
+            return Err(ProgrammaticSchemaError::ObservationRelationRowsExceeded {
+                relation_id: relation_id.clone(),
+                limit: policy.max_rows_per_relation(),
+                observed: rows,
+            });
+        }
+        if bytes > policy.max_bytes_per_relation() {
+            return Err(ProgrammaticSchemaError::ObservationRelationBytesExceeded {
+                relation_id: relation_id.clone(),
+                limit: policy.max_bytes_per_relation(),
+                observed: bytes,
+            });
+        }
+        total_rows = total_rows
+            .checked_add(rows)
+            .ok_or(ProgrammaticSchemaError::ObservationResourceCounterOverflow)?;
+        total_bytes = total_bytes
+            .checked_add(bytes)
+            .ok_or(ProgrammaticSchemaError::ObservationResourceCounterOverflow)?;
+    }
+    if total_rows > policy.max_total_rows() {
+        return Err(ProgrammaticSchemaError::ObservationTotalRowsExceeded {
+            limit: policy.max_total_rows(),
+            observed: total_rows,
+        });
+    }
+    if total_bytes > policy.max_total_bytes() {
+        return Err(ProgrammaticSchemaError::ObservationTotalBytesExceeded {
+            limit: policy.max_total_bytes(),
+            observed: total_bytes,
+        });
+    }
+    Ok(ObservationFixedPointEvidence {
+        iterations: iteration,
+        relation_count: batches.len(),
+        total_rows,
+        total_bytes,
+    })
 }
 
 fn build_observation_batches(
@@ -1923,6 +3343,26 @@ fn build_observation_batches(
 
     let mut provenance = observations.provenance.clone();
     provenance.sort_by(|left, right| left.relation_id().cmp(right.relation_id()));
+    let provenance_identities = provenance
+        .iter()
+        .map(|row| {
+            transformation_contract(row)
+                .map(|contract| *contract.provenance().provenance_identity().as_bytes())
+        })
+        .collect::<Vec<_>>();
+    let release_identities = provenance
+        .iter()
+        .map(|row| {
+            transformation_contract(row)
+                .map(|contract| *contract.provenance().release_identity().as_bytes())
+        })
+        .collect::<Vec<_>>();
+    let contract_authority_identities = provenance
+        .iter()
+        .map(|row| {
+            transformation_contract(row).map(ProgrammaticTransformationContract::authority_identity)
+        })
+        .collect::<Vec<_>>();
     let provenance_batch = RecordBatch::try_new(
         schema("system.programmatic_provenance_observation"),
         vec![
@@ -1946,18 +3386,80 @@ fn build_observation_batches(
                         source_schema_identity,
                         ..
                     } => Some(source_schema_identity.as_ref()),
-                    ProvenanceObservation::Transformation { .. } => None,
+                    ProvenanceObservation::Transformation { .. }
+                    | ProvenanceObservation::ObservationView { .. } => None,
                 },
             ))),
-            Arc::new(StringArray::from_iter(provenance.iter().map(
-                |row| match row {
-                    ProvenanceObservation::Transformation {
-                        transformation_id, ..
-                    } => Some(transformation_id.as_str()),
-                    ProvenanceObservation::Provider { .. }
-                    | ProvenanceObservation::SystemObservation { .. } => None,
-                },
-            ))),
+            Arc::new(StringArray::from_iter(provenance.iter().map(|row| {
+                transformation_id(row).map(ProgrammaticTransformationId::as_str)
+            }))),
+            Arc::new(Int64Array::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row)
+                    .map(|contract| i64::from(contract.semantic_version().major()))
+            }))),
+            Arc::new(Int64Array::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row)
+                    .map(|contract| i64::from(contract.semantic_version().minor()))
+            }))),
+            Arc::new(Int64Array::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row)
+                    .map(|contract| i64::from(contract.semantic_version().patch()))
+            }))),
+            Arc::new(StringArray::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row)
+                    .map(|contract| resource_class_code(contract.resource_class()))
+            }))),
+            Arc::new(Int64Array::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row).map(|contract| {
+                    i64::try_from(contract.resource_class().max_rows())
+                        .expect("validated transformation row bound fits i64")
+                })
+            }))),
+            Arc::new(Int64Array::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row).map(|contract| {
+                    i64::try_from(contract.resource_class().max_memory_bytes())
+                        .expect("validated transformation memory bound fits i64")
+                })
+            }))),
+            Arc::new(Int64Array::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row).and_then(|contract| {
+                    contract.resource_class().max_spill_bytes().map(|bound| {
+                        i64::try_from(bound).expect("validated transformation spill bound fits i64")
+                    })
+                })
+            }))),
+            Arc::new(StringArray::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row)
+                    .map(|contract| determinism_policy_code(contract.determinism_policy()))
+            }))),
+            Arc::new(StringArray::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row)
+                    .map(|contract| ordering_policy_code(contract.ordering_policy()))
+            }))),
+            Arc::new(Int64Array::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row).map(|contract| match contract.ordering_policy() {
+                    TransformationOrderingPolicy::Unordered => 0,
+                    TransformationOrderingPolicy::ByOutputFields(keys) => i64::try_from(keys.len())
+                        .expect("transformation ordering key count fits i64"),
+                })
+            }))),
+            Arc::new(StringArray::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row)
+                    .map(|contract| recursion_policy_code(contract.recursion_policy()))
+            }))),
+            Arc::new(Int64Array::from_iter(provenance.iter().map(|row| {
+                transformation_contract(row).and_then(|contract| {
+                    match contract.recursion_policy() {
+                        TransformationRecursionPolicy::Forbidden => None,
+                        TransformationRecursionPolicy::Bounded { max_iterations } => {
+                            Some(i64::from(max_iterations))
+                        }
+                    }
+                })
+            }))),
+            fixed32_array(provenance_identities.iter().map(Option::as_ref)),
+            fixed32_array(release_identities.iter().map(Option::as_ref)),
+            fixed32_array(contract_authority_identities.iter().map(Option::as_ref)),
         ],
     )?;
 
@@ -1998,6 +3500,100 @@ fn full_reference_parts(reference: &TableReference) -> (&str, &str, &str) {
     }
 }
 
+fn update_contract_frame(hasher: &mut blake3::Hasher, bytes: &[u8]) {
+    hasher.update(&u64::try_from(bytes.len()).unwrap_or(u64::MAX).to_be_bytes());
+    hasher.update(bytes);
+}
+
+const fn resource_class_tag(resource_class: TransformationResourceClass) -> u8 {
+    match resource_class {
+        TransformationResourceClass::BoundedInMemory { .. } => 0,
+        TransformationResourceClass::BoundedSpillable { .. } => 1,
+    }
+}
+
+const fn resource_class_code(resource_class: TransformationResourceClass) -> &'static str {
+    match resource_class {
+        TransformationResourceClass::BoundedInMemory { .. } => "bounded_in_memory",
+        TransformationResourceClass::BoundedSpillable { .. } => "bounded_spillable",
+    }
+}
+
+const fn determinism_policy_tag(policy: TransformationDeterminismPolicy) -> u8 {
+    match policy {
+        TransformationDeterminismPolicy::DeterministicSet => 0,
+        TransformationDeterminismPolicy::DeterministicSequence => 1,
+        TransformationDeterminismPolicy::Volatile => 2,
+    }
+}
+
+const fn determinism_policy_code(policy: TransformationDeterminismPolicy) -> &'static str {
+    match policy {
+        TransformationDeterminismPolicy::DeterministicSet => "deterministic_set",
+        TransformationDeterminismPolicy::DeterministicSequence => "deterministic_sequence",
+        TransformationDeterminismPolicy::Volatile => "volatile",
+    }
+}
+
+const fn ordering_policy_code(policy: &TransformationOrderingPolicy) -> &'static str {
+    match policy {
+        TransformationOrderingPolicy::Unordered => "unordered",
+        TransformationOrderingPolicy::ByOutputFields(_) => "by_output_fields",
+    }
+}
+
+const fn sort_direction_tag(direction: TransformationSortDirection) -> u8 {
+    match direction {
+        TransformationSortDirection::Ascending => 0,
+        TransformationSortDirection::Descending => 1,
+    }
+}
+
+const fn null_placement_tag(null_placement: TransformationNullPlacement) -> u8 {
+    match null_placement {
+        TransformationNullPlacement::First => 0,
+        TransformationNullPlacement::Last => 1,
+    }
+}
+
+const fn recursion_policy_code(policy: TransformationRecursionPolicy) -> &'static str {
+    match policy {
+        TransformationRecursionPolicy::Forbidden => "forbidden",
+        TransformationRecursionPolicy::Bounded { .. } => "bounded",
+    }
+}
+
+fn transformation_contract(
+    provenance: &ProvenanceObservation,
+) -> Option<&ProgrammaticTransformationContract> {
+    provenance.transformation_contract()
+}
+
+fn transformation_id(provenance: &ProvenanceObservation) -> Option<&ProgrammaticTransformationId> {
+    match provenance {
+        ProvenanceObservation::Transformation { contract, .. } => Some(contract.semantic_id()),
+        ProvenanceObservation::ObservationView {
+            transformation_id, ..
+        } => Some(transformation_id),
+        ProvenanceObservation::Provider { .. }
+        | ProvenanceObservation::SystemObservation { .. } => None,
+    }
+}
+
+fn fixed32_array<'a>(values: impl IntoIterator<Item = Option<&'a [u8; 32]>>) -> ArrayRef {
+    let mut builder = FixedSizeBinaryBuilder::new(32);
+    for value in values {
+        if let Some(value) = value {
+            builder
+                .append_value(value)
+                .expect("typed transformation identity has the governed storage width");
+        } else {
+            builder.append_null();
+        }
+    }
+    Arc::new(builder.finish())
+}
+
 const fn relation_origin_code(origin: RelationOrigin) -> &'static str {
     match origin {
         RelationOrigin::Provider => "provider",
@@ -2018,6 +3614,7 @@ const fn provenance_kind_code(provenance: &ProvenanceObservation) -> &'static st
     match provenance {
         ProvenanceObservation::Provider { .. } => "provider_contract",
         ProvenanceObservation::Transformation { .. } => "native_logical_plan",
+        ProvenanceObservation::ObservationView { .. } => "native_observation_view",
         ProvenanceObservation::SystemObservation { .. } => "assembly_observation",
     }
 }
@@ -2043,6 +3640,51 @@ pub enum ProgrammaticSchemaError {
     #[error("duplicate transformation identity {transformation_id:?}")]
     DuplicateTransformation {
         transformation_id: ProgrammaticTransformationId,
+    },
+    #[error("transformation {transformation_id:?} uses the reserved semantic version 0.0.0")]
+    SentinelTransformationSemanticVersion {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error("transformation {transformation_id:?} has a zero resource bound")]
+    InvalidTransformationResourceBounds {
+        transformation_id: ProgrammaticTransformationId,
+        resource_class: TransformationResourceClass,
+    },
+    #[error("transformation {transformation_id:?} uses the all-zero provenance identity")]
+    SentinelTransformationProvenanceIdentity {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error("transformation {transformation_id:?} uses the all-zero release identity")]
+    SentinelTransformationReleaseIdentity {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error("transformation {transformation_id:?} declares zero recursive iterations")]
+    InvalidTransformationRecursionBound {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error(
+        "transformation {transformation_id:?} has incompatible determinism {determinism_policy:?} and ordering {ordering_policy:?} policies"
+    )]
+    IncompatibleTransformationPolicies {
+        transformation_id: ProgrammaticTransformationId,
+        determinism_policy: TransformationDeterminismPolicy,
+        ordering_policy: TransformationOrderingPolicy,
+    },
+    #[error("transformation {transformation_id:?} declares an empty ordering key set")]
+    EmptyTransformationOrdering {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error(
+        "transformation {transformation_id:?} ordering names unknown output field {field_id:?}"
+    )]
+    UnknownTransformationOrderingField {
+        transformation_id: ProgrammaticTransformationId,
+        field_id: ProgrammaticFieldId,
+    },
+    #[error("transformation {transformation_id:?} repeats ordering output field {field_id:?}")]
+    DuplicateTransformationOrderingField {
+        transformation_id: ProgrammaticTransformationId,
+        field_id: ProgrammaticFieldId,
     },
     #[error("transformation {transformation_id:?} repeats dependency {relation_id:?}")]
     DuplicateDependency {
@@ -2115,6 +3757,108 @@ pub enum ProgrammaticSchemaError {
         #[source]
         source: DataFusionError,
     },
+    #[error("transformation {transformation_id:?} contains recursion but declares it forbidden")]
+    TransformationRecursionForbidden {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error(
+        "transformation {transformation_id:?} declares bounded recursion but its plan has no native recursive query"
+    )]
+    TransformationRecursionDeclarationInert {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error(
+        "transformation {transformation_id:?} requests {max_iterations} bounded recursive iterations, but DataFusion 55 native recursive execution exposes no iteration cap"
+    )]
+    BoundedNativeRecursionUnavailable {
+        transformation_id: ProgrammaticTransformationId,
+        max_iterations: u32,
+    },
+    #[error(
+        "deterministic transformation {transformation_id:?} contains a stable, volatile, or ambient expression"
+    )]
+    NonImmutableTransformationExpression {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error(
+        "volatile transformation {transformation_id:?} contains no stable, volatile, or ambient expression"
+    )]
+    VolatileTransformationDeclarationInert {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error("transformation {transformation_id:?} failed physical planning")]
+    TransformationPhysicalPlanning {
+        transformation_id: ProgrammaticTransformationId,
+        #[source]
+        source: DataFusionError,
+    },
+    #[error("transformation {transformation_id:?} declared ordering is not globally partitioned")]
+    TransformationOrderingNotGlobal {
+        transformation_id: ProgrammaticTransformationId,
+        partition_count: usize,
+    },
+    #[error("transformation {transformation_id:?} physical output does not satisfy its ordering")]
+    TransformationOrderingNotSatisfied {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error("transformation {transformation_id:?} failed its bounded proof execution")]
+    TransformationExecution {
+        transformation_id: ProgrammaticTransformationId,
+        #[source]
+        source: DataFusionError,
+    },
+    #[error("transformation {transformation_id:?} execution schema differs from its plan")]
+    TransformationExecutionSchemaMismatch {
+        transformation_id: ProgrammaticTransformationId,
+        expected: SchemaRef,
+        actual: SchemaRef,
+    },
+    #[error("transformation {transformation_id:?} resource counter overflowed")]
+    TransformationResourceCounterOverflow {
+        transformation_id: ProgrammaticTransformationId,
+    },
+    #[error(
+        "transformation {transformation_id:?} produced {observed} rows beyond its {limit} row bound"
+    )]
+    TransformationOutputRowsExceeded {
+        transformation_id: ProgrammaticTransformationId,
+        limit: u64,
+        observed: u64,
+    },
+    #[error(
+        "transformation {transformation_id:?} used {observed} observed bytes beyond its {limit} memory bound"
+    )]
+    TransformationMemoryBytesExceeded {
+        transformation_id: ProgrammaticTransformationId,
+        limit: u64,
+        observed: u64,
+    },
+    #[error(
+        "in-memory transformation {transformation_id:?} spilled {spilled_bytes} bytes in {spill_count} spills"
+    )]
+    TransformationUnexpectedSpill {
+        transformation_id: ProgrammaticTransformationId,
+        spill_count: u64,
+        spilled_bytes: u64,
+    },
+    #[error(
+        "transformation {transformation_id:?} spilled {observed} bytes beyond its {limit} spill bound"
+    )]
+    TransformationSpillBytesExceeded {
+        transformation_id: ProgrammaticTransformationId,
+        limit: u64,
+        observed: u64,
+    },
+    #[error("transformation {transformation_id:?} determinism proof failed")]
+    TransformationDeterminismProof {
+        transformation_id: ProgrammaticTransformationId,
+        #[source]
+        source: ResultChecksumError,
+    },
+    #[error("transformation {transformation_id:?} produced different results on re-execution")]
+    TransformationNotDeterministic {
+        transformation_id: ProgrammaticTransformationId,
+    },
     #[error("transformation {transformation_id:?} output schema assertion differs from its plan")]
     OutputSchemaAssertionMismatch {
         transformation_id: ProgrammaticTransformationId,
@@ -2148,8 +3892,32 @@ pub enum ProgrammaticSchemaError {
     ViewPlanDrift { relation_id: ProgrammaticRelationId },
     #[error("transformation relation {relation_id:?} unexpectedly carries SQL authority")]
     SqlViewDefinition { relation_id: ProgrammaticRelationId },
-    #[error("system observation batches changed after self-inclusive catalog registration")]
-    ObservationSelfInclusionDrift,
+    #[error("system observation fixed point did not converge within {limit} iterations")]
+    ObservationFixedPointIterationsExceeded { limit: u32 },
+    #[error("system observation resource counter overflowed")]
+    ObservationResourceCounterOverflow,
+    #[error(
+        "observation relation {relation_id:?} produced {observed} rows beyond its {limit} row bound"
+    )]
+    ObservationRelationRowsExceeded {
+        relation_id: ProgrammaticRelationId,
+        limit: u64,
+        observed: u64,
+    },
+    #[error("observation families produced {observed} rows beyond their {limit} total row bound")]
+    ObservationTotalRowsExceeded { limit: u64, observed: u64 },
+    #[error(
+        "observation relation {relation_id:?} retained {observed} bytes beyond its {limit} memory bound"
+    )]
+    ObservationRelationBytesExceeded {
+        relation_id: ProgrammaticRelationId,
+        limit: u64,
+        observed: u64,
+    },
+    #[error(
+        "observation families retained {observed} bytes beyond their {limit} total memory bound"
+    )]
+    ObservationTotalBytesExceeded { limit: u64, observed: u64 },
     #[error("registered relation {relation_id:?} is missing during candidate-only replacement")]
     CatalogReplacementMissing { relation_id: ProgrammaticRelationId },
     #[error("registered relation {relation_id:?} is not an observation view")]
@@ -2168,7 +3936,9 @@ pub enum ProgrammaticSchemaError {
 mod tests {
     use std::collections::HashMap;
 
-    use arrow_array::{ArrayRef, BooleanArray, Int64Array, RecordBatch, StringArray};
+    use arrow_array::{
+        ArrayRef, BooleanArray, FixedSizeBinaryArray, Int64Array, RecordBatch, StringArray,
+    };
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::catalog::MemorySchemaProvider;
     use datafusion::datasource::MemTable;
@@ -2179,7 +3949,7 @@ mod tests {
 
     #[derive(Debug)]
     struct FilterProjection {
-        id: ProgrammaticTransformationId,
+        contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
         dependencies: Vec<ProgrammaticRelationId>,
         minimum_id: i64,
@@ -2187,8 +3957,8 @@ mod tests {
     }
 
     impl ProgrammaticTransformation for FilterProjection {
-        fn id(&self) -> &ProgrammaticTransformationId {
-            &self.id
+        fn contract(&self) -> &ProgrammaticTransformationContract {
+            &self.contract
         }
 
         fn output(&self) -> &TransformationOutput {
@@ -2221,14 +3991,14 @@ mod tests {
 
     #[derive(Debug)]
     struct Passthrough {
-        id: ProgrammaticTransformationId,
+        contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
         dependencies: Vec<ProgrammaticRelationId>,
     }
 
     impl ProgrammaticTransformation for Passthrough {
-        fn id(&self) -> &ProgrammaticTransformationId {
-            &self.id
+        fn contract(&self) -> &ProgrammaticTransformationContract {
+            &self.contract
         }
 
         fn output(&self) -> &TransformationOutput {
@@ -2244,6 +4014,72 @@ mod tests {
             inputs: &TransformationInputs,
         ) -> Result<LogicalPlan, TransformationPlanError> {
             inputs.plan(&self.dependencies[0])
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum PolicyPlanKind {
+        Project,
+        OrderedAscending,
+        Volatile,
+        Recursive,
+    }
+
+    #[derive(Debug)]
+    struct PolicyProjection {
+        contract: ProgrammaticTransformationContract,
+        output: TransformationOutput,
+        dependencies: Vec<ProgrammaticRelationId>,
+        kind: PolicyPlanKind,
+    }
+
+    impl ProgrammaticTransformation for PolicyProjection {
+        fn contract(&self) -> &ProgrammaticTransformationContract {
+            &self.contract
+        }
+
+        fn output(&self) -> &TransformationOutput {
+            &self.output
+        }
+
+        fn dependencies(&self) -> &[ProgrammaticRelationId] {
+            &self.dependencies
+        }
+
+        fn build(
+            &self,
+            inputs: &TransformationInputs,
+        ) -> Result<LogicalPlan, TransformationPlanError> {
+            let input = inputs.plan(&self.dependencies[0])?;
+            let projection = match self.kind {
+                PolicyPlanKind::Volatile => LogicalPlanBuilder::from(input)
+                    .project([
+                        col("id"),
+                        datafusion::functions::math::random()
+                            .call(vec![])
+                            .alias("nonce"),
+                    ])?
+                    .build()?,
+                PolicyPlanKind::Project
+                | PolicyPlanKind::OrderedAscending
+                | PolicyPlanKind::Recursive => LogicalPlanBuilder::from(input)
+                    .project([col("id")])?
+                    .build()?,
+            };
+            match self.kind {
+                PolicyPlanKind::Project | PolicyPlanKind::Volatile => Ok(projection),
+                PolicyPlanKind::OrderedAscending => Ok(LogicalPlanBuilder::from(projection)
+                    .sort([col("id").sort(true, false)])?
+                    .build()?),
+                PolicyPlanKind::Recursive => Ok(LogicalPlan::RecursiveQuery(
+                    datafusion::logical_expr::RecursiveQuery::try_new(
+                        "policy-recursive".to_owned(),
+                        Arc::new(projection.clone()),
+                        Arc::new(projection),
+                        true,
+                    )?,
+                )),
+            }
         }
     }
 
@@ -2263,6 +4099,44 @@ mod tests {
 
     fn observation_epoch() -> EpochId {
         EpochId::from_bytes([0x5a; 16])
+    }
+
+    fn observation_policy(
+        max_iterations: u32,
+        max_rows_per_relation: u64,
+        max_total_rows: u64,
+        max_bytes_per_relation: u64,
+        max_total_bytes: u64,
+    ) -> ObservationFixedPointPolicy {
+        ObservationFixedPointPolicy::try_new(
+            max_iterations,
+            max_rows_per_relation,
+            max_total_rows,
+            max_bytes_per_relation,
+            max_total_bytes,
+        )
+        .expect("test observation policy is nonzero")
+    }
+
+    fn test_transformation_contract(
+        id: &str,
+        semantic_version: TransformationSemanticVersion,
+    ) -> ProgrammaticTransformationContract {
+        ProgrammaticTransformationContract::new(
+            ProgrammaticTransformationId::new(id),
+            semantic_version,
+            TransformationResourceClass::BoundedInMemory {
+                max_rows: 10_000,
+                max_memory_bytes: 1 << 20,
+            },
+            TransformationDeterminismPolicy::DeterministicSet,
+            TransformationOrderingPolicy::Unordered,
+            TransformationRecursionPolicy::Forbidden,
+            TransformationProvenance::new(
+                TransformationProvenanceIdentity::from_bytes([0x31; 32]),
+                TransformationReleaseIdentity::from_bytes([0x41; 32]),
+            ),
+        )
     }
 
     fn provider_input(
@@ -2323,11 +4197,13 @@ mod tests {
         )
     }
 
-    async fn fixture(
+    async fn fixture_with_contract(
         with_note: bool,
         minimum_id: i64,
         include_active: bool,
         assertion: Option<SchemaRef>,
+        contract: ProgrammaticTransformationContract,
+        observation_policy: ObservationFixedPointPolicy,
     ) -> Result<SealedProgrammaticSchemaAssembly, ProgrammaticSchemaError> {
         let input_id = ProgrammaticRelationId::new("provider.events");
         let output_id = ProgrammaticRelationId::new("derived.active_events");
@@ -2344,14 +4220,17 @@ mod tests {
         if let Some(assertion) = assertion {
             output = output.with_schema_assertion(assertion);
         }
-        let mut assembly = ProgrammaticSchemaAssembly::new(candidate_state());
+        let mut assembly = ProgrammaticSchemaAssembly::with_observation_policy(
+            candidate_state(),
+            observation_policy,
+        );
         assembly.register_provider(provider_input(
             input_id.as_str(),
             table("provider_events"),
             with_note,
         ))?;
         assembly.add_transformation(Arc::new(FilterProjection {
-            id: ProgrammaticTransformationId::new("filter-active-events"),
+            contract,
             output,
             dependencies: vec![input_id],
             minimum_id,
@@ -2360,9 +4239,124 @@ mod tests {
         assembly.seal(observation_epoch()).await
     }
 
+    async fn fixture(
+        with_note: bool,
+        minimum_id: i64,
+        include_active: bool,
+        assertion: Option<SchemaRef>,
+    ) -> Result<SealedProgrammaticSchemaAssembly, ProgrammaticSchemaError> {
+        fixture_with_contract(
+            with_note,
+            minimum_id,
+            include_active,
+            assertion,
+            test_transformation_contract(
+                "filter-active-events",
+                TransformationSemanticVersion::new(1, 0, 0),
+            ),
+            ObservationFixedPointPolicy::production(),
+        )
+        .await
+    }
+
+    async fn policy_fixture(
+        contract: ProgrammaticTransformationContract,
+        kind: PolicyPlanKind,
+    ) -> Result<SealedProgrammaticSchemaAssembly, ProgrammaticSchemaError> {
+        let input_id = ProgrammaticRelationId::new("provider.events");
+        let output_id = ProgrammaticRelationId::new("derived.policy_output");
+        let mut fields = vec![TransformationFieldIdentity::new(ProgrammaticFieldId::new(
+            "derived.policy_output.id",
+        ))];
+        if matches!(kind, PolicyPlanKind::Volatile) {
+            fields.push(TransformationFieldIdentity::new(ProgrammaticFieldId::new(
+                "derived.policy_output.nonce",
+            )));
+        }
+        let mut assembly = ProgrammaticSchemaAssembly::new(candidate_state());
+        assembly.register_provider(provider_input(
+            input_id.as_str(),
+            table("provider_events"),
+            false,
+        ))?;
+        assembly.add_transformation(Arc::new(PolicyProjection {
+            contract,
+            output: TransformationOutput::new(output_id, table("policy_output"), fields),
+            dependencies: vec![input_id],
+            kind,
+        }))?;
+        assembly.seal(observation_epoch()).await
+    }
+
+    fn passthrough_registration_error(
+        contract: ProgrammaticTransformationContract,
+    ) -> ProgrammaticSchemaError {
+        let mut assembly = ProgrammaticSchemaAssembly::new(candidate_state());
+        assembly
+            .add_transformation(Arc::new(Passthrough {
+                contract,
+                output: TransformationOutput::new(
+                    ProgrammaticRelationId::new("derived.contract_validation"),
+                    table("contract_validation"),
+                    [TransformationFieldIdentity::new(ProgrammaticFieldId::new(
+                        "derived.contract_validation.id",
+                    ))],
+                ),
+                dependencies: vec![ProgrammaticRelationId::new("provider.events")],
+            }))
+            .unwrap_err()
+    }
+
+    async fn observed_contract_authority(
+        sealed: &SealedProgrammaticSchemaAssembly,
+        relation_id: &str,
+    ) -> [u8; 32] {
+        let binding = sealed
+            .relation(&ProgrammaticRelationId::new(
+                PROVENANCE_OBSERVATION_RELATION_ID,
+            ))
+            .expect("provenance relation is installed");
+        let batches = sealed
+            .session()
+            .table(binding.table_reference.clone())
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        for batch in batches {
+            let relation_ids = batch
+                .column_by_name("relation_id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let identities = batch
+                .column_by_name("contract_authority_identity")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap();
+            for row in 0..batch.num_rows() {
+                if relation_ids.value(row) == relation_id {
+                    return identities
+                        .value(row)
+                        .try_into()
+                        .expect("contract authority has fixed width 32");
+                }
+            }
+        }
+        panic!("missing provenance row for {relation_id}")
+    }
+
     #[tokio::test]
     async fn provider_filter_projection_derives_and_registers_its_schema() {
         let sealed = fixture(false, 2, false, None).await.unwrap();
+        let fixed_point = sealed.observation_fixed_point();
+        assert_eq!(fixed_point.iterations(), 2);
+        assert_eq!(fixed_point.relation_count(), 5);
+        assert!(fixed_point.total_rows() > 0);
+        assert!(fixed_point.total_bytes() > 0);
         let output_id = ProgrammaticRelationId::new("derived.active_events");
         let binding = sealed.relation(&output_id).unwrap();
         assert_eq!(binding.contract.logical_schema().fields().len(), 1);
@@ -2436,6 +4430,410 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn observation_fixed_point_policy_rejects_every_zero_bound() {
+        for (expected, values) in [
+            ("max_iterations", (0, 1, 1, 1, 1)),
+            ("max_rows_per_relation", (1, 0, 1, 1, 1)),
+            ("max_total_rows", (1, 1, 0, 1, 1)),
+            ("max_bytes_per_relation", (1, 1, 1, 0, 1)),
+            ("max_total_bytes", (1, 1, 1, 1, 0)),
+        ] {
+            let (iterations, per_rows, total_rows, per_bytes, total_bytes) = values;
+            assert_eq!(
+                ObservationFixedPointPolicy::try_new(
+                    iterations,
+                    per_rows,
+                    total_rows,
+                    per_bytes,
+                    total_bytes,
+                ),
+                Err(ObservationFixedPointPolicyError::ZeroBound { field: expected })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn observation_fixed_point_iteration_bound_fails_closed() {
+        let error = fixture_with_contract(
+            false,
+            2,
+            false,
+            None,
+            test_transformation_contract(
+                "filter-active-events",
+                TransformationSemanticVersion::new(1, 0, 0),
+            ),
+            observation_policy(1, 10_000, 50_000, 1 << 20, 5 << 20),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ProgrammaticSchemaError::ObservationFixedPointIterationsExceeded { limit: 1 }
+        ));
+    }
+
+    #[tokio::test]
+    async fn observation_relation_row_bound_fails_closed_before_sealing() {
+        let error = fixture_with_contract(
+            false,
+            2,
+            false,
+            None,
+            test_transformation_contract(
+                "filter-active-events",
+                TransformationSemanticVersion::new(1, 0, 0),
+            ),
+            observation_policy(8, 1, 50_000, 1 << 20, 5 << 20),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ProgrammaticSchemaError::ObservationRelationRowsExceeded {
+                limit: 1,
+                observed,
+                ..
+            } if observed > 1
+        ));
+    }
+
+    #[tokio::test]
+    async fn observation_relation_memory_bound_fails_closed_before_sealing() {
+        let error = fixture_with_contract(
+            false,
+            2,
+            false,
+            None,
+            test_transformation_contract(
+                "filter-active-events",
+                TransformationSemanticVersion::new(1, 0, 0),
+            ),
+            observation_policy(8, 10_000, 50_000, 1, 5 << 20),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ProgrammaticSchemaError::ObservationRelationBytesExceeded {
+                limit: 1,
+                observed,
+                ..
+            } if observed > 1
+        ));
+    }
+
+    #[tokio::test]
+    async fn observation_total_row_bound_fails_closed_before_sealing() {
+        let error = fixture_with_contract(
+            false,
+            2,
+            false,
+            None,
+            test_transformation_contract(
+                "filter-active-events",
+                TransformationSemanticVersion::new(1, 0, 0),
+            ),
+            observation_policy(8, 10_000, 1, 1 << 20, 5 << 20),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ProgrammaticSchemaError::ObservationTotalRowsExceeded {
+                limit: 1,
+                observed,
+            } if observed > 1
+        ));
+    }
+
+    #[tokio::test]
+    async fn observation_total_memory_bound_fails_closed_before_sealing() {
+        let error = fixture_with_contract(
+            false,
+            2,
+            false,
+            None,
+            test_transformation_contract(
+                "filter-active-events",
+                TransformationSemanticVersion::new(1, 0, 0),
+            ),
+            observation_policy(8, 10_000, 50_000, 1 << 20, 1),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ProgrammaticSchemaError::ObservationTotalBytesExceeded {
+                limit: 1,
+                observed,
+            } if observed > 1
+        ));
+    }
+
+    #[tokio::test]
+    async fn transformation_contract_metadata_is_typed_and_queryable() {
+        let sealed = fixture(false, 2, false, None).await.unwrap();
+        let output_id = ProgrammaticRelationId::new("derived.active_events");
+        let observed = sealed.observations().provenance(&output_id).unwrap();
+        let contract = observed.transformation_contract().unwrap();
+        assert_eq!(
+            contract.semantic_id(),
+            &ProgrammaticTransformationId::new("filter-active-events")
+        );
+        assert_eq!(
+            contract.semantic_version(),
+            TransformationSemanticVersion::new(1, 0, 0)
+        );
+        assert_eq!(
+            contract.resource_class(),
+            TransformationResourceClass::BoundedInMemory {
+                max_rows: 10_000,
+                max_memory_bytes: 1 << 20,
+            }
+        );
+        assert_eq!(
+            contract.determinism_policy(),
+            TransformationDeterminismPolicy::DeterministicSet
+        );
+        assert_eq!(
+            contract.ordering_policy(),
+            &TransformationOrderingPolicy::Unordered
+        );
+        assert_eq!(
+            contract.recursion_policy(),
+            TransformationRecursionPolicy::Forbidden
+        );
+        assert_eq!(
+            observed_contract_authority(&sealed, output_id.as_str()).await,
+            contract.authority_identity()
+        );
+    }
+
+    #[test]
+    fn transformation_registration_rejects_sentinels_and_incompatible_policies() {
+        let mut contract = test_transformation_contract(
+            "invalid-transform",
+            TransformationSemanticVersion::new(0, 0, 0),
+        );
+        assert!(matches!(
+            passthrough_registration_error(contract.clone()),
+            ProgrammaticSchemaError::SentinelTransformationSemanticVersion { .. }
+        ));
+
+        contract.semantic_version = TransformationSemanticVersion::new(1, 0, 0);
+        contract.provenance = TransformationProvenance::new(
+            TransformationProvenanceIdentity::from_bytes([0; 32]),
+            TransformationReleaseIdentity::from_bytes([0x41; 32]),
+        );
+        assert!(matches!(
+            passthrough_registration_error(contract.clone()),
+            ProgrammaticSchemaError::SentinelTransformationProvenanceIdentity { .. }
+        ));
+
+        contract.provenance = TransformationProvenance::new(
+            TransformationProvenanceIdentity::from_bytes([0x31; 32]),
+            TransformationReleaseIdentity::from_bytes([0; 32]),
+        );
+        assert!(matches!(
+            passthrough_registration_error(contract.clone()),
+            ProgrammaticSchemaError::SentinelTransformationReleaseIdentity { .. }
+        ));
+
+        contract.provenance = TransformationProvenance::new(
+            TransformationProvenanceIdentity::from_bytes([0x31; 32]),
+            TransformationReleaseIdentity::from_bytes([0x41; 32]),
+        );
+        contract.determinism_policy = TransformationDeterminismPolicy::DeterministicSequence;
+        contract.ordering_policy = TransformationOrderingPolicy::Unordered;
+        assert!(matches!(
+            passthrough_registration_error(contract),
+            ProgrammaticSchemaError::IncompatibleTransformationPolicies { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn metadata_change_causally_changes_observed_transformation_authority() {
+        let first = fixture_with_contract(
+            false,
+            2,
+            false,
+            None,
+            test_transformation_contract(
+                "filter-active-events",
+                TransformationSemanticVersion::new(1, 0, 0),
+            ),
+            ObservationFixedPointPolicy::production(),
+        )
+        .await
+        .unwrap();
+        let second = fixture_with_contract(
+            false,
+            2,
+            false,
+            None,
+            test_transformation_contract(
+                "filter-active-events",
+                TransformationSemanticVersion::new(1, 0, 1),
+            ),
+            ObservationFixedPointPolicy::production(),
+        )
+        .await
+        .unwrap();
+        let output_id = ProgrammaticRelationId::new("derived.active_events");
+        assert_eq!(
+            first
+                .observations()
+                .provenance(&output_id)
+                .unwrap()
+                .logical_plan(),
+            second
+                .observations()
+                .provenance(&output_id)
+                .unwrap()
+                .logical_plan()
+        );
+        assert_ne!(
+            observed_contract_authority(&first, output_id.as_str()).await,
+            observed_contract_authority(&second, output_id.as_str()).await
+        );
+    }
+
+    #[tokio::test]
+    async fn physical_output_ordering_must_satisfy_the_declared_field_identity_keys() {
+        let mut contract = test_transformation_contract(
+            "ordered-policy",
+            TransformationSemanticVersion::new(1, 0, 0),
+        );
+        contract.determinism_policy = TransformationDeterminismPolicy::DeterministicSequence;
+        contract.ordering_policy = TransformationOrderingPolicy::ByOutputFields(Arc::from([
+            TransformationOrderingKey::new(
+                ProgrammaticFieldId::new("derived.policy_output.id"),
+                TransformationSortDirection::Ascending,
+                TransformationNullPlacement::Last,
+            ),
+        ]));
+        policy_fixture(contract.clone(), PolicyPlanKind::OrderedAscending)
+            .await
+            .expect("a global physical sort satisfies the sequence contract");
+
+        contract.ordering_policy = TransformationOrderingPolicy::ByOutputFields(Arc::from([
+            TransformationOrderingKey::new(
+                ProgrammaticFieldId::new("derived.policy_output.id"),
+                TransformationSortDirection::Descending,
+                TransformationNullPlacement::Last,
+            ),
+        ]));
+        assert!(matches!(
+            policy_fixture(contract, PolicyPlanKind::OrderedAscending)
+                .await
+                .unwrap_err(),
+            ProgrammaticSchemaError::TransformationOrderingNotSatisfied { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn determinism_policy_rejects_nonimmutable_and_inert_volatility() {
+        let deterministic = test_transformation_contract(
+            "deterministic-policy",
+            TransformationSemanticVersion::new(1, 0, 0),
+        );
+        assert!(matches!(
+            policy_fixture(deterministic, PolicyPlanKind::Volatile)
+                .await
+                .unwrap_err(),
+            ProgrammaticSchemaError::NonImmutableTransformationExpression { .. }
+        ));
+
+        let mut volatile = test_transformation_contract(
+            "volatile-policy",
+            TransformationSemanticVersion::new(1, 0, 0),
+        );
+        volatile.determinism_policy = TransformationDeterminismPolicy::Volatile;
+        policy_fixture(volatile.clone(), PolicyPlanKind::Volatile)
+            .await
+            .expect("an explicitly volatile plan is proof-executed once");
+        assert!(matches!(
+            policy_fixture(volatile, PolicyPlanKind::Project)
+                .await
+                .unwrap_err(),
+            ProgrammaticSchemaError::VolatileTransformationDeclarationInert { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn proof_execution_enforces_row_and_memory_resource_bounds() {
+        let mut row_bounded = test_transformation_contract(
+            "row-bounded-policy",
+            TransformationSemanticVersion::new(1, 0, 0),
+        );
+        row_bounded.resource_class = TransformationResourceClass::BoundedInMemory {
+            max_rows: 2,
+            max_memory_bytes: 1 << 20,
+        };
+        assert!(matches!(
+            policy_fixture(row_bounded, PolicyPlanKind::Project)
+                .await
+                .unwrap_err(),
+            ProgrammaticSchemaError::TransformationOutputRowsExceeded {
+                limit: 2,
+                observed: 3,
+                ..
+            }
+        ));
+
+        let mut memory_bounded = test_transformation_contract(
+            "memory-bounded-policy",
+            TransformationSemanticVersion::new(1, 0, 0),
+        );
+        memory_bounded.resource_class = TransformationResourceClass::BoundedInMemory {
+            max_rows: 10,
+            max_memory_bytes: 1,
+        };
+        assert!(matches!(
+            policy_fixture(memory_bounded, PolicyPlanKind::Project)
+                .await
+                .unwrap_err(),
+            ProgrammaticSchemaError::TransformationMemoryBytesExceeded { limit: 1, .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn recursion_policy_fails_closed_without_a_native_iteration_cap() {
+        let forbidden = test_transformation_contract(
+            "forbidden-recursion",
+            TransformationSemanticVersion::new(1, 0, 0),
+        );
+        assert!(matches!(
+            policy_fixture(forbidden, PolicyPlanKind::Recursive)
+                .await
+                .unwrap_err(),
+            ProgrammaticSchemaError::TransformationRecursionForbidden { .. }
+        ));
+
+        let mut bounded = test_transformation_contract(
+            "bounded-recursion",
+            TransformationSemanticVersion::new(1, 0, 0),
+        );
+        bounded.recursion_policy = TransformationRecursionPolicy::Bounded { max_iterations: 8 };
+        assert!(matches!(
+            policy_fixture(bounded.clone(), PolicyPlanKind::Project)
+                .await
+                .unwrap_err(),
+            ProgrammaticSchemaError::TransformationRecursionDeclarationInert { .. }
+        ));
+        assert!(matches!(
+            policy_fixture(bounded, PolicyPlanKind::Recursive)
+                .await
+                .unwrap_err(),
+            ProgrammaticSchemaError::BoundedNativeRecursionUnavailable {
+                max_iterations: 8,
+                ..
+            }
+        ));
+    }
+
     #[tokio::test]
     async fn input_and_plan_changes_causally_change_typed_observations() {
         let first = fixture(false, 1, false, None).await.unwrap();
@@ -2492,7 +4890,10 @@ mod tests {
         let mut unresolved = ProgrammaticSchemaAssembly::new(candidate_state());
         unresolved
             .add_transformation(Arc::new(Passthrough {
-                id: ProgrammaticTransformationId::new("unresolved"),
+                contract: test_transformation_contract(
+                    "unresolved",
+                    TransformationSemanticVersion::new(1, 0, 0),
+                ),
                 output: TransformationOutput::new(
                     ProgrammaticRelationId::new("unresolved.output"),
                     table("unresolved_output"),
@@ -2513,7 +4914,10 @@ mod tests {
         let mut cyclic = ProgrammaticSchemaAssembly::new(candidate_state());
         cyclic
             .add_transformation(Arc::new(Passthrough {
-                id: ProgrammaticTransformationId::new("left"),
+                contract: test_transformation_contract(
+                    "left",
+                    TransformationSemanticVersion::new(1, 0, 0),
+                ),
                 output: TransformationOutput::new(
                     left.clone(),
                     table("cycle_left"),
@@ -2526,7 +4930,10 @@ mod tests {
             .unwrap();
         cyclic
             .add_transformation(Arc::new(Passthrough {
-                id: ProgrammaticTransformationId::new("right"),
+                contract: test_transformation_contract(
+                    "right",
+                    TransformationSemanticVersion::new(1, 0, 0),
+                ),
                 output: TransformationOutput::new(
                     right,
                     table("cycle_right"),
@@ -2610,7 +5017,7 @@ mod tests {
         assert!(matches!(
             error,
             ProgrammaticSchemaError::SchemaContract(
-                SchemaContractError::ModelMetadataUnavailable { .. }
+                SchemaContractError::IdentityMetadataUnavailable { .. }
             )
         ));
     }

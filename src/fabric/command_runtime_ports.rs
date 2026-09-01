@@ -203,9 +203,10 @@ mod tests {
     use super::*;
     use crate::fabric::command::{
         ActorId, AdmissionContext, AuthorizationRef, CommandEvent, CommandIdentity,
-        CommandOwnership, CommandPins, CommandReducer, CompilerReleaseRef, EpochId, ExecutionOwner,
-        FabricCommandPayload, IdempotencyKey, LeaseId, ModelHeadRef, PrincipalId, ProofReceiptRef,
-        ProviderSetRef, ReductionContext, ResourceEnvelopeRef, SourceGeneration, WriterGeneration,
+        CommandOwnership, CommandPins, CommandReducer, EpochId, ExecutionOwner,
+        FabricCommandPayload, IdempotencyKey, InputReleaseRef, LeaseId, PrincipalId,
+        ProgramReleaseRef, ProofReceiptRef, ProviderSetRef, ReductionContext, ResourceEnvelopeRef,
+        SourceGeneration, WriterGeneration,
     };
 
     struct ChainReader {
@@ -280,8 +281,17 @@ mod tests {
             expected_head: ExpectedHead::Empty,
             writer_fence: fence(0x24, 1),
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes([0x25; 32]),
-                model_head: ModelHeadRef::from_bytes([0x26; 32]),
+                input_release: InputReleaseRef::from_bytes([0x25; 32]),
+                program_release: ProgramReleaseRef::from_bytes([0x26; 32]),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    [0x26; 32],
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(
+                    [0x26; 32],
+                ),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(
+                    [0x26; 32],
+                ),
                 source_generation: SourceGeneration::new(0),
                 provider_set: ProviderSetRef::from_bytes([0x27; 32]),
             },

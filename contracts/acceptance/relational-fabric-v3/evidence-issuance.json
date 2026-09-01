@@ -1,0 +1,713 @@
+{
+  "schema_version": 1,
+  "issuance_id": "wp33:fixture-r3",
+  "reviewed_content_id": "sha256:119c3a3c9964521002310367073c6a5be86be116412c818b043d9c9b204b30c6",
+  "status": "accepted",
+  "suite": "codefabric-relational-data-fabric@2.1.0",
+  "author": {
+    "identity": "wp33-successor-expectation-author-r3",
+    "role": "successor-only expectation transaction reissue author",
+    "implementation_owner": false
+  },
+  "reviewer": {
+    "identity": "wp33-independent-successor-reissue-reviewer-r2",
+    "role": "independent successor-only evidence reissuance reviewer",
+    "implementation_owner": false,
+    "expectation_author": false
+  },
+  "independence": {
+    "target_execution_used": false,
+    "legacy_execution_used": false,
+    "production_expected_value_code_used": false,
+    "required_inputs": [
+      "authoritative_v2.1_sources",
+      "decoded_expectations",
+      "semantic_fixtures"
+    ]
+  },
+  "artifacts": {
+    "expectations": {
+      "path": "contracts/acceptance/relational-fabric-v3/expectations.jsonl",
+      "sha256": "15a82d25c2cbe4bb115f353627b46c6564e8ad25441c1e29f9739a6b4771821c",
+      "rows": 18
+    },
+    "negative_fixtures": {
+      "path": "contracts/acceptance/relational-fabric-v3/negative-fixtures.jsonl",
+      "sha256": "7bf51524f3d1b364c05172d49e2b2c9d5bd12ae7d2d1bb00eac57dc460675dd9",
+      "rows": 36
+    }
+  },
+  "claim_reviews": [
+    {
+      "claim_id": "RFV3-CLAIM-001",
+      "expectation_sha256": "139678fa849534012a85b775958eae6d724c7b763be83906dce1f14db667ece2",
+      "fixture_sha256": {
+        "causal": "c03d9d3e3a2a237d220e337ddfb7696a39ea452b43892c418619d60680f5ae04",
+        "negative": "8b2f87f6a6b03986353d63a70ebff82125e607be26cd707fde2225df950b587b"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-001",
+        "expectation_sha256": "139678fa849534012a85b775958eae6d724c7b763be83906dce1f14db667ece2",
+        "semantic_fixture_sha256": {
+          "causal": "c03d9d3e3a2a237d220e337ddfb7696a39ea452b43892c418619d60680f5ae04",
+          "negative": "8b2f87f6a6b03986353d63a70ebff82125e607be26cd707fde2225df950b587b"
+        },
+        "subject": "Application-owned provider-native Arrow contracts bind exact source, release, context, and trust inputs; unavailable untrusted Rust compilation is an explicit remainder",
+        "source_authority": {
+          "source_anchor": "GEN §4 Provider responsibility model; GEN §8 Immutable source-image contract; GEN §10 Provider-observation metadata; GEN §11 Relation-scoped Arrow IPC boundary; GEN AC-G-31 rustc extractor protocol and public/private seam",
+          "governing_clauses": [
+            "SUITE §5.1 Proof relations",
+            "GEN §90 Provider job interfaces",
+            "GEN AC-G-35 Provider sandbox and Rust compilation trust model"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:33a79d62c3b78efe11d4380548956666929d3ea560b3dde083ac3b3df4b7d44d"
+      },
+      "rationale": "Accepted RFV3-CLAIM-001 under sha256:33a79d62c3b78efe11d4380548956666929d3ea560b3dde083ac3b3df4b7d44d. Subject: Application-owned provider-native Arrow contracts bind exact source, release, context, and trust inputs; unavailable untrusted Rust compilation is an explicit remainder Source authority: GEN §4 Provider responsibility model; GEN §8 Immutable source-image contract; GEN §10 Provider-observation metadata; GEN §11 Relation-scoped Arrow IPC boundary; GEN AC-G-31 rustc extractor protocol and public/private seam. Governing clauses: SUITE §5.1 Proof relations | GEN §90 Provider job interfaces | GEN AC-G-35 Provider sandbox and Rust compilation trust model. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-002",
+      "expectation_sha256": "9f7fb1100992bd660c70201c77a55d559ac55087cf3ed3093c4d29d025ac5b33",
+      "fixture_sha256": {
+        "causal": "6e6bcd884b42a95e5a125ecf6ac595f9334931416a2633c5517ce0f24bdedc50",
+        "negative": "23a999fb7cfb6f8d26e989c9aacb117480a6c324060c52bb7602b82cc512d75f"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-002",
+        "expectation_sha256": "9f7fb1100992bd660c70201c77a55d559ac55087cf3ed3093c4d29d025ac5b33",
+        "semantic_fixture_sha256": {
+          "causal": "6e6bcd884b42a95e5a125ecf6ac595f9334931416a2633c5517ce0f24bdedc50",
+          "negative": "23a999fb7cfb6f8d26e989c9aacb117480a6c324060c52bb7602b82cc512d75f"
+        },
+        "subject": "A typed transformation changes its plan-visible relation when an authoritative input changes",
+        "source_authority": {
+          "source_anchor": "GEN §92 Programmatic relation interface; GEN AC-G-38 Programmatic transformation, matching, and trust",
+          "governing_clauses": [
+            "SUITE §5.1 Proof relations",
+            "FAB §13 Resources, observability, and proof",
+            "P27 Every declaration causally load-bearing"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:75514530bce344ec52a1c495455a8fd9a25ff8f57228eeb50e0e4039eb334fae"
+      },
+      "rationale": "Accepted RFV3-CLAIM-002 under sha256:75514530bce344ec52a1c495455a8fd9a25ff8f57228eeb50e0e4039eb334fae. Subject: A typed transformation changes its plan-visible relation when an authoritative input changes Source authority: GEN §92 Programmatic relation interface; GEN AC-G-38 Programmatic transformation, matching, and trust. Governing clauses: SUITE §5.1 Proof relations | FAB §13 Resources, observability, and proof | P27 Every declaration causally load-bearing. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-003",
+      "expectation_sha256": "3e1bf0bfea6bdfa377029689a48566501f68127fef4a411c856ebe4aeeb4d3fe",
+      "fixture_sha256": {
+        "causal": "826c45c5c8f0648d68ca548fb371b66edb5b4da09e30324784325831e77ac444",
+        "negative": "109630abb36b7a4fd5a8db05b7c1de1efe331b41aaf1252154b9bb6527bbc698"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-003",
+        "expectation_sha256": "3e1bf0bfea6bdfa377029689a48566501f68127fef4a411c856ebe4aeeb4d3fe",
+        "semantic_fixture_sha256": {
+          "causal": "826c45c5c8f0648d68ca548fb371b66edb5b4da09e30324784325831e77ac444",
+          "negative": "109630abb36b7a4fd5a8db05b7c1de1efe331b41aaf1252154b9bb6527bbc698"
+        },
+        "subject": "A concrete application-owned call-graph analysis derives one typed row per admitted Pyrefly target candidate, preserves multi-candidate evidence, and materializes incomplete target coverage as an explicit unknown",
+        "source_authority": {
+          "source_anchor": "GEN §72 Call graph; GEN §84 Explicit unknown-materialization rules; GEN §95 Algorithm validation",
+          "governing_clauses": [
+            "SUITE §5.1 Proof relations",
+            "GEN §79 Derived graph relationship generation",
+            "P27 Separate provider evidence from application meaning",
+            "P30 Make derivation algorithms first-class"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:df1543ff6d0faf9b399552bec9872e92607d9fdb1c308183aec49a694208dfed"
+      },
+      "rationale": "Accepted RFV3-CLAIM-003 under sha256:df1543ff6d0faf9b399552bec9872e92607d9fdb1c308183aec49a694208dfed. Subject: A concrete application-owned call-graph analysis derives one typed row per admitted Pyrefly target candidate, preserves multi-candidate evidence, and materializes incomplete target coverage as an explicit unknown Source authority: GEN §72 Call graph; GEN §84 Explicit unknown-materialization rules; GEN §95 Algorithm validation. Governing clauses: SUITE §5.1 Proof relations | GEN §79 Derived graph relationship generation | P27 Separate provider evidence from application meaning | P30 Make derivation algorithms first-class. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-004",
+      "expectation_sha256": "9dacebf8b9616882a7f752ea20108575c88ebc11b44d6dc3c067efe98d9f8dbc",
+      "fixture_sha256": {
+        "causal": "9e703e949d25708302e3834ee574032f0f405f7152af8e95069aa03e42bdd467",
+        "negative": "25a03da5f56f5d3f29cb15f6cf3ee71a0e364e95457315c388dffb57076aa283"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-004",
+        "expectation_sha256": "9dacebf8b9616882a7f752ea20108575c88ebc11b44d6dc3c067efe98d9f8dbc",
+        "semantic_fixture_sha256": {
+          "causal": "9e703e949d25708302e3834ee574032f0f405f7152af8e95069aa03e42bdd467",
+          "negative": "25a03da5f56f5d3f29cb15f6cf3ee71a0e364e95457315c388dffb57076aa283"
+        },
+        "subject": "Find-code-entities compiles the requested description through the typed query program and selects exact admitted entity rows without collapsing syntax occurrences into semantic callables",
+        "source_authority": {
+          "source_anchor": "QRY §4.1 `find code entities`; QRY §5 Composition DAG and execution semantics; QRY §6 Resolution, authorization, and bound authority",
+          "governing_clauses": [
+            "QRY §13 Executable acceptance obligations",
+            "SUITE §5.2 Independent expectations",
+            "SUITE §3 Global invariants"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:165b2d0bfd971e0b324d870bc50837c2f4ec65ae82b7d11545dccb41658cdb53"
+      },
+      "rationale": "Accepted RFV3-CLAIM-004 under sha256:165b2d0bfd971e0b324d870bc50837c2f4ec65ae82b7d11545dccb41658cdb53. Subject: Find-code-entities compiles the requested description through the typed query program and selects exact admitted entity rows without collapsing syntax occurrences into semantic callables Source authority: QRY §4.1 `find code entities`; QRY §5 Composition DAG and execution semantics; QRY §6 Resolution, authorization, and bound authority. Governing clauses: QRY §13 Executable acceptance obligations | SUITE §5.2 Independent expectations | SUITE §3 Global invariants. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-005",
+      "expectation_sha256": "33c82a822fd3f7ae915a2bc72c34669cccd51cee58d1b0031c9fc7cb01cdbca5",
+      "fixture_sha256": {
+        "causal": "ba470a5f55060ffc47b5273bfeec15e3532df1d304c8617869fc40fde096c013",
+        "negative": "78cfa690b0458021eb05f3e3731a54c07897678fe2841cb17fa670154cb86748"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-005",
+        "expectation_sha256": "33c82a822fd3f7ae915a2bc72c34669cccd51cee58d1b0031c9fc7cb01cdbca5",
+        "semantic_fixture_sha256": {
+          "causal": "ba470a5f55060ffc47b5273bfeec15e3532df1d304c8617869fc40fde096c013",
+          "negative": "78cfa690b0458021eb05f3e3731a54c07897678fe2841cb17fa670154cb86748"
+        },
+        "subject": "Known type and UNKNOWN_EFFECT property facts are derived from admitted rows and explicit coverage using closed property-kind allocations and CBEF-v1.1 PROPERTY_FACT identities",
+        "source_authority": {
+          "source_anchor": "QRY §4.2 `retrieve facts about code`; QRY §7 Evidence, unknowns, absence, and provenance; QRY §8 Canonical identity and ordering; ONT §64 Canonical identity; ONT §66 Mandatory unknown semantics",
+          "governing_clauses": [
+            "QRY §13 Executable acceptance obligations",
+            "ONT §66 Mandatory unknown semantics",
+            "SUITE §3 Global invariants"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:b7a443709d50dd8b05807fb1281f05b8fdf74e0e2d2299811d8a54d1a5f75175"
+      },
+      "rationale": "Accepted RFV3-CLAIM-005 under sha256:b7a443709d50dd8b05807fb1281f05b8fdf74e0e2d2299811d8a54d1a5f75175. Subject: Known type and UNKNOWN_EFFECT property facts are derived from admitted rows and explicit coverage using closed property-kind allocations and CBEF-v1.1 PROPERTY_FACT identities Source authority: QRY §4.2 `retrieve facts about code`; QRY §7 Evidence, unknowns, absence, and provenance; QRY §8 Canonical identity and ordering; ONT §64 Canonical identity; ONT §66 Mandatory unknown semantics. Governing clauses: QRY §13 Executable acceptance obligations | ONT §66 Mandatory unknown semantics | SUITE §3 Global invariants. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-006",
+      "expectation_sha256": "c04587989009d3b0c45fd59e7030c573f4ac0c02467298b340a2686d7ea8a494",
+      "fixture_sha256": {
+        "causal": "ad056cb3bb517c1311d452c377e68f4598e0f19a00c71c2404c04af96a035c30",
+        "negative": "72e3558594475a994b02a991aa7c74cd25545186abb34b355739c68d5d369826"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-006",
+        "expectation_sha256": "c04587989009d3b0c45fd59e7030c573f4ac0c02467298b340a2686d7ea8a494",
+        "semantic_fixture_sha256": {
+          "causal": "ad056cb3bb517c1311d452c377e68f4598e0f19a00c71c2404c04af96a035c30",
+          "negative": "72e3558594475a994b02a991aa7c74cd25545186abb34b355739c68d5d369826"
+        },
+        "subject": "follow code relationships applies an explicit one-step bound",
+        "source_authority": {
+          "source_anchor": "QRY §4.3 follow code relationships",
+          "governing_clauses": [
+            "QRY §13 Executable acceptance obligations",
+            "P14 Highest-level extension",
+            "P15 Preserve optimizer visibility"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:42565d8d49d8200a795c0ac84db4ed54468faf1070d553a44e950d21e443cf2c"
+      },
+      "rationale": "Accepted RFV3-CLAIM-006 under sha256:42565d8d49d8200a795c0ac84db4ed54468faf1070d553a44e950d21e443cf2c. Subject: follow code relationships applies an explicit one-step bound Source authority: QRY §4.3 follow code relationships. Governing clauses: QRY §13 Executable acceptance obligations | P14 Highest-level extension | P15 Preserve optimizer visibility. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-007",
+      "expectation_sha256": "8a45d522eb9280b2ae6e65fb20f80de47f088548731fd27fe37dffdf2bef7bc3",
+      "fixture_sha256": {
+        "causal": "dd08c5b172ffe3e1c005dbc18794608113c4b36ea68982cd401751557fba062e",
+        "negative": "b18dd496cdeb343f528c2afeb7843455fe0de06411bd9d13d2ff453a835ef5b1"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-007",
+        "expectation_sha256": "8a45d522eb9280b2ae6e65fb20f80de47f088548731fd27fe37dffdf2bef7bc3",
+        "semantic_fixture_sha256": {
+          "causal": "dd08c5b172ffe3e1c005dbc18794608113c4b36ea68982cd401751557fba062e",
+          "negative": "b18dd496cdeb343f528c2afeb7843455fe0de06411bd9d13d2ff453a835ef5b1"
+        },
+        "subject": "Path identity binds the authorized workspace, analysis context, exact epoch and policy, and the ordered entity/fact witness",
+        "source_authority": {
+          "source_anchor": "QRY §4.4 `find connecting fact paths`; QRY §8 Canonical identity and ordering",
+          "governing_clauses": [
+            "QRY §13 Executable acceptance obligations",
+            "P25 Every clause names an oracle",
+            "P33 Functional core, imperative shell"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:f64b64cd571ee10e252a9050a30fda02e9c1228c87a95ecef201d8ea94875d60"
+      },
+      "rationale": "Accepted RFV3-CLAIM-007 under sha256:f64b64cd571ee10e252a9050a30fda02e9c1228c87a95ecef201d8ea94875d60. Subject: Path identity binds the authorized workspace, analysis context, exact epoch and policy, and the ordered entity/fact witness Source authority: QRY §4.4 `find connecting fact paths`; QRY §8 Canonical identity and ordering. Governing clauses: QRY §13 Executable acceptance obligations | P25 Every clause names an oracle | P33 Functional core, imperative shell. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-008",
+      "expectation_sha256": "ec80f16d0c42dcdfe6365423d833e81c2e447f33cd5e9ead6e658feda6fe562d",
+      "fixture_sha256": {
+        "causal": "7d9336d7a452fdd32fe7db0a0a4977e0c5aee413b5e470988b5014b6dfc02d67",
+        "negative": "709f2ac32badf8d0421ae9d25f41fa9526de6644a6aeb34ad80849cd36027214"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-008",
+        "expectation_sha256": "ec80f16d0c42dcdfe6365423d833e81c2e447f33cd5e9ead6e658feda6fe562d",
+        "semantic_fixture_sha256": {
+          "causal": "7d9336d7a452fdd32fe7db0a0a4977e0c5aee413b5e470988b5014b6dfc02d67",
+          "negative": "709f2ac32badf8d0421ae9d25f41fa9526de6644a6aeb34ad80849cd36027214"
+        },
+        "subject": "A typed pattern joins admitted node and relationship facts before applying scoped negation, whose absence result requires exact owner, family, context, subject, and fact coverage",
+        "source_authority": {
+          "source_anchor": "QRY §4.5 `match a code fact pattern`; QRY §7 Evidence, unknowns, absence, and provenance",
+          "governing_clauses": [
+            "QRY §13 Executable acceptance obligations",
+            "ONT §66 Mandatory unknown semantics",
+            "P29 Relational validation over typed model"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:72f8bf95a8e58c7576ef829308144e546785fa75167be0199096894517087481"
+      },
+      "rationale": "Accepted RFV3-CLAIM-008 under sha256:72f8bf95a8e58c7576ef829308144e546785fa75167be0199096894517087481. Subject: A typed pattern joins admitted node and relationship facts before applying scoped negation, whose absence result requires exact owner, family, context, subject, and fact coverage Source authority: QRY §4.5 `match a code fact pattern`; QRY §7 Evidence, unknowns, absence, and provenance. Governing clauses: QRY §13 Executable acceptance obligations | ONT §66 Mandatory unknown semantics | P29 Relational validation over typed model. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-009",
+      "expectation_sha256": "cd78f2ea83c267849c8227d593f13b68d6ab09ce8b6adba844bb20055c733d5b",
+      "fixture_sha256": {
+        "causal": "67cccd426d2b3b2f8f86d869b171c8a255b871ba7f484b489f4763425fb81db5",
+        "negative": "0985dc4b7acdc834bf383145ca8eb26623ef4d83d3cc9ae506ab50b0389fbcc4"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-009",
+        "expectation_sha256": "cd78f2ea83c267849c8227d593f13b68d6ab09ce8b6adba844bb20055c733d5b",
+        "semantic_fixture_sha256": {
+          "causal": "67cccd426d2b3b2f8f86d869b171c8a255b871ba7f484b489f4763425fb81db5",
+          "negative": "0985dc4b7acdc834bf383145ca8eb26623ef4d83d3cc9ae506ab50b0389fbcc4"
+        },
+        "subject": "A topologically closed request DAG executes two typed producer query blocks and combines their real result envelopes only after exact semantic-role and compatibility checks",
+        "source_authority": {
+          "source_anchor": "QRY §4.6 `combine result sets`; QRY §5 Composition and dependency graphs; QRY §8 Canonical identity and ordering",
+          "governing_clauses": [
+            "QRY §13 Executable acceptance obligations",
+            "P8 Common representation as infrastructure",
+            "P32 Validate by construction"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:3fbfa223651a2063401bc77438818bf3c6ba745184ddb7130a17befe27ba64ec"
+      },
+      "rationale": "Accepted RFV3-CLAIM-009 under sha256:3fbfa223651a2063401bc77438818bf3c6ba745184ddb7130a17befe27ba64ec. Subject: A topologically closed request DAG executes two typed producer query blocks and combines their real result envelopes only after exact semantic-role and compatibility checks Source authority: QRY §4.6 `combine result sets`; QRY §5 Composition and dependency graphs; QRY §8 Canonical identity and ordering. Governing clauses: QRY §13 Executable acceptance obligations | P8 Common representation as infrastructure | P32 Validate by construction. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-010",
+      "expectation_sha256": "841a8b870661b365229d241c200b429ba8faf29f97f589ec27c2b9748880f8d1",
+      "fixture_sha256": {
+        "causal": "fcd4cff75cd1e8757d7ba83e6a277747ce8469dcb51e17fbeeea762332402abf",
+        "negative": "bdc491d260085837aa8115ebb9d94e81ec07527c5ebf37418e617acfd586ead2"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-010",
+        "expectation_sha256": "841a8b870661b365229d241c200b429ba8faf29f97f589ec27c2b9748880f8d1",
+        "semantic_fixture_sha256": {
+          "causal": "fcd4cff75cd1e8757d7ba83e6a277747ce8469dcb51e17fbeeea762332402abf",
+          "negative": "bdc491d260085837aa8115ebb9d94e81ec07527c5ebf37418e617acfd586ead2"
+        },
+        "subject": "Objective fact, input-set, and group identities are independently derived from typed syntax occurrences, exact property values, canonical membership, grouping dimensions, aggregate definition, producer, and policy",
+        "source_authority": {
+          "source_anchor": "QRY §4.7 `summarize objective facts`; QRY §8 Canonical identity and ordering",
+          "governing_clauses": [
+            "QRY §13 Executable acceptance obligations",
+            "SUITE §3 Global invariants",
+            "P24 Semantic observability"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:e652161efccc9fa009387ebde583b6c1387038499b920b526e2afc4b685c5b36"
+      },
+      "rationale": "Accepted RFV3-CLAIM-010 under sha256:e652161efccc9fa009387ebde583b6c1387038499b920b526e2afc4b685c5b36. Subject: Objective fact, input-set, and group identities are independently derived from typed syntax occurrences, exact property values, canonical membership, grouping dimensions, aggregate definition, producer, and policy Source authority: QRY §4.7 `summarize objective facts`; QRY §8 Canonical identity and ordering. Governing clauses: QRY §13 Executable acceptance obligations | SUITE §3 Global invariants | P24 Semantic observability. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-011",
+      "expectation_sha256": "f70bec9b31098df48d38bd879da4f8f200569cc0060cf91be3bd3a06a2e970ed",
+      "fixture_sha256": {
+        "causal": "a069657c2777f613124186a45d1e2a48f0fef6b8b416c24c7ecd5aa91930002e",
+        "negative": "84aebe9fda7ba63c477c97795931e5b0aa3b0509b706865f05c41dcdbcfcb4c1"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-011",
+        "expectation_sha256": "f70bec9b31098df48d38bd879da4f8f200569cc0060cf91be3bd3a06a2e970ed",
+        "semantic_fixture_sha256": {
+          "causal": "a069657c2777f613124186a45d1e2a48f0fef6b8b416c24c7ecd5aa91930002e",
+          "negative": "84aebe9fda7ba63c477c97795931e5b0aa3b0509b706865f05c41dcdbcfcb4c1"
+        },
+        "subject": "Source-context identity binds entity, workspace, snapshot, file generation, source digest, exact delivered range and bytes, disclosure scope, and policy",
+        "source_authority": {
+          "source_anchor": "QRY §4.8 `retrieve source and syntax context`; QRY §8 Canonical identity and ordering",
+          "governing_clauses": [
+            "QRY §13 Executable acceptance obligations",
+            "SRV §12 Authorization and source disclosure",
+            "P13 Governance at authoritative boundary"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:58f8d93205162d7839f450980eace3a61b29d067ebe528dca6e9e25d280fcf9e"
+      },
+      "rationale": "Accepted RFV3-CLAIM-011 under sha256:58f8d93205162d7839f450980eace3a61b29d067ebe528dca6e9e25d280fcf9e. Subject: Source-context identity binds entity, workspace, snapshot, file generation, source digest, exact delivered range and bytes, disclosure scope, and policy Source authority: QRY §4.8 `retrieve source and syntax context`; QRY §8 Canonical identity and ordering. Governing clauses: QRY §13 Executable acceptance obligations | SRV §12 Authorization and source disclosure | P13 Governance at authoritative boundary. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-012",
+      "expectation_sha256": "2fdc30a8f67a8b81cd6f7120e74802105f76feefcbd0b7814d2ce0b534206ecd",
+      "fixture_sha256": {
+        "causal": "c425a1232c8001bf2bcf28ed49637fd47c81222b9dcb046d5f33f1fc40e43335",
+        "negative": "a39e66a4cc302231aa7b8da1f62368ba32021a5efe8ac52312b3a34420b1ab74"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-012",
+        "expectation_sha256": "2fdc30a8f67a8b81cd6f7120e74802105f76feefcbd0b7814d2ce0b534206ecd",
+        "semantic_fixture_sha256": {
+          "causal": "c425a1232c8001bf2bcf28ed49637fd47c81222b9dcb046d5f33f1fc40e43335",
+          "negative": "a39e66a4cc302231aa7b8da1f62368ba32021a5efe8ac52312b3a34420b1ab74"
+        },
+        "subject": "The exact delta-rs revision materializes a real local Delta table, selects an explicit non-latest version, enforces protocol features, and reads one inclusive CDF range",
+        "source_authority": {
+          "source_anchor": "FAB §9 Durable Delta relations; FAB §9.2 Exact reads and the single-selector rule; FAB §9.4 Durability classification and exact reconstruction",
+          "governing_clauses": [
+            "FAB §15 Executable acceptance obligations",
+            "SUITE §5.1 Proof relations",
+            "P11 Immutable snapshots and explicit transitions"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:abd9d28b4030ae6edc8fdf8afe4dee2aa37df509983d837fcc56af191e674b20"
+      },
+      "rationale": "Accepted RFV3-CLAIM-012 under sha256:abd9d28b4030ae6edc8fdf8afe4dee2aa37df509983d837fcc56af191e674b20. Subject: The exact delta-rs revision materializes a real local Delta table, selects an explicit non-latest version, enforces protocol features, and reads one inclusive CDF range Source authority: FAB §9 Durable Delta relations; FAB §9.2 Exact reads and the single-selector rule; FAB §9.4 Durability classification and exact reconstruction. Governing clauses: FAB §15 Executable acceptance obligations | SUITE §5.1 Proof relations | P11 Immutable snapshots and explicit transitions. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-013",
+      "expectation_sha256": "88eca16ddce9e343cb5ee10d78cf6d5816cf96a8efeef24af4a5a0732fe5fa9f",
+      "fixture_sha256": {
+        "causal": "07b97922246528895835a3e72c29223bb789694c3166847b145f765fc2efdb94",
+        "negative": "3b3088b89f15a162464e87018f7d2bc3e4dd9cd74f8ccda889e27773cccb8382"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-013",
+        "expectation_sha256": "88eca16ddce9e343cb5ee10d78cf6d5816cf96a8efeef24af4a5a0732fe5fa9f",
+        "semantic_fixture_sha256": {
+          "causal": "07b97922246528895835a3e72c29223bb789694c3166847b145f765fc2efdb94",
+          "negative": "3b3088b89f15a162464e87018f7d2bc3e4dd9cd74f8ccda889e27773cccb8382"
+        },
+        "subject": "Candidate-free recovery selects and installs the unique control.activation_event.v3 head, reconciles non-authoritative receipt state, reopens admission, and acknowledges only after exact readback",
+        "source_authority": {
+          "source_anchor": "FAB §11 `FabricCommand`, fencing, publication, and activation; FAB §11.3 Ordered activation; FAB §14 Lifecycle, reconstruction, and cutover",
+          "governing_clauses": [
+            "SUITE §5.1 Proof relations",
+            "P16 Lifecycle phases first-class",
+            "P34 One mutation path; idempotent commands"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:5df936fb8b7e698e440377cc569588d91a79bec669b1ad6c762f239442c284ec"
+      },
+      "rationale": "Accepted RFV3-CLAIM-013 under sha256:5df936fb8b7e698e440377cc569588d91a79bec669b1ad6c762f239442c284ec. Subject: Candidate-free recovery selects and installs the unique control.activation_event.v3 head, reconciles non-authoritative receipt state, reopens admission, and acknowledges only after exact readback Source authority: FAB §11 `FabricCommand`, fencing, publication, and activation; FAB §11.3 Ordered activation; FAB §14 Lifecycle, reconstruction, and cutover. Governing clauses: SUITE §5.1 Proof relations | P16 Lifecycle phases first-class | P34 One mutation path; idempotent commands. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-014",
+      "expectation_sha256": "131939c4e02ca6bf99dac73b166a334b6d89ab6c1c6a8b1a55644ac4cb818a1a",
+      "fixture_sha256": {
+        "causal": "fbebd980e2fc0a725d9ba7bae0992b914b95d11c8f00f71b4279d55d6cb75a09",
+        "negative": "b4f9bb75ce68f81bf588f54fd613109bab01069d108274d6afd69e918ac8a238"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-014",
+        "expectation_sha256": "131939c4e02ca6bf99dac73b166a334b6d89ab6c1c6a8b1a55644ac4cb818a1a",
+        "semantic_fixture_sha256": {
+          "causal": "fbebd980e2fc0a725d9ba7bae0992b914b95d11c8f00f71b4279d55d6cb75a09",
+          "negative": "b4f9bb75ce68f81bf588f54fd613109bab01069d108274d6afd69e918ac8a238"
+        },
+        "subject": "A content-bound access-scope identity constructs a reduced child catalog that exposes only its exact authorized relation and column grants",
+        "source_authority": {
+          "source_anchor": "FAB §12 Authorization and bound-plan closure",
+          "governing_clauses": [
+            "FAB §15 Executable acceptance obligations",
+            "SRV §12 Authorization and source disclosure",
+            "P13 Governance at authoritative boundary"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:8a22695446ce46be508255003970dfd53c5181eda552e80345bf2b60f2035a13"
+      },
+      "rationale": "Accepted RFV3-CLAIM-014 under sha256:8a22695446ce46be508255003970dfd53c5181eda552e80345bf2b60f2035a13. Subject: A content-bound access-scope identity constructs a reduced child catalog that exposes only its exact authorized relation and column grants Source authority: FAB §12 Authorization and bound-plan closure. Governing clauses: FAB §15 Executable acceptance obligations | SRV §12 Authorization and source disclosure | P13 Governance at authoritative boundary. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-015",
+      "expectation_sha256": "51408cd2a54768d26c986abdedb8ff88af4aa408fa3203a38beaad89ff929673",
+      "fixture_sha256": {
+        "causal": "8ad5dbb8d2ad22f83258ee78b5ec389801d6e5bcb1f7b1f4d599970c3a00a892",
+        "negative": "107bbcf14e7e7725ac3d84a3ebfa1ade356c31ee71efa84a1eeca053c6c02f57"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-015",
+        "expectation_sha256": "51408cd2a54768d26c986abdedb8ff88af4aa408fa3203a38beaad89ff929673",
+        "semantic_fixture_sha256": {
+          "causal": "8ad5dbb8d2ad22f83258ee78b5ec389801d6e5bcb1f7b1f4d599970c3a00a892",
+          "negative": "107bbcf14e7e7725ac3d84a3ebfa1ade356c31ee71efa84a1eeca053c6c02f57"
+        },
+        "subject": "Resource publication binds an explicit canonical Arrow schema contract and exact Arrow IPC V5 identity recipe before lease/publication state can become visible",
+        "source_authority": {
+          "source_anchor": "SRV §9 One logical response and delivery policy; SRV §10 Immutable result resources; AC-G-63 Immutable result artifact store",
+          "governing_clauses": [
+            "FAB §15 Executable acceptance obligations",
+            "LIFE §15 Executable acceptance obligations",
+            "P23 Local explicit state ownership"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:fef32045154024ae5e243e5f78f3a06234a10cc5c027ccde2bc9939102eab7b6"
+      },
+      "rationale": "Accepted RFV3-CLAIM-015 under sha256:fef32045154024ae5e243e5f78f3a06234a10cc5c027ccde2bc9939102eab7b6. Subject: Resource publication binds an explicit canonical Arrow schema contract and exact Arrow IPC V5 identity recipe before lease/publication state can become visible Source authority: SRV §9 One logical response and delivery policy; SRV §10 Immutable result resources; AC-G-63 Immutable result artifact store. Governing clauses: FAB §15 Executable acceptance obligations | LIFE §15 Executable acceptance obligations | P23 Local explicit state ownership. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-016",
+      "expectation_sha256": "738bc8052c0b7fa64c5fb2ded96dfb3d89122096144be709cb453424f838f129",
+      "fixture_sha256": {
+        "causal": "415cc67416ad5cbfecf0e345b3e796f3f3d9dd3c377aa73d0b10acf92c54988c",
+        "negative": "7a0025c9538e4b9718014897f70c70728e40b417d849a161f7e110dd4d1bd4dd"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-016",
+        "expectation_sha256": "738bc8052c0b7fa64c5fb2ded96dfb3d89122096144be709cb453424f838f129",
+        "semantic_fixture_sha256": {
+          "causal": "415cc67416ad5cbfecf0e345b3e796f3f3d9dd3c377aa73d0b10acf92c54988c",
+          "negative": "7a0025c9538e4b9718014897f70c70728e40b417d849a161f7e110dd4d1bd4dd"
+        },
+        "subject": "Untrusted provider execution is unavailable and not advertised when any host-containment prerequisite is absent; trusted-local remains separately authorized and explicitly degraded",
+        "source_authority": {
+          "source_anchor": "GEN AC-G-35 Provider sandbox and Rust compilation trust model; GEN §7.5 Semantic compilation trust; GEN §85 Capability reporting",
+          "governing_clauses": [
+            "SUITE §5.1 Proof relations",
+            "GEN §93 Provider fixture requirements",
+            "P36 Governance is executable"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:b210e82a009a2e51792749f3430c26f3faa7f578e7cc3a0c257c86c07ae8f88a"
+      },
+      "rationale": "Accepted RFV3-CLAIM-016 under sha256:b210e82a009a2e51792749f3430c26f3faa7f578e7cc3a0c257c86c07ae8f88a. Subject: Untrusted provider execution is unavailable and not advertised when any host-containment prerequisite is absent; trusted-local remains separately authorized and explicitly degraded Source authority: GEN AC-G-35 Provider sandbox and Rust compilation trust model; GEN §7.5 Semantic compilation trust; GEN §85 Capability reporting. Governing clauses: SUITE §5.1 Proof relations | GEN §93 Provider fixture requirements | P36 Governance is executable. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-017",
+      "expectation_sha256": "796538d52a21c7386e2fcd8aec12658ccfec3781222523df4977a29a610a01d1",
+      "fixture_sha256": {
+        "causal": "e698ee39d32787ea78d88ca03baab749e780d524ffe721db56675841572474b3",
+        "negative": "2d9a3989e42219f014ed4732908a062198ac7bf62ca4100b70653a758d686f26"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-017",
+        "expectation_sha256": "796538d52a21c7386e2fcd8aec12658ccfec3781222523df4977a29a610a01d1",
+        "semantic_fixture_sha256": {
+          "causal": "e698ee39d32787ea78d88ca03baab749e780d524ffe721db56675841572474b3",
+          "negative": "2d9a3989e42219f014ed4732908a062198ac7bf62ca4100b70653a758d686f26"
+        },
+        "subject": "The presentation boundary releases only the exact daemon-authored public projection; private diagnostics remain separate authority and any candidate projection containing a forbidden physical field is rejected",
+        "source_authority": {
+          "source_anchor": "SRV §11 Public status, errors, and redaction; SRV §13 Lifespan, middleware, and STDIO purity",
+          "governing_clauses": [
+            "SUITE §5.2 Independent expectations",
+            "P22 Protocol and canonical interoperability",
+            "SRV §12 Authorization and source disclosure"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:d7517bd6dc4349c02f93b7ab5a524f7d149b1a63479aa25a0e793dece77c6f1e"
+      },
+      "rationale": "Accepted RFV3-CLAIM-017 under sha256:d7517bd6dc4349c02f93b7ab5a524f7d149b1a63479aa25a0e793dece77c6f1e. Subject: The presentation boundary releases only the exact daemon-authored public projection; private diagnostics remain separate authority and any candidate projection containing a forbidden physical field is rejected Source authority: SRV §11 Public status, errors, and redaction; SRV §13 Lifespan, middleware, and STDIO purity. Governing clauses: SUITE §5.2 Independent expectations | P22 Protocol and canonical interoperability | SRV §12 Authorization and source disclosure. Both semantic fixtures were independently discriminated."
+    },
+    {
+      "claim_id": "RFV3-CLAIM-018",
+      "expectation_sha256": "7d3a33a03f9b3a97b2da9e3826c87c4d928d8f22ce36b56ca2bdb0e5a55b6910",
+      "fixture_sha256": {
+        "causal": "d1dcb58f521e4ca7a1dc7d7caf48a0c1a75a02ca6e313437f0b47ee2a661fd14",
+        "negative": "81436739a9337a9ed25441b42b249456fa0b3893fe9aa62ecdb98b53c3274914"
+      },
+      "reviewer_id": "wp33-independent-successor-reissue-reviewer-r2",
+      "disposition": "accepted",
+      "review_basis": {
+        "claim_id": "RFV3-CLAIM-018",
+        "expectation_sha256": "7d3a33a03f9b3a97b2da9e3826c87c4d928d8f22ce36b56ca2bdb0e5a55b6910",
+        "semantic_fixture_sha256": {
+          "causal": "d1dcb58f521e4ca7a1dc7d7caf48a0c1a75a02ca6e313437f0b47ee2a661fd14",
+          "negative": "81436739a9337a9ed25441b42b249456fa0b3893fe9aa62ecdb98b53c3274914"
+        },
+        "subject": "Clean reconstruction and incremental update produce the same canonical present-state relations",
+        "source_authority": {
+          "source_anchor": "FAB §14 Lifecycle, reconstruction, and cutover; LIFE §15 Executable acceptance obligations",
+          "governing_clauses": [
+            "SUITE §5.1 Proof relations",
+            "P19 Prove reproducibility by re-execution",
+            "P28 Compute change, never declare it"
+          ]
+        },
+        "review_dimensions": [
+          "decoded_expectation_semantics",
+          "causal_fixture_discrimination",
+          "negative_fixture_fail_closed_behavior",
+          "governing_clause_and_source_authority_conformance"
+        ],
+        "review_binding_id": "sha256:184f6cc18fb0e565b935254de3d8dbb5e0ab209783c670e319c559c96e0d4e87"
+      },
+      "rationale": "Accepted RFV3-CLAIM-018 under sha256:184f6cc18fb0e565b935254de3d8dbb5e0ab209783c670e319c559c96e0d4e87. Subject: Clean reconstruction and incremental update produce the same canonical present-state relations Source authority: FAB §14 Lifecycle, reconstruction, and cutover; LIFE §15 Executable acceptance obligations. Governing clauses: SUITE §5.1 Proof relations | P19 Prove reproducibility by re-execution | P28 Compute change, never declare it. Both semantic fixtures were independently discriminated."
+    }
+  ],
+  "consumer_order": {
+    "plan_path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v3_2026-08-30.md",
+    "required_before": {
+      "WP34": [
+        "RFV3-CLAIM-001",
+        "RFV3-CLAIM-002",
+        "RFV3-CLAIM-016"
+      ],
+      "WP35": [
+        "RFV3-CLAIM-003"
+      ],
+      "WP36": [
+        "RFV3-CLAIM-004",
+        "RFV3-CLAIM-005",
+        "RFV3-CLAIM-006",
+        "RFV3-CLAIM-007",
+        "RFV3-CLAIM-008",
+        "RFV3-CLAIM-009",
+        "RFV3-CLAIM-010",
+        "RFV3-CLAIM-011",
+        "RFV3-CLAIM-014"
+      ],
+      "WP37": [
+        "RFV3-CLAIM-012",
+        "RFV3-CLAIM-013",
+        "RFV3-CLAIM-015",
+        "RFV3-CLAIM-017"
+      ],
+      "WP38": [
+        "RFV3-CLAIM-018"
+      ]
+    }
+  },
+  "invalidation_policy": {
+    "policy_version": 1,
+    "expectation_change": "invalidate_issuance",
+    "fixture_change": "invalidate_issuance",
+    "consumer_effect": "reopen_all_affected_consumers",
+    "review_effect": "require_new_independent_review_and_issuance"
+  }
+}

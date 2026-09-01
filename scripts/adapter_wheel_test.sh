@@ -16,23 +16,39 @@ fi
 uv venv --python 3.14 "$temporary_root/venv"
 uv pip install --python "$temporary_root/venv/bin/python" "$wheel_path"
 "$temporary_root/venv/bin/python" - <<'PY'
-from codefabric_cpg_mcp.contracts import (
-    model_artifact_index,
-    model_artifact_index_bytes,
-    model_artifact_index_digest,
-    validate_checksum,
-)
-from codefabric_cpg_mcp.contracts.schemas import schema_fingerprints, schema_manifest
-from codefabric_cpg_mcp.contracts.wire_models import StatusToolOutput
+from importlib.resources import files
+from importlib.util import find_spec
 
-resource = model_artifact_index_bytes()
-index = model_artifact_index()
-assert resource.startswith(b'{"artifacts":')
-assert index.schema_version == 1
-assert index.artifacts
-validate_checksum(model_artifact_index_digest())
-assert "StatusToolOutput" in schema_manifest()["serialization"]
-assert schema_fingerprints()["serialization"]["StatusToolOutput"].startswith("b3:")
+from codefabric_cpg_mcp.contracts.wire_models import (
+    StatusToolOutput,
+    WireSchemaName,
+    wire_schema,
+    wire_schema_fingerprints,
+)
+from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2 as query_pb
+
+contracts_root = files("codefabric_cpg_mcp.contracts")
+for module in ("fingerprints", "index", "model_registries", "query_forms", "schemas"):
+    assert find_spec(f"codefabric_cpg_mcp.contracts.{module}") is None
+for artifact in (
+    "adapter-fingerprints.json",
+    "adapter-package-data.json",
+    "adapter-schemas.json",
+    "fingerprints.py",
+    "index.py",
+    "model_artifact_index.json",
+    "model_registries.py",
+    "query-form-contract.json",
+    "query_forms.py",
+    "schemas.py",
+):
+    assert not contracts_root.joinpath(artifact).is_file()
+fingerprints = dict(wire_schema_fingerprints("serialization"))
+schema = wire_schema(WireSchemaName.STATUS_TOOL_OUTPUT, "serialization")
+assert schema["title"] == "StatusToolOutput"
+assert fingerprints[WireSchemaName.STATUS_TOOL_OUTPUT].startswith("b3:")
 assert StatusToolOutput.model_fields
-print(model_artifact_index_digest())
+assert query_pb.DESCRIPTOR.name == "contracts/rpc/cpg_query_service.proto"
+assert query_pb.DESCRIPTOR.package == "codefabric.cpgd.v1"
+print(fingerprints[WireSchemaName.STATUS_TOOL_OUTPUT])
 PY

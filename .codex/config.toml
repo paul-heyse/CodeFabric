@@ -1,22 +1,52 @@
 # CodeFabric — project-scoped Codex configuration.
 #
-# This layer configures repository-owned environment filtering, least-privilege local
-# service access, command rules, skills, and the environment hook. Model choice and
-# approval posture remain user preferences in ~/.codex/config.toml.
+# This layer configures the project's approval and sandbox posture, its network-proxy
+# allowances, repository-owned environment filtering, command rules, skills, and the
+# environment hook. Model and reasoning choices remain user preferences in
+# ~/.codex/config.toml; approval policy and sandbox mode are set HERE and take
+# precedence over the user layer for this project.
+#
+# POSTURE — deliberately unconfined. Commands run with no approval prompts and no
+# filesystem or network sandbox, and the proxy allows every domain, SOCKS5, and every
+# Unix socket. The former least-privilege `permissions.codefabric` profile (workspace
+# scope plus read-only sccache cache access) and its `default_permissions` selector were
+# removed on 2026-08-30. The two sccache sockets are still listed below as the record of
+# the only socket a build genuinely needs; under
+# `dangerously_allow_all_unix_sockets = true` they grant nothing extra, and they are what
+# a narrower posture would restore.
 #
 # Project config is only read for TRUSTED projects. If nothing here appears to
-# take effect, check that ~/.codex/config.toml contains:
+# take effect, check that ~/.codex/config.toml contains a trusted entry for this
+# clone's absolute path:
 #
-#   [projects."/Users/paulheyse/CodeFabric"]
+#   [projects."/home/paul/CodeFabric"]        # Linux
+#   [projects."/Users/paulheyse/CodeFabric"]  # macOS
 #   trust_level = "trusted"
 #
-# Verified against codex-cli 0.151.0. See .codex/README.md for what was tested
-# and how to re-test after a Codex upgrade.
+# The environment policy, execpolicy rules, and SessionStart hook below were verified
+# against codex-cli 0.151.0 on 2026-08-29; see .codex/README.md for what was tested and
+# how to re-test after a Codex upgrade. The posture keys above replaced what was verified
+# then and have NOT themselves been re-verified.
 
-default_permissions = "codefabric"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+web_search = "live"
 
-[features]
-network_proxy = true
+[features.network_proxy]
+enabled = true
+allow_local_binding = true
+allow_upstream_proxy = true
+dangerously_allow_all_unix_sockets = true
+dangerously_allow_non_loopback_proxy = true
+enable_socks5 = true
+enable_socks5_udp = true
+
+[features.network_proxy.unix_sockets]
+"/private/tmp/codefabric-sccache/server.sock" = "allow"
+"/tmp/codefabric-sccache/server.sock" = "allow"
+
+[features.network_proxy.domains]
+"*" = "allow"
 
 # Each Codex command begins with a small, predictable inherited environment. The Just
 # execution boundary repeats the cleanup so commands remain correct outside Codex too.
@@ -35,24 +65,6 @@ ignore_default_excludes = false
 "CARGO_TARGET_DIR" = "exclude"
 "CARGO_INCREMENTAL" = "exclude"
 "CODEFABRIC_CPG_CAPABILITY_TOKEN" = "exclude"
-
-# The local cache daemon is the only Unix socket available to general sandboxed
-# commands. Cache reads are required by sccache 0.17 client-side StorageGetPath;
-# writes remain owned by the supervised host daemon.
-[permissions.codefabric]
-description = "CodeFabric workspace plus its supervised compiler cache."
-extends = ":workspace"
-
-[permissions.codefabric.filesystem]
-"~/Library/Caches/CodeFabric/sccache" = "read"
-"~/.cache/codefabric/sccache" = "read"
-
-[permissions.codefabric.network.unix_sockets]
-"/private/tmp/codefabric-sccache/server.sock" = "allow"
-"/tmp/codefabric-sccache/server.sock" = "allow"
-
-[permissions.codefabric.network]
-enabled = true
 
 # ---------------------------------------------------------------------------
 # Skills

@@ -1,93 +1,4 @@
 {
-  "accepted_replacements": [
-    {
-      "old_method": "codefabric.rustc.v1.RustcExtractor.Extract",
-      "replacement_method": "codefabric.rustc.v1.RustcExtractor.Observe",
-      "accepted_by": "codefabric-protocol-owner",
-      "accepted_at": "2026-08-23",
-      "acceptance_basis": "GEN AC-G-31 replaces the pre-production command-to-event Extract stream with the daemon-hosted event-to-command Observe stream before external release."
-    }
-  ],
-  "accepted_method_removals": [
-    {
-      "method": "codefabric.rustc.v1.RustcExtractor.CancelCompilation",
-      "accepted_by": "codefabric-protocol-owner",
-      "accepted_at": "2026-08-23",
-      "acceptance_basis": "GEN AC-G-31 assigns cancellation exclusively to the daemon-to-wrapper command stream; the pre-production unary client-to-daemon alias must not remain as a second authority."
-    }
-  ],
-  "accepted_field_replacements": [
-    {
-      "message": "codefabric.rustc.v1.ExtractorCommand",
-      "field_number": 1,
-      "old_name": "begin",
-      "new_name": "compilation_accepted",
-      "new_type_name": ".codefabric.rustc.v1.CompilationAccepted",
-      "accepted_by": "codefabric-protocol-owner",
-      "accepted_at": "2026-08-23",
-      "acceptance_basis": "GEN AC-G-31 makes the daemon response stream carry compilation acceptance rather than echoing the wrapper's begin event."
-    },
-    {
-      "message": "codefabric.rustc.v1.ExtractorHello",
-      "field_number": 5,
-      "old_name": "daemon_build",
-      "new_name": "extractor_build",
-      "new_type_name": "",
-      "accepted_by": "codefabric-protocol-owner",
-      "accepted_at": "2026-08-23",
-      "acceptance_basis": "GEN AC-G-31 makes the short-lived compiler wrapper the client, so the request identifies the extractor rather than the daemon."
-    },
-    {
-      "message": "codefabric.rustc.v1.ExtractorHello",
-      "field_number": 6,
-      "old_name": "output_schema_bundle_digest",
-      "new_name": "rustc_version",
-      "new_type_name": "",
-      "accepted_by": "codefabric-protocol-owner",
-      "accepted_at": "2026-08-23",
-      "acceptance_basis": "GEN AC-G-31 binds the client hello to the exact extractor toolchain."
-    },
-    {
-      "message": "codefabric.rustc.v1.ExtractorHello",
-      "field_number": 7,
-      "old_name": "sandbox_profile_digest",
-      "new_name": "rustc_commit",
-      "new_type_name": "",
-      "accepted_by": "codefabric-protocol-owner",
-      "accepted_at": "2026-08-23",
-      "acceptance_basis": "GEN AC-G-31 binds the client hello to the exact extractor toolchain."
-    },
-    {
-      "message": "codefabric.rustc.v1.ExtractorHelloAck",
-      "field_number": 4,
-      "old_name": "extractor_build",
-      "new_name": "daemon_build",
-      "new_type_name": "",
-      "accepted_by": "codefabric-protocol-owner",
-      "accepted_at": "2026-08-23",
-      "acceptance_basis": "GEN AC-G-31 makes the daemon the long-lived server, so the acknowledgement identifies the daemon."
-    },
-    {
-      "message": "codefabric.rustc.v1.ExtractorHelloAck",
-      "field_number": 5,
-      "old_name": "rustc_version",
-      "new_name": "output_schema_bundle_digest",
-      "new_type_name": "",
-      "accepted_by": "codefabric-protocol-owner",
-      "accepted_at": "2026-08-23",
-      "acceptance_basis": "GEN AC-G-31 requires the daemon response to supply the accepted output schema before analysis."
-    },
-    {
-      "message": "codefabric.rustc.v1.ExtractorHelloAck",
-      "field_number": 6,
-      "old_name": "rustc_commit",
-      "new_name": "sandbox_profile_digest",
-      "new_type_name": "",
-      "accepted_by": "codefabric-protocol-owner",
-      "accepted_at": "2026-08-23",
-      "acceptance_basis": "GEN AC-G-31 requires the daemon response to supply the accepted sandbox profile before analysis."
-    }
-  ],
   "files": [
     {
       "dependencies": [],
@@ -382,6 +293,71 @@
               "options": {},
               "proto3_optional": false,
               "type": "TYPE_INT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "leaseToken",
+              "label": "LABEL_OPTIONAL",
+              "name": "lease_token",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "canonicalResultDescriptorJson",
+              "label": "LABEL_OPTIONAL",
+              "name": "canonical_result_descriptor_json",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resultDescriptorChecksum",
+              "label": "LABEL_OPTIONAL",
+              "name": "result_descriptor_checksum",
+              "number": 9,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resultContractVersion",
+              "label": "LABEL_OPTIONAL",
+              "name": "result_contract_version",
+              "number": 10,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "arrowRelease",
+              "label": "LABEL_OPTIONAL",
+              "name": "arrow_release",
+              "number": 11,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
               "type_name": ""
             }
           ],
@@ -1530,6 +1506,73 @@
             {
               "default_value": null,
               "has_presence": false,
+              "json_name": "queryId",
+              "label": "LABEL_OPTIONAL",
+              "name": "query_id",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "executionState",
+              "label": "LABEL_OPTIONAL",
+              "name": "execution_state",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "canonicalErrorRecordJson",
+              "label": "LABEL_OPTIONAL",
+              "name": "canonical_error_record_json",
+              "number": 3,
+              "oneof": "_canonical_error_record_json",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "notices",
+              "label": "LABEL_REPEATED",
+              "name": "notices",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.cpgd.v1.QueryStatusSummary",
+          "oneofs": [
+            {
+              "name": "_canonical_error_record_json",
+              "options": {}
+            }
+          ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
               "json_name": "artifactId",
               "label": "LABEL_OPTIONAL",
               "name": "artifact_id",
@@ -1591,6 +1634,32 @@
               "proto3_optional": false,
               "type": "TYPE_ENUM",
               "type_name": ".codefabric.cpgd.v1.PayloadCompression"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "authorizationResourceId",
+              "label": "LABEL_OPTIONAL",
+              "name": "authorization_resource_id",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "owner",
+              "label": "LABEL_OPTIONAL",
+              "name": "owner",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v1.ResultOwner"
             }
           ],
           "full_name": "codefabric.cpgd.v1.ReadResultRequest",
@@ -1729,6 +1798,19 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "owner",
+              "label": "LABEL_OPTIONAL",
+              "name": "owner",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v1.ResultOwner"
             }
           ],
           "full_name": "codefabric.cpgd.v1.ReleaseResultRequest",
@@ -1777,6 +1859,19 @@
               "options": {},
               "proto3_optional": true,
               "type": "TYPE_INT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "releaseState",
+              "label": "LABEL_OPTIONAL",
+              "name": "release_state",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
               "type_name": ""
             }
           ],
@@ -2024,9 +2119,97 @@
               "proto3_optional": false,
               "type": "TYPE_INT64",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "authorizationResourceId",
+              "label": "LABEL_OPTIONAL",
+              "name": "authorization_resource_id",
+              "number": 11,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "nextOffset",
+              "label": "LABEL_OPTIONAL",
+              "name": "next_offset",
+              "number": 12,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "totalLength",
+              "label": "LABEL_OPTIONAL",
+              "name": "total_length",
+              "number": 13,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "contentChecksum",
+              "label": "LABEL_OPTIONAL",
+              "name": "content_checksum",
+              "number": 14,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v1.ResultChunk",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "workspaceId",
+              "label": "LABEL_OPTIONAL",
+              "name": "workspace_id",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "agentId",
+              "label": "LABEL_OPTIONAL",
+              "name": "agent_id",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.cpgd.v1.ResultOwner",
           "oneofs": [],
           "options": {},
           "reserved_names": [],
@@ -2446,6 +2629,19 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "cancelToken",
+              "label": "LABEL_OPTIONAL",
+              "name": "cancel_token",
+              "number": 10,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v1.StartQueryResponse",
@@ -2785,6 +2981,71 @@
               "label": "LABEL_OPTIONAL",
               "name": "cleanup_state",
               "number": 12,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "semanticExecutionState",
+              "label": "LABEL_OPTIONAL",
+              "name": "semantic_execution_state",
+              "number": 13,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "completenessState",
+              "label": "LABEL_OPTIONAL",
+              "name": "completeness_state",
+              "number": 14,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "truncated",
+              "label": "LABEL_OPTIONAL",
+              "name": "truncated",
+              "number": 15,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BOOL",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "queryStatuses",
+              "label": "LABEL_REPEATED",
+              "name": "query_statuses",
+              "number": 16,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v1.QueryStatusSummary"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "notices",
+              "label": "LABEL_REPEATED",
+              "name": "notices",
+              "number": 17,
               "oneof": null,
               "options": {},
               "proto3_optional": false,
@@ -3241,6 +3502,24 @@
       "edition": null,
       "enums": [
         {
+          "full_name": "codefabric.provider.v1.ArrowIpcMetadataVersion",
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": [],
+          "values": [
+            {
+              "name": "ARROW_IPC_METADATA_VERSION_UNSPECIFIED",
+              "number": 0,
+              "options": {}
+            },
+            {
+              "name": "ARROW_IPC_METADATA_VERSION_V5",
+              "number": 5,
+              "options": {}
+            }
+          ]
+        },
+        {
           "full_name": "codefabric.provider.v1.CancelAcknowledgementState",
           "options": {},
           "reserved_names": [],
@@ -3527,6 +3806,77 @@
             {
               "name": "PROVIDER_SCOPE_KIND_WORKSPACE_GLOBAL_DERIVATION",
               "number": 8,
+              "options": {}
+            }
+          ]
+        },
+        {
+          "full_name": "codefabric.provider.v1.RelationIpcRemainderReason",
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": [],
+          "values": [
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_UNSPECIFIED",
+              "number": 0,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_UNSUPPORTED",
+              "number": 1,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_PROVIDER_UNAVAILABLE",
+              "number": 2,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_RESOURCE_LIMIT",
+              "number": 3,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_INVALID_SOURCE",
+              "number": 4,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_CANCELLED",
+              "number": 5,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_REMAINDER_REASON_UNKNOWN",
+              "number": 6,
+              "options": {}
+            }
+          ]
+        },
+        {
+          "full_name": "codefabric.provider.v1.RelationIpcTerminalStatus",
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": [],
+          "values": [
+            {
+              "name": "RELATION_IPC_TERMINAL_STATUS_UNSPECIFIED",
+              "number": 0,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_TERMINAL_STATUS_COMPLETE",
+              "number": 1,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_TERMINAL_STATUS_PARTIAL",
+              "number": 2,
+              "options": {}
+            },
+            {
+              "name": "RELATION_IPC_TERMINAL_STATUS_UNKNOWN",
+              "number": 3,
               "options": {}
             }
           ]
@@ -4471,6 +4821,32 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "resource_profile_id",
+              "number": 15,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sandboxProfileDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "sandbox_profile_digest",
+              "number": 16,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.provider.v1.ProviderJobSpec",
@@ -4918,6 +5294,623 @@
             {
               "default_value": null,
               "has_presence": false,
+              "json_name": "scope",
+              "label": "LABEL_OPTIONAL",
+              "name": "scope",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "unitCount",
+              "label": "LABEL_OPTIONAL",
+              "name": "unit_count",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "reason",
+              "label": "LABEL_OPTIONAL",
+              "name": "reason",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.provider.v1.RelationIpcRemainderReason"
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcCoverageRemainder",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "status",
+              "label": "LABEL_OPTIONAL",
+              "name": "status",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.provider.v1.RelationIpcTerminalStatus"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "requestedUnits",
+              "label": "LABEL_OPTIONAL",
+              "name": "requested_units",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "completedUnits",
+              "label": "LABEL_OPTIONAL",
+              "name": "completed_units",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "remainders",
+              "label": "LABEL_REPEATED",
+              "name": "remainders",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcCoverageRemainder"
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcCoverageTrailer",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "declaredIpcBytes",
+              "label": "LABEL_OPTIONAL",
+              "name": "declared_ipc_bytes",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "declaredBatches",
+              "label": "LABEL_OPTIONAL",
+              "name": "declared_batches",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "declaredRows",
+              "label": "LABEL_OPTIONAL",
+              "name": "declared_rows",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcEnd",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "acknowledgedSequence",
+              "label": "LABEL_OPTIONAL",
+              "name": "acknowledged_sequence",
+              "number": 2,
+              "oneof": "_acknowledged_sequence",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "releasedBytes",
+              "label": "LABEL_OPTIONAL",
+              "name": "released_bytes",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "cancelled",
+              "label": "LABEL_OPTIONAL",
+              "name": "cancelled",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BOOL",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcFlowControlAck",
+          "oneofs": [
+            {
+              "name": "_acknowledged_sequence",
+              "options": {}
+            }
+          ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "open",
+              "label": "LABEL_OPTIONAL",
+              "name": "open",
+              "number": 1,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcOpen"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "payload",
+              "label": "LABEL_OPTIONAL",
+              "name": "payload",
+              "number": 2,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcPayload"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "flowControlAck",
+              "label": "LABEL_OPTIONAL",
+              "name": "flow_control_ack",
+              "number": 3,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFlowControlAck"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "ipcEnd",
+              "label": "LABEL_OPTIONAL",
+              "name": "ipc_end",
+              "number": 4,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcEnd"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "coverageTrailer",
+              "label": "LABEL_OPTIONAL",
+              "name": "coverage_trailer",
+              "number": 5,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcCoverageTrailer"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "terminal",
+              "label": "LABEL_OPTIONAL",
+              "name": "terminal",
+              "number": 6,
+              "oneof": "frame",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcTerminal"
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcFrame",
+          "oneofs": [
+            {
+              "name": "frame",
+              "options": {}
+            }
+          ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "protocolVersion",
+              "label": "LABEL_OPTIONAL",
+              "name": "protocol_version",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "identity",
+              "label": "LABEL_OPTIONAL",
+              "name": "identity",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcStreamIdentity"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sequence",
+              "label": "LABEL_OPTIONAL",
+              "name": "sequence",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcFrameHeader",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "requestedUnits",
+              "label": "LABEL_OPTIONAL",
+              "name": "requested_units",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "arrowTypeUniverse",
+              "label": "LABEL_OPTIONAL",
+              "name": "arrow_type_universe",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "metadataVersion",
+              "label": "LABEL_OPTIONAL",
+              "name": "metadata_version",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.provider.v1.ArrowIpcMetadataVersion"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "semanticEncoding",
+              "label": "LABEL_OPTIONAL",
+              "name": "semantic_encoding",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcOpen",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "arrowIpcFragment",
+              "label": "LABEL_OPTIONAL",
+              "name": "arrow_ipc_fragment",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcPayload",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "relationId",
+              "label": "LABEL_OPTIONAL",
+              "name": "relation_id",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "streamId",
+              "label": "LABEL_OPTIONAL",
+              "name": "stream_id",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "schemaFingerprint",
+              "label": "LABEL_OPTIONAL",
+              "name": "schema_fingerprint",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sourcePin",
+              "label": "LABEL_OPTIONAL",
+              "name": "source_pin",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "contextPin",
+              "label": "LABEL_OPTIONAL",
+              "name": "context_pin",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcStreamIdentity",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrameHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "status",
+              "label": "LABEL_OPTIONAL",
+              "name": "status",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.provider.v1.RelationIpcTerminalStatus"
+            }
+          ],
+          "full_name": "codefabric.provider.v1.RelationIpcTerminal",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
               "json_name": "inputBytes",
               "label": "LABEL_OPTIONAL",
               "name": "input_bytes",
@@ -5165,6 +6158,19 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.pyrefly.v1.CancelRunRequest"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "relationIpcAck",
+              "label": "LABEL_OPTIONAL",
+              "name": "relation_ipc_ack",
+              "number": 5,
+              "oneof": "command",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrame"
             }
           ],
           "full_name": "codefabric.pyrefly.v1.AnalyzeCommand",
@@ -5258,6 +6264,19 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.pyrefly.v1.RunTerminal"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "relationIpcFrame",
+              "label": "LABEL_OPTIONAL",
+              "name": "relation_ipc_frame",
+              "number": 7,
+              "oneof": "event",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.pyrefly.v1.RelationIpcFrameEvent"
             }
           ],
           "full_name": "codefabric.pyrefly.v1.AnalyzeEvent",
@@ -5542,6 +6561,45 @@
               "options": {},
               "proto3_optional": false,
               "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sandboxProfileDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "sandbox_profile_digest",
+              "number": 14,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "trustProfile",
+              "label": "LABEL_OPTIONAL",
+              "name": "trust_profile",
+              "number": 15,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "resource_profile_id",
+              "number": 16,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
               "type_name": ""
             }
           ],
@@ -6336,6 +7394,45 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.provider.v1.SourceSnapshotLease"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "resource_profile_id",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "maximumContexts",
+              "label": "LABEL_OPTIONAL",
+              "name": "maximum_contexts",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "maximumMemoryMib",
+              "label": "LABEL_OPTIONAL",
+              "name": "maximum_memory_mib",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.pyrefly.v1.OpenContextRequest",
@@ -6388,6 +7485,68 @@
             }
           ],
           "full_name": "codefabric.pyrefly.v1.OpenContextResponse",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "header",
+              "label": "LABEL_OPTIONAL",
+              "name": "header",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.pyrefly.v1.AnalyzeEventHeader"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "moduleId",
+              "label": "LABEL_OPTIONAL",
+              "name": "module_id",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "observationFamilyCode",
+              "label": "LABEL_OPTIONAL",
+              "name": "observation_family_code",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "frame",
+              "label": "LABEL_OPTIONAL",
+              "name": "frame",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrame"
+            }
+          ],
+          "full_name": "codefabric.pyrefly.v1.RelationIpcFrameEvent",
           "oneofs": [],
           "options": {},
           "reserved_names": [],
@@ -6558,6 +7717,45 @@
               "proto3_optional": false,
               "type": "TYPE_ENUM",
               "type_name": ".codefabric.provider.v1.ProviderRunState"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "recheckedModuleIds",
+              "label": "LABEL_REPEATED",
+              "name": "rechecked_module_ids",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sandboxProfileDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "sandbox_profile_digest",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "trustProfile",
+              "label": "LABEL_OPTIONAL",
+              "name": "trust_profile",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.pyrefly.v1.RunTerminal",
@@ -6723,6 +7921,31 @@
             {
               "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_CONTEXT_MANIFEST_DIGEST",
               "number": 6,
+              "options": {}
+            },
+            {
+              "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_PROVIDER_RESOURCE_PROFILE_ID",
+              "number": 7,
+              "options": {}
+            },
+            {
+              "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_SOURCE_SNAPSHOT_MANIFEST_DIGEST",
+              "number": 8,
+              "options": {}
+            },
+            {
+              "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_METADATA_DIGEST",
+              "number": 9,
+              "options": {}
+            },
+            {
+              "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_LOCK_DIGEST",
+              "number": 10,
+              "options": {}
+            },
+            {
+              "name": "EXTRACTOR_ENVIRONMENT_VARIABLE_CARGO_CONFIG_DIGEST",
+              "number": 11,
               "options": {}
             }
           ]
@@ -7139,6 +8362,32 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "resource_profile_id",
+              "number": 18,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "toolchainIdentityDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "toolchain_identity_digest",
+              "number": 19,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.rustc.v1.CompilationBegin",
@@ -7422,19 +8671,6 @@
             {
               "default_value": null,
               "has_presence": true,
-              "json_name": "compilationAccepted",
-              "label": "LABEL_OPTIONAL",
-              "name": "compilation_accepted",
-              "number": 1,
-              "oneof": "event",
-              "options": {},
-              "proto3_optional": false,
-              "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.rustc.v1.CompilationAccepted"
-            },
-            {
-              "default_value": null,
-              "has_presence": true,
               "json_name": "compilationBegin",
               "label": "LABEL_OPTIONAL",
               "name": "compilation_begin",
@@ -7496,6 +8732,19 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.rustc.v1.CompilationEnd"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "ownerRelationIpcFrame",
+              "label": "LABEL_OPTIONAL",
+              "name": "owner_relation_ipc_frame",
+              "number": 7,
+              "oneof": "event",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.rustc.v1.OwnerRelationIpcFrame"
             }
           ],
           "full_name": "codefabric.rustc.v1.ExtractionEvent",
@@ -7506,8 +8755,15 @@
             }
           ],
           "options": {},
-          "reserved_names": [],
-          "reserved_ranges": []
+          "reserved_names": [
+            "compilation_accepted"
+          ],
+          "reserved_ranges": [
+            {
+              "end_exclusive": 2,
+              "start": 1
+            }
+          ]
         },
         {
           "extension_ranges": [],
@@ -7515,15 +8771,15 @@
             {
               "default_value": null,
               "has_presence": true,
-              "json_name": "begin",
+              "json_name": "compilationAccepted",
               "label": "LABEL_OPTIONAL",
-              "name": "begin",
+              "name": "compilation_accepted",
               "number": 1,
               "oneof": "command",
               "options": {},
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
-              "type_name": ".codefabric.rustc.v1.CompilationBegin"
+              "type_name": ".codefabric.rustc.v1.CompilationAccepted"
             },
             {
               "default_value": null,
@@ -7563,6 +8819,19 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.rustc.v1.CancelCompilationRequest"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "relationIpcAck",
+              "label": "LABEL_OPTIONAL",
+              "name": "relation_ipc_ack",
+              "number": 5,
+              "oneof": "command",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrame"
             }
           ],
           "full_name": "codefabric.rustc.v1.ExtractorCommand",
@@ -7634,9 +8903,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "daemonBuild",
+              "json_name": "extractorBuild",
               "label": "LABEL_OPTIONAL",
-              "name": "daemon_build",
+              "name": "extractor_build",
               "number": 5,
               "oneof": null,
               "options": {},
@@ -7647,9 +8916,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "outputSchemaBundleDigest",
+              "json_name": "rustcVersion",
               "label": "LABEL_OPTIONAL",
-              "name": "output_schema_bundle_digest",
+              "name": "rustc_version",
               "number": 6,
               "oneof": null,
               "options": {},
@@ -7660,10 +8929,36 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "sandboxProfileDigest",
+              "json_name": "rustcCommit",
               "label": "LABEL_OPTIONAL",
-              "name": "sandbox_profile_digest",
+              "name": "rustc_commit",
               "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "toolchainIdentityDigest",
+              "label": "LABEL_OPTIONAL",
+              "name": "toolchain_identity_digest",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "resourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "resource_profile_id",
+              "number": 9,
               "oneof": null,
               "options": {},
               "proto3_optional": false,
@@ -7722,9 +9017,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "extractorBuild",
+              "json_name": "daemonBuild",
               "label": "LABEL_OPTIONAL",
-              "name": "extractor_build",
+              "name": "daemon_build",
               "number": 4,
               "oneof": null,
               "options": {},
@@ -7735,9 +9030,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "rustcVersion",
+              "json_name": "outputSchemaBundleDigest",
               "label": "LABEL_OPTIONAL",
-              "name": "rustc_version",
+              "name": "output_schema_bundle_digest",
               "number": 5,
               "oneof": null,
               "options": {},
@@ -7748,9 +9043,9 @@
             {
               "default_value": null,
               "has_presence": false,
-              "json_name": "rustcCommit",
+              "json_name": "sandboxProfileDigest",
               "label": "LABEL_OPTIONAL",
-              "name": "rustc_commit",
+              "name": "sandbox_profile_digest",
               "number": 6,
               "oneof": null,
               "options": {},
@@ -7782,6 +9077,32 @@
               "options": {},
               "proto3_optional": false,
               "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "acceptedResourceProfileId",
+              "label": "LABEL_OPTIONAL",
+              "name": "accepted_resource_profile_id",
+              "number": 9,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "providerDeadlineUnixMs",
+              "label": "LABEL_OPTIONAL",
+              "name": "provider_deadline_unix_ms",
+              "number": 10,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_INT64",
               "type_name": ""
             }
           ],
@@ -8143,6 +9464,94 @@
             {
               "default_value": null,
               "has_presence": false,
+              "json_name": "providerRunId",
+              "label": "LABEL_OPTIONAL",
+              "name": "provider_run_id",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "compilationUnitId",
+              "label": "LABEL_OPTIONAL",
+              "name": "compilation_unit_id",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sequence",
+              "label": "LABEL_OPTIONAL",
+              "name": "sequence",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "ownerId",
+              "label": "LABEL_OPTIONAL",
+              "name": "owner_id",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "observationFamilyCode",
+              "label": "LABEL_OPTIONAL",
+              "name": "observation_family_code",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "frame",
+              "label": "LABEL_OPTIONAL",
+              "name": "frame",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.provider.v1.RelationIpcFrame"
+            }
+          ],
+          "full_name": "codefabric.rustc.v1.OwnerRelationIpcFrame",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
               "json_name": "packageId",
               "label": "LABEL_OPTIONAL",
               "name": "package_id",
@@ -8251,27 +9660,19 @@
           "methods": [
             {
               "client_streaming": false,
-              "input_type": ".codefabric.rustc.v1.CancelCompilationRequest",
-              "name": "CancelCompilation",
-              "options": {},
-              "output_type": ".codefabric.provider.v1.CancelAcknowledgement",
-              "server_streaming": false
-            },
-            {
-              "client_streaming": true,
-              "input_type": ".codefabric.rustc.v1.ExtractorCommand",
-              "name": "Extract",
-              "options": {},
-              "output_type": ".codefabric.rustc.v1.ExtractionEvent",
-              "server_streaming": true
-            },
-            {
-              "client_streaming": false,
               "input_type": ".codefabric.rustc.v1.ExtractorHello",
               "name": "Handshake",
               "options": {},
               "output_type": ".codefabric.rustc.v1.ExtractorHelloAck",
               "server_streaming": false
+            },
+            {
+              "client_streaming": true,
+              "input_type": ".codefabric.rustc.v1.ExtractionEvent",
+              "name": "Observe",
+              "options": {},
+              "output_type": ".codefabric.rustc.v1.ExtractorCommand",
+              "server_streaming": true
             }
           ],
           "options": {}

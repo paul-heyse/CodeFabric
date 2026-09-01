@@ -557,11 +557,12 @@ without a reason. These can change compile time, debuggability, binary size, run
 
 ## 10) `rust-toolchain.toml`
 
-For this project, use stable as the repository default:
+For this project, use the exact current stable release as the repository default. The
+language compatibility floor remains the separately verified `rust-version`:
 
 ```toml
 [toolchain]
-channel = "stable"
+channel = "1.98.0"
 profile = "default"
 components = [
   "rustfmt",
@@ -572,16 +573,19 @@ components = [
 ]
 ```
 
-Nightly remains a **targeted analysis toolchain** for Miri and cargo-udeps. If a later functionality uses `rustc-dev`/compiler-private APIs, create an exact date-pinned nightly contract for that subsystem or upgrade the repository intentionally. Do not make rolling nightly the default merely because the workstation has it installed.
+Nightly remains a **targeted analysis toolchain** for Miri and cargo-udeps. CodeFabric's
+compiler-private extractor already owns `nightly-2026-08-18`; assurance reuses that exact
+compiler with a separate target directory. Upgrade that identity intentionally. Do not make
+rolling nightly the default merely because the workstation has it installed.
 
 Recommended targeted invocation pattern:
 
 ```bash
-cargo +nightly miri test
-cargo +nightly udeps --all-targets
+cargo +nightly-2026-08-18 miri test --locked
+cargo +nightly-2026-08-18 udeps --locked --all-targets
 ```
 
-For reproducible CI, replace symbolic `nightly` with an exact nightly date owned by the workflow or repository configuration.
+The same exact identity is used locally and in reproducible CI.
 
 ---
 
@@ -703,6 +707,17 @@ This is preferable to relying on an undocumented shell environment because agent
 
 A committed `rustc-wrapper = "sccache"` means contributors without `sccache` cannot build until it is installed. For a personal project this is usually acceptable if the bootstrap documentation installs the tool. If portability to arbitrary contributors is more important, keep `RUSTC_WRAPPER=sccache` in local/CI environment configuration instead.
 
+CodeFabric treats it as a hard prerequisite. A serialized, idempotent setup owns one
+launchd/systemd-user service, a 40 GiB disk cache, and a stable socket directory owned by
+the current uid with mode 0700 as required by the exact Codex socket permission. The
+generated systemd unit must not order itself after the target that wants it, and service
+startup must remove only the exact stale socket. It must bind the fixed allowlisted socket
+directly: no symlink or `RuntimeDirectory` substitution may change the resolved endpoint,
+and the entrypoint argument and `SCCACHE_SERVER_UDS` identity must agree. Doctor compares
+the installed unit and cache configuration with the generated contract; a setup migration
+must pass a repeated-compile canary before succeeding. Verification reports an actionable
+`just setup-sccache` instruction; it does not silently fall back to an uncached compile.
+
 ### 13.2 Monitor cache effectiveness
 
 Expose:
@@ -712,7 +727,9 @@ sccache --show-stats
 sccache --zero-stats
 ```
 
-through `just`. Do not assume caching is useful merely because it is enabled. Watch cache hit rate after normal edit/test cycles.
+through `just`. Do not assume caching is useful merely because it is enabled. Compare
+repeated cold-target/warm-cache Hyperfine samples, preserve error/timeout telemetry, and
+treat a cumulative hit percentage as diagnostics rather than performance proof.
 
 ### 13.3 Never use `cargo clean` as routine hygiene
 
@@ -843,13 +860,13 @@ mutants-file path:
     cargo mutants -f {{path}}
 
 miri:
-    cargo +nightly miri test
+    cargo +nightly-2026-08-18 miri test --locked
 
 miri-seeds seeds="16":
-    MIRIFLAGS="-Zmiri-many-seeds=0..{{seeds}}" cargo +nightly miri test
+    MIRIFLAGS="-Zmiri-many-seeds=0..{{seeds}}" cargo +nightly-2026-08-18 miri test --locked
 
 udeps:
-    cargo +nightly udeps --all-targets --all-features
+    cargo +nightly-2026-08-18 udeps --locked --all-targets --all-features
 
 fuzz target seconds="60":
     cargo fuzz run {{target}} -- -max_total_time={{seconds}}
@@ -955,13 +972,13 @@ Then keep jobs cheap and explicit:
 default_job = "check"
 
 [jobs.check]
-command = ["cargo", "check", "--all-targets"]
+command = ["./scripts/cargo-check-mode.sh", "cargo", "check", "--locked", "--all-targets"]
 
 [jobs.check-python-feature]
-command = ["cargo", "check", "--all-targets", "--features", "python"]
+command = ["./scripts/cargo-check-mode.sh", "cargo", "check", "--locked", "--all-targets", "--features", "python"]
 
 [jobs.nextest]
-command = ["cargo", "nextest", "run"]
+command = ["./scripts/cargo-check-mode.sh", "cargo", "nextest", "run", "--locked"]
 need_stdout = true
 analyzer = "nextest"
 ```
@@ -1299,8 +1316,8 @@ If the code remains fully safe Rust, Miri can be occasional. It becomes mandator
 Commands:
 
 ```bash
-cargo +nightly miri test
-MIRIFLAGS="-Zmiri-many-seeds=0..16" cargo +nightly miri test
+cargo +nightly-2026-08-18 miri test --locked
+MIRIFLAGS="-Zmiri-many-seeds=0..16" cargo +nightly-2026-08-18 miri test --locked
 ```
 
 ### 24.1 Python FFI caveat
@@ -1461,7 +1478,7 @@ cargo shear --deny-warnings
 ### 29.2 Disputed/high-impact finding
 
 ```bash
-cargo +nightly udeps --all-targets --all-features
+cargo +nightly-2026-08-18 udeps --locked --all-targets --all-features
 ```
 
 Before removing a dependency, inspect:
@@ -2183,7 +2200,7 @@ jobs:
       - uses: actions/checkout@<pinned>
       - uses: dtolnay/rust-toolchain@<pinned>
         with:
-          toolchain: stable
+          toolchain: 1.98.0
           components: rustfmt,clippy,llvm-tools-preview
       - uses: mozilla-actions/sccache-action@<pinned>
       - uses: cargo-bins/cargo-binstall@<pinned>
@@ -2213,7 +2230,7 @@ jobs:
       - uses: astral-sh/setup-uv@<pinned>
       - uses: dtolnay/rust-toolchain@<pinned>
         with:
-          toolchain: stable
+          toolchain: 1.98.0
       - run: uv sync --frozen
       - run: uv run ruff format --check python python_tests
       - run: uv run ruff check python python_tests
@@ -2945,7 +2962,10 @@ Do not use parallel `fd -x` execution for source-mutating commands unless those 
 
 ### 75.1 Developer bootstrap
 
-Use cargo-binstall to provision Rust CLIs quickly, preferably with explicit versions in a bootstrap script or documented setup manifest. Prebuilt binaries avoid compiling a large tooling fleet from source.
+Use cargo-binstall to provision Rust CLIs quickly from the committed
+`tooling/rust-tool-versions.env` manifest. The idempotent setup checks the installed binary
+first and replaces only a missing or mismatched identity. Prebuilt binaries avoid compiling
+a large tooling fleet from source.
 
 ### 75.2 CI
 

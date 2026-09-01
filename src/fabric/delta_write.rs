@@ -9,22 +9,27 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::sync::Arc;
 
 use arrow_array::RecordBatch;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::SessionState;
 use datafusion::logical_expr::LogicalPlan;
+use deltalake::TableProperty;
 use deltalake::delta_datafusion::SessionFallbackPolicy;
 use deltalake::kernel::Transaction;
 use deltalake::kernel::transaction::{CommitProperties, TransactionError};
+use deltalake::operations::create::CreateBuilder;
 use deltalake::protocol::SaveMode;
 use deltalake::{DeltaTable, DeltaTableError};
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
 use serde_json::Value;
 use thiserror::Error;
 
 use super::command::{OperationId, TransactionRef, WriterGeneration};
-use super::delta_exact::{ExactDeltaPin, read_exact_commit_info};
+use super::delta_exact::{ExactDeltaPin, read_exact_commit_entry};
 
 const META_OPERATION_ID: &str = "codefabric.operation_id";
 const META_WRITER_GENERATION: &str = "codefabric.writer_generation";
@@ -34,9 +39,155 @@ const META_SESSION_ID: &str = "codefabric.session_id";
 const META_APPLICATION_ID: &str = "codefabric.application_id";
 const META_APPLICATION_VERSION: &str = "codefabric.application_version";
 const META_WRITE_PRIMITIVE: &str = "codefabric.write_primitive";
+const META_TARGET_FILE_SIZE_BYTES: &str = "codefabric.target_file_size_bytes";
+const META_WRITE_BATCH_ROWS: &str = "codefabric.write_batch_rows";
+const META_MAX_ROW_GROUP_ROWS: &str = "codefabric.max_row_group_rows";
+const META_MAX_ROW_GROUP_BYTES: &str = "codefabric.max_row_group_bytes";
+const META_PARQUET_COMPRESSION: &str = "codefabric.parquet_compression";
 const CODEFABRIC_METADATA_PREFIX: &str = "codefabric.";
 const OPERATION_METRICS: &str = "operationMetrics";
 const NUM_RETRIES: &str = "num_retries";
+
+const DEFAULT_TARGET_FILE_SIZE_BYTES: u64 = 128 * 1024 * 1024;
+const DEFAULT_WRITE_BATCH_ROWS: usize = 65_536;
+const DEFAULT_MAX_ROW_GROUP_ROWS: usize = 65_536;
+const DEFAULT_MAX_ROW_GROUP_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Required creation-time properties for a durable append-only Delta history.
+///
+/// Applying this contract to [`CreateBuilder`] enables CDF at version zero,
+/// selects explicit data-skipping columns, and disables deletion vectors. The
+/// caller may add retention/checkpoint properties appropriate to the relation,
+/// but cannot defer these correctness-relevant properties to a later commit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControlledDeltaHistoryProperties {
+    statistics_columns: String,
+}
+
+impl ControlledDeltaHistoryProperties {
+    /// Construct the mandatory creation contract.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an empty comma-separated statistics-column selection.
+    pub fn try_new(
+        statistics_columns: impl Into<String>,
+    ) -> Result<Self, ControlledDeltaWriteInputError> {
+        let statistics_columns = statistics_columns.into();
+        if statistics_columns
+            .split(',')
+            .all(|column| column.trim().is_empty())
+        {
+            return Err(ControlledDeltaWriteInputError::EmptyStatisticsColumns);
+        }
+        Ok(Self { statistics_columns })
+    }
+
+    /// Exact comma-separated statistics columns set at table creation.
+    #[must_use]
+    pub fn statistics_columns(&self) -> &str {
+        &self.statistics_columns
+    }
+
+    /// Apply mandatory properties without replacing relation-specific
+    /// retention/checkpoint configuration already attached to the builder.
+    #[must_use]
+    pub fn apply_to(self, builder: CreateBuilder) -> CreateBuilder {
+        builder
+            .with_configuration_property(TableProperty::AppendOnly, Some("true"))
+            .with_configuration_property(TableProperty::EnableChangeDataFeed, Some("true"))
+            .with_configuration_property(
+                TableProperty::DataSkippingStatsColumns,
+                Some(self.statistics_columns),
+            )
+            .with_configuration_property(TableProperty::EnableDeletionVectors, Some("false"))
+    }
+}
+
+/// Explicit physical policy for one controlled Delta append/replacement.
+///
+/// These settings affect layout and cost only, never logical identity. The
+/// values are recorded in the exact commit entry and supplied directly to
+/// delta-rs/Parquet; no library default participates in a controlled write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ControlledDeltaWriteLayout {
+    target_file_size_bytes: NonZeroU64,
+    write_batch_rows: NonZeroUsize,
+    max_row_group_rows: NonZeroUsize,
+    max_row_group_bytes: NonZeroUsize,
+}
+
+impl Default for ControlledDeltaWriteLayout {
+    fn default() -> Self {
+        Self {
+            target_file_size_bytes: NonZeroU64::new(DEFAULT_TARGET_FILE_SIZE_BYTES)
+                .expect("controlled target file size is nonzero"),
+            write_batch_rows: NonZeroUsize::new(DEFAULT_WRITE_BATCH_ROWS)
+                .expect("controlled write batch is nonzero"),
+            max_row_group_rows: NonZeroUsize::new(DEFAULT_MAX_ROW_GROUP_ROWS)
+                .expect("controlled row group count is nonzero"),
+            max_row_group_bytes: NonZeroUsize::new(
+                usize::try_from(DEFAULT_MAX_ROW_GROUP_BYTES)
+                    .expect("controlled row group byte size fits usize"),
+            )
+            .expect("controlled row group byte size is nonzero"),
+        }
+    }
+}
+
+impl ControlledDeltaWriteLayout {
+    /// Construct a fully explicit layout policy. Non-zero types exclude the
+    /// invalid zero limits rejected by Parquet and delta-rs.
+    #[must_use]
+    pub const fn new(
+        target_file_size_bytes: NonZeroU64,
+        write_batch_rows: NonZeroUsize,
+        max_row_group_rows: NonZeroUsize,
+        max_row_group_bytes: NonZeroUsize,
+    ) -> Self {
+        Self {
+            target_file_size_bytes,
+            write_batch_rows,
+            max_row_group_rows,
+            max_row_group_bytes,
+        }
+    }
+
+    #[must_use]
+    pub const fn target_file_size_bytes(self) -> NonZeroU64 {
+        self.target_file_size_bytes
+    }
+
+    #[must_use]
+    pub const fn write_batch_rows(self) -> NonZeroUsize {
+        self.write_batch_rows
+    }
+
+    #[must_use]
+    pub const fn max_row_group_rows(self) -> NonZeroUsize {
+        self.max_row_group_rows
+    }
+
+    #[must_use]
+    pub const fn max_row_group_bytes(self) -> NonZeroUsize {
+        self.max_row_group_bytes
+    }
+
+    /// Stable compression identity supplied to every Parquet column.
+    #[must_use]
+    pub const fn parquet_compression(self) -> &'static str {
+        "zstd"
+    }
+
+    fn writer_properties(self) -> WriterProperties {
+        WriterProperties::builder()
+            .set_compression(Compression::ZSTD(Default::default()))
+            .set_write_batch_size(self.write_batch_rows.get())
+            .set_max_row_group_row_count(Some(self.max_row_group_rows.get()))
+            .set_max_row_group_bytes(Some(self.max_row_group_bytes.get()))
+            .build()
+    }
+}
 
 /// The two high-level plan-write primitives admitted at this boundary.
 ///
@@ -138,6 +289,7 @@ pub struct ControlledDeltaWriteSpec {
     writer_generation: WriterGeneration,
     marker: ApplicationTransactionMarker,
     mode: ControlledDeltaWriteMode,
+    layout: ControlledDeltaWriteLayout,
     commit_metadata: BTreeMap<String, Value>,
 }
 
@@ -157,8 +309,17 @@ impl ControlledDeltaWriteSpec {
             writer_generation,
             marker,
             mode,
+            layout: ControlledDeltaWriteLayout::default(),
             commit_metadata: BTreeMap::new(),
         }
+    }
+
+    /// Select an explicit measured physical layout without changing the
+    /// transaction's logical identity.
+    #[must_use]
+    pub fn with_layout(mut self, layout: ControlledDeltaWriteLayout) -> Self {
+        self.layout = layout;
+        self
     }
 
     /// Add application-owned metadata which is written and read back as part
@@ -224,6 +385,12 @@ impl ControlledDeltaWriteSpec {
     #[must_use]
     pub const fn mode(&self) -> ControlledDeltaWriteMode {
         self.mode
+    }
+
+    /// Explicit target-file, row-group, batch, and compression policy.
+    #[must_use]
+    pub const fn layout(&self) -> ControlledDeltaWriteLayout {
+        self.layout
     }
 
     /// Application-owned metadata included in the durable commit/readback
@@ -300,6 +467,9 @@ impl SessionBoundLogicalPlan {
 /// Invalid application-owned input rejected before any Delta write is constructed.
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum ControlledDeltaWriteInputError {
+    /// Durable history creation must explicitly select statistics columns.
+    #[error("controlled Delta history statistics columns must be nonempty")]
+    EmptyStatisticsColumns,
     /// Delta transaction application IDs must be nonempty.
     #[error("Delta application transaction ID must be nonempty")]
     EmptyApplicationId,
@@ -330,11 +500,14 @@ pub enum ControlledDeltaWriteInputError {
     NullCommitMetadataValue(String),
 }
 
-/// What the pinned snapshot API can prove about an application transaction marker.
+/// How the introducing Delta commit version for an application marker was proved.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MarkerCommitVersionEvidence {
+    /// The marker was read directly from the named commit entry's `txn` action.
+    ExactCommitEntry(u64),
     /// `transaction_version` proves marker visibility at an exact snapshot but does not expose
-    /// the Delta commit version which first introduced that marker.
+    /// the Delta commit version which first introduced that marker. This is used only when the
+    /// marker was already present before a new write attempt.
     NotExposedByPinnedSnapshotApi,
 }
 
@@ -366,12 +539,12 @@ impl ApplicationMarkerEvidence {
     }
 }
 
-/// What the pinned commit-history API exposed for the write's read version.
+/// What the selected commit's `commitInfo` action exposed for the write's read version.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommitReadVersionEvidence {
-    /// Commit history exposed the exact expected predecessor version.
+    /// `commitInfo.readVersion` exposed the exact expected predecessor version.
     Exact(u64),
-    /// Commit history omitted `readVersion`; exact application metadata and the returned
+    /// `commitInfo` omitted `readVersion`; exact application metadata and the returned
     /// predecessor+1 snapshot remain the binding evidence.
     NotExposedByCommitHistory,
 }
@@ -384,6 +557,7 @@ pub struct CommittedDeltaWrite {
     committed: ExactDeltaPin,
     operation_id: OperationId,
     writer_generation: WriterGeneration,
+    layout: ControlledDeltaWriteLayout,
     marker_evidence: ApplicationMarkerEvidence,
     session_id: String,
     read_version_evidence: CommitReadVersionEvidence,
@@ -404,16 +578,22 @@ impl CommittedDeltaWrite {
         &self.committed
     }
 
-    /// Operation identity read back from the exact committed history entry.
+    /// Operation identity read back from the exact committed log entry.
     #[must_use]
     pub const fn operation_id(&self) -> OperationId {
         self.operation_id
     }
 
-    /// Writer generation read back from the exact committed history entry.
+    /// Writer generation read back from the exact committed log entry.
     #[must_use]
     pub const fn writer_generation(&self) -> WriterGeneration {
         self.writer_generation
+    }
+
+    /// Physical policy read back from the exact committed log entry.
+    #[must_use]
+    pub const fn layout(&self) -> ControlledDeltaWriteLayout {
+        self.layout
     }
 
     /// Application marker read back from the exact committed snapshot.
@@ -428,7 +608,7 @@ impl CommittedDeltaWrite {
         &self.session_id
     }
 
-    /// Evidence exposed by pinned Delta commit history for the predecessor read version.
+    /// Evidence exposed by exact `commitInfo` for the predecessor read version.
     #[must_use]
     pub const fn read_version_evidence(&self) -> CommitReadVersionEvidence {
         self.read_version_evidence
@@ -441,7 +621,7 @@ impl CommittedDeltaWrite {
     }
 
     /// Application-owned metadata whose exact values were read back from the
-    /// committed history entry.
+    /// committed log entry.
     #[must_use]
     pub const fn commit_metadata(&self) -> &BTreeMap<String, Value> {
         &self.commit_metadata
@@ -545,9 +725,9 @@ pub enum ControlledDeltaWriteOutcome {
 /// Execute one zero-retry `WriteBuilder` attempt from a session-bound logical plan.
 ///
 /// The function never reloads table state, discovers the backing-store head, invokes DML or
-/// maintenance builders, or calls itself recursively. Marker inspection is performed only
-/// against the already-loaded exact predecessor and, after success, the exact snapshot returned
-/// by Delta.
+/// maintenance builders, or calls itself recursively. Pre-write marker inspection is performed
+/// against the already-loaded exact predecessor; after success, both `commitInfo` and `txn` are
+/// read from the returned version's exact JSON log entry.
 pub async fn write_exact_delta_plan(
     table: &DeltaTable,
     spec: &ControlledDeltaWriteSpec,
@@ -580,6 +760,7 @@ pub async fn write_exact_delta_plan(
             return ControlledDeltaWriteOutcome::MarkerAlreadyCommitted(marker_evidence(
                 spec.marker.clone(),
                 observed_predecessor,
+                MarkerCommitVersionEvidence::NotExposedByPinnedSnapshotApi,
             ));
         }
         Ok(Some(observed)) if observed > spec.marker.application_version => {
@@ -611,6 +792,7 @@ pub async fn write_exact_delta_plan(
         session_id,
     } = input;
     let commit_properties = controlled_commit_properties(spec, &session_id);
+    let layout = spec.layout();
     let write = table
         .clone()
         .write(std::iter::empty::<RecordBatch>())
@@ -618,6 +800,9 @@ pub async fn write_exact_delta_plan(
         .with_session_state(session)
         .with_session_fallback_policy(SessionFallbackPolicy::RequireSessionState)
         .with_save_mode(spec.mode.save_mode())
+        .with_target_file_size(Some(layout.target_file_size_bytes()))
+        .with_write_batch_size(layout.write_batch_rows().get())
+        .with_writer_properties(layout.writer_properties())
         .with_commit_properties(commit_properties);
 
     let committed_table = match write.await {
@@ -663,29 +848,6 @@ pub async fn write_exact_delta_plan(
         );
     }
 
-    let observed_marker = match read_marker(&committed_table, spec.marker()).await {
-        Ok(marker) => marker,
-        Err(source) => {
-            return unknown(
-                spec,
-                ControlledDeltaWriteUnknownStage::ReadMarkerAfterWrite,
-                "commit returned but its application marker could not be read back",
-                Some(source),
-            );
-        }
-    };
-    if observed_marker != Some(spec.marker.application_version) {
-        return unknown(
-            spec,
-            ControlledDeltaWriteUnknownStage::ReadMarkerAfterWrite,
-            format!(
-                "commit returned but marker readback was {observed_marker:?}, expected {}",
-                spec.marker.application_version
-            ),
-            None,
-        );
-    }
-
     let readback = match readback_commit(&committed_table, spec, &session_id).await {
         Ok(readback) => readback,
         Err(unknown) => {
@@ -701,7 +863,12 @@ pub async fn write_exact_delta_plan(
         committed: committed_pin.clone(),
         operation_id: spec.operation_id,
         writer_generation: spec.writer_generation,
-        marker_evidence: marker_evidence(spec.marker.clone(), committed_pin),
+        layout: spec.layout,
+        marker_evidence: marker_evidence(
+            spec.marker.clone(),
+            committed_pin,
+            MarkerCommitVersionEvidence::ExactCommitEntry(readback.transaction_commit_version),
+        ),
         session_id,
         read_version_evidence: readback.read_version_evidence,
         num_retries: readback.num_retries,
@@ -752,27 +919,6 @@ pub(crate) async fn readback_exact_delta_commit(
             None,
         ));
     }
-    let observed_marker = read_marker(committed_table, spec.marker())
-        .await
-        .map_err(|source| {
-            unknown_value(
-                spec,
-                ControlledDeltaWriteUnknownStage::ReadMarkerAfterWrite,
-                "failed to read the application marker from the exact restart snapshot",
-                Some(source),
-            )
-        })?;
-    if observed_marker != Some(spec.marker.application_version) {
-        return Err(unknown_value(
-            spec,
-            ControlledDeltaWriteUnknownStage::ReadMarkerAfterWrite,
-            format!(
-                "restart marker readback was {observed_marker:?}, expected {}",
-                spec.marker.application_version
-            ),
-            None,
-        ));
-    }
     let readback = readback_commit(committed_table, spec, recorded_session_id).await?;
     Ok(CommittedDeltaWrite {
         table: committed_table.clone(),
@@ -780,7 +926,12 @@ pub(crate) async fn readback_exact_delta_commit(
         committed: committed_pin.clone(),
         operation_id: spec.operation_id,
         writer_generation: spec.writer_generation,
-        marker_evidence: marker_evidence(spec.marker.clone(), committed_pin),
+        layout: spec.layout,
+        marker_evidence: marker_evidence(
+            spec.marker.clone(),
+            committed_pin,
+            MarkerCommitVersionEvidence::ExactCommitEntry(readback.transaction_commit_version),
+        ),
         session_id: recorded_session_id.to_owned(),
         read_version_evidence: readback.read_version_evidence,
         num_retries: readback.num_retries,
@@ -825,6 +976,26 @@ fn controlled_commit_properties(
             META_WRITE_PRIMITIVE.to_owned(),
             Value::String(spec.mode.as_str().to_owned()),
         ),
+        (
+            META_TARGET_FILE_SIZE_BYTES.to_owned(),
+            Value::from(spec.layout.target_file_size_bytes().get()),
+        ),
+        (
+            META_WRITE_BATCH_ROWS.to_owned(),
+            Value::from(spec.layout.write_batch_rows().get() as u64),
+        ),
+        (
+            META_MAX_ROW_GROUP_ROWS.to_owned(),
+            Value::from(spec.layout.max_row_group_rows().get() as u64),
+        ),
+        (
+            META_MAX_ROW_GROUP_BYTES.to_owned(),
+            Value::from(spec.layout.max_row_group_bytes().get() as u64),
+        ),
+        (
+            META_PARQUET_COMPRESSION.to_owned(),
+            Value::String(spec.layout.parquet_compression().to_owned()),
+        ),
     ]);
     metadata.extend(spec.commit_metadata.clone());
 
@@ -852,14 +1023,58 @@ async fn readback_commit(
     spec: &ControlledDeltaWriteSpec,
     session_id: &str,
 ) -> Result<CommitReadback, ControlledDeltaWriteUnknown> {
-    let commit = read_exact_commit_info(table).await.map_err(|source| {
+    let entry = read_exact_commit_entry(table).await.map_err(|source| {
         unknown_value(
             spec,
             ControlledDeltaWriteUnknownStage::ReadCommitHistory,
-            format!("exact committed history entry could not be loaded: {source}"),
+            format!("exact committed log entry could not be loaded: {source}"),
             None,
         )
     })?;
+    let transaction = match entry.application_transactions() {
+        [transaction] => transaction,
+        [] => {
+            return Err(unknown_value(
+                spec,
+                ControlledDeltaWriteUnknownStage::ValidateCommitReadback,
+                format!(
+                    "exact commit {} contains no application transaction action",
+                    entry.version()
+                ),
+                None,
+            ));
+        }
+        transactions => {
+            return Err(unknown_value(
+                spec,
+                ControlledDeltaWriteUnknownStage::ValidateCommitReadback,
+                format!(
+                    "exact commit {} contains {} application transaction actions, expected one",
+                    entry.version(),
+                    transactions.len()
+                ),
+                None,
+            ));
+        }
+    };
+    if transaction.app_id != spec.marker.application_id
+        || transaction.version != spec.marker.application_version
+    {
+        return Err(unknown_value(
+            spec,
+            ControlledDeltaWriteUnknownStage::ValidateCommitReadback,
+            format!(
+                "exact commit {} transaction action was {:?}@{}, expected {:?}@{}",
+                entry.version(),
+                transaction.app_id,
+                transaction.version,
+                spec.marker.application_id,
+                spec.marker.application_version
+            ),
+            None,
+        ));
+    }
+    let commit = entry.commit_info();
 
     let expectations = [
         (
@@ -890,6 +1105,26 @@ async fn readback_commit(
         (
             META_WRITE_PRIMITIVE,
             Value::String(spec.mode.as_str().to_owned()),
+        ),
+        (
+            META_TARGET_FILE_SIZE_BYTES,
+            Value::from(spec.layout.target_file_size_bytes().get()),
+        ),
+        (
+            META_WRITE_BATCH_ROWS,
+            Value::from(spec.layout.write_batch_rows().get() as u64),
+        ),
+        (
+            META_MAX_ROW_GROUP_ROWS,
+            Value::from(spec.layout.max_row_group_rows().get() as u64),
+        ),
+        (
+            META_MAX_ROW_GROUP_BYTES,
+            Value::from(spec.layout.max_row_group_bytes().get() as u64),
+        ),
+        (
+            META_PARQUET_COMPRESSION,
+            Value::String(spec.layout.parquet_compression().to_owned()),
         ),
     ];
     for (key, expected) in expectations {
@@ -961,12 +1196,14 @@ async fn readback_commit(
     Ok(CommitReadback {
         read_version_evidence,
         num_retries,
+        transaction_commit_version: entry.version(),
     })
 }
 
 struct CommitReadback {
     read_version_evidence: CommitReadVersionEvidence,
     num_retries: u64,
+    transaction_commit_version: u64,
 }
 
 fn reserved_commit_metadata_key(key: &str) -> bool {
@@ -980,6 +1217,11 @@ fn reserved_commit_metadata_key(key: &str) -> bool {
             | META_APPLICATION_ID
             | META_APPLICATION_VERSION
             | META_WRITE_PRIMITIVE
+            | META_TARGET_FILE_SIZE_BYTES
+            | META_WRITE_BATCH_ROWS
+            | META_MAX_ROW_GROUP_ROWS
+            | META_MAX_ROW_GROUP_BYTES
+            | META_PARQUET_COMPRESSION
     )
 }
 
@@ -993,11 +1235,12 @@ fn observed_pin(table: &DeltaTable) -> Result<ExactDeltaPin, String> {
 fn marker_evidence(
     marker: ApplicationTransactionMarker,
     observed_in: ExactDeltaPin,
+    commit_version_evidence: MarkerCommitVersionEvidence,
 ) -> ApplicationMarkerEvidence {
     ApplicationMarkerEvidence {
         marker,
         observed_in,
-        commit_version_evidence: MarkerCommitVersionEvidence::NotExposedByPinnedSnapshotApi,
+        commit_version_evidence,
     }
 }
 
@@ -1075,9 +1318,11 @@ fn hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fs;
+    use std::fs::File;
 
-    use arrow_array::{Int64Array, RecordBatch};
+    use arrow_array::{Int64Array, RecordBatch, StringArray};
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::execution::SessionStateBuilder;
     use datafusion::prelude::{SessionConfig, SessionContext};
@@ -1085,6 +1330,7 @@ mod tests {
     use deltalake::delta_datafusion::planner::DeltaPlanner;
     use deltalake::kernel::engine::arrow_conversion::TryIntoKernel as _;
     use deltalake::operations::create::CreateBuilder;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     use tempfile::TempDir;
     use url::Url;
 
@@ -1101,16 +1347,20 @@ mod tests {
         let table_path = temporary.path().join("table");
         fs::create_dir_all(&table_path).expect("create Delta write fixture directory");
         let root = Url::from_directory_path(&table_path).expect("fixture file URL");
-        let schema = Schema::new(vec![Field::new("value", DataType::Int64, false)]);
+        let schema = Schema::new(vec![value_field()]);
         let kernel: deltalake::kernel::StructType = (&schema)
             .try_into_kernel()
             .expect("Arrow fixture schema converts to Delta");
 
-        CreateBuilder::new()
-            .with_location(root.to_string())
-            .with_table_name("controlled_delta_write_fixture")
-            .with_save_mode(SaveMode::ErrorIfExists)
-            .with_columns(kernel.fields().cloned())
+        ControlledDeltaHistoryProperties::try_new("value")
+            .expect("history creation properties")
+            .apply_to(
+                CreateBuilder::new()
+                    .with_location(root.to_string())
+                    .with_table_name("controlled_delta_write_fixture")
+                    .with_save_mode(SaveMode::ErrorIfExists)
+                    .with_columns(kernel.fields().cloned()),
+            )
             .await
             .expect("create controlled Delta write fixture");
 
@@ -1127,13 +1377,16 @@ mod tests {
         }
     }
 
+    fn value_field() -> Field {
+        Field::new("value", DataType::Int64, false).with_metadata(HashMap::from([(
+            "codefabric.semantic_type".to_owned(),
+            "signed-test-value".to_owned(),
+        )]))
+    }
+
     fn batch(value: i64) -> RecordBatch {
         RecordBatch::try_new(
-            Arc::new(Schema::new(vec![Field::new(
-                "value",
-                DataType::Int64,
-                false,
-            )])),
+            Arc::new(Schema::new(vec![value_field()])),
             vec![Arc::new(Int64Array::from(vec![value]))],
         )
         .expect("fixture batch")
@@ -1197,6 +1450,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn history_creation_contract_sets_cdf_stats_and_feature_properties_at_version_zero() {
+        let fixture = fixture().await;
+        let configuration = fixture
+            .table
+            .snapshot()
+            .expect("created history snapshot")
+            .metadata()
+            .configuration();
+        assert_eq!(
+            configuration
+                .get("delta.enableChangeDataFeed")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            configuration
+                .get("delta.dataSkippingStatsColumns")
+                .map(String::as_str),
+            Some("value")
+        );
+        assert_eq!(
+            configuration
+                .get("delta.enableDeletionVectors")
+                .map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            configuration.get("delta.appendOnly").map(String::as_str),
+            Some("true")
+        );
+    }
+
+    #[tokio::test]
     async fn commit_preserves_session_marker_provenance_and_zero_retry() {
         let fixture = fixture().await;
         let expected_metadata = BTreeMap::from([
@@ -1237,11 +1523,53 @@ mod tests {
             transaction.writer_generation()
         );
         assert_eq!(committed.marker_evidence().marker(), transaction.marker());
+        assert_eq!(
+            committed.marker_evidence().commit_version_evidence(),
+            MarkerCommitVersionEvidence::ExactCommitEntry(1)
+        );
         assert_eq!(committed.commit_metadata(), &expected_metadata);
+        assert_eq!(committed.layout(), ControlledDeltaWriteLayout::default());
         assert_eq!(
             committed.marker_evidence().observed_in(),
             committed.committed()
         );
+
+        let add_actions = committed
+            .table
+            .snapshot()
+            .expect("committed exact snapshot")
+            .add_actions_table(true)
+            .expect("flatten committed add actions");
+        let relative_path = add_actions
+            .column_by_name("path")
+            .expect("add path")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("string add path")
+            .value(0);
+        let table_path = committed
+            .table
+            .table_url()
+            .to_file_path()
+            .expect("local fixture table path");
+        let parquet = ParquetRecordBatchReaderBuilder::try_new(
+            File::open(table_path.join(relative_path)).expect("open committed Parquet file"),
+        )
+        .expect("read committed Parquet metadata");
+        assert_eq!(
+            parquet
+                .schema()
+                .field_with_name("value")
+                .expect("written value field")
+                .metadata()
+                .get("codefabric.semantic_type")
+                .map(String::as_str),
+            Some("signed-test-value")
+        );
+        assert!(matches!(
+            parquet.metadata().row_group(0).column(0).compression(),
+            Compression::ZSTD(_)
+        ));
     }
 
     #[tokio::test]
@@ -1317,14 +1645,49 @@ mod tests {
         let readback =
             readback_exact_delta_commit(&exact_version_one, &transaction, &recorded_session_id)
                 .await
-                .expect("restart proof must read version one's commitInfo directly");
+                .expect("restart proof must read version one's commitInfo and txn directly");
         assert_eq!(readback.committed().version(), 1);
+        assert_eq!(
+            readback.marker_evidence().commit_version_evidence(),
+            MarkerCommitVersionEvidence::ExactCommitEntry(1)
+        );
         assert_eq!(
             readback
                 .commit_metadata()
                 .get("codefabric.materialization.row_count"),
             Some(&Value::from(1_u64))
         );
+    }
+
+    #[tokio::test]
+    async fn restart_readback_rejects_txn_drift_in_the_exact_commit_entry() {
+        let fixture = fixture().await;
+        let transaction = spec(&fixture.root, 0, 13);
+        let (session, input) = session_and_input(21);
+        let recorded_session_id = session.session_id().to_owned();
+        let committed = write_exact_delta_plan(&fixture.table, &transaction, input).await;
+        let ControlledDeltaWriteOutcome::Committed(committed) = committed else {
+            panic!("expected controlled version one, got {committed:?}");
+        };
+        let exact_version_one = committed.into_table();
+
+        assert_eq!(
+            read_marker(&exact_version_one, transaction.marker())
+                .await
+                .expect("read cached exact-snapshot marker before corruption"),
+            Some(transaction.marker().application_version())
+        );
+        rewrite_exact_transaction_app_id(&fixture.root, 1, "codefabric/test/corrupted-marker");
+
+        let error =
+            readback_exact_delta_commit(&exact_version_one, &transaction, &recorded_session_id)
+                .await
+                .expect_err("exact commit txn drift must fail despite cached snapshot evidence");
+        assert_eq!(
+            error.stage(),
+            ControlledDeltaWriteUnknownStage::ValidateCommitReadback
+        );
+        assert!(error.detail().contains("transaction action was"));
     }
 
     #[tokio::test]
@@ -1353,6 +1716,32 @@ mod tests {
         ));
         assert!(exact_version_exists(&fixture.root, 1).await);
         assert!(!exact_version_exists(&fixture.root, 2).await);
+    }
+
+    fn rewrite_exact_transaction_app_id(root: &Url, version: u64, application_id: &str) {
+        let table_path = root
+            .to_file_path()
+            .expect("fixture Delta root must be a local path");
+        let commit_path = table_path
+            .join("_delta_log")
+            .join(format!("{version:020}.json"));
+        let input = fs::read_to_string(&commit_path).expect("read exact fixture commit");
+        let mut found = false;
+        let mut actions = Vec::new();
+        for line in input.lines() {
+            let mut action: Value = serde_json::from_str(line).expect("parse fixture action");
+            if let Some(transaction) = action.get_mut("txn").and_then(Value::as_object_mut) {
+                transaction.insert("appId".to_owned(), Value::String(application_id.to_owned()));
+                found = true;
+            }
+            actions.push(serde_json::to_string(&action).expect("serialize fixture action"));
+        }
+        assert!(
+            found,
+            "fixture commit must contain an application txn action"
+        );
+        fs::write(commit_path, format!("{}\n", actions.join("\n")))
+            .expect("rewrite exact fixture transaction action");
     }
 
     #[test]

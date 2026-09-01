@@ -14,4 +14,6 @@ GRPC_MESSAGE_OPTIONS = (
 def create_local_channel(target: str) -> grpc.aio.Channel:
     """Create the private asynchronous daemon channel with symmetric limits."""
 
+    if not target.startswith("unix:///") or target == "unix:///" or "\x00" in target:
+        raise ValueError("production daemon target must be an absolute Unix socket")
     return grpc.aio.insecure_channel(target, options=GRPC_MESSAGE_OPTIONS)

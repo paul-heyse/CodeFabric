@@ -77,7 +77,7 @@ impl RetentionAttempt {
         self.validated.execution_owner()
     }
 
-    /// Exact model-selected retention policy.
+    /// Exact policy-selected retention contract.
     #[must_use]
     pub fn policy(self) -> RetentionPolicyRef {
         let FabricCommandPayload::ApplyRetention { policy, .. } = self.command().payload else {
@@ -520,7 +520,7 @@ mod tests {
     use crate::fabric::command::{
         ActorId, AdmissionContext, AdmissionOutcome, AuthorizationDecision, AuthorizationRef,
         CommandEvent, CommandIdentity, CommandOwnership, CommandPins, CommandReducer,
-        CompilerReleaseRef, IdempotencyKey, LeaseId, ModelHeadRef, PrincipalId, ProviderSetRef,
+        IdempotencyKey, InputReleaseRef, LeaseId, PrincipalId, ProgramReleaseRef, ProviderSetRef,
         ResourceEnvelopeRef, SourceGeneration, WriterFence,
     };
 
@@ -941,8 +941,17 @@ mod tests {
             expected_head: ExpectedHead::Empty,
             writer_fence,
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes([0x05; 32]),
-                model_head: ModelHeadRef::from_bytes([0x06; 32]),
+                input_release: InputReleaseRef::from_bytes([0x05; 32]),
+                program_release: ProgramReleaseRef::from_bytes([0x06; 32]),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    [0x06; 32],
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(
+                    [0x06; 32],
+                ),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(
+                    [0x06; 32],
+                ),
                 source_generation: SourceGeneration::new(7),
                 provider_set: ProviderSetRef::from_bytes([0x08; 32]),
             },

@@ -111,8 +111,10 @@ def test_relational_plan_v3_dependency_graph_without_activation() -> None:
         (
             "just",
             "plan-dependency-check",
-            "docs/plans/"
-            "codefabric_execution_proved_relational_data_fabric_implementation_plan_v3_2026-08-30.md",
+            (
+                "docs/plans/"
+                "codefabric_execution_proved_relational_data_fabric_implementation_plan_v3_2026-08-30.md"
+            ),
         ),
         cwd=ROOT,
         check=False,
@@ -120,7 +122,7 @@ def test_relational_plan_v3_dependency_graph_without_activation() -> None:
         text=True,
     )
     assert completed.returncode == 0, completed.stderr
-    assert "14 packets" in completed.stdout
+    assert "15 packets" in completed.stdout
 
 
 @pytest.mark.parametrize("mode", ["missing", "empty"])

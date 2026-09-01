@@ -7,6 +7,8 @@ files:
   - src/**/*.rs
 ignores:
   - src/tree_sitter_adapter.rs
+  - src/provider_native_syntax.rs
+  - src/provider_raw_kinds.rs
   - src/contracts/artifacts.rs
 rule:
   any:

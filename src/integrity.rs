@@ -7,13 +7,13 @@
 use std::fmt::Write as _;
 
 #[cfg(any(
-    all(feature = "canonical-json", not(feature = "model-compiler")),
+    feature = "canonical-json",
     feature = "daemon",
     feature = "data-fabric",
     feature = "fact-generation",
     feature = "repository-state"
 ))]
-pub use crate::model_generated::identity_recipes::{CacheKeyDomain, IntegrityDomain};
+pub use crate::identity_recipes::{CacheKeyDomain, IntegrityDomain};
 
 /// Compute an unframed BLAKE3-256 content digest.
 #[must_use]
@@ -62,7 +62,7 @@ impl IntegrityHasher {
     /// Start a domain-separated content-integrity digest selected from the
     /// governed hash-purpose registry.
     #[cfg(any(
-        all(feature = "canonical-json", not(feature = "model-compiler")),
+        feature = "canonical-json",
         feature = "daemon",
         feature = "data-fabric",
         feature = "fact-generation",
@@ -107,7 +107,7 @@ impl CacheKeyHasher {
     /// Start a domain-separated ephemeral cache key selected from the
     /// governed hash-purpose registry.
     #[cfg(any(
-        all(feature = "canonical-json", not(feature = "model-compiler")),
+        feature = "canonical-json",
         feature = "daemon",
         feature = "data-fabric",
         feature = "fact-generation",

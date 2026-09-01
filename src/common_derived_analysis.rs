@@ -1,7 +1,7 @@
 //! Versioned common graph and interprocedural analyses over accepted application facts.
 //!
 //! Input and output relation identities, field identities, family identities, authority, and
-//! semantic class are supplied by the active model. DataFusion performs typed relational
+//! semantic class come from the installed application contract. DataFusion performs typed relational
 //! deduplication and deterministic ordering at both sides of the application algorithm seam.
 //! Petgraph is used only for graph algorithms that are irreducible to the selected relational
 //! rung. Its `NodeIndex` values remain graph-local handles behind external canonical-ID maps and
@@ -57,7 +57,7 @@ type CanonicalIndex = NodeIndex<u32>;
 /// Exact immutable inputs repeated on every emitted row.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommonAnalysisProvenance {
-    pub model_epoch_id: [u8; 32],
+    pub fabric_epoch_id: [u8; 32],
     pub source_pin: [u8; 32],
     pub input_set_pin: [u8; 32],
     pub proof_pin: [u8; 32],
@@ -165,7 +165,7 @@ pub struct CommonDerivedAnalysisInput {
     pub changed_scopes: BTreeSet<CommonChangedScope>,
 }
 
-/// Model relation identities. Runtime logic never dispatches on their spellings.
+/// Application-owned relation identities. Runtime logic never dispatches on their spellings.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommonAnalysisRelations {
     pub cfg_nodes: RelationId,
@@ -179,10 +179,10 @@ pub struct CommonAnalysisRelations {
     pub invalidation: RelationId,
 }
 
-/// Physical field identities supplied by the model's schema contracts.
+/// Physical field identities supplied by the admitted schema contracts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommonAnalysisFields {
-    pub model_epoch_id: FieldId,
+    pub fabric_epoch_id: FieldId,
     pub source_pin: FieldId,
     pub input_set_pin: FieldId,
     pub proof_pin: FieldId,
@@ -213,7 +213,7 @@ pub struct CommonAnalysisFields {
 impl CommonAnalysisFields {
     fn all(&self) -> [&FieldId; 26] {
         [
-            &self.model_epoch_id,
+            &self.fabric_epoch_id,
             &self.source_pin,
             &self.input_set_pin,
             &self.proof_pin,
@@ -243,7 +243,7 @@ impl CommonAnalysisFields {
     }
 }
 
-/// Model family identities for every emitted semantic family.
+/// Application family identities for every emitted semantic family.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommonAnalysisFamilies {
     pub dominator: Arc<str>,
@@ -275,7 +275,7 @@ impl CommonAnalysisFamilies {
     }
 }
 
-/// Authority identity is model data, while its legal role is an exhaustive Rust contract.
+/// Authority identity is typed input data, while its legal role is an exhaustive Rust contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CommonAnalysisAuthority {
     ApplicationOwned(Arc<str>),
@@ -289,7 +289,7 @@ pub enum CommonAnalysisSemanticClass {
     Judgment(Arc<str>),
 }
 
-/// Complete model binding for the common-analysis boundary.
+/// Complete typed binding for the common-analysis boundary.
 #[derive(Clone, Debug)]
 pub struct CommonAnalysisBindings {
     pub relations: CommonAnalysisRelations,
@@ -300,7 +300,7 @@ pub struct CommonAnalysisBindings {
 }
 
 impl CommonAnalysisBindings {
-    /// Validate all model identities and the authority/semantic boundary.
+    /// Validate all binding identities and the authority/semantic boundary.
     pub fn validate(&self) -> Result<(), CommonDerivedAnalysisError> {
         let mut relations = BTreeSet::new();
         for relation in [
@@ -477,7 +477,7 @@ pub enum CommonAnalysisDependency {
     OutputRelation(RelationId),
     Field(FieldId),
     Family(Arc<str>),
-    ModelEpoch([u8; 32]),
+    FabricEpoch([u8; 32]),
     SourcePin([u8; 32]),
     InputSetPin([u8; 32]),
     ProofPin([u8; 32]),
@@ -546,7 +546,7 @@ struct FactRow {
 struct UnknownRow {
     family: Arc<str>,
     subject: Option<Arc<str>>,
-    reason: &'static str,
+    reason: Arc<str>,
     detail: Option<Arc<str>>,
     iteration: u32,
 }
@@ -608,14 +608,14 @@ impl AnalysisState {
         &mut self,
         family: &Arc<str>,
         subject: Option<Arc<str>>,
-        reason: &'static str,
+        reason: impl Into<Arc<str>>,
         detail: Option<Arc<str>>,
         iteration: u32,
     ) {
         self.unknowns.insert(UnknownRow {
             family: Arc::clone(family),
             subject,
-            reason,
+            reason: reason.into(),
             detail,
             iteration,
         });
@@ -625,11 +625,11 @@ impl AnalysisState {
 /// Closed errors at the common-analysis boundary.
 #[derive(Debug, Error)]
 pub enum CommonDerivedAnalysisError {
-    #[error("duplicate model relation identity {0:?}")]
+    #[error("duplicate relation identity {0:?}")]
     DuplicateRelation(String),
-    #[error("duplicate model field identity {0:?}")]
+    #[error("duplicate field identity {0:?}")]
     DuplicateField(String),
-    #[error("duplicate model family identity {0:?}")]
+    #[error("duplicate family identity {0:?}")]
     DuplicateFamily(String),
     #[error("invalid {kind} identity {value:?}")]
     InvalidIdentity { kind: &'static str, value: String },
@@ -803,7 +803,7 @@ fn validate_provenance(
     provenance: &CommonAnalysisProvenance,
 ) -> Result<(), CommonDerivedAnalysisError> {
     for (name, value) in [
-        ("model_epoch_id", provenance.model_epoch_id),
+        ("fabric_epoch_id", provenance.fabric_epoch_id),
         ("source_pin", provenance.source_pin),
         ("input_set_pin", provenance.input_set_pin),
         ("proof_pin", provenance.proof_pin),
@@ -850,21 +850,46 @@ fn validate_input(input: &CommonDerivedAnalysisInput) -> Result<(), CommonDerive
             validate_text(kind, value)?;
         }
     }
-    let mut call_sites = BTreeSet::new();
+    let mut caller_by_call_site = BTreeMap::new();
+    let mut call_targets = BTreeSet::new();
     for call in &input.calls {
         validate_text("call site", &call.call_site_id)?;
         validate_text("caller", &call.caller_id)?;
-        if !call_sites.insert(call.call_site_id.as_ref()) {
+        if let Some(caller) =
+            caller_by_call_site.insert(call.call_site_id.as_ref(), call.caller_id.as_ref())
+            && caller != call.caller_id.as_ref()
+        {
             return Err(CommonDerivedAnalysisError::InvalidInput(format!(
-                "duplicate call site {}",
+                "call site {} has conflicting callers",
                 call.call_site_id
             )));
         }
-        match &call.resolution {
-            CommonCallResolution::Exact { callee_id } => validate_text("callee", callee_id)?,
-            CommonCallResolution::Dynamic { reason } | CommonCallResolution::Unknown { reason } => {
-                validate_text("call gap", reason)?
+        let (resolution_kind, resolution_value) = match &call.resolution {
+            CommonCallResolution::Exact { callee_id } => {
+                validate_text("callee", callee_id)?;
+                ("exact", callee_id.as_ref())
             }
+            CommonCallResolution::Dynamic { reason } | CommonCallResolution::Unknown { reason } => {
+                validate_text("call gap", reason)?;
+                (
+                    if matches!(&call.resolution, CommonCallResolution::Dynamic { .. }) {
+                        "dynamic"
+                    } else {
+                        "unknown"
+                    },
+                    reason.as_ref(),
+                )
+            }
+        };
+        if !call_targets.insert((
+            call.call_site_id.as_ref(),
+            resolution_kind,
+            resolution_value,
+        )) {
+            return Err(CommonDerivedAnalysisError::InvalidInput(format!(
+                "duplicate call target observation for {}",
+                call.call_site_id
+            )));
         }
     }
     let mut callables = BTreeSet::new();
@@ -1267,7 +1292,7 @@ fn derive_cfg_families(
         }
 
         let mut post_graph = graph.clone();
-        // Empty text is rejected for model identities, so this graph-local sentinel cannot
+        // Empty text is rejected for binding identities, so this graph-local sentinel cannot
         // collide with a canonical node and is never emitted.
         let virtual_exit = post_graph.add_node(Arc::from(""));
         for exit in &exits {
@@ -1577,16 +1602,17 @@ fn derive_call_families(
     for call in &input.calls {
         let (reason, detail) = match &call.resolution {
             CommonCallResolution::Exact { .. } => continue,
-            CommonCallResolution::Dynamic { reason } => {
-                ("DYNAMIC_DISPATCH_TARGET_UNKNOWN", Arc::clone(reason))
-            }
-            CommonCallResolution::Unknown { reason } => ("CALL_TARGET_UNKNOWN", Arc::clone(reason)),
+            CommonCallResolution::Dynamic { reason } => (
+                Arc::from("DYNAMIC_DISPATCH_TARGET_UNKNOWN"),
+                Arc::clone(reason),
+            ),
+            CommonCallResolution::Unknown { reason } => (Arc::clone(reason), Arc::clone(reason)),
         };
         incomplete.insert(Arc::clone(&call.caller_id));
         state.unknown(
             &bindings.families.call_graph,
             Some(Arc::clone(&call.call_site_id)),
-            reason,
+            Arc::clone(&reason),
             Some(detail),
             0,
         );
@@ -1602,7 +1628,7 @@ fn derive_call_families(
             state.unknown(
                 family,
                 Some(Arc::clone(&call.call_site_id)),
-                reason,
+                Arc::clone(&reason),
                 Some(Arc::from("call topology is incomplete")),
                 0,
             );
@@ -2344,7 +2370,7 @@ fn apply_upstream_coverage(
 fn common_schema_fields(bindings: &CommonAnalysisBindings) -> Vec<Field> {
     vec![
         Field::new(
-            bindings.fields.model_epoch_id.as_str(),
+            bindings.fields.fabric_epoch_id.as_str(),
             DataType::FixedSizeBinary(32),
             false,
         ),
@@ -2383,7 +2409,7 @@ fn common_columns(
     rows: usize,
 ) -> Vec<ArrayRef> {
     vec![
-        fixed_repeat(Some(&provenance.model_epoch_id), rows),
+        fixed_repeat(Some(&provenance.fabric_epoch_id), rows),
         fixed_repeat(Some(&provenance.source_pin), rows),
         fixed_repeat(Some(&provenance.input_set_pin), rows),
         fixed_repeat(Some(&provenance.proof_pin), rows),
@@ -2496,7 +2522,7 @@ fn unknown_batch(
                 .collect::<Vec<_>>(),
         )),
         Arc::new(StringArray::from_iter_values(
-            rows.iter().map(|row| row.reason),
+            rows.iter().map(|row| row.reason.as_ref()),
         )),
         Arc::new(StringArray::from(
             rows.iter()
@@ -2585,7 +2611,7 @@ fn completeness_receipt(
 ) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"codefabric.common-analysis.completeness.v1\0");
-    hasher.update(&provenance.model_epoch_id);
+    hasher.update(&provenance.fabric_epoch_id);
     hasher.update(&provenance.source_pin);
     hasher.update(&provenance.input_set_pin);
     hasher.update(&provenance.proof_pin);
@@ -2753,7 +2779,7 @@ fn observe_dependencies(
         dependencies.insert(CommonAnalysisDependency::Family(Arc::clone(family)));
     }
     dependencies.extend([
-        CommonAnalysisDependency::ModelEpoch(input.provenance.model_epoch_id),
+        CommonAnalysisDependency::FabricEpoch(input.provenance.fabric_epoch_id),
         CommonAnalysisDependency::SourcePin(input.provenance.source_pin),
         CommonAnalysisDependency::InputSetPin(input.provenance.input_set_pin),
         CommonAnalysisDependency::ProofPin(input.provenance.proof_pin),
@@ -2870,8 +2896,146 @@ fn hex_full(value: &[u8]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use serde_json::Value;
+
     use super::*;
+
+    const WP33_EXPECTATIONS: &str =
+        include_str!("../contracts/acceptance/relational-fabric-v3/expectations.jsonl");
+    const WP33_FIXTURES: &str =
+        include_str!("../contracts/acceptance/relational-fabric-v3/negative-fixtures.jsonl");
+
+    fn claim_003() -> Value {
+        WP33_EXPECTATIONS
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("valid WP33 expectation row"))
+            .find(|row| row["claim_id"] == "RFV3-CLAIM-003")
+            .expect("frozen Claim 003 expectation")
+    }
+
+    fn claim_003_fixture(kind: &str) -> Value {
+        WP33_FIXTURES
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("valid WP33 fixture row"))
+            .find(|row| row["claim_id"] == "RFV3-CLAIM-003" && row["kind"] == kind)
+            .unwrap_or_else(|| panic!("frozen Claim 003 {kind} fixture"))
+    }
+
+    fn artifact_column(relation: &Value, name: &str) -> usize {
+        relation["columns"]
+            .as_array()
+            .expect("artifact relation columns")
+            .iter()
+            .position(|column| column == name)
+            .unwrap_or_else(|| panic!("artifact relation lacks {name}"))
+    }
+
+    fn claim_003_calls(provider: &Value, inputs: &Value) -> Vec<CommonCallSite> {
+        let occurrences = &inputs["canonical_call_occurrences"];
+        let callables = &inputs["canonical_callable_lookup"];
+        let provider_ordinal = artifact_column(provider, "call_occurrence_ordinal");
+        let provider_start = artifact_column(provider, "start_byte");
+        let provider_end = artifact_column(provider, "end_byte");
+        let provider_target = artifact_column(provider, "qualified_target");
+        let occurrence_ordinal = artifact_column(occurrences, "call_occurrence_ordinal");
+        let occurrence_site = artifact_column(occurrences, "call_site_id");
+        let occurrence_owner = artifact_column(occurrences, "owner_id");
+        let occurrence_file = artifact_column(occurrences, "file_id");
+        let occurrence_digest = artifact_column(occurrences, "content_digest");
+        let occurrence_start = artifact_column(occurrences, "start_byte");
+        let occurrence_end = artifact_column(occurrences, "end_byte");
+        let callable_target = artifact_column(callables, "qualified_target");
+        let callable_id = artifact_column(callables, "callable_id");
+        let source = &provider["source_image"];
+
+        let mut calls = provider["rows"]
+            .as_array()
+            .expect("Claim 003 provider rows")
+            .iter()
+            .map(|provider_row| {
+                let provider_row = provider_row.as_array().expect("Claim 003 provider row");
+                let occurrence = occurrences["rows"]
+                    .as_array()
+                    .expect("Claim 003 canonical occurrences")
+                    .iter()
+                    .find(|occurrence| {
+                        let occurrence = occurrence.as_array().unwrap();
+                        occurrence[occurrence_ordinal] == provider_row[provider_ordinal]
+                            && occurrence[occurrence_start] == provider_row[provider_start]
+                            && occurrence[occurrence_end] == provider_row[provider_end]
+                            && occurrence[occurrence_file] == source["file_id"]
+                            && occurrence[occurrence_digest] == source["content_digest"]
+                    })
+                    .expect("exact Claim 003 provider/canonical occurrence join")
+                    .as_array()
+                    .unwrap();
+                let callable = callables["rows"]
+                    .as_array()
+                    .expect("Claim 003 callable lookup")
+                    .iter()
+                    .find(|callable| {
+                        callable.as_array().unwrap()[callable_target]
+                            == provider_row[provider_target]
+                    })
+                    .expect("exact Claim 003 target/callable join")
+                    .as_array()
+                    .unwrap();
+                CommonCallSite {
+                    call_site_id: Arc::from(
+                        occurrence[occurrence_site]
+                            .as_str()
+                            .expect("Claim 003 call-site identity"),
+                    ),
+                    caller_id: Arc::from(
+                        occurrence[occurrence_owner]
+                            .as_str()
+                            .expect("Claim 003 caller identity"),
+                    ),
+                    resolution: CommonCallResolution::Exact {
+                        callee_id: Arc::from(
+                            callable[callable_id]
+                                .as_str()
+                                .expect("Claim 003 callable identity"),
+                        ),
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for remainder in provider["coverage_terminal"]["remainders"]
+            .as_array()
+            .expect("Claim 003 target-set remainders")
+        {
+            let call_site_id = remainder["call_site_id"]
+                .as_str()
+                .expect("Claim 003 remainder call-site identity");
+            let occurrence = occurrences["rows"]
+                .as_array()
+                .expect("Claim 003 canonical occurrences")
+                .iter()
+                .find(|occurrence| occurrence.as_array().unwrap()[occurrence_site] == call_site_id)
+                .expect("Claim 003 remainder/canonical occurrence join")
+                .as_array()
+                .unwrap();
+            calls.push(CommonCallSite {
+                call_site_id: Arc::from(call_site_id),
+                caller_id: Arc::from(
+                    occurrence[occurrence_owner]
+                        .as_str()
+                        .expect("Claim 003 remainder owner"),
+                ),
+                resolution: CommonCallResolution::Unknown {
+                    reason: Arc::from(
+                        remainder["reason"]
+                            .as_str()
+                            .expect("Claim 003 typed remainder reason"),
+                    ),
+                },
+            });
+        }
+        calls
+    }
 
     fn relation(value: &str) -> RelationId {
         RelationId::new(value).expect("test relation")
@@ -2881,7 +3045,7 @@ mod tests {
         FieldId::new(value).expect("test field")
     }
 
-    fn bindings() -> CommonAnalysisBindings {
+    pub(crate) fn bindings() -> CommonAnalysisBindings {
         CommonAnalysisBindings {
             relations: CommonAnalysisRelations {
                 cfg_nodes: relation("input.cfg_nodes"),
@@ -2895,7 +3059,7 @@ mod tests {
                 invalidation: relation("output.common_invalidation"),
             },
             fields: CommonAnalysisFields {
-                model_epoch_id: field("model_epoch_id"),
+                fabric_epoch_id: field("fabric_epoch_id"),
                 source_pin: field("source_pin"),
                 input_set_pin: field("input_set_pin"),
                 proof_pin: field("proof_pin"),
@@ -2965,7 +3129,7 @@ mod tests {
     fn input() -> CommonDerivedAnalysisInput {
         CommonDerivedAnalysisInput {
             provenance: CommonAnalysisProvenance {
-                model_epoch_id: [1; 32],
+                fabric_epoch_id: [1; 32],
                 source_pin: [2; 32],
                 input_set_pin: [3; 32],
                 proof_pin: [4; 32],
@@ -3052,6 +3216,155 @@ mod tests {
 
     fn optional_string(array: &StringArray, row: usize) -> Option<&str> {
         (!array.is_null(row)).then(|| array.value(row))
+    }
+
+    fn claim_003_input(provider: &Value, inputs: &Value) -> CommonDerivedAnalysisInput {
+        let mut analysis = input();
+        analysis.calls = claim_003_calls(provider, inputs);
+        let terminal = &provider["coverage_terminal"];
+        let coverage = analysis
+            .coverage
+            .get_mut(&CommonInputFamily::CallTargets)
+            .expect("Claim 003 call-target coverage");
+        coverage.requested_units = terminal["requested_call_sites"]
+            .as_u64()
+            .expect("Claim 003 requested call sites");
+        coverage.completed_units = terminal["completed_call_sites"]
+            .as_u64()
+            .expect("Claim 003 completed call sites");
+        coverage.remainder_units = u64::try_from(
+            terminal["remainders"]
+                .as_array()
+                .expect("Claim 003 coverage remainders")
+                .len(),
+        )
+        .unwrap();
+        analysis
+    }
+
+    fn expected_call_facts(decoded: &Value) -> BTreeSet<(String, String, String)> {
+        let call_site = artifact_column(decoded, "call_site_id");
+        let caller = artifact_column(decoded, "caller_id");
+        let callee = artifact_column(decoded, "callee_id");
+        decoded["rows"]
+            .as_array()
+            .expect("Claim 003 expected rows")
+            .iter()
+            .map(|row| {
+                let row = row.as_array().expect("Claim 003 expected row");
+                (
+                    row[call_site].as_str().unwrap().to_owned(),
+                    row[caller].as_str().unwrap().to_owned(),
+                    row[callee].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect()
+    }
+
+    fn actual_call_facts(
+        output: &CommonDerivedAnalysisOutput,
+    ) -> BTreeSet<(String, String, String)> {
+        let families = strings(&output.facts, "family_id");
+        let callers = strings(&output.facts, "subject_id");
+        let callees = strings(&output.facts, "object_id");
+        let call_sites = strings(&output.facts, "value_id");
+        (0..output.facts.num_rows())
+            .filter(|row| families.value(*row) == "family.call")
+            .map(|row| {
+                (
+                    call_sites.value(row).to_owned(),
+                    callers.value(row).to_owned(),
+                    callees.value(row).to_owned(),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn wp38_claim_003_positive_executes_candidate_preserving_common_call_graph() {
+        let claim = claim_003();
+        let inputs = &claim["complete_input_universe"]["inputs"];
+        let analysis = claim_003_input(&inputs["provider_call_targets"], inputs);
+        let output =
+            analyze_common_derived(&SessionContext::new(), &analysis, &bindings(), bounds())
+                .await
+                .expect("execute production common call-graph analysis");
+
+        let actual = actual_call_facts(&output);
+        assert_eq!(actual, expected_call_facts(&claim["decoded_expectation"]));
+        assert_eq!(
+            actual
+                .iter()
+                .filter(|(site, _, _)| {
+                    site == "entity:call-site:308e2487678a1d769a48da4b4e39b713"
+                })
+                .count(),
+            2,
+            "both accepted provider candidates remain visible"
+        );
+    }
+
+    #[tokio::test]
+    async fn wp38_claim_003_causal_provider_target_changes_common_call_graph() {
+        let claim = claim_003();
+        let inputs = &claim["complete_input_universe"]["inputs"];
+        let fixture = claim_003_fixture("causal");
+        let baseline = claim_003_input(&inputs["provider_call_targets"], inputs);
+        let mut changed_provider = inputs["provider_call_targets"].clone();
+        *changed_provider
+            .pointer_mut(
+                fixture["mutation"]["json_pointer"]
+                    .as_str()
+                    .expect("Claim 003 causal pointer"),
+            )
+            .expect("Claim 003 causal target") = fixture["mutation"]["after"].clone();
+        let changed = claim_003_input(&changed_provider, inputs);
+
+        let baseline_output =
+            analyze_common_derived(&SessionContext::new(), &baseline, &bindings(), bounds())
+                .await
+                .expect("execute baseline common call graph");
+        let changed_output =
+            analyze_common_derived(&SessionContext::new(), &changed, &bindings(), bounds())
+                .await
+                .expect("execute causally changed common call graph");
+
+        let baseline_facts = actual_call_facts(&baseline_output);
+        let changed_facts = actual_call_facts(&changed_output);
+        assert_ne!(baseline_facts, changed_facts);
+        assert_eq!(
+            changed_facts,
+            expected_call_facts(&fixture["expected_decoded"])
+        );
+    }
+
+    #[tokio::test]
+    async fn wp38_claim_003_negative_preserves_known_fact_and_typed_unknown() {
+        let claim = claim_003();
+        let inputs = &claim["complete_input_universe"]["inputs"];
+        let fixture = claim_003_fixture("negative");
+        let provider = &fixture["mutation"]["after"];
+        let analysis = claim_003_input(provider, inputs);
+        let output =
+            analyze_common_derived(&SessionContext::new(), &analysis, &bindings(), bounds())
+                .await
+                .expect("execute partial production common call-graph analysis");
+
+        assert_eq!(
+            actual_call_facts(&output),
+            expected_call_facts(&fixture["expected_decoded"]["known_facts"])
+        );
+        let unknown = &fixture["expected_decoded"]["unknown_remainder"]["rows"][0];
+        assert!(contains_unknown(
+            &output,
+            "family.call",
+            unknown[0].as_str(),
+            unknown[2].as_str().expect("Claim 003 typed unknown reason"),
+        ));
+        assert_eq!(
+            fixture["expected_decoded"]["published_false_edges"],
+            serde_json::json!([])
+        );
     }
 
     #[tokio::test]

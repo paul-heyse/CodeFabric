@@ -30,11 +30,17 @@ def render_census(justfile_text: str) -> dict[str, Any]:
             recipe = match.group(1)
             continue
         command = raw_line.strip()
-        if recipe is None or "cargo nextest run" not in command or " -E " not in command:
+        if (
+            recipe is None
+            or "cargo nextest run" not in command
+            or " -E " not in command
+        ):
             continue
         selectors.append({"recipe": recipe, "command": " ".join(command.split())})
     if not selectors:
-        raise GateFilterCensusError("justfile contains no name-coupled nextest selectors")
+        raise GateFilterCensusError(
+            "justfile contains no name-coupled nextest selectors"
+        )
     return {
         "artifact_id": "codefabric.governance.gate-filter-census",
         "schema_version": 1,
@@ -57,7 +63,9 @@ def validate_census(
         raise GateFilterCensusError("gate-filter census identity is invalid")
     live = render_census(justfile_text)
     if manifest != live:
-        raise GateFilterCensusError("committed gate-filter census differs from justfile")
+        raise GateFilterCensusError(
+            "committed gate-filter census differs from justfile"
+        )
     selectors = manifest["selectors"]
     recipes = {entry["recipe"] for entry in selectors}
     if require_no_tests_fail:

@@ -50,10 +50,6 @@ macro_rules! define_command_effect_family {
 }
 
 define_command_effect_family!(
-    ModelMigrationCommandEffectPort,
-    "Effects for the `ApplyModelMigration` lifecycle command."
-);
-define_command_effect_family!(
     SourceWaveCommandEffectPort,
     "Effects for the `PublishSourceWave` lifecycle command."
 );
@@ -88,7 +84,6 @@ define_command_effect_family!(
 /// family remain data/model-driven behind its typed port; this router owns only the static command
 /// protocol distinction.
 pub struct FabricCommandEffectRouter {
-    model_migration: Arc<dyn ModelMigrationCommandEffectPort>,
     source_wave: Arc<dyn SourceWaveCommandEffectPort>,
     relation_publication: Arc<dyn RelationPublicationCommandEffectPort>,
     activation: Arc<dyn ActivationCommandEffectPort>,
@@ -102,7 +97,6 @@ impl std::fmt::Debug for FabricCommandEffectRouter {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("FabricCommandEffectRouter")
-            .field("model_migration", &"installed")
             .field("source_wave", &"installed")
             .field("relation_publication", &"installed")
             .field("activation", &"installed")
@@ -119,7 +113,6 @@ impl FabricCommandEffectRouter {
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        model_migration: Arc<dyn ModelMigrationCommandEffectPort>,
         source_wave: Arc<dyn SourceWaveCommandEffectPort>,
         relation_publication: Arc<dyn RelationPublicationCommandEffectPort>,
         activation: Arc<dyn ActivationCommandEffectPort>,
@@ -129,7 +122,6 @@ impl FabricCommandEffectRouter {
         administration: Arc<dyn AdministrationCommandEffectPort>,
     ) -> Self {
         Self {
-            model_migration,
             source_wave,
             relation_publication,
             activation,
@@ -150,11 +142,6 @@ impl FabricCommandEffectPort for FabricCommandEffectRouter {
         context: ReductionContext,
     ) -> Result<PrepareEffectOutcome, CommandPortError> {
         match executing.command().payload {
-            FabricCommandPayload::ApplyModelMigration { .. } => {
-                self.model_migration
-                    .prepare(executing, owner, context)
-                    .await
-            }
             FabricCommandPayload::PublishSourceWave { .. } => {
                 self.source_wave.prepare(executing, owner, context).await
             }
@@ -189,11 +176,6 @@ impl FabricCommandEffectPort for FabricCommandEffectRouter {
         context: ReductionContext,
     ) -> Result<CommitEffectOutcome, CommandPortError> {
         match prepared.command().payload {
-            FabricCommandPayload::ApplyModelMigration { .. } => {
-                self.model_migration
-                    .commit(prepared, owner, transaction, context)
-                    .await
-            }
             FabricCommandPayload::PublishSourceWave { .. } => {
                 self.source_wave
                     .commit(prepared, owner, transaction, context)
@@ -240,11 +222,6 @@ impl FabricCommandEffectPort for FabricCommandEffectRouter {
         context: ReductionContext,
     ) -> Result<ReconciliationObservation, CommandPortError> {
         match awaiting.command().payload {
-            FabricCommandPayload::ApplyModelMigration { .. } => {
-                self.model_migration
-                    .reconcile(awaiting, owner, transaction, context)
-                    .await
-            }
             FabricCommandPayload::PublishSourceWave { .. } => {
                 self.source_wave
                     .reconcile(awaiting, owner, transaction, context)
@@ -291,13 +268,13 @@ mod tests {
     use super::*;
     use crate::fabric::command::{
         ActorId, AdmissionContext, AnalysisRunRef, AuthorizationDecision, AuthorizationRef,
-        CommandIdentity, CommandKind, CommandOwnership, CommandPins, CommandReducer,
-        CompilerReleaseRef, DiagnosticRef, EpochId, ExpectedHead, IdempotencyKey, LeaseId,
-        ModelHeadRef, ModelMigrationRef, OperationId, OwnerSetRef, PrincipalId, ProofReceiptRef,
-        ProtectedSetRef, ProviderSetRef, ReconciliationEvidenceRef, RelationPublication,
-        RelationSetRef, ResourceEnvelopeRef, RetentionPolicyRef, RollbackAuthorizationRef,
-        SourceGeneration, SourceImageSetRef, TransactionRef, UnknownCommit, UnknownCommitReason,
-        WorkspaceId, WriterFence, WriterGeneration,
+        CommandIdentity, CommandKind, CommandOwnership, CommandPins, CommandReducer, DiagnosticRef,
+        EpochId, ExpectedHead, IdempotencyKey, InputReleaseRef, LeaseId, OperationId, OwnerSetRef,
+        PrincipalId, ProgramReleaseRef, ProofReceiptRef, ProtectedSetRef, ProviderSetRef,
+        ReconciliationEvidenceRef, RelationPublication, RelationSetRef, ResourceEnvelopeRef,
+        RetentionPolicyRef, RollbackAuthorizationRef, SourceGeneration, SourceImageSetRef,
+        TransactionRef, UnknownCommit, UnknownCommitReason, WorkspaceId, WriterFence,
+        WriterGeneration,
     };
 
     struct Probe {
@@ -387,7 +364,6 @@ mod tests {
         };
     }
 
-    impl_effect_family_for_probe!(ModelMigrationCommandEffectPort);
     impl_effect_family_for_probe!(SourceWaveCommandEffectPort);
     impl_effect_family_for_probe!(RelationPublicationCommandEffectPort);
     impl_effect_family_for_probe!(ActivationCommandEffectPort);
@@ -398,7 +374,6 @@ mod tests {
 
     #[tokio::test]
     async fn every_static_command_variant_routes_to_exactly_one_required_family() {
-        let model = Arc::new(Probe::new(CommandKind::ApplyModelMigration));
         let source = Arc::new(Probe::new(CommandKind::PublishSourceWave));
         let publication = Arc::new(Probe::new(CommandKind::PublishRelations));
         let activation = Arc::new(Probe::new(CommandKind::ActivateEpoch));
@@ -407,7 +382,6 @@ mod tests {
         let retention = Arc::new(Probe::new(CommandKind::ApplyRetention));
         let administration = Arc::new(Probe::new(CommandKind::Administer));
         let router = FabricCommandEffectRouter::new(
-            model.clone(),
             source.clone(),
             publication.clone(),
             activation.clone(),
@@ -439,7 +413,6 @@ mod tests {
         }
 
         for probe in [
-            model,
             source,
             publication,
             activation,
@@ -452,12 +425,8 @@ mod tests {
         }
     }
 
-    fn payloads() -> [FabricCommandPayload; 8] {
+    fn payloads() -> [FabricCommandPayload; 7] {
         [
-            FabricCommandPayload::ApplyModelMigration {
-                migration: ModelMigrationRef::from_bytes([0x01; 32]),
-                target_model_head: ModelHeadRef::from_bytes([0x02; 32]),
-            },
             FabricCommandPayload::PublishSourceWave {
                 source_images: SourceImageSetRef::from_bytes([0x03; 32]),
                 target_generation: SourceGeneration::new(1),
@@ -506,8 +475,17 @@ mod tests {
             expected_head: ExpectedHead::Empty,
             writer_fence: execution_owner().fence,
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes([0x24; 32]),
-                model_head: ModelHeadRef::from_bytes([0x25; 32]),
+                input_release: InputReleaseRef::from_bytes([0x24; 32]),
+                program_release: ProgramReleaseRef::from_bytes([0x25; 32]),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    [0x25; 32],
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(
+                    [0x25; 32],
+                ),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(
+                    [0x25; 32],
+                ),
                 source_generation: SourceGeneration::new(0),
                 provider_set: ProviderSetRef::from_bytes([0x26; 32]),
             },

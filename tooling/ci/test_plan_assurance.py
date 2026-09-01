@@ -2,23 +2,15 @@ from __future__ import annotations
 
 import ast
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 
 from tooling.ci import artifact_contracts
-from tooling.ci import design_principle_alignment as alignment
 from tooling.ci import plan_assurance as assurance
 from tooling.ci.test_artifact_contracts import (
     _init_repository,
     _write_activation_fixture,
-)
-
-ONTOLOGY_FABRIC_V2_PLAN = (
-    assurance.ROOT
-    / "docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md"
 )
 
 
@@ -27,7 +19,9 @@ def test_cycle_is_rejected() -> None:
         assurance._topological_order({"WP01": {"WP02"}, "WP02": {"WP01"}})
 
 
-def test_first_packet_narrative_does_not_override_self_dependency(tmp_path: Path) -> None:
+def test_first_packet_narrative_does_not_override_self_dependency(
+    tmp_path: Path,
+) -> None:
     plan = tmp_path / "plan.md"
     plan.write_text(
         "### WP01 — First\n\n"
@@ -55,11 +49,6 @@ def test_overlap_dispositions_are_plan_qualified() -> None:
     dispositions = assurance._load_overlap_dispositions(assurance.ROOT)
     assert dispositions
     assert all(plan_id for plan_id, _, _ in dispositions)
-    assert (
-        "codefabric-ontology-compiled-data-fabric",
-        "src/semantic_query.rs",
-        frozenset({"WP05", "WP08"}),
-    ) in dispositions
     assert all(
         plan_id != "codefabric-execution-proved-relational-data-fabric"
         for plan_id, _, _ in dispositions
@@ -77,14 +66,6 @@ def test_known_touch_parser_ignores_fenced_preflight_and_reads_owned_paths() -> 
         "src/owned.rs",
         "contracts/example.yaml",
     }
-
-
-def test_ontology_fabric_release_barrier_is_structural() -> None:
-    dependencies = assurance._dependency_map(ONTOLOGY_FABRIC_V2_PLAN)
-    assert assurance._validate_ontology_fabric_readiness_states(dependencies) == 60
-    dependencies["WP17"].remove("WP16")
-    with pytest.raises(assurance.PlanAssuranceError, match="release-barrier"):
-        assurance._validate_ontology_fabric_readiness_states(dependencies)
 
 
 def test_packet_assurance_remains_runnable_during_declared_input_evolution(
@@ -183,6 +164,23 @@ def test_literal_only_function_is_not_a_definition(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert assurance.oracle_definitions(tmp_path, {"wp54_behavioral_acceptance"}) == []
+
+
+def test_hyphenated_oracle_is_discovered_as_a_substantive_just_recipe(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "justfile").write_text(
+        "substantive-oracle:\n    @printf 'proof\\n' >/dev/null\n",
+        encoding="utf-8",
+    )
+    assert assurance.oracle_definitions(tmp_path, {"substantive-oracle"}) == [
+        assurance.OracleDefinition(
+            "substantive-oracle",
+            "just",
+            "justfile",
+            "substantive-oracle",
+        )
+    ]
 
 
 def test_vacuous_future_state_does_not_satisfy_oracle_definition(
@@ -314,48 +312,6 @@ def test_wp54_negative_zero_state(tmp_path: Path) -> None:
         "root", ["wp54_negative_zero_state"]
     )
     assert rust_selector[-1] == "--no-tests=fail"
-
-    repository = tmp_path / "unowned-deletion"
-    repository.mkdir()
-    _init_repository(repository)
-    skill = repository / "skills" / "example" / "SKILL.md"
-    skill.parent.mkdir(parents=True)
-    skill.write_text("owned skill\n", encoding="utf-8")
-    subprocess.run(("git", "add", "skills"), cwd=repository, check=True)
-    subprocess.run(
-        (
-            "git",
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.invalid",
-            "commit",
-            "-m",
-            "add skill",
-        ),
-        cwd=repository,
-        check=True,
-        capture_output=True,
-    )
-    baseline = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        cwd=repository,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    skill.unlink()
-    registry = repository / alignment.BASELINE_REGISTRY
-    registry.parent.mkdir(parents=True, exist_ok=True)
-    registry.write_text(
-        yaml.safe_dump({"baseline_commit": baseline, "records": []}),
-        encoding="utf-8",
-    )
-    with pytest.raises(
-        alignment.AlignmentContractError,
-        match="unattributed dirty paths",
-    ):
-        alignment.validate_baseline(repository)
 
 
 def test_wp54_operational_acceptance() -> None:

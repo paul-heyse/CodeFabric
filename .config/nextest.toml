@@ -33,18 +33,6 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 filter = 'test(full_golden_scenario_clean_rebuild_equivalence)'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
-# The Gate B vertical and its causal interventions compile real nightly Rust owners,
-# execute a real Pyrefly sidecar, publish Delta tables, and cross daemon plus locked
-# STDIO process boundaries. Retain one-minute slow signals while allowing those bounded
-# semantic oracles to complete under aggregate-suite contention.
-[[profile.default.overrides]]
-filter = 'test(gate_b_vertical_slice_produces_all_eleven_planes) | test(gate_b_vertical_slice_adversarial) | test(gate_b_candidate_operational_gate) | test(gate_b_causal_intervention_matrix) | test(gate_b_named_fixture_query_causality)'
-slow-timeout = { period = "60s", terminate-after = 10 }
-
-[[profile.ci.overrides]]
-filter = 'test(gate_b_vertical_slice_produces_all_eleven_planes) | test(gate_b_vertical_slice_adversarial) | test(gate_b_candidate_operational_gate) | test(gate_b_causal_intervention_matrix) | test(gate_b_named_fixture_query_causality)'
-slow-timeout = { period = "60s", terminate-after = 10 }
-
 # When tests come to share a database, port, or other scarce resource, constrain them
 # with a test group rather than serializing the whole suite (spec section 18.3):
 #

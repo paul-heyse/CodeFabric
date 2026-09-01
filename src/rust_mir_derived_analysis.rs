@@ -53,7 +53,7 @@ pub struct RustStableOwnerKey {
 /// Exact immutable pins repeated on every derived row.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RustMirAnalysisProvenance {
-    pub model_epoch_id: [u8; 32],
+    pub fabric_epoch_id: [u8; 32],
     pub source_snapshot_pin: [u8; 32],
     pub analysis_context_pin: [u8; 32],
     pub source_generation: u64,
@@ -152,7 +152,7 @@ pub struct RustMirRawRelations {
     pub private_enrichment: Option<RustMirPrivateEnrichmentInput>,
 }
 
-/// Static output roles for this algorithm contract. Semantic relation identities are model data.
+/// Static output roles for this algorithm contract. Semantic relation identities are typed inputs.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum RustMirDerivedRelation {
     CfgEdge,
@@ -360,7 +360,7 @@ impl RustMirDerivedRelation {
         ))
     }
 
-    /// Build the Arrow schema after validating model relation and authority bindings.
+    /// Build the Arrow schema after validating relation and authority bindings.
     ///
     /// # Errors
     ///
@@ -374,7 +374,7 @@ impl RustMirDerivedRelation {
     }
 }
 
-/// Model-selected target relation identities for each static algorithm output role.
+/// Application-owned target relation identities for each static algorithm output role.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RustMirAnalysisRelations {
     pub cfg_edges: RelationId,
@@ -390,7 +390,7 @@ pub struct RustMirAnalysisRelations {
     pub unknowns: RelationId,
 }
 
-/// Complete model binding for one Rust MIR analysis compilation.
+/// Complete typed binding for one Rust MIR analysis compilation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RustMirAnalysisBindings {
     pub relations: RustMirAnalysisRelations,
@@ -430,7 +430,7 @@ impl RustMirAnalysisBindings {
             .collect::<BTreeSet<_>>();
         if identities.len() != RustMirDerivedRelation::ALL.len() {
             return Err(RustMirAnalysisError::InvalidBinding(
-                "Rust MIR output roles require distinct model relation identities".to_owned(),
+                "Rust MIR output roles require distinct relation identities".to_owned(),
             ));
         }
         if let Some(private) = &self.private_enrichment
@@ -459,7 +459,7 @@ impl RustMirPrivateAuthority {
     }
 }
 
-/// Model binding for the optional exact private borrowck relation.
+/// Typed binding for the optional exact private borrowck relation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RustMirPrivateEnrichmentBinding {
     pub relation_id: RelationId,
@@ -574,7 +574,7 @@ pub enum RustMirAnalysisError {
     ProvenanceMismatch(String),
     #[error("raw Rust MIR structure is invalid: {0}")]
     InvalidStructure(String),
-    #[error("Rust MIR analysis model binding is invalid: {0}")]
+    #[error("Rust MIR analysis binding is invalid: {0}")]
     InvalidBinding(String),
     #[error("Rust MIR analysis resource bound exceeded for {family}: {actual} > {maximum}")]
     ResourceBound {
@@ -1181,7 +1181,7 @@ pub fn analyze_rust_mir_relations(
 
 fn validate_provenance(provenance: &RustMirAnalysisProvenance) -> Result<(), RustMirAnalysisError> {
     for (name, value) in [
-        ("model_epoch_id", provenance.model_epoch_id),
+        ("fabric_epoch_id", provenance.fabric_epoch_id),
         ("source_snapshot_pin", provenance.source_snapshot_pin),
         ("analysis_context_pin", provenance.analysis_context_pin),
         (
@@ -1290,7 +1290,8 @@ fn materialize_private_enrichment(
     let Some(binding) = binding else {
         if input.is_some() {
             return Err(RustMirAnalysisError::InvalidBinding(
-                "exact private enrichment input requires a model-bound private relation".to_owned(),
+                "exact private enrichment input requires an application-bound private relation"
+                    .to_owned(),
             ));
         }
         return Ok(None);
@@ -3368,7 +3369,7 @@ fn append_input_unknowns(
 
 fn common_output_fields() -> Vec<Field> {
     vec![
-        Field::new("model_epoch_id", DataType::FixedSizeBinary(32), false),
+        Field::new("fabric_epoch_id", DataType::FixedSizeBinary(32), false),
         Field::new("source_snapshot_pin", DataType::FixedSizeBinary(32), false),
         Field::new("analysis_context_pin", DataType::FixedSizeBinary(32), false),
         Field::new("source_generation", DataType::UInt64, false),
@@ -3411,7 +3412,7 @@ fn common_output_columns(
     let stable_crate_id = provenance.stable_owner_key.map(|key| key.stable_crate_id);
     let def_path_hash = provenance.stable_owner_key.map(|key| key.def_path_hash);
     vec![
-        fixed_repeat(Some(&provenance.model_epoch_id), rows),
+        fixed_repeat(Some(&provenance.fabric_epoch_id), rows),
         fixed_repeat(Some(&provenance.source_snapshot_pin), rows),
         fixed_repeat(Some(&provenance.analysis_context_pin), rows),
         u64_repeat(Some(provenance.source_generation), rows),
@@ -3437,7 +3438,7 @@ fn common_output_columns(
 fn private_enrichment_schema(binding: &RustMirPrivateEnrichmentBinding) -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
         vec![
-            Field::new("model_epoch_id", DataType::FixedSizeBinary(32), false),
+            Field::new("fabric_epoch_id", DataType::FixedSizeBinary(32), false),
             Field::new("source_snapshot_pin", DataType::FixedSizeBinary(32), false),
             Field::new("analysis_context_pin", DataType::FixedSizeBinary(32), false),
             Field::new("source_generation", DataType::UInt64, false),
@@ -3505,7 +3506,7 @@ fn private_enrichment_batch(
     let stable_crate_id = provenance.stable_owner_key.map(|key| key.stable_crate_id);
     let def_path_hash = provenance.stable_owner_key.map(|key| key.def_path_hash);
     let columns = vec![
-        fixed_repeat(Some(&provenance.model_epoch_id), rows.len()),
+        fixed_repeat(Some(&provenance.fabric_epoch_id), rows.len()),
         fixed_repeat(Some(&provenance.source_snapshot_pin), rows.len()),
         fixed_repeat(Some(&provenance.analysis_context_pin), rows.len()),
         u64_repeat(Some(provenance.source_generation), rows.len()),
@@ -4062,7 +4063,7 @@ fn optional_string_values<'a>(values: impl IntoIterator<Item = Option<&'a str>>)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[derive(Clone, Debug)]
@@ -4079,7 +4080,7 @@ mod tests {
         RelationId::new(value).expect("valid test relation")
     }
 
-    fn bindings(prefix: &str) -> RustMirAnalysisBindings {
+    pub(crate) fn bindings(prefix: &str) -> RustMirAnalysisBindings {
         RustMirAnalysisBindings {
             relations: RustMirAnalysisRelations {
                 cfg_edges: relation(&format!("{prefix}.cfg")),
@@ -4101,7 +4102,7 @@ mod tests {
 
     fn provenance() -> RustMirAnalysisProvenance {
         RustMirAnalysisProvenance {
-            model_epoch_id: [1; 32],
+            fabric_epoch_id: [1; 32],
             source_snapshot_pin: [2; 32],
             analysis_context_pin: [3; 32],
             source_generation: 7,

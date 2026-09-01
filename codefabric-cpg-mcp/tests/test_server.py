@@ -18,10 +18,9 @@ from fastmcp import Client
 from jsonschema import Draft202012Validator
 from mcp.types import BlobResourceContents, TextResourceContents
 
-from codefabric_cpg_mcp.contracts.fingerprints import fastmcp_protocol_fingerprint
 from codefabric_cpg_mcp.contracts.json import JsonValue, canonicalize_value, checksum
-from codefabric_cpg_mcp.contracts.model_registries import CpgdFeature
-from codefabric_cpg_mcp.contracts.schemas import schema_manifest
+from codefabric_cpg_mcp.contracts.rpc_features import CpgdFeature
+from codefabric_cpg_mcp.contracts.wire_models import WireSchemaName, wire_schema
 from codefabric_cpg_mcp.daemon.arrow_resources import (
     ARROW_RELEASE,
     ARROW_RESULT_RESOURCE_FORMAT,
@@ -33,8 +32,6 @@ from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2 as query_p
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2_grpc as query_grpc
 from codefabric_cpg_mcp.server import mcp
 from codefabric_cpg_mcp.settings import process_settings
-
-FIXTURE = Path(__file__).parent / "fixtures/production-tool-manifest-v1.json"
 
 
 def _snapshot() -> dict[str, Any]:
@@ -214,6 +211,16 @@ class ProductionStubDaemon:
             digest(9): (self.arrow_relation, relation_checksum, ARROW_STREAM_MEDIA_TYPE),
         }
 
+    @staticmethod
+    def _event_header(sequence: int) -> Any:
+        query_id = "query:test"
+        return query_pb.QueryEventHeader(
+            daemon_query_id=query_id,
+            sequence=sequence,
+            event_checksum=checksum(f"{query_id}:{sequence}".encode()),
+            event_at_unix_ms=int(time.time() * 1000),
+        )
+
     async def Handshake(self, request: Any, _context: Any) -> Any:  # noqa: N802
         assert request.required_feature_bits == int(CpgdFeature.REQUIRED)
         assert request.host_capabilities.profile_digest
@@ -307,6 +314,7 @@ class ProductionStubDaemon:
             )
             yield query_pb.QueryEvent(
                 terminal=query_pb.TerminalEvent(
+                    header=self._event_header(1),
                     execution_state=query_pb.QUERY_EXECUTION_STATE_FAILED,
                     canonical_error_record_json=record,
                     cleanup_state="COMPLETE",
@@ -329,12 +337,14 @@ class ProductionStubDaemon:
         )
         yield query_pb.QueryEvent(
             snapshot_pinned=query_pb.SnapshotPinnedEvent(
+                header=self._event_header(1),
                 canonical_public_snapshot_metadata_json=snapshot,
                 metadata_checksum=checksum(snapshot),
             )
         )
         yield query_pb.QueryEvent(
             artifact_ready=query_pb.ArtifactReadyEvent(
+                header=self._event_header(2),
                 artifact_id=artifact_id,
                 artifact_checksum=artifact_checksum,
                 content_type=(
@@ -357,6 +367,7 @@ class ProductionStubDaemon:
         )
         yield query_pb.QueryEvent(
             terminal=query_pb.TerminalEvent(
+                header=self._event_header(3),
                 execution_state=query_pb.QUERY_EXECUTION_STATE_SUCCEEDED,
                 availability_state=self.availability_state,
                 freshness_state=self.freshness_state,
@@ -466,6 +477,32 @@ class ProductionStubDaemon:
         )
 
 
+class ReconnectingProductionStubDaemon(ProductionStubDaemon):
+    """Drop one live stream and require re-handshake plus cursor-bound attachment."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.handshake_calls = 0
+        self.attach_requests: list[Any] = []
+
+    async def Handshake(self, request: Any, _context: Any) -> Any:  # noqa: N802
+        self.handshake_calls += 1
+        return await super().Handshake(request, _context)
+
+    async def StreamQuery(self, _request: Any, _context: Any) -> AsyncIterator[Any]:  # noqa: N802
+        async for event in super().StreamQuery(_request, _context):
+            yield event
+            await _context.abort(grpc.StatusCode.UNAVAILABLE, "injected transport loss")
+
+    async def AttachQuery(self, request: Any, context: Any) -> AsyncIterator[Any]:  # noqa: N802
+        self.attach_requests.append(request)
+        async for event in super().StreamQuery(request, context):
+            variant = event.WhichOneof("event")
+            assert variant is not None
+            if getattr(event, variant).header.sequence > request.after_sequence:
+                yield event
+
+
 def _environment(monkeypatch: pytest.MonkeyPatch, target: str) -> None:
     monkeypatch.setenv("CODEFABRIC_CPG_DAEMON_TARGET", target)
     monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "workspace-main")
@@ -478,8 +515,10 @@ def _environment(monkeypatch: pytest.MonkeyPatch, target: str) -> None:
 async def _production_client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    daemon: ProductionStubDaemon | None = None,
 ) -> AsyncIterator[tuple[Client[Any], ProductionStubDaemon]]:
-    daemon = ProductionStubDaemon()
+    del tmp_path
+    daemon = daemon or ProductionStubDaemon()
     server = grpc.aio.server()
     query_grpc.add_CpgQueryServiceServicer_to_server(daemon, server)
     socket_path = Path("/tmp") / f"codefabric-wp68-{secrets.token_hex(6)}.sock"
@@ -566,11 +605,11 @@ def test_wp68_structural_acceptance(
     async def exercise() -> None:
         async with _production_client(tmp_path, monkeypatch) as (client, _daemon):
             listed = await client.list_tools()
-            accepted = json.loads(FIXTURE.read_text(encoding="utf-8"))
-            assert accepted == {
-                "fingerprint": fastmcp_protocol_fingerprint(listed),
-                "profile": "codefabric-fastmcp-tool-manifest-v1",
-                "schema_version": 1,
+            assert {tool.name for tool in listed} == {
+                "get_code_graph_reference",
+                "get_code_graph_status",
+                "query_code_graph",
+                "validate_code_graph_query",
             }
 
             query_tool = next(tool for tool in listed if tool.name == "query_code_graph")
@@ -579,12 +618,12 @@ def test_wp68_structural_acceptance(
                 {"request": {"semantic_request_id": "semantic:test"}, "delivery": "inline"},
             )
             assert query.structured_content is not None
-            schemas = schema_manifest()["serialization"]
-            assert isinstance(schemas, dict)
-            Draft202012Validator(schemas["QueryToolInput"]).validate(
-                {"request": {"semantic_request_id": "semantic:test"}, "delivery": "inline"}
-            )
-            Draft202012Validator(schemas["QueryToolOutput"]).validate(query.structured_content)
+            Draft202012Validator(
+                wire_schema(WireSchemaName.QUERY_TOOL_INPUT, "serialization")
+            ).validate({"request": {"semantic_request_id": "semantic:test"}, "delivery": "inline"})
+            Draft202012Validator(
+                wire_schema(WireSchemaName.QUERY_TOOL_OUTPUT, "serialization")
+            ).validate(query.structured_content)
             Draft202012Validator.check_schema(query_tool.inputSchema)
             assert query_tool.outputSchema is not None
             Draft202012Validator(query_tool.outputSchema).validate(query.structured_content)
@@ -688,6 +727,35 @@ def test_wp68_operational_acceptance(
             resources = await client.read_resource("cpg://reference/capabilities/1.3")
             assert len(resources) == 1
             assert isinstance(resources[0], TextResourceContents)
-            assert json.loads(resources[0].text)["registry_ids"]
+            assert json.loads(resources[0].text) == {
+                "authority": "daemon-observed workspace status",
+                "status_resource": "cpg://status/{workspace_id}",
+                "status_tool": "get_code_graph_status",
+            }
+
+    asyncio.run(exercise())
+
+
+def test_transport_loss_rehandshakes_and_attaches_exact_cursor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        daemon = ReconnectingProductionStubDaemon()
+        async with _production_client(tmp_path, monkeypatch, daemon) as (client, _daemon):
+            query = await client.call_tool(
+                "query_code_graph",
+                {"request": {"semantic_request_id": "semantic:test"}, "delivery": "inline"},
+            )
+            assert query.structured_content is not None
+            assert query.structured_content["execution_state"] == "NOT_EXECUTED_DEPENDENCY"
+            assert daemon.handshake_calls == 2
+            assert len(daemon.attach_requests) == 1
+            attached = daemon.attach_requests[0]
+            assert attached.daemon_query_id == "query:test"
+            assert attached.agent_instance_id == "pytest-primary"
+            assert attached.workspace_id == "workspace-main"
+            assert attached.after_sequence == 1
+            assert attached.after_event_checksum == checksum(b"query:test:1")
 
     asyncio.run(exercise())

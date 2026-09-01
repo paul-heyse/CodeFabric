@@ -1,7 +1,7 @@
 //! Relation-scoped Arrow IPC framing and bounded stream assembly.
 //!
 //! Arrow owns semantic rows. These types are the typed outer control plane: each stream is
-//! bound to one relation, one model-derived schema fingerprint, and exact source/context pins.
+//! bound to one relation, one application-owned schema fingerprint, and exact source/context pins.
 //! A stream is accepted only after Arrow end-of-stream, a coverage/remainder trailer, and a
 //! matching terminal frame arrive in that order.
 
@@ -40,7 +40,7 @@ const FIELD_ORDINAL_KEY: &str = "codefabric.field_ordinal";
 
 const IPC_STREAM_EOS: [u8; 8] = [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0];
 
-/// Model-owned relation identity.
+/// Application-owned relation identity.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RelationId(pub [u8; 16]);
 
@@ -48,15 +48,15 @@ pub struct RelationId(pub [u8; 16]);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct StreamId(pub [u8; 16]);
 
-/// Model-derived fingerprint of the one schema permitted on a stream.
+/// Application-owned fingerprint of the one schema permitted on a stream.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SchemaFingerprint(pub [u8; 32]);
 
 impl SchemaFingerprint {
-    /// Read the model-owned BLAKE3 schema identity carried by exact Arrow schema metadata.
+    /// Read the application-owned BLAKE3 schema identity carried by exact Arrow schema metadata.
     ///
-    /// This does not invent a second schema canonicalizer. The model/compiler owns the digest
-    /// projection; this boundary binds that declared identity to the frame identity and then
+    /// This does not invent a second schema canonicalizer. The application contract owns the
+    /// digest projection; this boundary binds that declared identity to the frame identity and then
     /// separately requires exact Arrow [`Schema`] equality while decoding.
     ///
     /// # Errors
@@ -330,7 +330,7 @@ pub enum RelationIpcErrorKind {
     InvalidIdentity(&'static str),
     #[error("Arrow relation schema metadata is invalid: {0}")]
     InvalidSchemaMetadata(&'static str),
-    #[error("schema fingerprint differs from the model-owned schema digest")]
+    #[error("schema fingerprint differs from the application-owned schema digest")]
     SchemaFingerprintMismatch,
     #[error("Arrow type universe differs from the pinned semantic universe")]
     ArrowTypeUniverseMismatch,
@@ -1072,7 +1072,7 @@ fn validate_relation_schema(
         .is_none_or(|relation_id| relation_id.trim().is_empty())
     {
         return Err(RelationIpcErrorKind::InvalidSchemaMetadata(
-            "model relation identity is absent",
+            "application relation identity is absent",
         ));
     }
     if SchemaFingerprint::from_schema_metadata(schema)? != expected_fingerprint {
@@ -1616,8 +1616,20 @@ mod tests {
     use arrow_array::{Array as _, ArrayRef, Int32Array, RecordBatch};
     use arrow_ipc::writer::IpcWriteOptions;
     use arrow_schema::{DataType, Field, Schema};
+    use serde_json::Value;
 
     use super::*;
+
+    const WP33_FIXTURES: &str =
+        include_str!("../contracts/acceptance/relational-fabric-v3/negative-fixtures.jsonl");
+
+    fn claim_001_negative_fixture() -> Value {
+        WP33_FIXTURES
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("valid WP33 fixture row"))
+            .find(|row| row["claim_id"] == "RFV3-CLAIM-001" && row["kind"] == "negative")
+            .expect("frozen Claim 001 negative fixture")
+    }
 
     fn identity(marker: u8) -> StreamIdentity {
         StreamIdentity {
@@ -2046,6 +2058,55 @@ mod tests {
         let error = never_opened.finish().unwrap_err();
         assert_eq!(error.kind, RelationIpcErrorKind::MissingOpen);
         assert!(matches!(error.coverage, FailureCoverage::Unknown { .. }));
+    }
+
+    #[test]
+    fn wp38_claim_001_negative_rejects_open_provider_coverage() {
+        let fixture = claim_001_negative_fixture();
+        let after = &fixture["mutation"]["after"];
+        let requested_units = after["requested_units"]
+            .as_u64()
+            .expect("Claim 001 requested units");
+        assert_eq!(after["completed_units"], 0);
+        assert_eq!(after["remainders"], serde_json::json!([]));
+        assert_eq!(after["state"], "open");
+
+        let contract = contract(91, requested_units);
+        let frames = encode_relation_stream(
+            &contract,
+            &[],
+            CoverageTrailer::complete(requested_units),
+            43,
+        )
+        .expect("construct the otherwise-valid production stream");
+        let end_index = frames
+            .iter()
+            .position(|frame| matches!(frame, RelationIpcFrame::IpcEnd(_)))
+            .expect("Claim 001 IPC end frame");
+        let mut assembler = assembler_with(&contract);
+        for frame in &frames[..=end_index] {
+            assembler.push(frame.clone()).unwrap();
+        }
+
+        let error = assembler
+            .finish()
+            .expect_err("open coverage must fail closed");
+        assert_eq!(error.kind, RelationIpcErrorKind::MissingCoverageTrailer);
+        assert_eq!(
+            error.coverage,
+            FailureCoverage::Unknown {
+                requested_units: Some(requested_units),
+                completed_units: None,
+            }
+        );
+        assert_eq!(
+            fixture["expected_decoded"]["error"],
+            "PROVIDER_REQUESTED_COVERAGE_OPEN"
+        );
+        assert_eq!(
+            fixture["expected_decoded"]["relation_id"],
+            after["relation_id"]
+        );
     }
 
     #[test]

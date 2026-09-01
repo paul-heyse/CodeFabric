@@ -6,23 +6,21 @@
 //! index translation together so that a provider or sink cannot reinterpret
 //! columns independently.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use arrow_array::{Array, ArrayRef, BooleanArray, RecordBatch, StringArray, UInt32Array};
+use arrow_array::{Array, ArrayRef, RecordBatch};
 use arrow_cast::cast::{CastOptions, can_cast_types, cast_with_options};
 use arrow_schema::extension::{EXTENSION_TYPE_METADATA_KEY, EXTENSION_TYPE_NAME_KEY};
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
 use datafusion::common::{
-    Constraint, Constraints, DFSchema, DataFusionError, FunctionalDependencies, TableReference,
+    Constraints, DFSchema, DataFusionError, FunctionalDependencies, TableReference,
 };
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::{ExecutionPlan, RecordBatchStream, SendableRecordBatchStream};
 use futures::Stream;
-
-use crate::relational_model::{ModelEpoch, ModelRelation};
 
 /// Arrow schema metadata key carrying the session-owned relation identity.
 pub const RELATION_ID_METADATA_KEY: &str = "codefabric.relation_id";
@@ -30,13 +28,6 @@ pub const RELATION_ID_METADATA_KEY: &str = "codefabric.relation_id";
 pub const FIELD_ID_METADATA_KEY: &str = "codefabric.field_id";
 /// Arrow field metadata key carrying the field's semantic role.
 pub const SEMANTIC_ROLE_METADATA_KEY: &str = "codefabric.semantic_role";
-
-/// Compatibility name retained while replay-model consumers are removed.
-pub const MODEL_RELATION_ID_METADATA_KEY: &str = RELATION_ID_METADATA_KEY;
-/// Compatibility name retained while replay-model consumers are removed.
-pub const MODEL_FIELD_ID_METADATA_KEY: &str = FIELD_ID_METADATA_KEY;
-/// Compatibility name retained while replay-model consumers are removed.
-pub const MODEL_SEMANTIC_ROLE_METADATA_KEY: &str = SEMANTIC_ROLE_METADATA_KEY;
 
 /// A named boundary at which a schema contract is enforced.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,7 +59,7 @@ impl SchemaPhase {
     }
 }
 
-/// Which model-owned schema is expected at a boundary.
+/// Which contract-owned schema is expected at a boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SchemaRole {
     Logical,
@@ -184,7 +175,7 @@ pub enum ColumnMappingMode {
     Positional,
     /// Stable field names carry storage identity.
     Name,
-    /// Stable model field IDs carry storage identity.
+    /// Stable session-owned field IDs carry storage identity.
     FieldId,
 }
 
@@ -196,104 +187,53 @@ pub enum DeletionVectorBehavior {
     Forbidden,
     /// The storage provider applies deletion vectors before emitting batches.
     AppliedByProvider,
-    /// The storage provider exposes the model-declared visibility column.
+    /// The storage provider exposes the contract-declared visibility column.
     ExposedVisibilityColumn,
 }
 
-/// A model relation row used by the schema compiler.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ModelSchemaRelationRow {
-    pub relation_id: String,
-    pub qualifier: TableReference,
-    pub relation_metadata: HashMap<String, String>,
+/// Non-schema policies bound to schemas observed from a provider or logical plan.
+///
+/// The schemas remain the authority for fields, identities, types, nullability,
+/// and metadata. These options carry only behavior that Arrow schemas cannot
+/// express by themselves.
+#[derive(Clone, Debug)]
+pub struct SchemaContractOptions {
+    constraints: Constraints,
+    compatibility: SchemaCompatibility,
+    column_mapping_mode: ColumnMappingMode,
+    deletion_vector_behavior: DeletionVectorBehavior,
 }
 
-/// A model semantic-type row used by the schema compiler.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ModelSchemaTypeRow {
-    pub semantic_type_id: String,
-    pub logical_data_type: DataType,
-    pub allows_null: bool,
+impl SchemaContractOptions {
+    /// Construct an explicit policy set for one observed logical/storage binding.
+    #[must_use]
+    pub const fn new(
+        constraints: Constraints,
+        compatibility: SchemaCompatibility,
+        column_mapping_mode: ColumnMappingMode,
+        deletion_vector_behavior: DeletionVectorBehavior,
+    ) -> Self {
+        Self {
+            constraints,
+            compatibility,
+            column_mapping_mode,
+            deletion_vector_behavior,
+        }
+    }
 }
 
-/// A model field row used by the schema compiler.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ModelSchemaFieldRow {
-    pub field_id: String,
-    pub relation_id: String,
-    pub field_name: String,
-    pub semantic_type_id: String,
-    pub ordinal: usize,
-    pub nullable: bool,
-    pub semantic_role: String,
-    pub field_metadata: HashMap<String, String>,
+impl Default for SchemaContractOptions {
+    fn default() -> Self {
+        Self::new(
+            Constraints::default(),
+            SchemaCompatibility::Exact,
+            ColumnMappingMode::Positional,
+            DeletionVectorBehavior::Forbidden,
+        )
+    }
 }
 
-/// The relational meaning of one model key row.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ModelSchemaKeyKind {
-    Primary,
-    Unique,
-}
-
-/// One ordered member of a model key.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ModelSchemaKeyRow {
-    pub key_id: String,
-    pub relation_id: String,
-    pub field_id: String,
-    pub ordinal: usize,
-    pub key_kind: ModelSchemaKeyKind,
-}
-
-/// Model-owned logical-to-storage representation for a semantic type.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ModelSchemaRepresentationRow {
-    pub representation_id: String,
-    pub semantic_type_id: String,
-    pub storage_data_type: DataType,
-    pub storage_encoding: String,
-    pub metadata_class: String,
-    pub extension_name: Option<String>,
-    pub extension_metadata: Option<String>,
-}
-
-/// Exact physical field binding selected by the model mapping program.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ModelPhysicalFieldBindingRow {
-    pub logical_field_id: String,
-    pub storage_field_id: String,
-    pub projection_index: usize,
-    pub filter_index: usize,
-    pub statistics_index: usize,
-}
-
-/// Exact physical relation binding selected by the model.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ModelPhysicalBindingRow {
-    pub physical_binding_id: String,
-    pub mapping_program_id: String,
-    pub source_schema_identity: String,
-    pub logical_relation_id: String,
-    pub storage_relation_id: String,
-    pub compatibility: SchemaCompatibility,
-    pub column_mapping_mode: ColumnMappingMode,
-    pub deletion_vector_behavior: DeletionVectorBehavior,
-    pub field_bindings: Vec<ModelPhysicalFieldBindingRow>,
-}
-
-/// Typed relation rows consumed by the model-derived schema compiler.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SchemaContractModelRows {
-    pub relations: Vec<ModelSchemaRelationRow>,
-    pub semantic_types: Vec<ModelSchemaTypeRow>,
-    pub fields: Vec<ModelSchemaFieldRow>,
-    pub keys: Vec<ModelSchemaKeyRow>,
-    pub representations: Vec<ModelSchemaRepresentationRow>,
-    pub physical_bindings: Vec<ModelPhysicalBindingRow>,
-}
-
-/// One compiled logical/storage cast, retaining both model field identities.
+/// One compiled logical/storage cast, retaining both exact field identities.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FieldCastBinding {
     logical_field_id: Arc<str>,
@@ -429,62 +369,54 @@ pub enum SchemaContractError {
         #[source]
         source: DataFusionError,
     },
-    #[error("{role:?} schema field {field_index} is missing model metadata {missing_key:?}")]
-    IncompleteModelFieldMetadata {
+    #[error("{role:?} schema field {field_index} is missing identity metadata {missing_key:?}")]
+    IncompleteFieldIdentityMetadata {
         role: SchemaRole,
         field_index: usize,
         missing_key: &'static str,
     },
-    #[error("{role:?} schema has an empty model metadata value for {key:?} at {path}")]
-    EmptyModelMetadata {
+    #[error("{role:?} schema has an empty identity metadata value for {key:?} at {path}")]
+    EmptyIdentityMetadata {
         role: SchemaRole,
         key: &'static str,
         path: String,
     },
     #[error(
-        "{role:?} schema model field ID {field_id:?} is duplicated at indices {first_index} and {second_index}"
+        "{role:?} schema field ID {field_id:?} is duplicated at indices {first_index} and {second_index}"
     )]
-    DuplicateModelFieldId {
+    DuplicateFieldId {
         role: SchemaRole,
         field_id: String,
         first_index: usize,
         second_index: usize,
     },
-    #[error("{role:?} schema does not declare a model relation identity")]
-    MissingModelRelationId { role: SchemaRole },
-    #[error("{role:?} schema has no compiled model metadata")]
-    ModelMetadataUnavailable { role: SchemaRole },
-    #[error("{role:?} schema has no model field with ID {field_id:?}")]
-    UnknownModelFieldId { role: SchemaRole, field_id: String },
-    #[error("{role:?} schema has no model field with semantic role {semantic_role:?}")]
-    UnknownModelSemanticRole {
+    #[error("{role:?} schema does not declare a relation identity")]
+    MissingRelationId { role: SchemaRole },
+    #[error("{role:?} schema has no compiled identity metadata")]
+    IdentityMetadataUnavailable { role: SchemaRole },
+    #[error("{role:?} schema has no field with ID {field_id:?}")]
+    UnknownFieldId { role: SchemaRole, field_id: String },
+    #[error("{role:?} schema has no field with semantic role {semantic_role:?}")]
+    UnknownSemanticRole {
         role: SchemaRole,
         semantic_role: String,
     },
     #[error(
         "{role:?} schema semantic role {semantic_role:?} resolves to {match_count} fields, not one"
     )]
-    AmbiguousModelSemanticRole {
+    AmbiguousSemanticRole {
         role: SchemaRole,
         semantic_role: String,
         match_count: usize,
     },
     #[error(
-        "{role:?} cast binding at index {field_index} names model field {actual_field_id:?}, expected {expected_field_id:?}"
+        "{role:?} cast binding at index {field_index} names field {actual_field_id:?}, expected {expected_field_id:?}"
     )]
-    ModelFieldBindingMismatch {
+    FieldBindingMismatch {
         role: SchemaRole,
         field_index: usize,
         expected_field_id: Arc<str>,
         actual_field_id: Arc<str>,
-    },
-    #[error(
-        "model schema compilation for {identity:?} found compiler-owned metadata key {key:?} in {location}"
-    )]
-    ReservedModelMetadataKey {
-        identity: String,
-        location: String,
-        key: String,
     },
     #[error("{role:?} field {path} has invalid extension metadata: {reason}")]
     InvalidExtensionMetadata {
@@ -560,10 +492,10 @@ pub enum SchemaContractError {
         #[source]
         source: ArrowError,
     },
-    #[error("model schema compilation failed for {identity:?}: {reason}")]
-    ModelCompilation { identity: String, reason: String },
+    #[error("schema contract cast binding {identity:?} is invalid: {reason}")]
+    InvalidCastBinding { identity: String, reason: String },
     #[error(
-        "model field {logical_field_id:?} cannot cast {logical_type} to storage field {storage_field_id:?} type {storage_type}"
+        "logical field {logical_field_id:?} cannot cast {logical_type} to storage field {storage_field_id:?} type {storage_type}"
     )]
     UnsupportedStorageCast {
         logical_field_id: String,
@@ -572,7 +504,7 @@ pub enum SchemaContractError {
         storage_type: DataType,
     },
     #[error(
-        "model field {logical_field_id:?} cannot restore storage field {storage_field_id:?} type {storage_type} to {logical_type}"
+        "logical field {logical_field_id:?} cannot restore storage field {storage_field_id:?} type {storage_type} to {logical_type}"
     )]
     UnsupportedRestorationCast {
         logical_field_id: String,
@@ -620,25 +552,25 @@ pub enum SchemaContractError {
 }
 
 #[derive(Clone, Debug)]
-struct ModelSchemaIndex {
+struct SchemaIdentityIndex {
     relation_id: Arc<str>,
     field_ids_by_index: Arc<[Arc<str>]>,
     field_indices_by_id: BTreeMap<Arc<str>, usize>,
     field_indices_by_semantic_role: BTreeMap<Arc<str>, Arc<[usize]>>,
 }
 
-fn compile_model_schema_index(
+fn compile_schema_identity_index(
     role: SchemaRole,
     schema: &Schema,
-) -> Result<Option<ModelSchemaIndex>, SchemaContractError> {
+) -> Result<Option<SchemaIdentityIndex>, SchemaContractError> {
     let relation_id = schema
         .metadata()
-        .get(MODEL_RELATION_ID_METADATA_KEY)
+        .get(RELATION_ID_METADATA_KEY)
         .map(|value| {
             if value.trim().is_empty() {
-                Err(SchemaContractError::EmptyModelMetadata {
+                Err(SchemaContractError::EmptyIdentityMetadata {
                     role,
-                    key: MODEL_RELATION_ID_METADATA_KEY,
+                    key: RELATION_ID_METADATA_KEY,
                     path: "$".to_owned(),
                 })
             } else {
@@ -647,14 +579,12 @@ fn compile_model_schema_index(
         })
         .transpose()?;
     let fields_declare_identity_metadata = schema.fields().iter().any(|field| {
-        field.metadata().contains_key(MODEL_FIELD_ID_METADATA_KEY)
-            || field
-                .metadata()
-                .contains_key(MODEL_SEMANTIC_ROLE_METADATA_KEY)
+        field.metadata().contains_key(FIELD_ID_METADATA_KEY)
+            || field.metadata().contains_key(SEMANTIC_ROLE_METADATA_KEY)
     });
     if relation_id.is_none() {
         if fields_declare_identity_metadata {
-            return Err(SchemaContractError::MissingModelRelationId { role });
+            return Err(SchemaContractError::MissingRelationId { role });
         }
         return Ok(None);
     }
@@ -663,24 +593,24 @@ fn compile_model_schema_index(
     let mut field_ids_by_index = Vec::with_capacity(schema.fields().len());
     let mut semantic_role_indices = BTreeMap::<Arc<str>, Vec<usize>>::new();
     for (field_index, field) in schema.fields().iter().enumerate() {
-        let field_id = field.metadata().get(MODEL_FIELD_ID_METADATA_KEY).ok_or(
-            SchemaContractError::IncompleteModelFieldMetadata {
+        let field_id = field.metadata().get(FIELD_ID_METADATA_KEY).ok_or(
+            SchemaContractError::IncompleteFieldIdentityMetadata {
                 role,
                 field_index,
-                missing_key: MODEL_FIELD_ID_METADATA_KEY,
+                missing_key: FIELD_ID_METADATA_KEY,
             },
         )?;
         let path = format!("$.{}", field.name());
         if field_id.trim().is_empty() {
-            return Err(SchemaContractError::EmptyModelMetadata {
+            return Err(SchemaContractError::EmptyIdentityMetadata {
                 role,
-                key: MODEL_FIELD_ID_METADATA_KEY,
+                key: FIELD_ID_METADATA_KEY,
                 path,
             });
         }
         let field_id = Arc::<str>::from(field_id.as_str());
         if let Some(first_index) = field_indices_by_id.insert(Arc::clone(&field_id), field_index) {
-            return Err(SchemaContractError::DuplicateModelFieldId {
+            return Err(SchemaContractError::DuplicateFieldId {
                 role,
                 field_id: field_id.to_string(),
                 first_index,
@@ -688,11 +618,11 @@ fn compile_model_schema_index(
             });
         }
         field_ids_by_index.push(field_id);
-        if let Some(semantic_role) = field.metadata().get(MODEL_SEMANTIC_ROLE_METADATA_KEY) {
+        if let Some(semantic_role) = field.metadata().get(SEMANTIC_ROLE_METADATA_KEY) {
             if semantic_role.trim().is_empty() {
-                return Err(SchemaContractError::EmptyModelMetadata {
+                return Err(SchemaContractError::EmptyIdentityMetadata {
                     role,
-                    key: MODEL_SEMANTIC_ROLE_METADATA_KEY,
+                    key: SEMANTIC_ROLE_METADATA_KEY,
                     path,
                 });
             }
@@ -703,8 +633,8 @@ fn compile_model_schema_index(
         }
     }
 
-    Ok(Some(ModelSchemaIndex {
-        relation_id: relation_id.expect("model field metadata requires a relation identity"),
+    Ok(Some(SchemaIdentityIndex {
+        relation_id: relation_id.expect("field identity metadata requires a relation identity"),
         field_ids_by_index: field_ids_by_index.into(),
         field_indices_by_id,
         field_indices_by_semantic_role: semantic_role_indices
@@ -724,8 +654,8 @@ pub struct SchemaContract {
     storage_schema: SchemaRef,
     mappings: Arc<[FieldIndexMapping]>,
     storage_to_logical: Arc<[Option<usize>]>,
-    logical_model_index: Option<Arc<ModelSchemaIndex>>,
-    storage_model_index: Option<Arc<ModelSchemaIndex>>,
+    logical_identity_index: Option<Arc<SchemaIdentityIndex>>,
+    storage_identity_index: Option<Arc<SchemaIdentityIndex>>,
     casts: Arc<[FieldCastBinding]>,
     constraints: Arc<Constraints>,
     compatibility: SchemaCompatibility,
@@ -748,36 +678,39 @@ impl SchemaContract {
         storage_schema: SchemaRef,
         mappings: Vec<FieldIndexMapping>,
     ) -> Result<Self, SchemaContractError> {
-        Self::try_new_compiled(
+        Self::try_new_with_options(
             source_schema_identity,
             qualifier,
             logical_schema,
             storage_schema,
             mappings,
-            Vec::new(),
-            Constraints::default(),
-            SchemaCompatibility::Exact,
-            ColumnMappingMode::Positional,
-            DeletionVectorBehavior::Forbidden,
+            SchemaContractOptions::default(),
         )
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "all compiled schema-lifecycle products are kept in one validated constructor"
-    )]
-    fn try_new_compiled(
+    /// Build a contract from observed schemas and explicit non-schema policies.
+    ///
+    /// Field identities, types, nullability, metadata, and cast bindings are
+    /// always derived from `logical_schema`, `storage_schema`, and `mappings`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error when an observed schema, identity, constraint, or
+    /// mapping cannot form one internally consistent contract.
+    pub fn try_new_with_options(
         source_schema_identity: impl Into<Arc<str>>,
         qualifier: TableReference,
         logical_schema: SchemaRef,
         storage_schema: SchemaRef,
         mappings: Vec<FieldIndexMapping>,
-        casts: Vec<FieldCastBinding>,
-        constraints: Constraints,
-        compatibility: SchemaCompatibility,
-        column_mapping_mode: ColumnMappingMode,
-        deletion_vector_behavior: DeletionVectorBehavior,
+        options: SchemaContractOptions,
     ) -> Result<Self, SchemaContractError> {
+        let SchemaContractOptions {
+            constraints,
+            compatibility,
+            column_mapping_mode,
+            deletion_vector_behavior,
+        } = options;
         let source_schema_identity = source_schema_identity.into();
         if source_schema_identity.trim().is_empty() {
             return Err(SchemaContractError::EmptySourceSchemaIdentity);
@@ -785,10 +718,12 @@ impl SchemaContract {
 
         validate_extension_metadata(SchemaRole::Logical, logical_schema.as_ref())?;
         validate_extension_metadata(SchemaRole::Storage, storage_schema.as_ref())?;
-        let logical_model_index =
-            compile_model_schema_index(SchemaRole::Logical, logical_schema.as_ref())?.map(Arc::new);
-        let storage_model_index =
-            compile_model_schema_index(SchemaRole::Storage, storage_schema.as_ref())?.map(Arc::new);
+        let logical_identity_index =
+            compile_schema_identity_index(SchemaRole::Logical, logical_schema.as_ref())?
+                .map(Arc::new);
+        let storage_identity_index =
+            compile_schema_identity_index(SchemaRole::Storage, storage_schema.as_ref())?
+                .map(Arc::new);
 
         let functional_dependencies = FunctionalDependencies::new_from_constraints(
             Some(&constraints),
@@ -805,38 +740,34 @@ impl SchemaContract {
             storage_schema.fields().len(),
             mappings,
         )?;
-        let casts = if casts.is_empty() {
-            mappings
-                .iter()
-                .map(|mapping| {
-                    let logical = logical_schema.field(mapping.logical_index());
-                    let storage = storage_schema.field(mapping.storage_index());
-                    FieldCastBinding {
-                        logical_field_id: logical_model_index.as_ref().map_or_else(
-                            || Arc::from(logical.name().as_str()),
-                            |index| Arc::clone(&index.field_ids_by_index[mapping.logical_index()]),
-                        ),
-                        storage_field_id: storage_model_index.as_ref().map_or_else(
-                            || Arc::from(storage.name().as_str()),
-                            |index| Arc::clone(&index.field_ids_by_index[mapping.storage_index()]),
-                        ),
-                        logical_index: mapping.logical_index(),
-                        storage_index: mapping.storage_index(),
-                        logical_data_type: logical.data_type().clone(),
-                        storage_data_type: storage.data_type().clone(),
-                    }
-                })
-                .collect::<Vec<_>>()
-        } else {
-            casts
-        };
+        let casts = mappings
+            .iter()
+            .map(|mapping| {
+                let logical = logical_schema.field(mapping.logical_index());
+                let storage = storage_schema.field(mapping.storage_index());
+                FieldCastBinding {
+                    logical_field_id: logical_identity_index.as_ref().map_or_else(
+                        || Arc::from(logical.name().as_str()),
+                        |index| Arc::clone(&index.field_ids_by_index[mapping.logical_index()]),
+                    ),
+                    storage_field_id: storage_identity_index.as_ref().map_or_else(
+                        || Arc::from(storage.name().as_str()),
+                        |index| Arc::clone(&index.field_ids_by_index[mapping.storage_index()]),
+                    ),
+                    logical_index: mapping.logical_index(),
+                    storage_index: mapping.storage_index(),
+                    logical_data_type: logical.data_type().clone(),
+                    storage_data_type: storage.data_type().clone(),
+                }
+            })
+            .collect::<Vec<_>>();
         validate_cast_bindings(
             &casts,
             &mappings,
             &logical_schema,
             &storage_schema,
-            logical_model_index.as_deref(),
-            storage_model_index.as_deref(),
+            logical_identity_index.as_deref(),
+            storage_identity_index.as_deref(),
         )?;
 
         Ok(Self {
@@ -848,8 +779,8 @@ impl SchemaContract {
             storage_schema,
             mappings,
             storage_to_logical,
-            logical_model_index,
-            storage_model_index,
+            logical_identity_index,
+            storage_identity_index,
             casts: casts.into(),
             constraints: Arc::new(constraints),
             compatibility,
@@ -883,47 +814,31 @@ impl SchemaContract {
         &self.storage_schema
     }
 
-    /// Resolve the programmatically installed relation identity for one schema role.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SchemaContractError::ModelMetadataUnavailable`] for a legacy or otherwise
-    /// unannotated schema. Callers must not substitute an Arrow table or field name for model
-    /// identity.
-    pub fn model_relation_id(&self, role: SchemaRole) -> Result<&str, SchemaContractError> {
-        self.relation_id(role)
-    }
-
     /// Resolve the exact relation identity carried by the live session schema.
+    ///
+    /// Returns [`SchemaContractError::IdentityMetadataUnavailable`] when the
+    /// observed schema lacks the required identity metadata. Callers must not
+    /// substitute an Arrow table name.
     pub fn relation_id(&self, role: SchemaRole) -> Result<&str, SchemaContractError> {
-        Ok(self.model_index(role)?.relation_id.as_ref())
+        Ok(self.identity_index(role)?.relation_id.as_ref())
     }
 
     /// Resolve a stable field ID to its exact index within the selected schema role.
     ///
     /// # Errors
     ///
-    /// Returns [`SchemaContractError::UnknownModelFieldId`] rather than falling back to a
+    /// Returns [`SchemaContractError::UnknownFieldId`] rather than falling back to a
     /// physical field name or ordinal.
-    pub fn field_index_for_model_id(
-        &self,
-        role: SchemaRole,
-        field_id: &str,
-    ) -> Result<usize, SchemaContractError> {
-        self.field_index_for_id(role, field_id)
-    }
-
-    /// Resolve a session-owned field identity to its exact schema index.
     pub fn field_index_for_id(
         &self,
         role: SchemaRole,
         field_id: &str,
     ) -> Result<usize, SchemaContractError> {
-        self.model_index(role)?
+        self.identity_index(role)?
             .field_indices_by_id
             .get(field_id)
             .copied()
-            .ok_or_else(|| SchemaContractError::UnknownModelFieldId {
+            .ok_or_else(|| SchemaContractError::UnknownFieldId {
                 role,
                 field_id: field_id.to_owned(),
             })
@@ -935,33 +850,24 @@ impl SchemaContract {
     /// reads the metadata compiled from the provider/transformation schema;
     /// field names and ordinals are never substituted for identity.
     pub fn field_id_at(&self, role: SchemaRole, index: usize) -> Result<&str, SchemaContractError> {
-        self.model_index(role)?
+        self.identity_index(role)?
             .field_ids_by_index
             .get(index)
             .map(AsRef::as_ref)
-            .ok_or_else(|| SchemaContractError::UnknownModelFieldId {
+            .ok_or_else(|| SchemaContractError::UnknownFieldId {
                 role,
                 field_id: format!("index:{index}"),
             })
     }
 
-    /// Resolve one logical model field ID without consulting Arrow field names.
+    /// Resolve one logical field ID without consulting Arrow field names.
     pub fn logical_index_for_field_id(&self, field_id: &str) -> Result<usize, SchemaContractError> {
-        self.field_index_for_model_id(SchemaRole::Logical, field_id)
+        self.field_index_for_id(SchemaRole::Logical, field_id)
     }
 
-    /// Resolve one storage model field ID without consulting Arrow field names.
+    /// Resolve one storage field ID without consulting Arrow field names.
     pub fn storage_index_for_field_id(&self, field_id: &str) -> Result<usize, SchemaContractError> {
-        self.field_index_for_model_id(SchemaRole::Storage, field_id)
-    }
-
-    /// Resolve a model field ID to its exact Arrow field and index.
-    pub fn field_for_model_id(
-        &self,
-        role: SchemaRole,
-        field_id: &str,
-    ) -> Result<(usize, &Field), SchemaContractError> {
-        self.field_for_id(role, field_id)
+        self.field_index_for_id(SchemaRole::Storage, field_id)
     }
 
     /// Resolve a session-owned field identity to its exact Arrow field and index.
@@ -978,10 +884,10 @@ impl SchemaContract {
         Ok((index, schema.field(index)))
     }
 
-    /// Return every exact field index carrying a model-owned semantic role.
+    /// Return every exact field index carrying a contract-owned semantic role.
     ///
-    /// Semantic roles are intentionally one-to-many. An empty slice means a complete model
-    /// relation did not declare the role; callers requiring exactly one field must use
+    /// Semantic roles are intentionally one-to-many. An empty slice means the
+    /// observed relation did not declare the role; callers requiring exactly one field must use
     /// [`Self::unique_field_index_for_semantic_role`].
     pub fn field_indices_for_semantic_role(
         &self,
@@ -989,13 +895,13 @@ impl SchemaContract {
         semantic_role: &str,
     ) -> Result<&[usize], SchemaContractError> {
         Ok(self
-            .model_index(role)?
+            .identity_index(role)?
             .field_indices_by_semantic_role
             .get(semantic_role)
             .map_or(&[], AsRef::as_ref))
     }
 
-    /// Return every logical field index carrying a model-owned semantic role.
+    /// Return every logical field index carrying a contract-owned semantic role.
     pub fn logical_indices_for_semantic_role(
         &self,
         semantic_role: &str,
@@ -1008,7 +914,7 @@ impl SchemaContract {
     /// # Errors
     ///
     /// Returns typed unknown and ambiguity errors. Uniqueness is an operation-level
-    /// requirement, not a global restriction on model roles.
+    /// requirement, not a global restriction on semantic roles.
     pub fn unique_field_index_for_semantic_role(
         &self,
         role: SchemaRole,
@@ -1016,11 +922,11 @@ impl SchemaContract {
     ) -> Result<usize, SchemaContractError> {
         match self.field_indices_for_semantic_role(role, semantic_role)? {
             [index] => Ok(*index),
-            [] => Err(SchemaContractError::UnknownModelSemanticRole {
+            [] => Err(SchemaContractError::UnknownSemanticRole {
                 role,
                 semantic_role: semantic_role.to_owned(),
             }),
-            indices => Err(SchemaContractError::AmbiguousModelSemanticRole {
+            indices => Err(SchemaContractError::AmbiguousSemanticRole {
                 role,
                 semantic_role: semantic_role.to_owned(),
                 match_count: indices.len(),
@@ -1028,14 +934,17 @@ impl SchemaContract {
         }
     }
 
-    fn model_index(&self, role: SchemaRole) -> Result<&ModelSchemaIndex, SchemaContractError> {
+    fn identity_index(
+        &self,
+        role: SchemaRole,
+    ) -> Result<&SchemaIdentityIndex, SchemaContractError> {
         let index = match role {
-            SchemaRole::Logical => &self.logical_model_index,
-            SchemaRole::Storage => &self.storage_model_index,
+            SchemaRole::Logical => &self.logical_identity_index,
+            SchemaRole::Storage => &self.storage_identity_index,
         };
         index
             .as_deref()
-            .ok_or(SchemaContractError::ModelMetadataUnavailable { role })
+            .ok_or(SchemaContractError::IdentityMetadataUnavailable { role })
     }
 
     #[must_use]
@@ -1231,7 +1140,7 @@ impl SchemaContract {
         self.validate_arrow_schema(phase, phase.output_role(), actual, compatibility)
     }
 
-    /// Validate a phase using the compatibility policy selected by the model.
+    /// Validate a phase using the compatibility policy bound to this contract.
     pub fn validate_bound_phase_schema(
         &self,
         phase: SchemaPhase,
@@ -1460,7 +1369,7 @@ impl SchemaContract {
         Ok(batch)
     }
 
-    /// Restore a provider/storage batch to exact model-owned logical meaning.
+    /// Restore a provider/storage batch to exact contract-owned logical meaning.
     pub fn restore_storage_batch(
         &self,
         batch: &RecordBatch,
@@ -1584,1010 +1493,6 @@ fn validate_batch_nullability(
     Ok(())
 }
 
-impl SchemaContractModelRows {
-    /// Project the replayed Arrow model relations into schema-compiler rows.
-    ///
-    /// `physical_bindings` are the typed results of the model-owned mapping
-    /// programs for the exact provider schemas observed while assembling an
-    /// epoch. Every result must match one authoritative `physical_binding`
-    /// model row; missing, extra, or mismatched selections fail closed.
-    pub fn from_model_epoch(
-        epoch: &ModelEpoch,
-        catalog_name: &str,
-        mut physical_bindings: Vec<ModelPhysicalBindingRow>,
-    ) -> Result<Self, SchemaContractError> {
-        if catalog_name.trim().is_empty() {
-            return Err(model_compilation(
-                epoch.model_epoch_id(),
-                "schema catalog name is empty".to_owned(),
-            ));
-        }
-        let relations = project_model_relations(epoch, catalog_name)?;
-        let semantic_types = project_model_semantic_types(epoch)?;
-        let fields = project_model_fields(epoch)?;
-        let keys = project_model_keys(epoch)?;
-        let representations = project_model_representations(epoch)?;
-        validate_model_physical_bindings(epoch, &physical_bindings)?;
-        physical_bindings
-            .sort_by(|left, right| left.physical_binding_id.cmp(&right.physical_binding_id));
-
-        Ok(Self {
-            relations,
-            semantic_types,
-            fields,
-            keys,
-            representations,
-            physical_bindings,
-        })
-    }
-
-    /// Compile every physical binding, keyed by its model identity.
-    pub fn compile_all(&self) -> Result<BTreeMap<String, SchemaContract>, SchemaContractError> {
-        self.physical_bindings
-            .iter()
-            .map(|binding| {
-                self.compile(&binding.physical_binding_id)
-                    .map(|contract| (binding.physical_binding_id.clone(), contract))
-            })
-            .collect()
-    }
-
-    /// Compile one exact physical binding into an executable schema contract.
-    ///
-    /// The row set remains the sole semantic authority: Arrow fields,
-    /// `DFSchema` qualification and functional dependencies, storage casts,
-    /// and all consumer index maps are derived together.
-    pub fn compile(
-        &self,
-        physical_binding_id: &str,
-    ) -> Result<SchemaContract, SchemaContractError> {
-        let binding = unique_row(
-            self.physical_bindings
-                .iter()
-                .filter(|row| row.physical_binding_id == physical_binding_id),
-            physical_binding_id,
-            "physical binding",
-        )?;
-        let logical_relation = unique_row(
-            self.relations
-                .iter()
-                .filter(|row| row.relation_id == binding.logical_relation_id),
-            &binding.logical_relation_id,
-            "logical relation",
-        )?;
-        let storage_relation = unique_row(
-            self.relations
-                .iter()
-                .filter(|row| row.relation_id == binding.storage_relation_id),
-            &binding.storage_relation_id,
-            "storage relation",
-        )?;
-
-        let semantic_types = unique_by(
-            &self.semantic_types,
-            |row| row.semantic_type_id.as_str(),
-            physical_binding_id,
-            "semantic type",
-        )?;
-        let representations = unique_by(
-            &self.representations,
-            |row| row.semantic_type_id.as_str(),
-            physical_binding_id,
-            "semantic-type representation",
-        )?;
-        let logical_fields = relation_fields(
-            &self.fields,
-            &binding.logical_relation_id,
-            physical_binding_id,
-        )?;
-        let storage_fields = relation_fields(
-            &self.fields,
-            &binding.storage_relation_id,
-            physical_binding_id,
-        )?;
-
-        let logical_by_id = logical_fields
-            .iter()
-            .enumerate()
-            .map(|(index, row)| (row.field_id.as_str(), (index, *row)))
-            .collect::<BTreeMap<_, _>>();
-        let storage_by_id = storage_fields
-            .iter()
-            .enumerate()
-            .map(|(index, row)| (row.field_id.as_str(), (index, *row)))
-            .collect::<BTreeMap<_, _>>();
-
-        let logical_arrow_fields = logical_fields
-            .iter()
-            .map(|row| {
-                compile_model_field(
-                    row,
-                    SchemaRole::Logical,
-                    &semantic_types,
-                    &representations,
-                    physical_binding_id,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let storage_arrow_fields = storage_fields
-            .iter()
-            .map(|row| {
-                compile_model_field(
-                    row,
-                    SchemaRole::Storage,
-                    &semantic_types,
-                    &representations,
-                    physical_binding_id,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        reject_reserved_relation_metadata(
-            &logical_relation.relation_metadata,
-            physical_binding_id,
-            &binding.logical_relation_id,
-        )?;
-        reject_reserved_relation_metadata(
-            &storage_relation.relation_metadata,
-            physical_binding_id,
-            &binding.storage_relation_id,
-        )?;
-        let mut logical_metadata = logical_relation.relation_metadata.clone();
-        logical_metadata.insert(
-            MODEL_RELATION_ID_METADATA_KEY.to_owned(),
-            binding.logical_relation_id.clone(),
-        );
-        logical_metadata.insert(
-            "codefabric.model.physical_binding_id".to_owned(),
-            binding.physical_binding_id.clone(),
-        );
-        logical_metadata.insert(
-            "codefabric.model.mapping_program_id".to_owned(),
-            binding.mapping_program_id.clone(),
-        );
-        let mut storage_metadata = storage_relation.relation_metadata.clone();
-        storage_metadata.insert(
-            MODEL_RELATION_ID_METADATA_KEY.to_owned(),
-            binding.storage_relation_id.clone(),
-        );
-        storage_metadata.insert(
-            "codefabric.model.physical_binding_id".to_owned(),
-            binding.physical_binding_id.clone(),
-        );
-        storage_metadata.insert(
-            "codefabric.model.mapping_program_id".to_owned(),
-            binding.mapping_program_id.clone(),
-        );
-        storage_metadata.insert(
-            "codefabric.storage.column_mapping".to_owned(),
-            column_mapping_name(binding.column_mapping_mode).to_owned(),
-        );
-        storage_metadata.insert(
-            "codefabric.storage.deletion_vectors".to_owned(),
-            deletion_vector_name(binding.deletion_vector_behavior).to_owned(),
-        );
-
-        let logical_schema = Arc::new(Schema::new_with_metadata(
-            logical_arrow_fields,
-            logical_metadata,
-        ));
-        let storage_schema = Arc::new(Schema::new_with_metadata(
-            storage_arrow_fields,
-            storage_metadata,
-        ));
-
-        if binding.field_bindings.len() != logical_fields.len() {
-            return Err(model_compilation(
-                physical_binding_id,
-                format!(
-                    "expected {} physical field bindings, received {}",
-                    logical_fields.len(),
-                    binding.field_bindings.len()
-                ),
-            ));
-        }
-
-        let mut mappings = Vec::with_capacity(logical_fields.len());
-        let mut casts = Vec::with_capacity(logical_fields.len());
-        let mut seen_logical = BTreeSet::new();
-        let mut seen_storage = BTreeSet::new();
-        for field_binding in &binding.field_bindings {
-            let Some((logical_index, logical_field)) = logical_by_id
-                .get(field_binding.logical_field_id.as_str())
-                .copied()
-            else {
-                return Err(model_compilation(
-                    physical_binding_id,
-                    format!(
-                        "physical field binding references unknown logical field {}",
-                        field_binding.logical_field_id
-                    ),
-                ));
-            };
-            let Some((storage_index, storage_field)) = storage_by_id
-                .get(field_binding.storage_field_id.as_str())
-                .copied()
-            else {
-                return Err(model_compilation(
-                    physical_binding_id,
-                    format!(
-                        "physical field binding references unknown storage field {}",
-                        field_binding.storage_field_id
-                    ),
-                ));
-            };
-            if !seen_logical.insert(logical_index) {
-                return Err(model_compilation(
-                    physical_binding_id,
-                    format!(
-                        "logical field {} has more than one physical binding",
-                        logical_field.field_id
-                    ),
-                ));
-            }
-            if !seen_storage.insert(storage_index) {
-                return Err(model_compilation(
-                    physical_binding_id,
-                    format!(
-                        "storage field {} is bound more than once",
-                        storage_field.field_id
-                    ),
-                ));
-            }
-
-            mappings.push(FieldIndexMapping::new(
-                logical_index,
-                storage_index,
-                field_binding.projection_index,
-                field_binding.filter_index,
-                field_binding.statistics_index,
-            ));
-            casts.push(FieldCastBinding {
-                logical_field_id: Arc::from(logical_field.field_id.as_str()),
-                storage_field_id: Arc::from(storage_field.field_id.as_str()),
-                logical_index,
-                storage_index,
-                logical_data_type: logical_schema.field(logical_index).data_type().clone(),
-                storage_data_type: storage_schema.field(storage_index).data_type().clone(),
-            });
-        }
-        mappings.sort_by_key(|mapping| mapping.logical_index());
-        casts.sort_by_key(FieldCastBinding::logical_index);
-
-        let constraints = compile_model_constraints(
-            &self.keys,
-            &binding.logical_relation_id,
-            &logical_by_id,
-            physical_binding_id,
-        )?;
-
-        SchemaContract::try_new_compiled(
-            binding.source_schema_identity.clone(),
-            logical_relation.qualifier.clone(),
-            logical_schema,
-            storage_schema,
-            mappings,
-            casts,
-            constraints,
-            binding.compatibility,
-            binding.column_mapping_mode,
-            binding.deletion_vector_behavior,
-        )
-    }
-}
-
-fn project_model_relations(
-    epoch: &ModelEpoch,
-    catalog_name: &str,
-) -> Result<Vec<ModelSchemaRelationRow>, SchemaContractError> {
-    let batch = epoch.relations().batch(ModelRelation::Relation);
-    let relation_ids = model_utf8_column(batch, "relation_id")?;
-    let schema_names = model_utf8_column(batch, "schema_name")?;
-    let relation_names = model_utf8_column(batch, "relation_name")?;
-    let semantic_roles = model_utf8_column(batch, "semantic_role")?;
-
-    (0..batch.num_rows())
-        .map(|row| {
-            let relation_id = model_required_utf8(relation_ids, row, "relation.relation_id")?;
-            let schema_name = model_required_utf8(schema_names, row, "relation.schema_name")?;
-            let relation_name = model_required_utf8(relation_names, row, "relation.relation_name")?;
-            let semantic_role = model_required_utf8(semantic_roles, row, "relation.semantic_role")?;
-            if schema_name.trim().is_empty() || relation_name.trim().is_empty() {
-                return Err(model_compilation(
-                    relation_id,
-                    "relation qualifier components must be non-empty".to_owned(),
-                ));
-            }
-            Ok(ModelSchemaRelationRow {
-                relation_id: relation_id.to_owned(),
-                qualifier: TableReference::full(catalog_name, schema_name, relation_name),
-                relation_metadata: HashMap::from([(
-                    "codefabric.semantic.role".to_owned(),
-                    semantic_role.to_owned(),
-                )]),
-            })
-        })
-        .collect()
-}
-
-fn project_model_semantic_types(
-    epoch: &ModelEpoch,
-) -> Result<Vec<ModelSchemaTypeRow>, SchemaContractError> {
-    let batch = epoch.relations().batch(ModelRelation::SemanticType);
-    let semantic_type_ids = model_utf8_column(batch, "semantic_type_id")?;
-    let logical_types = model_utf8_column(batch, "logical_type")?;
-    let allows_null = model_bool_column(batch, "allows_null")?;
-
-    (0..batch.num_rows())
-        .map(|row| {
-            let semantic_type_id =
-                model_required_utf8(semantic_type_ids, row, "semantic_type.semantic_type_id")?;
-            let logical_type =
-                model_required_utf8(logical_types, row, "semantic_type.logical_type")?;
-            let allows_null = model_required_bool(allows_null, row, "semantic_type.allows_null")?;
-            Ok(ModelSchemaTypeRow {
-                semantic_type_id: semantic_type_id.to_owned(),
-                logical_data_type: parse_model_arrow_data_type(
-                    semantic_type_id,
-                    "logical_type",
-                    logical_type,
-                )?,
-                allows_null,
-            })
-        })
-        .collect()
-}
-
-fn project_model_fields(
-    epoch: &ModelEpoch,
-) -> Result<Vec<ModelSchemaFieldRow>, SchemaContractError> {
-    let batch = epoch.relations().batch(ModelRelation::Field);
-    let field_ids = model_utf8_column(batch, "field_id")?;
-    let relation_ids = model_utf8_column(batch, "relation_id")?;
-    let field_names = model_utf8_column(batch, "field_name")?;
-    let semantic_type_ids = model_utf8_column(batch, "semantic_type_id")?;
-    let ordinals = model_u32_column(batch, "ordinal")?;
-    let nullability = model_bool_column(batch, "nullable")?;
-    let semantic_roles = model_utf8_column(batch, "semantic_role")?;
-
-    (0..batch.num_rows())
-        .map(|row| {
-            Ok(ModelSchemaFieldRow {
-                field_id: model_required_utf8(field_ids, row, "field.field_id")?.to_owned(),
-                relation_id: model_required_utf8(relation_ids, row, "field.relation_id")?
-                    .to_owned(),
-                field_name: model_required_utf8(field_names, row, "field.field_name")?.to_owned(),
-                semantic_type_id: model_required_utf8(
-                    semantic_type_ids,
-                    row,
-                    "field.semantic_type_id",
-                )?
-                .to_owned(),
-                ordinal: usize::try_from(model_required_u32(ordinals, row, "field.ordinal")?)
-                    .expect("u32 always fits usize on supported targets"),
-                nullable: model_required_bool(nullability, row, "field.nullable")?,
-                semantic_role: model_required_utf8(semantic_roles, row, "field.semantic_role")?
-                    .to_owned(),
-                field_metadata: HashMap::new(),
-            })
-        })
-        .collect()
-}
-
-fn project_model_keys(epoch: &ModelEpoch) -> Result<Vec<ModelSchemaKeyRow>, SchemaContractError> {
-    let batch = epoch.relations().batch(ModelRelation::Key);
-    let key_ids = model_utf8_column(batch, "key_id")?;
-    let relation_ids = model_utf8_column(batch, "relation_id")?;
-    let field_ids = model_utf8_column(batch, "field_id")?;
-    let ordinals = model_u32_column(batch, "ordinal")?;
-    let key_kinds = model_utf8_column(batch, "key_kind")?;
-
-    (0..batch.num_rows())
-        .map(|row| {
-            let key_id = model_required_utf8(key_ids, row, "key.key_id")?;
-            let key_kind = match model_required_utf8(key_kinds, row, "key.key_kind")? {
-                "primary" => ModelSchemaKeyKind::Primary,
-                "unique" => ModelSchemaKeyKind::Unique,
-                observed => {
-                    return Err(model_compilation(
-                        key_id,
-                        format!("unsupported key kind {observed:?}"),
-                    ));
-                }
-            };
-            Ok(ModelSchemaKeyRow {
-                key_id: key_id.to_owned(),
-                relation_id: model_required_utf8(relation_ids, row, "key.relation_id")?.to_owned(),
-                field_id: model_required_utf8(field_ids, row, "key.field_id")?.to_owned(),
-                ordinal: usize::try_from(model_required_u32(ordinals, row, "key.ordinal")?)
-                    .expect("u32 always fits usize on supported targets"),
-                key_kind,
-            })
-        })
-        .collect()
-}
-
-fn project_model_representations(
-    epoch: &ModelEpoch,
-) -> Result<Vec<ModelSchemaRepresentationRow>, SchemaContractError> {
-    let batch = epoch.relations().batch(ModelRelation::Representation);
-    let representation_ids = model_utf8_column(batch, "representation_id")?;
-    let semantic_type_ids = model_utf8_column(batch, "semantic_type_id")?;
-    let arrow_data_types = model_utf8_column(batch, "arrow_data_type")?;
-    let storage_encodings = model_utf8_column(batch, "storage_encoding")?;
-    let metadata_classes = model_utf8_column(batch, "metadata_class")?;
-    let extension_names = model_utf8_column(batch, "extension_name")?;
-    let extension_metadata = model_utf8_column(batch, "extension_metadata")?;
-
-    (0..batch.num_rows())
-        .map(|row| {
-            let representation_id =
-                model_required_utf8(representation_ids, row, "representation.representation_id")?;
-            Ok(ModelSchemaRepresentationRow {
-                representation_id: representation_id.to_owned(),
-                semantic_type_id: model_required_utf8(
-                    semantic_type_ids,
-                    row,
-                    "representation.semantic_type_id",
-                )?
-                .to_owned(),
-                storage_data_type: parse_model_arrow_data_type(
-                    representation_id,
-                    "arrow_data_type",
-                    model_required_utf8(arrow_data_types, row, "representation.arrow_data_type")?,
-                )?,
-                storage_encoding: model_required_utf8(
-                    storage_encodings,
-                    row,
-                    "representation.storage_encoding",
-                )?
-                .to_owned(),
-                metadata_class: model_required_utf8(
-                    metadata_classes,
-                    row,
-                    "representation.metadata_class",
-                )?
-                .to_owned(),
-                extension_name: model_optional_utf8(extension_names, row),
-                extension_metadata: model_optional_utf8(extension_metadata, row),
-            })
-        })
-        .collect()
-}
-
-fn validate_model_physical_bindings(
-    epoch: &ModelEpoch,
-    physical_bindings: &[ModelPhysicalBindingRow],
-) -> Result<(), SchemaContractError> {
-    let batch = epoch.relations().batch(ModelRelation::PhysicalBinding);
-    let binding_ids = model_utf8_column(batch, "physical_binding_id")?;
-    let logical_relation_ids = model_utf8_column(batch, "logical_relation_id")?;
-    let storage_relation_ids = model_utf8_column(batch, "storage_relation_id")?;
-    let mapping_program_ids = model_utf8_column(batch, "mapping_program_id")?;
-    let compatibility_modes = model_utf8_column(batch, "compatibility_mode")?;
-    let mut expected = BTreeMap::new();
-    for row in 0..batch.num_rows() {
-        let binding_id =
-            model_required_utf8(binding_ids, row, "physical_binding.physical_binding_id")?;
-        let authority = (
-            model_required_utf8(
-                logical_relation_ids,
-                row,
-                "physical_binding.logical_relation_id",
-            )?,
-            model_required_utf8(
-                storage_relation_ids,
-                row,
-                "physical_binding.storage_relation_id",
-            )?,
-            model_required_utf8(
-                mapping_program_ids,
-                row,
-                "physical_binding.mapping_program_id",
-            )?,
-            parse_model_compatibility(
-                binding_id,
-                model_required_utf8(
-                    compatibility_modes,
-                    row,
-                    "physical_binding.compatibility_mode",
-                )?,
-            )?,
-        );
-        if expected.insert(binding_id, authority).is_some() {
-            return Err(model_compilation(
-                binding_id,
-                "duplicate physical binding model row".to_owned(),
-            ));
-        }
-    }
-
-    let mut observed = BTreeSet::new();
-    for binding in physical_bindings {
-        if !observed.insert(binding.physical_binding_id.as_str()) {
-            return Err(model_compilation(
-                &binding.physical_binding_id,
-                "duplicate resolved physical binding".to_owned(),
-            ));
-        }
-        let Some((logical_relation_id, storage_relation_id, mapping_program_id, compatibility)) =
-            expected.get(binding.physical_binding_id.as_str())
-        else {
-            return Err(model_compilation(
-                &binding.physical_binding_id,
-                "resolved binding has no authoritative model row".to_owned(),
-            ));
-        };
-        if binding.logical_relation_id != *logical_relation_id
-            || binding.storage_relation_id != *storage_relation_id
-            || binding.mapping_program_id != *mapping_program_id
-            || binding.compatibility != *compatibility
-        {
-            return Err(model_compilation(
-                &binding.physical_binding_id,
-                "resolved binding differs from its authoritative model row".to_owned(),
-            ));
-        }
-    }
-
-    let missing = expected
-        .keys()
-        .copied()
-        .filter(|binding_id| !observed.contains(binding_id))
-        .collect::<Vec<_>>();
-    if !missing.is_empty() {
-        return Err(model_compilation(
-            epoch.model_epoch_id(),
-            format!("physical binding programs produced no result for {missing:?}"),
-        ));
-    }
-    Ok(())
-}
-
-fn parse_model_compatibility(
-    identity: &str,
-    value: &str,
-) -> Result<SchemaCompatibility, SchemaContractError> {
-    match value {
-        "exact" => Ok(SchemaCompatibility::Exact),
-        "contains" => Ok(SchemaCompatibility::Contains),
-        observed => Err(model_compilation(
-            identity,
-            format!("unsupported schema compatibility {observed:?}"),
-        )),
-    }
-}
-
-fn parse_model_arrow_data_type(
-    identity: &str,
-    field: &str,
-    value: &str,
-) -> Result<DataType, SchemaContractError> {
-    value.parse::<DataType>().or_else(|native_error| {
-        let compatibility_alias = match value {
-            "bool" | "boolean" => Some(DataType::Boolean),
-            "i8" => Some(DataType::Int8),
-            "i16" => Some(DataType::Int16),
-            "i32" => Some(DataType::Int32),
-            "i64" => Some(DataType::Int64),
-            "u8" => Some(DataType::UInt8),
-            "u16" => Some(DataType::UInt16),
-            "u32" => Some(DataType::UInt32),
-            "u64" => Some(DataType::UInt64),
-            "f32" => Some(DataType::Float32),
-            "f64" => Some(DataType::Float64),
-            "utf8" => Some(DataType::Utf8),
-            "large_utf8" => Some(DataType::LargeUtf8),
-            "binary" => Some(DataType::Binary),
-            "large_binary" => Some(DataType::LargeBinary),
-            _ => None,
-        };
-        compatibility_alias.ok_or_else(|| {
-            model_compilation(
-                identity,
-                format!("invalid Arrow {field} {value:?}: {native_error}"),
-            )
-        })
-    })
-}
-
-fn model_column_index(batch: &RecordBatch, name: &str) -> Result<usize, SchemaContractError> {
-    batch.schema().index_of(name).map_err(|error| {
-        model_compilation(
-            "model-epoch-projection",
-            format!("missing model column {name}: {error}"),
-        )
-    })
-}
-
-fn model_utf8_column<'a>(
-    batch: &'a RecordBatch,
-    name: &str,
-) -> Result<&'a StringArray, SchemaContractError> {
-    batch
-        .column(model_column_index(batch, name)?)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| {
-            model_compilation(
-                "model-epoch-projection",
-                format!("model column {name} is not Utf8"),
-            )
-        })
-}
-
-fn model_bool_column<'a>(
-    batch: &'a RecordBatch,
-    name: &str,
-) -> Result<&'a BooleanArray, SchemaContractError> {
-    batch
-        .column(model_column_index(batch, name)?)
-        .as_any()
-        .downcast_ref::<BooleanArray>()
-        .ok_or_else(|| {
-            model_compilation(
-                "model-epoch-projection",
-                format!("model column {name} is not Boolean"),
-            )
-        })
-}
-
-fn model_u32_column<'a>(
-    batch: &'a RecordBatch,
-    name: &str,
-) -> Result<&'a UInt32Array, SchemaContractError> {
-    batch
-        .column(model_column_index(batch, name)?)
-        .as_any()
-        .downcast_ref::<UInt32Array>()
-        .ok_or_else(|| {
-            model_compilation(
-                "model-epoch-projection",
-                format!("model column {name} is not UInt32"),
-            )
-        })
-}
-
-fn model_required_utf8<'a>(
-    column: &'a StringArray,
-    row: usize,
-    location: &str,
-) -> Result<&'a str, SchemaContractError> {
-    if column.is_null(row) {
-        return Err(model_compilation(
-            "model-epoch-projection",
-            format!("{location} is null"),
-        ));
-    }
-    Ok(column.value(row))
-}
-
-fn model_optional_utf8(column: &StringArray, row: usize) -> Option<String> {
-    (!column.is_null(row)).then(|| column.value(row).to_owned())
-}
-
-fn model_required_bool(
-    column: &BooleanArray,
-    row: usize,
-    location: &str,
-) -> Result<bool, SchemaContractError> {
-    if column.is_null(row) {
-        return Err(model_compilation(
-            "model-epoch-projection",
-            format!("{location} is null"),
-        ));
-    }
-    Ok(column.value(row))
-}
-
-fn model_required_u32(
-    column: &UInt32Array,
-    row: usize,
-    location: &str,
-) -> Result<u32, SchemaContractError> {
-    if column.is_null(row) {
-        return Err(model_compilation(
-            "model-epoch-projection",
-            format!("{location} is null"),
-        ));
-    }
-    Ok(column.value(row))
-}
-
-fn unique_row<'a, T: 'a>(
-    mut rows: impl Iterator<Item = &'a T>,
-    identity: &str,
-    row_kind: &str,
-) -> Result<&'a T, SchemaContractError> {
-    let Some(row) = rows.next() else {
-        return Err(model_compilation(
-            identity,
-            format!("missing {row_kind} row"),
-        ));
-    };
-    if rows.next().is_some() {
-        return Err(model_compilation(
-            identity,
-            format!("duplicate {row_kind} rows"),
-        ));
-    }
-    Ok(row)
-}
-
-fn unique_by<'a, T: 'a>(
-    rows: &'a [T],
-    key: impl Fn(&'a T) -> &'a str,
-    identity: &str,
-    row_kind: &str,
-) -> Result<BTreeMap<&'a str, &'a T>, SchemaContractError> {
-    let mut indexed = BTreeMap::new();
-    for row in rows {
-        let key = key(row);
-        if indexed.insert(key, row).is_some() {
-            return Err(model_compilation(
-                identity,
-                format!("duplicate {row_kind} row for {key}"),
-            ));
-        }
-    }
-    Ok(indexed)
-}
-
-fn relation_fields<'a>(
-    rows: &'a [ModelSchemaFieldRow],
-    relation_id: &str,
-    identity: &str,
-) -> Result<Vec<&'a ModelSchemaFieldRow>, SchemaContractError> {
-    let mut fields = rows
-        .iter()
-        .filter(|row| row.relation_id == relation_id)
-        .collect::<Vec<_>>();
-    fields.sort_by_key(|row| row.ordinal);
-    if fields.is_empty() {
-        return Err(model_compilation(
-            identity,
-            format!("relation {relation_id} has no field rows"),
-        ));
-    }
-    let mut names = BTreeSet::new();
-    let mut ids = BTreeSet::new();
-    for (expected_ordinal, field) in fields.iter().enumerate() {
-        if field.ordinal != expected_ordinal {
-            return Err(model_compilation(
-                identity,
-                format!(
-                    "relation {relation_id} field {} has ordinal {}, expected {expected_ordinal}",
-                    field.field_id, field.ordinal
-                ),
-            ));
-        }
-        if !names.insert(field.field_name.as_str()) || !ids.insert(field.field_id.as_str()) {
-            return Err(model_compilation(
-                identity,
-                format!("relation {relation_id} has a duplicate field ID or name"),
-            ));
-        }
-    }
-    Ok(fields)
-}
-
-fn compile_model_field(
-    row: &ModelSchemaFieldRow,
-    role: SchemaRole,
-    semantic_types: &BTreeMap<&str, &ModelSchemaTypeRow>,
-    representations: &BTreeMap<&str, &ModelSchemaRepresentationRow>,
-    identity: &str,
-) -> Result<Arc<Field>, SchemaContractError> {
-    reject_reserved_field_metadata(&row.field_metadata, identity, &row.field_id)?;
-    let semantic_type = semantic_types
-        .get(row.semantic_type_id.as_str())
-        .ok_or_else(|| {
-            model_compilation(
-                identity,
-                format!(
-                    "field {} references missing semantic type {}",
-                    row.field_id, row.semantic_type_id
-                ),
-            )
-        })?;
-    let representation = representations
-        .get(row.semantic_type_id.as_str())
-        .ok_or_else(|| {
-            model_compilation(
-                identity,
-                format!(
-                    "field {} has no representation for semantic type {}",
-                    row.field_id, row.semantic_type_id
-                ),
-            )
-        })?;
-    if row.nullable && !semantic_type.allows_null {
-        return Err(model_compilation(
-            identity,
-            format!(
-                "field {} is nullable but semantic type {} forbids null",
-                row.field_id, row.semantic_type_id
-            ),
-        ));
-    }
-    if representation.storage_encoding.trim().is_empty()
-        || representation.metadata_class.trim().is_empty()
-    {
-        return Err(model_compilation(
-            identity,
-            format!(
-                "representation {} requires storage encoding and metadata class",
-                representation.representation_id
-            ),
-        ));
-    }
-
-    let mut metadata = row.field_metadata.clone();
-    metadata.insert(MODEL_FIELD_ID_METADATA_KEY.to_owned(), row.field_id.clone());
-    metadata.insert(
-        "codefabric.model.semantic_type_id".to_owned(),
-        row.semantic_type_id.clone(),
-    );
-    metadata.insert(
-        MODEL_SEMANTIC_ROLE_METADATA_KEY.to_owned(),
-        row.semantic_role.clone(),
-    );
-    metadata.insert(
-        "codefabric.model.representation_id".to_owned(),
-        representation.representation_id.clone(),
-    );
-    metadata.insert(
-        "codefabric.metadata.class".to_owned(),
-        representation.metadata_class.clone(),
-    );
-    metadata.insert(
-        "codefabric.storage.encoding".to_owned(),
-        representation.storage_encoding.clone(),
-    );
-    if role == SchemaRole::Logical {
-        if let Some(extension_name) = &representation.extension_name {
-            metadata.insert(EXTENSION_TYPE_NAME_KEY.to_owned(), extension_name.clone());
-        }
-        if let Some(extension_metadata) = &representation.extension_metadata {
-            metadata.insert(
-                EXTENSION_TYPE_METADATA_KEY.to_owned(),
-                extension_metadata.clone(),
-            );
-        }
-    }
-    let data_type = match role {
-        SchemaRole::Logical => semantic_type.logical_data_type.clone(),
-        SchemaRole::Storage => representation.storage_data_type.clone(),
-    };
-    Ok(Arc::new(
-        Field::new(row.field_name.clone(), data_type, row.nullable).with_metadata(metadata),
-    ))
-}
-
-fn reject_reserved_relation_metadata(
-    metadata: &HashMap<String, String>,
-    identity: &str,
-    relation_id: &str,
-) -> Result<(), SchemaContractError> {
-    reject_reserved_metadata_key(
-        metadata,
-        identity,
-        format!("relation {relation_id}"),
-        |key| {
-            key.starts_with("codefabric.model.")
-                || matches!(
-                    key,
-                    "codefabric.storage.column_mapping" | "codefabric.storage.deletion_vectors"
-                )
-        },
-    )
-}
-
-fn reject_reserved_field_metadata(
-    metadata: &HashMap<String, String>,
-    identity: &str,
-    field_id: &str,
-) -> Result<(), SchemaContractError> {
-    reject_reserved_metadata_key(metadata, identity, format!("field {field_id}"), |key| {
-        key.starts_with("codefabric.model.")
-            || matches!(
-                key,
-                "codefabric.metadata.class" | "codefabric.storage.encoding"
-            )
-            || key == EXTENSION_TYPE_NAME_KEY
-            || key == EXTENSION_TYPE_METADATA_KEY
-    })
-}
-
-fn reject_reserved_metadata_key(
-    metadata: &HashMap<String, String>,
-    identity: &str,
-    location: String,
-    is_reserved: impl Fn(&str) -> bool,
-) -> Result<(), SchemaContractError> {
-    if let Some(key) = metadata.keys().find(|key| is_reserved(key)) {
-        return Err(SchemaContractError::ReservedModelMetadataKey {
-            identity: identity.to_owned(),
-            location,
-            key: key.clone(),
-        });
-    }
-    Ok(())
-}
-
-fn compile_model_constraints(
-    rows: &[ModelSchemaKeyRow],
-    relation_id: &str,
-    fields: &BTreeMap<&str, (usize, &ModelSchemaFieldRow)>,
-    identity: &str,
-) -> Result<Constraints, SchemaContractError> {
-    let mut grouped: BTreeMap<&str, Vec<&ModelSchemaKeyRow>> = BTreeMap::new();
-    for row in rows.iter().filter(|row| row.relation_id == relation_id) {
-        grouped.entry(row.key_id.as_str()).or_default().push(row);
-    }
-    let mut constraints = Vec::with_capacity(grouped.len());
-    for (key_id, mut key_rows) in grouped {
-        key_rows.sort_by_key(|row| row.ordinal);
-        let Some(first) = key_rows.first() else {
-            continue;
-        };
-        let key_kind = first.key_kind;
-        let mut indices = Vec::with_capacity(key_rows.len());
-        for (expected_ordinal, row) in key_rows.into_iter().enumerate() {
-            if row.ordinal != expected_ordinal || row.key_kind != key_kind {
-                return Err(model_compilation(
-                    identity,
-                    format!("key {key_id} has inconsistent kind or ordinal"),
-                ));
-            }
-            let Some((index, field)) = fields.get(row.field_id.as_str()).copied() else {
-                return Err(model_compilation(
-                    identity,
-                    format!("key {key_id} references unknown field {}", row.field_id),
-                ));
-            };
-            if key_kind == ModelSchemaKeyKind::Primary && field.nullable {
-                return Err(model_compilation(
-                    identity,
-                    format!(
-                        "primary key {key_id} contains nullable field {}",
-                        row.field_id
-                    ),
-                ));
-            }
-            indices.push(index);
-        }
-        constraints.push(match key_kind {
-            ModelSchemaKeyKind::Primary => Constraint::PrimaryKey(indices),
-            ModelSchemaKeyKind::Unique => Constraint::Unique(indices),
-        });
-    }
-    Ok(Constraints::new_unverified(constraints))
-}
-
-fn model_compilation(identity: &str, reason: String) -> SchemaContractError {
-    SchemaContractError::ModelCompilation {
-        identity: identity.to_owned(),
-        reason,
-    }
-}
-
-const fn column_mapping_name(mode: ColumnMappingMode) -> &'static str {
-    match mode {
-        ColumnMappingMode::Positional => "position",
-        ColumnMappingMode::Name => "name",
-        ColumnMappingMode::FieldId => "field-id",
-    }
-}
-
-const fn deletion_vector_name(behavior: DeletionVectorBehavior) -> &'static str {
-    match behavior {
-        DeletionVectorBehavior::Forbidden => "forbidden",
-        DeletionVectorBehavior::AppliedByProvider => "applied-by-provider",
-        DeletionVectorBehavior::ExposedVisibilityColumn => "exposed-visibility-column",
-    }
-}
-
 type ValidatedMappings = (Arc<[FieldIndexMapping]>, Arc<[Option<usize>]>);
 
 fn validate_cast_bindings(
@@ -2595,18 +1500,18 @@ fn validate_cast_bindings(
     mappings: &[FieldIndexMapping],
     logical_schema: &SchemaRef,
     storage_schema: &SchemaRef,
-    logical_model_index: Option<&ModelSchemaIndex>,
-    storage_model_index: Option<&ModelSchemaIndex>,
+    logical_identity_index: Option<&SchemaIdentityIndex>,
+    storage_identity_index: Option<&SchemaIdentityIndex>,
 ) -> Result<(), SchemaContractError> {
     if casts.len() != mappings.len() {
-        return Err(model_compilation(
-            "field-cast-bindings",
-            format!(
+        return Err(SchemaContractError::InvalidCastBinding {
+            identity: "field-cast-bindings".to_owned(),
+            reason: format!(
                 "expected {} cast bindings, received {}",
                 mappings.len(),
                 casts.len()
             ),
-        ));
+        });
     }
     for (logical_index, (cast, mapping)) in casts.iter().zip(mappings).enumerate() {
         if cast.logical_index != logical_index
@@ -2615,15 +1520,15 @@ fn validate_cast_bindings(
             || &cast.logical_data_type != logical_schema.field(logical_index).data_type()
             || &cast.storage_data_type != storage_schema.field(cast.storage_index).data_type()
         {
-            return Err(model_compilation(
-                cast.logical_field_id(),
-                "cast binding does not match the compiled field/index mapping".to_owned(),
-            ));
+            return Err(SchemaContractError::InvalidCastBinding {
+                identity: cast.logical_field_id().to_owned(),
+                reason: "cast binding does not match the observed field/index mapping".to_owned(),
+            });
         }
-        if let Some(model_index) = logical_model_index {
-            let expected = &model_index.field_ids_by_index[logical_index];
+        if let Some(identity_index) = logical_identity_index {
+            let expected = &identity_index.field_ids_by_index[logical_index];
             if expected.as_ref() != cast.logical_field_id() {
-                return Err(SchemaContractError::ModelFieldBindingMismatch {
+                return Err(SchemaContractError::FieldBindingMismatch {
                     role: SchemaRole::Logical,
                     field_index: logical_index,
                     expected_field_id: Arc::clone(expected),
@@ -2631,10 +1536,10 @@ fn validate_cast_bindings(
                 });
             }
         }
-        if let Some(model_index) = storage_model_index {
-            let expected = &model_index.field_ids_by_index[cast.storage_index];
+        if let Some(identity_index) = storage_identity_index {
+            let expected = &identity_index.field_ids_by_index[cast.storage_index];
             if expected.as_ref() != cast.storage_field_id() {
-                return Err(SchemaContractError::ModelFieldBindingMismatch {
+                return Err(SchemaContractError::FieldBindingMismatch {
                     role: SchemaRole::Storage,
                     field_index: cast.storage_index,
                     expected_field_id: Arc::clone(expected),
@@ -3209,13 +2114,10 @@ mod tests {
 
     use arrow_array::{BinaryArray, FixedSizeBinaryArray, StringArray};
     use arrow_schema::{DataType, Field, Fields, Schema};
+    use datafusion::common::Constraint;
     use datafusion::physical_plan::empty::EmptyExec;
 
     use super::*;
-    use crate::relational_model::{
-        BootstrapMetamodel, FabricCompilerRelease, IntrinsicInstaller, ModelDecision,
-        ModelMigration, ModelOperation, ModelRowBuilder, ReplayEngine,
-    };
 
     const EXTENSION_NAME: &str = "codefabric.test_id";
     const EXTENSION_METADATA: &str = "{\"width\":16}";
@@ -3248,7 +2150,7 @@ mod tests {
                 Arc::new(id_field(16, EXTENSION_METADATA)),
                 Arc::new(payload_field(false)),
             ],
-            HashMap::from([("model.schema".to_owned(), "relation.v1".to_owned())]),
+            HashMap::from([("provider.schema".to_owned(), "relation.v1".to_owned())]),
         ))
     }
 
@@ -3262,7 +2164,7 @@ mod tests {
 
     fn contract() -> SchemaContract {
         SchemaContract::try_new(
-            "model.relation.v1",
+            "provider.relation.v1",
             TableReference::full("codefabric", "cpg_serving", "relation"),
             logical_schema(),
             storage_schema(),
@@ -3274,355 +2176,88 @@ mod tests {
         .expect("valid contract")
     }
 
-    fn model_rows() -> SchemaContractModelRows {
-        let logical_relation = "relation.logical".to_owned();
-        let storage_relation = "relation.storage".to_owned();
-        SchemaContractModelRows {
-            relations: vec![
-                ModelSchemaRelationRow {
-                    relation_id: logical_relation.clone(),
-                    qualifier: TableReference::full("codefabric", "cpg_serving", "entity"),
-                    relation_metadata: HashMap::from([(
-                        "model.schema".to_owned(),
-                        "entity.v2".to_owned(),
-                    )]),
-                },
-                ModelSchemaRelationRow {
-                    relation_id: storage_relation.clone(),
-                    qualifier: TableReference::partial("storage", "entity"),
-                    relation_metadata: HashMap::from([(
-                        "storage.schema".to_owned(),
-                        "entity.delta.v1".to_owned(),
-                    )]),
-                },
-            ],
-            semantic_types: vec![
-                ModelSchemaTypeRow {
-                    semantic_type_id: "type.id16".to_owned(),
-                    logical_data_type: DataType::FixedSizeBinary(16),
-                    allows_null: false,
-                },
-                ModelSchemaTypeRow {
-                    semantic_type_id: "type.text".to_owned(),
-                    logical_data_type: DataType::Utf8,
-                    allows_null: true,
-                },
-            ],
-            fields: vec![
-                ModelSchemaFieldRow {
-                    field_id: "field.logical.id".to_owned(),
-                    relation_id: logical_relation.clone(),
-                    field_name: "entity_id".to_owned(),
-                    semantic_type_id: "type.id16".to_owned(),
-                    ordinal: 0,
-                    nullable: false,
-                    semantic_role: "canonical-id".to_owned(),
-                    field_metadata: HashMap::new(),
-                },
-                ModelSchemaFieldRow {
-                    field_id: "field.logical.name".to_owned(),
-                    relation_id: logical_relation.clone(),
-                    field_name: "name".to_owned(),
-                    semantic_type_id: "type.text".to_owned(),
-                    ordinal: 1,
-                    nullable: true,
-                    semantic_role: "semantic-text".to_owned(),
-                    field_metadata: HashMap::new(),
-                },
-                ModelSchemaFieldRow {
-                    field_id: "field.storage.id".to_owned(),
-                    relation_id: storage_relation.clone(),
-                    field_name: "entity_id_bytes".to_owned(),
-                    semantic_type_id: "type.id16".to_owned(),
-                    ordinal: 0,
-                    nullable: false,
-                    semantic_role: "storage-id".to_owned(),
-                    field_metadata: HashMap::new(),
-                },
-                ModelSchemaFieldRow {
-                    field_id: "field.storage.name".to_owned(),
-                    relation_id: storage_relation.clone(),
-                    field_name: "name".to_owned(),
-                    semantic_type_id: "type.text".to_owned(),
-                    ordinal: 1,
-                    nullable: true,
-                    semantic_role: "storage-value".to_owned(),
-                    field_metadata: HashMap::new(),
-                },
-            ],
-            keys: vec![ModelSchemaKeyRow {
-                key_id: "key.entity".to_owned(),
-                relation_id: logical_relation.clone(),
-                field_id: "field.logical.id".to_owned(),
-                ordinal: 0,
-                key_kind: ModelSchemaKeyKind::Primary,
-            }],
-            representations: vec![
-                ModelSchemaRepresentationRow {
-                    representation_id: "representation.id16.binary".to_owned(),
-                    semantic_type_id: "type.id16".to_owned(),
-                    storage_data_type: DataType::Binary,
-                    storage_encoding: "delta.binary".to_owned(),
-                    metadata_class: "contractual".to_owned(),
-                    extension_name: Some("codefabric.id16".to_owned()),
-                    extension_metadata: Some("{\"width\":16}".to_owned()),
-                },
-                ModelSchemaRepresentationRow {
-                    representation_id: "representation.text.utf8".to_owned(),
-                    semantic_type_id: "type.text".to_owned(),
-                    storage_data_type: DataType::Utf8,
-                    storage_encoding: "delta.utf8".to_owned(),
-                    metadata_class: "contractual".to_owned(),
-                    extension_name: None,
-                    extension_metadata: None,
-                },
-            ],
-            physical_bindings: vec![ModelPhysicalBindingRow {
-                physical_binding_id: "binding.entity.delta".to_owned(),
-                mapping_program_id: "program.binding.entity.delta".to_owned(),
-                source_schema_identity: "model:entity:v2/delta:v1".to_owned(),
-                logical_relation_id: logical_relation,
-                storage_relation_id: storage_relation,
-                compatibility: SchemaCompatibility::Exact,
-                column_mapping_mode: ColumnMappingMode::FieldId,
-                deletion_vector_behavior: DeletionVectorBehavior::AppliedByProvider,
-                field_bindings: vec![
-                    ModelPhysicalFieldBindingRow {
-                        logical_field_id: "field.logical.id".to_owned(),
-                        storage_field_id: "field.storage.id".to_owned(),
-                        projection_index: 0,
-                        filter_index: 0,
-                        statistics_index: 0,
-                    },
-                    ModelPhysicalFieldBindingRow {
-                        logical_field_id: "field.logical.name".to_owned(),
-                        storage_field_id: "field.storage.name".to_owned(),
-                        projection_index: 1,
-                        filter_index: 1,
-                        statistics_index: 1,
-                    },
-                ],
-            }],
-        }
+    fn field_identity_metadata(field_id: &str, semantic_role: &str) -> HashMap<String, String> {
+        HashMap::from([
+            (FIELD_ID_METADATA_KEY.to_owned(), field_id.to_owned()),
+            (
+                SEMANTIC_ROLE_METADATA_KEY.to_owned(),
+                semantic_role.to_owned(),
+            ),
+        ])
     }
 
-    fn projectable_model_epoch() -> ModelEpoch {
-        let metamodel = BootstrapMetamodel::new();
-        let mut operations = Vec::new();
-        operations.push(ModelOperation::Add(
-            ModelRowBuilder::new(ModelRelation::SemanticType)
-                .value("semantic_type_id", "type.entity-id")
-                .unwrap()
-                .value("name", "entity identifier")
-                .unwrap()
-                .value("logical_type", "FixedSizeBinary(16)")
-                .unwrap()
-                .value("allows_null", false)
-                .unwrap()
-                .build(&metamodel)
-                .unwrap(),
+    fn observed_binding_schemas(logical_roles: [&str; 2]) -> (SchemaRef, SchemaRef) {
+        let mut logical_id_metadata = field_identity_metadata("field.logical.id", logical_roles[0]);
+        logical_id_metadata.insert(
+            EXTENSION_TYPE_NAME_KEY.to_owned(),
+            "codefabric.id16".to_owned(),
+        );
+        logical_id_metadata.insert(
+            EXTENSION_TYPE_METADATA_KEY.to_owned(),
+            EXTENSION_METADATA.to_owned(),
+        );
+        let logical_schema = Arc::new(Schema::new_with_metadata(
+            vec![
+                Arc::new(
+                    Field::new("entity_id", DataType::FixedSizeBinary(16), false)
+                        .with_metadata(logical_id_metadata),
+                ),
+                Arc::new(Field::new("name", DataType::Utf8, true).with_metadata(
+                    field_identity_metadata("field.logical.name", logical_roles[1]),
+                )),
+            ],
+            HashMap::from([(
+                RELATION_ID_METADATA_KEY.to_owned(),
+                "relation.logical".to_owned(),
+            )]),
         ));
-        for (relation_id, schema_name, relation_name, semantic_role) in [
-            (
-                "relation.entity.logical",
-                "cpg_serving",
-                "entity",
-                "logical",
-            ),
-            (
-                "relation.entity.storage",
-                "cpg_storage",
-                "entity",
-                "storage",
-            ),
-        ] {
-            operations.push(ModelOperation::Add(
-                ModelRowBuilder::new(ModelRelation::Relation)
-                    .value("relation_id", relation_id)
-                    .unwrap()
-                    .value("schema_name", schema_name)
-                    .unwrap()
-                    .value("relation_name", relation_name)
-                    .unwrap()
-                    .value("semantic_role", semantic_role)
-                    .unwrap()
-                    .build(&metamodel)
-                    .unwrap(),
-            ));
-        }
-        for (field_id, relation_id, field_name, semantic_role) in [
-            (
-                "field.entity.logical-id",
-                "relation.entity.logical",
-                "entity_id",
-                "canonical-id",
-            ),
-            (
-                "field.entity.storage-id",
-                "relation.entity.storage",
-                "entity_id_bytes",
-                "storage-id",
-            ),
-        ] {
-            operations.push(ModelOperation::Add(
-                ModelRowBuilder::new(ModelRelation::Field)
-                    .value("field_id", field_id)
-                    .unwrap()
-                    .value("relation_id", relation_id)
-                    .unwrap()
-                    .value("field_name", field_name)
-                    .unwrap()
-                    .value("semantic_type_id", "type.entity-id")
-                    .unwrap()
-                    .value("ordinal", 0_u32)
-                    .unwrap()
-                    .value("nullable", false)
-                    .unwrap()
-                    .value("semantic_role", semantic_role)
-                    .unwrap()
-                    .build(&metamodel)
-                    .unwrap(),
-            ));
-        }
-        operations.push(ModelOperation::Add(
-            ModelRowBuilder::new(ModelRelation::Key)
-                .value("key_id", "key.entity.primary")
-                .unwrap()
-                .value("relation_id", "relation.entity.logical")
-                .unwrap()
-                .value("field_id", "field.entity.logical-id")
-                .unwrap()
-                .value("ordinal", 0_u32)
-                .unwrap()
-                .value("key_kind", "primary")
-                .unwrap()
-                .build(&metamodel)
-                .unwrap(),
+        let storage_schema = Arc::new(Schema::new_with_metadata(
+            vec![
+                Arc::new(
+                    Field::new("entity_id_bytes", DataType::Binary, false)
+                        .with_metadata(field_identity_metadata("field.storage.id", "storage-id")),
+                ),
+                Arc::new(Field::new("name", DataType::Utf8, true).with_metadata(
+                    field_identity_metadata("field.storage.name", "storage-value"),
+                )),
+            ],
+            HashMap::from([(
+                RELATION_ID_METADATA_KEY.to_owned(),
+                "relation.storage".to_owned(),
+            )]),
         ));
-        operations.push(ModelOperation::Add(
-            ModelRowBuilder::new(ModelRelation::Representation)
-                .value("representation_id", "representation.entity-id.delta")
-                .unwrap()
-                .value("semantic_type_id", "type.entity-id")
-                .unwrap()
-                .value("arrow_data_type", "Binary")
-                .unwrap()
-                .value("storage_encoding", "delta.binary")
-                .unwrap()
-                .value("metadata_class", "contractual")
-                .unwrap()
-                .value("extension_name", "codefabric.entity_id")
-                .unwrap()
-                .value("extension_metadata", "{\"width\":16}")
-                .unwrap()
-                .build(&metamodel)
-                .unwrap(),
-        ));
-        operations.push(ModelOperation::Add(
-            ModelRowBuilder::new(ModelRelation::Program)
-                .value("program_id", "program.entity.delta-binding")
-                .unwrap()
-                .value("name", "entity Delta binding")
-                .unwrap()
-                .value("program_kind", "physical-binding")
-                .unwrap()
-                .null("result_semantic_type_id")
-                .unwrap()
-                .build(&metamodel)
-                .unwrap(),
-        ));
-        operations.push(ModelOperation::Add(
-            ModelRowBuilder::new(ModelRelation::PhysicalBinding)
-                .value("physical_binding_id", "binding.entity.delta")
-                .unwrap()
-                .value("logical_relation_id", "relation.entity.logical")
-                .unwrap()
-                .value("storage_relation_id", "relation.entity.storage")
-                .unwrap()
-                .value("mapping_program_id", "program.entity.delta-binding")
-                .unwrap()
-                .value("compatibility_mode", "exact")
-                .unwrap()
-                .build(&metamodel)
-                .unwrap(),
-        ));
-
-        let decision = ModelDecision::new(
-            "decision.schema-contract",
-            "schema-owner",
-            "schema projection test",
-            "install a complete logical and physical schema model",
-            operations,
-        )
-        .unwrap();
-        let migration = ModelMigration::new(
-            "migration.schema-contract.1",
-            None,
-            "model.bootstrap.schema.release",
-            "model.schema.epoch.1",
-            1,
-            "schema-owner",
-            vec![decision],
-        )
-        .unwrap();
-        let release = FabricCompilerRelease::builder(
-            "schema.release",
-            "source:schema.release",
-            "build:schema.release",
-        )
-        .with_abis(1, 1, 1)
-        .with_intrinsic_package("schema.intrinsics")
-        .add_dependency("arrow", "59.2.0")
-        .unwrap()
-        .add_dependency("datafusion", "55.0.0")
-        .unwrap()
-        .add_dependency("deltalake", "43a0cf10")
-        .unwrap()
-        .add_provider_schema("delta", "schema.v1")
-        .unwrap()
-        .with_policy_and_configuration("policy.v1", "config.v1")
-        .add_toolchain("rust", "1.95.0")
-        .unwrap()
-        .add_wire_contract("schema.test")
-        .unwrap()
-        .build()
-        .unwrap();
-        ReplayEngine::new(
-            release,
-            IntrinsicInstaller::new("schema.intrinsics", "schema.impl").unwrap(),
-        )
-        .unwrap()
-        .replay(&[migration])
-        .unwrap()
+        (logical_schema, storage_schema)
     }
 
-    fn resolved_model_binding() -> ModelPhysicalBindingRow {
-        ModelPhysicalBindingRow {
-            physical_binding_id: "binding.entity.delta".to_owned(),
-            mapping_program_id: "program.entity.delta-binding".to_owned(),
-            source_schema_identity: "delta:entity@17".to_owned(),
-            logical_relation_id: "relation.entity.logical".to_owned(),
-            storage_relation_id: "relation.entity.storage".to_owned(),
-            compatibility: SchemaCompatibility::Exact,
-            column_mapping_mode: ColumnMappingMode::FieldId,
-            deletion_vector_behavior: DeletionVectorBehavior::AppliedByProvider,
-            field_bindings: vec![ModelPhysicalFieldBindingRow {
-                logical_field_id: "field.entity.logical-id".to_owned(),
-                storage_field_id: "field.entity.storage-id".to_owned(),
-                projection_index: 0,
-                filter_index: 0,
-                statistics_index: 0,
-            }],
-        }
+    fn observed_binding_contract() -> SchemaContract {
+        let (logical_schema, storage_schema) =
+            observed_binding_schemas(["canonical-id", "semantic-text"]);
+        SchemaContract::try_new_with_options(
+            "delta:entity@17",
+            TableReference::full("codefabric", "cpg_serving", "entity"),
+            logical_schema,
+            storage_schema,
+            vec![
+                FieldIndexMapping::direct(0, 0),
+                FieldIndexMapping::direct(1, 1),
+            ],
+            SchemaContractOptions::new(
+                Constraints::new_unverified(vec![Constraint::PrimaryKey(vec![0])]),
+                SchemaCompatibility::Exact,
+                ColumnMappingMode::FieldId,
+                DeletionVectorBehavior::AppliedByProvider,
+            ),
+        )
+        .expect("observed schemas form one direct contract")
     }
 
     #[test]
     fn constructs_qualified_schema_and_round_trips_index_mappings() {
         let contract = contract();
-        assert_eq!(contract.source_schema_identity(), "model.relation.v1");
+        assert_eq!(contract.source_schema_identity(), "provider.relation.v1");
         assert!(matches!(
-            contract.model_relation_id(SchemaRole::Logical),
-            Err(SchemaContractError::ModelMetadataUnavailable {
+            contract.relation_id(SchemaRole::Logical),
+            Err(SchemaContractError::IdentityMetadataUnavailable {
                 role: SchemaRole::Logical
             })
         ));
@@ -3874,7 +2509,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_ambiguous_and_incomplete_model_bindings() {
+    fn rejects_ambiguous_mappings_and_incomplete_extension_metadata() {
         let duplicate = SchemaContract::try_new(
             "duplicate.v1",
             TableReference::bare("duplicate"),
@@ -3917,10 +2552,8 @@ mod tests {
     }
 
     #[test]
-    fn compiles_model_rows_and_round_trips_fixed_width_logical_ids() {
-        let contract = model_rows()
-            .compile("binding.entity.delta")
-            .expect("model rows compile");
+    fn direct_observed_schemas_bind_policy_casts_and_public_phase_output() {
+        let contract = observed_binding_contract();
         assert_eq!(
             contract.logical_schema().field(0).data_type(),
             &DataType::FixedSizeBinary(16)
@@ -3949,6 +2582,8 @@ mod tests {
                 .source_indices,
             vec![0]
         );
+        assert_eq!(contract.casts()[0].logical_field_id(), "field.logical.id");
+        assert_eq!(contract.casts()[0].storage_field_id(), "field.storage.id");
 
         let ids = FixedSizeBinaryArray::try_from_iter([b"0123456789abcdef".as_slice()].into_iter())
             .expect("fixed-width ID");
@@ -3960,6 +2595,13 @@ mod tests {
             ],
         )
         .expect("logical batch");
+        contract
+            .validate_batch(
+                contract.logical_schema(),
+                &batch,
+                SchemaCompatibility::Exact,
+            )
+            .expect("public batch retains the observed logical schema");
         let stored = contract
             .adapt_logical_batch_to_storage(&batch)
             .expect("strict storage cast");
@@ -3988,64 +2630,14 @@ mod tests {
     }
 
     #[test]
-    fn projects_replayed_model_relations_and_exact_binding_selection() {
-        let epoch = projectable_model_epoch();
-        let rows = SchemaContractModelRows::from_model_epoch(
-            &epoch,
-            "codefabric",
-            vec![resolved_model_binding()],
-        )
-        .expect("replayed model projects into schema rows");
-        let contract = rows
-            .compile("binding.entity.delta")
-            .expect("projected rows compile");
-
+    fn field_identity_and_semantic_role_lookups_come_from_arrow_metadata() {
+        let contract = observed_binding_contract();
         assert_eq!(
-            contract.logical_schema().field(0).data_type(),
-            &DataType::FixedSizeBinary(16)
-        );
-        assert_eq!(
-            contract.storage_schema().field(0).data_type(),
-            &DataType::Binary
-        );
-        assert_eq!(
-            contract
-                .logical_schema()
-                .metadata()
-                .get("codefabric.model.mapping_program_id")
-                .map(String::as_str),
-            Some("program.entity.delta-binding")
-        );
-        assert_eq!(contract.constraints().len(), 1);
-    }
-
-    #[test]
-    fn model_projection_rejects_unexecuted_or_mismatched_binding_programs() {
-        let epoch = projectable_model_epoch();
-        assert!(matches!(
-            SchemaContractModelRows::from_model_epoch(&epoch, "codefabric", Vec::new()),
-            Err(SchemaContractError::ModelCompilation { .. })
-        ));
-
-        let mut mismatched = resolved_model_binding();
-        mismatched.mapping_program_id = "program.not-authoritative".to_owned();
-        assert!(matches!(
-            SchemaContractModelRows::from_model_epoch(&epoch, "codefabric", vec![mismatched]),
-            Err(SchemaContractError::ModelCompilation { .. })
-        ));
-    }
-
-    #[test]
-    fn model_identity_and_semantic_role_lookups_are_compiled_from_arrow_metadata() {
-        let contract = model_rows()
-            .compile("binding.entity.delta")
-            .expect("model rows compile");
-        assert_eq!(
-            contract.model_relation_id(SchemaRole::Logical).unwrap(),
+            contract.relation_id(SchemaRole::Logical).unwrap(),
             "relation.logical"
         );
         assert_eq!(
-            contract.model_relation_id(SchemaRole::Storage).unwrap(),
+            contract.relation_id(SchemaRole::Storage).unwrap(),
             "relation.storage"
         );
         assert_eq!(
@@ -4074,28 +2666,32 @@ mod tests {
         );
         assert!(matches!(
             contract.logical_index_for_field_id("field.logical.missing"),
-            Err(SchemaContractError::UnknownModelFieldId {
+            Err(SchemaContractError::UnknownFieldId {
                 role: SchemaRole::Logical,
                 ..
             })
         ));
         assert!(matches!(
             contract.unique_field_index_for_semantic_role(SchemaRole::Logical, "missing-role"),
-            Err(SchemaContractError::UnknownModelSemanticRole {
+            Err(SchemaContractError::UnknownSemanticRole {
                 role: SchemaRole::Logical,
                 ..
             })
         ));
 
-        let mut repeated_role_rows = model_rows();
-        repeated_role_rows
-            .fields
-            .iter_mut()
-            .filter(|field| field.relation_id == "relation.logical")
-            .for_each(|field| field.semantic_role = "shared-role".to_owned());
-        let repeated_role = repeated_role_rows
-            .compile("binding.entity.delta")
-            .expect("semantic roles may be one-to-many");
+        let (logical_schema, storage_schema) =
+            observed_binding_schemas(["shared-role", "shared-role"]);
+        let repeated_role = SchemaContract::try_new(
+            "same-role-observation",
+            TableReference::full("codefabric", "cpg_serving", "entity"),
+            logical_schema,
+            storage_schema,
+            vec![
+                FieldIndexMapping::direct(0, 0),
+                FieldIndexMapping::direct(1, 1),
+            ],
+        )
+        .expect("semantic roles may be one-to-many");
         assert_eq!(
             repeated_role
                 .logical_indices_for_semantic_role("shared-role")
@@ -4104,7 +2700,7 @@ mod tests {
         );
         assert!(matches!(
             repeated_role.unique_field_index_for_semantic_role(SchemaRole::Logical, "shared-role"),
-            Err(SchemaContractError::AmbiguousModelSemanticRole {
+            Err(SchemaContractError::AmbiguousSemanticRole {
                 role: SchemaRole::Logical,
                 match_count: 2,
                 ..
@@ -4112,51 +2708,15 @@ mod tests {
         ));
 
         let rebound = SchemaContract::try_new(
-            "model-rebound",
+            "programmatic-rebound",
             contract.qualifier().clone(),
             Arc::clone(contract.logical_schema()),
             Arc::clone(contract.storage_schema()),
             contract.mappings().to_vec(),
         )
-        .expect("generic construction preserves authoritative model field IDs");
+        .expect("direct construction preserves authoritative field IDs");
         assert_eq!(rebound.casts()[0].logical_field_id(), "field.logical.id");
         assert_eq!(rebound.casts()[0].storage_field_id(), "field.storage.id");
-    }
-
-    #[test]
-    fn model_compiler_rejects_caller_values_in_compiler_owned_metadata_namespaces() {
-        let mut field_collision = model_rows();
-        field_collision.fields[0].field_metadata.insert(
-            MODEL_FIELD_ID_METADATA_KEY.to_owned(),
-            "forged.field".to_owned(),
-        );
-        assert!(matches!(
-            field_collision.compile("binding.entity.delta"),
-            Err(SchemaContractError::ReservedModelMetadataKey { key, .. })
-                if key == MODEL_FIELD_ID_METADATA_KEY
-        ));
-
-        let mut relation_collision = model_rows();
-        relation_collision.relations[0].relation_metadata.insert(
-            MODEL_RELATION_ID_METADATA_KEY.to_owned(),
-            "forged.relation".to_owned(),
-        );
-        assert!(matches!(
-            relation_collision.compile("binding.entity.delta"),
-            Err(SchemaContractError::ReservedModelMetadataKey { key, .. })
-                if key == MODEL_RELATION_ID_METADATA_KEY
-        ));
-
-        let mut extension_collision = model_rows();
-        extension_collision.fields[0].field_metadata.insert(
-            EXTENSION_TYPE_NAME_KEY.to_owned(),
-            "forged.extension".to_owned(),
-        );
-        assert!(matches!(
-            extension_collision.compile("binding.entity.delta"),
-            Err(SchemaContractError::ReservedModelMetadataKey { key, .. })
-                if key == EXTENSION_TYPE_NAME_KEY
-        ));
     }
 
     #[test]
@@ -4164,17 +2724,17 @@ mod tests {
         let partial = Arc::new(Schema::new_with_metadata(
             vec![Arc::new(
                 Field::new("id", DataType::Utf8, false).with_metadata(HashMap::from([(
-                    MODEL_SEMANTIC_ROLE_METADATA_KEY.to_owned(),
+                    SEMANTIC_ROLE_METADATA_KEY.to_owned(),
                     "identity".to_owned(),
                 )])),
             )],
             HashMap::from([(
-                MODEL_RELATION_ID_METADATA_KEY.to_owned(),
+                RELATION_ID_METADATA_KEY.to_owned(),
                 "relation.partial".to_owned(),
             )]),
         ));
         let partial_error = SchemaContract::try_new(
-            "partial-model-metadata",
+            "partial-identity-metadata",
             TableReference::bare("partial"),
             Arc::clone(&partial),
             partial,
@@ -4183,10 +2743,10 @@ mod tests {
         .expect_err("a relation identity requires every stable field identity");
         assert!(matches!(
             partial_error,
-            SchemaContractError::IncompleteModelFieldMetadata {
+            SchemaContractError::IncompleteFieldIdentityMetadata {
                 role: SchemaRole::Logical,
                 field_index: 0,
-                missing_key: MODEL_FIELD_ID_METADATA_KEY,
+                missing_key: FIELD_ID_METADATA_KEY,
             }
         ));
 
@@ -4197,24 +2757,21 @@ mod tests {
                     Arc::new(
                         Field::new(name, DataType::Utf8, false).with_metadata(HashMap::from([
                             (
-                                MODEL_FIELD_ID_METADATA_KEY.to_owned(),
+                                FIELD_ID_METADATA_KEY.to_owned(),
                                 "field.duplicate".to_owned(),
                             ),
-                            (
-                                MODEL_SEMANTIC_ROLE_METADATA_KEY.to_owned(),
-                                "value".to_owned(),
-                            ),
+                            (SEMANTIC_ROLE_METADATA_KEY.to_owned(), "value".to_owned()),
                         ])),
                     )
                 })
                 .collect::<Vec<_>>(),
             HashMap::from([(
-                MODEL_RELATION_ID_METADATA_KEY.to_owned(),
+                RELATION_ID_METADATA_KEY.to_owned(),
                 "relation.duplicate".to_owned(),
             )]),
         ));
         let duplicate_error = SchemaContract::try_new(
-            "duplicate-model-field-id",
+            "duplicate-field-id",
             TableReference::bare("duplicate"),
             Arc::clone(&duplicate),
             duplicate,
@@ -4223,10 +2780,10 @@ mod tests {
                 FieldIndexMapping::direct(1, 1),
             ],
         )
-        .expect_err("model field IDs remain unique independent of Arrow names");
+        .expect_err("field IDs remain unique independent of Arrow names");
         assert!(matches!(
             duplicate_error,
-            SchemaContractError::DuplicateModelFieldId {
+            SchemaContractError::DuplicateFieldId {
                 role: SchemaRole::Logical,
                 first_index: 0,
                 second_index: 1,
@@ -4237,9 +2794,7 @@ mod tests {
 
     #[test]
     fn restoration_rejects_wrong_width_and_adaptation_rejects_unmapped_outputs() {
-        let compiled_contract = model_rows()
-            .compile("binding.entity.delta")
-            .expect("model rows compile");
+        let compiled_contract = observed_binding_contract();
         let wrong_width = RecordBatch::try_new(
             Arc::clone(compiled_contract.storage_schema()),
             vec![
@@ -4256,10 +2811,10 @@ mod tests {
             })
         ));
 
-        let legacy = contract();
-        let logical = RecordBatch::new_empty(Arc::clone(legacy.logical_schema()));
+        let unmapped = contract();
+        let logical = RecordBatch::new_empty(Arc::clone(unmapped.logical_schema()));
         assert!(matches!(
-            legacy.adapt_logical_batch_to_storage(&logical),
+            unmapped.adapt_logical_batch_to_storage(&logical),
             Err(SchemaContractError::UnmappedStorageOutput {
                 storage_index: 2,
                 ..

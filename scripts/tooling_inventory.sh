@@ -23,8 +23,8 @@ mkdir -p target
   echo "--- installed rustup components ---"
   rustup component list --installed
   echo
-  echo "--- installed cargo executables ---"
-  cargo install --list
+  echo "--- exact repository CLI contract ---"
+  ./scripts/tool-versions.sh report
   echo
   echo "--- build domains ---"
   echo "stable-root: Cargo.toml"

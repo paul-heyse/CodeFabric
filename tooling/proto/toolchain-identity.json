@@ -1,34 +1,31 @@
 {
-  "authority": "one model-derived grpc_tools.protoc invocation emits the sole FDS and Python bindings; the same FDS drives tonic_prost_build::Builder::compile_fds",
+  "authority": "one exact grpc_tools.protoc invocation emits the sole FDS and Python bindings; the same FDS drives tonic_prost_build::Builder::compile_fds",
   "descriptor_sha256": "247f2f9cc05e8a94f4f88eeb60447f43ffd5f22cddd464e9f6552edf8c53d7e8",
+  "generated_sha256": "42d75b276df9d1350695ef057921f5efab0cd48334aa1b1be7c429ea3267ceb2",
   "python": {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
-    "lock_digest": "b3:050d161204b71e0e53d4a4156af52df229aad73b32c68c05b514bc28e6053f37",
-    "project_digest": "b3:3fbe2752b43abf1ce5ddd2f145cfa804ad3df2a40fc6b72e228a28ee775e9b2f",
     "protobuf": "7.36.0",
     "protoc": "libprotoc 35.1",
-    "python_digest": "b3:82b0739ba87fba232d130d7099c1debd9005b6ed71ba7c2aa08e1623421e0400",
-    "python_version": "3.14.7",
-    "script_digest": "b3:7304585e5f9a044259627968bb2b42e1f1c4342596fb128c41a430e28ff1bfea"
+    "runtime": "3.14.7"
   },
   "rust": {
-    "action_key": "b3:941d48b8a7831fff70748b35801347952c4cc99b4f6f9e55757a1edc65664393",
-    "binary_digest": "b3:d33cec558851f123c5c61f7c585c94768374a2befb7d1eee2507e0e0328653cd",
-    "cargo_lock_digest": "b3:21b01693b4c54ae62fff218bc444ecf9c8e60573047295d44efaf8a1c0bbd5da",
-    "cargo_manifest_digest": "b3:95b5beb32566318b79adf1828a40788db8e19e3acb8f5a5c49e6668f25a9b0ca",
     "descriptor_api": "tonic_prost_build::Builder::compile_fds",
-    "features": [
-      "proto-tooling"
-    ],
-    "profile": "debug",
-    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8",
-    "target_triple": "aarch64-apple-darwin"
+    "packages": {
+      "prost": "0.14.4",
+      "prost-build": "0.14.4",
+      "prost-types": "0.14.4",
+      "tonic": "0.14.6",
+      "tonic-build": "0.14.6",
+      "tonic-prost": "0.14.6",
+      "tonic-prost-build": "0.14.6"
+    },
+    "toolchain_policy": "stable root; declared MSRV 1.95.0"
   },
-  "schema": 4,
+  "schema": 5,
   "sources": {
     "contracts/rpc/cpg_query_service.proto": "b3:e97fe5afc1a2089c0e82b1fd950416096e1028d96333f0fef3e4b8d19e5d7b44",
-    "contracts/rpc/provider_control.proto": "b3:289f50a480d12dd68e7adeedfe1dc958b85f0fa7eb9f908989fdd0e58c50429f",
+    "contracts/rpc/provider_control.proto": "b3:4dda9a201ca1e010b125b4e329abbe2a3830241d8afd06eb33e296f140eba2ef",
     "contracts/rpc/pyrefly_sidecar.proto": "b3:511a2c857f7eb25ae85002b41531c111e24a92d97f5fd2304a232a541704fc20",
     "contracts/rpc/rustc_extractor.proto": "b3:cbbb2b3e3d7aa09c536912dfadcc79c342b697c4f9b570bcac3838a0a5fb0433"
   }

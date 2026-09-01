@@ -6,16 +6,11 @@ from collections.abc import Iterable
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from google.protobuf import descriptor_pb2, descriptor_pool
 from google.protobuf.message import Message
 from jsonschema import Draft202012Validator
 
-from codefabric_cpg_mcp.contracts.query_forms import (
-    QUERY_FORM_CONTRACT_DIGEST,
-    QUERY_FORM_CONTRACT_ID,
-    QUERY_FORM_NODE_KINDS,
-    QUERY_FORMS,
-)
 from codefabric_cpg_mcp.daemon.channel import (
     GRPC_DEFAULT_AUTHORITY,
     GRPC_MESSAGE_OPTIONS,
@@ -238,27 +233,27 @@ def test_wp67_structural_acceptance_admin_protocol_schema_examples() -> None:
     assert all(not validator.is_valid(value) for value in examples["invalid"])
 
 
-def test_query_form_python_projection_parity() -> None:
-    contract = json.loads(
-        (
-            ROOT / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/contracts/query-form-contract.json"
-        ).read_text(encoding="utf-8")
-    )
+def test_released_query_schema_exposes_exact_eight_forms() -> None:
     schema = json.loads(
         (ROOT / "contracts/schema/cpg-semantic-query-request.schema.json").read_text(
             encoding="utf-8"
         )
     )
     Draft202012Validator.check_schema(schema)
-    assert contract["artifact_id"] == QUERY_FORM_CONTRACT_ID
-    assert contract["canonical_digest"] == QUERY_FORM_CONTRACT_DIGEST
-    assert tuple(form["slug"] for form in contract["forms"]) == QUERY_FORMS
-    assert {form["slug"]: form["node_kind"] for form in contract["forms"]} == QUERY_FORM_NODE_KINDS
     schema_slugs = tuple(
         variant["properties"]["request"]["const"]
         for variant in schema["properties"]["queries"]["items"]["oneOf"]
     )
-    assert schema_slugs == QUERY_FORMS
+    assert schema_slugs == (
+        "find code entities",
+        "retrieve facts about code",
+        "follow code relationships",
+        "find connecting fact paths",
+        "match a code fact pattern",
+        "combine result sets",
+        "summarize objective facts",
+        "retrieve source and syntax context",
+    )
 
 
 def test_pre_profile_provider_job_wire_remains_decodable() -> None:
@@ -300,3 +295,7 @@ def test_python_channel_applies_symmetric_four_mib_limits() -> None:
         options=GRPC_MESSAGE_OPTIONS,
     )
     assert channel is create.return_value
+
+    for forbidden in ("tcp://127.0.0.1:50051", "unix://relative.sock", "unix:///"):
+        with pytest.raises(ValueError, match="absolute Unix socket"):
+            create_local_channel(forbidden)

@@ -3,9 +3,9 @@
 //! Provider adapters expose typed Arrow batches. This module does not reinterpret those rows as
 //! canonical facts: it joins observed relations to an independently accepted
 //! [`ProviderBoundaryContract`], derives coverage from typed coverage relations, and registers
-//! only accepted raw relations in a candidate [`FabricEpochBuilder`]. Missing output or coverage
-//! is an explicit unknown; schema, pin, authority, or unexpected-output contradictions fail the
-//! whole consumed candidate builder.
+//! only accepted raw relations. All workspace partitions enter through one consumed
+//! [`ProgrammaticFabricEpochBuilder`]. Missing output or coverage is an explicit unknown; schema,
+//! pin, authority, or unexpected-output contradictions fail the whole consumed candidate builder.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
@@ -20,9 +20,8 @@ use datafusion::common::{DataFusionError, TableReference};
 use datafusion::datasource::MemTable;
 use thiserror::Error;
 
-use crate::fabric::epoch::{
-    FABRIC_CATALOG, FabricEpochBuilder, FabricEpochError, FabricEpochId, FabricSchemaRole,
-};
+use crate::fabric::epoch_runtime::{FABRIC_CATALOG, FabricEpochId, FabricSchemaRole};
+use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
 use crate::fabric::programmatic_schema::{
     ProgrammaticRelationId, ProgrammaticSchemaAssembly, ProgrammaticSchemaError, ProviderInput,
 };
@@ -35,9 +34,8 @@ use crate::provider_boundary::{
     evaluate_provider_boundary, validate_provider_boundary_contract,
 };
 use crate::provider_capability::{
-    ProviderCapabilityError, ProviderCapabilityRelation, ProviderOracleProof,
-    ProviderOracleProofBinding, derive_provider_capability_relation,
-    provider_oracle_proofs_from_executable_relations,
+    ProviderCapabilityError, ProviderCapabilityRelation, ProviderOracleProofBinding,
+    derive_provider_capability_relation, provider_oracle_proofs_from_executable_relations,
 };
 use crate::provider_native_syntax::{
     NativeSyntaxRelation, ProviderNativeSyntaxRun, RUFF_COMPONENT_RELEASE,
@@ -49,13 +47,16 @@ use crate::relation_ipc::{
     RemainderReason, SourcePin, StreamId, StreamIdentity, TerminalStatus,
 };
 use crate::rustc_relation_schema::RustcRelation;
-use crate::rustc_service::{AcceptedRustcCompilation, AcceptedRustcOwner};
-use crate::schema_contract::{FieldIndexMapping, SchemaContract, SchemaContractError};
+use crate::rustc_service::{
+    AcceptedRustcCompilation, AcceptedRustcOwner, TrustQualifiedRustcCompilation,
+};
+use crate::schema_contract::{FieldIndexMapping, SchemaContract, SchemaContractError, SchemaRole};
 
 const MAX_ADMISSION_BINDINGS: usize = 4_096;
+const MAX_PROVIDER_WORKSPACE_PARTITIONS: usize = 4_096;
 const MAX_RELATION_NAME_BYTES: usize = 512;
 
-/// Provider-emitted relation name used only to join output to model-owned bindings.
+/// Provider-emitted relation name used only to join output to application-owned bindings.
 ///
 /// This is deliberately open data rather than a generated target relation registry.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -107,7 +108,7 @@ impl ProviderNativeLane {
     }
 }
 
-/// Model classification used to prevent an analysis result from impersonating provider output.
+/// Application classification used to prevent an analysis result from impersonating provider output.
 ///
 /// These are semantic classes, not relation identifiers. The model remains authoritative for
 /// assigning a relation to a class.
@@ -151,7 +152,7 @@ pub enum ProviderCoverageSource {
     /// The requested item is the raw control relation itself. Presence plus exact schema is the
     /// complete structural observation; it says nothing about semantic-family support.
     StructuralPresence,
-    /// Coverage is read from typed provider rows using a model-supplied column binding.
+    /// Coverage is read from typed provider rows using an accepted contract binding.
     ProviderDeclared(DeclaredCoverageBinding),
 }
 
@@ -163,7 +164,7 @@ pub enum ProviderRelationPurpose {
     ControlEvidence,
 }
 
-/// Model/contract-supplied binding from provider relation identity to one epoch table.
+/// Application-owned binding from provider relation identity to one epoch table.
 #[derive(Clone, Debug)]
 pub struct ProviderRelationBinding {
     pub provider_relation: ProviderRelationIdentity,
@@ -191,33 +192,34 @@ pub struct ProviderAdmissionPlan {
 }
 
 /// One provider relation and its typed batches before boundary evaluation.
+///
+/// This carrier stays private to the exclusive programmatic admission transaction. Exposing it
+/// would let a caller assemble a provider-shaped relation set without first presenting the exact
+/// provider run that owns its source, context, coverage, and terminal evidence.
 #[derive(Clone, Debug)]
-pub struct ObservedProviderRelation {
-    pub identity: ProviderRelationIdentity,
-    pub lane: ProviderNativeLane,
-    pub batches: Vec<RecordBatch>,
+struct ObservedProviderRelation {
+    identity: ProviderRelationIdentity,
+    lane: ProviderNativeLane,
+    batches: Vec<RecordBatch>,
 }
 
 /// Exact provider output carrying independently observable source and context pins.
 #[derive(Clone, Debug)]
-pub struct AcceptedProviderRelationSet {
+struct AcceptedProviderRelationSet {
     source_pin: SourcePin,
     context_pin: ContextPin,
     relations: BTreeMap<ProviderRelationIdentity, ObservedProviderRelation>,
 }
 
 impl AcceptedProviderRelationSet {
-    /// Construct an application-owned accepted relation set.
-    ///
-    /// This is the generic seam used by the Rust extractor and focused contract fixtures. Exact
-    /// Tree-sitter/Ruff and Pyrefly integrations should use [`Self::from_native_syntax`] and
-    /// [`Self::from_pyrefly`] so their native pin carriers are checked.
+    /// Construct one transaction-private relation set after an exact provider adapter has
+    /// validated its native run. This deliberately is not a public admission overload.
     ///
     /// # Errors
     ///
     /// Rejects zero pins, duplicate relations, empty batch vectors, or schema drift within one
     /// relation.
-    pub fn try_new(
+    fn try_new(
         source_pin: SourcePin,
         context_pin: ContextPin,
         observed: Vec<ObservedProviderRelation>,
@@ -264,9 +266,7 @@ impl AcceptedProviderRelationSet {
     ///
     /// Rejects missing/malformed native pin fields, mixed source/context pins, relation metadata
     /// drift, or a release/provider identifier that differs from the exact compiled adapter.
-    pub fn from_native_syntax(
-        run: &ProviderNativeSyntaxRun,
-    ) -> Result<Self, ProviderAdmissionError> {
+    fn from_native_syntax(run: &ProviderNativeSyntaxRun) -> Result<Self, ProviderAdmissionError> {
         let mut observed = Vec::with_capacity(run.relations.len());
         let mut source_pin = None;
         let mut context_pin = None;
@@ -298,7 +298,7 @@ impl AcceptedProviderRelationSet {
     ///
     /// Rejects schema/relation/digest/correlation drift, duplicate module relations, or mixed
     /// semantic-environment pins.
-    pub fn from_pyrefly(run: &AcceptedPyreflyRun) -> Result<Self, ProviderAdmissionError> {
+    fn from_pyrefly(run: &AcceptedPyreflyRun) -> Result<Self, ProviderAdmissionError> {
         if run.modules.is_empty() {
             return Err(ProviderAdmissionError::InvalidObservedRelation {
                 relation: "provider.pyrefly.run".into(),
@@ -366,7 +366,7 @@ impl AcceptedProviderRelationSet {
     /// Rejects malformed digest pins, predecessor/unknown family codes on the target route,
     /// Arrow decode/schema/row drift, mixed owner/run/unit/generation columns, or duplicate
     /// owner-family chunks.
-    pub fn from_rustc(run: &AcceptedRustcCompilation) -> Result<Self, ProviderAdmissionError> {
+    fn from_rustc(run: &AcceptedRustcCompilation) -> Result<Self, ProviderAdmissionError> {
         let source_pin = parse_b3_pin(
             &run.admission.source_snapshot_manifest_digest,
             "rustc source snapshot manifest",
@@ -404,13 +404,15 @@ impl AcceptedProviderRelationSet {
         Self::try_new(SourcePin(source_pin), ContextPin(context_pin), observed)
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub const fn source_pin(&self) -> SourcePin {
+    pub(crate) const fn source_pin(&self) -> SourcePin {
         self.source_pin
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub const fn context_pin(&self) -> ContextPin {
+    pub(crate) const fn context_pin(&self) -> ContextPin {
         self.context_pin
     }
 }
@@ -616,49 +618,107 @@ pub struct ProviderAdmissionReport {
     pub relations: Vec<ProviderRelationAdmission>,
 }
 
-/// Successful registration keeps the still-mutable builder owned by the caller.
-pub struct ProviderAdmissionOutcome {
-    builder: FabricEpochBuilder,
-    report: ProviderAdmissionReport,
+/// The exact accepted provider runs and independently accepted admission plans
+/// that must enter one programmatic candidate together.
+///
+/// Each Python source partition carries a paired in-process Tree-sitter/Ruff
+/// run. The lanes retain separate admission plans, catalog roles, boundary
+/// reports, and authority pins after workspace aggregation.
+pub struct ExactProgrammaticProviderRuns<'a> {
+    tree_sitter_plan: &'a ProviderAdmissionPlan,
+    ruff_plan: &'a ProviderAdmissionPlan,
+    native_syntax_runs: &'a [ProviderNativeSyntaxRun],
+    pyrefly_plan: &'a ProviderAdmissionPlan,
+    pyrefly_runs: &'a [AcceptedPyreflyRun],
+    rustc_plan: &'a ProviderAdmissionPlan,
+    rustc_runs: &'a [TrustQualifiedRustcCompilation],
 }
 
-/// Successful admission into the same programmatic candidate session that
-/// will build every downstream CPG transformation.
+impl<'a> ExactProgrammaticProviderRuns<'a> {
+    #[must_use]
+    pub const fn new(
+        tree_sitter_plan: &'a ProviderAdmissionPlan,
+        ruff_plan: &'a ProviderAdmissionPlan,
+        native_syntax_runs: &'a [ProviderNativeSyntaxRun],
+        pyrefly_plan: &'a ProviderAdmissionPlan,
+        pyrefly_runs: &'a [AcceptedPyreflyRun],
+        rustc_plan: &'a ProviderAdmissionPlan,
+        rustc_runs: &'a [TrustQualifiedRustcCompilation],
+    ) -> Self {
+        Self {
+            tree_sitter_plan,
+            ruff_plan,
+            native_syntax_runs,
+            pyrefly_plan,
+            pyrefly_runs,
+            rustc_plan,
+            rustc_runs,
+        }
+    }
+}
+
+/// Provider-specific reports retained from one atomic programmatic admission.
+#[derive(Clone, Debug)]
+pub struct ExactProgrammaticProviderReports {
+    tree_sitter: ProviderAdmissionReport,
+    ruff: ProviderAdmissionReport,
+    pyrefly: ProviderAdmissionReport,
+    rustc: ProviderAdmissionReport,
+}
+
+impl ExactProgrammaticProviderReports {
+    #[must_use]
+    pub const fn tree_sitter(&self) -> &ProviderAdmissionReport {
+        &self.tree_sitter
+    }
+
+    #[must_use]
+    pub const fn ruff(&self) -> &ProviderAdmissionReport {
+        &self.ruff
+    }
+
+    #[must_use]
+    pub const fn pyrefly(&self) -> &ProviderAdmissionReport {
+        &self.pyrefly
+    }
+
+    #[must_use]
+    pub const fn rustc(&self) -> &ProviderAdmissionReport {
+        &self.rustc
+    }
+}
+
+/// Successful all-provider admission into the same programmatic candidate
+/// session that will build every downstream CPG transformation.
 pub struct ProgrammaticProviderAdmissionOutcome {
-    assembly: ProgrammaticSchemaAssembly,
-    report: ProviderAdmissionReport,
+    builder: ProgrammaticFabricEpochBuilder,
+    reports: ExactProgrammaticProviderReports,
 }
 
 impl ProgrammaticProviderAdmissionOutcome {
     #[must_use]
-    pub const fn report(&self) -> &ProviderAdmissionReport {
-        &self.report
+    pub const fn reports(&self) -> &ExactProgrammaticProviderReports {
+        &self.reports
     }
 
-    #[must_use]
-    pub fn into_parts(self) -> (ProgrammaticSchemaAssembly, ProviderAdmissionReport) {
-        (self.assembly, self.report)
-    }
-}
-
-impl ProviderAdmissionOutcome {
-    #[must_use]
-    pub const fn report(&self) -> &ProviderAdmissionReport {
-        &self.report
-    }
-
+    /// Exact candidate epoch that owns the admitted provider catalogs.
     #[must_use]
     pub const fn candidate_epoch_id(&self) -> &FabricEpochId {
         self.builder.identity()
     }
 
     #[must_use]
-    pub fn into_parts(self) -> (FabricEpochBuilder, ProviderAdmissionReport) {
-        (self.builder, self.report)
+    pub fn into_parts(
+        self,
+    ) -> (
+        ProgrammaticFabricEpochBuilder,
+        ExactProgrammaticProviderReports,
+    ) {
+        (self.builder, self.reports)
     }
 }
 
-/// Model-supplied catalog binding for the capability relation derived from one accepted run.
+/// Application-owned catalog binding for the capability relation derived from exact provider runs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProviderCapabilityCatalogBinding {
     pub table_name: String,
@@ -667,31 +727,37 @@ pub struct ProviderCapabilityCatalogBinding {
 
 /// Successful provider admission plus its registered, proof-qualified capability relation.
 pub struct ProviderCapabilityAdmissionOutcome {
-    builder: FabricEpochBuilder,
-    provider_report: ProviderAdmissionReport,
-    capability: ProviderCapabilityRelation,
+    builder: ProgrammaticFabricEpochBuilder,
+    provider_reports: ExactProgrammaticProviderReports,
+    capabilities: Vec<ProviderCapabilityRelation>,
 }
 
 impl ProviderCapabilityAdmissionOutcome {
     #[must_use]
-    pub const fn provider_report(&self) -> &ProviderAdmissionReport {
-        &self.provider_report
+    pub const fn provider_reports(&self) -> &ExactProgrammaticProviderReports {
+        &self.provider_reports
     }
 
     #[must_use]
-    pub const fn capability(&self) -> &ProviderCapabilityRelation {
-        &self.capability
+    pub fn capabilities(&self) -> &[ProviderCapabilityRelation] {
+        &self.capabilities
+    }
+
+    /// Exact candidate epoch that owns both raw providers and capability evidence.
+    #[must_use]
+    pub const fn candidate_epoch_id(&self) -> &FabricEpochId {
+        self.builder.identity()
     }
 
     #[must_use]
     pub fn into_parts(
         self,
     ) -> (
-        FabricEpochBuilder,
-        ProviderAdmissionReport,
-        ProviderCapabilityRelation,
+        ProgrammaticFabricEpochBuilder,
+        ExactProgrammaticProviderReports,
+        Vec<ProviderCapabilityRelation>,
     ) {
-        (self.builder, self.provider_report, self.capability)
+        (self.builder, self.provider_reports, self.capabilities)
     }
 }
 
@@ -711,6 +777,43 @@ pub enum ProviderAdmissionError {
         relation: String,
         expected: ProviderNativeLane,
         actual: ProviderNativeLane,
+    },
+    #[error("exact {lane:?} provider run omitted required relation {relation}")]
+    IncompleteExactProviderRun {
+        lane: ProviderNativeLane,
+        relation: String,
+    },
+    #[error("exact {lane:?} provider workspace contains duplicate partition {partition}")]
+    DuplicateProviderPartition {
+        lane: ProviderNativeLane,
+        partition: String,
+    },
+    #[error("exact {lane:?} provider partitions do not share one workspace authority")]
+    InconsistentProviderWorkspaceAuthority { lane: ProviderNativeLane },
+    #[error(
+        "exact {lane:?} provider workspace has {actual} partitions, exceeding the bound {maximum}"
+    )]
+    ProviderWorkspacePartitionLimit {
+        lane: ProviderNativeLane,
+        actual: usize,
+        maximum: usize,
+    },
+    #[error(
+        "provider relation {relation} is bound by both {first:?} and {second:?} admission plans"
+    )]
+    CrossProviderRelationIdentity {
+        relation: String,
+        first: ProviderNativeLane,
+        second: ProviderNativeLane,
+    },
+    #[error(
+        "epoch table {role:?}.{table} is bound by both {first:?} and {second:?} admission plans"
+    )]
+    CrossProviderTableBinding {
+        role: FabricSchemaRole,
+        table: String,
+        first: ProviderNativeLane,
+        second: ProviderNativeLane,
     },
     #[error("provider source/context pin differs from the accepted admission plan")]
     AdmissionPinMismatch,
@@ -732,6 +835,8 @@ pub enum ProviderAdmissionError {
     },
     #[error("provider emitted forbidden application-derived family {0}")]
     ForbiddenProviderOutput(String),
+    #[error("rustc trust evidence cannot enter exact provider admission: {0}")]
+    RustcTrustEvidence(String),
     #[error(transparent)]
     Boundary(#[from] ProviderBoundaryError),
     #[error(transparent)]
@@ -740,8 +845,6 @@ pub enum ProviderAdmissionError {
     SchemaContract(#[from] SchemaContractError),
     #[error(transparent)]
     DataFusion(#[from] DataFusionError),
-    #[error(transparent)]
-    Epoch(#[from] FabricEpochError),
     #[error(transparent)]
     ProgrammaticSchema(#[from] ProgrammaticSchemaError),
 }
@@ -779,9 +882,9 @@ fn validate_syntax_batch(
     let provider_releases = utf8_column(batch, "provider_release", relation_name)?;
     let content_digests = fixed32_column(batch, "content_digest", relation_name)?;
     let context_ids = fixed32_column(batch, "analysis_context_id", relation_name)?;
-    // These columns are required even when this particular fact relation has zero rows. Their
-    // types make the exact pin contract executable without inventing an empty-row capability.
-    let _model_epoch_ids = fixed32_column(batch, "model_epoch_id", relation_name)?;
+    // This column is required even when this particular fact relation has zero rows. Its type
+    // makes the exact provider-context contract executable without inventing an empty-row
+    // capability. Fabric-epoch identity is assigned only after the provider transaction admits.
     let _semantic_environment_ids =
         fixed32_column(batch, "semantic_environment_id", relation_name)?;
 
@@ -972,6 +1075,22 @@ fn fixed32_column<'a>(
     Ok(column)
 }
 
+fn fixed16_column<'a>(
+    batch: &'a RecordBatch,
+    field: &str,
+    relation: &str,
+) -> Result<&'a FixedSizeBinaryArray, ProviderAdmissionError> {
+    let column =
+        typed_column::<FixedSizeBinaryArray>(batch, field, relation, "FixedSizeBinary(16)")?;
+    if column.value_length() != 16 {
+        return Err(ProviderAdmissionError::InvalidObservedRelation {
+            relation: relation.to_owned(),
+            detail: format!("{field} is not FixedSizeBinary(16)"),
+        });
+    }
+    Ok(column)
+}
+
 fn typed_column<'a, T: 'static>(
     batch: &'a RecordBatch,
     field: &str,
@@ -1000,6 +1119,27 @@ fn fixed32_value(
     relation: &str,
     field: &str,
 ) -> Result<[u8; 32], ProviderAdmissionError> {
+    if column.is_null(row) {
+        return Err(ProviderAdmissionError::InvalidObservedRelation {
+            relation: relation.to_owned(),
+            detail: format!("{field} is null"),
+        });
+    }
+    column
+        .value(row)
+        .try_into()
+        .map_err(|_| ProviderAdmissionError::InvalidObservedRelation {
+            relation: relation.to_owned(),
+            detail: format!("{field} has the wrong width"),
+        })
+}
+
+fn fixed16_value(
+    column: &FixedSizeBinaryArray,
+    row: usize,
+    relation: &str,
+    field: &str,
+) -> Result<[u8; 16], ProviderAdmissionError> {
     if column.is_null(row) {
         return Err(ProviderAdmissionError::InvalidObservedRelation {
             relation: relation.to_owned(),
@@ -1060,84 +1200,110 @@ struct PreparedProviderAdmission {
 
 /// Evaluate exact provider output without mutating a candidate epoch.
 ///
+/// Kept transaction-private so callers cannot stop after validating one hand-assembled provider
+/// set and treat that report as admission. The public route consumes the programmatic epoch
+/// builder and all exact provider runs together.
+///
 /// # Errors
 ///
 /// Rejects plan, ownership, schema, pin, coverage, authority, or unexpected-output
 /// contradictions. Ordinary missing output/coverage is returned as an explicit unknown.
-pub fn evaluate_provider_admission(
+#[cfg(test)]
+fn evaluate_provider_admission(
     plan: &ProviderAdmissionPlan,
     observed: &AcceptedProviderRelationSet,
 ) -> Result<ProviderAdmissionReport, ProviderAdmissionError> {
     Ok(prepare_provider_admission(plan, observed)?.report)
 }
 
-/// Evaluate and register accepted raw provider relations in one consumed epoch candidate.
+/// Admit the exact Tree-sitter, Ruff, Pyrefly, and rustc runs into one
+/// programmatic epoch transaction.
 ///
-/// Consuming the builder is load-bearing: a registration failure drops the partially constructed
-/// candidate instead of returning mutable partial state to the caller.
+/// The builder is consumed before registration and is returned only after all
+/// four provider lanes succeed. Exact run conversion and every plan are
+/// preflighted first; any later catalog failure drops the assembly containing
+/// the earlier registrations instead of exposing partial state. Provider rows
+/// retain their native schemas and source/context columns, while the returned
+/// reports retain each provider's independently validated authority pins and
+/// explicit unknown/remainder outcomes.
 ///
 /// # Errors
 ///
-/// Returns a typed admission, DataFusion, schema-contract, or epoch-registration failure.
-pub fn admit_provider_relations(
-    mut builder: FabricEpochBuilder,
-    plan: &ProviderAdmissionPlan,
-    observed: &AcceptedProviderRelationSet,
-) -> Result<ProviderAdmissionOutcome, ProviderAdmissionError> {
-    let prepared = prepare_provider_admission(plan, observed)?;
-    for table in prepared.tables {
-        let provider = Arc::new(MemTable::try_new(
-            Arc::clone(&table.schema),
-            vec![table.batches],
-        )?);
-        let contract = Arc::new(SchemaContract::try_new(
-            Arc::clone(&table.binding.source_schema_identity),
-            TableReference::full(
-                FABRIC_CATALOG,
-                table.binding.role.as_str(),
-                table.binding.table_name.as_str(),
-            ),
-            Arc::clone(&table.schema),
-            Arc::clone(&table.schema),
-            (0..table.schema.fields().len())
-                .map(|index| FieldIndexMapping::direct(index, index))
-                .collect(),
-        )?);
-        builder.register_provider(
-            table.binding.role,
-            table.binding.table_name,
-            Arc::clone(&plan.provider_kind),
-            provider,
-            contract,
-        )?;
+/// Returns a typed exact-run, admission, cross-provider collision,
+/// schema-contract, catalog, or DataFusion failure.
+pub fn admit_provider_relations_programmatic(
+    builder: ProgrammaticFabricEpochBuilder,
+    runs: ExactProgrammaticProviderRuns<'_>,
+) -> Result<ProgrammaticProviderAdmissionOutcome, ProviderAdmissionError> {
+    if runs.tree_sitter_plan.expected_source_pin != runs.ruff_plan.expected_source_pin
+        || runs.tree_sitter_plan.expected_context_pin != runs.ruff_plan.expected_context_pin
+    {
+        return Err(
+            ProviderAdmissionError::InconsistentProviderWorkspaceAuthority {
+                lane: ProviderNativeLane::TreeSitter,
+            },
+        );
     }
-    Ok(ProviderAdmissionOutcome {
-        builder,
-        report: prepared.report,
+    let native_syntax = aggregate_native_syntax_runs(
+        runs.native_syntax_runs,
+        runs.tree_sitter_plan.expected_source_pin,
+        runs.tree_sitter_plan.expected_context_pin,
+    )?;
+    let tree_sitter = provider_lane_subset(&native_syntax, ProviderNativeLane::TreeSitter)?;
+    let ruff = provider_lane_subset(&native_syntax, ProviderNativeLane::Ruff)?;
+    let pyrefly = aggregate_pyrefly_runs(
+        runs.pyrefly_runs,
+        runs.pyrefly_plan.expected_source_pin,
+        runs.pyrefly_plan.expected_context_pin,
+    )?;
+    let rustc = aggregate_rustc_runs(
+        runs.rustc_runs,
+        runs.rustc_plan.expected_source_pin,
+        runs.rustc_plan.expected_context_pin,
+    )?;
+
+    let plans = [
+        (ProviderNativeLane::TreeSitter, runs.tree_sitter_plan),
+        (ProviderNativeLane::Ruff, runs.ruff_plan),
+        (ProviderNativeLane::Pyrefly, runs.pyrefly_plan),
+        (ProviderNativeLane::Rustc, runs.rustc_plan),
+    ];
+    validate_programmatic_transaction_plans(&plans)?;
+
+    let tree_sitter = prepare_provider_admission(runs.tree_sitter_plan, &tree_sitter)?;
+    let ruff = prepare_provider_admission(runs.ruff_plan, &ruff)?;
+    let pyrefly = prepare_provider_admission(runs.pyrefly_plan, &pyrefly)?;
+    let rustc = prepare_provider_admission(runs.rustc_plan, &rustc)?;
+
+    let (identity, runtime_config, runtime_env, mut assembly) = builder.into_assembly_parts();
+    let tree_sitter = register_prepared_programmatic(&mut assembly, tree_sitter)?;
+    let ruff = register_prepared_programmatic(&mut assembly, ruff)?;
+    let pyrefly = register_prepared_programmatic(&mut assembly, pyrefly)?;
+    let rustc = register_prepared_programmatic(&mut assembly, rustc)?;
+
+    Ok(ProgrammaticProviderAdmissionOutcome {
+        builder: ProgrammaticFabricEpochBuilder::from_assembly_parts(
+            identity,
+            runtime_config,
+            runtime_env,
+            assembly,
+        ),
+        reports: ExactProgrammaticProviderReports {
+            tree_sitter,
+            ruff,
+            pyrefly,
+            rustc,
+        },
     })
 }
 
-/// Evaluate and register accepted raw provider relations directly into the
-/// programmatic candidate session that owns downstream transformations.
-///
-/// The assembly is consumed so no partially registered candidate escapes on
-/// failure. Arrow types, nullability, field identities, and relation identity
-/// all come from the admitted provider schema itself.
-///
-/// # Errors
-///
-/// Returns a typed admission, schema-contract, catalog, or DataFusion failure.
-pub fn admit_provider_relations_programmatic(
-    mut assembly: ProgrammaticSchemaAssembly,
-    plan: &ProviderAdmissionPlan,
-    observed: &AcceptedProviderRelationSet,
-) -> Result<ProgrammaticProviderAdmissionOutcome, ProviderAdmissionError> {
-    let prepared = prepare_provider_admission(plan, observed)?;
+fn register_prepared_programmatic(
+    assembly: &mut ProgrammaticSchemaAssembly,
+    prepared: PreparedProviderAdmission,
+) -> Result<ProviderAdmissionReport, ProviderAdmissionError> {
     for table in prepared.tables {
-        let provider = Arc::new(MemTable::try_new(
-            Arc::clone(&table.schema),
-            vec![table.batches],
-        )?);
+        let partitions = table.batches.into_iter().map(|batch| vec![batch]).collect();
+        let provider = Arc::new(MemTable::try_new(Arc::clone(&table.schema), partitions)?);
         let table_reference = TableReference::full(
             FABRIC_CATALOG,
             table.binding.role.as_str(),
@@ -1159,28 +1325,555 @@ pub fn admit_provider_relations_programmatic(
             provider,
         ))?;
     }
-    Ok(ProgrammaticProviderAdmissionOutcome {
-        assembly,
-        report: prepared.report,
+    Ok(prepared.report)
+}
+
+fn validate_native_syntax_census(
+    observed: &AcceptedProviderRelationSet,
+) -> Result<(), ProviderAdmissionError> {
+    for relation in NativeSyntaxRelation::ALL {
+        let identity = ProviderRelationIdentity::try_new(relation.as_str())?;
+        if !observed.relations.contains_key(&identity) {
+            return Err(ProviderAdmissionError::IncompleteExactProviderRun {
+                lane: syntax_lane(relation),
+                relation: relation.as_str().to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct NativeSyntaxPartitionAuthority {
+    file_id: [u8; 16],
+    source_generation: u64,
+    content_digest: [u8; 32],
+    analysis_context_id: [u8; 32],
+    semantic_environment_id: [u8; 32],
+    tree_sitter_run_id: [u8; 16],
+    ruff_run_id: [u8; 16],
+}
+
+fn aggregate_native_syntax_runs(
+    runs: &[ProviderNativeSyntaxRun],
+    empty_source_pin: SourcePin,
+    empty_context_pin: ContextPin,
+) -> Result<AcceptedProviderRelationSet, ProviderAdmissionError> {
+    enforce_workspace_partition_limit(ProviderNativeLane::TreeSitter, runs.len())?;
+    if runs.is_empty() {
+        return AcceptedProviderRelationSet::try_new(
+            empty_source_pin,
+            empty_context_pin,
+            Vec::new(),
+        );
+    }
+
+    let mut authorities = Vec::with_capacity(runs.len());
+    let mut relation_sets = Vec::with_capacity(runs.len());
+    let mut source_partitions = BTreeSet::new();
+    let mut provider_runs = BTreeSet::new();
+    for run in runs {
+        let relation_set = AcceptedProviderRelationSet::from_native_syntax(run)?;
+        validate_native_syntax_census(&relation_set)?;
+        let authority = native_syntax_partition_authority(run)?;
+        let source_partition = (authority.file_id, authority.source_generation);
+        if !source_partitions.insert(source_partition) {
+            return Err(ProviderAdmissionError::DuplicateProviderPartition {
+                lane: ProviderNativeLane::TreeSitter,
+                partition: format!(
+                    "{}:{}",
+                    hex_bytes(&authority.file_id),
+                    authority.source_generation
+                ),
+            });
+        }
+        for (lane, run_id) in [
+            (ProviderNativeLane::TreeSitter, authority.tree_sitter_run_id),
+            (ProviderNativeLane::Ruff, authority.ruff_run_id),
+        ] {
+            if !provider_runs.insert((lane_name(lane), run_id)) {
+                return Err(ProviderAdmissionError::DuplicateProviderPartition {
+                    lane,
+                    partition: hex_bytes(&run_id),
+                });
+            }
+        }
+        authorities.push(authority);
+        relation_sets.push(relation_set);
+    }
+
+    let first = authorities[0];
+    if authorities.iter().any(|authority| {
+        authority.analysis_context_id != first.analysis_context_id
+            || authority.semantic_environment_id != first.semantic_environment_id
+    }) {
+        return Err(
+            ProviderAdmissionError::InconsistentProviderWorkspaceAuthority {
+                lane: ProviderNativeLane::TreeSitter,
+            },
+        );
+    }
+    authorities.sort_by_key(|authority| {
+        (
+            authority.file_id,
+            authority.source_generation,
+            authority.content_digest,
+        )
+    });
+    let source_pin = native_syntax_workspace_source_pin(&authorities);
+    merge_provider_relation_sets(
+        &relation_sets,
+        source_pin,
+        ContextPin(first.analysis_context_id),
+    )
+}
+
+fn native_syntax_partition_authority(
+    run: &ProviderNativeSyntaxRun,
+) -> Result<NativeSyntaxPartitionAuthority, ProviderAdmissionError> {
+    let tree = syntax_run_authority(run.relation(NativeSyntaxRelation::TreeSitterRun))?;
+    let ruff = syntax_run_authority(run.relation(NativeSyntaxRelation::RuffRun))?;
+    if tree.file_id != ruff.file_id
+        || tree.source_generation != ruff.source_generation
+        || tree.content_digest != ruff.content_digest
+        || tree.analysis_context_id != ruff.analysis_context_id
+        || tree.semantic_environment_id != ruff.semantic_environment_id
+    {
+        return Err(
+            ProviderAdmissionError::InconsistentProviderWorkspaceAuthority {
+                lane: ProviderNativeLane::TreeSitter,
+            },
+        );
+    }
+    Ok(NativeSyntaxPartitionAuthority {
+        file_id: tree.file_id,
+        source_generation: tree.source_generation,
+        content_digest: tree.content_digest,
+        analysis_context_id: tree.analysis_context_id,
+        semantic_environment_id: tree.semantic_environment_id,
+        tree_sitter_run_id: tree.provider_run_id,
+        ruff_run_id: ruff.provider_run_id,
     })
 }
 
-/// Register the capability relation computed from one successfully admitted provider run.
-///
-/// The admission outcome is consumed so capability registration cannot be detached from the
-/// exact boundary report that admitted the raw relations. Catalog naming and source-schema
-/// identity remain model data. Any proof or registration contradiction drops the partially
-/// constructed epoch candidate.
-///
-/// # Errors
-///
-/// Rejects invalid catalog bindings, ambiguous/unbound proof evidence, Arrow construction,
-/// schema-contract drift, or epoch registration failure.
-pub(crate) fn admit_provider_capability(
-    outcome: ProviderAdmissionOutcome,
+#[derive(Clone, Copy)]
+struct SyntaxRunAuthority {
+    provider_run_id: [u8; 16],
+    file_id: [u8; 16],
+    source_generation: u64,
+    content_digest: [u8; 32],
+    analysis_context_id: [u8; 32],
+    semantic_environment_id: [u8; 32],
+}
+
+fn syntax_run_authority(batch: &RecordBatch) -> Result<SyntaxRunAuthority, ProviderAdmissionError> {
+    let relation = batch
+        .schema_ref()
+        .metadata()
+        .get("codefabric.relation_id")
+        .cloned()
+        .unwrap_or_else(|| "provider.native_syntax.run".to_owned());
+    if batch.num_rows() != 1 {
+        return Err(ProviderAdmissionError::InvalidObservedRelation {
+            relation,
+            detail: "run relation must contain exactly one authority row".to_owned(),
+        });
+    }
+    let source_generations = u64_column(batch, "source_generation", &relation)?;
+    if source_generations.is_null(0) || source_generations.value(0) == 0 {
+        return Err(ProviderAdmissionError::InvalidObservedRelation {
+            relation,
+            detail: "source_generation is null or uses the zero sentinel".to_owned(),
+        });
+    }
+    let authority = SyntaxRunAuthority {
+        provider_run_id: fixed16_value(
+            fixed16_column(batch, "provider_run_id", &relation)?,
+            0,
+            &relation,
+            "provider_run_id",
+        )?,
+        file_id: fixed16_value(
+            fixed16_column(batch, "file_id", &relation)?,
+            0,
+            &relation,
+            "file_id",
+        )?,
+        source_generation: source_generations.value(0),
+        content_digest: fixed32_value(
+            fixed32_column(batch, "content_digest", &relation)?,
+            0,
+            &relation,
+            "content_digest",
+        )?,
+        analysis_context_id: fixed32_value(
+            fixed32_column(batch, "analysis_context_id", &relation)?,
+            0,
+            &relation,
+            "analysis_context_id",
+        )?,
+        semantic_environment_id: fixed32_value(
+            fixed32_column(batch, "semantic_environment_id", &relation)?,
+            0,
+            &relation,
+            "semantic_environment_id",
+        )?,
+    };
+    require_nonzero(authority.provider_run_id, "native syntax provider run")?;
+    require_nonzero(authority.file_id, "native syntax file")?;
+    require_nonzero(authority.content_digest, "native syntax content")?;
+    require_nonzero(authority.analysis_context_id, "native syntax context")?;
+    require_nonzero(
+        authority.semantic_environment_id,
+        "native syntax semantic environment",
+    )?;
+    Ok(authority)
+}
+
+fn native_syntax_workspace_source_pin(authorities: &[NativeSyntaxPartitionAuthority]) -> SourcePin {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"codefabric.native-syntax-workspace-source.v1\0");
+    hasher.update(
+        &u64::try_from(authorities.len())
+            .unwrap_or(u64::MAX)
+            .to_be_bytes(),
+    );
+    for authority in authorities {
+        hasher.update(&authority.file_id);
+        hasher.update(&authority.source_generation.to_be_bytes());
+        hasher.update(&authority.content_digest);
+    }
+    SourcePin(*hasher.finalize().as_bytes())
+}
+
+fn validate_pyrefly_census(
+    run: &AcceptedPyreflyRun,
+    observed: &AcceptedProviderRelationSet,
+) -> Result<(), ProviderAdmissionError> {
+    for module in &run.modules {
+        let present = module
+            .relations
+            .iter()
+            .map(|relation| relation.relation)
+            .collect::<BTreeSet<_>>();
+        for relation in PyreflyRelation::ALL {
+            if !present.contains(&relation) {
+                return Err(ProviderAdmissionError::IncompleteExactProviderRun {
+                    lane: ProviderNativeLane::Pyrefly,
+                    relation: format!("{}:{}", module.module_id, relation.relation_id()),
+                });
+            }
+        }
+    }
+    for relation in PyreflyRelation::ALL {
+        let identity = ProviderRelationIdentity::try_new(relation.relation_id())?;
+        if !observed.relations.contains_key(&identity) {
+            return Err(ProviderAdmissionError::IncompleteExactProviderRun {
+                lane: ProviderNativeLane::Pyrefly,
+                relation: relation.relation_id().to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn aggregate_pyrefly_runs(
+    runs: &[AcceptedPyreflyRun],
+    empty_source_pin: SourcePin,
+    empty_context_pin: ContextPin,
+) -> Result<AcceptedProviderRelationSet, ProviderAdmissionError> {
+    enforce_workspace_partition_limit(ProviderNativeLane::Pyrefly, runs.len())?;
+    if runs.is_empty() {
+        return AcceptedProviderRelationSet::try_new(
+            empty_source_pin,
+            empty_context_pin,
+            Vec::new(),
+        );
+    }
+
+    let first = &runs[0];
+    let mut provider_runs = BTreeSet::new();
+    let mut modules = BTreeMap::<String, ([u8; 16], [u8; 32])>::new();
+    let mut files = BTreeSet::new();
+    let mut relation_sets = Vec::with_capacity(runs.len());
+    let mut context_pin = None;
+    for run in runs {
+        if run.workspace_id != first.workspace_id
+            || run.analysis_context_id != first.analysis_context_id
+            || run.canonical_workspace_id != first.canonical_workspace_id
+            || run.canonical_analysis_context_id != first.canonical_analysis_context_id
+            || run.source_generation != first.source_generation
+            || run.sandbox_profile_digest != first.sandbox_profile_digest
+            || run.trust_profile != first.trust_profile
+        {
+            return Err(
+                ProviderAdmissionError::InconsistentProviderWorkspaceAuthority {
+                    lane: ProviderNativeLane::Pyrefly,
+                },
+            );
+        }
+        if !provider_runs.insert(run.provider_run_id.as_str()) {
+            return Err(ProviderAdmissionError::DuplicateProviderPartition {
+                lane: ProviderNativeLane::Pyrefly,
+                partition: run.provider_run_id.clone(),
+            });
+        }
+        let relation_set = AcceptedProviderRelationSet::from_pyrefly(run)?;
+        validate_pyrefly_census(run, &relation_set)?;
+        if context_pin.is_some_and(|pin| pin != relation_set.context_pin) {
+            return Err(
+                ProviderAdmissionError::InconsistentProviderWorkspaceAuthority {
+                    lane: ProviderNativeLane::Pyrefly,
+                },
+            );
+        }
+        context_pin = Some(relation_set.context_pin);
+        for module in &run.modules {
+            if modules.len() == MAX_PROVIDER_WORKSPACE_PARTITIONS {
+                return Err(ProviderAdmissionError::ProviderWorkspacePartitionLimit {
+                    lane: ProviderNativeLane::Pyrefly,
+                    actual: modules.len().saturating_add(1),
+                    maximum: MAX_PROVIDER_WORKSPACE_PARTITIONS,
+                });
+            }
+            let digest = *blake3::hash(&module.source_bytes).as_bytes();
+            if !files.insert(module.canonical_file_id) {
+                return Err(ProviderAdmissionError::DuplicateProviderPartition {
+                    lane: ProviderNativeLane::Pyrefly,
+                    partition: hex_bytes(&module.canonical_file_id),
+                });
+            }
+            if modules
+                .insert(module.module_id.clone(), (module.canonical_file_id, digest))
+                .is_some()
+            {
+                return Err(ProviderAdmissionError::DuplicateProviderPartition {
+                    lane: ProviderNativeLane::Pyrefly,
+                    partition: module.module_id.clone(),
+                });
+            }
+        }
+        relation_sets.push(relation_set);
+    }
+    let source_pin = pyrefly_workspace_source_pin(first.source_generation, &modules);
+    merge_provider_relation_sets(
+        &relation_sets,
+        source_pin,
+        context_pin.expect("a non-empty accepted Pyrefly run has a context pin"),
+    )
+}
+
+fn pyrefly_workspace_source_pin(
+    source_generation: u64,
+    modules: &BTreeMap<String, ([u8; 16], [u8; 32])>,
+) -> SourcePin {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"codefabric.pyrefly.source-pin.v1\0");
+    hasher.update(&source_generation.to_be_bytes());
+    for (module_id, (file_id, digest)) in modules {
+        hasher.update(
+            &u64::try_from(module_id.len())
+                .unwrap_or(u64::MAX)
+                .to_be_bytes(),
+        );
+        hasher.update(module_id.as_bytes());
+        hasher.update(file_id);
+        hasher.update(digest);
+    }
+    SourcePin(*hasher.finalize().as_bytes())
+}
+
+fn aggregate_rustc_runs(
+    runs: &[TrustQualifiedRustcCompilation],
+    empty_source_pin: SourcePin,
+    empty_context_pin: ContextPin,
+) -> Result<AcceptedProviderRelationSet, ProviderAdmissionError> {
+    enforce_workspace_partition_limit(ProviderNativeLane::Rustc, runs.len())?;
+    if runs.is_empty() {
+        return AcceptedProviderRelationSet::try_new(
+            empty_source_pin,
+            empty_context_pin,
+            Vec::new(),
+        );
+    }
+
+    let first = &runs[0].accepted().admission;
+    let mut provider_runs = BTreeSet::new();
+    let mut compilation_units = BTreeSet::new();
+    let mut relation_sets = Vec::with_capacity(runs.len());
+    let mut source_pin = None;
+    let mut context_pin = None;
+    for qualified in runs {
+        qualified
+            .validate()
+            .map_err(|error| ProviderAdmissionError::RustcTrustEvidence(error.to_string()))?;
+        let run = qualified.accepted();
+        if run.admission.workspace_id != first.workspace_id
+            || run.admission.analysis_context_id != first.analysis_context_id
+            || run.admission.canonical_workspace_id != first.canonical_workspace_id
+            || run.admission.canonical_analysis_context_id != first.canonical_analysis_context_id
+            || run.admission.source_generation != first.source_generation
+            || run.admission.context_manifest_digest != first.context_manifest_digest
+            || run.admission.source_snapshot_manifest_digest
+                != first.source_snapshot_manifest_digest
+            || run.admission.resource_profile_id != first.resource_profile_id
+        {
+            return Err(
+                ProviderAdmissionError::InconsistentProviderWorkspaceAuthority {
+                    lane: ProviderNativeLane::Rustc,
+                },
+            );
+        }
+        if !provider_runs.insert(run.admission.provider_run_id.as_str()) {
+            return Err(ProviderAdmissionError::DuplicateProviderPartition {
+                lane: ProviderNativeLane::Rustc,
+                partition: run.admission.provider_run_id.clone(),
+            });
+        }
+        if !compilation_units.insert(run.begin.compilation_unit_id.as_str()) {
+            return Err(ProviderAdmissionError::DuplicateProviderPartition {
+                lane: ProviderNativeLane::Rustc,
+                partition: run.begin.compilation_unit_id.clone(),
+            });
+        }
+        let relation_set = AcceptedProviderRelationSet::from_rustc(run)?;
+        if source_pin.is_some_and(|pin| pin != relation_set.source_pin)
+            || context_pin.is_some_and(|pin| pin != relation_set.context_pin)
+        {
+            return Err(
+                ProviderAdmissionError::InconsistentProviderWorkspaceAuthority {
+                    lane: ProviderNativeLane::Rustc,
+                },
+            );
+        }
+        source_pin = Some(relation_set.source_pin);
+        context_pin = Some(relation_set.context_pin);
+        relation_sets.push(relation_set);
+    }
+    merge_provider_relation_sets(
+        &relation_sets,
+        source_pin.expect("a non-empty rustc set has a source pin"),
+        context_pin.expect("a non-empty rustc set has a context pin"),
+    )
+}
+
+fn merge_provider_relation_sets(
+    sets: &[AcceptedProviderRelationSet],
+    source_pin: SourcePin,
+    context_pin: ContextPin,
+) -> Result<AcceptedProviderRelationSet, ProviderAdmissionError> {
+    let mut grouped =
+        BTreeMap::<ProviderRelationIdentity, (ProviderNativeLane, Vec<RecordBatch>)>::new();
+    for set in sets {
+        for relation in set.relations.values() {
+            let entry = grouped
+                .entry(relation.identity.clone())
+                .or_insert_with(|| (relation.lane, Vec::new()));
+            if entry.0 != relation.lane {
+                return Err(ProviderAdmissionError::ProviderLaneMismatch {
+                    relation: relation.identity.as_str().to_owned(),
+                    expected: entry.0,
+                    actual: relation.lane,
+                });
+            }
+            let partition_count = entry.1.len().saturating_add(relation.batches.len());
+            enforce_workspace_partition_limit(relation.lane, partition_count)?;
+            entry.1.extend(relation.batches.iter().cloned());
+        }
+    }
+    AcceptedProviderRelationSet::try_new(
+        source_pin,
+        context_pin,
+        grouped
+            .into_iter()
+            .map(|(identity, (lane, batches))| ObservedProviderRelation {
+                identity,
+                lane,
+                batches,
+            })
+            .collect(),
+    )
+}
+
+fn enforce_workspace_partition_limit(
+    lane: ProviderNativeLane,
+    actual: usize,
+) -> Result<(), ProviderAdmissionError> {
+    if actual > MAX_PROVIDER_WORKSPACE_PARTITIONS {
+        return Err(ProviderAdmissionError::ProviderWorkspacePartitionLimit {
+            lane,
+            actual,
+            maximum: MAX_PROVIDER_WORKSPACE_PARTITIONS,
+        });
+    }
+    Ok(())
+}
+
+fn provider_lane_subset(
+    observed: &AcceptedProviderRelationSet,
+    lane: ProviderNativeLane,
+) -> Result<AcceptedProviderRelationSet, ProviderAdmissionError> {
+    let relations = observed
+        .relations
+        .values()
+        .filter(|relation| relation.lane == lane)
+        .cloned()
+        .collect::<Vec<_>>();
+    AcceptedProviderRelationSet::try_new(observed.source_pin, observed.context_pin, relations)
+}
+
+const fn lane_name(lane: ProviderNativeLane) -> u8 {
+    match lane {
+        ProviderNativeLane::TreeSitter => 1,
+        ProviderNativeLane::Ruff => 2,
+        ProviderNativeLane::Pyrefly => 3,
+        ProviderNativeLane::Rustc => 4,
+    }
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn validate_programmatic_transaction_plans(
+    plans: &[(ProviderNativeLane, &ProviderAdmissionPlan)],
+) -> Result<(), ProviderAdmissionError> {
+    let mut relations = BTreeMap::<ProviderRelationIdentity, ProviderNativeLane>::new();
+    let mut tables = BTreeMap::<(FabricSchemaRole, String), ProviderNativeLane>::new();
+    for (lane, plan) in plans {
+        validate_admission_plan(plan)?;
+        for binding in &plan.bindings {
+            if binding.lane != *lane {
+                return Err(ProviderAdmissionError::ProviderLaneMismatch {
+                    relation: binding.provider_relation.as_str().to_owned(),
+                    expected: *lane,
+                    actual: binding.lane,
+                });
+            }
+            if let Some(first) = relations.insert(binding.provider_relation.clone(), *lane) {
+                return Err(ProviderAdmissionError::CrossProviderRelationIdentity {
+                    relation: binding.provider_relation.as_str().to_owned(),
+                    first,
+                    second: *lane,
+                });
+            }
+            let table = (binding.role, binding.table_name.clone());
+            if let Some(first) = tables.insert(table.clone(), *lane) {
+                return Err(ProviderAdmissionError::CrossProviderTableBinding {
+                    role: table.0,
+                    table: table.1,
+                    first,
+                    second: *lane,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_provider_capability_catalog_binding(
     binding: &ProviderCapabilityCatalogBinding,
-    proofs: &[ProviderOracleProof],
-) -> Result<ProviderCapabilityAdmissionOutcome, ProviderAdmissionError> {
+) -> Result<(), ProviderAdmissionError> {
     if binding.table_name.is_empty()
         || binding.table_name.trim() != binding.table_name
         || binding.table_name.len() > MAX_RELATION_NAME_BYTES
@@ -1191,62 +1884,147 @@ pub(crate) fn admit_provider_capability(
             "provider capability catalog binding is invalid".into(),
         ));
     }
+    Ok(())
+}
 
-    let ProviderAdmissionOutcome {
-        mut builder,
-        report,
-    } = outcome;
-    if proofs
-        .iter()
-        .any(|proof| proof.proof_epoch_id != *builder.identity().as_bytes())
-    {
-        return Err(ProviderAdmissionError::CapabilityProofEpochMismatch);
+fn programmatic_provider_capabilities(
+    reports: &ExactProgrammaticProviderReports,
+    proof_relations: &ProofRelations,
+    oracle_bindings: &[ProviderOracleProofBinding],
+) -> Result<Vec<ProviderCapabilityRelation>, ProviderAdmissionError> {
+    let reports = [
+        reports.tree_sitter(),
+        reports.ruff(),
+        reports.pyrefly(),
+        reports.rustc(),
+    ];
+    let mut owners = BTreeMap::new();
+    for (report_index, report) in reports.iter().enumerate() {
+        for family in &report.boundary.families {
+            if owners
+                .insert((family.oracle_id, family.relation_id), report_index)
+                .is_some()
+            {
+                return Err(ProviderCapabilityError::DuplicateBoundaryFamily.into());
+            }
+        }
     }
-    let capability = derive_provider_capability_relation(&report.boundary, proofs)?;
-    let schema = Arc::clone(capability.schema());
+
+    let mut seen_bindings = BTreeSet::new();
+    let mut bindings_by_report: [Vec<ProviderOracleProofBinding>; 4] =
+        std::array::from_fn(|_| Vec::new());
+    for binding in oracle_bindings {
+        let key = (binding.provider_oracle_id, binding.relation_id);
+        if !seen_bindings.insert(key) {
+            return Err(ProviderCapabilityError::DuplicateProofBinding.into());
+        }
+        let report_index = owners
+            .get(&key)
+            .copied()
+            .ok_or(ProviderCapabilityError::UnboundProofBinding)?;
+        bindings_by_report[report_index].push(*binding);
+    }
+
+    reports
+        .into_iter()
+        .zip(bindings_by_report)
+        .map(|(report, bindings)| {
+            let proofs = provider_oracle_proofs_from_executable_relations(
+                &report.boundary,
+                proof_relations,
+                &bindings,
+            )?;
+            if proofs.iter().any(|proof| {
+                proof.proof_epoch_id != *proof_relations.candidate_pins().epoch.as_bytes()
+            }) {
+                return Err(ProviderAdmissionError::CapabilityProofEpochMismatch);
+            }
+            Ok(derive_provider_capability_relation(
+                &report.boundary,
+                &proofs,
+            )?)
+        })
+        .collect()
+}
+
+fn register_programmatic_provider_capabilities(
+    outcome: ProgrammaticProviderAdmissionOutcome,
+    binding: &ProviderCapabilityCatalogBinding,
+    capabilities: Vec<ProviderCapabilityRelation>,
+) -> Result<ProviderCapabilityAdmissionOutcome, ProviderAdmissionError> {
+    validate_provider_capability_catalog_binding(binding)?;
+    let schema = capabilities
+        .first()
+        .map(ProviderCapabilityRelation::schema)
+        .cloned()
+        .ok_or_else(|| {
+            ProviderAdmissionError::InvalidPlan(
+                "programmatic provider capability set is empty".into(),
+            )
+        })?;
+    if capabilities
+        .iter()
+        .any(|capability| capability.schema().as_ref() != schema.as_ref())
+    {
+        return Err(ProviderAdmissionError::SchemaMismatch {
+            relation: "system.provider_capability.v1".to_owned(),
+        });
+    }
     let provider = Arc::new(MemTable::try_new(
         Arc::clone(&schema),
-        vec![vec![capability.batch().clone()]],
+        capabilities
+            .iter()
+            .map(|capability| vec![capability.batch().clone()])
+            .collect(),
     )?);
+    let table_reference = TableReference::full(
+        FABRIC_CATALOG,
+        FabricSchemaRole::System.as_str(),
+        binding.table_name.as_str(),
+    );
     let contract = Arc::new(SchemaContract::try_new(
         Arc::clone(&binding.source_schema_identity),
-        TableReference::full(
-            FABRIC_CATALOG,
-            FabricSchemaRole::System.as_str(),
-            binding.table_name.as_str(),
-        ),
+        table_reference.clone(),
         Arc::clone(&schema),
         Arc::clone(&schema),
         (0..schema.fields().len())
             .map(|index| FieldIndexMapping::direct(index, index))
             .collect(),
     )?);
-    builder.register_provider(
-        FabricSchemaRole::System,
-        binding.table_name.clone(),
-        "datafusion.mem_table.provider_capability",
-        provider,
+    let relation_id =
+        ProgrammaticRelationId::new(contract.relation_id(SchemaRole::Logical)?.to_owned());
+    let ProgrammaticProviderAdmissionOutcome { builder, reports } = outcome;
+    let (identity, runtime_config, runtime_env, mut assembly) = builder.into_assembly_parts();
+    assembly.register_provider(ProviderInput::new(
+        relation_id,
+        table_reference,
         contract,
-    )?;
+        provider,
+    ))?;
     Ok(ProviderCapabilityAdmissionOutcome {
-        builder,
-        provider_report: report,
-        capability,
+        builder: ProgrammaticFabricEpochBuilder::from_assembly_parts(
+            identity,
+            runtime_config,
+            runtime_env,
+            assembly,
+        ),
+        provider_reports: reports,
+        capabilities,
     })
 }
 
 /// Register provider capability derived only from the executable proof engine's sealed output.
 ///
-/// This is the production path: model-owned bindings join provider contract families to proof
-/// oracles, exact proof/candidate pins are carried into the receipt relation, and missing oracle
-/// execution remains missing proof rather than an optimistic capability.
+/// This is the production path: application-owned bindings join all four exact provider reports
+/// to proof oracles, exact proof/candidate pins are carried into the receipt relation, and missing
+/// oracle execution remains missing proof rather than an optimistic capability.
 ///
 /// # Errors
 ///
 /// Returns binding, proof-pin, schema, or catalog-registration failures without returning a
 /// partially mutated epoch candidate.
 pub fn admit_provider_capability_from_proof_relations(
-    outcome: ProviderAdmissionOutcome,
+    outcome: ProgrammaticProviderAdmissionOutcome,
     catalog_binding: &ProviderCapabilityCatalogBinding,
     proof_relations: &ProofRelations,
     oracle_bindings: &[ProviderOracleProofBinding],
@@ -1254,12 +2032,9 @@ pub fn admit_provider_capability_from_proof_relations(
     if proof_relations.candidate_pins().epoch != *outcome.candidate_epoch_id() {
         return Err(ProviderAdmissionError::CapabilityProofEpochMismatch);
     }
-    let proofs = provider_oracle_proofs_from_executable_relations(
-        &outcome.report.boundary,
-        proof_relations,
-        oracle_bindings,
-    )?;
-    admit_provider_capability(outcome, catalog_binding, &proofs)
+    let capabilities =
+        programmatic_provider_capabilities(outcome.reports(), proof_relations, oracle_bindings)?;
+    register_programmatic_provider_capabilities(outcome, catalog_binding, capabilities)
 }
 
 fn prepare_provider_admission(
@@ -1678,7 +2453,17 @@ fn declared_coverage(
                     "requested/completed units are invalid",
                 ));
             }
-            let status = statuses.value(row);
+            // Provider-native rows retain their exact vocabulary in the registered Arrow
+            // relation. Admission maps that vocabulary only into the application-owned terminal
+            // state used by the boundary evaluator. rustc deliberately distinguishes
+            // characterized incompleteness from a generic partial/unknown label.
+            let raw_status = statuses.value(row);
+            let status = provider_terminal_status(raw_status).ok_or_else(|| {
+                coverage_error(
+                    relation_name,
+                    "terminal vocabulary is not registered by the application",
+                )
+            })?;
             let unknown_semantics =
                 unknowns.is_some_and(|values| !values.is_null(row) && values.value(row));
             if unknowns.is_some_and(|values| values.is_null(row)) {
@@ -1687,11 +2472,10 @@ fn declared_coverage(
                     "unknown-semantics field is null",
                 ));
             }
-            let status_unknown = status == "unknown";
+            let status_unknown = status == TerminalStatus::Unknown;
             let effective_unknown = status_unknown || unknown_semantics;
-            if !matches!(status, "complete" | "partial" | "unknown")
-                || (status == "complete"
-                    && (provider_completed != row_requested || effective_unknown))
+            if status == TerminalStatus::Complete
+                && (provider_completed != row_requested || effective_unknown)
             {
                 return Err(coverage_error(
                     relation_name,
@@ -1703,7 +2487,10 @@ fn declared_coverage(
             } else {
                 provider_completed
             };
-            if status == "partial" && !effective_unknown && effective_completed == row_requested {
+            if status == TerminalStatus::Partial
+                && !effective_unknown
+                && effective_completed == row_requested
+            {
                 return Err(coverage_error(
                     relation_name,
                     "partial claim has no incomplete unit",
@@ -1754,7 +2541,7 @@ fn declared_coverage(
                     coverage_error(relation_name, "completed-unit aggregation overflow")
                 })?;
             any_unknown |= effective_unknown;
-            any_partial |= status == "partial";
+            any_partial |= status == TerminalStatus::Partial;
         }
     }
     if !matched {
@@ -1779,6 +2566,20 @@ fn declared_coverage(
         completed_units,
         remainders,
     }))
+}
+
+/// Map a provider-native completeness label into the application terminal state without
+/// rewriting the provider relation that carries the label.
+///
+/// The two characterized labels are part of the exact rustc adapter contract. An unregistered
+/// label is a schema/protocol contradiction, never an implicit unknown or empty success.
+fn provider_terminal_status(value: &str) -> Option<TerminalStatus> {
+    match value {
+        "complete" => Some(TerminalStatus::Complete),
+        "partial" | "partial-characterized" => Some(TerminalStatus::Partial),
+        "unknown" | "unavailable-characterized" => Some(TerminalStatus::Unknown),
+        _ => None,
+    }
 }
 
 fn coverage_utf8_column<'a>(
@@ -1868,13 +2669,17 @@ fn relation_row_count(relation: Option<&ObservedProviderRelation>) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use std::path::Path;
+
     use arrow_array::ArrayRef;
+    use arrow_array::builder::FixedSizeBinaryBuilder;
     use arrow_ipc::writer::StreamWriter;
     use arrow_schema::{DataType, Field, Schema};
 
     use super::*;
-    use crate::fabric::epoch::{FabricEpochId, FabricEpochRuntimeConfig, FabricSchemaRole};
+    use crate::cancellation::Cancellation;
+    use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig, FabricSchemaRole};
     use crate::fabric::proof::{
         OracleId, OracleImplementationRef, ProofRunId, ProofTerminalStatus,
         test_relations_with_oracle,
@@ -1886,13 +2691,22 @@ mod tests {
         ProviderLocalIdentityRole, ProviderOracleId, ProviderRevision, RetentionPolicy,
         UnavailableBehavior, UpstreamApiSymbol,
     };
+    use crate::provider_native_syntax::{
+        ExactPythonSyntaxRunner, ProviderNativeSourceImage, PythonModuleInput, PythonSyntaxRunPins,
+        SyntaxProviderRunPin,
+    };
+    use crate::provider_types::ProviderText;
+    use crate::pyrefly_service::AcceptedPyreflyRelation;
     use crate::relation_ipc::{SchemaFingerprint, TerminalStatus};
-    use crate::relational_model::{FabricCompilerRelease, IntrinsicInstaller, ReplayEngine};
+    use crate::rpc::generated::codefabric::provider::v1::ProviderRunState;
     use crate::rpc::generated::codefabric::rustc::v1::{
         CompilationBegin, CompilationEnd, CompilerOwnerKey, OwnerBegin, OwnerEnd,
         OwnerObservationChunk,
     };
-    use crate::rustc_service::{AcceptedRustcCompilation, AcceptedRustcOwner, RustcRunAdmission};
+    use crate::rustc_service::{
+        AcceptedRustcCompilation, AcceptedRustcOwner, RustcRunAdmission,
+        TrustQualifiedRustcCompilation,
+    };
 
     fn data_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![Field::new(
@@ -1929,6 +2743,38 @@ mod tests {
                 Arc::new(UInt64Array::from(vec![1])) as ArrayRef,
                 Arc::new(StringArray::from(vec!["complete"])) as ArrayRef,
                 Arc::new(StringArray::from(vec![None::<&str>])) as ArrayRef,
+            ],
+        )
+        .unwrap()
+    }
+
+    fn characterized_coverage_schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("family", DataType::Utf8, false),
+            Field::new("requested_units", DataType::UInt64, false),
+            Field::new("completed_units", DataType::UInt64, false),
+            Field::new("terminal_status", DataType::Utf8, false),
+            Field::new("remainder_reason", DataType::Utf8, true),
+            Field::new("unknown_semantics", DataType::Boolean, false),
+        ]))
+    }
+
+    fn characterized_coverage_batch(
+        schema: &SchemaRef,
+        status: &str,
+        completed_units: u64,
+        remainder_reason: Option<&str>,
+        unknown_semantics: bool,
+    ) -> RecordBatch {
+        RecordBatch::try_new(
+            Arc::clone(schema),
+            vec![
+                Arc::new(StringArray::from(vec!["rustc.call"])) as ArrayRef,
+                Arc::new(UInt64Array::from(vec![1])) as ArrayRef,
+                Arc::new(UInt64Array::from(vec![completed_units])) as ArrayRef,
+                Arc::new(StringArray::from(vec![status])) as ArrayRef,
+                Arc::new(StringArray::from(vec![remainder_reason])) as ArrayRef,
+                Arc::new(BooleanArray::from(vec![unknown_semantics])) as ArrayRef,
             ],
         )
         .unwrap()
@@ -2103,44 +2949,822 @@ mod tests {
         (plan, observed)
     }
 
-    fn epoch_builder() -> FabricEpochBuilder {
-        let runtime = FabricEpochRuntimeConfig::default();
-        let release = FabricCompilerRelease::builder(
-            "provider-admission-test-release",
-            "source:provider-admission-test",
-            "build:provider-admission-test",
-        )
-        .with_abis(1, 1, 1)
-        .with_intrinsic_package("intrinsics-v1")
-        .add_dependency("arrow", "59.2.0")
-        .unwrap()
-        .add_dependency("datafusion", "55.0.0")
-        .unwrap()
-        .add_dependency("deltalake", "43a0cf10")
-        .unwrap()
-        .add_provider_schema("ruff", "python-0.0.7")
-        .unwrap()
-        .with_policy_and_configuration("policy-v2", runtime.identity())
-        .add_toolchain("rust", "1.95.0")
-        .unwrap()
-        .add_wire_contract("codefabric.rpc.provider-admission-test")
-        .unwrap()
-        .build()
-        .unwrap();
-        let model = Arc::new(
-            ReplayEngine::new(
-                release,
-                IntrinsicInstaller::new("intrinsics-v1", "implementation-v1").unwrap(),
-            )
-            .unwrap()
-            .replay(&[])
-            .unwrap(),
-        );
-        FabricEpochBuilder::try_new(FabricEpochId::from_bytes([50; 16]), model, runtime).unwrap()
-    }
-
     fn digest(byte: u8) -> String {
         format!("b3:{}", format!("{byte:02x}").repeat(32))
+    }
+
+    pub(crate) fn programmatic_epoch_builder() -> ProgrammaticFabricEpochBuilder {
+        ProgrammaticFabricEpochBuilder::try_new(
+            FabricEpochId::from_bytes([90; 16]),
+            FabricEpochRuntimeConfig::default(),
+        )
+        .unwrap()
+    }
+
+    fn exact_native_syntax_run(marker: u8, source_text: &str) -> ProviderNativeSyntaxRun {
+        let bytes = Arc::<[u8]>::from(source_text.as_bytes());
+        let source = ProviderNativeSourceImage::new(
+            [marker; 16],
+            7,
+            Arc::clone(&bytes),
+            crate::integrity::digest_bytes(&bytes),
+            ProviderText {
+                text: Arc::from(source_text),
+                original_byte_offsets: Arc::from(
+                    source_text
+                        .char_indices()
+                        .map(|(offset, _)| u64::try_from(offset).unwrap())
+                        .chain(std::iter::once(u64::try_from(source_text.len()).unwrap()))
+                        .collect::<Vec<_>>(),
+                ),
+            },
+        )
+        .unwrap();
+        let module_name = format!("fixture.module_{marker}");
+        let module_path = format!("fixture/module_{marker}.py");
+        ExactPythonSyntaxRunner::new()
+            .unwrap()
+            .run_full(
+                1,
+                &source,
+                PythonSyntaxRunPins {
+                    tree_sitter: SyntaxProviderRunPin {
+                        provider_run_id: [marker; 16],
+                        analysis_context_id: [202; 32],
+                        semantic_environment_id: [203; 32],
+                    },
+                    ruff: SyntaxProviderRunPin {
+                        provider_run_id: [marker.wrapping_add(64); 16],
+                        analysis_context_id: [202; 32],
+                        semantic_environment_id: [203; 32],
+                    },
+                },
+                PythonModuleInput {
+                    module_name: &module_name,
+                    module_path: Path::new(&module_path),
+                },
+                &Cancellation::default(),
+            )
+            .unwrap()
+    }
+
+    fn fixed_value(width: i32, value: &[u8]) -> ArrayRef {
+        let mut builder = FixedSizeBinaryBuilder::with_capacity(1, width);
+        builder.append_value(value).unwrap();
+        Arc::new(builder.finish())
+    }
+
+    fn ipc_batch(batch: &RecordBatch) -> Vec<u8> {
+        let mut ipc = Vec::new();
+        {
+            let mut writer = StreamWriter::try_new(&mut ipc, &batch.schema()).unwrap();
+            writer.write(batch).unwrap();
+            writer.finish().unwrap();
+        }
+        ipc
+    }
+
+    fn exact_pyrefly_batch(
+        relation: PyreflyRelation,
+        provider_run_id: &str,
+        module_id: &str,
+        module_name: &str,
+        source_bytes: &[u8],
+    ) -> RecordBatch {
+        let schema = relation.schema();
+        let content_digest = *blake3::hash(source_bytes).as_bytes();
+        let columns = schema
+            .fields()
+            .iter()
+            .map(|field| match field.data_type() {
+                DataType::Utf8 => {
+                    let value = match field.name().as_str() {
+                        "provider_run_id" => provider_run_id,
+                        "analysis_context_id" => "context:pyrefly-workspace",
+                        "module_id" => module_id,
+                        "file_id" => "file:pyrefly-fixture",
+                        "module_name" => module_name,
+                        "qualified_target" => "fixture.target",
+                        "callee_kind" => "function",
+                        "resolution_state" => "resolved",
+                        _ => "fixture",
+                    };
+                    Arc::new(StringArray::from(vec![value])) as ArrayRef
+                }
+                DataType::UInt64 => Arc::new(UInt64Array::from(vec![7])) as ArrayRef,
+                DataType::Boolean => Arc::new(BooleanArray::from(vec![true])) as ArrayRef,
+                DataType::FixedSizeBinary(32) => {
+                    let value = if field.name() == "content_digest" {
+                        content_digest
+                    } else {
+                        [77; 32]
+                    };
+                    fixed_value(32, &value)
+                }
+                other => panic!("unexpected Pyrefly fixture type {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        RecordBatch::try_new(schema, columns).unwrap()
+    }
+
+    fn exact_pyrefly_run(marker: u8, source_text: &str) -> AcceptedPyreflyRun {
+        let provider_run_id = format!("run:pyrefly:{marker}");
+        let module_id = format!("module:pyrefly:{marker}");
+        let module_name = format!("fixture.pyrefly_{marker}");
+        let source_bytes = source_text.as_bytes().to_vec();
+        let relations = PyreflyRelation::ALL
+            .into_iter()
+            .map(|relation| {
+                let batch = exact_pyrefly_batch(
+                    relation,
+                    &provider_run_id,
+                    &module_id,
+                    &module_name,
+                    &source_bytes,
+                );
+                let arrow_ipc = ipc_batch(&batch);
+                AcceptedPyreflyRelation {
+                    relation,
+                    schema_digest: relation.schema_digest(),
+                    chunk_digest: crate::integrity::framed_digest(&arrow_ipc),
+                    row_count: 1,
+                    batch,
+                    arrow_ipc,
+                }
+            })
+            .collect::<Vec<_>>();
+        let context = relations
+            .iter()
+            .find(|relation| relation.relation == PyreflyRelation::ModuleContext)
+            .unwrap();
+        AcceptedPyreflyRun {
+            provider_run_id,
+            workspace_id: "workspace:provider-admission".to_owned(),
+            analysis_context_id: "context:pyrefly-workspace".to_owned(),
+            canonical_workspace_id: [61; 16],
+            canonical_analysis_context_id: [62; 16],
+            source_generation: 7,
+            modules: vec![AcceptedPyreflyModule {
+                module_id,
+                module_name,
+                canonical_file_id: [marker; 16],
+                source_bytes,
+                arrow_ipc: context.arrow_ipc.clone(),
+                batch: context.batch.clone(),
+                schema_digest: context.schema_digest.clone(),
+                chunk_digest: context.chunk_digest.clone(),
+                module_digest: digest(marker.wrapping_add(1)),
+                relations,
+            }],
+            capability_codes: Vec::new(),
+            overall_digest: digest(marker.wrapping_add(2)),
+            rechecked_module_ids: Vec::new(),
+            sandbox_profile_digest: digest(63),
+            trust_profile: "UNTRUSTED_SANDBOXED".to_owned(),
+        }
+    }
+
+    fn exact_rustc_batch(
+        relation: RustcRelation,
+        marker: u8,
+        provider_run_id: &str,
+        compilation_unit_id: &str,
+        owner_id: &str,
+    ) -> RecordBatch {
+        let schema = relation.schema();
+        let columns = schema
+            .fields()
+            .iter()
+            .map(|field| match field.data_type() {
+                DataType::Utf8 => {
+                    let value = match field.name().as_str() {
+                        "provider_run_id" => provider_run_id,
+                        "compilation_unit_id" => compilation_unit_id,
+                        "owner_id" => owner_id,
+                        "slot_kind" => "statement",
+                        "projection_kind" => "BaseLocal",
+                        "occurrence_role" => "fixture-place",
+                        "local_role" => "temporary",
+                        "mutability" if relation == RustcRelation::MirLocal => "mut",
+                        "rvalue_kind" => "Ref",
+                        "cast_kind" => "PtrToPtr",
+                        "aggregate_kind" => "Coroutine",
+                        "region_kind" => "fixture-region",
+                        "raw_statement_kind" => "Assign",
+                        "normalized_effect" => "WRITE",
+                        "raw_terminator_kind" => "InlineAsm",
+                        "access_kind" => "Drop",
+                        "structured_evidence" => "StatementKind::Assign.destination",
+                        "declared_target" => "fixture::foreign_call",
+                        "dispatch_kind" => "direct",
+                        "resolution_confidence" => "exact",
+                        _ => "fixture",
+                    };
+                    Arc::new(StringArray::from(vec![value])) as ArrayRef
+                }
+                DataType::UInt64 => {
+                    let value = match field.name().as_str() {
+                        "source_block" => u64::from(marker),
+                        "target_block" => u64::from(marker).saturating_add(1),
+                        "stable_crate_id" => u64::from(marker).saturating_add(100),
+                        _ => 7,
+                    };
+                    Arc::new(UInt64Array::from(vec![value])) as ArrayRef
+                }
+                DataType::Boolean => Arc::new(BooleanArray::from(vec![true])) as ArrayRef,
+                DataType::FixedSizeBinary(width @ (16 | 32)) => {
+                    fixed_value(*width, &vec![91; usize::try_from(*width).unwrap()])
+                }
+                other => panic!("unexpected rustc fixture type {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        RecordBatch::try_new(schema, columns).unwrap()
+    }
+
+    fn exact_rustc_run(marker: u8, manifest_marker: u8) -> TrustQualifiedRustcCompilation {
+        let provider_run_id = format!("run:rustc:{marker}");
+        let compilation_unit_id = format!("unit:rustc:{marker}");
+        let owner_id = format!("owner:rustc:{marker}");
+        let relations = RustcRelation::ALL
+            .into_iter()
+            .map(|relation| {
+                let batch = exact_rustc_batch(
+                    relation,
+                    marker,
+                    &provider_run_id,
+                    &compilation_unit_id,
+                    &owner_id,
+                );
+                let arrow_ipc = ipc_batch(&batch);
+                (relation, arrow_ipc)
+            })
+            .collect::<Vec<_>>();
+        let accepted = AcceptedRustcCompilation::test_only(
+            RustcRunAdmission {
+                provider_run_id: provider_run_id.clone(),
+                workspace_id: "workspace:provider-admission".to_owned(),
+                analysis_context_id: "context:rustc-workspace".to_owned(),
+                canonical_workspace_id: [61; 16],
+                canonical_analysis_context_id: [64; 16],
+                source_generation: 7,
+                context_manifest_digest: digest(manifest_marker),
+                source_snapshot_manifest_digest: digest(manifest_marker.wrapping_add(1)),
+                resource_profile_id: "profile:rustc-provider-admission".to_owned(),
+            },
+            CompilationBegin {
+                provider_run_id: provider_run_id.clone(),
+                compilation_unit_id: compilation_unit_id.clone(),
+                ..CompilationBegin::default()
+            },
+            vec![AcceptedRustcOwner {
+                begin: OwnerBegin {
+                    provider_run_id: provider_run_id.clone(),
+                    compilation_unit_id: compilation_unit_id.clone(),
+                    sequence: 1,
+                    owner: Some(CompilerOwnerKey {
+                        owner_id: owner_id.clone(),
+                        owner_kind: "CRATE".to_owned(),
+                        file_id: format!("file:rustc:{marker}"),
+                        source_start: 0,
+                        source_end: 1,
+                    }),
+                    expected_observation_family_codes: relations
+                        .iter()
+                        .map(|(relation, _)| relation.family_code())
+                        .collect(),
+                },
+                chunks: relations
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (relation, arrow_ipc))| OwnerObservationChunk {
+                        provider_run_id: provider_run_id.clone(),
+                        compilation_unit_id: compilation_unit_id.clone(),
+                        sequence: 2 + u64::try_from(index).unwrap(),
+                        owner_id: owner_id.clone(),
+                        observation_family_code: relation.family_code(),
+                        chunk_digest: crate::integrity::framed_digest(&arrow_ipc),
+                        arrow_ipc,
+                        payload_reference: None,
+                        schema_digest: relation.schema_digest(),
+                        row_count: 1,
+                    })
+                    .collect(),
+                end: OwnerEnd::default(),
+            }],
+            CompilationEnd {
+                compiler_exit_status: 0,
+                terminal_state: ProviderRunState::Succeeded as i32,
+                ..CompilationEnd::default()
+            },
+        );
+        TrustQualifiedRustcCompilation::test_only(accepted)
+    }
+
+    fn exact_plan(
+        lane: ProviderNativeLane,
+        marker: u8,
+        observed: &AcceptedProviderRelationSet,
+    ) -> ProviderAdmissionPlan {
+        let revision = ProviderRevision {
+            provider_id: ProviderId([marker; 16]),
+            release: format!("exact-provider-{marker}"),
+            source_revision: [marker.wrapping_add(1); 32],
+        };
+        let installer = ProviderInstallerIdentity {
+            installer_id: ProviderInstallerId([marker.wrapping_add(2); 32]),
+            owner: BoundaryOwnerId([marker.wrapping_add(3); 32]),
+            provider_revision: revision.clone(),
+        };
+        let mut rows = Vec::with_capacity(observed.relations.len());
+        let mut bindings = Vec::with_capacity(observed.relations.len());
+        for (index, relation) in observed.relations.values().enumerate() {
+            let identity = marker.wrapping_add(u8::try_from(index).unwrap());
+            let family = family(&format!("fixture.{}.{}", lane_name(lane), index));
+            let schema = relation.batches[0].schema();
+            rows.push(ProviderBoundaryContractRow {
+                api_family: family.clone(),
+                upstream_symbols: vec![
+                    UpstreamApiSymbol::new(format!("fixture::lane_{}::{index}", lane_name(lane)))
+                        .unwrap(),
+                ],
+                relation: ProviderArrowRelationContract {
+                    relation_id: RelationId([identity; 16]),
+                    schema_fingerprint: SchemaFingerprint([identity.wrapping_add(1); 32]),
+                    fields: schema
+                        .fields()
+                        .iter()
+                        .enumerate()
+                        .map(|(ordinal, field)| ProviderBoundaryField {
+                            ordinal,
+                            field: Arc::clone(field),
+                            meaning: FieldMeaning::TypedFact,
+                            provider_local_identity: ProviderLocalIdentityRole::None,
+                            canonical_identity: CanonicalIdentityRole::NotCanonical,
+                            coordinate: CoordinateRole::None,
+                            retention: RetentionPolicy::RetainProviderNative,
+                        })
+                        .collect(),
+                    schema,
+                },
+                authority: ProviderAuthorityRole::Primary,
+                disposition: ContractDisposition::Required,
+                unavailable_behavior: UnavailableBehavior {
+                    status: TerminalStatus::Partial,
+                    allowed_reasons: vec![
+                        RemainderReason::ProviderUnavailable,
+                        RemainderReason::ResourceLimit,
+                        RemainderReason::Cancelled,
+                        RemainderReason::InvalidSource,
+                        RemainderReason::Unsupported,
+                    ],
+                },
+                oracle_id: ProviderOracleId([identity.wrapping_add(2); 32]),
+            });
+            bindings.push(ProviderRelationBinding {
+                provider_relation: relation.identity.clone(),
+                api_family: family,
+                lane,
+                role: lane.raw_role(),
+                table_name: format!("fixture_{}_{}", lane_name(lane), index),
+                source_schema_identity: Arc::from(format!(
+                    "provider:fixture:{}:{}",
+                    lane_name(lane),
+                    relation.identity.as_str()
+                )),
+                handler_id: ProviderHandlerId([identity.wrapping_add(3); 16]),
+                authority_class: ProviderAuthorityClass::ProviderNative,
+                purpose: ProviderRelationPurpose::ControlEvidence,
+                requested_units: 1,
+                coverage: ProviderCoverageSource::StructuralPresence,
+            });
+        }
+        ProviderAdmissionPlan {
+            provider_kind: Arc::from(format!("exact-provider-lane-{}", lane_name(lane))),
+            expected_source_pin: observed.source_pin,
+            expected_context_pin: observed.context_pin,
+            installer,
+            contract: ProviderBoundaryContract {
+                contract_id: BoundaryContractId([marker.wrapping_add(4); 32]),
+                contract_revision: 1,
+                provider_revision: revision,
+                acceptance: IndependentContractAcceptance {
+                    author_owner: BoundaryOwnerId([marker.wrapping_add(5); 32]),
+                    reviewer_owner: BoundaryOwnerId([marker.wrapping_add(6); 32]),
+                    acceptance_authority: BoundaryOwnerId([marker.wrapping_add(7); 32]),
+                },
+                rows,
+            },
+            bindings,
+        }
+    }
+
+    pub(crate) struct ExactWorkspaceFixture {
+        native_syntax_runs: Vec<ProviderNativeSyntaxRun>,
+        pyrefly_runs: Vec<AcceptedPyreflyRun>,
+        rustc_runs: Vec<TrustQualifiedRustcCompilation>,
+        tree_sitter_plan: ProviderAdmissionPlan,
+        ruff_plan: ProviderAdmissionPlan,
+        pyrefly_plan: ProviderAdmissionPlan,
+        rustc_plan: ProviderAdmissionPlan,
+    }
+
+    impl ExactWorkspaceFixture {
+        pub(crate) fn runs(&self) -> ExactProgrammaticProviderRuns<'_> {
+            ExactProgrammaticProviderRuns::new(
+                &self.tree_sitter_plan,
+                &self.ruff_plan,
+                &self.native_syntax_runs,
+                &self.pyrefly_plan,
+                &self.pyrefly_runs,
+                &self.rustc_plan,
+                &self.rustc_runs,
+            )
+        }
+    }
+
+    pub(crate) fn exact_workspace_fixture() -> ExactWorkspaceFixture {
+        exact_workspace_fixture_from(
+            [(21, "value = 1\n"), (22, "other = value + 1\n")],
+            [(31, "value: int = 1\n"), (32, "other: int = 2\n")],
+            [41, 42],
+            65,
+        )
+    }
+
+    pub(crate) fn changed_exact_workspace_fixture() -> ExactWorkspaceFixture {
+        exact_workspace_fixture_from(
+            [
+                (23, "value = call(1)\nresult = value\n"),
+                (24, "other = call(2)\nresult = other\n"),
+            ],
+            [
+                (33, "value: int = int('1')\n"),
+                (34, "other: int = int('2')\n"),
+            ],
+            [43, 44],
+            75,
+        )
+    }
+
+    fn exact_workspace_fixture_from(
+        native_sources: [(u8, &str); 2],
+        pyrefly_sources: [(u8, &str); 2],
+        rustc_markers: [u8; 2],
+        rustc_manifest_marker: u8,
+    ) -> ExactWorkspaceFixture {
+        let native_syntax_runs = vec![
+            exact_native_syntax_run(native_sources[0].0, native_sources[0].1),
+            exact_native_syntax_run(native_sources[1].0, native_sources[1].1),
+        ];
+        let pyrefly_runs = vec![
+            exact_pyrefly_run(pyrefly_sources[0].0, pyrefly_sources[0].1),
+            exact_pyrefly_run(pyrefly_sources[1].0, pyrefly_sources[1].1),
+        ];
+        let rustc_runs = vec![
+            exact_rustc_run(rustc_markers[0], rustc_manifest_marker),
+            exact_rustc_run(rustc_markers[1], rustc_manifest_marker),
+        ];
+
+        let native = aggregate_native_syntax_runs(
+            &native_syntax_runs,
+            SourcePin([1; 32]),
+            ContextPin([2; 32]),
+        )
+        .unwrap();
+        let tree_sitter = provider_lane_subset(&native, ProviderNativeLane::TreeSitter).unwrap();
+        let ruff = provider_lane_subset(&native, ProviderNativeLane::Ruff).unwrap();
+        let pyrefly =
+            aggregate_pyrefly_runs(&pyrefly_runs, SourcePin([3; 32]), ContextPin([4; 32])).unwrap();
+        let rustc =
+            aggregate_rustc_runs(&rustc_runs, SourcePin([5; 32]), ContextPin([6; 32])).unwrap();
+
+        ExactWorkspaceFixture {
+            native_syntax_runs,
+            pyrefly_runs,
+            rustc_runs,
+            tree_sitter_plan: exact_plan(ProviderNativeLane::TreeSitter, 10, &tree_sitter),
+            ruff_plan: exact_plan(ProviderNativeLane::Ruff, 50, &ruff),
+            pyrefly_plan: exact_plan(ProviderNativeLane::Pyrefly, 100, &pyrefly),
+            rustc_plan: exact_plan(ProviderNativeLane::Rustc, 150, &rustc),
+        }
+    }
+
+    #[tokio::test]
+    async fn workspace_transaction_aggregates_all_four_exact_provider_lanes() {
+        let fixture = exact_workspace_fixture();
+        let outcome =
+            admit_provider_relations_programmatic(programmatic_epoch_builder(), fixture.runs())
+                .unwrap();
+        for report in [
+            outcome.reports().tree_sitter(),
+            outcome.reports().ruff(),
+            outcome.reports().pyrefly(),
+            outcome.reports().rustc(),
+        ] {
+            assert_eq!(report.boundary.status, TerminalStatus::Complete);
+            assert!(report.relations.iter().all(|relation| matches!(
+                relation.disposition,
+                ProviderRegistrationDisposition::Registered {
+                    coverage: TerminalStatus::Complete,
+                    ..
+                }
+            )));
+        }
+
+        let (builder, _) = outcome.into_parts();
+        let (_, _, _, assembly) = builder.into_assembly_parts();
+        let sealed = assembly
+            .seal(FabricEpochId::from_bytes([90; 16]))
+            .await
+            .unwrap();
+        for relation_id in [
+            NativeSyntaxRelation::TreeSitterRun.as_str(),
+            NativeSyntaxRelation::RuffRun.as_str(),
+            PyreflyRelation::ModuleContext.relation_id(),
+            RustcRelation::Compilation.relation_id(),
+        ] {
+            let binding = sealed
+                .relation(&ProgrammaticRelationId::new(relation_id))
+                .unwrap_or_else(|| panic!("{relation_id} was not registered"));
+            let rows = sealed
+                .session()
+                .table(binding.table_reference.clone())
+                .await
+                .unwrap()
+                .count()
+                .await
+                .unwrap();
+            assert_eq!(rows, 2, "{relation_id} did not retain both partitions");
+        }
+    }
+
+    #[tokio::test]
+    async fn absent_language_lanes_return_explicit_unknowns_without_fake_tables() {
+        let fixture = exact_workspace_fixture();
+        let no_syntax = Vec::<ProviderNativeSyntaxRun>::new();
+        let no_pyrefly = Vec::<AcceptedPyreflyRun>::new();
+        let no_rustc = Vec::<TrustQualifiedRustcCompilation>::new();
+        let outcome = admit_provider_relations_programmatic(
+            programmatic_epoch_builder(),
+            ExactProgrammaticProviderRuns::new(
+                &fixture.tree_sitter_plan,
+                &fixture.ruff_plan,
+                &no_syntax,
+                &fixture.pyrefly_plan,
+                &no_pyrefly,
+                &fixture.rustc_plan,
+                &no_rustc,
+            ),
+        )
+        .unwrap();
+        for report in [
+            outcome.reports().tree_sitter(),
+            outcome.reports().ruff(),
+            outcome.reports().pyrefly(),
+            outcome.reports().rustc(),
+        ] {
+            assert_eq!(report.boundary.status, TerminalStatus::Unknown);
+            assert!(report.relations.iter().all(|relation| {
+                relation.disposition
+                    == ProviderRegistrationDisposition::Unknown {
+                        cause: ProviderAdmissionUnknownCause::MissingRelation,
+                    }
+            }));
+        }
+
+        let (builder, _) = outcome.into_parts();
+        let (_, _, _, assembly) = builder.into_assembly_parts();
+        let sealed = assembly
+            .seal(FabricEpochId::from_bytes([90; 16]))
+            .await
+            .unwrap();
+        assert!(
+            sealed
+                .relation(&ProgrammaticRelationId::new(
+                    NativeSyntaxRelation::TreeSitterRun.as_str()
+                ))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn duplicate_workspace_partition_is_rejected_before_registration() {
+        let fixture = exact_workspace_fixture();
+        let duplicate_syntax = vec![
+            exact_native_syntax_run(21, "value = 1\n"),
+            exact_native_syntax_run(21, "value = 2\n"),
+        ];
+        let error = admit_provider_relations_programmatic(
+            programmatic_epoch_builder(),
+            ExactProgrammaticProviderRuns::new(
+                &fixture.tree_sitter_plan,
+                &fixture.ruff_plan,
+                &duplicate_syntax,
+                &fixture.pyrefly_plan,
+                &fixture.pyrefly_runs,
+                &fixture.rustc_plan,
+                &fixture.rustc_runs,
+            ),
+        )
+        .err()
+        .expect("duplicate source partition must fail");
+        assert!(matches!(
+            error,
+            ProviderAdmissionError::DuplicateProviderPartition {
+                lane: ProviderNativeLane::TreeSitter,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn exact_programmatic_admission_rejects_missing_pyrefly_coverage_relation() {
+        let fixture = exact_workspace_fixture();
+        let mut missing_coverage = fixture.pyrefly_runs.clone();
+        missing_coverage[0].modules[0]
+            .relations
+            .retain(|relation| relation.relation != PyreflyRelation::Coverage);
+
+        let error = admit_provider_relations_programmatic(
+            programmatic_epoch_builder(),
+            ExactProgrammaticProviderRuns::new(
+                &fixture.tree_sitter_plan,
+                &fixture.ruff_plan,
+                &fixture.native_syntax_runs,
+                &fixture.pyrefly_plan,
+                &missing_coverage,
+                &fixture.rustc_plan,
+                &fixture.rustc_runs,
+            ),
+        )
+        .err()
+        .expect("an exact provider run cannot omit its typed coverage relation");
+
+        assert!(matches!(
+            error,
+            ProviderAdmissionError::IncompleteExactProviderRun {
+                lane: ProviderNativeLane::Pyrefly,
+                relation,
+            } if relation.ends_with(PyreflyRelation::Coverage.relation_id())
+        ));
+    }
+
+    #[test]
+    fn changed_source_or_rustc_receipt_binding_invalidates_workspace_authority() {
+        let fixture = exact_workspace_fixture();
+        let changed_syntax = vec![
+            exact_native_syntax_run(21, "value = 1\n"),
+            exact_native_syntax_run(22, "other = value + 2\n"),
+        ];
+        let error = admit_provider_relations_programmatic(
+            programmatic_epoch_builder(),
+            ExactProgrammaticProviderRuns::new(
+                &fixture.tree_sitter_plan,
+                &fixture.ruff_plan,
+                &changed_syntax,
+                &fixture.pyrefly_plan,
+                &fixture.pyrefly_runs,
+                &fixture.rustc_plan,
+                &fixture.rustc_runs,
+            ),
+        )
+        .err()
+        .expect("changed source partition must change workspace authority");
+        assert!(matches!(
+            error,
+            ProviderAdmissionError::AdmissionPinMismatch
+        ));
+
+        let mut changed_rustc = fixture.rustc_runs.clone();
+        changed_rustc[1]
+            .accepted_mut_for_test()
+            .admission
+            .source_snapshot_manifest_digest = digest(99);
+        let error = admit_provider_relations_programmatic(
+            programmatic_epoch_builder(),
+            ExactProgrammaticProviderRuns::new(
+                &fixture.tree_sitter_plan,
+                &fixture.ruff_plan,
+                &fixture.native_syntax_runs,
+                &fixture.pyrefly_plan,
+                &fixture.pyrefly_runs,
+                &fixture.rustc_plan,
+                &changed_rustc,
+            ),
+        )
+        .err()
+        .expect("rustc source pins detached from the launcher receipt must fail");
+        assert!(matches!(
+            error,
+            ProviderAdmissionError::RustcTrustEvidence(_)
+        ));
+    }
+
+    #[test]
+    fn cross_provider_relation_and_table_collisions_are_rejected() {
+        let fixture = exact_workspace_fixture();
+        let mut relation_collision = fixture.ruff_plan.clone();
+        relation_collision.bindings[0].provider_relation = fixture.tree_sitter_plan.bindings[0]
+            .provider_relation
+            .clone();
+        let error = admit_provider_relations_programmatic(
+            programmatic_epoch_builder(),
+            ExactProgrammaticProviderRuns::new(
+                &fixture.tree_sitter_plan,
+                &relation_collision,
+                &fixture.native_syntax_runs,
+                &fixture.pyrefly_plan,
+                &fixture.pyrefly_runs,
+                &fixture.rustc_plan,
+                &fixture.rustc_runs,
+            ),
+        )
+        .err()
+        .expect("cross-provider relation collision must fail");
+        assert!(matches!(
+            error,
+            ProviderAdmissionError::CrossProviderRelationIdentity { .. }
+        ));
+
+        let mut table_collision = fixture.ruff_plan.clone();
+        table_collision.bindings[0].role = fixture.tree_sitter_plan.bindings[0].role;
+        table_collision.bindings[0].table_name =
+            fixture.tree_sitter_plan.bindings[0].table_name.clone();
+        let error = admit_provider_relations_programmatic(
+            programmatic_epoch_builder(),
+            ExactProgrammaticProviderRuns::new(
+                &fixture.tree_sitter_plan,
+                &table_collision,
+                &fixture.native_syntax_runs,
+                &fixture.pyrefly_plan,
+                &fixture.pyrefly_runs,
+                &fixture.rustc_plan,
+                &fixture.rustc_runs,
+            ),
+        )
+        .err()
+        .expect("cross-provider table collision must fail");
+        assert!(matches!(
+            error,
+            ProviderAdmissionError::CrossProviderTableBinding { .. }
+        ));
+    }
+
+    #[test]
+    fn later_provider_failure_drops_the_partially_registered_builder() {
+        let fixture = exact_workspace_fixture();
+        let rustc =
+            aggregate_rustc_runs(&fixture.rustc_runs, SourcePin([1; 32]), ContextPin([2; 32]))
+                .unwrap();
+        let relation_id =
+            ProviderRelationIdentity::try_new(RustcRelation::Compilation.relation_id()).unwrap();
+        let relation = rustc.relations.get(&relation_id).unwrap();
+        let schema = relation.batches[0].schema();
+        let table_reference = TableReference::full(
+            FABRIC_CATALOG,
+            FabricSchemaRole::RawRustc.as_str(),
+            "preexisting_rustc_collision",
+        );
+        let contract = Arc::new(
+            SchemaContract::try_new(
+                "provider:fixture:preexisting-rustc",
+                table_reference.clone(),
+                Arc::clone(&schema),
+                Arc::clone(&schema),
+                (0..schema.fields().len())
+                    .map(|index| FieldIndexMapping::direct(index, index))
+                    .collect(),
+            )
+            .unwrap(),
+        );
+        let provider = Arc::new(
+            MemTable::try_new(Arc::clone(&schema), vec![relation.batches.clone()]).unwrap(),
+        );
+        let weak_provider = Arc::downgrade(&provider);
+        let mut builder = programmatic_epoch_builder();
+        builder
+            .register_provider(ProviderInput::new(
+                ProgrammaticRelationId::new(relation_id.as_str()),
+                table_reference,
+                contract,
+                provider.clone(),
+            ))
+            .unwrap();
+        drop(provider);
+
+        let error = admit_provider_relations_programmatic(builder, fixture.runs())
+            .err()
+            .expect("the rustc duplicate must fail after earlier lane registration");
+        assert!(matches!(
+            error,
+            ProviderAdmissionError::ProgrammaticSchema(
+                ProgrammaticSchemaError::DuplicateRelation { .. }
+            )
+        ));
+        assert!(
+            weak_provider.upgrade().is_none(),
+            "failed transaction retained a partially registered candidate"
+        );
     }
 
     #[test]
@@ -2185,8 +3809,8 @@ mod tests {
             chunks: vec![chunk],
             end: OwnerEnd::default(),
         };
-        let accepted = AcceptedRustcCompilation {
-            admission: RustcRunAdmission {
+        let accepted = AcceptedRustcCompilation::test_only(
+            RustcRunAdmission {
                 provider_run_id: provider_run_id.clone(),
                 workspace_id: "workspace:rustc-provider-admission".into(),
                 analysis_context_id: "context:rustc-provider-admission".into(),
@@ -2197,14 +3821,18 @@ mod tests {
                 source_snapshot_manifest_digest: digest(42),
                 resource_profile_id: "profile:rustc-provider-admission".into(),
             },
-            begin: CompilationBegin {
+            CompilationBegin {
                 provider_run_id,
                 compilation_unit_id,
                 ..CompilationBegin::default()
             },
-            owners: vec![owner],
-            end: CompilationEnd::default(),
-        };
+            vec![owner],
+            CompilationEnd {
+                compiler_exit_status: 0,
+                terminal_state: ProviderRunState::Succeeded as i32,
+                ..CompilationEnd::default()
+            },
+        );
 
         let relations = AcceptedProviderRelationSet::from_rustc(&accepted).unwrap();
         let observed = relations
@@ -2219,61 +3847,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn typed_coverage_admits_raw_relations_and_registers_exact_contracts() {
-        let (plan, observed) = accepted_plan();
-        let outcome = admit_provider_relations(epoch_builder(), &plan, &observed).unwrap();
-        assert_eq!(outcome.report().boundary.status, TerminalStatus::Complete);
-        assert!(outcome.report().relations.iter().all(|relation| matches!(
-            relation.disposition,
-            ProviderRegistrationDisposition::Registered {
-                coverage: TerminalStatus::Complete,
-                ..
-            }
-        )));
+    async fn proof_qualified_capabilities_register_in_the_exact_programmatic_candidate() {
+        let fixture = exact_workspace_fixture();
+        let admitted =
+            admit_provider_relations_programmatic(programmatic_epoch_builder(), fixture.runs())
+                .unwrap();
+        let candidate_epoch_id = FabricEpochId::from_bytes([90; 16]);
+        assert_eq!(admitted.candidate_epoch_id(), &candidate_epoch_id);
 
-        let (builder, _) = outcome.into_parts();
-        let epoch = builder.seal().await.unwrap();
-        let schemas = epoch
-            .catalog_observation()
-            .column(2)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        let tables = epoch
-            .catalog_observation()
-            .column(3)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        let admitted = (0..epoch.catalog_observation().num_rows()).any(|row| {
-            !schemas.is_null(row)
-                && !tables.is_null(row)
-                && schemas.value(row) == FabricSchemaRole::RawRuff.as_str()
-                && tables.value(row) == "token"
-        });
-        assert!(
-            admitted,
-            "raw provider relation was not queryable in the sealed catalog"
-        );
-    }
-
-    #[tokio::test]
-    async fn accepted_provider_capability_is_registered_only_after_oracle_proof() {
-        let (plan, observed) = accepted_plan();
-        let admitted = admit_provider_relations(epoch_builder(), &plan, &observed).unwrap();
-        let boundary = &admitted.report().boundary;
-        let proof_epoch_id = *admitted.candidate_epoch_id().as_bytes();
         let proof_oracle = OracleId::new([71; 16]).unwrap();
         let proof_relations = test_relations_with_oracle(
-            FabricEpochId::from_bytes(proof_epoch_id),
+            candidate_epoch_id,
             proof_oracle,
             OracleImplementationRef::new([72; 32]).unwrap(),
             Some(ProofRunId::new([73; 16]).unwrap()),
             ProofTerminalStatus::Pass,
         );
-        let oracle_bindings = boundary
-            .families
+        let reports = admitted.reports();
+        let provider_reports = [
+            reports.tree_sitter(),
+            reports.ruff(),
+            reports.pyrefly(),
+            reports.rustc(),
+        ];
+        let expected_rows = provider_reports
             .iter()
+            .map(|report| report.boundary.families.len())
+            .sum::<usize>();
+        let oracle_bindings = provider_reports
+            .into_iter()
+            .flat_map(|report| &report.boundary.families)
             .map(|family| ProviderOracleProofBinding {
                 provider_oracle_id: family.oracle_id,
                 relation_id: family.relation_id,
@@ -2284,44 +3887,127 @@ mod tests {
             admitted,
             &ProviderCapabilityCatalogBinding {
                 table_name: "provider_capability".into(),
-                source_schema_identity: Arc::from("model:provider-capability:test"),
+                source_schema_identity: Arc::from("programmatic:provider-capability:test"),
             },
             &proof_relations,
             &oracle_bindings,
         )
         .unwrap();
-        let states = admitted
-            .capability()
-            .batch()
-            .column(24)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        assert!(
-            states.iter().all(|state| state == Some("proved-complete")),
-            "a complete accepted family with passing proof was not advertised"
+        assert_eq!(admitted.candidate_epoch_id(), &candidate_epoch_id);
+        assert_eq!(admitted.capabilities().len(), 4);
+        assert_eq!(
+            admitted
+                .capabilities()
+                .iter()
+                .map(|capability| capability.batch().num_rows())
+                .sum::<usize>(),
+            expected_rows
         );
+        for capability in admitted.capabilities() {
+            let states = capability
+                .batch()
+                .column(24)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            assert!(
+                states.iter().all(|state| state == Some("proved-complete")),
+                "a complete accepted family with passing proof was not advertised"
+            );
+        }
 
-        let (builder, _, _) = admitted.into_parts();
-        let epoch = builder.seal().await.unwrap();
-        let schemas = epoch
-            .catalog_observation()
-            .column(2)
-            .as_any()
-            .downcast_ref::<StringArray>()
+        let (builder, reports, capabilities) = admitted.into_parts();
+        assert_eq!(reports.rustc().boundary.status, TerminalStatus::Complete);
+        assert_eq!(capabilities.len(), 4);
+        let (_, _, _, assembly) = builder.into_assembly_parts();
+        let sealed = assembly.seal(candidate_epoch_id).await.unwrap();
+        let capability = sealed
+            .relation(&ProgrammaticRelationId::new(
+                "system.provider_capability.v1",
+            ))
+            .expect("provider capability relation was not registered");
+        assert_eq!(
+            capability.table_reference,
+            TableReference::full(
+                FABRIC_CATALOG,
+                FabricSchemaRole::System.as_str(),
+                "provider_capability",
+            )
+        );
+        let row_count = sealed
+            .session()
+            .table(capability.table_reference.clone())
+            .await
+            .unwrap()
+            .count()
+            .await
             .unwrap();
-        let tables = epoch
-            .catalog_observation()
-            .column(3)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        assert!((0..epoch.catalog_observation().num_rows()).any(|row| {
-            !schemas.is_null(row)
-                && !tables.is_null(row)
-                && schemas.value(row) == FabricSchemaRole::System.as_str()
-                && tables.value(row) == "provider_capability"
-        }));
+        assert_eq!(row_count, expected_rows);
+    }
+
+    #[test]
+    fn provider_capability_rejects_a_different_proof_candidate_epoch() {
+        let fixture = exact_workspace_fixture();
+        let admitted =
+            admit_provider_relations_programmatic(programmatic_epoch_builder(), fixture.runs())
+                .unwrap();
+        let proof_relations = test_relations_with_oracle(
+            FabricEpochId::from_bytes([91; 16]),
+            OracleId::new([71; 16]).unwrap(),
+            OracleImplementationRef::new([72; 32]).unwrap(),
+            Some(ProofRunId::new([73; 16]).unwrap()),
+            ProofTerminalStatus::Pass,
+        );
+        let error = admit_provider_capability_from_proof_relations(
+            admitted,
+            &ProviderCapabilityCatalogBinding {
+                table_name: "provider_capability".into(),
+                source_schema_identity: Arc::from("programmatic:provider-capability:test"),
+            },
+            &proof_relations,
+            &[],
+        )
+        .err()
+        .expect("a proof from another candidate epoch must fail");
+        assert!(matches!(
+            error,
+            ProviderAdmissionError::CapabilityProofEpochMismatch
+        ));
+    }
+
+    #[test]
+    fn provider_capability_rejects_a_binding_outside_the_exact_reports() {
+        let fixture = exact_workspace_fixture();
+        let admitted =
+            admit_provider_relations_programmatic(programmatic_epoch_builder(), fixture.runs())
+                .unwrap();
+        let proof_oracle = OracleId::new([71; 16]).unwrap();
+        let proof_relations = test_relations_with_oracle(
+            FabricEpochId::from_bytes([90; 16]),
+            proof_oracle,
+            OracleImplementationRef::new([72; 32]).unwrap(),
+            Some(ProofRunId::new([73; 16]).unwrap()),
+            ProofTerminalStatus::Pass,
+        );
+        let error = admit_provider_capability_from_proof_relations(
+            admitted,
+            &ProviderCapabilityCatalogBinding {
+                table_name: "provider_capability".into(),
+                source_schema_identity: Arc::from("programmatic:provider-capability:test"),
+            },
+            &proof_relations,
+            &[ProviderOracleProofBinding {
+                provider_oracle_id: ProviderOracleId([250; 32]),
+                relation_id: RelationId([251; 16]),
+                proof_oracle_id: proof_oracle,
+            }],
+        )
+        .err()
+        .expect("a binding outside the exact reports must fail");
+        assert!(matches!(
+            error,
+            ProviderAdmissionError::Capability(ProviderCapabilityError::UnboundProofBinding)
+        ));
     }
 
     #[test]
@@ -2376,6 +4062,93 @@ mod tests {
                 cause: ProviderAdmissionUnknownCause::MissingCoverage
             }
         );
+    }
+
+    #[test]
+    fn characterized_provider_statuses_map_without_rewriting_raw_coverage() {
+        let evaluate = |raw_status: &str,
+                        completed_units: u64,
+                        remainder_reason: Option<&str>,
+                        unknown_semantics: bool|
+         -> Result<CoverageTrailer, ProviderAdmissionError> {
+            let schema = characterized_coverage_schema();
+            let batch = characterized_coverage_batch(
+                &schema,
+                raw_status,
+                completed_units,
+                remainder_reason,
+                unknown_semantics,
+            );
+            let statuses = batch
+                .column_by_name("terminal_status")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            assert_eq!(statuses.value(0), raw_status, "provider row was rewritten");
+            let coverage_identity =
+                ProviderRelationIdentity::try_new("provider.rustc.coverage.v1").unwrap();
+            let observed = AcceptedProviderRelationSet::try_new(
+                SourcePin([0x91; 32]),
+                ContextPin([0x92; 32]),
+                vec![ObservedProviderRelation {
+                    identity: coverage_identity.clone(),
+                    lane: ProviderNativeLane::Rustc,
+                    batches: vec![batch],
+                }],
+            )
+            .unwrap();
+            let binding = ProviderRelationBinding {
+                provider_relation: ProviderRelationIdentity::try_new("provider.rustc.call.v1")
+                    .unwrap(),
+                api_family: family("rustc.call"),
+                lane: ProviderNativeLane::Rustc,
+                role: FabricSchemaRole::RawRustc,
+                table_name: "rustc_call".to_owned(),
+                source_schema_identity: Arc::from("provider:rustc:call:v1"),
+                handler_id: ProviderHandlerId([0x93; 16]),
+                authority_class: ProviderAuthorityClass::ProviderNative,
+                purpose: ProviderRelationPurpose::SemanticFact,
+                requested_units: 1,
+                coverage: ProviderCoverageSource::StructuralPresence,
+            };
+            let declared = DeclaredCoverageBinding {
+                relation_identity: coverage_identity,
+                family_value: "rustc.call".to_owned(),
+                family_column: "family".to_owned(),
+                requested_units_column: "requested_units".to_owned(),
+                completed_units_column: "completed_units".to_owned(),
+                status_column: "terminal_status".to_owned(),
+                remainder_reason_column: Some("remainder_reason".to_owned()),
+                unknown_semantics_column: Some("unknown_semantics".to_owned()),
+                remainder_reason_map: BTreeMap::from([(
+                    "RESOURCE_LIMIT".to_owned(),
+                    RemainderReason::ResourceLimit,
+                )]),
+            };
+            super::declared_coverage(&binding, &declared, &observed)?
+                .ok_or_else(|| coverage_error("provider.rustc.coverage.v1", "missing row"))
+        };
+
+        let complete = evaluate("complete", 1, None, false).unwrap();
+        assert_eq!(complete.status, TerminalStatus::Complete);
+        assert_eq!(complete.completed_units, 1);
+
+        let partial = evaluate("partial-characterized", 0, Some("RESOURCE_LIMIT"), false).unwrap();
+        assert_eq!(partial.status, TerminalStatus::Partial);
+        assert_eq!(partial.completed_units, 0);
+        assert_eq!(partial.remainders[0].reason, RemainderReason::ResourceLimit);
+
+        let unavailable = evaluate("unavailable-characterized", 0, None, true).unwrap();
+        assert_eq!(unavailable.status, TerminalStatus::Unknown);
+        assert_eq!(unavailable.completed_units, 0);
+        assert_eq!(unavailable.remainders[0].reason, RemainderReason::Unknown);
+
+        let error = evaluate("new-unregistered-provider-state", 0, None, true).unwrap_err();
+        assert!(matches!(
+            error,
+            ProviderAdmissionError::InvalidCoverage { .. }
+        ));
     }
 
     #[test]

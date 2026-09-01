@@ -15,11 +15,9 @@ from mcp.types import TextContent, ToolAnnotations
 from pydantic import Field
 
 from .contracts.json import canonicalize_value
-from .contracts.model_registries import REGISTRY_IDS
-from .contracts.schemas import schema_fingerprints, schema_manifest
 from .contracts.wire_models import (
     JSON_OBJECT_ADAPTER,
-    TYPE_ADAPTERS,
+    REFERENCE_TOOL_OUTPUT_ADAPTER,
     InlineDelivery,
     InlineReference,
     PublicToolMeta,
@@ -36,6 +34,8 @@ from .contracts.wire_models import (
     ValidateQueryOutput,
     ValidateToolInput,
     ValidationIssue,
+    WireSchemaName,
+    wire_schema,
 )
 from .daemon import CpgDaemonClient, DaemonQueryError
 from .daemon.arrow_resources import manifest_resource_uri, relation_resource_uri
@@ -57,11 +57,8 @@ READ_ONLY_CLOSED_WORLD_ANNOTATIONS = ToolAnnotations(
 _CURRENT_CONTEXT = CurrentContext()
 
 
-def _output_schema(name: str) -> dict[str, Any]:
-    schemas = schema_manifest()["serialization"]
-    if not isinstance(schemas, dict) or not isinstance(schemas.get(name), dict):
-        raise RuntimeError(f"missing generated serialization schema: {name}")
-    schema = dict(cast(dict[str, Any], schemas[name]))
+def _output_schema(name: WireSchemaName) -> dict[str, Any]:
+    schema = wire_schema(name, "serialization")
     # MCP requires every tool output schema to advertise an object at its root. A
     # discriminated union of closed object variants is still an object contract,
     # but Pydantic emits only ``oneOf`` for the root TypeAdapter view.
@@ -154,7 +151,11 @@ _REFERENCE_MEDIA_TYPES = {
 def _reference_content(reference: str) -> str:
     if reference == "capabilities":
         return canonicalize_value(
-            {"registry_ids": {name: list(values) for name, values in REGISTRY_IDS.items()}}
+            {
+                "authority": "daemon-observed workspace status",
+                "status_tool": "get_code_graph_status",
+                "status_resource": "cpg://status/{workspace_id}",
+            }
         ).decode("utf-8")
     if reference == "recipe_index":
         return canonicalize_value(
@@ -193,7 +194,7 @@ def _reference_content(reference: str) -> str:
     timeout=120.0,
     annotations=READ_ONLY_CLOSED_WORLD_ANNOTATIONS,
     meta={"semantic_query_specification": "1.3", "canonical": True, "daemon_backed": True},
-    output_schema=_output_schema("QueryToolOutput"),
+    output_schema=_output_schema(WireSchemaName.QUERY_TOOL_OUTPUT),
 )
 async def query_code_graph(
     request: Annotated[dict[str, Any], Field(description="Complete semantic query request.")],
@@ -373,7 +374,7 @@ async def get_reference_resource(reference: str, version: str) -> str:
     description="Validate and resolve a semantic request without executing fact retrieval.",
     tags={"cpg", "validate", "read"},
     annotations=READ_ONLY_CLOSED_WORLD_ANNOTATIONS,
-    output_schema=_output_schema("ValidateQueryOutput"),
+    output_schema=_output_schema(WireSchemaName.VALIDATE_QUERY_OUTPUT),
 )
 async def validate_code_graph_query(
     request: Annotated[dict[str, Any], Field(description="Complete semantic query request.")],
@@ -402,7 +403,7 @@ async def validate_code_graph_query(
     description="Return the safe public readiness, freshness, capability, and version view.",
     tags={"cpg", "status", "read"},
     annotations=READ_ONLY_CLOSED_WORLD_ANNOTATIONS,
-    output_schema=_output_schema("StatusToolOutput"),
+    output_schema=_output_schema(WireSchemaName.STATUS_TOOL_OUTPUT),
 )
 async def get_code_graph_status(ctx: Context = _CURRENT_CONTEXT) -> StatusToolOutput:
     """Read public daemon status without triggering generation."""
@@ -425,7 +426,7 @@ async def get_code_graph_status(ctx: Context = _CURRENT_CONTEXT) -> StatusToolOu
     description="Return a constrained packaged schema/reference view.",
     tags={"cpg", "reference", "read"},
     annotations=READ_ONLY_CLOSED_WORLD_ANNOTATIONS,
-    output_schema=_output_schema("ReferenceToolOutput"),
+    output_schema=_output_schema(WireSchemaName.REFERENCE_TOOL_OUTPUT),
 )
 async def get_code_graph_reference(
     reference: Annotated[
@@ -444,20 +445,20 @@ async def get_code_graph_reference(
         Field(description="Constrained packaged reference identity."),
     ],
 ) -> ReferenceToolOutput:
-    """Return generated schemas inline and stable resource links for larger references."""
+    """Return type-derived schemas inline and stable resource links for larger references."""
 
     schema_names = {
-        "query_tool_output_schema": "QueryToolOutput",
-        "validate_tool_output_schema": "ValidateQueryOutput",
-        "status_tool_output_schema": "StatusToolOutput",
-        "reference_tool_output_schema": "ReferenceToolOutput",
+        "query_tool_output_schema": WireSchemaName.QUERY_TOOL_OUTPUT,
+        "validate_tool_output_schema": WireSchemaName.VALIDATE_QUERY_OUTPUT,
+        "status_tool_output_schema": WireSchemaName.STATUS_TOOL_OUTPUT,
+        "reference_tool_output_schema": WireSchemaName.REFERENCE_TOOL_OUTPUT,
     }
     if reference in schema_names:
         text = canonicalize_value(_output_schema(schema_names[reference])).decode()
-        return TYPE_ADAPTERS["ReferenceToolOutput"].validate_python(
+        return REFERENCE_TOOL_OUTPUT_ADAPTER.validate_python(
             InlineReference(media_type="application/schema+json", text=text), strict=True
         )
-    return TYPE_ADAPTERS["ReferenceToolOutput"].validate_python(
+    return REFERENCE_TOOL_OUTPUT_ADAPTER.validate_python(
         ResourceReference(
             uri=f"cpg://reference/{reference}/1.3",
             media_type=_REFERENCE_MEDIA_TYPES[reference],
@@ -465,8 +466,5 @@ async def get_code_graph_reference(
         strict=True,
     )
 
-
-# Eager validation prevents exposing tool definitions with drifted generated schemas.
-schema_fingerprints()
 
 __all__ = ["mcp"]

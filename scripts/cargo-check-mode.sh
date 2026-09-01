@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Preserve native rustc incremental feedback for local check-oriented commands.
+# Preserve native rustc incremental feedback for explicit local edit-loop commands.
 
 set -euo pipefail
 
@@ -13,8 +13,8 @@ if [ -n "${CI:-}" ]; then
 else
   export CARGO_INCREMENTAL=1
   # sccache 0.17.0 exits rather than passing through an incremental Rust invocation.
-  # Ordinary check/Clippy units also omit `link`, so bypassing the wrapper is both
-  # required and avoids cache lookup overhead on a non-cacheable workflow.
+  # Check/Clippy units omit `link`, while focused test builds benefit from preserving
+  # the local incremental graph. Neither path is terminal reproducibility evidence.
   export RUSTC_WRAPPER=
 fi
 

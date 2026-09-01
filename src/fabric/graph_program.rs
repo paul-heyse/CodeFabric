@@ -5,7 +5,7 @@
 //! compiler selects DataFusion's bounded recursive-query rung and emits no SQL text, graph-index
 //! identity, row-oriented graph kernel, or opaque logical extension.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::{NonZeroU16, NonZeroUsize};
 use std::sync::Arc;
 
@@ -22,8 +22,16 @@ use datafusion::logical_expr::{Expr, JoinType, LogicalPlan, LogicalPlanBuilder};
 use datafusion::physical_plan::execute_stream;
 use datafusion::prelude::{col, lit};
 use futures::StreamExt;
+use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeRef;
 use thiserror::Error;
 
+use crate::cancellation::Cancellation;
+use crate::identity::{
+    CanonicalPublicIdentity, IdentityDomain, decode_public_id, decode_public_id_any_kind,
+    decode_public_id_prefix, derive_public_recipe_identity,
+};
+use crate::identity_recipes::{self as recipes, RecipeValue};
 use crate::relational_program::{FieldId, RelationId};
 
 const EDGE_SEED_ALIAS: &str = "__codefabric_graph_edge_seed";
@@ -34,7 +42,350 @@ const INTERNAL_TARGET: &str = "__codefabric_graph_target";
 const INTERNAL_DEPTH: &str = "__codefabric_graph_depth";
 const INTERNAL_MINIMUM_DEPTH: &str = "__codefabric_graph_minimum_depth";
 
-/// One exact model-bound relation supplied to the graph compiler.
+/// One canonical relationship edge admitted to a query-local ordered-path projection.
+///
+/// Canonical entity and fact identities remain the only public identity. `NodeIndex` and
+/// `EdgeIndex` exist only inside [`bounded_shortest_path_witness`].
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct OrderedPathEdge {
+    pub fact_id: Arc<str>,
+    pub source_entity_id: Arc<str>,
+    pub target_entity_id: Arc<str>,
+}
+
+impl OrderedPathEdge {
+    /// Construct one bounded, non-empty canonical edge row.
+    ///
+    /// # Errors
+    ///
+    /// Rejects empty, whitespace-padded, control-bearing, or overlong identities.
+    pub fn try_new(
+        fact_id: impl Into<Arc<str>>,
+        source_entity_id: impl Into<Arc<str>>,
+        target_entity_id: impl Into<Arc<str>>,
+    ) -> Result<Self, GraphProgramError> {
+        let edge = Self {
+            fact_id: fact_id.into(),
+            source_entity_id: source_entity_id.into(),
+            target_entity_id: target_entity_id.into(),
+        };
+        for (kind, value) in [
+            ("path fact", edge.fact_id.as_ref()),
+            ("path source entity", edge.source_entity_id.as_ref()),
+            ("path target entity", edge.target_entity_id.as_ref()),
+        ] {
+            validate_bounded_text(kind, value)?;
+        }
+        Ok(edge)
+    }
+}
+
+/// Explicit query-local resource bounds for ordered shortest-path witness construction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OrderedPathBounds {
+    max_path_length: NonZeroU16,
+    max_input_edges: NonZeroUsize,
+    max_frontier_paths: NonZeroUsize,
+}
+
+impl OrderedPathBounds {
+    /// Construct a non-zero ordered-path resource envelope.
+    ///
+    /// # Errors
+    ///
+    /// Rejects any zero bound.
+    pub fn try_new(
+        max_path_length: u16,
+        max_input_edges: usize,
+        max_frontier_paths: usize,
+    ) -> Result<Self, GraphProgramError> {
+        Ok(Self {
+            max_path_length: NonZeroU16::new(max_path_length)
+                .ok_or(GraphProgramError::ZeroResourceBound("max_path_length"))?,
+            max_input_edges: NonZeroUsize::new(max_input_edges)
+                .ok_or(GraphProgramError::ZeroResourceBound("max_input_edges"))?,
+            max_frontier_paths: NonZeroUsize::new(max_frontier_paths)
+                .ok_or(GraphProgramError::ZeroResourceBound("max_frontier_paths"))?,
+        })
+    }
+
+    #[must_use]
+    pub const fn max_path_length(self) -> u16 {
+        self.max_path_length.get()
+    }
+
+    #[must_use]
+    pub const fn max_input_edges(self) -> usize {
+        self.max_input_edges.get()
+    }
+
+    #[must_use]
+    pub const fn max_frontier_paths(self) -> usize {
+        self.max_frontier_paths.get()
+    }
+}
+
+/// One deterministic shortest-path witness expressed only in canonical application identities.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OrderedPathWitness {
+    ordered_entity_ids: Arc<[Arc<str>]>,
+    ordered_fact_ids: Arc<[Arc<str>]>,
+}
+
+/// Complete immutable inputs for the released path-result public identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PathResultIdentityInput {
+    pub workspace_id: Arc<str>,
+    pub analysis_context_id: Arc<str>,
+    pub fabric_epoch_id: Arc<str>,
+    pub policy_identity: Arc<str>,
+    pub ordered_entity_ids: Arc<[Arc<str>]>,
+    pub ordered_fact_ids: Arc<[Arc<str>]>,
+}
+
+/// Compatibility name for callers migrated from slot-based identities.
+pub type PathResultSlotIdentityInput = PathResultIdentityInput;
+
+/// Issue one path-result identity bound to its exact ordered entity/fact witness.
+///
+/// # Errors
+///
+/// Rejects invalid bounded identities or an unrepresentable canonical preimage.
+pub fn issue_path_result_slot_identity(
+    input: &PathResultSlotIdentityInput,
+) -> Result<CanonicalPublicIdentity, GraphProgramError> {
+    issue_path_result_identity(input)
+}
+
+/// Issue one witness-bound CBEF-v1 path-result identity.
+///
+/// # Errors
+///
+/// Rejects malformed canonical IDs, an invalid witness shape, or an invalid policy identity.
+pub fn issue_path_result_identity(
+    input: &PathResultIdentityInput,
+) -> Result<CanonicalPublicIdentity, GraphProgramError> {
+    validate_bounded_text("path policy identity", &input.policy_identity)?;
+    if input.ordered_entity_ids.len() != input.ordered_fact_ids.len().saturating_add(1) {
+        return Err(GraphProgramError::CanonicalIdentity);
+    }
+    let workspace_id = decode_public_id(IdentityDomain::Workspace, None, &input.workspace_id)
+        .map_err(|_| GraphProgramError::CanonicalIdentity)?;
+    let analysis_context_id = decode_public_id(
+        IdentityDomain::AnalysisContext,
+        None,
+        &input.analysis_context_id,
+    )
+    .map_err(|_| GraphProgramError::CanonicalIdentity)?;
+    let fabric_epoch_id = decode_public_id_prefix("fabric-epoch", &input.fabric_epoch_id)
+        .map_err(|_| GraphProgramError::CanonicalIdentity)?;
+    let entity_ids = input
+        .ordered_entity_ids
+        .iter()
+        .map(|value| {
+            decode_public_id_any_kind(IdentityDomain::Entity, value)
+                .map(RecipeValue::Id)
+                .map_err(|_| GraphProgramError::CanonicalIdentity)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let fact_ids = input
+        .ordered_fact_ids
+        .iter()
+        .map(|value| {
+            decode_public_id_any_kind(IdentityDomain::RelationFact, value)
+                .map(RecipeValue::Id)
+                .map_err(|_| GraphProgramError::CanonicalIdentity)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let record = recipes::path_result(recipes::PathResultFields {
+        workspace_id: RecipeValue::Id(workspace_id),
+        analysis_context_id: RecipeValue::Id(analysis_context_id),
+        fabric_epoch_id: RecipeValue::Id(fabric_epoch_id),
+        policy_identity: RecipeValue::Utf8(input.policy_identity.to_string()),
+        ordered_entity_ids: RecipeValue::OrderedList(entity_ids),
+        ordered_fact_ids: RecipeValue::OrderedList(fact_ids),
+    })
+    .map_err(|_| GraphProgramError::CanonicalIdentity)?;
+    derive_public_recipe_identity(
+        record,
+        vec![
+            ("workspace_id", serde_json::json!(input.workspace_id)),
+            (
+                "analysis_context_id",
+                serde_json::json!(input.analysis_context_id),
+            ),
+            ("fabric_epoch_id", serde_json::json!(input.fabric_epoch_id)),
+            ("policy_identity", serde_json::json!(input.policy_identity)),
+            (
+                "ordered_entity_ids",
+                serde_json::json!(input.ordered_entity_ids),
+            ),
+            (
+                "ordered_fact_ids",
+                serde_json::json!(input.ordered_fact_ids),
+            ),
+        ],
+        &["path length", "witness provenance", "certainty summary"],
+    )
+    .map_err(|_| GraphProgramError::CanonicalIdentity)
+}
+
+/// Validate the currently released bounded ordered-path policy.
+///
+/// # Errors
+///
+/// Rejects every unbounded or unknown policy before graph construction.
+pub fn validate_bounded_ordered_path_policy(policy: &str) -> Result<(), GraphProgramError> {
+    validate_bounded_text("ordered path policy", policy)?;
+    if policy == "shortest" {
+        Ok(())
+    } else {
+        Err(GraphProgramError::UnboundedOrderedPathPolicy(
+            policy.to_owned(),
+        ))
+    }
+}
+
+impl OrderedPathWitness {
+    #[must_use]
+    pub fn ordered_entity_ids(&self) -> &[Arc<str>] {
+        &self.ordered_entity_ids
+    }
+
+    #[must_use]
+    pub fn ordered_fact_ids(&self) -> &[Arc<str>] {
+        &self.ordered_fact_ids
+    }
+
+    #[must_use]
+    pub fn length(&self) -> usize {
+        self.ordered_fact_ids.len()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PendingPath {
+    nodes: Vec<NodeIndex>,
+    facts: Vec<Arc<str>>,
+}
+
+/// Construct one immutable query-local `DiGraph` and return the canonical shortest witness.
+///
+/// Equal-length paths are ordered by their ordered canonical fact-ID sequence. The graph-local
+/// indices never escape, input order cannot affect the result, cycles cannot enter a shortest
+/// witness, and every queue/input bound fails closed before a partial witness is returned.
+///
+/// # Errors
+///
+/// Rejects duplicate fact identities, an excessive edge/frontier count, unknown endpoints, and
+/// invalid canonical identities.
+pub fn bounded_shortest_path_witness(
+    edges: &[OrderedPathEdge],
+    source_entity_id: &str,
+    target_entity_id: &str,
+    bounds: OrderedPathBounds,
+) -> Result<Option<OrderedPathWitness>, GraphProgramError> {
+    validate_bounded_text("path source entity", source_entity_id)?;
+    validate_bounded_text("path target entity", target_entity_id)?;
+    if edges.len() > bounds.max_input_edges() {
+        return Err(GraphProgramError::OrderedPathInputEdgesExceeded {
+            limit: bounds.max_input_edges(),
+            observed: edges.len(),
+        });
+    }
+    let mut ordered = edges.to_vec();
+    ordered.sort();
+    let mut fact_ids = BTreeSet::new();
+    for edge in &ordered {
+        if !fact_ids.insert(Arc::clone(&edge.fact_id)) {
+            return Err(GraphProgramError::DuplicateOrderedPathFact(
+                edge.fact_id.to_string(),
+            ));
+        }
+    }
+
+    let mut graph = DiGraph::<Arc<str>, Arc<str>>::new();
+    let mut nodes = BTreeMap::<Arc<str>, NodeIndex>::new();
+    for identity in ordered.iter().flat_map(|edge| {
+        [
+            Arc::clone(&edge.source_entity_id),
+            Arc::clone(&edge.target_entity_id),
+        ]
+    }) {
+        nodes
+            .entry(Arc::clone(&identity))
+            .or_insert_with(|| graph.add_node(identity));
+    }
+    let source = nodes.get(source_entity_id).copied().ok_or_else(|| {
+        GraphProgramError::UnknownOrderedPathEndpoint {
+            role: "source",
+            entity_id: source_entity_id.to_owned(),
+        }
+    })?;
+    let target = nodes.get(target_entity_id).copied().ok_or_else(|| {
+        GraphProgramError::UnknownOrderedPathEndpoint {
+            role: "target",
+            entity_id: target_entity_id.to_owned(),
+        }
+    })?;
+    for edge in ordered {
+        graph.add_edge(
+            nodes[edge.source_entity_id.as_ref()],
+            nodes[edge.target_entity_id.as_ref()],
+            edge.fact_id,
+        );
+    }
+
+    let mut frontier = VecDeque::from([PendingPath {
+        nodes: vec![source],
+        facts: Vec::new(),
+    }]);
+    while let Some(path) = frontier.pop_front() {
+        let current = *path.nodes.last().expect("path always has one node");
+        if current == target {
+            return Ok(Some(OrderedPathWitness {
+                ordered_entity_ids: path
+                    .nodes
+                    .iter()
+                    .map(|node| Arc::clone(&graph[*node]))
+                    .collect::<Vec<_>>()
+                    .into(),
+                ordered_fact_ids: path.facts.into(),
+            }));
+        }
+        if path.facts.len() >= usize::from(bounds.max_path_length()) {
+            continue;
+        }
+        let mut outgoing = graph
+            .edges(current)
+            .map(|edge| {
+                (
+                    Arc::clone(edge.weight()),
+                    Arc::clone(&graph[edge.target()]),
+                    edge.target(),
+                )
+            })
+            .collect::<Vec<_>>();
+        outgoing.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        for (fact_id, _, next) in outgoing {
+            if path.nodes.contains(&next) {
+                continue;
+            }
+            if frontier.len() >= bounds.max_frontier_paths() {
+                return Err(GraphProgramError::OrderedPathFrontierExceeded {
+                    limit: bounds.max_frontier_paths(),
+                });
+            }
+            let mut next_path = path.clone();
+            next_path.nodes.push(next);
+            next_path.facts.push(fact_id);
+            frontier.push_back(next_path);
+        }
+    }
+    Ok(None)
+}
+
+/// One exact application-contract relation supplied to the graph compiler.
 #[derive(Clone, Debug)]
 pub struct GraphRelationInput {
     relation_id: RelationId,
@@ -58,7 +409,7 @@ impl GraphRelationInput {
     }
 }
 
-/// Complete model-supplied field and relation bindings for bounded reachability.
+/// Complete application-owned field and relation bindings for bounded reachability.
 #[derive(Clone, Debug)]
 pub struct ReachabilityBindings {
     operation_id: Arc<str>,
@@ -75,7 +426,7 @@ pub struct ReachabilityBindings {
 }
 
 impl ReachabilityBindings {
-    /// Validate a model-selected reachability contract before any plan is built.
+    /// Validate an application-owned reachability contract before any plan is built.
     ///
     /// # Errors
     ///
@@ -275,7 +626,7 @@ pub enum GraphNativeOperator {
     OutputOverflowProbeLimit,
 }
 
-/// Model/runtime dependencies observed while compiling the actual operation.
+/// Application/runtime dependencies observed while compiling the actual operation.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum GraphCompilationDependency {
     InputRelation(RelationId),
@@ -364,14 +715,46 @@ impl CompiledGraphProgram {
         &self,
         context: &SessionContext,
     ) -> Result<GraphProgramExecution, GraphProgramError> {
+        self.execute_with_cancellation(context, &Cancellation::default())
+            .await
+    }
+
+    /// Execute with one request-owned cooperative cancellation capability.
+    ///
+    /// Cancellation is checked at every material planning boundary and before accepting each
+    /// output batch. The physical stream is dropped before the typed cancellation error is
+    /// returned, which invokes DataFusion's stream-drop abort and resource-release contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GraphProgramError::Cancelled`] when cancellation is observed, or the same typed
+    /// planning, execution, schema, and resource errors as [`Self::execute`].
+    pub async fn execute_with_cancellation(
+        &self,
+        context: &SessionContext,
+        cancellation: &Cancellation,
+    ) -> Result<GraphProgramExecution, GraphProgramError> {
+        if cancellation.is_cancelled() {
+            return Err(GraphProgramError::Cancelled);
+        }
         let optimized = context.state().optimize(&self.plan)?;
+        if cancellation.is_cancelled() {
+            return Err(GraphProgramError::Cancelled);
+        }
         let physical = context.state().create_physical_plan(&optimized).await?;
+        if cancellation.is_cancelled() {
+            return Err(GraphProgramError::Cancelled);
+        }
         let mut stream = execute_stream(physical, context.task_ctx())?;
         let bounds = self.observation.bounds;
         let mut batches = Vec::new();
         let mut rows = 0_usize;
         let mut bytes = 0_usize;
         while let Some(batch) = stream.next().await {
+            if cancellation.is_cancelled() {
+                drop(stream);
+                return Err(GraphProgramError::Cancelled);
+            }
             let batch = batch?;
             if batch.schema_ref().as_ref() != self.output_schema.as_ref() {
                 return Err(GraphProgramError::ExecutedOutputSchemaMismatch {
@@ -410,6 +793,9 @@ impl CompiledGraphProgram {
             batches.push(batch);
         }
         drop(stream);
+        if cancellation.is_cancelled() {
+            return Err(GraphProgramError::Cancelled);
+        }
 
         Ok(GraphProgramExecution {
             schema: Arc::clone(&self.output_schema),
@@ -692,21 +1078,36 @@ pub enum GraphProgramError {
     InvalidOutputSchema(String),
     #[error("resource bound {0} must be non-zero")]
     ZeroResourceBound(&'static str),
+    #[error("ordered-path input edges exceeded bound {limit}: observed {observed}")]
+    OrderedPathInputEdgesExceeded { limit: usize, observed: usize },
+    #[error("ordered-path fact identity {0:?} is duplicated")]
+    DuplicateOrderedPathFact(String),
+    #[error("ordered-path {role} endpoint {entity_id:?} is absent from the admitted graph")]
+    UnknownOrderedPathEndpoint {
+        role: &'static str,
+        entity_id: String,
+    },
+    #[error("ordered-path frontier exceeded bound {limit}")]
+    OrderedPathFrontierExceeded { limit: usize },
+    #[error("ordered path policy {0:?} is not a released finite policy")]
+    UnboundedOrderedPathPolicy(String),
+    #[error("ordered-path canonical identity derivation failed")]
+    CanonicalIdentity,
     #[error("output-row bound cannot reserve one overflow-probe row")]
     ResourceProbeOverflow,
     #[error("edge relation mismatch: expected {expected:?}, actual {actual:?}")]
     InputRelationMismatch { expected: String, actual: String },
-    #[error("edge input schema differs from its model binding")]
+    #[error("edge input schema differs from its application binding")]
     InputSchemaMismatch {
         expected: SchemaRef,
         actual: SchemaRef,
     },
-    #[error("compiled reachability schema differs from its model binding")]
+    #[error("compiled reachability schema differs from its application binding")]
     CompiledOutputSchemaMismatch {
         expected: SchemaRef,
         actual: SchemaRef,
     },
-    #[error("executed reachability schema differs from its model binding")]
+    #[error("executed reachability schema differs from its application binding")]
     ExecutedOutputSchemaMismatch {
         expected: SchemaRef,
         actual: SchemaRef,
@@ -719,6 +1120,8 @@ pub enum GraphProgramError {
     OutputBytesExceeded { limit: usize, observed: usize },
     #[error("resource counter overflowed for {0}")]
     ResourceCounterOverflow(&'static str),
+    #[error("graph execution was cancelled")]
+    Cancelled,
     #[error(transparent)]
     DataFusion(#[from] datafusion::error::DataFusionError),
 }
@@ -733,6 +1136,52 @@ mod tests {
     use datafusion::physical_plan::displayable;
 
     use super::*;
+
+    #[test]
+    fn path_result_identity_is_a_witness_bound_domain_18_known_answer() {
+        let input = PathResultIdentityInput {
+            workspace_id: Arc::from(format!("workspace:{}", "00".repeat(16))),
+            analysis_context_id: Arc::from(format!("context:{}", "11".repeat(16))),
+            fabric_epoch_id: Arc::from(format!("fabric-epoch:{}", "22".repeat(16))),
+            policy_identity: Arc::from("policy:r1"),
+            ordered_entity_ids: vec![
+                Arc::from(format!("entity:function:{}", "44".repeat(16))),
+                Arc::from(format!("entity:function:{}", "45".repeat(16))),
+            ]
+            .into(),
+            ordered_fact_ids: vec![Arc::from(format!("fact:call:{}", "55".repeat(16)))].into(),
+        };
+        let identity = issue_path_result_identity(&input).expect("domain-18 path identity KAT");
+        assert_eq!(identity.public_id, "path:959e262ba970b5e61f5b3e638a998694");
+        assert_eq!(
+            identity.recipe_evidence()["digest"]["full_digest_hex"],
+            "959e262ba970b5e61f5b3e638a9986941e86ded7a0e00a0cd2b6de90afc03e1d"
+        );
+        assert_eq!(
+            identity.recipe_evidence()["record_domain"],
+            serde_json::json!({"code": 18, "name": "PATH_RESULT"})
+        );
+
+        let mut reversed = input.clone();
+        reversed.ordered_entity_ids = input
+            .ordered_entity_ids
+            .iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        assert_ne!(
+            issue_path_result_identity(&reversed).unwrap().public_id,
+            identity.public_id
+        );
+
+        let mut malformed = input;
+        malformed.ordered_fact_ids = Arc::from([]);
+        assert!(matches!(
+            issue_path_result_identity(&malformed),
+            Err(GraphProgramError::CanonicalIdentity)
+        ));
+    }
 
     fn edge_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
@@ -778,12 +1227,8 @@ mod tests {
         GraphResourceBounds::try_new(depth, rows, 32, 1_000_000).expect("valid bounds")
     }
 
-    async fn input(
-        context: &SessionContext,
-        table: &str,
-        edges: &[(&str, &str)],
-    ) -> GraphRelationInput {
-        let batch = RecordBatch::try_new(
+    fn edge_batch(edges: &[(&str, &str)]) -> RecordBatch {
+        RecordBatch::try_new(
             edge_schema(),
             vec![
                 Arc::new(StringArray::from_iter_values(
@@ -794,9 +1239,17 @@ mod tests {
                 )),
             ],
         )
-        .expect("edge batch");
-        let provider =
-            Arc::new(MemTable::try_new(edge_schema(), vec![vec![batch]]).expect("edge mem table"));
+        .expect("edge batch")
+    }
+
+    async fn input_partitions(
+        context: &SessionContext,
+        table: &str,
+        partitions: Vec<Vec<RecordBatch>>,
+    ) -> GraphRelationInput {
+        let provider = Arc::new(
+            MemTable::try_new(edge_schema(), partitions).expect("partitioned edge mem table"),
+        );
         context
             .register_table(table, provider)
             .expect("register edges");
@@ -806,6 +1259,14 @@ mod tests {
             .expect("edge frame")
             .into_unoptimized_plan();
         GraphRelationInput::new(relation_id("canonical.call_edge"), plan)
+    }
+
+    async fn input(
+        context: &SessionContext,
+        table: &str,
+        edges: &[(&str, &str)],
+    ) -> GraphRelationInput {
+        input_partitions(context, table, vec![vec![edge_batch(edges)]]).await
     }
 
     fn rows(execution: &GraphProgramExecution) -> Vec<(String, String, u32)> {
@@ -880,7 +1341,83 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn zero_edges_preserve_the_model_output_schema() {
+    async fn partition_and_batch_layout_preserve_deterministic_graph_rows() {
+        let compact_context = SessionContext::new();
+        let compact = input(
+            &compact_context,
+            "compact_edges",
+            &[("a", "b"), ("a", "c"), ("b", "d"), ("c", "d")],
+        )
+        .await;
+        let compact = compile_bounded_reachability(compact, &bindings(), bounds(3, 32))
+            .expect("compile compact graph")
+            .execute(&compact_context)
+            .await
+            .expect("execute compact graph");
+
+        let fragmented_context = SessionContext::new();
+        let fragmented = input_partitions(
+            &fragmented_context,
+            "fragmented_edges",
+            vec![
+                vec![edge_batch(&[("c", "d")]), edge_batch(&[("a", "b")])],
+                vec![edge_batch(&[("b", "d")]), edge_batch(&[("a", "c")])],
+            ],
+        )
+        .await;
+        let fragmented = compile_bounded_reachability(fragmented, &bindings(), bounds(3, 32))
+            .expect("compile fragmented graph")
+            .execute(&fragmented_context)
+            .await
+            .expect("execute fragmented graph");
+
+        assert_eq!(rows(&compact), rows(&fragmented));
+        assert_eq!(compact.schema().as_ref(), fragmented.schema().as_ref());
+        assert_eq!(compact.observation(), fragmented.observation());
+    }
+
+    #[tokio::test]
+    async fn cancellation_is_typed_reusable_and_releases_graph_resources() {
+        let context = SessionContext::new();
+        let graph = input(&context, "cancelled_edges", &[("a", "b"), ("b", "c")]).await;
+        let compiled = compile_bounded_reachability(graph, &bindings(), bounds(3, 32))
+            .expect("compile cancellable graph");
+        let cancellation = Cancellation::with_check_interval(1);
+        cancellation.cancel();
+        let memory_before = context.state().runtime_env().memory_pool.reserved();
+
+        assert!(matches!(
+            compiled
+                .execute_with_cancellation(&context, &cancellation)
+                .await,
+            Err(GraphProgramError::Cancelled)
+        ));
+        assert_eq!(
+            context.state().runtime_env().memory_pool.reserved(),
+            memory_before,
+            "cancelled graph execution must not retain a DataFusion memory reservation"
+        );
+        assert!(
+            compiled
+                .observation()
+                .dependencies()
+                .contains(&GraphCompilationDependency::DataFusionExecuteStreamDropAbort)
+        );
+
+        let completed = compiled
+            .execute(&context)
+            .await
+            .expect("a cancelled attempt cannot poison the reusable logical plan");
+        assert!(!rows(&completed).is_empty());
+        assert_eq!(
+            context.state().runtime_env().memory_pool.reserved(),
+            memory_before,
+            "completed graph execution must release its DataFusion memory reservation"
+        );
+    }
+
+    #[tokio::test]
+    async fn zero_edges_preserve_the_contract_output_schema() {
         let context = SessionContext::new();
         let graph = input(&context, "empty_edges", &[]).await;
         let compiled = compile_bounded_reachability(graph, &bindings(), bounds(4, 10))

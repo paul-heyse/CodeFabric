@@ -104,15 +104,11 @@
   "x-codefabric-artifact": {
     "artifact_id": "codefabric.adapter.fastmcp-input.schema",
     "artifact_kind": "json-schema",
+    "authority": "released-wire-compatibility",
     "compatible_suite_major": 1,
-    "generator_revision": "codefabric-model-adapter-driver-v1",
+    "runtime_source": "codefabric_cpg_mcp.contracts.wire_models",
+    "schema_mode": "validation",
     "status": "released",
     "version": "1.0"
-  },
-  "x-codefabric-generated": {
-    "generator_revision": "codefabric-model-adapter-driver-v1",
-    "profile": "codefabric-jcs-v1",
-    "source_artifact_id": "codefabric.adapter.model-ir",
-    "source_digest": "b3:e8572d05a57be81326b49cf6515d455a96c6df1fe9e0d9f65c3efdd27ce7c6a4"
   }
 }

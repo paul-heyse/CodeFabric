@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use arrow_ipc::reader::StreamReader;
 use futures::{Stream, stream};
 use prost::Message;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tonic::service::InterceptorLayer;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
@@ -34,6 +34,10 @@ use crate::rpc::generated::codefabric::rustc::v1::{
 };
 use crate::rpc::{AuthorizedUnixStream, SameUserInterceptor, negotiate_feature_bits};
 
+use crate::provider_sandbox::{
+    GeneratedSandboxProfile, ProviderSandboxLaunchMaterial, ProviderSandboxLauncher,
+    SandboxCapabilityMatrix, SandboxMechanism,
+};
 use crate::relation_ipc::{
     FlowControlAck, FrameHeader, RelationIpcAssembler, RelationIpcFrame, RelationIpcLimits,
     StreamId, TerminalStatus,
@@ -41,10 +45,16 @@ use crate::relation_ipc::{
 use crate::relation_ipc_wire::{
     decode_relation_frame, encode_relation_frame, relation_stream_contract,
 };
-use crate::rust_compilation_trust::RustCompilationCancellationSignal;
+use crate::rust_compilation_trust::{
+    RustCompilationAdmissionProof, RustCompilationCancellationSignal, RustCompilationInputs,
+    RustCompilationLaunchPlan, RustCompilationLauncherReceipt, RustCompilationPrivatePaths,
+    RustCompilationProtocolBinding, RustCompilationRunRequest, RustCompilationTrustError,
+    RustCompilationTrustMode, RustCompilationTrustPolicy, compile_rust_compilation_launch_plan,
+    issue_rust_compilation_admission_proof, supervise_rust_compilation,
+};
 use crate::rustc_relation_schema::{RustcRelation, schema_bundle_digest};
 
-include!("generated/digest_frames.rs");
+include!("digest_frames.rs");
 
 /// AC-G-31 maximum number of chunks a wrapper may have in flight.
 pub const MAX_OUTSTANDING_CHUNKS: u32 = 4;
@@ -275,6 +285,149 @@ pub struct AcceptedRustcCompilation {
     pub begin: CompilationBegin,
     pub owners: Vec<AcceptedRustcOwner>,
     pub end: CompilationEnd,
+    trust_binding: RustCompilationProtocolBinding,
+}
+
+/// Compiler relations qualified by a real, matching untrusted launcher receipt.
+///
+/// The raw protocol result remains useful for diagnostics, but only this type can enter exact
+/// provider admission. Construction consumes the raw result so the receipt cannot be detached
+/// after validation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrustQualifiedRustcCompilation {
+    accepted: AcceptedRustcCompilation,
+    trust_proof: RustCompilationAdmissionProof,
+}
+
+impl TrustQualifiedRustcCompilation {
+    /// Join one daemon-accepted compiler stream to its independently observed launcher receipt.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a receipt from another plan/run or a compiler terminal that is not the contained
+    /// successful terminal required for semantic registration.
+    pub fn try_new(
+        accepted: AcceptedRustcCompilation,
+        trust_proof: RustCompilationAdmissionProof,
+    ) -> Result<Self, RustCompilationTrustError> {
+        let qualified = Self {
+            accepted,
+            trust_proof,
+        };
+        qualified.validate()?;
+        Ok(qualified)
+    }
+
+    /// Revalidate the launch-plan, launcher-terminal, and compiler-stream join immediately before
+    /// provider registration.
+    ///
+    /// # Errors
+    ///
+    /// Rejects changed protocol pins, a receipt/proof detached from its plan, or either terminal
+    /// ceasing to represent one proved contained success.
+    pub fn validate(&self) -> Result<(), RustCompilationTrustError> {
+        let admission = &self.accepted.admission;
+        let proof = &self.trust_proof;
+        self.accepted.trust_binding.validate_untrusted_protocol(
+            &admission.provider_run_id,
+            &admission.workspace_id,
+            &admission.analysis_context_id,
+            admission.source_generation,
+            &admission.context_manifest_digest,
+            &admission.source_snapshot_manifest_digest,
+            &admission.resource_profile_id,
+            &proof.provenance().sandbox_profile_digest,
+            &proof.provenance().toolchain_digest,
+        )?;
+        let compiler_succeeded = ProviderRunState::try_from(self.accepted.end.terminal_state)
+            .is_ok_and(|state| state == ProviderRunState::Succeeded)
+            && self.accepted.end.compiler_exit_status == 0;
+        let launcher_succeeded = proof.terminal().terminal_state
+            == crate::rust_compilation_trust::RustCompilationTerminalState::Succeeded
+            && proof.terminal().exit_code == Some(0)
+            && proof.terminal().accounting_quality
+                == crate::rust_compilation_trust::RustCompilationAccountingQuality::KernelComplete
+            && proof.terminal().process_sample_count > 0
+            && proof.terminal().process_group_empty
+            && proof.terminal().output_manifest_digest.is_some();
+        let capability = proof.capability();
+        let provenance = proof.provenance();
+        if self.accepted.trust_binding != *proof.protocol_binding()
+            || !compiler_succeeded
+            || !launcher_succeeded
+            || capability.workspace_id != admission.workspace_id
+            || capability.provider_run_id != admission.provider_run_id
+            || capability.trust_mode
+                != crate::rust_compilation_trust::RustCompilationTrustMode::UntrustedSandboxed
+            || capability.trust_state
+                != crate::rust_compilation_trust::RustCompilationTrustState::ProvedUntrustedContainment
+            || !capability.available
+            || capability.degraded
+            || capability.launcher_receipt_digest != proof.launcher_receipt_digest()
+            || provenance.workspace_id != admission.workspace_id
+            || provenance.provider_run_id != admission.provider_run_id
+            || provenance.source_generation != admission.source_generation
+            || provenance.source_snapshot_digest
+                != self.accepted.trust_binding.source_snapshot_digest()
+            || provenance.exact_toolchain_release
+                != self.accepted.trust_binding.exact_toolchain_release()
+            || provenance.plan_digest != self.accepted.trust_binding.plan_digest()
+            || provenance.launcher_receipt_digest != proof.launcher_receipt_digest()
+        {
+            return Err(RustCompilationTrustError::CompilerObservationBindingMismatch);
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn accepted(&self) -> &AcceptedRustcCompilation {
+        &self.accepted
+    }
+
+    #[must_use]
+    pub const fn trust_proof(&self) -> &RustCompilationAdmissionProof {
+        &self.trust_proof
+    }
+
+    #[cfg(test)]
+    pub(crate) fn accepted_mut_for_test(&mut self) -> &mut AcceptedRustcCompilation {
+        &mut self.accepted
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_only(accepted: AcceptedRustcCompilation) -> Self {
+        let proof = RustCompilationAdmissionProof::test_only(accepted.trust_binding.clone());
+        Self::try_new(accepted, proof).expect("test compiler stream and trust proof are aligned")
+    }
+}
+
+#[cfg(test)]
+impl AcceptedRustcCompilation {
+    pub(crate) fn test_only(
+        admission: RustcRunAdmission,
+        begin: CompilationBegin,
+        owners: Vec<AcceptedRustcOwner>,
+        end: CompilationEnd,
+    ) -> Self {
+        let trust_binding = RustCompilationProtocolBinding::test_only(
+            &admission.provider_run_id,
+            &admission.workspace_id,
+            &admission.analysis_context_id,
+            admission.source_generation,
+            &admission.context_manifest_digest,
+            &admission.source_snapshot_manifest_digest,
+            &admission.resource_profile_id,
+            &digest(b"test-sandbox"),
+            &digest(b"test-toolchain"),
+        );
+        Self {
+            admission,
+            begin,
+            owners,
+            end,
+            trust_binding,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -307,6 +460,7 @@ struct RunValidator {
     owner_ids: BTreeSet<String>,
     open_owner: Option<OpenOwner>,
     next_sequence: u64,
+    trust_binding: RustCompilationProtocolBinding,
 }
 
 impl RunValidator {
@@ -315,6 +469,7 @@ impl RunValidator {
         policy: RustcProtocolPolicy,
         begin: CompilationBegin,
         first_event: ExtractionEvent,
+        trust_binding: RustCompilationProtocolBinding,
     ) -> Result<Self, Status> {
         validate_begin(&admission, &policy, &begin)?;
         Ok(Self {
@@ -326,6 +481,7 @@ impl RunValidator {
             owner_ids: BTreeSet::new(),
             open_owner: None,
             next_sequence: 1,
+            trust_binding,
         })
     }
 
@@ -477,7 +633,7 @@ impl RunValidator {
         let stream_id = frame_header.identity.stream_id;
         if owner.relation_by_stream.get(&stream_id) != Some(&relation) {
             return Err(Status::failed_precondition(
-                "relation frame differs from the model-derived contract",
+                "relation frame differs from the application-owned contract",
             ));
         }
         if matches!(frame, RelationIpcFrame::Open(_))
@@ -704,6 +860,7 @@ impl RunValidator {
             begin: self.begin,
             owners: self.owners,
             end,
+            trust_binding: self.trust_binding,
         })
     }
 
@@ -800,6 +957,7 @@ fn sorted_digests(values: &[String]) -> bool {
 pub struct RustcObservationService {
     policy: RustcProtocolPolicy,
     admission: RustcRunAdmission,
+    trust_binding: RustCompilationProtocolBinding,
     active: Arc<Mutex<BTreeMap<String, ActiveRun>>>,
     accepted: mpsc::Sender<AcceptedRustcCompilation>,
     supervisor_cancellation: RustCompilationCancellationSignal,
@@ -814,6 +972,7 @@ impl RustcObservationService {
     pub fn new(
         policy: RustcProtocolPolicy,
         admission: RustcRunAdmission,
+        trust_binding: RustCompilationProtocolBinding,
     ) -> Result<(Self, mpsc::Receiver<AcceptedRustcCompilation>), Status> {
         policy.validate()?;
         if !valid_identifier(&admission.provider_run_id)
@@ -827,6 +986,23 @@ impl RustcObservationService {
         {
             return Err(Status::invalid_argument("rustc run admission is invalid"));
         }
+        trust_binding
+            .validate_untrusted_protocol(
+                &admission.provider_run_id,
+                &admission.workspace_id,
+                &admission.analysis_context_id,
+                admission.source_generation,
+                &admission.context_manifest_digest,
+                &admission.source_snapshot_manifest_digest,
+                &admission.resource_profile_id,
+                &policy.sandbox_profile_digest,
+                &policy.toolchain_identity_digest,
+            )
+            .map_err(|error| {
+                Status::failed_precondition(format!(
+                    "rustc launch-plan binding differs from protocol admission: {error}"
+                ))
+            })?;
         let provider = PROVIDER_ENTRIES
             .iter()
             .find(|provider| provider.provider_id == "rustc-mir")
@@ -848,6 +1024,7 @@ impl RustcObservationService {
             Self {
                 policy,
                 admission,
+                trust_binding,
                 active: Arc::new(Mutex::new(BTreeMap::new())),
                 accepted,
                 supervisor_cancellation: RustCompilationCancellationSignal::default(),
@@ -1022,6 +1199,7 @@ impl RustcObservationService {
             self.policy.clone(),
             begin.clone(),
             first_event,
+            self.trust_binding.clone(),
         )?;
         {
             let mut active = self.active.lock().await;
@@ -1127,6 +1305,225 @@ impl RustcObservationService {
     }
 }
 
+/// Closed daemon inputs for one untrusted Rust semantic-provider lifecycle.
+///
+/// The caller supplies independently resolved source, context, toolchain, and protocol inputs;
+/// this transaction compiles their exact launch plan and never accepts a preconstructed compiler
+/// response or a trusted-local fallback.
+pub struct UntrustedRustcProviderLifecycle<'a> {
+    pub trust_policy: &'a RustCompilationTrustPolicy,
+    pub sandbox_capabilities: &'a SandboxCapabilityMatrix,
+    pub sandbox_profile: &'a GeneratedSandboxProfile,
+    pub compilation_inputs: &'a RustCompilationInputs,
+    pub private_paths: &'a RustCompilationPrivatePaths,
+    pub compilation_request: &'a RustCompilationRunRequest,
+    pub protocol_policy: RustcProtocolPolicy,
+    pub run_admission: RustcRunAdmission,
+    pub allowed_uid: u32,
+    pub launch_material: ProviderSandboxLaunchMaterial<'a>,
+}
+
+enum OwnedRustcLaunchMaterial {
+    DarwinProfile(PathBuf),
+    LinuxSeccomp(fs::File),
+}
+
+impl OwnedRustcLaunchMaterial {
+    fn clone_untrusted(
+        mechanism: SandboxMechanism,
+        material: ProviderSandboxLaunchMaterial<'_>,
+    ) -> Result<Self, RustcProviderLifecycleError> {
+        match (mechanism, material) {
+            (
+                SandboxMechanism::DarwinSeatbelt,
+                ProviderSandboxLaunchMaterial::DarwinProfile(path),
+            ) => Ok(Self::DarwinProfile(path.to_path_buf())),
+            (
+                SandboxMechanism::LinuxBubblewrap,
+                ProviderSandboxLaunchMaterial::LinuxSeccomp(file),
+            ) => Ok(Self::LinuxSeccomp(file.try_clone().map_err(|source| {
+                RustcProviderLifecycleError::LaunchMaterialIo { source }
+            })?)),
+            _ => Err(RustcProviderLifecycleError::LaunchMaterialMismatch),
+        }
+    }
+
+    fn as_borrowed(&self) -> ProviderSandboxLaunchMaterial<'_> {
+        match self {
+            Self::DarwinProfile(path) => ProviderSandboxLaunchMaterial::DarwinProfile(path),
+            Self::LinuxSeccomp(file) => ProviderSandboxLaunchMaterial::LinuxSeccomp(file),
+        }
+    }
+}
+
+/// Run one complete untrusted Rust provider transaction from launch-plan compilation through
+/// receipt-qualified semantic output.
+///
+/// The private UDS is bound before Cargo starts, compiler observations are drained concurrently,
+/// and no raw result escapes this function. Every observed compilation unit must end successfully
+/// before the exact launcher receipt can qualify its Arrow relations.
+///
+/// # Errors
+///
+/// Rejects unavailable containment/accounting, trusted-local or mismatched launch material,
+/// source/context/toolchain drift, missing or failed protocol terminals, transport failure, and
+/// any receipt/compiler-stream mismatch. All failures remove the private socket and return no
+/// semantic result.
+pub async fn run_untrusted_rustc_provider_lifecycle(
+    lifecycle: UntrustedRustcProviderLifecycle<'_>,
+) -> Result<Vec<TrustQualifiedRustcCompilation>, RustcProviderLifecycleError> {
+    if lifecycle.trust_policy.trust_mode != RustCompilationTrustMode::UntrustedSandboxed {
+        return Err(RustCompilationTrustError::UntrustedAdmissionRequired.into());
+    }
+    let plan = compile_rust_compilation_launch_plan(
+        lifecycle.trust_policy,
+        lifecycle.sandbox_capabilities,
+        lifecycle.sandbox_profile,
+        lifecycle.compilation_inputs,
+        lifecycle.private_paths,
+        lifecycle.compilation_request,
+        None,
+    )?;
+    let launch_material = OwnedRustcLaunchMaterial::clone_untrusted(
+        lifecycle.sandbox_profile.mechanism,
+        lifecycle.launch_material,
+    )?;
+    let capabilities = lifecycle.sandbox_capabilities.clone();
+    let profile = lifecycle.sandbox_profile.clone();
+    let private_paths = lifecycle.private_paths.clone();
+    execute_prepared_rustc_lifecycle(
+        plan,
+        lifecycle.private_paths.extractor_socket_path.clone(),
+        lifecycle.protocol_policy,
+        lifecycle.run_admission,
+        lifecycle.allowed_uid,
+        move |plan, cancellation| async move {
+            tokio::task::spawn_blocking(move || {
+                let launcher = ProviderSandboxLauncher::new(capabilities);
+                supervise_rust_compilation(
+                    &plan,
+                    &private_paths,
+                    &launcher,
+                    &profile,
+                    launch_material.as_borrowed(),
+                    &cancellation,
+                )
+            })
+            .await
+            .map_err(RustcProviderLifecycleError::SupervisorTask)?
+            .map_err(Into::into)
+        },
+    )
+    .await
+}
+
+async fn execute_prepared_rustc_lifecycle<F, Fut>(
+    plan: RustCompilationLaunchPlan,
+    socket: PathBuf,
+    protocol_policy: RustcProtocolPolicy,
+    run_admission: RustcRunAdmission,
+    allowed_uid: u32,
+    supervisor: F,
+) -> Result<Vec<TrustQualifiedRustcCompilation>, RustcProviderLifecycleError>
+where
+    F: FnOnce(RustCompilationLaunchPlan, RustCompilationCancellationSignal) -> Fut,
+    Fut: Future<Output = Result<RustCompilationLauncherReceipt, RustcProviderLifecycleError>>,
+{
+    let binding = plan.protocol_binding()?;
+    let (service, mut accepted_receiver) =
+        RustcObservationService::new(protocol_policy, run_admission, binding)
+            .map_err(RustcProviderLifecycleError::Protocol)?;
+    let listener = bind_rustc_uds(&socket)?;
+    let monitor = service.clone();
+    let cancellation = service.supervisor_cancellation_signal();
+    let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+    let server_socket = socket.clone();
+    let server = tokio::spawn(async move {
+        serve_bound_rustc_uds(listener, &server_socket, allowed_uid, service, async move {
+            let _ = shutdown_receiver.await;
+        })
+        .await
+    });
+    let collector = tokio::spawn(async move {
+        let mut accepted = Vec::new();
+        while let Some(compilation) = accepted_receiver.recv().await {
+            accepted.push(compilation);
+        }
+        accepted
+    });
+
+    let receipt = supervisor(plan.clone(), cancellation).await;
+    let _ = shutdown_sender.send(());
+    let server_result = server
+        .await
+        .map_err(RustcProviderLifecycleError::ServerTask)?;
+    let terminal_states = monitor.terminal_states().await;
+    drop(monitor);
+    let mut accepted = collector
+        .await
+        .map_err(RustcProviderLifecycleError::CollectorTask)?;
+    server_result?;
+    let receipt = receipt?;
+
+    if terminal_states.is_empty() || accepted.is_empty() {
+        return Err(RustcProviderLifecycleError::MissingCompilerTerminal);
+    }
+    if terminal_states.len() != accepted.len()
+        || terminal_states
+            .values()
+            .any(|state| *state != ProviderRunState::Succeeded)
+    {
+        return Err(RustcProviderLifecycleError::IncompleteCompilerTerminal);
+    }
+    accepted.sort_by(|left, right| {
+        left.begin
+            .compilation_unit_id
+            .cmp(&right.begin.compilation_unit_id)
+    });
+    if accepted
+        .windows(2)
+        .any(|window| window[0].begin.compilation_unit_id == window[1].begin.compilation_unit_id)
+    {
+        return Err(RustcProviderLifecycleError::DuplicateCompilationUnit);
+    }
+    let proof = issue_rust_compilation_admission_proof(&plan, &receipt)?;
+    accepted
+        .into_iter()
+        .map(|compilation| TrustQualifiedRustcCompilation::try_new(compilation, proof.clone()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+/// Closed lifecycle failures. No variant carries partially accepted semantic output.
+#[derive(Debug, thiserror::Error)]
+pub enum RustcProviderLifecycleError {
+    #[error(transparent)]
+    Trust(#[from] RustCompilationTrustError),
+    #[error("rustc protocol admission failed: {0}")]
+    Protocol(Status),
+    #[error(transparent)]
+    Transport(#[from] RustcTransportError),
+    #[error("untrusted rustc launch material does not match the proved sandbox mechanism")]
+    LaunchMaterialMismatch,
+    #[error("untrusted rustc launch material could not be duplicated: {source}")]
+    LaunchMaterialIo {
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("rustc supervisor task failed: {0}")]
+    SupervisorTask(tokio::task::JoinError),
+    #[error("rustc UDS server task failed: {0}")]
+    ServerTask(tokio::task::JoinError),
+    #[error("rustc observation collector task failed: {0}")]
+    CollectorTask(tokio::task::JoinError),
+    #[error("rustc launcher completed without a verified compiler terminal")]
+    MissingCompilerTerminal,
+    #[error("not every observed rustc compilation unit reached one successful terminal")]
+    IncompleteCompilerTerminal,
+    #[error("rustc lifecycle observed a duplicate compilation-unit identity")]
+    DuplicateCompilationUnit,
+}
+
 /// Serve one private compiler-observation endpoint with kernel peer-UID authentication.
 ///
 /// # Errors
@@ -1142,6 +1539,11 @@ pub async fn serve_rustc_uds<F>(
 where
     F: Future<Output = ()> + Send + 'static,
 {
+    let listener = bind_rustc_uds(socket)?;
+    serve_bound_rustc_uds(listener, socket, allowed_uid, service, shutdown).await
+}
+
+fn bind_rustc_uds(socket: &Path) -> Result<tokio::net::UnixListener, RustcTransportError> {
     if socket.exists() {
         return Err(RustcTransportError::SocketExists(socket.to_path_buf()));
     }
@@ -1156,6 +1558,28 @@ where
             source,
         }
     })?;
+    Ok(listener)
+}
+
+async fn serve_bound_rustc_uds<F>(
+    listener: tokio::net::UnixListener,
+    socket: &Path,
+    allowed_uid: u32,
+    service: RustcObservationService,
+    shutdown: F,
+) -> Result<(), RustcTransportError>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    struct RemoveSocket(PathBuf);
+
+    impl Drop for RemoveSocket {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    let _remove_socket = RemoveSocket(socket.to_path_buf());
     let incoming = stream::unfold(listener, move |listener| async move {
         let accepted = listener
             .accept()
@@ -1171,7 +1595,6 @@ where
         .add_service(service)
         .serve_with_incoming_shutdown(incoming, shutdown)
         .await;
-    let _ = fs::remove_file(socket);
     result.map_err(RustcTransportError::Transport)
 }
 
@@ -1269,13 +1692,25 @@ impl RustcExtractor for RustcObservationService {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
+    use crate::provider_sandbox::{ProviderTrustProfile, SandboxProbeObservation};
     use crate::rpc::generated::codefabric::provider::v1::BlobReference;
+    use crate::rpc::generated::codefabric::rustc::v1::rustc_extractor_client::RustcExtractorClient;
     use crate::rpc::generated::codefabric::rustc::v1::{
         CompilerOwnerKey, DiagnosticSummary, PackageTargetIdentity,
     };
+    use crate::rust_compilation_trust::{
+        RustCompilationContextPins, RustCompilationResourceLimits, RustExecutableExtensionPolicy,
+    };
     use arrow_array::RecordBatch;
     use arrow_ipc::writer::StreamWriter;
+    use hyper_util::rt::TokioIo;
+    use tempfile::TempDir;
+    use tonic::transport::{Channel, Endpoint};
+    use tower::service_fn;
 
     fn b3(value: &str) -> String {
         digest(value.as_bytes())
@@ -1336,6 +1771,189 @@ mod tests {
         (policy, admission, begin)
     }
 
+    struct LifecycleHarness {
+        _root: TempDir,
+        launch_marker: PathBuf,
+        inputs: RustCompilationInputs,
+        paths: RustCompilationPrivatePaths,
+        request: RustCompilationRunRequest,
+        capabilities: SandboxCapabilityMatrix,
+        profile: GeneratedSandboxProfile,
+        trust_policy: RustCompilationTrustPolicy,
+        protocol_policy: RustcProtocolPolicy,
+        admission: RustcRunAdmission,
+        allowed_uid: u32,
+    }
+
+    fn lifecycle_limits() -> RustCompilationResourceLimits {
+        RustCompilationResourceLimits {
+            wall_time_millis: 30_000,
+            stdout_bytes: 1024 * 1024,
+            stderr_bytes: 1024 * 1024,
+            artifact_bytes: 32 * 1024 * 1024,
+            process_count: 32,
+            file_count: 10_000,
+            single_file_bytes: 8 * 1024 * 1024,
+            cpu_seconds: 120,
+            memory_bytes: 1024 * 1024 * 1024,
+            open_files: 128,
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn lifecycle_harness() -> LifecycleHarness {
+        let root = tempfile::tempdir().unwrap();
+        let root_path = fs::canonicalize(root.path()).unwrap();
+        let workspace = root_path.join("workspace");
+        let dependencies = root_path.join("dependencies");
+        let private_parent = root_path.join("private");
+        fs::create_dir(&workspace).unwrap();
+        fs::create_dir(&dependencies).unwrap();
+        let mut private_builder = fs::DirBuilder::new();
+        private_builder.mode(0o700).create(&private_parent).unwrap();
+        fs::write(
+            workspace.join("Cargo.toml"),
+            b"[package]\nname='fixture'\nversion='0.0.0'\n",
+        )
+        .unwrap();
+        let toolchain_bin = dependencies.join("toolchain/bin");
+        fs::create_dir_all(&toolchain_bin).unwrap();
+        fs::create_dir(dependencies.join("cargo-home")).unwrap();
+        fs::create_dir(dependencies.join("rustup-home")).unwrap();
+        let cargo = toolchain_bin.join("cargo");
+        let rustc = toolchain_bin.join("rustc");
+        let wrapper = toolchain_bin.join("codefabric-rustc-extractor");
+        let launch_marker = root_path.join("host-cargo-bypass-marker");
+        fs::write(
+            &cargo,
+            format!("#!/bin/sh\ntouch '{}'\nexit 0\n", launch_marker.display()),
+        )
+        .unwrap();
+        for executable in [&cargo, &rustc, &wrapper] {
+            if !executable.exists() {
+                fs::write(executable, b"#!/bin/sh\nexit 0\n").unwrap();
+            }
+            fs::set_permissions(executable, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let inputs = RustCompilationInputs::inspect(
+            &workspace,
+            &dependencies,
+            &cargo,
+            &rustc,
+            &wrapper,
+            &b3("source-image"),
+            &b3("dependencies"),
+            &b3("toolchain"),
+            "rustc-1.100.0-nightly-2026-08-18",
+        )
+        .unwrap();
+        let paths = RustCompilationPrivatePaths::prepare(&private_parent, "lifecycle").unwrap();
+        let request = RustCompilationRunRequest {
+            manifest_relative_path: "Cargo.toml".into(),
+            package_names: vec!["fixture".into()],
+            feature_names: Vec::new(),
+            all_targets: true,
+            build_scripts_present: true,
+            procedural_macros_present: true,
+            context: RustCompilationContextPins {
+                provider_run_id: "run:test".into(),
+                workspace_id: "workspace:test".into(),
+                analysis_context_id: "context:test".into(),
+                source_generation: 7,
+                context_manifest_digest: b3("context"),
+                resource_profile_id: "compiler-semantic-standard".into(),
+                source_snapshot_manifest_digest: b3("source"),
+                cargo_metadata_digest: b3("metadata"),
+                cargo_lock_digest: b3("lock"),
+                cargo_config_digest: b3("config"),
+            },
+        };
+        let behavior = [
+            "launch-confined",
+            "leased-workspace-read-allowed",
+            "workspace-write-denied",
+            "out-of-root-write-denied",
+            "live-workspace-read-denied",
+            "credential-read-denied",
+            "git-read-denied",
+            "network-denied",
+            "inherited-fd-read-denied",
+            "child-process-contained",
+            "resource-limit-enforceable",
+            "cleanup-escape-denied",
+            "output-write-allowed",
+        ]
+        .into_iter()
+        .map(|name| (name.to_owned(), true))
+        .collect();
+        let capabilities = SandboxCapabilityMatrix::evaluate_for_test(&SandboxProbeObservation {
+            mechanism: SandboxMechanism::DarwinSeatbelt,
+            executable_path: "/usr/bin/sandbox-exec".into(),
+            executable_version: "darwin-seatbelt-system".into(),
+            owned_by_root: true,
+            executable_mode: 0o755,
+            setuid: false,
+            behavior,
+        });
+        let profile = GeneratedSandboxProfile::generate(
+            ProviderTrustProfile::UntrustedSandboxed,
+            SandboxMechanism::DarwinSeatbelt,
+            &inputs.workspace_view,
+            &inputs.dependency_view,
+            &paths.run_root,
+        )
+        .unwrap();
+        let (mut protocol_policy, admission, _) = fixture();
+        protocol_policy.sandbox_profile_digest = profile.sha256_digest.clone();
+        let allowed_uid = fs::metadata(&root_path).unwrap().uid();
+        LifecycleHarness {
+            _root: root,
+            launch_marker,
+            inputs,
+            paths,
+            request,
+            capabilities,
+            profile,
+            trust_policy: RustCompilationTrustPolicy::untrusted_sandboxed_v1(
+                lifecycle_limits(),
+                RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
+            ),
+            protocol_policy,
+            admission,
+            allowed_uid,
+        }
+    }
+
+    fn lifecycle_plan(harness: &LifecycleHarness) -> RustCompilationLaunchPlan {
+        compile_rust_compilation_launch_plan(
+            &harness.trust_policy,
+            &harness.capabilities,
+            &harness.profile,
+            &harness.inputs,
+            &harness.paths,
+            &harness.request,
+            None,
+        )
+        .unwrap()
+    }
+
+    fn trust_binding(
+        policy: &RustcProtocolPolicy,
+        admission: &RustcRunAdmission,
+    ) -> RustCompilationProtocolBinding {
+        RustCompilationProtocolBinding::test_only(
+            &admission.provider_run_id,
+            &admission.workspace_id,
+            &admission.analysis_context_id,
+            admission.source_generation,
+            &admission.context_manifest_digest,
+            &admission.source_snapshot_manifest_digest,
+            &admission.resource_profile_id,
+            &policy.sandbox_profile_digest,
+            &policy.toolchain_identity_digest,
+        )
+    }
+
     fn event(event: Event) -> ExtractionEvent {
         ExtractionEvent { event: Some(event) }
     }
@@ -1382,7 +2000,8 @@ mod tests {
     fn accepted_stream() -> (RunValidator, CompilationEnd) {
         let (policy, admission, begin) = fixture();
         let first = event(Event::CompilationBegin(begin.clone()));
-        let mut validator = RunValidator::new(admission, policy, begin, first).unwrap();
+        let binding = trust_binding(&policy, &admission);
+        let mut validator = RunValidator::new(admission, policy, begin, first, binding).unwrap();
         let relation = RustcRelation::MirBody;
         let owner_begin = owner_begin(relation.family_code());
         validator
@@ -1473,6 +2092,90 @@ mod tests {
         (validator, compilation_end)
     }
 
+    fn completed_event_stream() -> Vec<ExtractionEvent> {
+        completed_event_stream_for_generation(7)
+    }
+
+    fn completed_event_stream_for_generation(source_generation: u64) -> Vec<ExtractionEvent> {
+        let (validator, mut end) = accepted_stream();
+        let mut events = validator.events.clone();
+        let Some(Event::CompilationBegin(begin)) = events[0].event.as_mut() else {
+            panic!("accepted fixture begins with the compiler begin event")
+        };
+        begin.source_generation = source_generation;
+        let mut digest_events = events.clone();
+        digest_events.push(event(Event::CompilationEnd(end.clone())));
+        end.overall_stream_digest = overall_stream_digest(&digest_events);
+        events.push(event(Event::CompilationEnd(end)));
+        events
+    }
+
+    async fn send_lifecycle_events(
+        socket: PathBuf,
+        policy: RustcProtocolPolicy,
+        admission: RustcRunAdmission,
+        events: Vec<ExtractionEvent>,
+    ) -> Result<(), Status> {
+        let channel: Channel = Endpoint::from_static("http://[::]:50051")
+            .connect_with_connector(service_fn(move |_| {
+                let socket = socket.clone();
+                async move {
+                    tokio::net::UnixStream::connect(socket)
+                        .await
+                        .map(TokioIo::new)
+                }
+            }))
+            .await
+            .expect("bound rustc lifecycle socket accepts the exact same-user client");
+        let mut client = RustcExtractorClient::new(channel);
+        client
+            .handshake(ExtractorHello {
+                protocol_major: 1,
+                protocol_minor: 0,
+                required_feature_bits: 0,
+                optional_feature_bits: 0,
+                extractor_build: policy.extractor_build,
+                rustc_version: policy.rustc_version,
+                rustc_commit: policy.rustc_commit,
+                toolchain_identity_digest: policy.toolchain_identity_digest,
+                resource_profile_id: admission.resource_profile_id,
+            })
+            .await?;
+        let mut commands = client
+            .observe(tokio_stream::iter(events))
+            .await?
+            .into_inner();
+        while commands.message().await?.is_some() {}
+        Ok(())
+    }
+
+    async fn execute_test_lifecycle(
+        harness: &LifecycleHarness,
+        events: Vec<ExtractionEvent>,
+        tolerate_stream_failure: bool,
+    ) -> Result<Vec<TrustQualifiedRustcCompilation>, RustcProviderLifecycleError> {
+        let plan = lifecycle_plan(harness);
+        let socket = harness.paths.extractor_socket_path.clone();
+        let policy = harness.protocol_policy.clone();
+        let admission = harness.admission.clone();
+        execute_prepared_rustc_lifecycle(
+            plan,
+            harness.paths.extractor_socket_path.clone(),
+            harness.protocol_policy.clone(),
+            harness.admission.clone(),
+            harness.allowed_uid,
+            move |plan, _cancellation| async move {
+                let stream_result = send_lifecycle_events(socket, policy, admission, events).await;
+                if !tolerate_stream_failure {
+                    stream_result.map_err(RustcProviderLifecycleError::Protocol)?;
+                }
+                RustCompilationLauncherReceipt::test_only_contained_success(&plan)
+                    .map_err(Into::into)
+            },
+        )
+        .await
+    }
+
     #[test]
     fn wp35_behavioral_acceptance() {
         let (validator, mut end) = accepted_stream();
@@ -1490,7 +2193,8 @@ mod tests {
     fn relation_payload_cancellation_is_acknowledged_and_never_reconciled() {
         let (policy, admission, begin) = fixture();
         let first = event(Event::CompilationBegin(begin.clone()));
-        let mut validator = RunValidator::new(admission, policy, begin, first).unwrap();
+        let binding = trust_binding(&policy, &admission);
+        let mut validator = RunValidator::new(admission, policy, begin, first, binding).unwrap();
         let relation = RustcRelation::MirBody;
         let owner_begin = owner_begin(relation.family_code());
         validator
@@ -1616,7 +2320,8 @@ mod tests {
     fn typed_relation_ingress_rejects_unknown_and_opaque_referenced_payloads() {
         let (policy, admission, begin) = fixture();
         let first = event(Event::CompilationBegin(begin.clone()));
-        let mut validator = RunValidator::new(admission, policy, begin, first).unwrap();
+        let binding = trust_binding(&policy, &admission);
+        let mut validator = RunValidator::new(admission, policy, begin, first, binding).unwrap();
         let unknown_begin = owner_begin(70);
         assert_eq!(
             validator
@@ -1655,8 +2360,9 @@ mod tests {
     #[tokio::test]
     async fn wp35_operational_acceptance_handshake_and_cancel_are_single_authority() {
         let (policy, admission, begin) = fixture();
+        let binding = trust_binding(&policy, &admission);
         let (service, _accepted) =
-            RustcObservationService::new(policy.clone(), admission.clone()).unwrap();
+            RustcObservationService::new(policy.clone(), admission.clone(), binding).unwrap();
         let hello = ExtractorHello {
             protocol_major: 1,
             protocol_minor: 0,
@@ -1702,11 +2408,193 @@ mod tests {
         );
     }
 
+    #[test]
+    fn observation_service_rejects_mismatched_launch_plan_binding_before_listen() {
+        let (policy, admission, _) = fixture();
+        let mismatched = RustCompilationProtocolBinding::test_only(
+            &admission.provider_run_id,
+            &admission.workspace_id,
+            &admission.analysis_context_id,
+            admission.source_generation,
+            &admission.context_manifest_digest,
+            &digest(b"changed-source-manifest"),
+            &admission.resource_profile_id,
+            &policy.sandbox_profile_digest,
+            &policy.toolchain_identity_digest,
+        );
+
+        let Err(error) = RustcObservationService::new(policy, admission, mismatched) else {
+            panic!("a mismatched launch-plan binding must fail before the endpoint is usable");
+        };
+        assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+        assert!(error.message().contains("launch-plan binding differs"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn orchestrated_untrusted_accounting_failure_never_executes_host_cargo() {
+        let harness = lifecycle_harness();
+        let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
+            trust_policy: &harness.trust_policy,
+            sandbox_capabilities: &harness.capabilities,
+            sandbox_profile: &harness.profile,
+            compilation_inputs: &harness.inputs,
+            private_paths: &harness.paths,
+            compilation_request: &harness.request,
+            protocol_policy: harness.protocol_policy.clone(),
+            run_admission: harness.admission.clone(),
+            allowed_uid: harness.allowed_uid,
+            launch_material: ProviderSandboxLaunchMaterial::DarwinProfile(Path::new(
+                "/not-consumed-without-kernel-accounting",
+            )),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            result,
+            RustcProviderLifecycleError::Trust(
+                RustCompilationTrustError::CompleteAccountingUnavailable
+            )
+        ));
+        assert!(!harness.launch_marker.exists());
+        assert!(!harness.paths.extractor_socket_path.exists());
+    }
+
+    #[tokio::test]
+    async fn orchestrated_trusted_local_bypass_is_rejected_before_spawn() {
+        let harness = lifecycle_harness();
+        let trusted_local = RustCompilationTrustPolicy::trusted_local_v1(
+            lifecycle_limits(),
+            RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
+        );
+        let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
+            trust_policy: &trusted_local,
+            sandbox_capabilities: &harness.capabilities,
+            sandbox_profile: &harness.profile,
+            compilation_inputs: &harness.inputs,
+            private_paths: &harness.paths,
+            compilation_request: &harness.request,
+            protocol_policy: harness.protocol_policy.clone(),
+            run_admission: harness.admission.clone(),
+            allowed_uid: harness.allowed_uid,
+            launch_material: ProviderSandboxLaunchMaterial::DarwinProfile(Path::new(
+                "/trusted-local-bypass",
+            )),
+        })
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            result,
+            RustcProviderLifecycleError::Trust(
+                RustCompilationTrustError::UntrustedAdmissionRequired
+            )
+        ));
+        assert!(!harness.launch_marker.exists());
+        assert!(!harness.paths.extractor_socket_path.exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn orchestrated_missing_terminal_returns_no_semantic_output() {
+        let harness = lifecycle_harness();
+        let mut events = completed_event_stream();
+        let Some(ExtractionEvent {
+            event: Some(Event::CompilationEnd(_)),
+        }) = events.pop()
+        else {
+            panic!("fixture ends with the compiler terminal")
+        };
+
+        let result = execute_test_lifecycle(&harness, events, true)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            result,
+            RustcProviderLifecycleError::MissingCompilerTerminal
+        ));
+        assert!(!harness.paths.extractor_socket_path.exists());
+    }
+
+    #[tokio::test]
+    async fn orchestrated_context_mismatch_never_invokes_supervisor() {
+        let harness = lifecycle_harness();
+        let mut mismatched = harness.admission.clone();
+        mismatched.analysis_context_id = "context:changed".into();
+        let invoked = Arc::new(AtomicBool::new(false));
+        let observed_invocation = Arc::clone(&invoked);
+        let result = execute_prepared_rustc_lifecycle(
+            lifecycle_plan(&harness),
+            harness.paths.extractor_socket_path.clone(),
+            harness.protocol_policy.clone(),
+            mismatched,
+            harness.allowed_uid,
+            move |plan, _cancellation| {
+                observed_invocation.store(true, Ordering::Release);
+                async move {
+                    RustCompilationLauncherReceipt::test_only_contained_success(&plan)
+                        .map_err(Into::into)
+                }
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(result, RustcProviderLifecycleError::Protocol(_)));
+        assert!(!invoked.load(Ordering::Acquire));
+        assert!(!harness.launch_marker.exists());
+        assert!(!harness.paths.extractor_socket_path.exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn orchestrated_clean_and_incremental_generations_emit_equal_arrow_semantics() {
+        let clean = lifecycle_harness();
+        let clean_output = execute_test_lifecycle(&clean, completed_event_stream(), false)
+            .await
+            .unwrap();
+
+        let mut incremental = lifecycle_harness();
+        incremental.request.context.source_generation = 8;
+        incremental.admission.source_generation = 8;
+        let incremental_output = execute_test_lifecycle(
+            &incremental,
+            completed_event_stream_for_generation(8),
+            false,
+        )
+        .await
+        .unwrap();
+
+        let semantic_payloads = |runs: &[TrustQualifiedRustcCompilation]| {
+            runs.iter()
+                .flat_map(|run| &run.accepted().owners)
+                .flat_map(|owner| &owner.chunks)
+                .map(|chunk| {
+                    (
+                        chunk.observation_family_code,
+                        chunk.schema_digest.clone(),
+                        chunk.arrow_ipc.clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            semantic_payloads(&clean_output),
+            semantic_payloads(&incremental_output)
+        );
+        assert_eq!(clean_output[0].accepted().admission.source_generation, 7);
+        assert_eq!(
+            incremental_output[0].accepted().admission.source_generation,
+            8
+        );
+    }
+
     #[tokio::test]
     async fn cargo_run_tracks_and_cancels_multiple_compilation_units_independently() {
         let (mut policy, admission, _) = fixture();
         policy.sandbox_profile_digest = format!("sha256:{}", "ab".repeat(32));
-        let (service, _accepted) = RustcObservationService::new(policy, admission.clone()).unwrap();
+        let binding = trust_binding(&policy, &admission);
+        let (service, _accepted) =
+            RustcObservationService::new(policy, admission.clone(), binding).unwrap();
         let (first_sender, mut first_commands) = mpsc::channel(2);
         let (second_sender, mut second_commands) = mpsc::channel(2);
         {

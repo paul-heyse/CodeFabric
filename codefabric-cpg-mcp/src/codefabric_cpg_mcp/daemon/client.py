@@ -14,13 +14,13 @@ from typing import Any, Never, cast
 import grpc
 
 from ..contracts.json import canonicalize_json, canonicalize_value, checksum
-from ..contracts.model_registries import CpgdFeature
-from ..contracts.schemas import schema_fingerprints
+from ..contracts.rpc_features import CpgdFeature
 from ..contracts.wire_models import (
     JSON_OBJECT_ADAPTER,
     JsonObject,
     QueryToolInput,
     ValidateToolInput,
+    wire_schema_fingerprints,
 )
 from ..settings import Settings
 from .arrow_resources import (
@@ -65,6 +65,15 @@ class DaemonProtocolError(RuntimeError):
     """The daemon returned an internally inconsistent accepted-protocol result."""
 
 
+class DaemonProjectionError(DaemonProtocolError):
+    """A daemon result attempted to cross the released projection boundary."""
+
+    def __init__(self, reason: str, forbidden_fields: tuple[str, ...]) -> None:
+        self.reason = reason
+        self.forbidden_fields = forbidden_fields
+        super().__init__(reason)
+
+
 class DaemonQueryError(DaemonProtocolError):
     """One daemon-authored canonical public error record."""
 
@@ -75,6 +84,64 @@ class DaemonQueryError(DaemonProtocolError):
         self.canonical_bytes = canonical
         self.record = cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(canonical, strict=True))
         super().__init__(canonical.decode("utf-8"))
+
+
+_FORBIDDEN_RELEASED_RESPONSE_FIELDS = frozenset({"internal_table", "physical_plan"})
+
+
+def validate_inline_daemon_response(
+    payload: bytes,
+    artifact_checksum: str,
+    terminal: Any,
+) -> JsonObject:
+    """Validate the exact daemon-owned inline response before public presentation.
+
+    The adapter remains a pass-through: this function neither constructs nor repairs semantic
+    response content. It verifies canonical bytes, their content address, the independently
+    streamed terminal states, and the absence of private physical authority before returning the
+    decoded object unchanged.
+    """
+
+    canonical_payload = canonicalize_json(payload)
+    if canonical_payload != payload:
+        raise DaemonProtocolError("result artifact is not canonical JSON")
+    payload_checksum = checksum(payload)
+    if (
+        payload_checksum != artifact_checksum
+        or terminal.canonical_response_checksum != artifact_checksum
+    ):
+        raise DaemonProtocolError("terminal and inline result identities differ")
+    response = cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(payload, strict=True))
+    expected_states = {
+        "execution_state": terminal.semantic_execution_state,
+        "availability_state": terminal.availability_state,
+        "completeness_state": terminal.completeness_state,
+        "freshness_state": terminal.freshness_state,
+        "limit_state": terminal.limit_state,
+    }
+    if any(response.get(name) != value for name, value in expected_states.items()):
+        raise DaemonProtocolError("terminal states differ from the canonical response")
+
+    def forbidden_fields(value: Any) -> set[str]:
+        if isinstance(value, dict):
+            fields = set(_FORBIDDEN_RELEASED_RESPONSE_FIELDS.intersection(value))
+            for nested in value.values():
+                fields.update(forbidden_fields(nested))
+            return fields
+        if isinstance(value, list):
+            fields: set[str] = set()
+            for nested in value:
+                fields.update(forbidden_fields(nested))
+            return fields
+        return set()
+
+    forbidden = tuple(sorted(forbidden_fields(response)))
+    if forbidden:
+        raise DaemonProjectionError(
+            "released projection contains a forbidden physical-name field",
+            forbidden,
+        )
+    return response
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +186,7 @@ class CpgDaemonClient:
         self.host_profile_digest = host_capability_profile_digest(settings.max_request_bytes)
         self.handshake_response: Any | None = None
         self._connect_lock = asyncio.Lock()
+        self._reconnect_lock = asyncio.Lock()
         # Capability material cached only so a later resource read can ask the
         # daemon. Presence here never proves that the daemon still recognizes a lease.
         self._lease_cache: dict[str, tuple[str, str, int, int]] = {}
@@ -137,7 +205,6 @@ class CpgDaemonClient:
     async def _connect(self) -> None:
         """Perform the handshake while the caller holds the connection lock."""
 
-        fingerprints = schema_fingerprints()["serialization"]
         request = query_pb.HandshakeRequest(
             adapter_instance_id=self.settings.agent_instance_id,
             adapter_version=version("codefabric-cpg-mcp"),
@@ -150,8 +217,8 @@ class CpgDaemonClient:
                 maximum=SEMANTIC_QUERY_VERSION,
             ),
             schema_fingerprints=[
-                query_pb.SchemaFingerprint(schema_id=name, version="1.3", digest=digest)
-                for name, digest in sorted(cast(dict[str, str], fingerprints).items())
+                query_pb.SchemaFingerprint(schema_id=name.value, version="1.3", digest=digest)
+                for name, digest in wire_schema_fingerprints("serialization")
             ],
             required_feature_bits=int(CpgdFeature.REQUIRED),
             optional_feature_bits=int(CpgdFeature.SUPPORTED & ~CpgdFeature.REQUIRED),
@@ -184,6 +251,43 @@ class CpgDaemonClient:
         ):
             raise DaemonProtocolError("daemon negotiated an unsupported protocol profile")
         self.handshake_response = response
+
+    async def _reconnect(self, failed_channel: grpc.aio.Channel) -> None:
+        """Recreate one failed UDS channel and renegotiate the bound session once."""
+
+        async with self._reconnect_lock:
+            if self.channel is not failed_channel and self.handshake_response is not None:
+                return
+            await self.channel.close()
+            self.channel = create_local_channel(self.settings.daemon_target)
+            self.stub = query_grpc.CpgQueryServiceStub(self.channel)
+            self.handshake_response = None
+            await self.connect()
+
+    @staticmethod
+    def _validated_query_event_header(
+        event: Any,
+        daemon_query_id: str,
+        previous_sequence: int,
+    ) -> tuple[str, int, str]:
+        """Validate the monotonic, query-bound event cursor before presentation."""
+
+        variant = event.WhichOneof("event")
+        if variant is None:
+            raise DaemonProtocolError("query event variant is absent")
+        payload = getattr(event, variant)
+        if not payload.HasField("header"):
+            raise DaemonProtocolError("query event header is absent")
+        header = payload.header
+        expected_sequence = previous_sequence + 1
+        expected_checksum = checksum(f"{daemon_query_id}:{expected_sequence}".encode())
+        if (
+            header.daemon_query_id != daemon_query_id
+            or header.sequence != expected_sequence
+            or header.event_checksum != expected_checksum
+        ):
+            raise DaemonProtocolError("query event identity, sequence, or checksum differs")
+        return variant, header.sequence, header.event_checksum
 
     async def close(self) -> None:
         """Release the process-lifetime channel."""
@@ -321,8 +425,11 @@ class CpgDaemonClient:
         artifact: Any | None = None
         terminal: Any | None = None
         snapshot: JsonObject | None = None
+        last_sequence = 0
+        last_event_checksum: str | None = None
+        reconnect_attempted = False
         try:
-            events = self.stub.StreamQuery(
+            events: Any = self.stub.StreamQuery(
                 query_pb.StreamQueryRequest(
                     daemon_query_id=started.daemon_query_id,
                     resume_token=started.resume_token,
@@ -330,25 +437,53 @@ class CpgDaemonClient:
                 ),
                 timeout=self.settings.query_timeout_seconds,
             )
-            async for event in events:
-                variant = event.WhichOneof("event")
-                if variant == "snapshot_pinned":
-                    snapshot_bytes = canonicalize_json(
-                        event.snapshot_pinned.canonical_public_snapshot_metadata_json
+            while True:
+                try:
+                    async for event in events:
+                        variant, last_sequence, last_event_checksum = (
+                            self._validated_query_event_header(
+                                event,
+                                started.daemon_query_id,
+                                last_sequence,
+                            )
+                        )
+                        if variant == "snapshot_pinned":
+                            snapshot_bytes = canonicalize_json(
+                                event.snapshot_pinned.canonical_public_snapshot_metadata_json
+                            )
+                            if (
+                                snapshot_bytes
+                                != event.snapshot_pinned.canonical_public_snapshot_metadata_json
+                                or checksum(snapshot_bytes)
+                                != event.snapshot_pinned.metadata_checksum
+                            ):
+                                raise DaemonProtocolError("snapshot metadata identity differs")
+                            snapshot = cast(
+                                JsonObject,
+                                JSON_OBJECT_ADAPTER.validate_json(snapshot_bytes, strict=True),
+                            )
+                        elif variant == "artifact_ready":
+                            artifact = event.artifact_ready
+                        elif variant == "terminal":
+                            terminal = event.terminal
+                    break
+                except grpc.aio.AioRpcError as error:
+                    if reconnect_attempted or error.code() != grpc.StatusCode.UNAVAILABLE:
+                        raise
+                    failed_channel = self.channel
+                    await self._reconnect(failed_channel)
+                    reconnect_attempted = True
+                    events = self.stub.AttachQuery(
+                        query_pb.AttachQueryRequest(
+                            daemon_query_id=started.daemon_query_id,
+                            resume_token=started.resume_token,
+                            after_sequence=last_sequence,
+                            after_event_checksum=last_event_checksum,
+                            agent_instance_id=self.settings.agent_instance_id,
+                            workspace_id=self.settings.workspace_id,
+                        ),
+                        timeout=self.settings.query_timeout_seconds,
                     )
-                    if (
-                        snapshot_bytes
-                        != event.snapshot_pinned.canonical_public_snapshot_metadata_json
-                        or checksum(snapshot_bytes) != event.snapshot_pinned.metadata_checksum
-                    ):
-                        raise DaemonProtocolError("snapshot metadata identity differs")
-                    snapshot = cast(
-                        JsonObject, JSON_OBJECT_ADAPTER.validate_json(snapshot_bytes, strict=True)
-                    )
-                elif variant == "artifact_ready":
-                    artifact = event.artifact_ready
-                elif variant == "terminal":
-                    terminal = event.terminal
         except BaseException:
             cancellation = asyncio.create_task(
                 self.cancel(started.daemon_query_id, started.cancel_token, "adapter interrupted")
@@ -459,19 +594,7 @@ class CpgDaemonClient:
             artifact.artifact_checksum,
             terminal.result_byte_count,
         )
-        canonical_payload = canonicalize_json(payload)
-        if canonical_payload != payload:
-            raise DaemonProtocolError("result artifact is not canonical JSON")
-        response = cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(payload, strict=True))
-        expected_states = {
-            "execution_state": terminal.semantic_execution_state,
-            "availability_state": terminal.availability_state,
-            "completeness_state": terminal.completeness_state,
-            "freshness_state": terminal.freshness_state,
-            "limit_state": terminal.limit_state,
-        }
-        if any(response.get(name) != value for name, value in expected_states.items()):
-            raise DaemonProtocolError("terminal states differ from the canonical response")
+        response = validate_inline_daemon_response(payload, artifact.artifact_checksum, terminal)
         return DaemonQueryResult(
             semantic_request_id=started.effective_semantic_request_id,
             daemon_query_id=started.daemon_query_id,

@@ -63,8 +63,9 @@ therefore not itself a skill.
 
 ## Toolchain
 
-`rust-toolchain.toml` pins **stable** for the root daemon/data plane. The separate
+`rust-toolchain.toml` pins exact stable Rust **1.98.0** for the root daemon/data plane. The separate
 `rustc-extractor/` root pins `nightly-2026-08-18` with `rustc-dev`, `rust-src`, and
 `llvm-tools`; that is the extractor's production toolchain and never changes the root pin.
-The dated nightly, exact compiler identity, golden corpus, and managed upgrade procedure are
+Assurance commands reuse that dated nightly with an isolated target directory. The dated
+nightly, exact compiler identity, golden corpus, and managed upgrade procedure are
 the accepted boundary required by repo-spec §76 and the fact-generation design.

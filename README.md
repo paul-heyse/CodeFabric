@@ -33,7 +33,7 @@ compatibility floor. It has no native-extension build surface or root Python pac
 implementation and AWS SDK; `s3-storage` enables them explicitly. The pinned Delta
 kernel still compiles latent `object_store` cloud features, which the graph and advisory
 policy checks report rather than concealing. Narrow `canonical-json`, `contract-models`,
-`model-compiler`, `proto-tooling`, `rpc`, `repository-state`, and `data-fabric`
+`proto-tooling`, `rpc`, `repository-state`, and `data-fabric`
 features keep focused tools from compiling unrelated production subsystems.
 
 The additional Cargo roots are not a Cargo workspace. Their separate toolchains and
@@ -43,7 +43,7 @@ dependency isolation are build-domain requirements, not semantic source organiza
 
 | Surface | Baseline |
 |---|---|
-| Stable daemon/data plane | Linux and macOS; Rust 1.95.0 or newer |
+| Stable daemon/data plane | Linux and macOS; exact development toolchain 1.98.0, verified MSRV 1.95.0 |
 | rustc extractor | `nightly-2026-08-18`; exact compiler identity recorded |
 | Pyrefly sidecar | Pyrefly 1.2.0 at an immutable source revision |
 | FastMCP adapter | Python 3.14.7 development pin; package floor 3.12 |
@@ -52,21 +52,27 @@ dependency isolation are build-domain requirements, not semantic source organiza
 
 ```bash
 just doctor      # toolchains, domain presence, required tools, and direnv state
-just setup       # locked adapter environment + supervised sccache service
+just setup       # exact tools + locked adapter environment + supervised sccache service
 just --list      # the operational API
 just ci-fast     # current routine gate
 ```
 
-The repository requires `just`, `sccache`, `cargo-nextest`, `typos`, `rg`, `ast-grep`,
+The exact CLI identities live in `tooling/rust-tool-versions.env`; `just tools-doctor`
+checks them and `just setup-tools` reconciles mismatches with cargo-binstall. The
+repository requires `just`, `sccache`, `cargo-nextest`, `typos`, `rg`, `ast-grep`,
 `jq`, and `uv`. Dependency gates additionally use `cargo-deny`, `cargo-audit`,
 `cargo-shear`, and `cargo-machete`. `sccache` is a committed wrapper backed by a
 supervised per-user service, so Cargo fails with a setup instruction rather than silently
 running uncached. `just sccache-canary` proves a repeated Rust compile is a real cache hit.
 It is a transport/storage liveness probe, not a repository performance claim; use the
-opt-in `just sccache-effectiveness` for two Cargo-shaped cold-target builds.
+opt-in `just sccache-effectiveness` for repeated Hyperfine cold-target/warm-cache samples.
+`just linker-benchmark` compares the pinned default linker with mold without changing the
+committed linker configuration. The service binds the exact fixed socket permitted by the
+Codex sandbox; setup and doctor reject a symlink, a runtime-directory substitution, or any
+disagreement between the supervisor and entrypoint socket identities.
 
 Stable root and Pyrefly-sidecar builds share the repository `target/`. Dated-nightly
-extractor, nightly assurance, and sanitizer/fuzz artifacts use separate target
+extractor, exact dated-nightly assurance, and sanitizer/fuzz artifacts use separate target
 subdirectories. Compile-producing Just recipes and CI set `CARGO_INCREMENTAL=0` so sccache
 can reuse complete compiler outputs. Local check and Clippy recipes retain rustc
 incremental feedback and explicitly bypass sccache because ordinary `cargo check` units
@@ -79,10 +85,12 @@ worktrees keep independent target trees and do not claim `SCCACHE_BASEDIRS` norm
 
 Every Just recipe establishes its own clean environment: repository-local uv cache,
 domain-explicit Python project, Rustup-owned Cargo, and no inherited virtualenv, Conda,
-direnv, toolchain-wrapper, or target-directory overrides. Use `just <recipe>` directly
+direnv, toolchain, compiler-wrapper, flags, linker, sccache backend, or build-directory
+overrides. Use `just <recipe>` directly
 from interactive and non-interactive shells. Root `direnv` is optional convenience only;
 it does not sync or activate Python. `scripts/bootstrap.sh` verifies and reports state but
-does not mutate the caller's environment.
+does not mutate the caller's environment and executes its checks through that same clean
+recipe shell.
 
 The workstation cache is a supervised, disk-only 40 GiB cache. CodeFabric does not add a
 remote cache or distributed compilation layer for the single-developer workstation.
@@ -98,11 +106,8 @@ just root-test            # nextest plus doctests
 just adapter-ci-fast      # Ruff, Pyrefly, pytest, and STDIO discipline
 just extractor-ci-fast    # dated-nightly extractor gate
 just sidecar-ci-fast      # stable pinned-source sidecar gate
-just model-family-check   # typed render plus independent staged consumers
-just model-repro-check    # bounded predecessor reproducibility during transition
-just model-assurance-check # live Just/test/rule evidence and profile soundness
 just stable-graph-check   # exact pins/families and local-vs-S3 activation boundary
-just governance           # model-derived structure, provenance, and zero-state checks
+just governance           # structure, provenance, and zero-state checks
 just ci-fast              # routine four-domain aggregate gate
 ```
 

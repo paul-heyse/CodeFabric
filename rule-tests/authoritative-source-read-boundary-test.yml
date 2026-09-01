@@ -4,10 +4,6 @@ valid:
       fn read_source(root: &SecureRoot, path: &PlatformPath) -> Result<Vec<u8>, SecurePathError> {
           root.read_file(path)
       }
-  - |
-      fn read_candidate_input(path: &Path) -> Result<Vec<u8>, GateBCandidateError> {
-          Ok(fs::read(path)?)
-      }
 invalid:
   - |
       fn read_source(path: &Path) {

@@ -128,6 +128,24 @@ struct LocatedTypeRow {
     end_column: u64,
 }
 
+type ProjectedTypeRows = (
+    Vec<TypeShapeRow>,
+    Vec<TypeComponentRow>,
+    Vec<TypeTraitRow>,
+    Vec<LocatedTypeRow>,
+);
+
+struct LoadedModuleAnalysisInput<'a> {
+    query: &'a Query,
+    run: &'a AnalysisRunIdentity,
+    diagnostics: &'a [String],
+    module: &'a ModuleInput,
+    source: &'a [u8],
+    provider_path: &'a Path,
+    name: ModuleName,
+    path: ModulePath,
+}
+
 struct CallTargetRow {
     occurrence: u64,
     start_byte: u64,
@@ -213,7 +231,7 @@ fn parse_digest(value: &str) -> Result<[u8; 32], String> {
         return Err("digest is not 32 bytes".to_owned());
     }
     let mut result = [0_u8; 32];
-    for (index, chunk) in encoded.as_bytes().chunks_exact(2).enumerate() {
+    for (index, chunk) in encoded.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let high = hex_nibble(chunk[0]).ok_or_else(|| "digest is not hexadecimal".to_owned())?;
         let low = hex_nibble(chunk[1]).ok_or_else(|| "digest is not hexadecimal".to_owned())?;
         result[index] = (high << 4) | low;
@@ -361,16 +379,16 @@ impl SemanticContext {
             .map(|((module, (name, path)), provider_path)| {
                 let source = std::fs::read(&module.source_path)
                     .map_err(|error| format!("read admitted Pyrefly source: {error}"))?;
-                analyze_loaded_module(
-                    &self.query,
+                analyze_loaded_module(LoadedModuleAnalysisInput {
+                    query: &self.query,
                     run,
-                    &diagnostics,
+                    diagnostics: &diagnostics,
                     module,
-                    &source,
-                    &provider_path,
+                    source: &source,
+                    provider_path: &provider_path,
                     name,
                     path,
-                )
+                })
             })
             .collect::<Result<Vec<_>, String>>()?;
         Ok(ContextAnalysis {
@@ -383,16 +401,17 @@ impl SemanticContext {
 }
 
 #[allow(clippy::too_many_lines)]
-fn analyze_loaded_module(
-    query: &Query,
-    run: &AnalysisRunIdentity,
-    diagnostics: &[String],
-    module: &ModuleInput,
-    source: &[u8],
-    provider_path: &Path,
-    name: ModuleName,
-    path: ModulePath,
-) -> Result<ModuleAnalysis, String> {
+fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleAnalysis, String> {
+    let LoadedModuleAnalysisInput {
+        query,
+        run,
+        diagnostics,
+        module,
+        source,
+        provider_path,
+        name,
+        path,
+    } = input;
     let common = CommonIdentity {
         run,
         module,
@@ -405,7 +424,7 @@ fn analyze_loaded_module(
     let (shape_rows, component_rows, trait_rows, located_rows) =
         project_type_table(type_table.as_ref(), source)?;
     let call_rows = project_callees(callees.as_deref(), source)?;
-    let member_rows = project_members(query, name, path, type_table.as_ref());
+    let member_rows = project_members(query, name, &path, type_table.as_ref());
     let source_path_text = provider_path.to_string_lossy();
     let module_diagnostics = diagnostics
         .iter()
@@ -425,43 +444,43 @@ fn analyze_loaded_module(
     let mut relations = vec![
         encode_relation(
             PyreflyRelation::ModuleContext,
-            module_context_batch(&common, source.len())?,
+            &module_context_batch(&common, source.len())?,
         )?,
         encode_relation(
             PyreflyRelation::TypeShape,
-            type_shape_batch(&common, &shape_rows)?,
+            &type_shape_batch(&common, &shape_rows)?,
         )?,
         encode_relation(
             PyreflyRelation::TypeComponent,
-            type_component_batch(&common, &component_rows)?,
+            &type_component_batch(&common, &component_rows)?,
         )?,
         encode_relation(
             PyreflyRelation::TypeTrait,
-            type_trait_batch(&common, &trait_rows)?,
+            &type_trait_batch(&common, &trait_rows)?,
         )?,
         encode_relation(
             PyreflyRelation::LocatedType,
-            located_type_batch(&common, &located_rows)?,
+            &located_type_batch(&common, &located_rows)?,
         )?,
         encode_relation(
             PyreflyRelation::CallTarget,
-            call_target_batch(&common, &call_rows)?,
+            &call_target_batch(&common, &call_rows)?,
         )?,
         encode_relation(
             PyreflyRelation::Member,
-            member_batch(&common, &member_rows)?,
+            &member_batch(&common, &member_rows)?,
         )?,
         encode_relation(
             PyreflyRelation::Diagnostic,
-            diagnostic_batch(&common, &module_diagnostics)?,
+            &diagnostic_batch(&common, &module_diagnostics)?,
         )?,
         encode_relation(
             PyreflyRelation::AffectedModule,
-            affected_module_batch(&common)?,
+            &affected_module_batch(&common)?,
         )?,
         encode_relation(
             PyreflyRelation::Coverage,
-            coverage_batch(&common, &coverage_rows)?,
+            &coverage_batch(&common, &coverage_rows)?,
         )?,
     ];
     relations.sort_by_key(|relation| relation.relation);
@@ -476,15 +495,7 @@ fn analyze_loaded_module(
 fn project_type_table(
     response: Option<&TypeTableResponseData>,
     source: &[u8],
-) -> Result<
-    (
-        Vec<TypeShapeRow>,
-        Vec<TypeComponentRow>,
-        Vec<TypeTraitRow>,
-        Vec<LocatedTypeRow>,
-    ),
-    String,
-> {
+) -> Result<ProjectedTypeRows, String> {
     let Some(response) = response else {
         return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
     };
@@ -625,7 +636,7 @@ fn project_callees(
 fn project_members(
     query: &Query,
     name: ModuleName,
-    path: ModulePath,
+    path: &ModulePath,
     response: Option<&TypeTableResponseData>,
 ) -> Vec<MemberRow> {
     let candidates = response
@@ -633,7 +644,7 @@ fn project_members(
         .flat_map(|response| &response.type_table)
         .filter_map(|entry| match &entry.kind {
             IndexedTypeShapeKind::Named { name, .. } => name
-                .rsplit(|character| character == '.' || character == ':')
+                .rsplit(['.', ':'])
                 .next()
                 .filter(|candidate| {
                     !candidate.is_empty()
@@ -1151,7 +1162,7 @@ fn coverage_batch(
 
 fn encode_relation(
     relation: PyreflyRelation,
-    batch: RecordBatch,
+    batch: &RecordBatch,
 ) -> Result<RelationAnalysis, String> {
     let row_count = u64::try_from(batch.num_rows()).map_err(|_| "relation rows exceed u64")?;
     let schema = relation.schema();
@@ -1170,7 +1181,7 @@ fn encode_relation(
                 |error| format!("open {} Arrow stream: {error}", relation.relation_id()),
             )?;
         writer
-            .write(&batch)
+            .write(batch)
             .map_err(|error| format!("write {} Arrow stream: {error}", relation.relation_id()))?;
         writer
             .finish()
@@ -1214,8 +1225,249 @@ fn as_u64(value: usize) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow_array::{Array as _, FixedSizeBinaryArray};
     use arrow_ipc::reader::StreamReader;
+    use serde_json::{Value, json};
     use std::io::Cursor;
+
+    const WP33_EXPECTATIONS: &str =
+        include_str!("../../contracts/acceptance/relational-fabric-v3/expectations.jsonl");
+    const WP33_FIXTURES: &str =
+        include_str!("../../contracts/acceptance/relational-fabric-v3/negative-fixtures.jsonl");
+
+    fn claim_001() -> Value {
+        WP33_EXPECTATIONS
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("valid WP33 expectation row"))
+            .find(|row| row["claim_id"] == "RFV3-CLAIM-001")
+            .expect("frozen Claim 001 expectation")
+    }
+
+    fn claim_001_fixture(kind: &str) -> Value {
+        WP33_FIXTURES
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("valid WP33 fixture row"))
+            .find(|row| row["claim_id"] == "RFV3-CLAIM-001" && row["kind"] == kind)
+            .unwrap_or_else(|| panic!("frozen Claim 001 {kind} fixture"))
+    }
+
+    fn claim_001_pyrefly_request(claim: &Value) -> &Value {
+        claim["complete_input_universe"]["inputs"]["provider_requests"]
+            .as_array()
+            .expect("Claim 001 provider requests")
+            .iter()
+            .find(|request| request["provider_id"] == "pyrefly")
+            .expect("Claim 001 Pyrefly request")
+    }
+
+    fn analyze_claim_001_source(
+        context: &mut SemanticContext,
+        admitted_path: &Path,
+        source: &Value,
+        request: &Value,
+    ) -> RecordBatch {
+        std::fs::write(
+            admitted_path,
+            source["bytes_utf8"]
+                .as_str()
+                .expect("Claim 001 source bytes"),
+        )
+        .expect("write admitted Claim 001 source image");
+        let environment = request["semantic_environment_id"]
+            .as_str()
+            .expect("Claim 001 semantic environment");
+        let run = AnalysisRunIdentity {
+            provider_run_id: request["provider_run_id"]
+                .as_str()
+                .expect("Claim 001 provider run")
+                .to_owned(),
+            analysis_context_id: request["analysis_context_id"]
+                .as_str()
+                .expect("Claim 001 analysis context")
+                .to_owned(),
+            semantic_environment_digest: format!("b3:{environment}"),
+            source_generation: source["source_generation"]
+                .as_u64()
+                .expect("Claim 001 source generation"),
+        };
+        let module = ModuleInput {
+            module_id: "entity:module:wp38-claim-001".to_owned(),
+            module_name: "fixture_typed".to_owned(),
+            file_id: source["file_id"]
+                .as_str()
+                .expect("Claim 001 file ID")
+                .to_owned(),
+            source_path: admitted_path.to_owned(),
+            source_digest: source["content_digest"]
+                .as_str()
+                .expect("Claim 001 content digest")
+                .to_owned(),
+        };
+        let analysis = context
+            .analyze_modules(&run, &[module])
+            .expect("execute production Pyrefly query surface");
+        let relation = analysis.modules[0]
+            .relations
+            .iter()
+            .find(|relation| relation.relation == PyreflyRelation::CallTarget)
+            .expect("Claim 001 call-target relation");
+        let mut reader = StreamReader::try_new(Cursor::new(&relation.arrow_ipc), None).unwrap();
+        let batch = reader.next().unwrap().unwrap();
+        assert!(reader.next().is_none());
+        batch
+    }
+
+    fn claim_001_call_target(batch: &RecordBatch) -> Value {
+        assert_eq!(batch.num_rows(), 1, "one frozen Claim 001 call target");
+        let u64_value = |name: &str| {
+            batch
+                .column_by_name(name)
+                .expect("Claim 001 u64 column")
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("Claim 001 UInt64 array")
+                .value(0)
+        };
+        let text = |name: &str| {
+            batch
+                .column_by_name(name)
+                .expect("Claim 001 text column")
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .expect("Claim 001 StringArray")
+                .value(0)
+        };
+        let classes = batch
+            .column_by_name("class_name")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        json!({
+            "call_occurrence_ordinal": u64_value("call_occurrence_ordinal"),
+            "start_byte": u64_value("start_byte"),
+            "end_byte": u64_value("end_byte"),
+            "target_ordinal": u64_value("target_ordinal"),
+            "callee_kind": text("callee_kind"),
+            "qualified_target": text("qualified_target"),
+            "class_name": if classes.is_null(0) { Value::Null } else { json!(classes.value(0)) },
+            "resolution_state": text("resolution_state"),
+        })
+    }
+
+    fn claim_001_content_digest(batch: &RecordBatch) -> String {
+        use std::fmt::Write as _;
+
+        let digest = batch
+            .column_by_name("content_digest")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .unwrap()
+            .value(0);
+        let mut content_digest = String::with_capacity(3 + digest.len() * 2);
+        content_digest.push_str("b3:");
+        for byte in digest {
+            write!(content_digest, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        content_digest
+    }
+
+    fn claim_001_text<'a>(batch: &'a RecordBatch, name: &str) -> &'a str {
+        batch
+            .column_by_name(name)
+            .unwrap_or_else(|| panic!("Claim 001 {name} column"))
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap_or_else(|| panic!("Claim 001 {name} StringArray"))
+            .value(0)
+    }
+
+    fn claim_001_source<'a>(claim: &'a Value, source_id: &Value) -> &'a Value {
+        claim["complete_input_universe"]["inputs"]["source_images"]
+            .as_array()
+            .expect("Claim 001 source images")
+            .iter()
+            .find(|source| source["source_id"] == *source_id)
+            .expect("Claim 001 requested source image")
+    }
+
+    fn claim_001_temp_root(suffix: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "codefabric-wp38-claim-001-{suffix}-{}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn wp38_claim_001_positive_executes_frozen_pyrefly_provider_observation() {
+        let claim = claim_001();
+        let request = claim_001_pyrefly_request(&claim);
+        let source = claim_001_source(&claim, &request["source_id"]);
+        let expected = claim["decoded_expectation"]["rows"]
+            .as_array()
+            .expect("Claim 001 decoded rows")
+            .iter()
+            .find(|row| row[0] == "pyrefly")
+            .expect("Claim 001 decoded Pyrefly row");
+
+        let root = claim_001_temp_root("positive");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create Claim 001 positive root");
+        let admitted_path = root.join("admitted.py");
+        let mut context = SemanticContext::new(&root, "wp38-claim-001-positive")
+            .expect("create production Pyrefly context");
+        let batch = analyze_claim_001_source(&mut context, &admitted_path, source, request);
+
+        assert_eq!(
+            request["relation_id"],
+            PyreflyRelation::CallTarget.relation_id()
+        );
+        assert_eq!(expected[1], claim_001_text(&batch, "provider_run_id"));
+        assert_eq!(expected[3], PyreflyRelation::CallTarget.schema_digest());
+        assert_eq!(expected[5], claim_001_content_digest(&batch));
+        assert_eq!(expected[6], claim_001_call_target(&batch));
+        assert_eq!(source["file_id"], claim_001_text(&batch, "file_id"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn wp38_claim_001_causal_source_mutation_changes_production_pyrefly_target() {
+        let claim = claim_001();
+        let request = claim_001_pyrefly_request(&claim);
+        let fixture = claim_001_fixture("causal");
+        let before = &fixture["mutation"]["before"];
+        let after = &fixture["mutation"]["after"];
+
+        let root = claim_001_temp_root("causal");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create Claim 001 causal root");
+        let admitted_path = root.join("admitted.py");
+        let mut context = SemanticContext::new(&root, "wp38-claim-001-causal")
+            .expect("create production Pyrefly context");
+        let baseline = analyze_claim_001_source(&mut context, &admitted_path, before, request);
+        let changed = analyze_claim_001_source(&mut context, &admitted_path, after, request);
+
+        assert_ne!(
+            claim_001_call_target(&baseline),
+            claim_001_call_target(&changed)
+        );
+        assert_eq!(
+            fixture["expected_decoded"]["native_fields"],
+            claim_001_call_target(&changed)
+        );
+        assert_eq!(
+            fixture["expected_decoded"]["source_digest"],
+            claim_001_content_digest(&changed)
+        );
+        assert_eq!(
+            fixture["expected_decoded"]["provider_run_id"],
+            claim_001_text(&changed, "provider_run_id")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn operational_source_paths_do_not_escape_diagnostics() {

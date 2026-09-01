@@ -1,14 +1,14 @@
 # Repository toolchain pin (spec section 10, section 86 "rust-toolchain.toml stable-first").
 #
-# Stable is the daemon/data-plane and Pyrefly-sidecar toolchain. The production MIR
+# Rust 1.98.0 is the daemon/data-plane and Pyrefly-sidecar toolchain. The production MIR
 # extractor owns an exact dated nightly in rustc-extractor/rust-toolchain.toml; targeted
-# assurance commands may still use a separately installed nightly.
+# assurance commands use that same dated nightly with an isolated target directory.
 #
 # `rustc-dev` is intentionally absent from this root. Compiler-private APIs and their
 # required component live only in the isolated extractor domain.
 
 [toolchain]
-channel = "stable"
+channel = "1.98.0"
 profile = "default"
 components = [
   "rustfmt",

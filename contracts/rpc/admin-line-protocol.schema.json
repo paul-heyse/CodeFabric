@@ -55,7 +55,7 @@
           "additionalProperties": false,
           "required": ["command"],
           "properties": {
-            "command": {"enum": ["status", "stop", "drain"]}
+            "command": {"enum": ["status", "cutover_status", "stop", "drain"]}
           }
         }
       }
@@ -249,6 +249,23 @@
         "shutdown_mode": {"enum": [null, "stop", "drain"]},
         "workspaces": {"type": "array", "items": {"$ref": "#/$defs/WorkspaceRecord"}},
         "workspace_health": {"type": "array", "items": {"$ref": "#/$defs/WorkspaceHealthStatus"}},
+        "cutover_status": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["workspace_id", "durable_phase", "durable_event_id", "durable_sequence", "admission", "code", "remediation"],
+            "properties": {
+              "workspace_id": {"$ref": "#/$defs/Id16"},
+              "durable_phase": {"type": "string"},
+              "durable_event_id": {"type": ["string", "null"]},
+              "durable_sequence": {"type": ["integer", "null"], "minimum": 1},
+              "admission": {"enum": ["closed", "target_read_only", "target_read_write"]},
+              "code": {"type": "string"},
+              "remediation": {"type": "string"}
+            }
+          }
+        },
         "error_code": {"type": ["string", "null"]}
       }
     }

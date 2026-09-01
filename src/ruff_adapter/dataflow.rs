@@ -1,13 +1,11 @@
 //! Application-owned Python value/access inputs and owner-local reaching definitions.
 //!
 //! Ruff binding identities define variable domains. The WP06 CFG supplies the control
-//! topology, but petgraph-local indices never cross this adapter boundary. Every derived
-//! output is selected through the governed `PY_OWNER_REACHING_DEFS_V1` registry entry and
-//! carries its precision and derivation-bundle identity.
+//! topology, but petgraph-local indices never cross this adapter boundary. Every derived output
+//! carries the application-owned released derivation, precision, and bundle identities directly;
+//! no generated registry selects the producer.
 
 use std::collections::{BTreeMap, BTreeSet};
-
-use crate::registries::DERIVATION_ENTRIES;
 
 use super::callables::{
     PythonCallArgumentFact, PythonCallSiteFact, PythonCallableFact, PythonCallableSyntaxFact,
@@ -21,7 +19,6 @@ use super::semantic::{
 pub const PYTHON_DATAFLOW_DERIVATION_ID: &str = "PY_OWNER_REACHING_DEFS_V1";
 pub const PYTHON_DATAFLOW_PRECISION_PROFILE: &str = "PYTHON_LOCAL_REACHING_DEFS_V1";
 pub const PYTHON_DATAFLOW_BUNDLE_ID: &str = "codefabric.derivation-bundle.v1.3";
-const IMPLEMENTATION_SYMBOL: &str = "crate::ruff_adapter::dataflow::project_python_dataflow";
 
 /// Closed value classification for `value_detail`.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -39,24 +36,6 @@ pub enum PythonValueKind {
     Unknown,
 }
 
-impl PythonValueKind {
-    pub(crate) const fn code(self) -> i16 {
-        match self {
-            Self::Literal => 10,
-            Self::NameRead => 20,
-            Self::AttributeRead => 30,
-            Self::SubscriptRead => 40,
-            Self::CallReturn => 50,
-            Self::OperationResult => 60,
-            Self::Container => 70,
-            Self::CallableObject => 80,
-            Self::AwaitOrYield => 90,
-            Self::Merged => 100,
-            Self::Unknown => 110,
-        }
-    }
-}
-
 /// Closed normalized-operation classification for `operation_detail`.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum PythonOperationKind {
@@ -65,18 +44,6 @@ pub enum PythonOperationKind {
     Call,
     Merge,
     DynamicBarrier,
-}
-
-impl PythonOperationKind {
-    pub(crate) const fn code(self) -> i32 {
-        match self {
-            Self::Read => 10,
-            Self::Write => 20,
-            Self::Call => 30,
-            Self::Merge => 40,
-            Self::DynamicBarrier => 50,
-        }
-    }
 }
 
 /// Closed definition/use event classification.
@@ -93,24 +60,6 @@ pub enum PythonDataflowEventKind {
     Decorator,
     EvaluatedAnnotation,
     DynamicUnknown,
-}
-
-impl PythonDataflowEventKind {
-    pub(crate) const fn code(self) -> i16 {
-        match self {
-            Self::Definition => 10,
-            Self::Read => 20,
-            Self::Receiver => 30,
-            Self::Callee => 40,
-            Self::Argument => 50,
-            Self::Condition => 60,
-            Self::ReturnOrYield => 70,
-            Self::Index => 80,
-            Self::Decorator => 90,
-            Self::EvaluatedAnnotation => 100,
-            Self::DynamicUnknown => 110,
-        }
-    }
 }
 
 /// Canonical abstract memory/access-path location classification.
@@ -152,17 +101,6 @@ pub enum PythonAccessProjectionKind {
     Unknown,
 }
 
-impl PythonAccessProjectionKind {
-    pub(crate) const fn code(self) -> i16 {
-        match self {
-            Self::Base => 10,
-            Self::Field => 20,
-            Self::Index => 30,
-            Self::Unknown => 40,
-        }
-    }
-}
-
 /// The six governed owner-local relation families produced by this derivation.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum PythonDataflowRelationKind {
@@ -175,17 +113,6 @@ pub enum PythonDataflowRelationKind {
 }
 
 impl PythonDataflowRelationKind {
-    pub(crate) const fn canonical_name(self) -> &'static str {
-        match self {
-            Self::ReachingDefinition => "REACHING_DEFINITION",
-            Self::Reaches => "REACHES",
-            Self::DefUse => "DEF_USE",
-            Self::DataDep => "DATA_DEP",
-            Self::ValueFlowsTo => "VALUE_FLOWS_TO",
-            Self::KillsDefinition => "KILLS_DEFINITION",
-        }
-    }
-
     const fn discriminator(self) -> u8 {
         match self {
             Self::ReachingDefinition => 1,
@@ -303,37 +230,6 @@ struct BindingDomain {
 }
 
 type Reaching = BTreeMap<BindingDomain, BTreeSet<PythonSemanticId>>;
-
-fn selected_derivation() -> Result<(), PythonSemanticError> {
-    let selected = DERIVATION_ENTRIES
-        .iter()
-        .filter(|entry| entry.derivation_id == PYTHON_DATAFLOW_DERIVATION_ID)
-        .collect::<Vec<_>>();
-    if selected.len() != 1 {
-        return Err(PythonSemanticError::Invariant(format!(
-            "{PYTHON_DATAFLOW_DERIVATION_ID} must resolve to exactly one derivation entry"
-        )));
-    }
-    let entry = selected[0];
-    if entry.precision_profile != PYTHON_DATAFLOW_PRECISION_PROFILE
-        || entry.derivation_bundle_id != PYTHON_DATAFLOW_BUNDLE_ID
-        || entry.implementation_symbol != IMPLEMENTATION_SYMBOL
-        || entry.output_fact_families
-            != [
-                "reaching-definition",
-                "reaches",
-                "def-use",
-                "data-dep",
-                "value-flows-to",
-                "kills-definition",
-            ]
-    {
-        return Err(PythonSemanticError::Invariant(format!(
-            "{PYTHON_DATAFLOW_DERIVATION_ID} registry selection mismatched runtime contract"
-        )));
-    }
-    Ok(())
-}
 
 fn hash_path(owner_id: PythonSemanticId, display: &str) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new_derive_key("codefabric.python-access-path.v1");
@@ -504,7 +400,6 @@ pub(super) fn project_python_dataflow(
     cfg_nodes: &[PythonCfgNodeFact],
     cfg_edges: &[PythonCfgEdgeFact],
 ) -> Result<PythonDataflowProjection, PythonSemanticError> {
-    selected_derivation()?;
     let binding_by_id = bindings
         .iter()
         .map(|binding| (binding.binding_id, binding))

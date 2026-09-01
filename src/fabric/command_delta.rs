@@ -329,9 +329,9 @@ mod tests {
     use crate::fabric::command::{
         ActorId, AdmissionContext, AdmissionOutcome, AuthorizationDecision, AuthorizationRef,
         CommandIdentity, CommandKind, CommandOwnership, CommandPins, CommitConfirmation,
-        CompilerReleaseRef, DurableCommandState, EpochId, ExpectedHead, FabricCommand,
-        FabricCommandPayload, IdempotencyKey, LeaseId, ModelHeadRef, OperationSelectionRef,
-        PrincipalId, ProofReceiptRef, ProviderSetRef, ReconciliationEvidenceRef,
+        DurableCommandState, EpochId, ExpectedHead, FabricCommand, FabricCommandPayload,
+        IdempotencyKey, InputReleaseRef, LeaseId, OperationSelectionRef, PrincipalId,
+        ProgramReleaseRef, ProofReceiptRef, ProviderSetRef, ReconciliationEvidenceRef,
         ReconciliationObservation, RelationSetRef, ResourceEnvelopeRef, SourceGeneration,
         WorkspaceId, WriterFence,
     };
@@ -422,8 +422,17 @@ mod tests {
             expected_head: ExpectedHead::Epoch(EpochId::from_bytes(bytes16(8))),
             writer_fence: fence(),
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes(bytes32(9)),
-                model_head: ModelHeadRef::from_bytes(bytes32(10)),
+                input_release: InputReleaseRef::from_bytes(bytes32(9)),
+                program_release: ProgramReleaseRef::from_bytes(bytes32(10)),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    bytes32(10),
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(bytes32(
+                    10,
+                )),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(bytes32(
+                    10,
+                )),
                 source_generation: SourceGeneration::new(11),
                 provider_set: ProviderSetRef::from_bytes(bytes32(12)),
             },

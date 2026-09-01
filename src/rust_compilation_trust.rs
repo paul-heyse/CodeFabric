@@ -133,6 +133,7 @@ impl RustCompilationResourceLimits {
             open_files: self.open_files,
             address_space_bytes: self.memory_bytes,
             output_file_bytes: self.single_file_bytes,
+            process_count: self.process_count,
         }
     }
 }
@@ -803,7 +804,11 @@ pub struct RustCompilationLaunchPlan {
     sandbox_profile_digest: String,
     workspace_id: String,
     provider_run_id: String,
+    analysis_context_id: String,
     source_generation: u64,
+    context_manifest_digest: String,
+    source_snapshot_manifest_digest: String,
+    resource_profile_id: String,
     source_snapshot_digest: String,
     dependency_snapshot_digest: String,
     toolchain_digest: String,
@@ -850,6 +855,35 @@ impl RustCompilationLaunchPlan {
     #[must_use]
     pub const fn trust_mode(&self) -> RustCompilationTrustMode {
         self.trust_mode
+    }
+
+    /// Derive the non-forgeable daemon-protocol binding for this exact verified launch plan.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a plan whose paths, executable identities, environment, or digest changed after
+    /// policy compilation.
+    pub fn protocol_binding(
+        &self,
+    ) -> Result<RustCompilationProtocolBinding, RustCompilationTrustError> {
+        self.verify_digest()?;
+        Ok(RustCompilationProtocolBinding {
+            plan_digest: self.plan_digest.clone(),
+            trust_mode: self.trust_mode,
+            trust_state: self.platform.trust_state,
+            sandbox_mechanism: self.platform.sandbox_mechanism,
+            sandbox_profile_digest: self.sandbox_profile_digest.clone(),
+            workspace_id: self.workspace_id.clone(),
+            provider_run_id: self.provider_run_id.clone(),
+            analysis_context_id: self.analysis_context_id.clone(),
+            source_generation: self.source_generation,
+            context_manifest_digest: self.context_manifest_digest.clone(),
+            source_snapshot_manifest_digest: self.source_snapshot_manifest_digest.clone(),
+            resource_profile_id: self.resource_profile_id.clone(),
+            source_snapshot_digest: self.source_snapshot_digest.clone(),
+            toolchain_identity_digest: self.toolchain_digest.clone(),
+            exact_toolchain_release: self.exact_toolchain_release.clone(),
+        })
     }
 
     /// Produce the request owned by the shared semantic-provider launcher.
@@ -935,6 +969,119 @@ impl RustCompilationLaunchPlan {
             }
         }
         Ok(())
+    }
+}
+
+/// Exact launch-plan authority installed into the daemon endpoint before the extractor connects.
+///
+/// Fields are private so a compiler response or caller-supplied digest cannot manufacture this
+/// authority. Production construction is possible only through
+/// [`RustCompilationLaunchPlan::protocol_binding`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RustCompilationProtocolBinding {
+    plan_digest: String,
+    trust_mode: RustCompilationTrustMode,
+    trust_state: RustCompilationTrustState,
+    sandbox_mechanism: SandboxMechanism,
+    sandbox_profile_digest: String,
+    workspace_id: String,
+    provider_run_id: String,
+    analysis_context_id: String,
+    source_generation: u64,
+    context_manifest_digest: String,
+    source_snapshot_manifest_digest: String,
+    resource_profile_id: String,
+    source_snapshot_digest: String,
+    toolchain_identity_digest: String,
+    exact_toolchain_release: String,
+}
+
+impl RustCompilationProtocolBinding {
+    /// Require one proved untrusted plan and exact daemon protocol pins.
+    ///
+    /// # Errors
+    ///
+    /// Rejects trusted-local/degraded execution or any run, sandbox, source, context, resource,
+    /// or toolchain mismatch before the private endpoint starts accepting streams.
+    #[allow(clippy::too_many_arguments)]
+    pub fn validate_untrusted_protocol(
+        &self,
+        provider_run_id: &str,
+        workspace_id: &str,
+        analysis_context_id: &str,
+        source_generation: u64,
+        context_manifest_digest: &str,
+        source_snapshot_manifest_digest: &str,
+        resource_profile_id: &str,
+        sandbox_profile_digest: &str,
+        toolchain_identity_digest: &str,
+    ) -> Result<(), RustCompilationTrustError> {
+        if self.trust_mode != RustCompilationTrustMode::UntrustedSandboxed
+            || self.trust_state != RustCompilationTrustState::ProvedUntrustedContainment
+            || self.sandbox_mechanism == SandboxMechanism::None
+        {
+            return Err(RustCompilationTrustError::UntrustedAdmissionRequired);
+        }
+        if self.provider_run_id != provider_run_id
+            || self.workspace_id != workspace_id
+            || self.analysis_context_id != analysis_context_id
+            || self.source_generation != source_generation
+            || self.context_manifest_digest != context_manifest_digest
+            || self.source_snapshot_manifest_digest != source_snapshot_manifest_digest
+            || self.resource_profile_id != resource_profile_id
+            || self.sandbox_profile_digest != sandbox_profile_digest
+            || self.toolchain_identity_digest != toolchain_identity_digest
+        {
+            return Err(RustCompilationTrustError::CompilerObservationBindingMismatch);
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn plan_digest(&self) -> &str {
+        &self.plan_digest
+    }
+
+    #[must_use]
+    pub fn source_snapshot_digest(&self) -> &str {
+        &self.source_snapshot_digest
+    }
+
+    #[must_use]
+    pub fn exact_toolchain_release(&self) -> &str {
+        &self.exact_toolchain_release
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn test_only(
+        provider_run_id: &str,
+        workspace_id: &str,
+        analysis_context_id: &str,
+        source_generation: u64,
+        context_manifest_digest: &str,
+        source_snapshot_manifest_digest: &str,
+        resource_profile_id: &str,
+        sandbox_profile_digest: &str,
+        toolchain_identity_digest: &str,
+    ) -> Self {
+        Self {
+            plan_digest: format!("b3:{}", "11".repeat(32)),
+            trust_mode: RustCompilationTrustMode::UntrustedSandboxed,
+            trust_state: RustCompilationTrustState::ProvedUntrustedContainment,
+            sandbox_mechanism: SandboxMechanism::DarwinSeatbelt,
+            sandbox_profile_digest: sandbox_profile_digest.to_owned(),
+            workspace_id: workspace_id.to_owned(),
+            provider_run_id: provider_run_id.to_owned(),
+            analysis_context_id: analysis_context_id.to_owned(),
+            source_generation,
+            context_manifest_digest: context_manifest_digest.to_owned(),
+            source_snapshot_manifest_digest: source_snapshot_manifest_digest.to_owned(),
+            resource_profile_id: resource_profile_id.to_owned(),
+            source_snapshot_digest: source_snapshot_manifest_digest.to_owned(),
+            toolchain_identity_digest: toolchain_identity_digest.to_owned(),
+            exact_toolchain_release: "rustc-1.100.0-nightly-2026-08-18".to_owned(),
+        }
     }
 }
 
@@ -1056,7 +1203,11 @@ pub fn compile_rust_compilation_launch_plan(
         sandbox_profile_digest: sandbox_profile.sha256_digest.clone(),
         workspace_id: request.context.workspace_id.clone(),
         provider_run_id: request.context.provider_run_id.clone(),
+        analysis_context_id: request.context.analysis_context_id.clone(),
         source_generation: request.context.source_generation,
+        context_manifest_digest: request.context.context_manifest_digest.clone(),
+        source_snapshot_manifest_digest: request.context.source_snapshot_manifest_digest.clone(),
+        resource_profile_id: request.context.resource_profile_id.clone(),
         source_snapshot_digest: inputs.source_snapshot_digest.clone(),
         dependency_snapshot_digest: inputs.dependency_snapshot_digest.clone(),
         toolchain_digest: inputs.toolchain_digest.clone(),
@@ -1375,6 +1526,39 @@ impl RustCompilationLauncherReceipt {
         self.cancellation_receipt_digest.as_deref()
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_only_contained_success(
+        plan: &RustCompilationLaunchPlan,
+    ) -> Result<Self, RustCompilationTrustError> {
+        Self::close(
+            plan,
+            RustCompilationTerminalObservation {
+                terminal_state: RustCompilationTerminalState::Succeeded,
+                exit_code: Some(0),
+                exceeded_limit: None,
+                usage: RustCompilationObservedUsage {
+                    wall_time_millis: 1,
+                    stdout_bytes: 0,
+                    stderr_bytes: 0,
+                    artifact_bytes: 0,
+                    peak_process_count: 1,
+                    file_count: 0,
+                    largest_file_bytes: 0,
+                    cpu_seconds: 0,
+                    peak_memory_bytes: 1,
+                    peak_open_files: 1,
+                },
+                accounting_quality: RustCompilationAccountingQuality::KernelComplete,
+                process_sample_count: 1,
+                process_group_empty: true,
+                stdout_digest: format!("b3:{}", "31".repeat(32)),
+                stderr_digest: format!("b3:{}", "32".repeat(32)),
+                output_manifest_digest: Some(format!("b3:{}", "33".repeat(32))),
+            },
+            None,
+        )
+    }
+
     /// Close a launch with actual bounded observations.
     ///
     /// # Errors
@@ -1533,14 +1717,12 @@ impl ProcessGroupObserver {
     ) -> Result<ProcessGroupSample, RustCompilationTrustError> {
         let group = process_group_id.to_string();
         #[cfg(target_os = "macos")]
-        let ps_group_selector = "-g";
+        let ps_arguments = &["-o", "pid=,pgid=,rss=,time=", "-g", &group];
         #[cfg(target_os = "linux")]
-        let ps_group_selector = "--pgroup";
-        let ps = bounded_command_output(
-            self.ps_path,
-            &["-o", "pid=,pgid=,rss=,time=", ps_group_selector, &group],
-            4 * 1024 * 1024,
-        )?;
+        // procps-ng 4.0.4 has no `--pgroup`; enumerate the bounded process table and retain only
+        // rows whose kernel-observed PGID matches the launcher-owned group.
+        let ps_arguments = &["-e", "-o", "pid=,pgid=,rss=,time="];
+        let ps = bounded_command_output(self.ps_path, ps_arguments, 4 * 1024 * 1024)?;
         if !ps.status.success() {
             return Err(RustCompilationTrustError::ProcessAccountingFailed);
         }
@@ -1558,7 +1740,10 @@ impl ProcessGroupObserver {
                 .parse::<i32>()
                 .map_err(|_| RustCompilationTrustError::ProcessAccountingFailed)?;
             if observed_group != process_group_id {
+                #[cfg(target_os = "macos")]
                 return Err(RustCompilationTrustError::ProcessAccountingFailed);
+                #[cfg(target_os = "linux")]
+                continue;
             }
             let rss_kib = columns[2]
                 .parse::<u64>()
@@ -1863,11 +2048,11 @@ enum SupervisionDecision {
 /// Execute and supervise one admitted Cargo run, returning the only constructible launcher
 /// receipt path.
 ///
-/// The supervisor captures bounded stdout/stderr, samples the complete launcher-owned process
-/// group, observes the private output tree, and always verifies group emptiness before closing a
-/// receipt. Current `ps`/`lsof` accounting is explicitly sampled; therefore untrusted plans fail
-/// before spawn until a kernel-complete group-accounting backend is installed. Separately
-/// authorized `TRUSTED_LOCAL` plans may execute and remain visibly degraded in their receipt.
+/// The supervisor captures bounded stdout/stderr, reads aggregate CPU/memory/process usage from
+/// the launcher-owned Linux cgroup when present, samples descriptor use, observes the private
+/// output tree, and always verifies both process-group and cgroup emptiness before closing a
+/// receipt. Separately authorized `TRUSTED_LOCAL` plans without a run cgroup remain visibly
+/// degraded in their receipt.
 ///
 /// # Errors
 ///
@@ -1891,15 +2076,25 @@ pub fn supervise_rust_compilation(
         return Err(RustCompilationTrustError::CancellationBeforeLaunch);
     }
     let observer = ProcessGroupObserver::probe()?;
-    let accounting_quality = observer.quality();
     if plan.trust_mode == RustCompilationTrustMode::UntrustedSandboxed
-        && accounting_quality != RustCompilationAccountingQuality::KernelComplete
+        && sandbox_profile.mechanism != SandboxMechanism::LinuxBubblewrap
     {
         return Err(RustCompilationTrustError::CompleteAccountingUnavailable);
     }
     let stdout_file = open_capture_file(&paths.stdout_path)?;
     let stderr_file = open_capture_file(&paths.stderr_path)?;
     let mut child = plan.launch_captured(launcher, sandbox_profile, material)?;
+    let kernel_accounting_available = child.kernel_usage()?.is_some();
+    let accounting_quality = if kernel_accounting_available {
+        RustCompilationAccountingQuality::KernelComplete
+    } else {
+        observer.quality()
+    };
+    if plan.trust_mode == RustCompilationTrustMode::UntrustedSandboxed
+        && accounting_quality != RustCompilationAccountingQuality::KernelComplete
+    {
+        return Err(RustCompilationTrustError::CompleteAccountingUnavailable);
+    }
     let stdout = child
         .take_stdout()
         .ok_or(RustCompilationTrustError::MissingCapturePipe)?;
@@ -1922,9 +2117,9 @@ pub fn supervise_rust_compilation(
         peak_memory_bytes: 0,
         peak_open_files: 0,
     };
-    let mut sample_count = 0_u64;
+    let mut sample_count = u64::from(kernel_accounting_available);
 
-    let decision = loop {
+    let mut decision = loop {
         usage.wall_time_millis = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         usage.stdout_bytes = stdout_capture.observed_bytes.load(Ordering::Acquire);
         usage.stderr_bytes = stderr_capture.observed_bytes.load(Ordering::Acquire);
@@ -1951,6 +2146,21 @@ pub fn supervise_rust_compilation(
             break SupervisionDecision::ResourceLimit(RustCompilationLimitKind::SingleFileBytes);
         }
 
+        if let Some(kernel) = child.kernel_usage()? {
+            sample_count = sample_count.saturating_add(1);
+            usage.peak_process_count = usage.peak_process_count.max(kernel.peak_process_count);
+            usage.cpu_seconds = usage.cpu_seconds.max(kernel.cpu_millis.div_ceil(1_000));
+            usage.peak_memory_bytes = usage.peak_memory_bytes.max(kernel.peak_memory_bytes);
+            if kernel.process_limit_hit {
+                usage.peak_process_count = plan.limits.process_count.saturating_add(1);
+                break SupervisionDecision::ResourceLimit(RustCompilationLimitKind::ProcessCount);
+            }
+            if kernel.memory_limit_hit {
+                usage.peak_memory_bytes = plan.limits.memory_bytes.saturating_add(1);
+                break SupervisionDecision::ResourceLimit(RustCompilationLimitKind::Memory);
+            }
+        }
+
         if let Some(status) = child.try_wait()? {
             if child.wait_group_empty(Duration::ZERO)? {
                 break SupervisionDecision::Exited(status);
@@ -1958,11 +2168,30 @@ pub fn supervise_rust_compilation(
             break SupervisionDecision::LeaderExitedWithDescendants;
         }
 
-        let sample = observer.sample(child.process_group_id())?;
-        sample_count = sample_count.saturating_add(1);
-        usage.peak_process_count = usage.peak_process_count.max(sample.process_count);
-        usage.cpu_seconds = usage.cpu_seconds.max(sample.cpu_millis.div_ceil(1_000));
-        usage.peak_memory_bytes = usage.peak_memory_bytes.max(sample.memory_bytes);
+        let sample = match observer.sample(child.process_group_id()) {
+            Ok(sample) => sample,
+            Err(RustCompilationTrustError::ProcessAccountingFailed) => {
+                // The leader may exit between the process-table and descriptor observations.
+                // Accept that race only after independently observing both leader exit and an
+                // empty launcher-owned group; a live child or descendant still fails closed.
+                if let Some(status) = child.try_wait()? {
+                    if child.wait_group_empty(Duration::ZERO)? {
+                        break SupervisionDecision::Exited(status);
+                    }
+                    break SupervisionDecision::LeaderExitedWithDescendants;
+                }
+                return Err(RustCompilationTrustError::ProcessAccountingFailed);
+            }
+            Err(error) => return Err(error),
+        };
+        if accounting_quality == RustCompilationAccountingQuality::SampledDegraded {
+            sample_count = sample_count.saturating_add(1);
+        }
+        if accounting_quality == RustCompilationAccountingQuality::SampledDegraded {
+            usage.peak_process_count = usage.peak_process_count.max(sample.process_count);
+            usage.cpu_seconds = usage.cpu_seconds.max(sample.cpu_millis.div_ceil(1_000));
+            usage.peak_memory_bytes = usage.peak_memory_bytes.max(sample.memory_bytes);
+        }
         usage.peak_open_files = usage.peak_open_files.max(sample.open_files);
         if usage.exceeds(RustCompilationLimitKind::ProcessCount, plan.limits) {
             break SupervisionDecision::ResourceLimit(RustCompilationLimitKind::ProcessCount);
@@ -1981,6 +2210,20 @@ pub fn supervise_rust_compilation(
         }
         thread::sleep(Duration::from_millis(100));
     };
+
+    if let Some(kernel) = child.kernel_usage()? {
+        sample_count = sample_count.saturating_add(1);
+        usage.peak_process_count = usage.peak_process_count.max(kernel.peak_process_count);
+        usage.cpu_seconds = usage.cpu_seconds.max(kernel.cpu_millis.div_ceil(1_000));
+        usage.peak_memory_bytes = usage.peak_memory_bytes.max(kernel.peak_memory_bytes);
+        if kernel.process_limit_hit {
+            usage.peak_process_count = plan.limits.process_count.saturating_add(1);
+            decision = SupervisionDecision::ResourceLimit(RustCompilationLimitKind::ProcessCount);
+        } else if kernel.memory_limit_hit {
+            usage.peak_memory_bytes = plan.limits.memory_bytes.saturating_add(1);
+            decision = SupervisionDecision::ResourceLimit(RustCompilationLimitKind::Memory);
+        }
+    }
 
     let cancellation_receipt = match decision {
         SupervisionDecision::Exited(_) => None,
@@ -2032,6 +2275,17 @@ pub fn supervise_rust_compilation(
     usage.wall_time_millis = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     usage.stdout_bytes = stdout.observed_bytes;
     usage.stderr_bytes = stderr.observed_bytes;
+    if let Some(kernel) = child.kernel_usage()? {
+        usage.peak_process_count = usage.peak_process_count.max(kernel.peak_process_count);
+        usage.cpu_seconds = usage.cpu_seconds.max(kernel.cpu_millis.div_ceil(1_000));
+        usage.peak_memory_bytes = usage.peak_memory_bytes.max(kernel.peak_memory_bytes);
+        if kernel.process_limit_hit {
+            usage.peak_process_count = plan.limits.process_count.saturating_add(1);
+        }
+        if kernel.memory_limit_hit {
+            usage.peak_memory_bytes = plan.limits.memory_bytes.saturating_add(1);
+        }
+    }
     let final_output = observe_output_tree(paths, true, plan.limits)?;
     usage.artifact_bytes = usage.artifact_bytes.max(final_output.artifact_bytes);
     usage.file_count = usage.file_count.max(final_output.file_count);
@@ -2133,8 +2387,15 @@ pub fn project_rust_compilation_trust_rows(
 {
     plan.verify_digest()?;
     receipt.verify_digest()?;
-    if receipt.plan_digest != plan.plan_digest
+    if receipt.launcher_id != plan.launcher_id
+        || receipt.plan_digest != plan.plan_digest
         || receipt.policy_digest != plan.policy_digest
+        || receipt.trust_mode != plan.trust_mode
+        || receipt.trust_state != plan.platform.trust_state
+        || receipt.sandbox_mechanism != plan.platform.sandbox_mechanism
+        || receipt.probe_digest != plan.platform.probe_digest
+        || receipt.sandbox_profile_digest != plan.sandbox_profile_digest
+        || receipt.workspace_id != plan.workspace_id
         || receipt.provider_run_id != plan.provider_run_id
         || receipt.source_snapshot_digest != plan.source_snapshot_digest
         || receipt.toolchain_digest != plan.toolchain_digest
@@ -2185,6 +2446,152 @@ pub fn project_rust_compilation_trust_rows(
     ))
 }
 
+/// Receipt-backed authority required before rustc semantic relations may enter a candidate epoch.
+///
+/// The proof retains both the independently observed launcher terminal and relational trust
+/// projections. Its fields are private: only [`issue_rust_compilation_admission_proof`] can mint a
+/// production value.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RustCompilationAdmissionProof {
+    protocol_binding: RustCompilationProtocolBinding,
+    launcher_receipt_digest: String,
+    terminal: RustCompilationTerminalObservation,
+    capability: RustCompilationCapabilityRow,
+    provenance: RustCompilationProvenanceRow,
+}
+
+impl RustCompilationAdmissionProof {
+    #[must_use]
+    pub const fn protocol_binding(&self) -> &RustCompilationProtocolBinding {
+        &self.protocol_binding
+    }
+
+    #[must_use]
+    pub fn launcher_receipt_digest(&self) -> &str {
+        &self.launcher_receipt_digest
+    }
+
+    #[must_use]
+    pub const fn terminal(&self) -> &RustCompilationTerminalObservation {
+        &self.terminal
+    }
+
+    #[must_use]
+    pub const fn capability(&self) -> &RustCompilationCapabilityRow {
+        &self.capability
+    }
+
+    #[must_use]
+    pub const fn provenance(&self) -> &RustCompilationProvenanceRow {
+        &self.provenance
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_only(protocol_binding: RustCompilationProtocolBinding) -> Self {
+        let launcher_receipt_digest = format!("b3:{}", "22".repeat(32));
+        let terminal = RustCompilationTerminalObservation {
+            terminal_state: RustCompilationTerminalState::Succeeded,
+            exit_code: Some(0),
+            exceeded_limit: None,
+            usage: RustCompilationObservedUsage {
+                wall_time_millis: 1,
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                artifact_bytes: 0,
+                peak_process_count: 1,
+                file_count: 1,
+                largest_file_bytes: 0,
+                cpu_seconds: 0,
+                peak_memory_bytes: 1,
+                peak_open_files: 1,
+            },
+            accounting_quality: RustCompilationAccountingQuality::KernelComplete,
+            process_sample_count: 1,
+            process_group_empty: true,
+            stdout_digest: format!("b3:{}", "23".repeat(32)),
+            stderr_digest: format!("b3:{}", "24".repeat(32)),
+            output_manifest_digest: Some(format!("b3:{}", "25".repeat(32))),
+        };
+        let capability = RustCompilationCapabilityRow {
+            workspace_id: protocol_binding.workspace_id.clone(),
+            provider_run_id: protocol_binding.provider_run_id.clone(),
+            trust_mode: RustCompilationTrustMode::UntrustedSandboxed,
+            trust_state: RustCompilationTrustState::ProvedUntrustedContainment,
+            available: true,
+            degraded: false,
+            reason_code: "RUST_COMPILATION_COMPLETED".into(),
+            policy_digest: format!("b3:{}", "26".repeat(32)),
+            platform_probe_digest: format!("b3:{}", "27".repeat(32)),
+            launcher_receipt_digest: launcher_receipt_digest.clone(),
+        };
+        let provenance = RustCompilationProvenanceRow {
+            workspace_id: protocol_binding.workspace_id.clone(),
+            provider_run_id: protocol_binding.provider_run_id.clone(),
+            source_generation: protocol_binding.source_generation,
+            source_snapshot_digest: protocol_binding.source_snapshot_digest.clone(),
+            dependency_snapshot_digest: format!("b3:{}", "28".repeat(32)),
+            toolchain_digest: protocol_binding.toolchain_identity_digest.clone(),
+            exact_toolchain_release: protocol_binding.exact_toolchain_release.clone(),
+            policy_digest: capability.policy_digest.clone(),
+            plan_digest: protocol_binding.plan_digest.clone(),
+            platform_probe_digest: capability.platform_probe_digest.clone(),
+            sandbox_profile_digest: protocol_binding.sandbox_profile_digest.clone(),
+            launcher_receipt_digest: launcher_receipt_digest.clone(),
+            trusted_local_authorization_id: None,
+            build_scripts_policy: RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
+            procedural_macros_policy: RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
+        };
+        Self {
+            protocol_binding,
+            launcher_receipt_digest,
+            terminal,
+            capability,
+            provenance,
+        }
+    }
+}
+
+/// Issue semantic-admission authority from one exact verified untrusted launcher receipt.
+///
+/// # Errors
+///
+/// Rejects trusted-local/degraded plans, mismatched or changed receipts, non-success terminals,
+/// incomplete process-group accounting, or a missing complete output-tree manifest.
+pub fn issue_rust_compilation_admission_proof(
+    plan: &RustCompilationLaunchPlan,
+    receipt: &RustCompilationLauncherReceipt,
+) -> Result<RustCompilationAdmissionProof, RustCompilationTrustError> {
+    let protocol_binding = plan.protocol_binding()?;
+    let (capability, provenance) = project_rust_compilation_trust_rows(plan, receipt)?;
+    let terminal = receipt.terminal();
+    if plan.trust_mode != RustCompilationTrustMode::UntrustedSandboxed
+        || plan.platform.trust_state != RustCompilationTrustState::ProvedUntrustedContainment
+        || plan.platform.sandbox_mechanism == SandboxMechanism::None
+        || capability.trust_mode != RustCompilationTrustMode::UntrustedSandboxed
+        || capability.trust_state != RustCompilationTrustState::ProvedUntrustedContainment
+        || capability.degraded
+    {
+        return Err(RustCompilationTrustError::UntrustedAdmissionRequired);
+    }
+    if terminal.terminal_state != RustCompilationTerminalState::Succeeded
+        || terminal.exit_code != Some(0)
+        || !terminal.process_group_empty
+        || terminal.accounting_quality != RustCompilationAccountingQuality::KernelComplete
+        || terminal.process_sample_count == 0
+        || terminal.output_manifest_digest.is_none()
+        || !capability.available
+    {
+        return Err(RustCompilationTrustError::IncompleteContainedTerminalEvidence);
+    }
+    Ok(RustCompilationAdmissionProof {
+        protocol_binding,
+        launcher_receipt_digest: receipt.receipt_digest.clone(),
+        terminal: terminal.clone(),
+        capability,
+        provenance,
+    })
+}
+
 #[derive(Debug, Error)]
 pub enum RustCompilationTrustError {
     #[error("Rust compilation resource limits are invalid or effectively unbounded")]
@@ -2223,6 +2630,12 @@ pub enum RustCompilationTrustError {
     SandboxProfileMismatch,
     #[error("proved untrusted containment is unavailable")]
     ContainmentUnavailable,
+    #[error("rustc semantic admission requires proved untrusted containment")]
+    UntrustedAdmissionRequired,
+    #[error("rustc compiler observation differs from the exact launch-plan binding")]
+    CompilerObservationBindingMismatch,
+    #[error("rustc launcher receipt lacks complete contained success evidence")]
+    IncompleteContainedTerminalEvidence,
     #[error("trusted-local authorization is required")]
     TrustedLocalAuthorizationRequired,
     #[error("trusted-local authorization does not bind this exact run")]
@@ -2512,10 +2925,39 @@ mod tests {
     use std::collections::VecDeque;
     use std::os::unix::fs::{DirBuilderExt as _, symlink};
 
+    use serde_json::Value;
     use tempfile::TempDir;
 
     use super::*;
-    use crate::provider_sandbox::{SandboxCapabilityMatrix, SandboxProbeObservation};
+    use crate::provider_sandbox::{
+        LINUX_BUBBLEWRAP_PATH, SandboxCapabilityMatrix, SandboxProbeObservation,
+        required_untrusted_probes,
+    };
+
+    const WP33_EXPECTATIONS: &str =
+        include_str!("../contracts/acceptance/relational-fabric-v3/expectations.jsonl");
+    const WP33_FIXTURES: &str =
+        include_str!("../contracts/acceptance/relational-fabric-v3/negative-fixtures.jsonl");
+
+    fn wp33_row(source: &str, key: &str, value: &str) -> Value {
+        source
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("valid WP33 JSONL row"))
+            .find(|row| row[key] == value)
+            .unwrap_or_else(|| panic!("missing frozen WP33 row {value}"))
+    }
+
+    fn claim_016() -> Value {
+        wp33_row(WP33_EXPECTATIONS, "claim_id", "RFV3-CLAIM-016")
+    }
+
+    fn claim_016_fixture(kind: &str) -> Value {
+        WP33_FIXTURES
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("valid WP33 fixture row"))
+            .find(|row| row["claim_id"] == "RFV3-CLAIM-016" && row["kind"] == kind)
+            .unwrap_or_else(|| panic!("missing frozen Claim 016 {kind} fixture"))
+    }
 
     struct Harness {
         _root: TempDir,
@@ -2542,6 +2984,49 @@ mod tests {
             cpu_seconds: 120,
             memory_bytes: 1024 * 1024 * 1024,
             open_files: 128,
+        }
+    }
+
+    fn claim_016_limits(claim: &Value) -> RustCompilationResourceLimits {
+        let input = &claim["complete_input_universe"]["inputs"]["resource_limits"];
+        let cpu_millis = input["cpu_ms"].as_u64().expect("Claim 016 cpu_ms");
+        let output_bytes = input["output_bytes"]
+            .as_u64()
+            .expect("Claim 016 output_bytes");
+        RustCompilationResourceLimits {
+            wall_time_millis: input["wall_ms"].as_u64().expect("Claim 016 wall_ms"),
+            stdout_bytes: output_bytes,
+            stderr_bytes: output_bytes,
+            artifact_bytes: output_bytes,
+            process_count: u32::try_from(input["processes"].as_u64().expect("Claim 016 processes"))
+                .expect("Claim 016 processes fit u32"),
+            file_count: 64,
+            single_file_bytes: input["arrow_output_bytes"]
+                .as_u64()
+                .expect("Claim 016 arrow_output_bytes"),
+            cpu_seconds: cpu_millis.div_ceil(1_000),
+            memory_bytes: input["memory_bytes"]
+                .as_u64()
+                .expect("Claim 016 memory_bytes"),
+            open_files: input["open_files"].as_u64().expect("Claim 016 open_files"),
+        }
+    }
+
+    fn claim_016_unavailable_linux_observation() -> SandboxProbeObservation {
+        let mut behavior = required_untrusted_probes(SandboxMechanism::LinuxBubblewrap)
+            .into_iter()
+            .map(|name| (name.to_owned(), true))
+            .collect::<BTreeMap<_, _>>();
+        behavior.insert("compiled-seccomp-policy-authorized".into(), false);
+        behavior.insert("cleanup-escape-denied".into(), false);
+        SandboxProbeObservation {
+            mechanism: SandboxMechanism::LinuxBubblewrap,
+            executable_path: LINUX_BUBBLEWRAP_PATH.into(),
+            executable_version: "0.9.0".into(),
+            owned_by_root: true,
+            executable_mode: 0o755,
+            setuid: false,
+            behavior,
         }
     }
 
@@ -2648,7 +3133,7 @@ mod tests {
                 cargo_config_digest: digest(8),
             },
         };
-        let capabilities = SandboxCapabilityMatrix::evaluate(&observation(true));
+        let capabilities = SandboxCapabilityMatrix::evaluate_for_test(&observation(true));
         let (provider_profile, mechanism) = match mode {
             RustCompilationTrustMode::UntrustedSandboxed => (
                 ProviderTrustProfile::UntrustedSandboxed,
@@ -2818,7 +3303,7 @@ mod tests {
     #[test]
     fn unavailable_untrusted_containment_never_falls_back() {
         let harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
-        let unavailable = SandboxCapabilityMatrix::evaluate(&observation(false));
+        let unavailable = SandboxCapabilityMatrix::evaluate_for_test(&observation(false));
         let error = compile_rust_compilation_launch_plan(
             &untrusted_policy(),
             &unavailable,
@@ -2893,6 +3378,178 @@ mod tests {
             plan.trusted_local_authorization_id.as_deref(),
             Some("trusted-local-grant-1")
         );
+    }
+
+    #[test]
+    fn wp38_claim_016_positive_executes_fail_closed_production_preflight() {
+        let claim = claim_016();
+        let inputs = &claim["complete_input_universe"]["inputs"];
+        let expected = &claim["decoded_expectation"]["rows"];
+        assert_eq!(inputs["explicit_authorization"]["trusted_local"], false);
+
+        let trusted = harness(RustCompilationTrustMode::TrustedLocal);
+        let trusted_policy = RustCompilationTrustPolicy::trusted_local_v1(
+            claim_016_limits(&claim),
+            RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
+        );
+        let trusted_error = compile_rust_compilation_launch_plan(
+            &trusted_policy,
+            &trusted.capabilities,
+            &trusted.profile,
+            &trusted.inputs,
+            &trusted.paths,
+            &trusted.request,
+            None,
+        )
+        .expect_err("frozen Claim 016 has no trusted-local authorization");
+        assert!(matches!(
+            trusted_error,
+            RustCompilationTrustError::TrustedLocalAuthorizationRequired
+        ));
+        assert_eq!(expected[0][0], "trusted-local-request-1");
+        assert_eq!(expected[0][2], "denied");
+        assert_eq!(expected[0][3], "CAPABILITY_UNAVAILABLE");
+        assert_eq!(expected[0][8], 0);
+
+        let untrusted = harness(RustCompilationTrustMode::UntrustedSandboxed);
+        let capabilities =
+            SandboxCapabilityMatrix::evaluate_for_test(&claim_016_unavailable_linux_observation());
+        let capability = capabilities
+            .row(ProviderTrustProfile::UntrustedSandboxed)
+            .expect("untrusted capability row");
+        assert!(!capability.available);
+        assert_eq!(capability.reason_code, "SANDBOX_SECCOMP_POLICY_UNAVAILABLE");
+        let profile = GeneratedSandboxProfile::generate(
+            ProviderTrustProfile::UntrustedSandboxed,
+            SandboxMechanism::LinuxBubblewrap,
+            &untrusted.inputs.workspace_view,
+            &untrusted.inputs.dependency_view,
+            &untrusted.paths.run_root,
+        )
+        .expect("Claim 016 programmatic Linux profile");
+        let untrusted_policy = RustCompilationTrustPolicy::untrusted_sandboxed_v1(
+            claim_016_limits(&claim),
+            RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
+        );
+        assert!(matches!(
+            compile_rust_compilation_launch_plan(
+                &untrusted_policy,
+                &capabilities,
+                &profile,
+                &untrusted.inputs,
+                &untrusted.paths,
+                &untrusted.request,
+                None,
+            ),
+            Err(RustCompilationTrustError::ContainmentUnavailable)
+        ));
+        assert_eq!(expected[1][0], "hostile-untrusted-1");
+        assert_eq!(expected[1][2], "sandbox_unavailable");
+        assert_eq!(expected[1][3], "SANDBOX_UNAVAILABLE");
+        assert_eq!(expected[1][8], 0);
+        let requested_actions = inputs["provider_jobs"][1]["payload"]["action_ids"]
+            .as_array()
+            .expect("Claim 016 hostile action IDs");
+        let expected_actions = expected[1][9]
+            .as_array()
+            .expect("Claim 016 hostile action closure");
+        assert_eq!(requested_actions.len(), expected_actions.len());
+        for (requested, observed) in requested_actions.iter().zip(expected_actions) {
+            assert_eq!(observed["action_id"], *requested);
+            assert_eq!(observed["attempted"], false);
+            assert_eq!(observed["contained"], "unknown");
+        }
+    }
+
+    #[test]
+    fn wp38_claim_016_causal_authorization_executes_degraded_trusted_local_plan() {
+        let claim = claim_016();
+        let fixture = claim_016_fixture("causal");
+        assert_eq!(fixture["mutation"]["input_role"], "explicit_authorization");
+        let admitted = &fixture["mutation"]["after"];
+        assert_eq!(admitted["trusted_local"], true);
+
+        let harness = harness(RustCompilationTrustMode::TrustedLocal);
+        let policy = RustCompilationTrustPolicy::trusted_local_v1(
+            claim_016_limits(&claim),
+            RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
+        );
+        let mut authorization = trusted_authorization(&policy, &harness);
+        authorization.authorization_id = admitted["authorization_id"]
+            .as_str()
+            .expect("Claim 016 authorization ID")
+            .to_owned();
+        let plan = compile_rust_compilation_launch_plan(
+            &policy,
+            &harness.capabilities,
+            &harness.profile,
+            &harness.inputs,
+            &harness.paths,
+            &harness.request,
+            Some(&authorization),
+        )
+        .expect("authorized Claim 016 trusted-local plan");
+        let expected = &fixture["expected_decoded"];
+        assert_eq!(expected["authorization_state"], "accepted");
+        assert_eq!(plan.trust_mode, RustCompilationTrustMode::TrustedLocal);
+        assert_eq!(
+            plan.platform.trust_state,
+            RustCompilationTrustState::DegradedTrustedLocal
+        );
+        assert_eq!(expected["effective_trust_profile"], "trusted_local");
+        assert_eq!(expected["capability_state"], "degraded_trusted_local");
+        assert_eq!(
+            plan.trusted_local_authorization_id.as_deref(),
+            admitted["authorization_id"].as_str()
+        );
+        assert_eq!(
+            expected["launch_admission"],
+            "authorized_for_trusted_local_launch"
+        );
+        assert_eq!(expected["untrusted_admission"], "unavailable");
+        assert_eq!(expected["hostile_actions_attempted"], 0);
+    }
+
+    #[test]
+    fn wp38_claim_016_negative_rejects_seccomp_requirement_weakening() {
+        let fixture = claim_016_fixture("negative");
+        let mutation = &fixture["mutation"];
+        assert_eq!(mutation["input_role"], "launcher_constraints");
+        assert_eq!(
+            mutation["json_pointer"],
+            "/required/compiled_seccomp_policy_authorized"
+        );
+        assert_eq!(mutation["before"], true);
+        assert_eq!(mutation["after"], false);
+
+        // The production capability compiler owns this closed requirement set. A claimed input
+        // cannot remove the probe: the exact failed prerequisite remains in the typed row.
+        assert!(
+            required_untrusted_probes(SandboxMechanism::LinuxBubblewrap)
+                .contains(&"compiled-seccomp-policy-authorized")
+        );
+        let capabilities =
+            SandboxCapabilityMatrix::evaluate_for_test(&claim_016_unavailable_linux_observation());
+        let row = capabilities
+            .row(ProviderTrustProfile::UntrustedSandboxed)
+            .expect("untrusted capability row");
+        assert!(!row.available);
+        assert!(
+            row.unmet_requirements
+                .iter()
+                .any(|requirement| requirement == "compiled-seccomp-policy-authorized")
+        );
+        let expected = &fixture["expected_decoded"];
+        assert_eq!(
+            expected["error"],
+            "HOST_CONTAINMENT_POLICY_WEAKENING_REJECTED"
+        );
+        assert_eq!(
+            expected["missing_prerequisite"],
+            "compiled_seccomp_policy_authorized"
+        );
+        assert_eq!(expected["untrusted_admission"], "unavailable");
+        assert_eq!(expected["hostile_actions_attempted"], 0);
     }
 
     #[test]
@@ -3004,8 +3661,15 @@ mod tests {
         assert!(RustCompilationPrivatePaths::inspect(&symlink_harness.paths.run_root).is_err());
 
         let identity_harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
-        fs::remove_file(identity_harness.inputs.workspace_view.join("Cargo.toml")).unwrap();
-        fs::remove_dir(&identity_harness.inputs.workspace_view).unwrap();
+        let displaced_workspace = identity_harness
+            .inputs
+            .workspace_view
+            .with_file_name("displaced-workspace");
+        fs::rename(
+            &identity_harness.inputs.workspace_view,
+            &displaced_workspace,
+        )
+        .unwrap();
         fs::create_dir(&identity_harness.inputs.workspace_view).unwrap();
         fs::write(
             identity_harness.inputs.workspace_view.join("Cargo.toml"),
@@ -3257,6 +3921,62 @@ sleep 30
             provenance.build_scripts_policy,
             RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher
         );
+    }
+
+    #[test]
+    fn proved_untrusted_launcher_receipt_qualifies_semantic_admission() {
+        let harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
+        let plan = compile_untrusted(&harness);
+        let receipt =
+            RustCompilationLauncherReceipt::close(&plan, success_observation(), None).unwrap();
+
+        let proof = issue_rust_compilation_admission_proof(&plan, &receipt).unwrap();
+
+        assert_eq!(proof.protocol_binding().plan_digest(), plan.plan_digest());
+        assert_eq!(proof.launcher_receipt_digest(), receipt.receipt_digest());
+        assert_eq!(
+            proof.capability().trust_state,
+            RustCompilationTrustState::ProvedUntrustedContainment
+        );
+        assert!(proof.capability().available);
+        assert!(!proof.capability().degraded);
+        assert_eq!(
+            proof.provenance().source_snapshot_digest,
+            harness.inputs.source_snapshot_digest
+        );
+        assert_eq!(
+            proof.provenance().toolchain_digest,
+            harness.inputs.toolchain_digest
+        );
+        assert_eq!(
+            proof.terminal().accounting_quality,
+            RustCompilationAccountingQuality::KernelComplete
+        );
+    }
+
+    #[test]
+    fn changed_or_trusted_local_launcher_receipt_cannot_qualify_semantic_admission() {
+        let first_harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
+        let first_plan = compile_untrusted(&first_harness);
+        let first_receipt =
+            RustCompilationLauncherReceipt::close(&first_plan, success_observation(), None)
+                .unwrap();
+        let changed_harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
+        let changed_plan = compile_untrusted(&changed_harness);
+        assert!(matches!(
+            issue_rust_compilation_admission_proof(&changed_plan, &first_receipt).unwrap_err(),
+            RustCompilationTrustError::LauncherReceiptMismatch
+        ));
+
+        let trusted_harness = harness(RustCompilationTrustMode::TrustedLocal);
+        let trusted_plan = compile_trusted(&trusted_harness, limits());
+        let trusted_receipt =
+            RustCompilationLauncherReceipt::close(&trusted_plan, success_observation(), None)
+                .unwrap();
+        assert!(matches!(
+            issue_rust_compilation_admission_proof(&trusted_plan, &trusted_receipt).unwrap_err(),
+            RustCompilationTrustError::UntrustedAdmissionRequired
+        ));
     }
 
     #[test]

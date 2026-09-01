@@ -1,8 +1,8 @@
 # Shared cross-language fixtures
 
-`contracts/manifests/fixture-oracles.json` classifies every data fixture as
-`normative-kat`, `differential`, `property`, `negative-class`, or
-`generated-example` and records its origin, owner, version, and change record.
+There is deliberately no generated global fixture census. Retained normative fixtures are named
+by their owning executable contract; the independent v3 claim and negative-fixture transaction
+lives under `contracts/acceptance/relational-fabric-v3/`.
 
 Normative KATs are immutable owner-reviewed protocol authority. Generators and gates
 must never write them. Candidate answers may be emitted only to an isolated review

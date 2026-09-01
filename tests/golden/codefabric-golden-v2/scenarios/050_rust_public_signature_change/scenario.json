@@ -1,1 +1,0 @@
-{"scenario_id":"050_rust_public_signature_change","edits":["change-rust-signature"],"expected_terminal":"CURRENT"}

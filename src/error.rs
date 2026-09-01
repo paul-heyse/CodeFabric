@@ -1,4 +1,4 @@
-//! Phase-carrying public error envelope backed by the generated error registry.
+//! Phase-carrying public error envelope backed by released application contract data.
 
 use std::error::Error;
 use std::fmt;
@@ -15,12 +15,11 @@ pub struct ErrorEnvelope<E, T = Phase> {
 }
 
 impl<E, T> ErrorEnvelope<E, T> {
-    /// Construct an envelope only from a generated public-error member.
+    /// Construct an envelope only from a released public-error compatibility member.
     ///
     /// # Panics
     ///
-    /// Panics when a caller attempts to publish an unregistered error identity. This is an
-    /// internal invariant violation also prevented statically by `public-error-closure-check`.
+    /// Panics when a caller attempts to publish an unregistered error identity.
     #[must_use]
     pub fn new(phase: Phase, code: &'static str, trace: Vec<T>, source: E) -> Self {
         let identity = public_error(code).expect("boundary error identity must be registered");
@@ -66,7 +65,7 @@ mod tests {
     #[test]
     fn wp61_behavioral_acceptance() {
         for registered in PHASE_VALUES {
-            let phase = Phase::try_from(registered.code).expect("generated phase code");
+            let phase = Phase::try_from(registered.code).expect("application phase code");
             let error = ErrorEnvelope::new(
                 phase,
                 "INVALID_REQUEST_SCHEMA",

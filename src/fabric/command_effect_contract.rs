@@ -17,6 +17,7 @@ pub(crate) struct ValidatedCommandAttempt {
     command: FabricCommand,
     attempt: u32,
     execution_owner: ExecutionOwner,
+    prepared_transaction: Option<TransactionRef>,
 }
 
 impl ValidatedCommandAttempt {
@@ -44,6 +45,15 @@ impl ValidatedCommandAttempt {
         self.execution_owner
     }
 
+    /// Exact transaction validated from a durable `CommitPrepared` or reconciliation record.
+    ///
+    /// Executing/preparation tokens deliberately return `None`: a consumer may not invent a
+    /// transaction identity merely because the reducer admitted an execution attempt.
+    #[must_use]
+    pub(crate) const fn prepared_transaction(self) -> Option<TransactionRef> {
+        self.prepared_transaction
+    }
+
     #[cfg(test)]
     pub(crate) const fn for_test(
         command: FabricCommand,
@@ -54,6 +64,22 @@ impl ValidatedCommandAttempt {
             command,
             attempt,
             execution_owner,
+            prepared_transaction: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn for_test_prepared(
+        command: FabricCommand,
+        attempt: u32,
+        execution_owner: ExecutionOwner,
+        transaction: TransactionRef,
+    ) -> Self {
+        Self {
+            command,
+            attempt,
+            execution_owner,
+            prepared_transaction: Some(transaction),
         }
     }
 
@@ -122,7 +148,7 @@ pub(crate) fn executing_attempt(
     if recorded != owner {
         return Err(CommandPortError::ContextUnavailable);
     }
-    validated_attempt(record, attempt, owner)
+    validated_attempt(record, attempt, owner, None)
 }
 
 /// Validate a `CommitPrepared` record at the sole durable effect boundary.
@@ -146,7 +172,7 @@ pub(crate) fn prepared_attempt(
     if recorded != owner || prepared != transaction {
         return Err(CommandPortError::ContextUnavailable);
     }
-    validated_attempt(record, attempt, owner)
+    validated_attempt(record, attempt, owner, Some(transaction))
 }
 
 /// Validate an exact marker/control-history read without changing execution authority.
@@ -175,7 +201,7 @@ pub(crate) fn reconciliation_attempt(
         return Err(CommandPortError::ContextUnavailable);
     }
     Ok(ValidatedCommandRecovery {
-        attempt: validated_attempt(record, attempt, execution_owner)?,
+        attempt: validated_attempt(record, attempt, execution_owner, Some(transaction))?,
         active_recovery_owner,
     })
 }
@@ -210,6 +236,7 @@ fn validated_attempt(
     record: &CommandRecord,
     attempt: u32,
     execution_owner: ExecutionOwner,
+    prepared_transaction: Option<TransactionRef>,
 ) -> Result<ValidatedCommandAttempt, CommandPortError> {
     let admitted = record.command().writer_fence;
     if execution_owner.fence != admitted
@@ -221,6 +248,7 @@ fn validated_attempt(
         command: *record.command(),
         attempt,
         execution_owner,
+        prepared_transaction,
     })
 }
 
@@ -245,8 +273,8 @@ mod tests {
     use crate::fabric::command::{
         ActorId, AdministrationAction, AdministrationRequestRef, AdmissionContext,
         AdmissionOutcome, AuthorizationDecision, AuthorizationRef, CommandEvent, CommandIdentity,
-        CommandOwnership, CommandPins, CommandReducer, CompilerReleaseRef, ExpectedHead,
-        FabricCommandPayload, IdempotencyKey, LeaseId, ModelHeadRef, OperationId, PrincipalId,
+        CommandOwnership, CommandPins, CommandReducer, ExpectedHead, FabricCommandPayload,
+        IdempotencyKey, InputReleaseRef, LeaseId, OperationId, PrincipalId, ProgramReleaseRef,
         ProviderSetRef, ReconciliationEvidenceRef, ReconciliationObservation, ResourceEnvelopeRef,
         SourceGeneration, UnknownCommit, UnknownCommitReason, WorkspaceId, WriterFence,
     };
@@ -348,8 +376,17 @@ mod tests {
             expected_head: ExpectedHead::Empty,
             writer_fence,
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes([0x15; 32]),
-                model_head: ModelHeadRef::from_bytes([0x16; 32]),
+                input_release: InputReleaseRef::from_bytes([0x15; 32]),
+                program_release: ProgramReleaseRef::from_bytes([0x16; 32]),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    [0x16; 32],
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(
+                    [0x16; 32],
+                ),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(
+                    [0x16; 32],
+                ),
                 source_generation: SourceGeneration::new(0),
                 provider_set: ProviderSetRef::from_bytes([0x17; 32]),
             },

@@ -1,9 +1,0 @@
-id: ontology-global-result-version-forbidden
-snapshots:
-  ? |
-    const RESULT_CHECKSUM_VERSION: &str = "ResultChecksumV2";
-  : labels:
-    - source: RESULT_CHECKSUM_VERSION
-      style: primary
-      start: 6
-      end: 29

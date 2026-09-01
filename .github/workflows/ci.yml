@@ -22,6 +22,8 @@ env:
   CARGO_INCREMENTAL: "0"
   SCCACHE_GHA_ENABLED: "true"
   SCCACHE_CLIENT_SIDE: "1"
+  # Untrusted pull requests may consume the default-branch cache but never publish it.
+  SCCACHE_GHA_RW_MODE: ${{ github.event_name == 'pull_request' && 'READ_ONLY' || 'READ_WRITE' }}
 
 jobs:
   changes:
@@ -65,7 +67,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
-          toolchain: stable
+          toolchain: 1.98.0
           components: rustfmt, clippy, llvm-tools-preview
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -73,14 +75,15 @@ jobs:
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
       - name: Install root gate tools
         run: |
-          cargo binstall --no-confirm just@1.58.0
-          cargo binstall --no-confirm cargo-nextest@0.9.143
-          cargo binstall --no-confirm cargo-deny@0.20.2
-          cargo binstall --no-confirm cargo-audit@0.22.2
-          cargo binstall --no-confirm cargo-shear@1.13.4
-          cargo binstall --no-confirm cargo-machete@0.9.2
-          cargo binstall --no-confirm cargo-msrv@0.19.3
-          cargo binstall --no-confirm typos-cli@1.49.0
+          source tooling/rust-tool-versions.env
+          cargo binstall --no-confirm just@"$JUST_VERSION"
+          cargo binstall --no-confirm cargo-nextest@"$CARGO_NEXTEST_VERSION"
+          cargo binstall --no-confirm cargo-deny@"$CARGO_DENY_VERSION"
+          cargo binstall --no-confirm cargo-audit@"$CARGO_AUDIT_VERSION"
+          cargo binstall --no-confirm cargo-shear@"$CARGO_SHEAR_VERSION"
+          cargo binstall --no-confirm cargo-machete@"$CARGO_MACHETE_VERSION"
+          cargo binstall --no-confirm cargo-msrv@"$CARGO_MSRV_VERSION"
+          cargo binstall --no-confirm typos-cli@"$TYPOS_CLI_VERSION"
       - name: Stable root routine gate
         run: just root-ci-fast
       - name: Stable root policy and MSRV
@@ -105,15 +108,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
-          toolchain: stable
+          toolchain: 1.98.0
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
-          version: "0.12.5"
+          version: "0.12.7"
           python-version: "3.14.7"
           enable-cache: true
       - name: Install command runner
-        run: cargo binstall --no-confirm just@1.58.0
+        run: source tooling/rust-tool-versions.env && cargo binstall --no-confirm just@"$JUST_VERSION"
       - name: Locked adapter environment
         run: uv sync --frozen --project codefabric-cpg-mcp --python 3.14.7
       - name: Adapter gate
@@ -122,13 +125,13 @@ jobs:
         run: just adapter-stdio-test
 
   contracts:
-    name: Model-derived artifacts and interoperability
+    name: Released contracts and interoperability
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
-          toolchain: stable
+          toolchain: 1.98.0
           components: rustfmt
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
@@ -140,19 +143,16 @@ jobs:
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
-          version: "0.12.5"
+          version: "0.12.7"
           python-version: "3.14.7"
           enable-cache: true
-      - name: Install model gate tools
+      - name: Install contract gate tools
         run: |
-          cargo binstall --no-confirm just@1.58.0
-          cargo binstall --no-confirm cargo-nextest@0.9.143
+          source tooling/rust-tool-versions.env
+          cargo binstall --no-confirm just@"$JUST_VERSION"
+          cargo binstall --no-confirm cargo-nextest@"$CARGO_NEXTEST_VERSION"
       - name: Locked adapter environment
         run: uv sync --frozen --project codefabric-cpg-mcp --python 3.14.7
-      - name: Typed model families and staged consumers
-        run: just model-family-check aggregate
-      - name: Two-root deterministic DesiredTree
-        run: just model-repro-check
       - name: Cross-language Protobuf round trips
         run: |
           cargo nextest run --locked --no-default-features --features rpc --test integration -E 'test(/rust_protobuf_matches_the_shared_wire_fixture/)' --no-tests=fail
@@ -161,10 +161,6 @@ jobs:
         run: just released-fixture-check
       - name: Released wave acceptance gates
         run: just wave-acceptance-check
-      - name: Model compiler bootstrap and released census
-        run: |
-          just model-bootstrap-check
-          just model-release-census-check
       - name: sccache telemetry
         if: always()
         run: sccache --show-stats
@@ -176,13 +172,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
-          toolchain: stable
+          toolchain: 1.98.0
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
       - name: Install governance tools
         run: |
-          cargo binstall --no-confirm just@1.58.0
-          cargo binstall --no-confirm cargo-deny@0.20.2
-          cargo binstall --no-confirm ast-grep@0.45.1
+          source tooling/rust-tool-versions.env
+          cargo binstall --no-confirm just@"$JUST_VERSION"
+          cargo binstall --no-confirm cargo-deny@"$CARGO_DENY_VERSION"
+          cargo binstall --no-confirm ast-grep@"$AST_GREP_VERSION"
+      - name: Exact tool and toolchain configuration
+        run: just tool-version-contract-check
       - name: Structural boundary rules
         run: just governance-scan
       - name: Superseded governance zero state
@@ -206,7 +205,7 @@ jobs:
           version: "v0.17.0"
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
       - name: Install command runner
-        run: cargo binstall --no-confirm just@1.58.0
+        run: source tooling/rust-tool-versions.env && cargo binstall --no-confirm just@"$JUST_VERSION"
       - name: Extractor gate
         run: just extractor-ci-fast
       - name: Extractor protocol silence
@@ -227,7 +226,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
-          toolchain: stable
+          toolchain: 1.98.0
           components: rustfmt, clippy
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -235,9 +234,10 @@ jobs:
       - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
       - name: Install sidecar gate tools
         run: |
-          cargo binstall --no-confirm just@1.58.0
-          cargo binstall --no-confirm cargo-deny@0.20.2
-          cargo binstall --no-confirm cargo-audit@0.22.2
+          source tooling/rust-tool-versions.env
+          cargo binstall --no-confirm just@"$JUST_VERSION"
+          cargo binstall --no-confirm cargo-deny@"$CARGO_DENY_VERSION"
+          cargo binstall --no-confirm cargo-audit@"$CARGO_AUDIT_VERSION"
       - name: Sidecar gate and policy
         run: |
           just sidecar-ci-fast

@@ -32,9 +32,24 @@ default:
 doctor:
     ./scripts/bootstrap.sh
 
-[doc("Idempotently prepare the adapter and supervised compiler cache")]
+[doc("Idempotently prepare exact tools, the adapter, and supervised compiler cache")]
 [group('environment')]
-setup: setup-adapter setup-sccache
+setup: setup-tools setup-adapter setup-sccache
+
+[doc("Check exact workstation CLI and Rustup identities")]
+[group('environment')]
+tools-doctor:
+    ./scripts/tool-versions.sh check
+
+[doc("Reject drift between the tool manifest and operational Rust/CI configuration")]
+[group('gate')]
+tool-version-contract-check:
+    ./scripts/tool-version-contract-check.sh
+
+[doc("Idempotently install the exact workstation CLI and Rustup contract")]
+[group('environment')]
+setup-tools:
+    ./scripts/tool-versions.sh install
 
 [doc("Prove a contaminated caller cannot alter repository Python or Rust resolution")]
 [group('environment')]
@@ -65,7 +80,7 @@ inventory:
 [doc("Resolved package metadata, no dependencies")]
 [group('environment')]
 metadata:
-    cargo metadata --format-version 1 --no-deps
+    cargo metadata --locked --format-version 1 --no-deps
 
 # sccache is a committed build prerequisite (.cargo/config.toml). Spec section 13.2:
 # measure representative cache effectiveness rather than assuming the wrapper helps.
@@ -80,14 +95,24 @@ cache-stats:
 sccache-doctor:
     ./scripts/sccache-service.sh doctor
 
-[doc("Prove sccache transport/storage with a repeated sandbox-compatible Rust compile")]
+[doc("Validate sccache service lifecycle, wrapper probes, and Cargo probe-cache recovery")]
+[group('environment')]
+sccache-service-template-check:
+    ./scripts/sccache-service-template-check.sh
+
+[doc("Prove sccache transport/storage and reject cached Cargo wrapper failures")]
 [group('environment')]
 sccache-canary:
     ./scripts/sccache-service.sh canary
 
-[doc("Measure two cold-target Cargo builds against the preserved local cache")]
+[doc("Restart the supervised per-user sccache service")]
+[group('environment')]
+sccache-restart:
+    ./scripts/sccache-service.sh restart
+
+[doc("Repeatedly measure cold-target/warm-cache client and server modes")]
 [group('perf')]
-sccache-effectiveness mode="client" *args:
+sccache-effectiveness mode="both" *args:
     ./scripts/sccache-effectiveness.sh "{{ mode }}" "$@"
 
 [doc("Build with non-incremental compiler outputs reusable through sccache")]
@@ -99,6 +124,11 @@ build-shared *args:
 [group('perf')]
 build-incremental *args:
     RUSTC_WRAPPER= CARGO_INCREMENTAL=1 cargo build --locked "$@"
+
+[doc("Compare the pinned default Linux linker with mold without changing config")]
+[group('perf')]
+linker-benchmark *args:
+    ./scripts/linker-benchmark.sh "$@"
 
 [doc("Zero sccache statistics before a measurement run")]
 [group('environment')]
@@ -115,95 +145,44 @@ spec-outline *args:
 authoritative-design-conformance-check:
     PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_authoritative_design_conformance.py
 
-[doc("Prove the v2 design suite is the sole current authority and v1.3 is byte-identical history")]
-[group('gate')]
-v2-authority-cutover-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_relational_fabric_transition.py -k 'authority_selection'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_transition.py authority-cutover-check
-
-[doc("Reject selection of any historical v1.3 master as current design authority")]
-[group('gate')]
-legacy-suite-current-authority-zero-state-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_transition.py legacy-suite-current-authority-zero-state-check
-
-[doc("Prove the hidden, parsed, Cargo, installed, wheel, and sdist legacy inventory union")]
-[group('gate')]
-legacy-inventory-universe-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_relational_fabric_transition.py -k 'inventory or archive'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_transition.py legacy-inventory-universe-check
-
-[doc("Prove every bounded legacy surface has one fresh design-bound disposition")]
-[group('gate')]
-legacy-disposition-coverage-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_relational_fabric_transition.py -k 'selector or disposition or mixed_file'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_transition.py legacy-disposition-coverage-check
-
-[doc("Reject additions or modifications to the frozen predecessor authority surface")]
-[group('gate')]
-legacy-authority-freeze-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_relational_fabric_transition.py -k 'freeze'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_transition.py legacy-authority-freeze-check
-
-[doc("Compile every authored ontology operation into the normalized Arrow program package")]
+[doc("Verify released Protobuf outputs, compatibility, and the independent generator identity")]
 [group('contracts')]
-ontology-program-compiler-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_program_bundle_(semantic_parity|model_rebuild)/)' --no-tests=fail
+proto-check:
+    ./scripts/proto_dependency_check.sh
+    cargo check --locked --no-default-features --features proto-tooling --bin codefabric-proto-gen
+    cargo clippy --locked --no-default-features --features proto-tooling --bin codefabric-proto-gen -- -D warnings
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff format --check tooling/proto/generate.py tooling/proto/test_generate.py
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff check tooling/proto/generate.py tooling/proto/test_generate.py
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/proto/test_generate.py codefabric-cpg-mcp/tests/test_proto.py
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/proto/generate.py check
 
-[doc("Prove ontology-program identity acyclicity and byte-reproducible Arrow IPC packaging")]
+[doc("Generate released Protobuf bindings twice in isolated roots and compare exact bytes")]
 [group('contracts')]
-ontology-program-packaging-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_program_bundle_(digest_acyclicity|ipc_reproducibility)/)' --no-tests=fail
+proto-repro-check: proto-check
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/proto/generate.py repro-check
 
-[doc("Prove a bijective current-profile catalog of native DataFusion calculations")]
-[group('test')]
-ontology-calculation-catalog-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_native_profile|calculation_catalog_bijection)/)' --no-tests=fail
-
-[doc("Mutate normalized plan operators, relation/field operands, calculations, diagnostics, and phrase operands and prove governed DataFusion outcomes change")]
-[group('test')]
-ontology-program-causality-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(compiled_program_causality_matrix|phrase_binding_fail_closed)/)' --no-tests=fail
-
-[doc("Prove the gate checksum's canonical Arrow KATs, including actual map entries")]
-[group('test')]
-ontology-gate-result-checksum-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_gate_checksum_canonical_kats/)' --no-tests=fail
-
-[doc("Prove one terminal execution, post-exhaustion metrics, and artifact identity separation")]
-[group('test')]
-ontology-gate-execution-artifact-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_gate_(single_execution_metric_closure|artifact_identity_separation)/)' --no-tests=fail
-
-[doc("Prove memory, output, deadline, cancellation, spill cleanup, and checksum bounds leave durable authority unchanged")]
-[group('test')]
-ontology-runtime-resource-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(activation_owner_disconnect_cancels_before_response|activation_task_drop_cancels_owned_proof|candidate_resource_failure_no_mutation|governed_real_spill_process_death_reconciliation|governed_runtime_deadline_cancellation_memory_cleanup|governed_spill_orphan_reconciliation|serving_inflight_termination_and_release)/)' --no-tests=fail
-
-[doc("Prove sealed DataFusion ingress, exhaustive pinned variants, and Arrow ID-domain boundaries")]
+[doc("Validate compact v3 L/DB dispositions, retained targets, exact exclusions, and permanent oracles")]
 [group('gate')]
-id-domain-plan-enforcement-check:
-    cargo nextest run --locked --lib -E 'test(/(ontology_(domain_state_effect_truth_table|analyzer_pinned_variant_census|analyzer_bypass_matrix|arrow_extension_boundary_matrix)|odf_(embedded_subquery_plan_is_domain_checked|generated_domain_policy_total_truth_table)|serving_allowlist_rejects_provider_inside_scalar_subquery)/)' --no-tests=fail
+legacy-disposition-artifact-integrity-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_post_purge_assurance.py -k 'wp39_int_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/post_purge_assurance.py disposition-integrity
 
-[doc("Execute the bootstrap-discovered semantic closure and prove additive self-description")]
-[group('gate')]
-ontology-candidate-receipt-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(bootstrap_program_package_closure|semantic_closure_corruption_matrix|self_description_additive_relation|program_execution_receipt_bijection)/)' --no-tests=fail
+[doc("Rerun retained composition, provider, analysis, query, and adapter behavior after purge")]
+[group('test')]
+retained-target-post-purge-behavior-check: programmatic-production-composition-check exact-provider-batch-check analysis-producer-semantic-check semantic-request-program-check adapter-test
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_post_purge_assurance.py -k 'wp39_beh_'
 
-[doc("Prove candidate catalogs reopen only exact manifest Delta versions with retained schema and statistics")]
+[doc("Reject executable predecessor authority while retaining named historical evidence")]
 [group('gate')]
-ontology-candidate-delta-binding-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_candidate_delta_(binding_exact_version|catalog_reopen)/)' --no-tests=fail
+remaining-legacy-zero-state-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_remaining_legacy_zero_state.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/remaining_legacy_zero_state.py
 
-[doc("Prove owner decisions are separate from observations and bind the complete opaque receipt ledger")]
+[doc("Build and inventory every retained domain, feature, lock, graph, and adapter package after purge")]
 [group('gate')]
-ontology-decision-integrity-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(candidate_receipt_binding_matrix|decision_observation_separation|activation_state_transaction_atomicity)/)' --no-tests=fail
-
-[doc("Prove ontology activation rollback, lost-response reconciliation, and restart idempotency")]
-[group('gate')]
-ontology-activation-recovery-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(activation_state_transaction_atomicity|activation_restart_idempotency|activation_recovery_rejects_missing_snapshot|activation_concurrency_forward_rollback)/)' --no-tests=fail
-    cargo nextest run --locked --test integration -E 'test(ontology_datafabric_end_to_end_cutover)' --no-tests=fail
+post-purge-package-build-operations-check: root-check extractor-check sidecar-check adapter-wheel-test stable-graph-check features-each proto-repro-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_post_purge_assurance.py -k 'wp39_ops_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/post_purge_assurance.py package-inventory
 
 [doc("Reconstruct identical programmatic epochs from activation-selected exact Delta versions")]
 [group('gate')]
@@ -235,35 +214,6 @@ activation-fault-matrix-check:
 fabric-epoch-pinning-check:
     cargo nextest run --locked --lib -E 'test(/(leases_pin_predecessor_across_closed_atomic_swap|restart_recovery_keeps_admission_closed_until_marker_and_cache_reconciliation|recovery_requires_the_exact_durable_head)/)' --no-tests=fail
 
-[doc("Prove the sole authenticated workspace admin route compiles, proves, stages, decides, and atomically activates a submission")]
-[group('gate')]
-ontology-activation-route-check:
-    cargo nextest run --locked --test integration -E 'test(ontology_datafabric_end_to_end_cutover)' --no-tests=fail
-
-[doc("Execute identical results through persisted legacy V1 and target V2 lease authorities across restart")]
-[group('gate')]
-result-authority-lease-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(result_authority_lease_matrix|retained_epoch_package_reconstruction)|odf_result_checksum_v2_continuity/)' --no-tests=fail
-
-[doc("Prove real Delta/SQLite/admin cutover, restart leases, publication continuity, and forward rollback")]
-[group('gate')]
-ontology-datafabric-integration-check:
-    cargo nextest run --locked --test integration -E 'test(/ontology_datafabric_(end_to_end_cutover|predecessor_failure_atomicity|old_new_lease_restart|post_cutover_fact_publication)/)' --no-tests=fail
-    @if rg -n 'ProgramExecutionComparison|execute_phrase_probe|unoptimized_batches|optimized_batches' src tests; then echo 'temporary ontology dual-execution comparison authority remains' >&2; exit 1; fi
-
-[doc("Prove successor-only ontology authority across the hidden live envelope and retired command surface")]
-[group('gate')]
-ontology-datafabric-legacy-zero-state-check:
-    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/ontology_datafabric_legacy_zero_state.py
-    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_ontology_compiled_data_fabric.py -k 'ontology_datafabric_successor_authority or ontology_datafabric_legacy_zero_state or ontology_datafabric_retired_command_absence or ontology_datafabric_release_certification'
-    cargo check --all-targets
-    just gate-filter-census
-
-[doc("Prove diagnostic artifacts, checksums, and opaque receipts remain separate 1:1 identities")]
-[group('gate')]
-ontology-plan-artifact-boundary-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(plan_artifact_receipt_boundary|gate_artifact_identity_separation|program_execution_receipt_bijection)/)' --no-tests=fail
-
 [doc("Navigate docs/library_ref by chapter without reading whole references")]
 [group('environment')]
 lib-outline *args:
@@ -281,17 +231,16 @@ root-fmt:
 [doc("Type-check default local and featureless stable-domain surfaces")]
 [group('static')]
 root-check:
-    ./scripts/cargo-check-mode.sh cargo check --all-targets
-    ./scripts/cargo-check-mode.sh cargo check --all-targets --no-default-features
+    ./scripts/cargo-check-mode.sh cargo check --locked --all-targets
+    ./scripts/cargo-check-mode.sh cargo check --locked --all-targets --no-default-features
 
 # Edit-loop check, not a gate. Measured 2026-08-30 against the repository target/, warm,
 # after a one-line edit to a private fn: this recipe ~7.5s against `root-check` ~15s
 # (n=3). `root-check` costs double because it checks two surfaces. When nothing has
 # changed both are ~1s, so the win is only in the edit loop.
 #
-# Scope is the whole reason: `--all-targets` compiles this crate ten times -- lib,
-# lib-as-test, and a bin plus a bin-test for each of codefabricd,
-# codefabric-gate-b-candidate, and codefabric-model-schema-consumer. Isolated-tree
+# Scope is the whole reason: `--all-targets` compiles the library, its test
+# configuration, and every current production binary and binary test. Isolated-tree
 # control, n=5 hyperfine 1.20.0: `--lib` 6.22s +/- 0.31, `--all-targets` 10.23s +/- 0.96.
 #
 # The trade is diagnostic reach: this surface does not type-check #[cfg(test)] modules,
@@ -301,13 +250,13 @@ root-check:
 [doc("Fast library-only type-check for the edit loop -- root-check remains the gate")]
 [group('static')]
 root-check-fast:
-    ./scripts/cargo-check-mode.sh cargo check --lib
+    ./scripts/cargo-check-mode.sh cargo check --locked --lib
 
 [doc("Clippy on default local and featureless stable-domain surfaces")]
 [group('static')]
 root-clippy:
-    ./scripts/cargo-check-mode.sh cargo clippy --all-targets -- -D warnings
-    ./scripts/cargo-check-mode.sh cargo clippy --all-targets --no-default-features -- -D warnings
+    ./scripts/cargo-check-mode.sh cargo clippy --locked --all-targets -- -D warnings
+    ./scripts/cargo-check-mode.sh cargo clippy --locked --all-targets --no-default-features -- -D warnings
 
 [doc("Spelling and identifier hygiene")]
 [group('static')]
@@ -319,7 +268,12 @@ typos:
 [doc("Rust tests via nextest (does NOT include doctests)")]
 [group('test')]
 root-test-rust:
-    cargo nextest run
+    cargo nextest run --locked
+
+[doc("Focused incremental nextest edit loop -- root-test remains the gate")]
+[group('test')]
+root-test-incremental *args:
+    ./scripts/cargo-check-mode.sh cargo nextest run --locked "$@"
 
 # nextest does not run doctests. This is a separate, mandatory step -- never report "all
 # Rust tests passed" from nextest alone (spec sections 18.2 and 62.2).
@@ -327,7 +281,7 @@ root-test-rust:
 [doc("Rust doctests -- nextest does not cover these")]
 [group('test')]
 root-doctest:
-    cargo test --doc
+    cargo test --locked --doc
 
 [doc("Everything in the stable root: Rust tests and doctests")]
 [group('test')]
@@ -337,23 +291,12 @@ root-test: root-test-rust root-doctest
 [group('test')]
 wave2-integration-check:
     cargo nextest run --locked -E 'test(/wp1[2-8]/)' --no-tests=fail
-    cargo test --doc
-
-[doc("Run the current Wave-3 fabric/publication acceptance oracles")]
-[group('test')]
-wave3-integration-check:
-    cargo nextest run --locked -E 'test(/wp(19|2[0-6])/)' --no-tests=fail
-    cargo test --doc
-
-[doc("Prove generated foreign keys over the complete candidate publication state")]
-[group('test')]
-publication-referential-integrity-check:
-    cargo nextest run --locked --lib -E 'test(/wp74_/)' --no-tests=fail
+    cargo test --locked --doc
 
 [doc("Run the DataFusion 55, Arrow 59, and delta 43a0cf10 behavioral contract")]
 [group('test')]
 data-fabric-upgrade-check:
-    cargo nextest run --locked --test integration -E 'test(/(arrow59_|wp03_|wp05_|wp06_(behavioral|structural|negative)|delta_43a0cf10_|data_fabric_(old_write_new_read|new_write_old_read)_compatibility|data_fabric_(target_stack_release|old_live_authority|current_reference_routing|gate_b_empty))/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(/(arrow59_|wp03_|wp05_|wp06_(behavioral|structural|negative)|delta_43a0cf10_|data_fabric_(old_write_new_read|new_write_old_read)_compatibility|data_fabric_(target_stack_release|old_live_authority|current_reference_routing))/)' --no-tests=fail
     cargo nextest run --locked --lib -E 'test(/(datafusion_55_|delta_43a0cf10_|wp03_operational|wp05_|wp2[12]_)/)' --no-tests=fail
 
 [doc("Prove effective-relation statistics, pushdown truth, and observed runtime evidence")]
@@ -361,17 +304,12 @@ data-fabric-upgrade-check:
 provider-statistics-contract-check:
     cargo nextest run --locked --lib -E 'test(/(wp58_(behavioral|operational)_acceptance|datafusion_55_effective_provider_statistics_contract|exact_statistics_and_structured_scan_survive_governance_wrapper)/)' --no-tests=fail
 
-[doc("Prove the common direct/IPC provider fact protocol, schema census, and rejection posture")]
-[group('test')]
-provider-protocol-check:
-    cargo nextest run --locked --lib -E 'test(/wp59_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail
-
 [doc("Exercise the fail-closed semantic-provider sandbox escape matrix on the current host")]
 [group('test')]
 semantic-sandbox-host-matrix-check:
     cargo nextest run --locked --lib -E 'test(/semantic_sandbox_current_host_escape_matrix/)' --no-tests=fail
     @if rg -n 'ObservationMessage|CanonicalFact|encode_selected|with_skip_validation' src/ rustc-extractor/src/; then echo 'provider protocol legacy or unsafe IPC validation bypass remains' >&2; exit 1; fi
-    @rg -n 'StreamDecoder::new\(\)\.with_require_alignment\(false\)' src/fact_ingest.rs >/dev/null
+    @rg -n 'StreamDecoder::new\(\)\.with_require_alignment\(false\)' src/relation_ipc.rs >/dev/null
 
 [doc("Prove predecessor data-fabric identities survive only in reviewed historical locations")]
 [group('static')]
@@ -382,12 +320,11 @@ data-fabric-old-authority-check:
 [group('test')]
 wave4-integration-check:
     cargo nextest run --locked -E 'test(/wp(27|28|29|30|31|32|33)/)' --no-tests=fail
-    cargo test --doc
+    cargo test --locked --doc
 
-[doc("Run the complete Wave-5 vertical golden-slice acceptance surface")]
+[doc("Run the complete Wave-5 query and public-delivery acceptance surface")]
 [group('test')]
-wave5-integration-check:
-    cargo nextest run --locked -E 'test(/(wp(20|3[4-9]|40|62|63|64|65)|qry_v13_graph_forms_conformance|semantic_query_(mixed_dag_contract|graph_adversarial_conformance|graph_operational_gate)|production_eight_form_semantic_query_conformance)/)' --no-tests=fail
+wave5-integration-check: semantic-request-contract-integrity-check semantic-request-program-check query-unknown-negative-proof-check graph-query-resource-operations-check
     cd rustc-extractor && cargo test --locked wp35
     uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests
 
@@ -396,22 +333,327 @@ wave5-integration-check:
 query-daemon-activation-check:
     cargo nextest run --locked -E 'test(/wp63_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)/)' --no-tests=fail
 
-[doc("Prove all eight semantic query forms, mixed DAG execution, ordering, and absence semantics")]
+[doc("Validate the exact eight-form request contract, application ingress mapping, and public projection")]
 [group('test')]
-semantic-query-conformance-check:
-    cargo nextest run --locked --lib -E 'test(/(qry_v13_(form_contract_conformance|relational_forms_conformance|graph_forms_conformance)|semantic_query_(relational_plan_visibility|relational_policy_and_absence|relational_operational_gate|mixed_dag_contract|graph_adversarial_conformance|graph_operational_gate)|production_eight_form_semantic_query_conformance|wp39_operational_acceptance)/)' --no-tests=fail
+semantic-request-contract-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/(released_query_form_vocabulary_is_closed_without_a_generated_registry|released_request_parser_is_authority_neutral_and_canonical|released_request_parser_rejects_unreleased_fields|programmatic_query_contract_identity_is_typed_ordered_and_causal|port_bundle_requires_application_and_every_component_identity)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(all_eight_forms_project_exact_rows_pins_repetitions_and_dependencies)' --no-tests=fail
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_proto.py -k released_query_schema_exposes_exact_eight_forms
 
-[doc("Prove the generated QRY 1.3 form authority, Rust/Python projections, and retired-slug zero state")]
+[doc("Compile and execute all eight request forms through typed ingress, native programs, authorized children, and the production backend")]
 [group('test')]
-query-form-contract-check:
-    cargo nextest run --locked --lib -E 'test(/(qry_v13_form_contract_conformance|query_form_projection_parity|qry_v13_connecting_path_schema_falsification|query_form_contract_operational_gate)/)' --no-tests=fail
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_proto.py -k query_form_python_projection_parity
-    just model-repro-check
+semantic-request-program-check:
+    cargo nextest run --locked --lib -E 'test(/(all_eight_released_forms_compile_from_typed_program_rows|epoch_bound_ingress_consumes_every_typed_relation_row_once|epoch_bound_direct_compiler_lowers_exact_programs_returns_and_handoffs)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(all_eight_epoch_bound_forms_execute_through_one_real_authorized_child|relational_program_executes_only_through_authorized_child_inputs)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(real_delta_sqlite_daemon_query_activation_and_process_reopen)' --no-tests=fail
 
-[doc("Prove the five governed relational QRY forms compile and execute as native DataFusion plans")]
+[doc("Validate the exact production workspace factory, typed inputs, ports, and release pins")]
 [group('test')]
-semantic-query-relational-conformance-check:
-    cargo nextest run --locked --lib -E 'test(/(qry_v13_relational_forms_conformance|semantic_query_relational_plan_visibility|semantic_query_relational_policy_and_absence|semantic_query_relational_operational_gate)/)' --no-tests=fail
+production-composition-contract-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/(release_pins_reject_every_missing_identity|source_authority_is_explicit_and_independent_of_release_vector|semantic_catalog_authority_rejects_pin_and_program_drift|request_owned_limits_identity_is_complete_and_stable)/)' --no-tests=fail
+
+[doc("Exercise the real typed-input daemon composition and causal query/activation vertical")]
+[group('test')]
+programmatic-production-composition-check:
+    cargo nextest run --locked --lib -E 'test(/(epoch_query_registry_is_exact_and_workspace_scoped|activation_admission_installs_before_swap_and_rejects_substituted_authority|real_delta_sqlite_daemon_query_activation_and_process_reopen)/)' --no-tests=fail
+
+[doc("Reject default, bootstrap, empty, and arbitrary-label production authority")]
+[group('test')]
+daemon-bootstrap-route-denial-check:
+    cargo nextest run --locked --lib -E 'test(/(production_serve_requires_programmatic_composition|daemon_factory_rejects_an_empty_workspace_set|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail
+
+[doc("Prove bounded cancellation, shutdown, restart, and durable runtime reconstruction")]
+[group('test')]
+programmatic-runtime-lifecycle-check:
+    cargo nextest run --locked --lib -E 'test(/(real_delta_sqlite_daemon_query_activation_and_process_reopen|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
+
+[doc("Prove released lifecycle identity, Protobuf descriptors, UDS peer policy, deadlines, and frame limits")]
+[group('test')]
+public-lifecycle-wire-contract-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/(public_lifecycle_identity_contract_rejects_substitution_and_duplicate_workspaces|negotiated_query_session_binds_workspace_and_host_profile|programmatic_query_contract_identity_is_typed_ordered_and_causal)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(/(wp10_behavioral_acceptance|missing_or_mismatched_identity_is_rejected_before_handler_dispatch|rust_client_deadline_cancels_a_slow_rpc|rust_client_and_server_apply_symmetric_four_mib_limits)/)' --no-tests=fail
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_proto.py codefabric-cpg-mcp/tests/test_settings.py -k 'wp10 or generated_descriptors or python_channel or daemon_scheme'
+
+[doc("Exercise real Delta activation and restart through the production UDS daemon and FastMCP Arrow resources")]
+[group('test')]
+lifecycle-production-vertical-check:
+    cargo nextest run --locked --lib -E 'test(/(real_delta_sqlite_daemon_query_activation_and_process_reopen|production_serve_requires_programmatic_composition|wp12_behavioral_acceptance)/)' --no-tests=fail
+
+[doc("Keep FastMCP UDS-only and presentation-only while proving real generated-gRPC Arrow delivery")]
+[group('test')]
+fastmcp-presentation-boundary-check:
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp_presentation_boundary.py
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_server.py codefabric-cpg-mcp/tests/test_arrow_resources.py codefabric-cpg-mcp/tests/test_stdio.py codefabric-cpg-mcp/tests/test_settings.py
+
+[doc("Prove bounded backpressure, cancellation cleanup, reconnect attachment, shutdown, and restart recovery")]
+[group('test')]
+resource-cancellation-recovery-check:
+    cargo nextest run --locked --lib -E 'test(/(flow_control_credit_is_bounded_and_cancellation_is_terminal|frame_count_byte_budget_and_backpressure_are_enforced_before_allocation|cancellation_is_terminal_after_ipc_end_or_coverage_trailer|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(rust_client_deadline_cancels_a_slow_rpc)' --no-tests=fail
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_server.py codefabric-cpg-mcp/tests/test_arrow_resources.py -k 'transport_loss or wp15_arrow or checksum_offset_length or wrong_owner_token'
+
+[doc("Validate immutable WP40 identities, exact frozen inputs, live test names, and development-only certification state")]
+[group('test')]
+release-evidence-record-integrity-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_relational_fabric_release.py -k 'int_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_release.py record-integrity
+
+[doc("Execute the post-purge successor matrix against independently reviewed expectations")]
+[group('test')]
+release-evidence-matrix-v3-check: successor-expected-behavior-review-check first-principles-production-behavior-check retained-target-post-purge-behavior-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_relational_fabric_release.py -k 'beh_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_release.py matrix-v3
+
+[doc("Execute authorization, containment, provider, protocol, resource, activation, and legacy rejection evidence")]
+[group('test')]
+security-resource-release-rejection-check: causal-fault-discrimination-check provider-trust-coverage-remainder-check candidate-free-recovery-check resource-cancellation-recovery-check remaining-legacy-zero-state-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_relational_fabric_release.py -k 'neg_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_release.py security-resource-rejection
+
+[doc("Execute clean/incremental equivalence, restart, CDF, cache, resource, package, and honest performance evidence")]
+[group('test')]
+clean-incremental-recovery-performance-check: production-evidence-recovery-operations-check exact-provider-batch-check lifecycle-production-vertical-check post-purge-package-build-operations-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_relational_fabric_release.py -k 'ops_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_release.py clean-incremental-recovery-performance
+
+[doc("Validate content-addressed cutover events, prepared commands, schema closure, and fencing")]
+[group('test')]
+cutover-event-contract-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/wp41_int_/) | test(/wp41_prod_int_/)' --no-tests=fail
+
+[doc("Execute durable forward-only target authority and physical-zero convergence")]
+[group('test')]
+fenced-authority-cutover-v3-check:
+    cargo nextest run --locked --lib -E 'test(/wp41_beh_/) | test(/wp41_prod_beh_/)' --no-tests=fail
+
+[doc("Reject predecessor physical/config/role revival and supervisor or activation substitution")]
+[group('test')]
+predecessor-restart-revocation-check:
+    cargo nextest run --locked --lib -E 'test(/wp41_neg_/) | test(/wp41_prod_neg_/)' --no-tests=fail
+
+[doc("Reconcile every interrupted cutover edge from exact command, Delta, and supervisor readback")]
+[group('test')]
+unknown-cutover-reconciliation-check:
+    cargo nextest run --locked --lib -E 'test(/wp41_ops_/) | test(/wp41_prod_ops_/)' --no-tests=fail
+
+[doc("Validate exact WP29-WP42 scope, 56 substantive oracles, proof ancestry, and independent review")]
+[group('test')]
+successor-provenance-state-integrity-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_certification.py -k 'int_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_certification.py contract-integrity
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_certification.py provenance-state-integrity
+
+[doc("Execute and record all 56 successor oracles at one trusted certification HEAD")]
+[group('test')]
+relational-fabric-v3-certification:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_certification.py -k 'beh_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_certification.py certify
+
+[doc("Reject any restored legacy route, missing fault, stale selector, or package reachability")]
+[group('test')]
+successor-final-zero-state-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_certification.py -k 'neg_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_certification.py final-zero-state
+
+[doc("Run four isolated build domains and record unavailable host profiles fail closed")]
+[group('test')]
+successor-four-domain-release-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_certification.py -k 'ops_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_certification.py four-domain-release
+
+[doc("Prove retired bootstrap, model, ontology, dual-epoch, and candidate authority stays absent")]
+[group('test')]
+bootstrap-model-decommission-integrity-check:
+    ./scripts/model_zero_state_check.sh
+
+[doc("Prove cold programmatic composition constructs and queries without predecessor artifacts")]
+[group('test')]
+bootstrap-model-consumer-cutover-check:
+    cargo nextest run --locked --lib -E 'test(/(provider_plan_schema_observations_and_query_share_one_sealed_session|real_delta_sqlite_daemon_query_activation_and_process_reopen)/)' --no-tests=fail
+
+[doc("Reject every released request or daemon attempt to select predecessor authority")]
+[group('test')]
+bootstrap-model-dual-authority-zero-state-check:
+    ./scripts/model_zero_state_check.sh
+    cargo nextest run --locked --lib -E 'test(/(released_request_parser_rejects_unreleased_fields|production_serve_requires_programmatic_composition)/)' --no-tests=fail
+
+[doc("Reopen exact programmatic command and query authority without model artifacts")]
+[group('test')]
+programmatic-model-free-restart-check:
+    cargo nextest run --locked --lib -E 'test(/(real_delta_sqlite_daemon_query_activation_and_process_reopen|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
+
+[doc("Validate the plan-derived schema, transformation, native-rung, and observation contract matrix")]
+[group('test')]
+datafusion-contract-matrix-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/(constructs_qualified_schema_and_round_trips_index_mappings|direct_observed_schemas_bind_policy_casts_and_public_phase_output|transformation_contract_metadata_is_typed_and_queryable|programmatic_bindings_compile_from_live_schema_contracts_without_model_rows|recursive_plan_remains_optimizer_visible_and_has_no_extension|observation_fixed_point_policy_rejects_every_zero_bound|recursion_policy_fails_closed_without_a_native_iteration_cap|determinism_policy_rejects_nonimmutable_and_inert_volatility)/)' --no-tests=fail
+
+[doc("Prove plan-derived schemas, fixed-point observations, child views, and shared logical reuse")]
+[group('test')]
+datafusion-plan-schema-cache-check:
+    cargo nextest run --locked --lib -E 'test(/(provider_filter_projection_derives_and_registers_its_schema|provider_plan_schema_observations_and_query_share_one_sealed_session|fully_granted_view_graph_is_rebuilt_against_child_providers|shared_cache_tracks_concrete_registry_authority_not_only_opaque_pins|compiles_projection_filter_aggregate_sort_and_limit_to_native_nodes)/)' --no-tests=fail
+
+[doc("Reject schema drift, dependency cycles, parent-provider leaks, missing grants, and cache collisions")]
+[group('test')]
+authorized-child-schema-rejection-check:
+    cargo nextest run --locked --lib -E 'test(/(output_schema_declaration_is_assertion_only_and_mismatch_fails|unresolved_and_cyclic_transformations_fail_before_plan_building|granted_view_graph_rejects_a_transitively_denied_parent_provider|unresolved_relation_and_function_name_authority_fail_closed|logical_plan_cache_rejects_materialization_collision_for_complete_key|observation_fixed_point_iteration_bound_fails_closed|observation_relation_row_bound_fails_closed_before_sealing|observation_relation_memory_bound_fails_closed_before_sealing|observation_total_row_bound_fails_closed_before_sealing|observation_total_memory_bound_fails_closed_before_sealing)/)' --no-tests=fail
+
+[doc("Exercise bounded cache eviction, TTL refresh, transformation resources, and fresh execution")]
+[group('test')]
+datafusion-cache-resource-operations-check:
+    cargo nextest run --locked --lib -E 'test(/(native_datafusion_cache_enforces_entry_and_byte_bounds_with_lru_eviction|object_list_ttl_is_a_refresh_bound_not_validity_or_authority|proof_execution_enforces_row_and_memory_resource_bounds|relational_program_executes_only_through_authorized_child_inputs|logical_plan_cache_bypasses_oversized_entries_without_changing_semantics)/)' --no-tests=fail
+
+[doc("Prove Delta history creation, transaction identity, exact proof rows, and activation readback integrity")]
+[group('test')]
+delta-durability-protocol-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/(history_creation_contract_sets_cdf_stats_and_feature_properties_at_version_zero|commit_preserves_session_marker_provenance_and_zero_retry|corrupt_duplicate_rows_fail_closed_after_exact_reopen|exact_delta_append_readback_and_marker_reconciliation_round_trip)/)' --no-tests=fail
+
+[doc("Reconstruct exact semantic, CDF, checkpoint, and nine-relation proof state from pinned Delta versions")]
+[group('test')]
+delta-exact-reconstruction-v3-check:
+    cargo nextest run --locked --lib -E 'test(/(exact_process_reopen_restores_all_nine_relations|snapshot_recipe_reconstructs_the_exact_pin_without_a_version_selector|exact_provider_read_retains_full_stats_and_marks_missing_values_unknown|exact_cdf_range_has_an_inclusive_end_and_excludes_a_newer_head|reconstructed_checkpoint_restarts_at_the_next_exact_version)/)' --no-tests=fail
+
+[doc("Reject receipt, cache, predecessor-schema, and reversible-vector substitution as activation authority")]
+[group('test')]
+activation-receipt-nonauthority-check:
+    cargo nextest run --locked --lib -E 'test(/(missing_and_wrong_version_vectors_fail_closed|concrete_cache_and_acknowledgement_are_idempotent_and_fenced|recovery_rejects_a_reversible_version_vector_substitution|predecessor_v2_activation_schema_is_not_a_reopen_authority|durable_ack_marker_prevents_duplicate_acknowledgement_on_recovery)/)' --no-tests=fail
+
+[doc("Recover admission-closed from durable Delta evidence without a process-local candidate")]
+[group('test')]
+candidate-free-recovery-check:
+    cargo nextest run --locked --lib -E 'test(/(unknown_commit_recovers_only_from_exact_operation_marker_and_chain|unknown_marker_keeps_restart_admission_closed_and_requires_reconciliation|cache_loss_and_process_reopen_reconstruct_durable_authority|split_head_and_stale_fence_reject_before_native_checkpoint|active_pins_cdf_and_proof_references_refuse_destructive_vacuum)/)' --no-tests=fail
+
+[doc("Validate frozen WP33 claim, fixture, dependency, and review identities")]
+[group('test')]
+successor-evidence-transaction-integrity-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance.py -k 'int_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance.py transaction-integrity
+
+[doc("Validate independently reviewed decoded successor expectations and mutation detection")]
+[group('test')]
+successor-expected-behavior-review-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance.py -k 'beh_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance.py expected-behavior-review
+
+[doc("Validate semantic causal/negative fixtures cannot import target or historical output")]
+[group('test')]
+successor-negative-fixture-independence-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance.py -k 'neg_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance.py negative-fixture-independence
+
+[doc("Validate WP33 issuance precedes consumers and fails closed on zero selection or mutation")]
+[group('test')]
+successor-evidence-issuance-readiness-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance.py -k 'ops_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance.py readiness
+
+[doc("Execute frozen Claim 018 through real clean and incremental Arrow/DataFusion successor code")]
+[group('test')]
+wp38-claim-018-production-check:
+    cargo nextest run --locked --lib -E 'test(/(wp38_claim_018_clean_incremental_equivalence_executes_successor_arrow_datafusion|wp38_claim_018_causal_source_change_is_discriminated_by_successor_execution|wp38_claim_018_missing_delete_fault_is_rejected_by_successor_execution)/)' --no-tests=fail
+
+[doc("Execute every currently implemented artifact-bound positive WP38 observation")]
+[group('test')]
+wp38-artifact-bound-positive-execution-check:
+    cd pyrefly-sidecar && cargo test --locked wp38_claim_001_positive_executes_frozen_pyrefly_provider_observation
+    cargo nextest run --locked --lib -E 'test(/(wp38_claim_002_positive_executes_frozen_typed_datafusion_transformation|wp38_claim_003_positive_executes_candidate_preserving_common_call_graph|wp38_claim_004_positive_production_execution|wp38_claim_005_positive_production_execution|wp38_claim_006_positive_production_execution|wp38_claim_007_positive_production_execution|wp38_claim_008_positive_production_execution|wp38_claim_009_positive_production_execution|wp38_claim_010_positive_production_execution|wp38_claim_011_positive_production_execution|wp38_claim_012_positive_executes_frozen_exact_delta_and_cdf_semantics|wp38_claim_013_positive_recovers_the_artifact_bound_exact_epoch|wp38_claim_014_positive_production_execution|wp38_claim_015_positive_executes_typed_arrow_ipc_and_canonical_artifact_identity|wp38_claim_016_positive_executes_fail_closed_production_preflight|wp38_claim_018_clean_incremental_equivalence_executes_successor_arrow_datafusion)/)' --no-tests=fail
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_production_evidence_claim017.py::test_wp38_claim_017_positive_executes_frozen_released_response_projection
+
+[doc("Execute every currently implemented artifact-bound causal WP38 observation")]
+[group('test')]
+wp38-artifact-bound-causal-execution-check:
+    cd pyrefly-sidecar && cargo test --locked wp38_claim_001_causal_source_mutation_changes_production_pyrefly_target
+    cargo nextest run --locked --lib -E 'test(/(wp38_claim_002_causal_fixture_changes_real_datafusion_rows|wp38_claim_003_causal_provider_target_changes_common_call_graph|wp38_claim_004_causal_production_execution|wp38_claim_005_causal_production_execution|wp38_claim_006_causal_production_execution|wp38_claim_007_causal_production_execution|wp38_claim_008_causal_production_execution|wp38_claim_009_causal_production_execution|wp38_claim_010_causal_production_execution|wp38_claim_011_causal_production_execution|wp38_claim_012_causal_exact_version_changes_the_decoded_snapshot|wp38_claim_013_causal_new_head_changes_the_recovered_exact_epoch|wp38_claim_014_causal_production_execution|wp38_claim_015_causal_row_budget_rejects_before_resource_publication|wp38_claim_016_causal_authorization_executes_degraded_trusted_local_plan|wp38_claim_018_causal_source_change_is_discriminated_by_successor_execution)/)' --no-tests=fail
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_production_evidence_claim017.py::test_wp38_claim_017_causal_terminal_selects_frozen_cancelled_response
+
+[doc("Execute every currently implemented artifact-bound rejection WP38 observation")]
+[group('test')]
+wp38-artifact-bound-negative-execution-check:
+    cargo nextest run --locked --lib -E 'test(/(wp38_claim_001_negative_rejects_open_provider_coverage|wp38_claim_002_negative_fixture_rejects_undeclared_typed_column|wp38_claim_003_negative_preserves_known_fact_and_typed_unknown|wp38_claim_004_negative_production_execution|wp38_claim_005_negative_production_execution|wp38_claim_006_negative_production_execution|wp38_claim_007_negative_production_execution|wp38_claim_008_negative_production_execution|wp38_claim_009_negative_production_execution|wp38_claim_010_negative_production_execution|wp38_claim_011_negative_production_execution|wp38_claim_012_negative_rejects_frozen_unsupported_writer_feature|wp38_claim_013_negative_transaction_mismatch_keeps_admission_closed|wp38_claim_014_negative_production_execution|wp38_claim_015_negative_cancellation_releases_without_publication|wp38_claim_016_negative_rejects_seccomp_requirement_weakening|wp38_claim_018_missing_delete_fault_is_rejected_by_successor_execution)/)' --no-tests=fail
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_production_evidence_claim017.py::test_wp38_claim_017_negative_rejects_frozen_candidate_public_projection
+
+[doc("Bind frozen WP33 inputs to the append-only, independently reviewed WP38 transaction")]
+[group('test')]
+production-evidence-input-integrity-check: successor-evidence-transaction-integrity-check remaining-legacy-zero-state-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_production_evidence.py -k 'int_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/production_evidence.py input-integrity
+
+[doc("Execute positive successor observations for every independently issued release claim")]
+[group('test')]
+first-principles-production-behavior-check: production-evidence-input-integrity-check exact-provider-batch-check provider-ipc-contract-integrity-check datafusion-contract-matrix-integrity-check analysis-producer-semantic-check semantic-request-program-check delta-exact-reconstruction-v3-check lifecycle-production-vertical-check public-lifecycle-wire-contract-integrity-check wp38-artifact-bound-positive-execution-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_production_evidence.py -k 'beh_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/production_evidence.py behavior
+
+[doc("Execute issued causal and rejection faults without historical acceptance dependencies")]
+[group('test')]
+causal-fault-discrimination-check: production-evidence-input-integrity-check provider-admission-exclusivity-check authorized-child-schema-rejection-check analysis-causal-fault-check query-unknown-negative-proof-check activation-receipt-nonauthority-check fastmcp-presentation-boundary-check wp38-artifact-bound-causal-execution-check wp38-artifact-bound-negative-execution-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_production_evidence.py -k 'neg_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/production_evidence.py causal-faults
+
+[doc("Execute restart, cache-loss, resource, security, equivalence, and recovery evidence")]
+[group('test')]
+production-evidence-recovery-operations-check: production-evidence-input-integrity-check provider-trust-coverage-remainder-check datafusion-cache-resource-operations-check candidate-free-recovery-check graph-query-resource-operations-check resource-cancellation-recovery-check wp38-claim-018-production-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_production_evidence.py -k 'ops_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/production_evidence.py recovery-operations
+
+[doc("Validate exact Arrow IPC identities, schemas, pinned provider batches, and cross-process control contracts")]
+[group('test')]
+provider-ipc-contract-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/(round_trip_keeps_one_schema_and_dictionary_scope|registration_binds_schema_fingerprint_and_exact_arrow_universe|production_provider_schemas_interoperate_with_the_relation_stream_boundary|workspace_transaction_aggregates_all_four_exact_provider_lanes|observation_service_rejects_mismatched_launch_plan_binding_before_listen)/)' --no-tests=fail
+    cd pyrefly-sidecar && cargo test --locked pyrefly_protocol_conformance
+    cd rustc-extractor && cargo test --locked wp35_structural_acceptance
+
+[doc("Prove exact typed provider-native Arrow rows and clean/incremental semantic equivalence")]
+[group('test')]
+exact-provider-batch-check:
+    cargo nextest run --locked --lib -E 'test(/(exact_provider_native_relations_are_typed_and_source_pinned|incremental_run_emits_structural_changed_ranges|workspace_transaction_aggregates_all_four_exact_provider_lanes|accepted_rustc_zero_fact_relation_remains_a_proved_empty_batch|orchestrated_clean_and_incremental_generations_emit_equal_arrow_semantics)/)' --no-tests=fail
+    cd rustc-extractor && cargo test --locked zero_fact_relation_is_a_schema_carrying_arrow_batch
+
+[doc("Reject incomplete, opaque, corrupt, parallel, or trust-bypassing provider admission")]
+[group('test')]
+provider-admission-exclusivity-check:
+    cargo nextest run --locked --lib -E 'test(/(duplicate_and_out_of_order_sequences_fail_closed|truncation_and_corruption_are_distinct_typed_failures|missing_trailer_and_terminal_are_not_complete|opaque_schema_carriers_are_rejected_before_any_provider_bytes|raw_json_cannot_masquerade_as_semantic_row_payload|exact_programmatic_admission_rejects_missing_pyrefly_coverage_relation|changed_source_or_rustc_receipt_binding_invalidates_workspace_authority|later_provider_failure_drops_the_partially_registered_builder|typed_relation_ingress_rejects_unknown_and_opaque_referenced_payloads|orchestrated_trusted_local_bypass_is_rejected_before_spawn|orchestrated_missing_terminal_returns_no_semantic_output|orchestrated_context_mismatch_never_invokes_supervisor|pyrefly_stale_generation_rejection_falsification)/)' --no-tests=fail
+    just remaining-legacy-zero-state-check
+
+[doc("Exercise provider coverage, remainder, flow-control, cancellation, containment, and resource bounds")]
+[group('test')]
+provider-trust-coverage-remainder-check:
+    cargo nextest run --locked --lib -E 'test(/(partial_and_unknown_coverage_are_explicit_and_counted|flow_control_credit_is_bounded_and_cancellation_is_terminal|frame_count_byte_budget_and_backpressure_are_enforced_before_allocation|cancellation_is_terminal_after_ipc_end_or_coverage_trailer|invalid_source_keeps_syntax_and_materializes_semantic_remainders|absent_language_lanes_return_explicit_unknowns_without_fake_tables|policy_closure_and_all_resource_limits_are_enforced|credential_proxy_agent_and_unknown_environment_are_rejected|cancellation_is_plan_bound_and_escalates_the_complete_group|surviving_process_group_fails_without_a_false_receipt|sampled_accounting_fails_closed_before_an_untrusted_spawn|orchestrated_untrusted_accounting_failure_never_executes_host_cargo|cargo_run_tracks_and_cancels_multiple_compilation_units_independently)/)' --no-tests=fail
+    cd pyrefly-sidecar && cargo test --locked relation_acknowledgements_return_only_explicitly_accepted_credit
+    cd rustc-extractor && cargo test --locked wp35_operational_acceptance
+
+[doc("Validate closed producer identities, dependencies, algorithms, inputs, and remainders")]
+[group('test')]
+analysis-producer-contract-integrity-check:
+    cargo nextest run --locked --lib -E 'test(/(existing_family_dependency_contracts_are_closed_and_non_placeholder|existing_family_census_rejects_dependency_contract_drift)/)' --no-tests=fail
+
+[doc("Execute every currently realized typed producer against live catalog relations")]
+[group('test')]
+analysis-producer-semantic-check:
+    cargo nextest run --locked --lib -E 'test(/existing_family_census_executes_fifteen_real_catalog_input_producers/)' --no-tests=fail
+
+[doc("Prove changed catalog inputs causally change typed producer outputs")]
+[group('test')]
+analysis-causal-fault-check:
+    cargo nextest run --locked --lib -E 'test(/changed_catalog_inputs_causally_change_real_producer_outputs/)' --no-tests=fail
+
+[doc("Enforce aggregate producer/fixed-point resource bounds without partial epochs")]
+[group('test')]
+analysis-fixed-point-resource-check:
+    cargo nextest run --locked --lib -E 'test(/(aggregate_resource_envelope_rejects_zero_and_overcommit_before_registration|resource_contract_is_causal_in_composition_closure_observation|execution_bound_aborts_seal_without_returning_partial_epoch)/)' --no-tests=fail
+
+[doc("Reject unknown-as-empty results, unauthorized child capabilities, predecessor selectors, SQL escapes, and parent authority leaks")]
+[group('test')]
+query-unknown-negative-proof-check:
+    cargo nextest run --locked --lib -E 'test(/(invalid_closure_and_explicit_remainder_do_not_fallback|epoch_bound_direct_compiler_preserves_unknown_producer_closure|unknown_coverage_is_explicit_and_never_transport_truncation|empty_relation_retains_its_schema_and_explicit_completion|empty_result_retains_exact_projected_schema|zero_edges_preserve_the_contract_output_schema)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(reduced_catalog_exposes_allowed_table_and_physically_omits_denied_table|granted_view_graph_rejects_a_transitively_denied_parent_provider|shared_cache_tracks_concrete_registry_authority_not_only_opaque_pins|cached_reference_validation_reaches_subqueries_and_function_capabilities|child_owns_fresh_closed_registries_and_resources|unresolved_relation_and_function_name_authority_fail_closed|installs_only_exact_supplied_function_variable_and_store_capabilities|scope_authorization_can_only_narrow_baseline_capabilities|no_epoch_workspace_and_denied_relation_fail_at_their_authority_boundaries|epoch_bound_ingress_program_id_not_compatibility_form_selects_execution|provider_authority_and_judgment_are_rejected)/)' --no-tests=fail
+    @if rg -n 'SELECT |SessionContext::sql|\.sql\(|sql_expr\(|query_sql|order_sensitive_checksum|SemanticQueryPlanner|QueryFormCrosswalk|model_epoch_pin|bootstrap_model' src/query_service.rs src/semantic_query_contract.rs src/relational_semantic_query.rs src/fabric/programmatic_ingress_port.rs src/fabric/programmatic_query_backend.rs src/fabric/child_session.rs src/fabric/relational_query_runtime.rs src/fabric/graph_program.rs; then echo 'retired query authority or SQL/name escape remains on the semantic query path' >&2; exit 1; fi
+
+[doc("Prove native graph planning, layout determinism, bounded resources, cancellation, cache isolation, pagination, and cleanup")]
+[group('test')]
+graph-query-resource-operations-check:
+    cargo nextest run --locked --lib -E 'test(/(cycles_and_duplicate_paths_produce_unique_minimum_depth_rows|zero_edges_preserve_the_contract_output_schema|depth_and_output_limits_are_enforced_without_partial_success|recursive_plan_remains_optimizer_visible_and_has_no_extension|invalid_bindings_and_bounds_fail_before_plan_construction|partition_and_batch_layout_preserve_deterministic_graph_rows|cancellation_is_typed_reusable_and_releases_graph_resources)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(success_is_arrow_native_deterministic_and_causally_observed|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|row_batch_schema_and_ipc_resource_overflow_fail_without_publication|result_reads_reauthorize_owner_and_token_and_release_is_terminal|published_result_retains_exact_predecessor_epoch_across_swap_until_release|caller_admitted_execution_cannot_mix_compilation_and_execution_epochs)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(row_and_ipc_byte_overflow_fail_without_truncation|chunks_reassemble_exact_bytes_and_checksum|owner_token_resource_release_tombstone_and_expiry_are_explicit|result_release_returns_epoch_capacity_after_causal_backpressure|canonical_batch_checksum_is_row_order_independent|wp64_(behavioral_acceptance|structural_acceptance|negative_zero_state|operational_acceptance)|logical_plan_cache_(is_collision_safe_bounded_and_lru|bypasses_oversized_entries_without_changing_semantics|rejects_materialization_collision_for_complete_key))/)' --no-tests=fail
 
 [doc("Prove parameter-neutral plan identity and partition-independent Arrow result checksums")]
 [group('test')]
@@ -422,120 +664,7 @@ query-determinism-check:
 [group('test')]
 query-artifact-single-execution-check:
     cargo nextest run --locked --lib -E 'test(/(query_failure_artifact_closure|query_terminal_journal_authority|query_artifact_no_diagnostic_reexecution|query_artifact_failure_operational_gate)/)' --no-tests=fail
-    @if rg -n 'AnalyzeExec::new|LogicalPlan::Analyze|EXPLAIN ANALYZE' src/query_service.rs src/semantic_query.rs src/fabric/serving.rs; then echo 'governed serving must not construct AnalyzeExec or EXPLAIN ANALYZE' >&2; exit 1; fi
-
-[doc("Prove the semantic query path contains no legacy SQL builder, string state fields, or order-sensitive checksum")]
-[group('static')]
-query-legacy-zero-state-check:
-    @if rg -n 'SELECT ' src/semantic_query.rs src/query_service.rs; then echo 'legacy SQL remains on the semantic query path' >&2; exit 1; fi
-    @if rg -n 'fn query_sql|f\(sql, snapshot\)|order_sensitive_checksum' src/semantic_query.rs src/query_service.rs src/fabric/; then echo 'legacy query identity or checksum remains' >&2; exit 1; fi
-    @just alignment-detector-check DP-110
-    cargo nextest run --locked --lib -E 'test(/(wp62_negative_zero_state|wp75_negative_zero_state|wp64_negative_zero_state)/)' --no-tests=fail
-
-[doc("Verify accountable-owner acceptance and execute the immutable released Gate B corpus")]
-[group('test')]
-gate-b-check: gate-b-owner-acceptance-check wave5-integration-check wave6-integration-check adapter-wheel-test model-release-census-check
-    cargo run --locked --bin codefabric-gate-b-candidate -- check-release . target/gate-b-release-check-scratch
-
-[doc("Verify the Gate B owner authority, accepted candidate, immutable corpus, and current-version index")]
-[group('test')]
-gate-b-owner-acceptance-check:
-    cargo run --locked --bin codefabric-gate-b-candidate -- verify-release .
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP76 --plan docs/plans/codefabric_design_principles_full_alignment_implementation_plan_v3_2026-08-25.md
-
-[doc("Execute the production Gate B vertical and verify functional-candidate isolation")]
-[group('test')]
-gate-b-candidate-check:
-    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
-    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_vertical_slice_produces_all_eleven_planes|gate_b_vertical_slice_adversarial|gate_b_candidate_independent_oracle_contract|gate_b_candidate_operational_gate)/)' --no-tests=fail
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_stdio.py codefabric-cpg-mcp/tests/test_adapter_contracts.py
-    @if rg -n 'fn run_scenario|async fn run_(pyrefly|rustc)|functional_candidate_projection|normalize_gate_b_planes' src/gate_b_candidate.rs src/gate_b_candidate; then echo 'candidate-local scenario, provider, or comparison authority remains' >&2; exit 1; fi
-    @if test -d tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; then cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1; fi
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP06 --plan docs/plans/codefabric_design_principles_full_alignment_review_remediation_implementation_plan_v4_2026-08-26.md
-
-[doc("Validate strict, human-authored Gate B semantic claims, anchors, scenarios, and proof universes")]
-[group('test')]
-functional-golden-contract-check:
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(functional_golden_claim_schema_conformance|functional_golden_source_anchor_closure|functional_golden_negative_claim_requires_complete_universe|functional_golden_duplicate_key_rejected|functional_golden_contract_operational_gate)/)' --no-tests=fail
-    @if rg -n '"(expected_digest|candidate_digest|canonical_row_hex|governed_key_hex|response_bytes_hex|descriptor_identity|registry_count|runtime_id|matches|requirement_checks)"|"b3:' tests/golden/codefabric-golden-v4; then echo 'captured output or integrity material remains in the functional expectation authority' >&2; exit 1; fi
-
-[doc("Prove the rejected Gate B v3 candidate remains immutable and outside release routing")]
-[group('test')]
-gate-b-rejected-candidate-zero-state-check:
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_rejected_candidate_zero_state)' --no-tests=fail
-    @if rg -n 'codefabric-golden-v3\.0\.0-candidate\.1' tests/golden/corpus-index.json tests/golden/codefabric-golden-v2/owner-acceptance.json; then echo 'rejected Gate B candidate entered current or accepted release metadata' >&2; exit 1; fi
-
-[doc("Execute the independent logical evaluators and prove expectation/production isolation")]
-[group('test')]
-functional-golden-independence-check:
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(reference_query_evaluator_laws|functional_golden_comparator_falsification|functional_golden_expectation_write_isolation|functional_golden_independence_operational_gate|reference_bag_multiplicity_law|reference_coverage_monotonicity_law)/)' --no-tests=fail
-    @if rg -n 'use crate::(semantic_query|reconciliation|gate_b_candidate|gate_b_release|lifecycle)|use (datafusion|petgraph)' src/functional_golden.rs src/functional_golden; then echo 'functional evaluator imports a production semantic engine' >&2; exit 1; fi
-    @if rg -n 'fs::(write|create_dir|remove|rename)|File::create|OpenOptions' src/functional_golden.rs src/functional_golden; then echo 'functional expectation closure contains a write path' >&2; exit 1; fi
-
-[doc("Execute the first-principles Gate B provider, canonical, public-query, and scenario contract")]
-[group('test')]
-gate-b-public-vertical-check:
-    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
-    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_public_vertical_conformance|golden_scenario_semantic_transition_contracts|gate_b_public_vertical_operational_gate)/)' --no-tests=fail
-
-[doc("Prove named fixture edits and producing/public seam interventions affect their dependent Gate B claims")]
-[group('test')]
-gate-b-causal-check:
-    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
-    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(gate_b_causal_intervention_matrix|gate_b_named_fixture_query_causality)/)' --no-tests=fail
-
-[doc("Prove UDS artifact readback and locked FastMCP STDIO preserve exact Gate B semantics")]
-[group('test')]
-gate-b-delivery-equivalence-check:
-    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
-    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_delivery_surface_semantic_equivalence)' --no-tests=fail
-
-[doc("Prove the governed comparison projection is the only Gate B semantic-ignore authority")]
-[group('static')]
-gate-b-projection-registry-check:
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_projection_registry_closure)' --no-tests=fail
-    @if rg -n 'semantic[^\n]*(ignore|normaliz)|ignore[^\n]*semantic' src/gate_b_candidate.rs src/gate_b_candidate; then echo 'candidate-local semantic comparison ignore or normalizer remains' >&2; exit 1; fi
-    @if rg -n 'fn run_scenario|async fn run_(pyrefly|rustc)|codefabric-pyrefly-sidecar|run_rustc_extractor\.sh' src/gate_b_candidate.rs src/gate_b_candidate; then echo 'candidate-local scenario edit dispatcher or provider ownership remains' >&2; exit 1; fi
-
-[doc("Execute every registered Gate B semantic mutant and reject survivors, collateral failures, or claim gaps")]
-[group('test')]
-semantic-oracle-mutants-check profile:
-    @if test "{{profile}}" != "gate-b"; then echo 'only the gate-b semantic mutant profile is registered' >&2; exit 1; fi
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(/(semantic_oracle_required_mutants_are_killed|semantic_oracle_rejects_unregistered_or_surviving_mutant)/)' --no-tests=fail
-
-[doc("Generate and validate the decoded claim-by-claim Gate B human review dossier")]
-[group('test')]
-gate-b-review-bundle-check:
-    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
-    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_human_review_bundle_contract)' --no-tests=fail
-
-[doc("Validate functional candidate isolation and any committed successor digest chain")]
-[group('test')]
-gate-b-functional-candidate-check:
-    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
-    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
-    cargo nextest run --locked --lib --no-fail-fast -E 'test(gate_b_functional_candidate_is_expectation_independent)' --no-tests=fail
-    @if test -d tests/golden/review-candidates/codefabric-golden-v4.0.0-candidate.1; then cargo run --locked --bin codefabric-gate-b-candidate -- verify-functional tests/golden/review-candidates/codefabric-golden-v4.0.0-candidate.1; else echo 'functional Gate B successor is not candidate-ready or committed' >&2; exit 1; fi
-    @if rg -n 'codefabric-golden-v4\.0\.0-candidate\.1' tests/golden/corpus-index.json; then echo 'unaccepted functional candidate advanced the corpus index' >&2; exit 1; fi
-
-[doc("Verify immutable v2 release, rejected v3 candidate, and functional successor remain distinctly routed")]
-[group('test')]
-gate-b-predecessor-check:
-    cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1
-    cargo run --locked --bin codefabric-gate-b-candidate -- verify tests/golden/review-candidates/codefabric-golden-v3.0.0-candidate.1
-    just gate-b-rejected-candidate-zero-state-check
-
-[doc("Compare continuous effective state with the clean-rebuild oracle")]
-[group('test')]
-rebuild-equivalence-check:
-    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
-    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
-    CODEFABRIC_FULL_REBUILD_PROVIDERS=1 cargo nextest run --locked --lib -E 'test(/(full_golden_scenario_clean_rebuild_equivalence|clean_rebuild_independence_contract|clean_rebuild_equivalence_adversarial|clean_rebuild_operational_gate|wp72_rejects_either_noncurrent_comparison_input|wp72_structural_acceptance)/)' --no-tests=fail
+    @if rg -n 'AnalyzeExec::new|LogicalPlan::Analyze|EXPLAIN ANALYZE' src/query_service.rs src/fabric/query_artifact.rs src/fabric/programmatic_query_backend.rs; then echo 'governed serving must not construct AnalyzeExec or EXPLAIN ANALYZE' >&2; exit 1; fi
 
 [doc("Run the complete Wave-6 continuous-update acceptance surface")]
 [group('test')]
@@ -545,28 +674,20 @@ wave6-integration-check:
 [doc("Compare Git-accelerated candidates and state with authoritative fallback")]
 [group('test')]
 git-parity-check:
-    cargo nextest run --locked --test integration -E 'test(/(wp(49|50|51|52|53)|wp72_operational_acceptance)/)' --no-tests=fail
-
-[doc("Run the complete WP72 true-rebuild, comparator, Git parity, and process-closure oracle set")]
-[group('test')]
-wp72-acceptance-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP05 --plan docs/plans/codefabric_design_principles_full_alignment_review_remediation_implementation_plan_v4_2026-08-26.md
-    cargo build --manifest-path pyrefly-sidecar/Cargo.toml --locked
-    CARGO_TARGET_DIR=target/extractor cargo +nightly-2026-08-18 build --manifest-path rustc-extractor/Cargo.toml --locked
-    CODEFABRIC_FULL_REBUILD_PROVIDERS=1 cargo nextest run --locked -E 'test(/(full_golden_scenario_clean_rebuild_equivalence|clean_rebuild_independence_contract|clean_rebuild_equivalence_adversarial|clean_rebuild_operational_gate|wp72_rejects_either_noncurrent_comparison_input|wp72_structural_acceptance|wp72_operational_acceptance)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(/wp(49|50|51|52|53)/)' --no-tests=fail
 
 [doc("Run the complete Wave-7 Git-aware lifecycle acceptance surface")]
 [group('test')]
-wave7-integration-check: git-parity-check rebuild-equivalence-check wp72-acceptance-check source-capture-race-check
+wave7-integration-check: git-parity-check source-capture-race-check
 
 [doc("Run the Wave-8 Python-local semantic acceptance slice; WP02-WP07 populate the selector")]
 [group('test')]
 wave8-integration-check:
     cargo nextest run --locked --lib --no-fail-fast -E 'test(/(py_context_(discovery_conformance|manifest_identity_parity|guess_rejection_falsification|invalidation_operational_gate)|py_scope_binding_fixture_conformance|ruff_semantic_isolation_parity|py_unresolved_reference_unknown_falsification|py_scope_binding_owner_replacement_gate|py_import_export_fixture_conformance|py_import_syntax_semantic_distinction_parity|py_dynamic_export_unknown_falsification|py_module_fact_replacement_gate|py_callable_call_site_fixture_conformance|py_call_site_first_class_parity|py_dynamic_splat_unknown_argument_falsification|py_callable_contract_replacement_gate|py_cfg_fixture_conformance|py_cfg_wellformedness_parity|py_cfg_exceptional_edge_falsification|py_cfg_owner_invalidation_gate|py_defuse_fixture_conformance|py_semantic_profile_partial_parity|py_parse_error_capability_gap_falsification|wave8_integration_operational_gate)$/)' --no-tests=fail
 
-[doc("Run every released Wave-2 through Wave-7 integration gate")]
+[doc("Run every retained Wave-2 and Wave-4 through Wave-7 integration gate")]
 [group('test')]
-wave-acceptance-check: wave2-integration-check wave3-integration-check wave4-integration-check wave5-integration-check wave6-integration-check wave7-integration-check
+wave-acceptance-check: wave2-integration-check wave4-integration-check wave5-integration-check wave6-integration-check wave7-integration-check
 
 [doc("Validate that a vacuum dry-run cannot include retained snapshot files")]
 [group('test')]
@@ -605,84 +726,9 @@ advisory-policy-check:
 stable-graph-check:
     ./scripts/stable_graph_check.sh
 
-[doc("Build the handwritten model compiler with every generated production output absent")]
-[group('gate')]
-model-bootstrap-check:
-    ./scripts/model_bootstrap_check.sh
-
-[doc("Compile the repository model and exercise Git/fallback/current-byte inventory semantics")]
-[group('gate')]
-model-inventory-check:
-    ./scripts/model_inventory_check.sh
-
-[doc("Verify the owner-accepted released-artifact census against the compiled model")]
-[group('gate')]
-model-release-census-check:
-    ./scripts/model_release_census_check.sh
-
-[doc("Validate typed action keys, affected closure, DesiredTree parity, and zero repository writes")]
-[group('gate')]
-model-plan-check:
-    ./scripts/model_plan_check.sh
-
-[doc("Print the structured read-only model action plan for optional changed paths")]
-[group('environment')]
-model-plan *paths:
-    ./scripts/model_exec.sh plan "$@" --root .
-
-# These private recipes are the small, reviewable profile roots. The model compiler derives
-# every transitive capability from Just's live JSON graph; there is no sibling proof manifest.
-_model-profile-edit: root-fmt model-plan-check
-
-_model-profile-changed: _model-profile-edit model-family-check model-incremental-check governance-scan root-check root-clippy root-doctest extractor-ci-fast sidecar-ci-fast adapter-ci-fast stable-graph-check
-
-_model-profile-tier-a: _model-profile-changed
-
-_model-profile-release: _model-profile-tier-a model-bootstrap-check model-inventory-check model-release-census-check model-repro-check model-transaction-check model-zero-state-check adapter-wheel-test features-each policy seed-zero-state-check
-
-[doc("Validate the read-only desired tree under a model assurance profile")]
-[group('gate')]
-model-check profile="edit":
-    ./scripts/model_exec.sh check "{{profile}}" --root .
-
-[doc("Validate one model family through typed render, independent decode, and staged consumers")]
-[group('gate')]
-model-family-check family="":
-    ./scripts/model_family_check.sh "{{family}}"
-
-[doc("Generate the complete model DesiredTree twice and compare exact path and byte identity")]
-[group('gate')]
-model-repro-check:
-    ./scripts/model_repro_check.sh
-
-[doc("Validate worktree-local locking, crash recovery, and exact transactional reconciliation")]
-[group('gate')]
-model-transaction-check:
-    ./scripts/model_transaction_check.sh
-
-[doc("Validate content-addressed family caching, affected closure, and watcher widening")]
-[group('gate')]
-model-incremental-check:
-    ./scripts/model_incremental_check.sh
-
-[doc("Compile live assurance evidence and prove conservative model profiles")]
-[group('gate')]
-model-assurance-check:
-    ./scripts/model_assurance_check.sh
-
-[doc("Watch repository hints and recompile the current-byte model after every batch")]
-[group('environment')]
-model-watch:
-    ./scripts/model_exec.sh watch .
-
-[doc("Explain a model artifact ID or repository path")]
-[group('environment')]
-model-explain target:
-    ./scripts/model_exec.sh explain "{{target}}" .
-
 [doc("Run repository structural governance rules")]
 [group('gate')]
-governance-scan: public-error-closure-check
+governance-scan:
     ast-grep test
     ast-grep scan \
       --globs '!contracts/generated/**' \
@@ -690,12 +736,6 @@ governance-scan: public-error-closure-check
       --globs '!codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/**' \
       --globs '!rustc-extractor/src/generated/**' \
       --globs '!pyrefly-sidecar/src/generated/**'
-
-[doc("Reject public Rust error prefixes outside the generated error registry")]
-[group('gate')]
-public-error-closure-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_error_registry_closure.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/error_registry_closure.py
 
 [doc("The routine stable-root gate")]
 [group('gate')]
@@ -792,67 +832,24 @@ adapter-wheel-test:
 [group('adapter')]
 adapter-ci-fast: adapter-lint adapter-type adapter-test
 
-# -------------------------------------------------------- model governance
+# ------------------------------------------------------ assurance governance
 
-[doc("Check formatting and lint for the model compiler and plan-governance helpers")]
+[doc("Check formatting and lint for plan-governance helpers")]
 [group('gate')]
-model-tooling-lint:
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff format --check tooling/model tooling/ci
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff check tooling/model tooling/ci
+governance-tooling-lint:
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff format --check tooling/ci
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff check tooling/ci
 
 [doc("Validate active plan, review, and schema-2 execution-state contracts")]
 [group('gate')]
-artifacts-check: model-tooling-lint
+artifacts-check: governance-tooling-lint
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_artifact_contracts.py
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/artifact_contracts.py artifacts-check
-
-[doc("Validate model-control ownership and single-active-program design contracts")]
-[group('gate')]
-model-design-contract-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_model_design_contracts.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/model_design_contracts.py
-
-[doc("Validate P1-P25 normative ownership and DP-001-DP-124 packet traceability")]
-[group('gate')]
-design-principle-traceability-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_design_principle_alignment.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/design_principle_alignment.py traceability-check
-
-[doc("Reject unregistered semantic properties and stale storage mappings before publication")]
-[group('gate')]
-property-registry-closure-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_property_registry_closure.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/property_registry_closure.py
-
-[doc("Validate governed DB01-DB03 semantic-provider candidates and reviewed transition allows")]
-[group('gate')]
-semantic-provider-legacy-zero-state-check scope="all":
-    ./scripts/semantic_provider_legacy_zero_state.sh "{{scope}}"
-
-[doc("Validate the closed semantic-provider fault seam census")]
-[group('gate')]
-semantic-fault-point-check:
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/semantic_provider_contracts.py faults
-
-[doc("Validate bounded semantic-provider telemetry, containment, and shared dispatch")]
-[group('gate')]
-semantic-observability-contract-check:
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/semantic_provider_contracts.py observability
 
 [doc("Run reproducible non-normative semantic substrate warm/cold workloads")]
 [group('perf')]
 semantic-profile-bench:
     uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/benchmarks/semantic_profile_bench.py
-
-[doc("Execute all current design-principle detectors, or one DP-NNN detector")]
-[group('gate')]
-alignment-detector-check detector_id="":
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/design_principle_alignment.py detector-check "{{detector_id}}"
-
-[doc("Reject any dirty, deleted, or untracked path without an explicit owner disposition")]
-[group('gate')]
-audit-baseline-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/design_principle_alignment.py baseline-check
 
 [doc("Validate governed oracle criteria, substantive definitions, and zero-match-safe selectors")]
 [group('gate')]
@@ -870,45 +867,6 @@ plan-dependency-check *args:
 [group('gate')]
 gate-filter-census:
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python scripts/gate_filter_census.py check
-
-[doc("Prove per-domain ID extensions, lowering, analyzer coverage, and retired generic typing")]
-[group('gate')]
-id-domain-extension-check:
-    cargo nextest run --locked --lib -E 'test(/odf_(id_domain_lowering_conformance|domain_conformant_plans_execute|cross_domain_plan_rejection|all_plan_ingresses_domain_checked)/)' --no-tests=fail
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_ontology_compiled_data_fabric.py -k 'id_domain'
-
-[doc("Execute compiled ontology FK, membership, conformance, cardinality, and one-of gates")]
-[group('gate')]
-ontology-relational-closure-check:
-    cargo nextest run --locked --lib -E 'test(/odf_(ontology_referential_zero|ontology_violation_rejection|property_value_one_of_gate|span_decision_conformance|span_incoherence_rejection)/)' --no-tests=fail
-
-[doc("Validate normalized ontology parity, relational closure, and serving decoration")]
-[group('gate')]
-ontology-dimension-check: ontology-relational-closure-check
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP09 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP10 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
-
-[doc("Validate logical structure classification and the selected flat source-span lowering")]
-[group('gate')]
-structure-classification-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check WP12 --plan docs/plans/codefabric_ontology_compiled_data_fabric_implementation_plan_v2_2026-08-27.md
-
-[doc("Resolve the complete ontology plane dynamically from a leased catalog")]
-[group('gate')]
-ontology-self-description-check:
-    cargo nextest run --locked --lib -E 'test(/ontology_(bootstrap_program_package_closure|self_description_additive_relation)/)' --no-tests=fail
-
-[doc("Execute every released negative fixture and cited assurance registry")]
-[group('gate')]
-released-fixture-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_released_fixture_verifier.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/released_fixture_verifier.py
-
-[doc("Validate purpose-classified hash APIs and the semantic fingerprint registry")]
-[group('gate')]
-digest-domain-contract-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_digest_domain_contracts.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/digest_domain_contracts.py check
 
 [doc("Execute exactly four substantive acceptance oracles for one implementation packet")]
 [group('test')]
@@ -940,19 +898,9 @@ seed-zero-state-check:
 model-zero-state-check:
     ./scripts/model_zero_state_check.sh
 
-[doc("Run the exhaustive read-only model release certification")]
+[doc("Run structural, artifact, provenance, compatibility, and zero-state governance")]
 [group('gate')]
-model-release-check:
-    ./scripts/model_release_check.sh
-
-[doc("Validate the sealed inactive Waves successor without changing the active pointer")]
-[group('gate')]
-model-handoff-check:
-    ./scripts/model_handoff_check.sh
-
-[doc("Run model-derived structural, artifact, provenance, and zero-state governance")]
-[group('gate')]
-governance: governance-scan model-design-contract-check model-assurance-check model-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check released-fixture-check oracle-substance-check plan-dependency-check design-principle-traceability-check alignment-detector-check v2-authority-cutover-check legacy-authority-freeze-check
+governance: tool-version-contract-check governance-scan authoritative-design-conformance-check proto-check model-zero-state-check remaining-legacy-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check successor-evidence-transaction-integrity-check successor-expected-behavior-review-check successor-negative-fixture-independence-check oracle-substance-check plan-dependency-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]
@@ -964,9 +912,9 @@ environment-regression: environment-contract-check sccache-canary doctor extract
 
 [doc("ci-fast plus policy, the ci nextest profile, and snapshot review state")]
 [group('gate')]
-ci-pr: ci-fast policy sidecar-policy wave-acceptance-check gate-b-check
-    cargo nextest run -P ci
-    cargo test --doc
+ci-pr: ci-fast policy sidecar-policy wave-acceptance-check
+    cargo nextest run --locked -P ci
+    cargo test --locked --doc
     cargo insta pending-snapshots
 
 # ------------------------------------------------------- coverage / test quality
@@ -979,7 +927,7 @@ ci-pr: ci-fast policy sidecar-policy wave-acceptance-check gate-b-check
 [group('quality')]
 coverage:
     mkdir -p target/coverage
-    cargo llvm-cov nextest \
+    cargo llvm-cov nextest --locked \
       --features local-workstation \
       --lcov \
       --output-path target/coverage/lcov.info
@@ -998,20 +946,20 @@ mutants-file path:
 # Miri explores executions; it never proves soundness (spec section 24.2). Record
 # toolchain, seed range, and exclusions with any finding.
 
-[doc("Miri UB check on the default toolchain's nightly")]
+[doc("Miri UB check on the exact dated assurance toolchain")]
 [group('quality')]
 miri:
-    CARGO_TARGET_DIR=target/nightly-assurance cargo +nightly miri test
+    CARGO_TARGET_DIR=target/nightly-assurance cargo +nightly-2026-08-18 miri test --locked
 
 [doc("Miri across a range of randomized seeds")]
 [group('quality')]
 miri-seeds seeds="16":
-    CARGO_TARGET_DIR=target/nightly-assurance MIRIFLAGS="-Zmiri-many-seeds=0..{{seeds}}" cargo +nightly miri test
+    CARGO_TARGET_DIR=target/nightly-assurance MIRIFLAGS="-Zmiri-many-seeds=0..{{seeds}}" cargo +nightly-2026-08-18 miri test --locked
 
 [doc("Compiler-oriented unused-dependency adjudication")]
 [group('quality')]
 udeps:
-    CARGO_TARGET_DIR=target/nightly-assurance cargo +nightly udeps --all-targets --all-features
+    CARGO_TARGET_DIR=target/nightly-assurance cargo +nightly-2026-08-18 udeps --locked --all-targets --all-features
 
 # Bounded runs only; long campaigns belong in scheduled infrastructure (spec section 23).
 # WP06's canonical JSON decoder is the first production-path untrusted-input surface;
@@ -1020,21 +968,21 @@ udeps:
 [doc("Bounded fuzz run against one target")]
 [group('quality')]
 fuzz target seconds="60":
-    rust_host="$(rustc +nightly -vV | sed -n 's/^host: //p')"; \
+    rust_host="$(rustc +nightly-2026-08-18 -vV | sed -n 's/^host: //p')"; \
       runtime_corpus="target/fuzz-corpus/$rust_host/{{target}}"; \
       mkdir -p "$runtime_corpus"; \
       cp -R "fuzz/corpus/{{target}}/." "$runtime_corpus/"; \
-      cargo +nightly fuzz run --target "$rust_host" --target-dir "target/fuzz/$rust_host" \
+      cargo +nightly-2026-08-18 fuzz run --target "$rust_host" --target-dir "target/fuzz/$rust_host" \
       {{target}} "$runtime_corpus" -- -max_total_time={{seconds}}
 
 [doc("Coverage of a fuzz corpus")]
 [group('quality')]
 fuzz-coverage target:
-    rust_host="$(rustc +nightly -vV | sed -n 's/^host: //p')"; \
+    rust_host="$(rustc +nightly-2026-08-18 -vV | sed -n 's/^host: //p')"; \
       runtime_corpus="target/fuzz-corpus/$rust_host/{{target}}"; \
       mkdir -p "$runtime_corpus"; \
       cp -R "fuzz/corpus/{{target}}/." "$runtime_corpus/"; \
-      cargo +nightly fuzz coverage --target "$rust_host" \
+      cargo +nightly-2026-08-18 fuzz coverage --target "$rust_host" \
       --target-dir "target/fuzz/$rust_host" {{target}} "$runtime_corpus"
 
 # --------------------------------------------------------- feature / compatibility
@@ -1045,12 +993,12 @@ fuzz-coverage target:
 [doc("Check every feature in isolation")]
 [group('compat')]
 features-each:
-    cargo hack check --each-feature
+    cargo hack check --locked --each-feature
 
 [doc("Check with no default features")]
 [group('compat')]
 features-no-default:
-    cargo hack check --no-default-features
+    cargo hack check --locked --no-default-features
 
 [doc("Verify the declared MSRV (inert until Cargo.toml declares rust-version)")]
 [group('compat')]
@@ -1115,7 +1063,7 @@ asm *args:
 [doc("Release codegen with symbols preserved, for samply or flamegraph")]
 [group('perf')]
 profile-build:
-    cargo build --profile profiling
+    cargo build --locked --profile profiling
 
 # ------------------------------------------------------------- mutating operations
 #
@@ -1135,39 +1083,11 @@ plan-activate plan:
 root-fmt-write:
     cargo fmt --all
 
-[confirm("Reconcile every model-owned Derived output transactionally. Continue?")]
-[doc("MUTATES: apply the complete validated model DesiredTree through the sole writer")]
+[confirm("Regenerate the released descriptor census and Rust/Python Protobuf bindings. Continue?")]
+[doc("MUTATES: regenerate released Protobuf outputs without changing the compatibility baseline")]
 [group('mutating')]
-model-sync:
-    ./scripts/model_exec.sh sync --confirm .
-
-[doc("MUTATES: emit fixture candidates to an isolated review directory")]
-[group('mutating')]
-fixture-candidates output_dir="target/fixture-candidates":
-    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/model/fixture_candidates.py --output-dir "{{output_dir}}"
-
-[doc("MUTATES DISPOSABLE STATE: emit the released-artifact census review candidate under target/")]
-[group('mutating')]
-model-release-census-candidate:
-    ./scripts/model_exec.sh release-census-candidate .
-
-[confirm("Generate the immutable functional Gate B successor for accountable-owner review. Continue?")]
-[doc("MUTATES: emit the decoded behavior-first Gate B candidate without accepting or releasing it")]
-[group('mutating')]
-gate-b-functional-candidate-emit output_dir="tests/golden/review-candidates/codefabric-golden-v4.0.0-candidate.1":
-    cargo run --locked --bin codefabric-gate-b-candidate -- emit-functional . target/gate-b-functional-candidate-emit-scratch "{{output_dir}}"
-
-[confirm("Accept the exact reviewed Gate B candidate and publish immutable corpus v2. Continue?")]
-[doc("MUTATES: record accountable-owner acceptance and publish immutable Gate B corpus v2 exactly once")]
-[group('mutating')]
-gate-b-owner-accept candidate_bundle="tests/golden/review-candidates/codefabric-golden-v2.0.0-candidate.1" acceptance_artifact="tests/golden/codefabric-golden-v2/owner-acceptance.json":
-    cargo run --locked --bin codefabric-gate-b-candidate -- accept . "{{candidate_bundle}}" "{{acceptance_artifact}}" codefabric-repository-owner "Explicit accountable-owner approval of the exact WP71 candidate bundle recorded in the implementation-plan execution thread"
-
-[confirm("Accept the reviewed released-artifact census as owner authority. Continue?")]
-[doc("MUTATES: create the owner-accepted released-artifact census exactly once")]
-[group('mutating')]
-model-accept kind owner provenance:
-    ./scripts/model_exec.sh accept "{{kind}}" --owner "{{owner}}" --provenance "{{provenance}}" --reviewed .
+proto-gen:
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/proto/generate.py write
 
 [confirm("typos -w rewrites source in place; identifier fixes can be API changes. Continue?")]
 [doc("MUTATES: apply spelling corrections to source")]

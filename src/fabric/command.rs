@@ -74,28 +74,38 @@ byte_identity!(
     32
 );
 byte_identity!(
-    /// Exact compiler release pin.
-    CompilerReleaseRef,
+    /// Exact reviewed explicit-input release pin.
+    InputReleaseRef,
     32
 );
 byte_identity!(
-    /// Exact replayed model head pin.
-    ModelHeadRef,
+    /// Exact typed program/transformation release pin.
+    ProgramReleaseRef,
     32
 );
 byte_identity!(
-    /// Exact provider release/configuration set pin.
+    /// Exact application and analysis implementation release pin.
+    ApplicationReleaseRef,
+    32
+);
+byte_identity!(
+    /// Exact source-image/inventory authority pin.
+    SourceAuthorityRef,
+    32
+);
+byte_identity!(
+    /// Exact provider adapter and toolchain release pin.
+    ProviderReleaseRef,
+    32
+);
+byte_identity!(
+    /// Exact admitted provider-run/configuration set authority.
     ProviderSetRef,
     32
 );
 byte_identity!(
     /// Bounded resource policy consumed by this command.
     ResourceEnvelopeRef,
-    32
-);
-byte_identity!(
-    /// One immutable model-migration event or event set.
-    ModelMigrationRef,
     32
 );
 byte_identity!(
@@ -242,9 +252,12 @@ pub struct CommandOwnership {
 /// Complete semantic input pins shared by every durable command variant.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CommandPins {
-    pub compiler_release: CompilerReleaseRef,
-    pub model_head: ModelHeadRef,
+    pub input_release: InputReleaseRef,
+    pub program_release: ProgramReleaseRef,
+    pub application_release: ApplicationReleaseRef,
+    pub source_authority: SourceAuthorityRef,
     pub source_generation: SourceGeneration,
+    pub provider_release: ProviderReleaseRef,
     pub provider_set: ProviderSetRef,
 }
 
@@ -301,12 +314,23 @@ pub enum AdministrationAction {
     RebuildCandidate,
     RepairTemporalCache,
     ReconcileOperation,
+    /// Read the complete guarded retention closure for one exact selected Delta pin.
+    InspectDeltaRetention,
+    /// Validate a proposed deletion set without deleting any resource.
+    ValidateDeltaRetention,
+    /// Produce a native Delta vacuum dry run without deleting any file.
+    PlanDeltaVacuum,
+    /// Create a physical checkpoint for an exact selected Delta pin.
+    CreateDeltaCheckpoint,
+    /// Compact one exact selected Delta pin.
+    CompactDelta,
+    /// Execute a previously reviewed Delta vacuum plan.
+    ExecuteDeltaVacuum,
 }
 
 /// Exhaustive command kind used by dispatch and result compatibility checks.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum CommandKind {
-    ApplyModelMigration,
     PublishSourceWave,
     PublishRelations,
     ActivateEpoch,
@@ -319,10 +343,6 @@ pub enum CommandKind {
 /// Typed command-specific intent. No variant admits opaque JSON, SQL, or untyped table names.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum FabricCommandPayload {
-    ApplyModelMigration {
-        migration: ModelMigrationRef,
-        target_model_head: ModelHeadRef,
-    },
     PublishSourceWave {
         source_images: SourceImageSetRef,
         target_generation: SourceGeneration,
@@ -357,7 +377,6 @@ impl FabricCommandPayload {
     #[must_use]
     pub const fn kind(self) -> CommandKind {
         match self {
-            Self::ApplyModelMigration { .. } => CommandKind::ApplyModelMigration,
             Self::PublishSourceWave { .. } => CommandKind::PublishSourceWave,
             Self::PublishRelations { .. } => CommandKind::PublishRelations,
             Self::ActivateEpoch { .. } => CommandKind::ActivateEpoch,
@@ -423,11 +442,6 @@ pub struct ExecutionOwner {
 /// Result of one command, typed by the command kind that may produce it.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum CommandResult {
-    ModelMigrationApplied {
-        model_head: ModelHeadRef,
-        resulting_head: ExpectedHead,
-        selection: OperationSelectionRef,
-    },
     SourceWavePublished {
         source_generation: SourceGeneration,
         resulting_head: ExpectedHead,
@@ -469,7 +483,6 @@ impl CommandResult {
     #[must_use]
     pub const fn kind(self) -> CommandKind {
         match self {
-            Self::ModelMigrationApplied { .. } => CommandKind::ApplyModelMigration,
             Self::SourceWavePublished { .. } => CommandKind::PublishSourceWave,
             Self::RelationsPublished { .. } => CommandKind::PublishRelations,
             Self::EpochActivated { .. } => CommandKind::ActivateEpoch,
@@ -1768,8 +1781,17 @@ mod tests {
             expected_head: ExpectedHead::Epoch(EpochId::from_bytes(bytes16(6))),
             writer_fence: fence(7, 11),
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes(bytes32(8)),
-                model_head: ModelHeadRef::from_bytes(bytes32(9)),
+                input_release: InputReleaseRef::from_bytes(bytes32(8)),
+                program_release: ProgramReleaseRef::from_bytes(bytes32(9)),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    bytes32(9),
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(bytes32(
+                    9,
+                )),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(bytes32(
+                    9,
+                )),
                 source_generation: SourceGeneration::new(12),
                 provider_set: ProviderSetRef::from_bytes(bytes32(10)),
             },

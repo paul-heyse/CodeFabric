@@ -89,10 +89,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_daemon_target(self) -> Settings:
-        """Restrict the daemon endpoint to the two protocol-owned schemes."""
+        """Restrict production delivery to one absolute Unix-domain socket."""
 
-        if not self.daemon_target.startswith(("unix://", "tcp://")):
-            raise ValueError("daemon_target must use unix:// or tcp://")
+        if (
+            not self.daemon_target.startswith("unix:///")
+            or self.daemon_target == "unix:///"
+            or "\x00" in self.daemon_target
+        ):
+            raise ValueError("daemon_target must use unix:/// with an absolute socket path")
         return self
 
     @classmethod

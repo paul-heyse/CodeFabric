@@ -243,7 +243,6 @@ tools and assurance:
 default = ["local-workstation"]
 canonical-json = ["dep:base64", "dep:blake3", "dep:serde", "dep:serde_json", "..."]
 contract-models = ["canonical-json", "dep:serde_yaml_ng"]
-model-compiler = ["dep:gix", "dep:petgraph", "dep:rustix", "..."]
 data-fabric = ["dep:arrow", "...", "dep:datafusion", "dep:deltalake", "..."]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
 repository-state = ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"]
@@ -258,7 +257,6 @@ s3-storage = ["data-fabric", "deltalake/s3"]
 | featureless substrate | `cargo check --all-targets --no-default-features` | dependency-free root substrate |
 | canonical JSON | `cargo check --no-default-features --features canonical-json` | strict JSON/JCS only; no data fabric, repository, or RPC |
 | contract models | `cargo check --no-default-features --features contract-models` | runtime wire models only; no compiler or generated-output closure |
-| model compiler | `cargo check --no-default-features --features model-compiler --bin codefabric-model` | handwritten repository model, drivers, assurance, and reconciler |
 | Protobuf tooling | `cargo check --no-default-features --features proto-tooling --bin codefabric-proto-gen` | generator-only graph |
 | S3 deployment | `cargo check --all-targets --features s3-storage` | explicit delta-rs S3 graph |
 
@@ -277,7 +275,7 @@ dated-nightly extractor boundary. Compiled capability is not provider authority.
 
 | Decision | Value | Why |
 |---|---|---|
-| root toolchain | `stable` | stable daemon/data-plane boundary |
+| root toolchain | exact `1.98.0` | reproducible stable daemon/data-plane boundary; upgrade deliberately |
 | components | `rustfmt`, `clippy`, `rust-analyzer`, `rust-src`, `llvm-tools-preview` | `llvm-tools-preview` is the substrate for coverage, binutils and fuzz-coverage (tooling-ref §8); `rust-src` gives semantic tools stdlib source (§7) |
 | extractor toolchain | `nightly-2026-08-18` in its own root | owns `rustc-dev`; it never contaminates the stable root |
 | `rust-version` | `1.95.0` | floor imposed by the Ruff 0.0.7 provider train (above delta-rs's 1.94.1 floor) and verified with `cargo msrv verify` |
@@ -350,7 +348,9 @@ storage contract while reporting cumulative error/timeout telemetry. `just
 sccache-canary` proves only transport/storage liveness with a repeated cacheable `rlib`
 compile. `just sccache-effectiveness` is the opt-in Cargo-shaped cold-target/warm-cache
 measurement; `just cache-stats` reports advanced statistics. A cumulative hit percentage
-alone is not performance evidence.
+alone is not performance evidence. `tooling/rust-tool-versions.env` is the single exact
+workstation/CI CLI manifest; `just tools-doctor` checks it and `just setup-tools`
+idempotently reconciles only missing or mismatched tools.
 
 Nothing host-specific belongs in that file — no `-C target-cpu=native`, no absolute paths,
 no one machine's linker.
@@ -362,29 +362,50 @@ interaction. A large `target/` is not evidence that a release artifact is large.
 The cache and artifact topology is deliberate:
 
 - local sccache uses a launchd/systemd-user supervised UDS service with a dedicated 40 GiB
-  cache on local SSD; setup compares generated files and does not restart a healthy,
-  unchanged daemon;
+  cache on local SSD. The stable socket directory is owned by the current uid with mode
+  0700 so it satisfies the exact Codex UDS permission without cross-user access. Setup is
+  serialized, removes only the exact stale socket before service start, compares generated
+  files, and does not restart a healthy unchanged daemon. The systemd user unit deliberately
+  has no `After=default.target` cycle or `RuntimeDirectory`, applies `UMask=0077`, and passes
+  the same fixed socket identity through both `ExecStart` and `SCCACHE_SERVER_UDS`. The
+  entrypoint rejects disagreement, `just doctor` rejects an installed-unit/config drift,
+  and every setup migration proves a real repeated compile before succeeding;
 - client-side mode performs cache reads in the compiler process, so the Codex sandbox only
   needs read access to the cache plus access to the single service socket;
 - sccache 0.17.0 does **not** apply `SCCACHE_BASEDIRS` to Rust keys. Distinct absolute
   worktree roots may therefore miss for workspace crates; keep independent target trees
   and do not claim cross-worktree Rust path normalization;
+- the wrapper sends Cargo's non-compiling `rustc -vV`, version, and `--print` discovery
+  queries directly to rustc before consulting sccache. Cargo persists both successful and
+  failed discovery output in `target/.rustc_info.json`, so allowing transient service state
+  to fail those queries can replay a repaired error. The canary rejects a cached sccache
+  failure with a targeted instruction to remove only that generated file, never the whole
+  Cargo target;
 - stable root and stable Pyrefly-sidecar builds share the repository `target/`;
 - the dated-nightly extractor uses `target/extractor/`;
-- Miri/udeps use `target/nightly-assurance/`;
+- Miri/udeps use the exact `nightly-2026-08-18` toolchain and
+  `target/nightly-assurance/`;
 - cargo-fuzz uses `target/fuzz/<nightly-host>/` and explicitly selects the native host.
 
 Incremental policy is workflow-specific. Just establishes `CARGO_INCREMENTAL=0` for
 compile-producing build/test/gate paths, as does CI. Local `root-check`, `root-clippy`,
-`extractor-check`, and `sidecar-check` explicitly restore rustc incremental compilation;
+`root-test-incremental`, `extractor-check`, and `sidecar-check` explicitly restore rustc
+incremental compilation;
 they also bypass sccache because 0.17.0 rejects incremental Rust invocations instead of
 passing them through, while ordinary check units omit `link` anyway. The committed wrapper
 recognizes Cargo's incremental compiler shape and routes only that incompatible invocation
 directly to the real rustc, so raw Cargo retains safe profile defaults; named recipes remain
 the supported reproducible command surface. `just build-shared` and `just
-build-incremental` expose the apples-to-apples build comparison. The wrapper remains
+build-incremental` expose the apples-to-apples build comparison; `just
+sccache-effectiveness` uses repeated Hyperfine samples, and `just linker-benchmark`
+compares the pinned default linker with mold without changing repository defaults. The
+wrapper remains
 mandatory in compile-producing routine workflows; no-wrapper paths are explicit check,
 controlled measurement, or diagnosis commands.
+
+Cargo 1.98.0 still rejects `build.build-dir` as an unstable Cargo surface, so it is not
+committed or benchmarked through a rolling nightly. Revisit it only after the pinned stable
+Cargo exposes the setting; keep CI registry/target caching similarly measurement-gated.
 
 ### One continuous checker
 
@@ -425,7 +446,8 @@ check workloads — every unit carries `-C incremental=` and the wrapper execs s
 rustc), and `RUSTC_WRAPPER` toggling (it does not enter Cargo's fingerprint; alternating
 `just` and raw `cargo` rebuilds nothing).
 
-`bacon.toml` defines stable-root `check`, `clippy`, and `nextest` jobs, and exports
+`bacon.toml` defines stable-root `check`, `clippy`, and `nextest` jobs through the same
+incremental/no-wrapper helper, uses `--locked`, and exports
 `.bacon-locations` for editor/agent consumption — an agent must confirm that file matches
 the current source generation before reading an empty list as success (§15.2).
 
@@ -433,10 +455,11 @@ the current source generation before reading an empty list as success (§15.2).
 
 Every supported Just recipe must work from a fresh non-interactive shell without `direnv`,
 sourcing a bootstrap script, activating Python, or manually choosing a Rust toolchain.
-`scripts/repo-shell.sh` removes inherited Python/Conda/direnv/Rust overrides, puts the
+`scripts/repo-shell.sh` removes inherited Python/Conda/direnv/Rust/Cargo/linker/sccache
+overrides, puts the
 repository Cargo router and Rustup first, and places uv's cache under `target/uv-cache`.
-Stable Cargo resolves through `rustup run stable`; extractor Cargo resolves through
-`rustup run nightly-2026-08-18`.
+Stable Cargo resolves through `rustup run 1.98.0`; extractor and assurance Cargo resolve
+through `rustup run nightly-2026-08-18`.
 
 Workstation shell startup also reorders `~/.cargo/bin` ahead of Homebrew in login and
 non-login zsh/Bash. This is a convenience, not gate authority: the repository Cargo router
@@ -445,9 +468,10 @@ ordering cannot mix installations.
 
 Root `.envrc` only exports `CF_ROOT`, the repository uv-cache location, and convenient
 tool paths; it does not run `uv sync` or activate the adapter. Use the idempotent
-`just setup` (or `just setup-adapter`) explicitly. `scripts/bootstrap.sh` is a verifier and
-context reporter: sourcing it intentionally changes nothing; `--quiet` is silent when
-healthy and `--context` emits the agent report. Python commands remain domain-explicit;
+`just setup` (or a focused setup recipe) explicitly. `scripts/bootstrap.sh` is a verifier and
+context reporter: execution re-enters the canonical repository shell, sourcing it
+intentionally changes nothing, `--quiet` is silent when healthy, and `--context` emits the
+agent report. Python commands remain domain-explicit;
 there is no root uv project.
 
 ---
@@ -463,7 +487,6 @@ compatibility tests; each later packet adds behavioral proof at the boundary it 
 | Do documented examples still work? | `cargo test --doc` | `just root-doctest` |
 | Does the exact stable graph match the design? | resolved metadata/tree validator | `just stable-graph-check` |
 | Do structural boundaries hold? | tested ast-grep rules | `just governance-scan` |
-| Is the bounded predecessor DesiredTree reproducible during transition? | dual isolated legacy generation | `just model-repro-check` |
 | Do all four domains pass their routine gates? | aggregate command | `just ci-fast` |
 | Which Rust regions executed? | cargo-llvm-cov | `just coverage` |
 | Do assertions detect plausible faults? | cargo-mutants | `just mutants-file <path>` |

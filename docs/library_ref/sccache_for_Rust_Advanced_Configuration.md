@@ -2309,6 +2309,38 @@ cargo --config 'build.rustc-wrapper="sccache"' check
 
 Also inspect layered Cargo config; a repository, parent directory, environment variable, or command-line config may override another setting.
 
+### 24.2.1 Cargo can replay a stale failed wrapper probe
+
+Cargo persists compiler-discovery output such as `rustc -vV` and `rustc --print=...` in
+`target/.rustc_info.json`. Its cache stores unsuccessful output as well as successful
+output, while the outer compiler fingerprint follows rustc and wrapper identity/metadata
+rather than mutable wrapper dependencies such as an sccache daemon or socket. A transient
+wrapper failure during discovery can therefore remain replayable after sccache is healthy.
+
+This symptom is especially confusing because a direct wrapper invocation and an sccache
+canary can pass while Cargo immediately prints an older wrapper error without executing the
+wrapper. Use Cargo logging or a process trace to distinguish replay from a live invocation.
+
+Prevention:
+
+```text
+wrapper receives rustc version or --print discovery query
+  -> execute rustc directly before consulting sccache state
+
+wrapper receives a cache-eligible compile
+  -> retain the normal fail-closed sccache path
+```
+
+Targeted recovery after confirming the cached output contains an obsolete sccache failure:
+
+```bash
+rm -- target/.rustc_info.json
+```
+
+Do not substitute `cargo clean`; no compiled artifacts or incremental state need removal.
+Cargo's implementation is the authority for this internal cache behavior, so revalidate it
+when upgrading Cargo.
+
 ## 24.3 Non-cacheable Rust units
 
 Use advanced stats and identify whether the units correspond to expected boundaries:
@@ -4090,6 +4122,8 @@ The reference should be maintained against released upstream documentation/sourc
 - Cargo profiles: <https://doc.rust-lang.org/cargo/reference/profiles.html>
 - Cargo environment variables: <https://doc.rust-lang.org/cargo/reference/environment-variables.html>
 - Cargo build cache / rebuild behavior: <https://doc.rust-lang.org/cargo/guide/build-cache.html>
+- Cargo 1.98 compiler-discovery cache implementation: <https://github.com/rust-lang/cargo/blob/797e8a9bc/src/cargo/util/rustc.rs>
+- Cargo stale `.rustc_info.json` failure report: <https://github.com/rust-lang/cargo/issues/9500>
 
 The Cargo Book is authoritative for `rustc-wrapper`, `build.incremental`, `CARGO_INCREMENTAL`, target directories, profiles, and flag precedence.
 

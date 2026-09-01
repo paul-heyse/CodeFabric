@@ -280,7 +280,7 @@ async fn receive_run_control(
                     return;
                 }
             }
-            Some(Command::ChunkAccepted(_)) | Some(Command::ChunkRejected(_)) => {
+            Some(Command::ChunkAccepted(_) | Command::ChunkRejected(_)) => {
                 credits.rejected =
                     Some("legacy whole-relation chunk control is no longer admitted".into());
                 drop(credits);
@@ -876,8 +876,7 @@ impl PyreflySidecar for Service {
                             let frame_sequence = payload
                                 .header
                                 .as_ref()
-                                .map(|header| header.sequence)
-                                .unwrap_or(u64::MAX);
+                                .map_or(u64::MAX, |header| header.sequence);
                             if let Err(error) = reserve_relation_credit(
                                 &run,
                                 identity,

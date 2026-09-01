@@ -1,1 +1,0 @@
-{"scenario_id":"130_daemon_restart","edits":["restart-daemon"],"expected_terminal":"CURRENT"}

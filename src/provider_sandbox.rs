@@ -16,14 +16,64 @@ use thiserror::Error;
 
 /// Stable reason returned when the requested containment profile cannot be proved.
 pub const SANDBOX_UNAVAILABLE_REASON: &str = "SANDBOX_UNAVAILABLE";
+/// Exact Linux containment executable required by the accepted host contract.
+pub const LINUX_BUBBLEWRAP_PATH: &str = "/usr/bin/bwrap";
+/// Application-owned seccomp policy identity that remains mandatory in addition to bubblewrap.
+pub const LINUX_SECCOMP_POLICY_ID: &str = "codefabric-provider-v1";
+#[cfg(target_os = "macos")]
 static SANDBOX_PROBE_NONCE: AtomicU64 = AtomicU64::new(0);
+#[cfg(target_os = "linux")]
+static SANDBOX_RUN_NONCE: AtomicU64 = AtomicU64::new(0);
+
+const COMMON_UNTRUSTED_PROBES: [&str; 13] = [
+    "launch-confined",
+    "leased-workspace-read-allowed",
+    "workspace-write-denied",
+    "out-of-root-write-denied",
+    "live-workspace-read-denied",
+    "credential-read-denied",
+    "git-read-denied",
+    "network-denied",
+    "inherited-fd-read-denied",
+    "child-process-contained",
+    "resource-limit-enforceable",
+    "cleanup-escape-denied",
+    "output-write-allowed",
+];
+
+const LINUX_UNTRUSTED_PROBES: [&str; 12] = [
+    "linux-namespace-launch",
+    "linux-user-namespace-enabled",
+    "linux-cgroup-v2-mounted",
+    "linux-cgroup-membership-resolved",
+    "linux-cgroup-cpu-controller-available",
+    "linux-cgroup-memory-controller-available",
+    "linux-cgroup-pids-controller-available",
+    "linux-cgroup-parent-control-writable",
+    "compiled-seccomp-policy-authorized",
+    "pre-exec-cgroup-placement",
+    "kernel-complete-accounting",
+    "seccomp-active",
+];
+
+pub(crate) fn required_untrusted_probes(mechanism: SandboxMechanism) -> Vec<&'static str> {
+    let mut required = COMMON_UNTRUSTED_PROBES.to_vec();
+    if mechanism == SandboxMechanism::LinuxBubblewrap {
+        required.extend(LINUX_UNTRUSTED_PROBES);
+    }
+    required
+}
 
 const PROVIDER_LAUNCH_SHELL: &str = r#"
 preserve="$1"
 cpu="$2"
 open_files="$3"
 file_blocks="$4"
-shift 4
+cgroup_procs="$5"
+shift 5
+if [ -n "$cgroup_procs" ]; then
+  printf '%s\n' "$$" > "$cgroup_procs" || exit 125
+fi
 for descriptor in /dev/fd/*; do
   fd="${descriptor##*/}"
   case "$fd" in
@@ -74,62 +124,116 @@ pub struct SandboxCapabilityRow {
     pub mechanism: SandboxMechanism,
     pub available: bool,
     pub reason_code: String,
+    /// Every failed input to this decision, including exact executable identity.
+    pub unmet_requirements: Vec<String>,
+    /// Required and observed executable identity retained with the typed unavailable decision.
+    pub executable_identity: SandboxExecutableIdentityEvidence,
     pub probe_digest: String,
 }
 
-/// Complete host matrix. Untrusted execution is advertised only after every required probe passes.
+/// Exact host executable requirement and the observation evaluated against it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SandboxExecutableIdentityEvidence {
+    pub required_path: PathBuf,
+    pub required_version: String,
+    pub require_root_owned: bool,
+    pub forbidden_mode_bits: u32,
+    pub require_setuid: bool,
+    pub observed_path: PathBuf,
+    pub observed_version: String,
+    pub observed_root_owned: bool,
+    pub observed_mode: u32,
+    pub observed_setuid: bool,
+}
+
+/// Complete host matrix. Untrusted execution is advertised only after every required probe passes.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SandboxCapabilityMatrix {
-    pub rows: Vec<SandboxCapabilityRow>,
+    rows: Vec<SandboxCapabilityRow>,
 }
 
 impl SandboxCapabilityMatrix {
-    /// Evaluate one immutable observation without probing or launching as a side effect.
+    /// Probe the current host and mint its sole production capability matrix.
+    ///
+    /// A caller cannot supply claimed observations to this constructor. Synthetic observations
+    /// are restricted to unit tests so a claimed sandbox digest cannot become launch authority.
     #[must_use]
-    pub fn evaluate(observation: &SandboxProbeObservation) -> Self {
-        let mut required = vec![
-            "launch-confined",
-            "leased-workspace-read-allowed",
-            "workspace-write-denied",
-            "out-of-root-write-denied",
-            "live-workspace-read-denied",
-            "credential-read-denied",
-            "git-read-denied",
-            "network-denied",
-            "inherited-fd-read-denied",
-            "child-process-contained",
-            "resource-limit-enforceable",
-            "cleanup-escape-denied",
-            "output-write-allowed",
-        ];
-        if observation.mechanism == SandboxMechanism::LinuxBubblewrap {
-            required.push("seccomp-active");
-        }
-        let exact_identity = match observation.mechanism {
-            SandboxMechanism::DarwinSeatbelt => {
-                observation.executable_path == Path::new("/usr/bin/sandbox-exec")
-                    && observation.owned_by_root
-                    && observation.executable_mode & 0o022 == 0
-                    && !observation.setuid
-            }
-            SandboxMechanism::LinuxBubblewrap => {
-                observation.executable_path == Path::new("/usr/bin/bwrap")
-                    && observation.executable_version.trim() == "bubblewrap 0.11.2"
-                    && observation.owned_by_root
-                    && observation.executable_mode & 0o022 == 0
-                    && !observation.setuid
-            }
-            SandboxMechanism::None => false,
+    pub fn probe_current_host() -> Self {
+        Self::evaluate(&probe_host_sandbox())
+    }
+
+    fn evaluate(observation: &SandboxProbeObservation) -> Self {
+        let required = required_untrusted_probes(observation.mechanism);
+        let (required_path, required_version) = match observation.mechanism {
+            SandboxMechanism::DarwinSeatbelt => (PathBuf::from("/usr/bin/sandbox-exec"), ""),
+            SandboxMechanism::LinuxBubblewrap => (PathBuf::from(LINUX_BUBBLEWRAP_PATH), ""),
+            SandboxMechanism::None => (PathBuf::new(), "unsupported-host"),
         };
-        let behavior_proved = required
+        let executable_identity = SandboxExecutableIdentityEvidence {
+            required_path,
+            required_version: required_version.into(),
+            require_root_owned: true,
+            forbidden_mode_bits: 0o022,
+            require_setuid: false,
+            observed_path: observation.executable_path.clone(),
+            observed_version: observation.executable_version.clone(),
+            observed_root_owned: observation.owned_by_root,
+            observed_mode: observation.executable_mode,
+            observed_setuid: observation.setuid,
+        };
+        let exact_identity = executable_identity.observed_path == executable_identity.required_path
+            && (executable_identity.required_version.is_empty()
+                || executable_identity.observed_version.trim()
+                    == executable_identity.required_version)
+            && executable_identity.observed_root_owned == executable_identity.require_root_owned
+            && executable_identity.observed_mode & executable_identity.forbidden_mode_bits == 0
+            && executable_identity.observed_setuid == executable_identity.require_setuid;
+        let mut unmet_requirements = required
             .iter()
-            .all(|probe| observation.behavior.get(*probe).copied() == Some(true));
+            .filter(|probe| observation.behavior.get(**probe).copied() != Some(true))
+            .map(|probe| (*probe).to_owned())
+            .collect::<Vec<_>>();
+        if !exact_identity {
+            unmet_requirements.insert(0, "exact-sandbox-executable-identity".into());
+        }
         let probe_digest = sha256_json(observation).unwrap_or_else(|_| "sha256:invalid".into());
-        let available = exact_identity && behavior_proved;
+        let available = unmet_requirements.is_empty();
         let untrusted_reason = if available {
             "SANDBOX_PROVED"
         } else if !exact_identity {
             "SANDBOX_IDENTITY_UNPROVED"
+        } else if unmet_requirements
+            .iter()
+            .any(|requirement| requirement == "compiled-seccomp-policy-authorized")
+        {
+            "SANDBOX_SECCOMP_POLICY_UNAVAILABLE"
+        } else if unmet_requirements
+            .iter()
+            .any(|requirement| requirement == "linux-user-namespace-enabled")
+        {
+            "SANDBOX_USER_NAMESPACE_UNAVAILABLE"
+        } else if unmet_requirements
+            .iter()
+            .any(|requirement| requirement == "linux-cgroup-v2-mounted")
+        {
+            "SANDBOX_CGROUP_V2_UNAVAILABLE"
+        } else if unmet_requirements.iter().any(|requirement| {
+            matches!(
+                requirement.as_str(),
+                "linux-cgroup-membership-resolved"
+                    | "linux-cgroup-cpu-controller-available"
+                    | "linux-cgroup-memory-controller-available"
+                    | "linux-cgroup-pids-controller-available"
+                    | "linux-cgroup-parent-control-writable"
+                    | "pre-exec-cgroup-placement"
+            )
+        }) {
+            "SANDBOX_CGROUP_DELEGATION_UNAVAILABLE"
+        } else if unmet_requirements
+            .iter()
+            .any(|requirement| requirement == "kernel-complete-accounting")
+        {
+            "SANDBOX_KERNEL_ACCOUNTING_UNAVAILABLE"
         } else {
             "SANDBOX_BEHAVIOR_UNPROVED"
         };
@@ -140,6 +244,8 @@ impl SandboxCapabilityMatrix {
                     mechanism: observation.mechanism,
                     available,
                     reason_code: untrusted_reason.into(),
+                    unmet_requirements,
+                    executable_identity: executable_identity.clone(),
                     probe_digest: probe_digest.clone(),
                 },
                 SandboxCapabilityRow {
@@ -147,6 +253,8 @@ impl SandboxCapabilityMatrix {
                     mechanism: SandboxMechanism::None,
                     available: true,
                     reason_code: "TRUSTED_LOCAL_WEAKER_ISOLATION".into(),
+                    unmet_requirements: Vec::new(),
+                    executable_identity: executable_identity.clone(),
                     probe_digest: probe_digest.clone(),
                 },
                 SandboxCapabilityRow {
@@ -154,10 +262,17 @@ impl SandboxCapabilityMatrix {
                     mechanism: SandboxMechanism::None,
                     available: true,
                     reason_code: "PARSING_ONLY_NO_SEMANTIC_CHILD".into(),
+                    unmet_requirements: Vec::new(),
+                    executable_identity,
                     probe_digest,
                 },
             ],
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn evaluate_for_test(observation: &SandboxProbeObservation) -> Self {
+        Self::evaluate(observation)
     }
 
     /// Resolve one trust profile from the closed matrix.
@@ -293,6 +408,7 @@ fn probe_darwin_seatbelt() -> SandboxProbeObservation {
                         "10",
                         "64",
                         "2",
+                        "",
                         &executable.to_string_lossy(),
                         "-f",
                         &profile_path.to_string_lossy(),
@@ -379,7 +495,7 @@ fn probe_darwin_seatbelt() -> SandboxProbeObservation {
 
 #[cfg(target_os = "linux")]
 fn probe_linux_bubblewrap() -> SandboxProbeObservation {
-    let executable = PathBuf::from("/usr/bin/bwrap");
+    let executable = PathBuf::from(LINUX_BUBBLEWRAP_PATH);
     let metadata = fs::metadata(&executable).ok();
     let version = Command::new(&executable)
         .arg("--version")
@@ -388,9 +504,76 @@ fn probe_linux_bubblewrap() -> SandboxProbeObservation {
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
         .unwrap_or_else(|| "unavailable".into());
-    // WP16 installs and escape-tests the lane-specific compiled seccomp descriptor. Until that
-    // descriptor is present, the shared substrate intentionally advertises no untrusted Linux
-    // capability even when bubblewrap itself has the exact identity.
+    let namespace_launch = probe_linux_namespace_launch(&executable);
+    let user_namespace_enabled = fs::read_to_string("/proc/sys/user/max_user_namespaces")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .is_some_and(|maximum| maximum > 0)
+        && ["user", "pid", "net", "cgroup"]
+            .iter()
+            .all(|namespace| Path::new("/proc/self/ns").join(namespace).exists());
+    let cgroup_v2_mounted = linux_cgroup_v2_mounted();
+    let current_cgroup = linux_current_cgroup_directory();
+    let cgroup_delegate = linux_cgroup_delegate_root();
+    let cgroup_parent_control_writable = cgroup_delegate.is_some();
+    let cgroup_controllers = cgroup_delegate
+        .as_ref()
+        .and_then(|directory| fs::read_to_string(directory.join("cgroup.controllers")).ok())
+        .map(|controllers| {
+            controllers
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let (pre_exec_cgroup_placement, kernel_complete_accounting) = probe_linux_run_cgroup_backend();
+    let mut behavior = COMMON_UNTRUSTED_PROBES
+        .into_iter()
+        .map(|probe| (probe.to_owned(), false))
+        .collect::<BTreeMap<_, _>>();
+    behavior.extend([
+        ("linux-namespace-launch".into(), namespace_launch),
+        (
+            "linux-user-namespace-enabled".into(),
+            user_namespace_enabled,
+        ),
+        ("linux-cgroup-v2-mounted".into(), cgroup_v2_mounted),
+        (
+            "linux-cgroup-membership-resolved".into(),
+            current_cgroup.is_some(),
+        ),
+        (
+            "linux-cgroup-cpu-controller-available".into(),
+            cgroup_parent_control_writable && cgroup_controllers.iter().any(|value| value == "cpu"),
+        ),
+        (
+            "linux-cgroup-memory-controller-available".into(),
+            cgroup_parent_control_writable
+                && cgroup_controllers.iter().any(|value| value == "memory"),
+        ),
+        (
+            "linux-cgroup-pids-controller-available".into(),
+            cgroup_parent_control_writable
+                && cgroup_controllers.iter().any(|value| value == "pids"),
+        ),
+        (
+            "linux-cgroup-parent-control-writable".into(),
+            cgroup_parent_control_writable,
+        ),
+        // A caller-supplied descriptor is not proof of an application-owned compiled policy. The
+        // policy and the full escape matrix remain unavailable even when the independently tested
+        // cgroup backend can place and account a child before its first untrusted exec.
+        ("compiled-seccomp-policy-authorized".into(), false),
+        (
+            "pre-exec-cgroup-placement".into(),
+            pre_exec_cgroup_placement,
+        ),
+        (
+            "kernel-complete-accounting".into(),
+            kernel_complete_accounting,
+        ),
+        ("seccomp-active".into(), false),
+    ]);
     SandboxProbeObservation {
         mechanism: SandboxMechanism::LinuxBubblewrap,
         executable_path: executable,
@@ -400,8 +583,189 @@ fn probe_linux_bubblewrap() -> SandboxProbeObservation {
         setuid: metadata
             .as_ref()
             .is_some_and(|value| value.mode() & 0o4000 != 0),
-        behavior: BTreeMap::new(),
+        behavior,
     }
+}
+
+#[cfg(target_os = "linux")]
+fn probe_linux_namespace_launch(executable: &Path) -> bool {
+    let mut command = Command::new(executable);
+    command
+        .args([
+            "--unshare-all",
+            "--unshare-net",
+            "--die-with-parent",
+            "--new-session",
+            "--cap-drop",
+            "ALL",
+            "--ro-bind",
+            "/usr",
+            "/usr",
+            "--symlink",
+            "usr/bin",
+            "/bin",
+            "--symlink",
+            "usr/lib",
+            "/lib",
+            "--symlink",
+            "usr/lib64",
+            "/lib64",
+            "--symlink",
+            "usr/sbin",
+            "/sbin",
+            "--proc",
+            "/proc",
+            "--dev",
+            "/dev",
+            "--tmpfs",
+            "/tmp",
+            "--chdir",
+            "/tmp",
+            "/usr/bin/true",
+        ])
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let Ok(mut child) = command.spawn() else {
+        return false;
+    };
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(None) | Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_cgroup_v2_mounted() -> bool {
+    fs::read_to_string("/proc/self/mountinfo")
+        .ok()
+        .is_some_and(|mountinfo| {
+            mountinfo.lines().any(|line| {
+                let Some((mount, filesystem)) = line.split_once(" - ") else {
+                    return false;
+                };
+                mount.split_whitespace().nth(4) == Some("/sys/fs/cgroup")
+                    && filesystem.split_whitespace().next() == Some("cgroup2")
+            })
+        })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_current_cgroup_directory() -> Option<PathBuf> {
+    use std::path::Component;
+
+    let membership = fs::read_to_string("/proc/self/cgroup").ok()?;
+    let mut unified = membership
+        .lines()
+        .filter_map(|line| line.strip_prefix("0::"));
+    let relative = Path::new(unified.next()?).strip_prefix("/").ok()?;
+    if unified.next().is_some()
+        || !relative
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(Path::new("/sys/fs/cgroup").join(relative))
+}
+
+#[cfg(target_os = "linux")]
+fn linux_cgroup_delegate_root() -> Option<PathBuf> {
+    const REQUIRED_CONTROLLERS: [&str; 3] = ["cpu", "memory", "pids"];
+
+    let mount = Path::new("/sys/fs/cgroup");
+    let current = linux_current_cgroup_directory()?;
+    if !current.starts_with(mount) {
+        return None;
+    }
+    let uid = rustix::process::getuid().as_raw();
+    current
+        .ancestors()
+        .take_while(|path| *path != mount)
+        .find_map(|path| {
+            let metadata = fs::metadata(path).ok()?;
+            if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o200 == 0 {
+                return None;
+            }
+            if fs::read_to_string(path.join("cgroup.type")).ok()?.trim() != "domain" {
+                return None;
+            }
+            let controllers = fs::read_to_string(path.join("cgroup.controllers")).ok()?;
+            let subtree = fs::read_to_string(path.join("cgroup.subtree_control")).ok()?;
+            let has_all = |value: &str| {
+                REQUIRED_CONTROLLERS
+                    .iter()
+                    .all(|required| value.split_whitespace().any(|item| item == *required))
+            };
+            if !has_all(&controllers) || !has_all(&subtree) {
+                return None;
+            }
+            if !fs::read_to_string(path.join("cgroup.procs"))
+                .ok()?
+                .trim()
+                .is_empty()
+            {
+                return None;
+            }
+            ["cgroup.procs", "cgroup.subtree_control"]
+                .iter()
+                .all(|name| {
+                    fs::OpenOptions::new()
+                        .write(true)
+                        .open(path.join(name))
+                        .is_ok()
+                })
+                .then(|| path.to_path_buf())
+        })
+}
+
+#[cfg(target_os = "linux")]
+fn probe_linux_run_cgroup_backend() -> (bool, bool) {
+    let limits = ProviderProcessLimits {
+        cpu_seconds: 1,
+        open_files: 16,
+        address_space_bytes: 64 * 1024 * 1024,
+        output_file_bytes: 1024 * 1024,
+        process_count: 4,
+    };
+    let Ok(cgroup) = LinuxRunCgroup::create(limits) else {
+        return (false, false);
+    };
+    let output = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(PROVIDER_LAUNCH_SHELL)
+        .arg("codefabric-cgroup-probe")
+        .arg("")
+        .arg(limits.cpu_seconds.to_string())
+        .arg(limits.open_files.to_string())
+        .arg(limits.output_file_bytes.div_ceil(512).to_string())
+        .arg(cgroup.procs_path())
+        .arg("/bin/cat")
+        .arg("/proc/self/cgroup")
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+    let placed_before_exec = output.is_ok_and(|output| {
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .any(|line| line.ends_with(&format!("/{}", cgroup.name())))
+    });
+    let accounted_by_kernel = cgroup.usage().is_ok();
+    (placed_before_exec, accounted_by_kernel)
 }
 
 /// Canonical profile bytes and the digest recorded in provider-run/snapshot provenance.
@@ -508,6 +872,223 @@ pub struct ProviderProcessLimits {
     pub open_files: u64,
     pub address_space_bytes: u64,
     pub output_file_bytes: u64,
+    pub process_count: u32,
+}
+
+/// Kernel-owned aggregate usage for one delegated Linux run cgroup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderKernelUsage {
+    pub cpu_millis: u64,
+    pub peak_memory_bytes: u64,
+    pub peak_process_count: u32,
+    pub memory_limit_hit: bool,
+    pub process_limit_hit: bool,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct LinuxRunCgroup {
+    path: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxRunCgroup {
+    fn create(limits: ProviderProcessLimits) -> std::io::Result<Self> {
+        let delegate = linux_cgroup_delegate_root().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "delegated cgroup-v2 root with cpu, memory, and pids is unavailable",
+            )
+        })?;
+        let mut created = None;
+        for _ in 0..32 {
+            let nonce = SANDBOX_RUN_NONCE.fetch_add(1, Ordering::Relaxed);
+            let candidate = delegate.join(format!("codefabric-run-{}-{nonce}", std::process::id()));
+            match fs::create_dir(&candidate) {
+                Ok(()) => {
+                    created = Some(candidate);
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        }
+        let cgroup = Self {
+            path: created.ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "could not allocate a unique run cgroup",
+                )
+            })?,
+        };
+        cgroup.configure(limits)?;
+        Ok(cgroup)
+    }
+
+    fn configure(&self, limits: ProviderProcessLimits) -> std::io::Result<()> {
+        let settings = [
+            ("cpu.max", "100000 100000".to_owned()),
+            ("memory.max", limits.address_space_bytes.to_string()),
+            ("memory.oom.group", "1".to_owned()),
+            ("pids.max", limits.process_count.to_string()),
+        ];
+        for (name, value) in settings {
+            self.write_and_verify(name, &value)?;
+        }
+        let swap = self.path.join("memory.swap.max");
+        if swap.exists() {
+            self.write_and_verify("memory.swap.max", "0")?;
+        }
+        let peak = self.path.join("memory.peak");
+        if fs::OpenOptions::new().write(true).open(&peak).is_ok() {
+            fs::write(&peak, b"0\n")?;
+        }
+        for name in [
+            "cgroup.events",
+            "cpu.stat",
+            "memory.current",
+            "memory.events",
+            "memory.peak",
+            "pids.current",
+            "pids.events",
+            "pids.peak",
+        ] {
+            fs::File::open(self.path.join(name))?;
+        }
+        fs::OpenOptions::new()
+            .write(true)
+            .open(self.path.join("cgroup.kill"))?;
+        Ok(())
+    }
+
+    fn write_and_verify(&self, name: &str, value: &str) -> std::io::Result<()> {
+        let path = self.path.join(name);
+        fs::write(&path, format!("{value}\n"))?;
+        let observed = fs::read_to_string(path)?;
+        if observed.trim() != value {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("cgroup setting {name} read back as {observed:?}"),
+            ));
+        }
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        self.path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+    }
+
+    fn procs_path(&self) -> PathBuf {
+        self.path.join("cgroup.procs")
+    }
+
+    fn contains_process(&self, process_id: u32) -> std::io::Result<bool> {
+        let process_id = process_id.to_string();
+        Ok(fs::read_to_string(self.procs_path())?
+            .lines()
+            .any(|line| line.trim() == process_id))
+    }
+
+    fn wait_for_process(&self, child: &mut Child) -> std::io::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            if self.contains_process(child.id())? {
+                return Ok(());
+            }
+            if child.try_wait()?.is_some() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "provider exited before run-cgroup placement was observed",
+                ));
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "provider did not enter its run cgroup before the placement deadline",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    fn is_empty(&self) -> std::io::Result<bool> {
+        let events = fs::read_to_string(self.path.join("cgroup.events"))?;
+        Ok(read_keyed_u64(&events, "populated")? == 0)
+    }
+
+    fn kill(&self) -> std::io::Result<()> {
+        if self.is_empty()? {
+            return Ok(());
+        }
+        fs::write(self.path.join("cgroup.kill"), b"1\n")
+    }
+
+    fn usage(&self) -> std::io::Result<ProviderKernelUsage> {
+        let cpu = fs::read_to_string(self.path.join("cpu.stat"))?;
+        let memory_events = fs::read_to_string(self.path.join("memory.events"))?;
+        let pids_events = fs::read_to_string(self.path.join("pids.events"))?;
+        let cpu_millis = read_keyed_u64(&cpu, "usage_usec")?.div_ceil(1_000);
+        let peak_memory_bytes = read_plain_u64(&self.path.join("memory.peak"))?;
+        let peak_process_count = u32::try_from(read_plain_u64(&self.path.join("pids.peak"))?)
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "pids.peak exceeds the supported process count",
+                )
+            })?;
+        Ok(ProviderKernelUsage {
+            cpu_millis,
+            peak_memory_bytes,
+            peak_process_count,
+            memory_limit_hit: read_keyed_u64(&memory_events, "max")? > 0
+                || read_keyed_u64(&memory_events, "oom")? > 0
+                || read_keyed_u64(&memory_events, "oom_kill")? > 0,
+            process_limit_hit: read_keyed_u64(&pids_events, "max")? > 0,
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for LinuxRunCgroup {
+    fn drop(&mut self) {
+        let _ = self.kill();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while matches!(self.is_empty(), Ok(false)) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let _ = fs::remove_dir(&self.path);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_plain_u64(path: &Path) -> std::io::Result<u64> {
+    fs::read_to_string(path)?
+        .trim()
+        .parse::<u64>()
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
+#[cfg(target_os = "linux")]
+fn read_keyed_u64(contents: &str, key: &str) -> std::io::Result<u64> {
+    contents
+        .lines()
+        .find_map(|line| {
+            let mut fields = line.split_whitespace();
+            (fields.next() == Some(key))
+                .then(|| fields.next())
+                .flatten()
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("cgroup accounting key {key} is absent"),
+            )
+        })?
+        .parse::<u64>()
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
 }
 
 /// Closed launch request. Environment and standard descriptors are rebuilt by the launcher.
@@ -541,9 +1122,38 @@ pub enum ProviderSandboxLaunchMaterial<'a> {
 pub struct ProviderProcessGroupChild {
     child: Child,
     process_group_id: rustix::process::Pid,
+    #[cfg(target_os = "linux")]
+    run_cgroup: Option<LinuxRunCgroup>,
 }
 
 impl ProviderProcessGroupChild {
+    #[cfg(target_os = "linux")]
+    fn new(mut child: Child, run_cgroup: Option<LinuxRunCgroup>) -> Result<Self, SandboxError> {
+        let process_group_id = i32::try_from(child.id())
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .ok_or(SandboxError::InvalidLaunch)?;
+        if rustix::process::getpgid(Some(process_group_id)) != Ok(process_group_id) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(SandboxError::ProcessGroupUnavailable);
+        }
+        if let Some(cgroup) = &run_cgroup
+            && cgroup.wait_for_process(&mut child).is_err()
+        {
+            let _ = cgroup.kill();
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(SandboxError::CgroupPlacement);
+        }
+        Ok(Self {
+            child,
+            process_group_id,
+            run_cgroup,
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
     fn new(mut child: Child) -> Result<Self, SandboxError> {
         let process_group_id = i32::try_from(child.id())
             .ok()
@@ -595,6 +1205,21 @@ impl ProviderProcessGroupChild {
         self.process_group_id.as_raw_nonzero().get()
     }
 
+    /// Read kernel-complete aggregate CPU, memory, and process usage when this child owns a
+    /// delegated Linux run cgroup. Trusted-local and non-Linux launches return `None`.
+    pub fn kernel_usage(&self) -> std::io::Result<Option<ProviderKernelUsage>> {
+        #[cfg(target_os = "linux")]
+        {
+            return self
+                .run_cgroup
+                .as_ref()
+                .map(LinuxRunCgroup::usage)
+                .transpose();
+        }
+        #[cfg(not(target_os = "linux"))]
+        Ok(None)
+    }
+
     /// Send a graceful termination signal to the complete run-scoped group.
     pub fn terminate_group(&mut self) -> std::io::Result<()> {
         self.signal_group(rustix::process::Signal::TERM)
@@ -602,7 +1227,15 @@ impl ProviderProcessGroupChild {
 
     /// Send an unconditional kill signal to the complete run-scoped group.
     pub fn kill_group(&mut self) -> std::io::Result<()> {
-        self.signal_group(rustix::process::Signal::KILL)
+        let process_group = self.signal_group(rustix::process::Signal::KILL);
+        #[cfg(target_os = "linux")]
+        let cgroup = self
+            .run_cgroup
+            .as_ref()
+            .map_or(Ok(()), LinuxRunCgroup::kill);
+        #[cfg(not(target_os = "linux"))]
+        let cgroup = Ok(());
+        process_group.and(cgroup)
     }
 
     /// Wait until the complete process group no longer exists, reaping its leader as it exits.
@@ -610,13 +1243,24 @@ impl ProviderProcessGroupChild {
         let deadline = Instant::now() + timeout;
         loop {
             let _ = self.child.try_wait()?;
-            match rustix::process::test_kill_process_group(self.process_group_id) {
-                Ok(()) => {}
-                Err(error) if error == rustix::io::Errno::SRCH => return Ok(true),
-                // Darwin can transiently report EPERM while a just-signalled group is being
-                // dismantled. It is not proof of emptiness: keep polling until ESRCH or timeout.
-                Err(error) if error == rustix::io::Errno::PERM => {}
-                Err(error) => return Err(error.into()),
+            let process_group_empty =
+                match rustix::process::test_kill_process_group(self.process_group_id) {
+                    Ok(()) => false,
+                    Err(error) if error == rustix::io::Errno::SRCH => true,
+                    // Darwin can transiently report EPERM while a just-signalled group is being
+                    // dismantled. It is not proof of emptiness: keep polling until ESRCH or timeout.
+                    Err(error) if error == rustix::io::Errno::PERM => false,
+                    Err(error) => return Err(error.into()),
+                };
+            #[cfg(target_os = "linux")]
+            let cgroup_empty = self
+                .run_cgroup
+                .as_ref()
+                .map_or(Ok(true), LinuxRunCgroup::is_empty)?;
+            #[cfg(not(target_os = "linux"))]
+            let cgroup_empty = true;
+            if process_group_empty && cgroup_empty {
+                return Ok(true);
             }
             if Instant::now() >= deadline {
                 return Ok(false);
@@ -759,6 +1403,18 @@ impl ProviderSandboxLauncher {
                     "--ro-bind".into(),
                     "/usr".into(),
                     "/usr".into(),
+                    "--symlink".into(),
+                    "usr/bin".into(),
+                    "/bin".into(),
+                    "--symlink".into(),
+                    "usr/lib".into(),
+                    "/lib".into(),
+                    "--symlink".into(),
+                    "usr/lib64".into(),
+                    "/lib64".into(),
+                    "--symlink".into(),
+                    "usr/sbin".into(),
+                    "/sbin".into(),
                     "--proc".into(),
                     "/proc".into(),
                     "--dev".into(),
@@ -792,6 +1448,21 @@ impl ProviderSandboxLauncher {
 
         // The fixed shell program only applies inherited limits. Provider-controlled strings are
         // positional arguments, never interpolated into shell source.
+        #[cfg(target_os = "linux")]
+        let run_cgroup = if profile.mechanism == SandboxMechanism::LinuxBubblewrap {
+            Some(
+                LinuxRunCgroup::create(request.limits)
+                    .map_err(|_| SandboxError::CgroupUnavailable)?,
+            )
+        } else {
+            None
+        };
+        #[cfg(target_os = "linux")]
+        let cgroup_procs = run_cgroup.as_ref().map_or_else(String::new, |cgroup| {
+            cgroup.procs_path().display().to_string()
+        });
+        #[cfg(not(target_os = "linux"))]
+        let cgroup_procs = String::new();
         let mut command = Command::new("/bin/sh");
         let preserved_descriptor = inherited_seccomp
             .as_ref()
@@ -804,6 +1475,7 @@ impl ProviderSandboxLauncher {
             .arg(request.limits.cpu_seconds.to_string())
             .arg(request.limits.open_files.to_string())
             .arg(request.limits.output_file_bytes.div_ceil(512).to_string())
+            .arg(cgroup_procs)
             .args(confined)
             .env_clear()
             .envs(&request.environment)
@@ -824,12 +1496,10 @@ impl ProviderSandboxLauncher {
         #[cfg(target_os = "linux")]
         {
             use rustix::process::{Pid, Resource, Rlimit, prlimit};
-            use std::num::NonZeroI32;
             let mut child = child;
             let pid = i32::try_from(child.id())
                 .ok()
-                .and_then(NonZeroI32::new)
-                .map(Pid::from_raw)
+                .and_then(Pid::from_raw)
                 .ok_or(SandboxError::InvalidLaunch)?;
             let limit = Rlimit {
                 current: Some(request.limits.address_space_bytes),
@@ -840,7 +1510,7 @@ impl ProviderSandboxLauncher {
                 let _ = child.wait();
                 return Err(SandboxError::ResourceLimit);
             }
-            return ProviderProcessGroupChild::new(child);
+            return ProviderProcessGroupChild::new(child, run_cgroup);
         }
         #[cfg(not(target_os = "linux"))]
         ProviderProcessGroupChild::new(child)
@@ -865,6 +1535,10 @@ pub enum SandboxError {
     ResourceLimit,
     #[error("provider child did not enter its required run-scoped process group")]
     ProcessGroupUnavailable,
+    #[error("delegated provider run cgroup is unavailable")]
+    CgroupUnavailable,
+    #[error("provider child did not enter its delegated run cgroup before exec")]
+    CgroupPlacement,
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -962,7 +1636,7 @@ fn darwin_profile(view: &Path, dependencies: &Path, output: &Path) -> String {
 
 fn linux_profile(view: &Path, dependencies: &Path, output: &Path) -> String {
     format!(
-        "mechanism=bubblewrap-0.11.2\nno_new_privs=true\nunshare=user,pid,ipc,uts,cgroup,net\nro_bind={}:/workspace\nro_bind={}:/dependencies\nbind={}:/output\ntmpfs=/tmp\ncap_drop=ALL\nseccomp=codefabric-provider-v1\ndie_with_parent=true\nnew_session=true\n",
+        "mechanism=bubblewrap\nno_new_privs=true\nunshare=user,pid,ipc,uts,cgroup,net\nro_bind=/usr:/usr\nsymlink=usr/bin:/bin\nsymlink=usr/lib:/lib\nsymlink=usr/lib64:/lib64\nsymlink=usr/sbin:/sbin\nro_bind={}:/workspace\nro_bind={}:/dependencies\nbind={}:/output\ntmpfs=/tmp\ncap_drop=ALL\nseccomp=codefabric-provider-v1\ndie_with_parent=true\nnew_session=true\n",
         view.display(),
         dependencies.display(),
         output.display(),
@@ -1017,6 +1691,22 @@ mod tests {
         }
     }
 
+    fn linux_observation(behavior: bool) -> SandboxProbeObservation {
+        SandboxProbeObservation {
+            mechanism: SandboxMechanism::LinuxBubblewrap,
+            executable_path: "/usr/bin/bwrap".into(),
+            executable_version: "bubblewrap 0.11.2".into(),
+            owned_by_root: true,
+            executable_mode: 0o755,
+            setuid: false,
+            behavior: COMMON_UNTRUSTED_PROBES
+                .into_iter()
+                .chain(LINUX_UNTRUSTED_PROBES)
+                .map(|name| (name.into(), behavior))
+                .collect(),
+        }
+    }
+
     #[test]
     fn sandbox_unavailable_fail_closed_falsification() {
         let matrix = SandboxCapabilityMatrix::evaluate(&observation(false));
@@ -1055,6 +1745,7 @@ mod tests {
                         open_files: 16,
                         address_space_bytes: 64 * 1024 * 1024,
                         output_file_bytes: 1024,
+                        process_count: 4,
                     },
                 },
                 &profile,
@@ -1137,6 +1828,7 @@ mod tests {
                         open_files: 32,
                         address_space_bytes: 128 * 1024 * 1024,
                         output_file_bytes: 1024,
+                        process_count: 8,
                     },
                 },
                 &profile,
@@ -1203,6 +1895,278 @@ mod tests {
         ] {
             assert!(validate_launch_environment(&rejected, &profile).is_err());
         }
+    }
+
+    #[test]
+    fn linux_claimed_identity_cannot_replace_seccomp_or_kernel_accounting() {
+        let mut claimed = linux_observation(true);
+        claimed
+            .behavior
+            .insert("compiled-seccomp-policy-authorized".into(), false);
+        let missing_seccomp = SandboxCapabilityMatrix::evaluate(&claimed);
+        let row = missing_seccomp
+            .row(ProviderTrustProfile::UntrustedSandboxed)
+            .unwrap();
+        assert!(!row.available);
+        assert_eq!(row.reason_code, "SANDBOX_SECCOMP_POLICY_UNAVAILABLE");
+        assert_eq!(
+            row.unmet_requirements,
+            ["compiled-seccomp-policy-authorized"]
+        );
+
+        claimed
+            .behavior
+            .insert("compiled-seccomp-policy-authorized".into(), true);
+        claimed
+            .behavior
+            .insert("pre-exec-cgroup-placement".into(), false);
+        let missing_atomic_placement = SandboxCapabilityMatrix::evaluate(&claimed);
+        let row = missing_atomic_placement
+            .row(ProviderTrustProfile::UntrustedSandboxed)
+            .unwrap();
+        assert!(!row.available);
+        assert_eq!(row.reason_code, "SANDBOX_CGROUP_DELEGATION_UNAVAILABLE");
+        assert_eq!(row.unmet_requirements, ["pre-exec-cgroup-placement"]);
+
+        claimed
+            .behavior
+            .insert("pre-exec-cgroup-placement".into(), true);
+        claimed
+            .behavior
+            .insert("kernel-complete-accounting".into(), false);
+        let sampled_accounting = SandboxCapabilityMatrix::evaluate(&claimed);
+        let row = sampled_accounting
+            .row(ProviderTrustProfile::UntrustedSandboxed)
+            .unwrap();
+        assert!(!row.available);
+        assert_eq!(row.reason_code, "SANDBOX_KERNEL_ACCOUNTING_UNAVAILABLE");
+        assert_eq!(row.unmet_requirements, ["kernel-complete-accounting"]);
+    }
+
+    #[test]
+    fn linux_missing_kernel_accounting_rejects_before_provider_spawn() {
+        let mut claimed = linux_observation(true);
+        claimed
+            .behavior
+            .insert("kernel-complete-accounting".into(), false);
+        let matrix = SandboxCapabilityMatrix::evaluate(&claimed);
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        let dependencies = root.path().join("dependencies");
+        let output = root.path().join("output");
+        for directory in [&workspace, &dependencies, &output] {
+            fs::create_dir(directory).unwrap();
+        }
+        let executable = dependencies.join("provider");
+        fs::write(
+            &executable,
+            b"#!/bin/sh\nprintf launched > /output/launched\n",
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let profile = GeneratedSandboxProfile::generate(
+            ProviderTrustProfile::UntrustedSandboxed,
+            SandboxMechanism::LinuxBubblewrap,
+            &workspace,
+            &dependencies,
+            &output,
+        )
+        .unwrap();
+        let error = ProviderSandboxLauncher::new(matrix)
+            .launch(
+                &ProviderLaunchRequest {
+                    host_executable: executable,
+                    contained_executable: "/dependencies/provider".into(),
+                    arguments: Vec::new(),
+                    environment: BTreeMap::from([(
+                        "PATH".to_owned(),
+                        "/dependencies:/usr/bin:/bin".to_owned(),
+                    )]),
+                    output_root: output.clone(),
+                    limits: ProviderProcessLimits {
+                        cpu_seconds: 1,
+                        open_files: 16,
+                        address_space_bytes: 64 * 1024 * 1024,
+                        output_file_bytes: 1024,
+                        process_count: 4,
+                    },
+                },
+                &profile,
+                ProviderSandboxLaunchMaterial::None,
+            )
+            .unwrap_err();
+        assert!(matches!(error, SandboxError::SandboxUnavailable));
+        assert!(!output.join("launched").exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_run_cgroup_limits_placement_and_descendant_cleanup() {
+        if linux_cgroup_delegate_root().is_none() {
+            assert_eq!(probe_linux_run_cgroup_backend(), (false, false));
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("entered-cgroup");
+        let limits = ProviderProcessLimits {
+            cpu_seconds: 2,
+            open_files: 32,
+            address_space_bytes: 64 * 1024 * 1024,
+            output_file_bytes: 1024 * 1024,
+            process_count: 8,
+        };
+        let cgroup = LinuxRunCgroup::create(limits).unwrap();
+        let cgroup_path = cgroup.path.clone();
+        assert_eq!(
+            fs::read_to_string(cgroup_path.join("cpu.max"))
+                .unwrap()
+                .trim(),
+            "100000 100000"
+        );
+        assert_eq!(
+            fs::read_to_string(cgroup_path.join("memory.max"))
+                .unwrap()
+                .trim(),
+            limits.address_space_bytes.to_string()
+        );
+        assert_eq!(
+            fs::read_to_string(cgroup_path.join("pids.max"))
+                .unwrap()
+                .trim(),
+            limits.process_count.to_string()
+        );
+
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg(PROVIDER_LAUNCH_SHELL)
+            .arg("codefabric-cgroup-test")
+            .arg("")
+            .arg(limits.cpu_seconds.to_string())
+            .arg(limits.open_files.to_string())
+            .arg(limits.output_file_bytes.div_ceil(512).to_string())
+            .arg(cgroup.procs_path())
+            .arg("/bin/sh")
+            .arg("-c")
+            .arg("cat /proc/self/cgroup > \"$1\"; /usr/bin/setsid /bin/sleep 30 & wait")
+            .arg("provider")
+            .arg(&marker)
+            .env_clear()
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command.process_group(0);
+        let child = command.spawn().unwrap();
+        let mut child = ProviderProcessGroupChild::new(child, Some(cgroup)).unwrap();
+
+        let expected_membership =
+            format!("/{}", cgroup_path.file_name().unwrap().to_string_lossy());
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let membership = loop {
+            let membership = fs::read_to_string(&marker).unwrap_or_default();
+            if membership
+                .lines()
+                .any(|line| line.ends_with(&expected_membership))
+            {
+                break membership;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "provider did not observe its pre-exec cgroup membership: {membership:?}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(
+            membership
+                .lines()
+                .any(|line| line.ends_with(&expected_membership))
+        );
+        let usage = child.kernel_usage().unwrap().unwrap();
+        assert!(usage.peak_process_count >= 1);
+
+        child.kill_group().unwrap();
+        assert!(child.wait_group_empty(Duration::from_secs(1)).unwrap());
+        let _ = child.wait();
+        drop(child);
+        assert!(!cgroup_path.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_host_probe_records_remaining_authority_without_fallback() {
+        let observation = probe_host_sandbox();
+        for requirement in ["compiled-seccomp-policy-authorized", "seccomp-active"] {
+            assert_eq!(
+                observation.behavior.get(requirement),
+                Some(&false),
+                "Linux probe must not synthesize {requirement}: {observation:?}"
+            );
+        }
+        for observed_prerequisite in [
+            "linux-namespace-launch",
+            "linux-user-namespace-enabled",
+            "linux-cgroup-v2-mounted",
+            "linux-cgroup-membership-resolved",
+            "linux-cgroup-cpu-controller-available",
+            "linux-cgroup-memory-controller-available",
+            "linux-cgroup-pids-controller-available",
+            "linux-cgroup-parent-control-writable",
+        ] {
+            assert!(
+                observation.behavior.contains_key(observed_prerequisite),
+                "Linux probe omitted {observed_prerequisite}: {observation:?}"
+            );
+        }
+        let matrix = SandboxCapabilityMatrix::probe_current_host();
+        let row = matrix
+            .row(ProviderTrustProfile::UntrustedSandboxed)
+            .unwrap();
+        assert!(!row.available);
+        assert!(
+            row.unmet_requirements
+                .iter()
+                .any(|requirement| requirement == "compiled-seccomp-policy-authorized")
+        );
+        assert!(
+            row.unmet_requirements
+                .iter()
+                .any(|requirement| requirement == "seccomp-active")
+        );
+        let cgroup_backend_available = observation
+            .behavior
+            .get("pre-exec-cgroup-placement")
+            .copied()
+            .unwrap_or(false)
+            && observation
+                .behavior
+                .get("kernel-complete-accounting")
+                .copied()
+                .unwrap_or(false);
+        assert_eq!(
+            row.unmet_requirements.iter().all(|requirement| !matches!(
+                requirement.as_str(),
+                "pre-exec-cgroup-placement" | "kernel-complete-accounting"
+            )),
+            cgroup_backend_available
+        );
+        assert!(
+            row.unmet_requirements
+                .iter()
+                .all(|requirement| requirement != "exact-sandbox-executable-identity"),
+            "launcher version is observation metadata; exact path/ownership/mode plus behavior prove capability: {observation:?}"
+        );
+    }
+
+    #[test]
+    fn linux_launcher_version_is_not_a_substitute_for_capability_proof() {
+        let mut observation = linux_observation(true);
+        observation.executable_version = "bubblewrap 0.9.0".into();
+        let matrix = SandboxCapabilityMatrix::evaluate(&observation);
+        let row = matrix
+            .row(ProviderTrustProfile::UntrustedSandboxed)
+            .unwrap();
+        assert!(row.available, "{row:?}");
+        assert_eq!(row.reason_code, "SANDBOX_PROVED");
     }
 
     #[test]

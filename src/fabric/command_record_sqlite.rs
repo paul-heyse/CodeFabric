@@ -19,8 +19,10 @@ use rustix::fs::{Mode, OFlags, open, openat};
 use thiserror::Error;
 use tokio::sync::oneshot;
 
+#[cfg(test)]
+use super::command::WorkspaceId;
 use super::command::{
-    CommandRecord, CommandStateKind, IdempotencyKey, OperationId, ReducerTransition, WorkspaceId,
+    CommandRecord, CommandStateKind, IdempotencyKey, OperationId, ReducerTransition,
 };
 use super::command_actor::{
     CommandPortError, DurableAdmissionWrite, DurableCommandRecordPort, DurableTransitionWrite,
@@ -928,8 +930,8 @@ mod tests {
     use crate::fabric::command::{
         ActorId, AdmissionContext, AuthorizationDecision, AuthorizationRef, CommandCancellation,
         CommandEvent, CommandFailure, CommandIdentity, CommandOwnership, CommandPins,
-        CommandReducer, CompilerReleaseRef, DiagnosticRef, EpochId, ExpectedHead, FabricCommand,
-        FabricCommandPayload, FailureClass, FailureCode, LeaseId, ModelHeadRef, PrincipalId,
+        CommandReducer, DiagnosticRef, EpochId, ExpectedHead, FabricCommand, FabricCommandPayload,
+        FailureClass, FailureCode, InputReleaseRef, LeaseId, PrincipalId, ProgramReleaseRef,
         ProofReceiptRef, ProviderSetRef, Reduction, ReductionContext, ResourceEnvelopeRef,
         SourceGeneration, WriterFence, WriterGeneration,
     };
@@ -951,8 +953,17 @@ mod tests {
                 generation: WriterGeneration::new(1).unwrap(),
             },
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes([0x20; 32]),
-                model_head: ModelHeadRef::from_bytes([0x21; 32]),
+                input_release: InputReleaseRef::from_bytes([0x20; 32]),
+                program_release: ProgramReleaseRef::from_bytes([0x21; 32]),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    [0x21; 32],
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(
+                    [0x21; 32],
+                ),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(
+                    [0x21; 32],
+                ),
                 source_generation: SourceGeneration::new(0),
                 provider_set: ProviderSetRef::from_bytes([0x22; 32]),
             },

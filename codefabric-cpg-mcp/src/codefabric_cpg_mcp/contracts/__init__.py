@@ -1,6 +1,5 @@
 """Machine-contract encoding helpers shared with the Rust daemon."""
 
-from . import model_registries as registries
 from .identity import (
     SOURCE_CONTEXT_ID,
     CbefField,
@@ -19,15 +18,6 @@ from .identity import (
     encode_record,
     validate_workspace_paths,
 )
-from .index import (
-    ExternalDriverBudget,
-    ModelArtifactIndex,
-    ModelArtifactRecord,
-    NamedResourceProfile,
-    model_artifact_index,
-    model_artifact_index_bytes,
-    model_artifact_index_digest,
-)
 from .json import (
     PROFILE,
     CanonicalJsonError,
@@ -44,10 +34,6 @@ from .json import (
 
 __all__ = [
     "PROFILE",
-    "ExternalDriverBudget",
-    "ModelArtifactIndex",
-    "ModelArtifactRecord",
-    "NamedResourceProfile",
     "CbefField",
     "CbefRecord",
     "CbefValue",
@@ -58,9 +44,6 @@ __all__ = [
     "SOURCE_CONTEXT_ID",
     "TypeCode",
     "WorkspacePath",
-    "model_artifact_index",
-    "model_artifact_index_bytes",
-    "model_artifact_index_digest",
     "canonicalize_json",
     "canonicalize_value",
     "canonical_type_term",
@@ -77,5 +60,4 @@ __all__ = [
     "validate_lowercase_public",
     "validate_uint64",
     "validate_workspace_paths",
-    "registries",
 ]

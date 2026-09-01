@@ -1,8 +1,8 @@
 //! Sealed fabric epochs assembled directly from provider contracts and native
 //! DataFusion transformations.
 //!
-//! This is the target epoch path. It deliberately has no `ModelEpoch`, replay
-//! registry, bootstrap metamodel, SQL definition, or serialized-plan input.
+//! This is the target epoch path. It deliberately has no predecessor replay,
+//! bootstrap catalog, SQL definition, or serialized-plan input.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -31,12 +31,12 @@ use crate::relational_program::{
 use super::activation::TableVersionSet;
 use super::datafusion_cache::{
     CachedLogicalPlan, EpochLogicalPlanCache, LogicalPlanAuthorityBuilder,
-    LogicalPlanAuthorityFingerprint, LogicalPlanCacheKey, LogicalPlanCacheObservation,
-    LogicalPlanCacheOutcome, LogicalPlanCacheScope, LogicalPlanExecutionObservation,
-    execution_observation, frame_schema_contract, frame_session_logical_authority,
-    validate_logical_plan_references,
+    LogicalPlanAuthorityFingerprint, LogicalPlanCacheError, LogicalPlanCacheKey,
+    LogicalPlanCacheObservation, LogicalPlanCacheOutcome, LogicalPlanCacheScope,
+    LogicalPlanExecutionObservation, execution_observation, frame_schema_contract,
+    frame_session_logical_authority, validate_logical_plan_references,
 };
-use super::epoch::{
+use super::epoch_runtime::{
     FABRIC_CATALOG, FabricEpochId, FabricEpochRuntimeConfig, FabricSchemaRole, epoch_identity_text,
 };
 use super::programmatic_observation_delta::{
@@ -78,9 +78,6 @@ impl ProgrammaticFabricEpochBuilder {
             ));
         }
         for role in FabricSchemaRole::ALL {
-            if role == FabricSchemaRole::Model {
-                continue;
-            }
             if catalog
                 .register_schema(role.as_str(), Arc::new(MemorySchemaProvider::new()))?
                 .is_some()
@@ -246,6 +243,7 @@ impl ProgrammaticFabricEpochBuilder {
         let program_bindings = Arc::new(ProgramBindings::try_new(authority_id, contracts)?);
         let logical_plan_cache = Arc::new(EpochLogicalPlanCache::new(
             runtime_config.cache_policy().logical_plan_entries(),
+            runtime_config.cache_policy().logical_plan_bytes(),
         ));
         let state = session.state();
         if !Arc::ptr_eq(state.runtime_env(), &runtime_env) {
@@ -572,10 +570,10 @@ impl ProgrammaticFabricEpoch {
             let schema = Arc::new(compiled.plan.schema().as_arrow().clone());
             let state = context.state();
             let optimized = state.optimize(&compiled.plan)?;
-            let cached = self.logical_plan_cache.insert(
+            let cached = self.logical_plan_cache.try_insert(
                 cache_key,
                 CachedLogicalPlan::new(compiled.plan, optimized, schema, compiled.observations),
-            );
+            )?;
             (cached, LogicalPlanCacheOutcome::Miss)
         };
         let optimized_schema = cached.optimized_plan().schema().as_arrow();
@@ -740,6 +738,8 @@ pub enum ProgrammaticFabricEpochError {
     },
     #[error("cached logical-plan schema differs from its admitted output contract")]
     CachedPlanSchemaDrift,
+    #[error(transparent)]
+    LogicalPlanCache(#[from] LogicalPlanCacheError),
     #[error("logical-plan semantic authority could not be derived: {0}")]
     LogicalPlanAuthority(String),
     #[error("cached logical plan escaped its sealed epoch authority: {0}")]
@@ -772,9 +772,12 @@ mod tests {
 
     use super::*;
     use crate::fabric::programmatic_schema::{
-        ProgrammaticFieldId, ProgrammaticTransformationId, RELATION_OBSERVATION_RELATION_ID,
-        TransformationFieldIdentity, TransformationInputs, TransformationOutput,
-        TransformationPlanError,
+        ProgrammaticFieldId, ProgrammaticTransformationContract, ProgrammaticTransformationId,
+        RELATION_OBSERVATION_RELATION_ID, TransformationDeterminismPolicy,
+        TransformationFieldIdentity, TransformationInputs, TransformationOrderingPolicy,
+        TransformationOutput, TransformationPlanError, TransformationProvenance,
+        TransformationProvenanceIdentity, TransformationRecursionPolicy,
+        TransformationReleaseIdentity, TransformationResourceClass, TransformationSemanticVersion,
     };
     use crate::relational_program::{CompilationDependency, FieldId, RelationalExpression};
     use crate::schema_contract::{
@@ -782,14 +785,14 @@ mod tests {
     };
 
     struct PositiveValues {
-        id: ProgrammaticTransformationId,
+        contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
         dependencies: Arc<[ProgrammaticRelationId]>,
     }
 
     impl ProgrammaticTransformation for PositiveValues {
-        fn id(&self) -> &ProgrammaticTransformationId {
-            &self.id
+        fn contract(&self) -> &ProgrammaticTransformationContract {
+            &self.contract
         }
 
         fn output(&self) -> &TransformationOutput {
@@ -864,7 +867,21 @@ mod tests {
         let output = ProgrammaticRelationId::new("facts.positive_values");
         builder
             .add_transformation(Arc::new(PositiveValues {
-                id: ProgrammaticTransformationId::new("transform.positive_values"),
+                contract: ProgrammaticTransformationContract::new(
+                    ProgrammaticTransformationId::new("transform.positive_values"),
+                    TransformationSemanticVersion::new(1, 0, 0),
+                    TransformationResourceClass::BoundedInMemory {
+                        max_rows: 1_000,
+                        max_memory_bytes: 1 << 20,
+                    },
+                    TransformationDeterminismPolicy::DeterministicSet,
+                    TransformationOrderingPolicy::Unordered,
+                    TransformationRecursionPolicy::Forbidden,
+                    TransformationProvenance::new(
+                        TransformationProvenanceIdentity::from_bytes([0x51; 32]),
+                        TransformationReleaseIdentity::from_bytes([0x61; 32]),
+                    ),
+                ),
                 output: TransformationOutput::new(
                     output.clone(),
                     datafusion::common::TableReference::full(
@@ -938,16 +955,16 @@ mod tests {
             repeated.plan_observation().optimized_plan_digest,
             result.plan_observation().optimized_plan_digest
         );
-        assert_eq!(
-            epoch.logical_plan_cache_observation(),
-            LogicalPlanCacheObservation {
-                capacity_entries: 256,
-                resident_entries: 1,
-                hits: 1,
-                misses: 1,
-                evictions: 0,
-            }
-        );
+        let cache = epoch.logical_plan_cache_observation();
+        assert_eq!(cache.capacity_entries, 256);
+        assert!(cache.capacity_bytes > 0);
+        assert_eq!(cache.resident_entries, 1);
+        assert!(cache.resident_bytes > 0);
+        assert_eq!(cache.hits, 1);
+        assert_eq!(cache.misses, 1);
+        assert_eq!(cache.evictions, 0);
+        assert_eq!(cache.oversized_bypasses, 0);
+        assert_eq!(cache.collisions, 0);
         assert!(
             !epoch
                 .context()

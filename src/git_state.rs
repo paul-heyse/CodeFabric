@@ -279,7 +279,7 @@ impl GitCandidateCache {
         }
     }
 
-    /// Read an exact entry from L1 and then the model-generated SQLite L2 table.
+    /// Read an exact entry from L1 and then the operational SQLite L2 table.
     ///
     /// Corrupt or stale data is an ordinary miss because this cache is never authoritative.
     ///
@@ -447,7 +447,7 @@ pub struct GitCandidatePlanningRequest {
     pub cache_fence_verified: bool,
 }
 
-/// Model-owned candidate plan. Git paths remain hints until the source-image boundary recaptures
+/// Application-owned candidate plan. Git paths remain hints until the source-image boundary recaptures
 /// current bytes.
 #[cfg(feature = "daemon")]
 #[derive(Clone, Debug, Eq, PartialEq)]

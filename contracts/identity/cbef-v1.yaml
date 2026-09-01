@@ -1,9 +1,9 @@
 artifact_id: codefabric.identity.cbef-v1
 artifact_kind: yaml-contract
-version: "1.0"
+version: "1.1"
 compatible_suite_major: 1
 status: released
-canonical_digest: "b3:a749eca0307587c485412a1ce9770947068f8d44f2d8e23381a433a4e9dee252"
+canonical_digest: "b3:1d35ae5cb6582d0ebb1d52db19ed117f93c8cbc06376375e93e34c01c71264c1"
 format_name: CBEF-v1
 format_version: 1
 magic_ascii: CFID
@@ -184,6 +184,112 @@ domains:
       - {tag: 5, name: case_sensitivity_mode, type_code: UTF8, normalization: ASCII_LOWER}
       - {tag: 6, name: authorization_revision, type_code: UNSIGNED, width_bytes: 8}
       - {tag: 7, name: allowed_source_disclosure_rules, type_code: SET, member_type: UTF8-ASCII_LOWER}
+  - code: 18
+    name: PATH_RESULT
+    public_prefix: path
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_id, type_code: ID}
+      - {tag: 3, name: fabric_epoch_id, type_code: ID}
+      - {tag: 4, name: policy_identity, type_code: UTF8, normalization: NONE}
+      - {tag: 5, name: ordered_entity_ids, type_code: ORDERED_LIST, member_type: ID}
+      - {tag: 6, name: ordered_fact_ids, type_code: ORDERED_LIST, member_type: ID}
+  - code: 19
+    name: OBJECTIVE_INPUT_SET
+    public_prefix: input-set
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_ids, type_code: SET, member_type: ID}
+      - {tag: 3, name: fact_ids, type_code: SET, member_type: ID}
+      - {tag: 4, name: producer_identities, type_code: SET, member_type: UTF8-NONE}
+      - {tag: 5, name: policy_identity, type_code: UTF8, normalization: NONE}
+      - {tag: 6, name: coverage_state, type_code: UTF8, normalization: ASCII_LOWER, allowed_values: [complete, partial, indeterminate, unavailable]}
+  - code: 20
+    name: OBJECTIVE_GROUP
+    public_prefix: group
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_id, type_code: ID}
+      - {tag: 3, name: input_set_id, type_code: ID}
+      - {tag: 4, name: grouping_dimensions, type_code: ORDERED_LIST, member_type: UTF8-NONE}
+      - tag: 5
+        name: canonical_group_key
+        type_code: MAP
+        key_type: UTF8-NONE
+        value_type: TAGGED_UNION
+        value_variants:
+          - {variant: 2, type_code: UTF8}
+          - {variant: 4, type_code: UNSIGNED}
+          - {variant: 5, type_code: SIGNED}
+          - {variant: 6, type_code: BOOLEAN}
+      - {tag: 6, name: aggregate_function, type_code: UTF8, normalization: ASCII_LOWER, allowed_values: [count, count_distinct, sum, average, minimum, maximum]}
+      - {tag: 7, name: measure, type_code: UTF8, normalization: NONE, authority: governed-program-input}
+      - {tag: 8, name: producer_identity, type_code: UTF8, normalization: NONE}
+  - code: 21
+    name: QUERY_SOURCE_CONTEXT
+    public_prefix: context
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: analysis_context_id, type_code: ID}
+      - {tag: 3, name: snapshot_id, type_code: ID}
+      - {tag: 4, name: entity_id, type_code: ID}
+      - {tag: 5, name: source_file_id, type_code: ID}
+      - {tag: 6, name: source_generation, type_code: UNSIGNED, width_bytes: 8}
+      - {tag: 7, name: source_content_digest, type_code: DIGEST}
+      - {tag: 8, name: delivered_start_byte, type_code: UNSIGNED, width_bytes: 8}
+      - {tag: 9, name: delivered_end_byte, type_code: UNSIGNED, width_bytes: 8}
+      - {tag: 10, name: delivered_content_digest, type_code: DIGEST}
+      - {tag: 11, name: disclosure_scope_id, type_code: ID}
+      - {tag: 12, name: policy_identity, type_code: UTF8, normalization: NONE}
+      - {tag: 13, name: context_kind, type_code: UTF8, normalization: ASCII_LOWER}
+  - code: 22
+    name: ACCESS_SCOPE
+    public_prefix: access-scope
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: policy_identity, type_code: UTF8, normalization: NONE}
+      - {tag: 3, name: principal_id, type_code: ID}
+      - {tag: 4, name: agent_id, type_code: ID}
+      - {tag: 5, name: credential_digest, type_code: DIGEST}
+      - {tag: 6, name: role, type_code: UTF8, normalization: ASCII_LOWER}
+      - {tag: 7, name: operation, type_code: UTF8, normalization: ASCII_LOWER}
+      - {tag: 8, name: allowed_relations, type_code: SET, member_type: UTF8-NONE, explicit_empty: true}
+      - {tag: 9, name: allowed_columns, type_code: MAP, key_type: UTF8-NONE, value_type: SET-UTF8-NONE, explicit_empty: true}
+      - {tag: 10, name: allowed_functions, type_code: SET, member_type: UTF8-NONE, explicit_empty: true}
+      - {tag: 11, name: allowed_extensions, type_code: SET, member_type: UTF8-NONE, explicit_empty: true}
+      - {tag: 12, name: allowed_variables, type_code: SET, member_type: UTF8-NONE, explicit_empty: true}
+      - {tag: 13, name: allowed_object_stores, type_code: SET, member_type: UTF8-NONE, explicit_empty: true}
+      - {tag: 14, name: allowed_metadata, type_code: SET, member_type: UTF8-NONE, explicit_empty: true}
+      - {tag: 15, name: row_policies, type_code: SET, member_type: UTF8-NONE, explicit_empty: true}
+      - {tag: 16, name: execution_posture, type_code: SET, member_type: UTF8-NONE, explicit_empty: true}
+      - {tag: 17, name: source_access, type_code: BOOLEAN}
+      - {tag: 18, name: source_file_ids, type_code: SET, member_type: ID, explicit_empty: true}
+      - tag: 19
+        name: authorized_ranges
+        type_code: SET
+        member_type: ORDERED_LIST
+        explicit_empty: true
+        member_schema:
+          - {position: 0, name: source_file_id, type_code: ID}
+          - {position: 1, name: start_byte, type_code: UNSIGNED, width_bytes: 8}
+          - {position: 2, name: end_byte, type_code: UNSIGNED, width_bytes: 8}
+  - code: 23
+    name: RESULT_ARTIFACT_V2
+    public_prefix: artifact
+    kind_slug_required: false
+    fields:
+      - {tag: 1, name: workspace_id, type_code: ID}
+      - {tag: 2, name: owning_agent_id, type_code: UTF8, normalization: NONE}
+      - {tag: 3, name: fabric_epoch_id, type_code: ID}
+      - {tag: 4, name: snapshot_id, type_code: ID}
+      - {tag: 5, name: canonical_response_checksum, type_code: DIGEST}
+      - {tag: 6, name: format, type_code: UTF8, normalization: ASCII_LOWER}
+      - {tag: 7, name: format_version, type_code: UTF8, normalization: NONE}
 digest_algorithm: BLAKE3-256
 id_derivation: first-16-bytes
 symbolic_source_context: context:source

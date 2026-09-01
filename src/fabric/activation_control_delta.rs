@@ -55,15 +55,15 @@ use super::command::{
 use super::command_actor::CommandPortError;
 use super::command_runtime_ports::CommandActivationChainPort;
 use super::delta_exact::{
-    ExactDeltaPin, ExactDeltaProviderError, ValidatedDeltaSnapshot,
-    provider_from_validated_snapshot,
+    ExactDeltaPin, ExactDeltaProviderError, ExactDeltaStatisticsInspection, ValidatedDeltaSnapshot,
+    provider_read_from_validated_snapshot,
 };
 use super::delta_write::{
     ApplicationTransactionMarker, ControlledDeltaWriteMode, ControlledDeltaWriteOutcome,
     ControlledDeltaWriteSpec, SessionBoundLogicalPlan, readback_exact_delta_commit,
     write_exact_delta_plan,
 };
-use super::epoch::{FABRIC_CATALOG, FabricSchemaRole};
+use super::epoch_runtime::{FABRIC_CATALOG, FabricSchemaRole};
 use super::programmatic_schema::{
     ProgrammaticRelationId, ProgrammaticSchemaAssembly, ProviderInput,
 };
@@ -75,17 +75,17 @@ use crate::schema_contract::{
 };
 
 /// Stable logical identity of the append-only activation-event relation.
-pub const ACTIVATION_CONTROL_RELATION_ID: &str = "control.activation_event.v2";
+pub const ACTIVATION_CONTROL_RELATION_ID: &str = "control.activation_event.v3";
 /// Stable Delta storage identity for the same logical relation.
-pub const ACTIVATION_CONTROL_STORAGE_RELATION_ID: &str = "storage.delta.activation_event.v2";
+pub const ACTIVATION_CONTROL_STORAGE_RELATION_ID: &str = "storage.delta.activation_event.v3";
 /// Exact provider/transformation implementation selected for the relation.
 pub const ACTIVATION_CONTROL_PROVIDER_BINDING_ID: &str =
-    "binding.delta.exact-snapshot.activation-event.v2";
+    "binding.delta.exact-snapshot.activation-event.v3";
 /// Contract identity used by schema/session binding evidence.
 pub const ACTIVATION_CONTROL_SCHEMA_IDENTITY: &str =
-    "programmatic:control.activation_event.v2:arrow59-delta1";
+    "programmatic:control.activation_event.v3:arrow59-delta1";
 /// Version of this durable relation contract.
-pub const ACTIVATION_CONTROL_SCHEMA_VERSION: u16 = 2;
+pub const ACTIVATION_CONTROL_SCHEMA_VERSION: u16 = 3;
 
 const ARROW_TYPE_UNIVERSE: &str =
     "arrow-array@59.2.0|arrow-schema@59.2.0|datafusion@55.0.0|deltalake@43a0cf10";
@@ -105,7 +105,7 @@ const ACTIVATION_STATS_COLUMNS: &str =
 const DIAGNOSTIC_DIGEST_DOMAIN: &[u8] = b"codefabric.activation.diagnostic-fact.v1";
 const RECONCILIATION_DIGEST_DOMAIN: &[u8] = b"codefabric.activation.reconciliation-fact.v1";
 const READBACK_DIGEST_DOMAIN: &[u8] = b"codefabric.activation.control-readback.v1";
-const PERSISTED_ROW_DIGEST_DOMAIN: &[u8] = b"codefabric.activation.control-row.v1";
+const PERSISTED_ROW_DIGEST_DOMAIN: &[u8] = b"codefabric.activation.control-row.v2";
 
 const EVENT_ID: usize = 8;
 const WORKSPACE_ID: usize = 9;
@@ -116,21 +116,24 @@ const ORDINAL: usize = 13;
 const LEASE_ID: usize = 14;
 const WRITER_GENERATION: usize = 15;
 const EPOCH_ID: usize = 16;
-const COMPILER_RELEASE: usize = 17;
-const MODEL_HEAD: usize = 18;
-const SOURCE_GENERATION: usize = 19;
-const PROVIDER_SET: usize = 20;
-const TABLE_VERSIONS: usize = 21;
-const TABLE_VERSION_COMPONENTS: usize = 22;
-const OVERLAY_SEGMENTS: usize = 23;
-const POLICY_SET: usize = 24;
-const RESOURCE_ENVELOPE: usize = 25;
-const PROOF_RECEIPT: usize = 26;
-const COMPATIBILITY_CLASS: usize = 27;
-const RETENTION_POLICY: usize = 28;
-const OPERATION_SELECTION: usize = 29;
-const TRANSACTION: usize = 30;
-const ROW_DIGEST: usize = 31;
+const INPUT_RELEASE: usize = 17;
+const PROGRAM_RELEASE: usize = 18;
+const APPLICATION_RELEASE: usize = 19;
+const SOURCE_AUTHORITY: usize = 20;
+const SOURCE_GENERATION: usize = 21;
+const PROVIDER_RELEASE: usize = 22;
+const PROVIDER_SET: usize = 23;
+const TABLE_VERSIONS: usize = 24;
+const TABLE_VERSION_COMPONENTS: usize = 25;
+const OVERLAY_SEGMENTS: usize = 26;
+const POLICY_SET: usize = 27;
+const RESOURCE_ENVELOPE: usize = 28;
+const PROOF_RECEIPT: usize = 29;
+const COMPATIBILITY_CLASS: usize = 30;
+const RETENTION_POLICY: usize = 31;
+const OPERATION_SELECTION: usize = 32;
+const TRANSACTION: usize = 33;
+const ROW_DIGEST: usize = 34;
 
 const COMPONENT_RELATION_ID: usize = 0;
 const COMPONENT_DELTA_ROOT: usize = 1;
@@ -296,9 +299,12 @@ fn activation_fields() -> Vec<FieldSpec> {
         binary("lease_id", 16, false, "writer_lease_identity"),
         u64_field("writer_generation", "writer_fence_generation"),
         binary("epoch_id", 16, false, "selected_epoch_identity"),
-        binary("compiler_release", 32, false, "compiler_release_pin"),
-        binary("model_head", 32, false, "model_head_pin"),
+        binary("input_release", 32, false, "input_release_pin"),
+        binary("program_release", 32, false, "program_release_pin"),
+        binary("application_release", 32, false, "application_release_pin"),
+        binary("source_authority", 32, false, "source_authority_pin"),
         u64_field("source_generation", "source_generation_pin"),
+        binary("provider_release", 32, false, "provider_release_pin"),
         binary("provider_set", 32, false, "provider_set_pin"),
         binary("table_versions", 32, false, "table_version_set_pin"),
         table_version_components_field(),
@@ -643,15 +649,27 @@ impl ActivationControlRowCodec {
             fixed_array::<16>(rows.iter().map(|row| Some(*row.row.pins.epoch.as_bytes())))?,
             fixed_array::<32>(
                 rows.iter()
-                    .map(|row| Some(*row.row.pins.compiler_release.as_bytes())),
+                    .map(|row| Some(*row.row.pins.input_release.as_bytes())),
             )?,
             fixed_array::<32>(
                 rows.iter()
-                    .map(|row| Some(*row.row.pins.model_head.as_bytes())),
+                    .map(|row| Some(*row.row.pins.program_release.as_bytes())),
+            )?,
+            fixed_array::<32>(
+                rows.iter()
+                    .map(|row| Some(*row.row.pins.application_release.as_bytes())),
+            )?,
+            fixed_array::<32>(
+                rows.iter()
+                    .map(|row| Some(*row.row.pins.source_authority.as_bytes())),
             )?,
             Arc::new(UInt64Array::from_iter_values(
                 rows.iter().map(|row| row.row.pins.source_generation.get()),
             )),
+            fixed_array::<32>(
+                rows.iter()
+                    .map(|row| Some(*row.row.pins.provider_release.as_bytes())),
+            )?,
             fixed_array::<32>(
                 rows.iter()
                     .map(|row| Some(*row.row.pins.provider_set.as_bytes())),
@@ -808,78 +826,92 @@ impl ActivationControlRowCodec {
             TABLE_VERSION_COMPONENTS,
             index,
         )?);
-        let row = DurableActivationRow {
-            event_id: ActivationEventId::from_bytes(required_fixed(batch, EVENT_ID, index)?),
-            workspace_id: WorkspaceId::from_bytes(required_fixed(batch, WORKSPACE_ID, index)?),
-            operation_id: OperationId::from_bytes(required_fixed(batch, OPERATION_ID, index)?),
-            predecessor_event_id,
-            predecessor_epoch,
-            ordinal,
-            execution_fence: WriterFence {
-                lease_id: LeaseId::from_bytes(required_fixed(batch, LEASE_ID, index)?),
-                generation: writer_generation,
-            },
-            pins: FabricEpochPins {
-                epoch: EpochId::from_bytes(required_fixed(batch, EPOCH_ID, index)?),
-                compiler_release: super::command::CompilerReleaseRef::from_bytes(required_fixed(
+        let row =
+            DurableActivationRow {
+                event_id: ActivationEventId::from_bytes(required_fixed(batch, EVENT_ID, index)?),
+                workspace_id: WorkspaceId::from_bytes(required_fixed(batch, WORKSPACE_ID, index)?),
+                operation_id: OperationId::from_bytes(required_fixed(batch, OPERATION_ID, index)?),
+                predecessor_event_id,
+                predecessor_epoch,
+                ordinal,
+                execution_fence: WriterFence {
+                    lease_id: LeaseId::from_bytes(required_fixed(batch, LEASE_ID, index)?),
+                    generation: writer_generation,
+                },
+                pins: FabricEpochPins {
+                    epoch: EpochId::from_bytes(required_fixed(batch, EPOCH_ID, index)?),
+                    input_release: super::command::InputReleaseRef::from_bytes(required_fixed(
+                        batch,
+                        INPUT_RELEASE,
+                        index,
+                    )?),
+                    program_release: super::command::ProgramReleaseRef::from_bytes(required_fixed(
+                        batch,
+                        PROGRAM_RELEASE,
+                        index,
+                    )?),
+                    application_release: super::command::ApplicationReleaseRef::from_bytes(
+                        required_fixed(batch, APPLICATION_RELEASE, index)?,
+                    ),
+                    source_authority: super::command::SourceAuthorityRef::from_bytes(
+                        required_fixed(batch, SOURCE_AUTHORITY, index)?,
+                    ),
+                    source_generation: SourceGeneration::new(required_u64(
+                        batch,
+                        SOURCE_GENERATION,
+                        index,
+                    )?),
+                    provider_release: super::command::ProviderReleaseRef::from_bytes(
+                        required_fixed(batch, PROVIDER_RELEASE, index)?,
+                    ),
+                    provider_set: super::command::ProviderSetRef::from_bytes(required_fixed(
+                        batch,
+                        PROVIDER_SET,
+                        index,
+                    )?),
+                    table_versions: TableVersionSetRef::from_bytes(required_fixed(
+                        batch,
+                        TABLE_VERSIONS,
+                        index,
+                    )?),
+                    overlay_segments: super::activation::OverlaySegmentSetRef::from_bytes(
+                        required_fixed(batch, OVERLAY_SEGMENTS, index)?,
+                    ),
+                    policy_set: super::activation::PolicySetRef::from_bytes(required_fixed(
+                        batch, POLICY_SET, index,
+                    )?),
+                    resource_envelope: super::command::ResourceEnvelopeRef::from_bytes(
+                        required_fixed(batch, RESOURCE_ENVELOPE, index)?,
+                    ),
+                    proof_receipt: super::command::ProofReceiptRef::from_bytes(required_fixed(
+                        batch,
+                        PROOF_RECEIPT,
+                        index,
+                    )?),
+                },
+                compatibility: CompatibilityClassRef::from_bytes(required_fixed(
                     batch,
-                    COMPILER_RELEASE,
+                    COMPATIBILITY_CLASS,
                     index,
                 )?),
-                model_head: super::command::ModelHeadRef::from_bytes(required_fixed(
-                    batch, MODEL_HEAD, index,
-                )?),
-                source_generation: SourceGeneration::new(required_u64(
+                retention: RetentionPolicyRef::from_bytes(required_fixed(
                     batch,
-                    SOURCE_GENERATION,
+                    RETENTION_POLICY,
                     index,
                 )?),
-                provider_set: super::command::ProviderSetRef::from_bytes(required_fixed(
-                    batch,
-                    PROVIDER_SET,
-                    index,
-                )?),
-                table_versions: TableVersionSetRef::from_bytes(required_fixed(
-                    batch,
-                    TABLE_VERSIONS,
-                    index,
-                )?),
-                overlay_segments: super::activation::OverlaySegmentSetRef::from_bytes(
-                    required_fixed(batch, OVERLAY_SEGMENTS, index)?,
-                ),
-                policy_set: super::activation::PolicySetRef::from_bytes(required_fixed(
-                    batch, POLICY_SET, index,
-                )?),
-                resource_envelope: super::command::ResourceEnvelopeRef::from_bytes(required_fixed(
-                    batch,
-                    RESOURCE_ENVELOPE,
-                    index,
-                )?),
-                proof_receipt: super::command::ProofReceiptRef::from_bytes(required_fixed(
-                    batch,
-                    PROOF_RECEIPT,
-                    index,
-                )?),
-            },
-            compatibility: CompatibilityClassRef::from_bytes(required_fixed(
-                batch,
-                COMPATIBILITY_CLASS,
-                index,
-            )?),
-            retention: RetentionPolicyRef::from_bytes(required_fixed(
-                batch,
-                RETENTION_POLICY,
-                index,
-            )?),
-            commit: DurableActivationCommit {
-                operation_selection: OperationSelectionRef::from_bytes(required_fixed(
-                    batch,
-                    OPERATION_SELECTION,
-                    index,
-                )?),
-                transaction: TransactionRef::from_bytes(required_fixed(batch, TRANSACTION, index)?),
-            },
-        };
+                commit: DurableActivationCommit {
+                    operation_selection: OperationSelectionRef::from_bytes(required_fixed(
+                        batch,
+                        OPERATION_SELECTION,
+                        index,
+                    )?),
+                    transaction: TransactionRef::from_bytes(required_fixed(
+                        batch,
+                        TRANSACTION,
+                        index,
+                    )?),
+                },
+            };
         let control_predecessor = ActivationControlRelationPin::new(
             ExactDeltaPin::new(&root, predecessor_version)
                 .map_err(|error| ActivationControlError::ExactDelta(error.to_string()))?,
@@ -906,6 +938,7 @@ pub struct ActivationControlDeltaProvider {
     control_relation: ActivationControlRelationPin,
     codec: ActivationControlRowCodec,
     provider: Arc<dyn TableProvider>,
+    statistics: ExactDeltaStatisticsInspection,
 }
 
 impl fmt::Debug for ActivationControlDeltaProvider {
@@ -937,9 +970,10 @@ impl ActivationControlDeltaProvider {
         let snapshot = ValidatedDeltaSnapshot::try_from_loaded_table(table.clone(), &pin)
             .map_err(|error| ActivationControlError::ExactDelta(error.to_string()))?;
         validate_activation_control_properties(&table)?;
-        let raw = provider_from_validated_snapshot(&pin, snapshot, Arc::clone(&session))
+        let read = provider_read_from_validated_snapshot(&pin, snapshot, Arc::clone(&session))
             .await
             .map_err(|error| ActivationControlError::ExactDelta(error.to_string()))?;
+        let (raw, statistics) = read.into_parts();
         let restored = Arc::new(ActivationStorageProvider::try_new(
             Arc::clone(codec.contract()),
             raw,
@@ -954,6 +988,7 @@ impl ActivationControlDeltaProvider {
             control_relation,
             codec,
             provider,
+            statistics,
         })
     }
 
@@ -970,6 +1005,13 @@ impl ActivationControlDeltaProvider {
     #[must_use]
     pub fn provider(&self) -> Arc<dyn TableProvider> {
         Arc::clone(&self.provider)
+    }
+
+    /// Non-lossy file/column and optimizer statistics retained from exact
+    /// activation-control provider construction.
+    #[must_use]
+    pub const fn statistics(&self) -> &ExactDeltaStatisticsInspection {
+        &self.statistics
     }
 
     /// Append one row against exactly this provider's loaded predecessor.
@@ -1242,12 +1284,53 @@ impl DeltaActivationRuntimeAuthority {
         }
     }
 
+    #[must_use]
+    pub const fn workspace_id(&self) -> WorkspaceId {
+        self.workspace_id
+    }
+
+    #[must_use]
+    pub fn control_relation(&self) -> &ActivationControlRelationPin {
+        self.control.control_relation()
+    }
+
     fn observe_fence(&self) -> Result<WriterFence, Arc<str>> {
         self.generations
             .observe_current(self.workspace_id)
             .map_err(|error| Arc::<str>::from(error.to_string()))?
             .ok_or_else(|| Arc::<str>::from("no durable writer fence exists for workspace"))
     }
+
+    /// Read the exact activation chain under the independently observed current writer fence.
+    ///
+    /// This is the production cold-start input to workspace composition. The returned snapshot is
+    /// derived from the already exact, non-refreshing Delta provider and the durable generation
+    /// store; neither a process cache nor a latest-table lookup participates.
+    pub async fn current_snapshot(
+        &self,
+    ) -> Result<ActivationAuthoritySnapshot, DeltaActivationRuntimeAuthoritySnapshotError> {
+        let active_fence = self
+            .observe_fence()
+            .map_err(DeltaActivationRuntimeAuthoritySnapshotError::WriterAuthority)?;
+        let chain = self
+            .control
+            .read_workspace_chain(self.workspace_id, active_fence)
+            .await
+            .map_err(DeltaActivationRuntimeAuthoritySnapshotError::Control)?;
+        Ok(ActivationAuthoritySnapshot {
+            chain,
+            active_fence,
+        })
+    }
+}
+
+/// Fail-closed cold-start observation failures from the concrete Delta activation authority.
+#[derive(Debug, Error)]
+pub enum DeltaActivationRuntimeAuthoritySnapshotError {
+    #[error("durable writer authority is unavailable: {0}")]
+    WriterAuthority(Arc<str>),
+    #[error("exact activation-control readback failed: {0}")]
+    Control(ActivationControlError),
 }
 
 #[async_trait::async_trait]
@@ -1323,6 +1406,26 @@ impl ActivationAuthorityPort for DeltaActivationRuntimeAuthority {
         } else {
             AuthorityRevalidationOutcome::Stale(snapshot)
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl ActivationEventPort for DeltaActivationRuntimeAuthority {
+    async fn append_and_readback(
+        &self,
+        contract: ActivationAppendContract,
+    ) -> ActivationAppendOutcome {
+        self.control.append_and_readback(contract).await
+    }
+}
+
+#[async_trait::async_trait]
+impl ActivationOperationMarkerPort for DeltaActivationRuntimeAuthority {
+    async fn read_operation_marker(
+        &self,
+        request: ActivationOperationMarkerRequest,
+    ) -> ActivationOperationMarkerOutcome {
+        self.control.read_operation_marker(request).await
     }
 }
 
@@ -2837,11 +2940,11 @@ mod tests {
         ActivationOperationMarkerOutcome, ActivationOperationMarkerPort,
     };
     use crate::fabric::command::{
-        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins,
-        CompilerReleaseRef, ExecutionOwner, FabricCommand, FabricCommandPayload, IdempotencyKey,
-        ModelHeadRef, PrincipalId, ProofReceiptRef, ProviderSetRef, ResourceEnvelopeRef,
+        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins, ExecutionOwner,
+        FabricCommand, FabricCommandPayload, IdempotencyKey, InputReleaseRef, PrincipalId,
+        ProgramReleaseRef, ProofReceiptRef, ProviderSetRef, ResourceEnvelopeRef,
     };
-    use crate::fabric::epoch::FabricEpochRuntimeConfig;
+    use crate::fabric::epoch_runtime::FabricEpochRuntimeConfig;
     use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
     use crate::fabric::writer_lease::WriterGenerationPortError;
 
@@ -2928,8 +3031,17 @@ mod tests {
             execution_fence: fence(seed.wrapping_add(3), 7),
             pins: FabricEpochPins {
                 epoch: EpochId::from_bytes(bytes16(seed.wrapping_add(4))),
-                compiler_release: CompilerReleaseRef::from_bytes(bytes32(seed.wrapping_add(5))),
-                model_head: ModelHeadRef::from_bytes(bytes32(seed.wrapping_add(6))),
+                input_release: InputReleaseRef::from_bytes(bytes32(seed.wrapping_add(5))),
+                program_release: ProgramReleaseRef::from_bytes(bytes32(seed.wrapping_add(6))),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    bytes32(seed.wrapping_add(20)),
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(bytes32(
+                    seed.wrapping_add(21),
+                )),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(bytes32(
+                    seed.wrapping_add(22),
+                )),
                 source_generation: SourceGeneration::new(9),
                 provider_set: ProviderSetRef::from_bytes(bytes32(seed.wrapping_add(7))),
                 table_versions: table_versions.reference(),
@@ -2967,8 +3079,11 @@ mod tests {
             expected_head: row.predecessor_epoch,
             writer_fence: row.execution_fence,
             pins: CommandPins {
-                compiler_release: row.pins.compiler_release,
-                model_head: row.pins.model_head,
+                input_release: row.pins.input_release,
+                program_release: row.pins.program_release,
+                application_release: row.pins.application_release,
+                source_authority: row.pins.source_authority,
+                provider_release: row.pins.provider_release,
                 source_generation: row.pins.source_generation,
                 provider_set: row.pins.provider_set,
             },
@@ -3066,7 +3181,7 @@ mod tests {
                 .metadata()
                 .get(FIELD_ID_METADATA_KEY)
                 .map(String::as_str),
-            Some("control.activation_event.v2.event_id")
+            Some("control.activation_event.v3.event_id")
         );
     }
 
@@ -3091,6 +3206,38 @@ mod tests {
             .unwrap();
         assert_eq!(&storage.schema(), codec.contract().storage_schema());
         assert_eq!(codec.decode_storage(&storage).unwrap(), vec![persisted]);
+    }
+
+    #[test]
+    fn predecessor_v2_activation_schema_is_not_a_reopen_authority() {
+        let session = SessionStateBuilder::new().with_default_features().build();
+        let persisted =
+            PersistedActivationControlRow::try_new(row(1), table_versions(1), control(7, &session))
+                .unwrap();
+        let codec = ActivationControlRowCodec::try_new().unwrap();
+        let logical = codec.encode_logical(&[persisted]).unwrap();
+        let mut predecessor_metadata = logical.schema().metadata().clone();
+        predecessor_metadata.insert(
+            RELATION_ID_METADATA_KEY.to_owned(),
+            "control.activation_event.v2".to_owned(),
+        );
+        predecessor_metadata.insert(RELATION_PROTOCOL_KEY.to_owned(), "2".to_owned());
+        predecessor_metadata.insert(
+            PROVIDER_BINDING_KEY.to_owned(),
+            "binding.delta.exact-snapshot.activation-event.v2".to_owned(),
+        );
+        let predecessor_schema = logical
+            .schema()
+            .as_ref()
+            .clone()
+            .with_metadata(predecessor_metadata);
+        let predecessor =
+            RecordBatch::try_new(Arc::new(predecessor_schema), logical.columns().to_vec()).unwrap();
+
+        assert!(matches!(
+            codec.decode_logical(&predecessor),
+            Err(ActivationControlError::SchemaContract(_))
+        ));
     }
 
     #[test]
@@ -3383,6 +3530,18 @@ mod tests {
             request_control.binding(),
             "the same session and executable contract must reproduce the binding"
         );
+        assert_eq!(committed.statistics().add_actions().num_rows(), 1);
+        assert_eq!(
+            committed
+                .statistics()
+                .field("partition.event_id")
+                .expect("non-partitioned activation column remains inspectable")
+                .availability(),
+            super::super::delta_exact::ExactDeltaStatisticAvailability::UnknownForFiles {
+                file_count: 1,
+                unknown_file_count: 1,
+            }
+        );
         let readback = committed.read_all(recovery_fence).await.unwrap();
         assert_eq!(readback.rows().len(), 1);
         assert_eq!(readback.rows()[0].row(), semantic);
@@ -3420,6 +3579,9 @@ mod tests {
                 fence: semantic.execution_fence,
             }),
         );
+        let startup_snapshot = authority.current_snapshot().await.unwrap();
+        assert_eq!(startup_snapshot.chain, chain);
+        assert_eq!(startup_snapshot.active_fence, semantic.execution_fence);
         let authoritative_chain = authority
             .read_chain(semantic.workspace_id)
             .await

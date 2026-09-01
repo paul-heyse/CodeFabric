@@ -11,7 +11,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"
-codefabric = { path = "..", default-features = false, features = ["contract-models", "rpc"] }
+codefabric = { path = "..", default-features = false, features = ["canonical-json", "rpc"] }
 prost = "=0.14.4"
 
 [[bin]]
@@ -24,13 +24,6 @@ bench = false
 [[bin]]
 name = "identity"
 path = "fuzz_targets/identity.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "registry"
-path = "fuzz_targets/registry.rs"
 test = false
 doc = false
 bench = false

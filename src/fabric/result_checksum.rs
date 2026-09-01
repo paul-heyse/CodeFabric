@@ -15,7 +15,7 @@ pub struct ResultChecksumV1 {
     pub row_count: u64,
 }
 
-/// Extension-aware successor over the generated logical result schema.
+/// Extension-aware checksum over an application-owned logical result schema.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResultChecksumV2 {
     pub checksum: String,
@@ -33,6 +33,43 @@ pub struct GateResultChecksumV1 {
 
 /// Exact gate-result checksum contract version.
 pub const GATE_RESULT_CHECKSUM_VERSION: &str = "GateResultChecksumV1";
+
+/// Compute the canonical schema-and-row checksum for one exact Arrow batch.
+///
+/// The application-owned schema digest, row count, and sorted Arrow row encodings are committed under the
+/// application-owned Arrow-batch integrity domain, so input row order does not affect the result.
+///
+/// # Errors
+///
+/// Returns an Arrow row-encoding error for a type unsupported by the pinned Arrow version.
+pub fn batch_checksum(batch: &RecordBatch) -> Result<[u8; 32], super::FabricError> {
+    let schema = batch.schema();
+    let fields = schema
+        .fields()
+        .iter()
+        .map(|field| SortField::new(field.data_type().clone()))
+        .collect();
+    let converter = RowConverter::new(fields)?;
+    let rows = converter.convert_columns(batch.columns())?;
+    let mut ordered = rows.iter().map(|row| row.data()).collect::<Vec<_>>();
+    ordered.sort_unstable();
+    let mut hasher = crate::integrity::IntegrityHasher::for_domain(
+        crate::integrity::IntegrityDomain::ArrowBatch,
+    );
+    if let Some(digest) = schema.metadata().get("com.codefabric.cpg.schema_digest") {
+        hasher.update(digest.as_bytes());
+    }
+    hasher.update(
+        &u64::try_from(batch.num_rows())
+            .unwrap_or(u64::MAX)
+            .to_be_bytes(),
+    );
+    for row in ordered {
+        hasher.update(&u64::try_from(row.len()).unwrap_or(u64::MAX).to_be_bytes());
+        hasher.update(row);
+    }
+    Ok(hasher.finalize())
+}
 
 fn gate_framed(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> String {
     let mut bytes = Vec::new();
@@ -294,7 +331,7 @@ pub fn result_checksum_v1(
     )
 }
 
-/// Compute `ResultChecksumV2` over generated extension-typed and nested-list result schemas.
+/// Compute `ResultChecksumV2` over extension-typed and nested-list result schemas.
 ///
 /// V2 deliberately preserves V1's order-independent row-multiset semantics while using a new
 /// frozen integrity domain. V1 remains available for already-released artifacts.
@@ -351,7 +388,7 @@ pub fn gate_result_checksum_v1(
 /// Reproduce the checksum contract declared by a persisted result artifact.
 ///
 /// New artifacts are always emitted as V2; V1 remains a verifier-only branch for artifacts that
-/// were accepted before the generated extension-aware result schemas became active.
+/// were accepted before the extension-aware result schemas became active.
 ///
 /// # Errors
 ///
@@ -395,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn odf_result_checksum_v2_continuity() {
+    fn result_checksum_v2_continuity() {
         let ordered = int_batch(vec![9, 4, 7, 4]);
         let repartitioned = int_batch(vec![4, 9, 4, 7]);
         let v1 = result_checksum_v1(
@@ -738,5 +775,15 @@ mod tests {
         let replayed = result_checksum_v1(batch.schema().as_ref(), &[batch], LIMIT).unwrap();
         assert_eq!(recorded, replayed);
         assert!(recorded.checksum.starts_with("b3:"));
+    }
+
+    #[test]
+    fn canonical_batch_checksum_is_row_order_independent() {
+        let first = int_batch(vec![9, 4, 7]);
+        let reordered = int_batch(vec![7, 9, 4]);
+        assert_eq!(
+            batch_checksum(&first).unwrap(),
+            batch_checksum(&reordered).unwrap()
+        );
     }
 }

@@ -39,7 +39,6 @@ HISTORICAL_PREFIXES = (
     "docs/plans/",
     "docs/reviews/",
     "docs/library_ref/",
-    "tests/golden/",
 )
 
 NAVIGATION_SURFACES = (

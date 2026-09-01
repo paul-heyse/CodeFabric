@@ -7,7 +7,7 @@ name = "codefabric-cpg-mcp"
 version = "0.1.0"
 description = "STDIO FastMCP adapter for the CodeFabric present-state CPG daemon."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14.7"
 dependencies = [
   "blake3==1.0.9",
   "fastmcp==3.4.7",

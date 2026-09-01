@@ -39,8 +39,8 @@ use url::Url;
 use super::activation::{TableVersionSet, TableVersionSetError, TableVersionSetRef};
 use super::command::{EpochId, OperationId, TransactionRef, WriterGeneration};
 use super::delta_exact::{
-    ExactDeltaPin, ExactDeltaProviderError, ValidatedDeltaSnapshot,
-    provider_from_validated_snapshot, read_exact_commit_info,
+    ExactDeltaPin, ExactDeltaProviderError, ExactDeltaStatisticsInspection, ValidatedDeltaSnapshot,
+    provider_read_from_validated_snapshot, read_exact_commit_info,
 };
 use super::delta_write::{
     ApplicationTransactionMarker, ControlledDeltaWriteMode, ControlledDeltaWriteOutcome,
@@ -94,6 +94,7 @@ struct ObservationHistorySpec {
     history_relation_id: ProgrammaticRelationId,
     history_reference: TableReference,
     history_contract: Arc<SchemaContract>,
+    semantic_read_contract: Arc<SchemaContract>,
     view_transformation_id: ProgrammaticTransformationId,
 }
 
@@ -494,6 +495,7 @@ pub struct ProgrammaticObservationDeltaPublication {
     table_versions: Arc<TableVersionSet>,
     materializations:
         Arc<BTreeMap<ProgrammaticRelationId, ProgrammaticObservationMaterializationEvidence>>,
+    provider_statistics: Arc<BTreeMap<ProgrammaticRelationId, ExactDeltaStatisticsInspection>>,
     registry: Arc<ProgrammaticObservationHistoryRegistry>,
 }
 
@@ -504,6 +506,7 @@ impl fmt::Debug for ProgrammaticObservationDeltaPublication {
             .field("epoch_id", &self.epoch_id)
             .field("table_versions", &self.table_versions)
             .field("materializations", &self.materializations)
+            .field("provider_statistics_count", &self.provider_statistics.len())
             .field("registry", &self.registry)
             .finish()
     }
@@ -524,14 +527,17 @@ impl ProgrammaticObservationDeltaPublication {
             ProgrammaticRelationId,
             ProgrammaticObservationMaterializationEvidence,
         >,
+        provider_statistics: BTreeMap<ProgrammaticRelationId, ExactDeltaStatisticsInspection>,
         registry: Arc<ProgrammaticObservationHistoryRegistry>,
     ) -> Result<Self, ProgrammaticObservationDeltaConfigurationError> {
         validate_publication_relations(&table_versions, &registry)?;
         validate_materialization_relations(epoch_id, &materializations, &registry)?;
+        validate_provider_statistics_relations(&provider_statistics, &registry)?;
         Ok(Self {
             epoch_id,
             table_versions,
             materializations: Arc::new(materializations),
+            provider_statistics: Arc::new(provider_statistics),
             registry,
         })
     }
@@ -571,6 +577,40 @@ impl ProgrammaticObservationDeltaPublication {
         self.materializations.iter()
     }
 
+    /// Full file/column and optimizer statistics retained from construction of
+    /// the exact provider for one published history relation.
+    #[must_use]
+    pub fn provider_statistics(
+        &self,
+        relation_id: &ProgrammaticRelationId,
+    ) -> Option<&ExactDeltaStatisticsInspection> {
+        self.provider_statistics.get(relation_id)
+    }
+
+    /// Executable logical-to-persistence mapping for one exact durable history.
+    ///
+    /// The logical schema is the same application-owned observation contract installed in the
+    /// current epoch view. The storage schema is the derived Delta history envelope containing
+    /// `observation_set_id` and `row_ordinal`. Those transport fields remain storage-only.
+    #[must_use]
+    pub fn semantic_history_read_contract(
+        &self,
+        relation_id: &ProgrammaticRelationId,
+    ) -> Option<&Arc<SchemaContract>> {
+        self.registry
+            .history(relation_id)
+            .map(|history| &history.semantic_read_contract)
+    }
+
+    /// Complete exact-provider statistics evidence for the published history
+    /// vector, in stable relation-id order.
+    pub fn provider_statistics_inspections(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&ProgrammaticRelationId, &ExactDeltaStatisticsInspection)>
+    {
+        self.provider_statistics.iter()
+    }
+
     /// Canonical activation pin for the complete registered history vector.
     /// Roots are included because a version number is meaningful only within
     /// its exact Delta table identity.
@@ -597,19 +637,6 @@ impl ProgrammaticObservationDeltaPublication {
             ));
         }
         Ok(targets)
-    }
-
-    async fn reopen(
-        epoch_id: EpochId,
-        table_versions: Arc<TableVersionSet>,
-        registry: Arc<ProgrammaticObservationHistoryRegistry>,
-    ) -> Result<(Self, ProgrammaticObservationDeltaTargets), ProgrammaticObservationDeltaOpenError>
-    {
-        validate_publication_relations(&table_versions, &registry)?;
-        let (targets, materializations) =
-            load_published_targets(epoch_id, &table_versions, Arc::clone(&registry)).await?;
-        let publication = Self::try_new(epoch_id, table_versions, materializations, registry)?;
-        Ok((publication, targets))
     }
 }
 
@@ -760,6 +787,13 @@ pub enum ProgrammaticObservationDeltaConfigurationError {
     },
     #[error("Delta materialization relation set differs: expected {expected:?}, actual {actual:?}")]
     MaterializationSetMismatch {
+        expected: BTreeSet<ProgrammaticRelationId>,
+        actual: BTreeSet<ProgrammaticRelationId>,
+    },
+    #[error(
+        "Delta exact-provider statistics relation set differs: expected {expected:?}, actual {actual:?}"
+    )]
+    ProviderStatisticsSetMismatch {
         expected: BTreeSet<ProgrammaticRelationId>,
         actual: BTreeSet<ProgrammaticRelationId>,
     },
@@ -1014,17 +1048,23 @@ pub async fn provision_programmatic_observation_histories(
     )?)
 }
 
+struct BoundObservationHistories {
+    installed: BTreeMap<
+        ProgrammaticRelationId,
+        (ObservationHistorySpec, ProgrammaticObservationDeltaTarget),
+    >,
+    provider_statistics: BTreeMap<ProgrammaticRelationId, ExactDeltaStatisticsInspection>,
+}
+
 async fn bind_exact_observation_histories(
     assembly: &mut ProgrammaticSchemaAssembly,
     epoch_id: EpochId,
     registry: &ProgrammaticObservationHistoryRegistry,
     mut targets: ProgrammaticObservationDeltaTargets,
     session: Arc<datafusion::execution::SessionState>,
-) -> Result<
-    BTreeMap<ProgrammaticRelationId, (ObservationHistorySpec, ProgrammaticObservationDeltaTarget)>,
-    ProgrammaticObservationDeltaError,
-> {
+) -> Result<BoundObservationHistories, ProgrammaticObservationDeltaError> {
     let mut installed = BTreeMap::new();
+    let mut provider_statistics = BTreeMap::new();
     for history in registry.histories() {
         let history = history.clone();
         let relation_id = history.system.relation_id.clone();
@@ -1033,7 +1073,7 @@ async fn bind_exact_observation_histories(
                 relation_id: relation_id.clone(),
             }
         })?;
-        let provider = exact_history_provider(
+        let (provider, statistics) = exact_history_provider(
             Arc::clone(&session),
             &history,
             target.table.clone(),
@@ -1057,9 +1097,13 @@ async fn bind_exact_observation_histories(
                 view,
             )
             .map_err(ProgrammaticObservationDeltaError::from)?;
+        provider_statistics.insert(relation_id.clone(), statistics);
         installed.insert(relation_id, (history, target));
     }
-    Ok(installed)
+    Ok(BoundObservationHistories {
+        installed,
+        provider_statistics,
+    })
 }
 
 /// Reconstruct and seal an epoch from the exact relation/version vector that
@@ -1077,18 +1121,17 @@ pub async fn reopen_programmatic_observations(
     let registry = Arc::new(ProgrammaticObservationHistoryRegistry::try_from_assembly(
         &assembly,
     )?);
-    let (publication, targets) = ProgrammaticObservationDeltaPublication::reopen(
-        epoch_id,
-        Arc::clone(&table_versions),
-        Arc::clone(&registry),
-    )
-    .await?;
+    validate_publication_relations(&table_versions, &registry)?;
+    let (targets, materializations) =
+        load_published_targets(epoch_id, &table_versions, Arc::clone(&registry)).await?;
     assembly.install_transformations().await?;
     let session = Arc::new(assembly.candidate_state());
     let context = assembly.candidate_context();
-    let installed =
-        bind_exact_observation_histories(&mut assembly, epoch_id, &registry, targets, session)
-            .await?;
+    let BoundObservationHistories {
+        installed,
+        provider_statistics,
+    } = bind_exact_observation_histories(&mut assembly, epoch_id, &registry, targets, session)
+        .await?;
     let selected = installed
         .iter()
         .map(|(relation_id, (_, target))| (relation_id.clone(), target.predecessor.clone()))
@@ -1104,6 +1147,13 @@ pub async fn reopen_programmatic_observations(
     let sealed = assembly
         .finish_seal(epoch_id, current_epoch_batches)
         .await?;
+    let publication = ProgrammaticObservationDeltaPublication::try_new(
+        epoch_id,
+        table_versions,
+        materializations,
+        provider_statistics,
+        registry,
+    )?;
     Ok(ProgrammaticObservationHistoricization {
         sealed,
         publication,
@@ -1134,7 +1184,10 @@ pub async fn historicize_programmatic_observations(
     // Bind predecessor histories and current-epoch views before materializing
     // observations so both physical dependencies and logical views are part of
     // the self-inclusive catalog census.
-    let mut installed = bind_exact_observation_histories(
+    let BoundObservationHistories {
+        mut installed,
+        mut provider_statistics,
+    } = bind_exact_observation_histories(
         &mut assembly,
         identity.epoch_id,
         &registry,
@@ -1237,7 +1290,7 @@ pub async fn historicize_programmatic_observations(
         committed.insert(relation_id.clone(), committed_pin.clone());
         materializations.insert(relation_id.clone(), materialization);
 
-        let provider = exact_history_provider(
+        let (provider, statistics) = exact_history_provider(
             Arc::clone(&session),
             &history,
             committed_table,
@@ -1245,6 +1298,7 @@ pub async fn historicize_programmatic_observations(
         )
         .await
         .map_err(|source| failure(&committed, source))?;
+        provider_statistics.insert(relation_id.clone(), statistics);
         assembly
             .replace_registered_provider(&history.history_relation_id, Arc::clone(&provider))
             .map_err(|source| failure(&committed, source.into()))?;
@@ -1274,6 +1328,7 @@ pub async fn historicize_programmatic_observations(
         identity.epoch_id,
         table_versions,
         materializations,
+        provider_statistics,
         registry,
     )
     .map_err(|source| failure(&committed, source.into()))?;
@@ -1325,15 +1380,32 @@ fn history_spec(
             relation_identity.to_owned(),
         )]),
     ));
-    let mappings = (0..schema.fields().len())
+    let history_mappings = (0..schema.fields().len())
         .map(|index| FieldIndexMapping::direct(index, index))
         .collect();
     let history_contract = Arc::new(SchemaContract::try_new(
         HISTORY_SOURCE_IDENTITY,
         history_reference.clone(),
         Arc::clone(&schema),
+        Arc::clone(&schema),
+        history_mappings,
+    )?);
+    let semantic_mappings = (0..system.contract.logical_schema().fields().len())
+        .map(|logical_index| {
+            let storage_index = if logical_index == 0 {
+                0
+            } else {
+                logical_index + 2
+            };
+            FieldIndexMapping::direct(logical_index, storage_index)
+        })
+        .collect();
+    let semantic_read_contract = Arc::new(SchemaContract::try_new(
+        HISTORY_SOURCE_IDENTITY,
+        history_reference.clone(),
+        Arc::clone(system.contract.logical_schema()),
         schema,
-        mappings,
+        semantic_mappings,
     )?);
     let view_transformation_id = ProgrammaticTransformationId::new(format!(
         "system.current_epoch_view.{}",
@@ -1344,6 +1416,7 @@ fn history_spec(
         history_relation_id,
         history_reference,
         history_contract,
+        semantic_read_contract,
         view_transformation_id,
     })
 }
@@ -1362,20 +1435,24 @@ async fn exact_history_provider(
     history: &ObservationHistorySpec,
     table: DeltaTable,
     pin: &ExactDeltaPin,
-) -> Result<Arc<dyn TableProvider>, ProgrammaticObservationDeltaError> {
+) -> Result<
+    (Arc<dyn TableProvider>, ExactDeltaStatisticsInspection),
+    ProgrammaticObservationDeltaError,
+> {
     let snapshot = ValidatedDeltaSnapshot::try_from_loaded_table(table, pin).map_err(|source| {
         ProgrammaticObservationDeltaError::ExactProvider {
             relation_id: history.system.relation_id.clone(),
             source,
         }
     })?;
-    let raw = provider_from_validated_snapshot(pin, snapshot, session)
+    let read = provider_read_from_validated_snapshot(pin, snapshot, session)
         .await
         .map_err(|source| ProgrammaticObservationDeltaError::ExactProvider {
             relation_id: history.system.relation_id.clone(),
             source,
         })?;
-    Ok(Arc::new(
+    let (raw, statistics) = read.into_parts();
+    let provider = Arc::new(
         SchemaContractStorageProvider::try_new(Arc::clone(&history.history_contract), raw)
             .map_err(
                 |source| ProgrammaticObservationDeltaError::StorageProvider {
@@ -1383,7 +1460,8 @@ async fn exact_history_provider(
                     source,
                 },
             )?,
-    ) as Arc<dyn TableProvider>)
+    ) as Arc<dyn TableProvider>;
+    Ok((provider, statistics))
 }
 
 fn current_epoch_view_plan(
@@ -1421,7 +1499,15 @@ fn current_epoch_view_plan(
             .fields()
             .iter()
             .skip(1)
-            .map(|field| col(field.name()).alias(field.name().to_owned())),
+            .map(|field| {
+                let expression = match field.data_type() {
+                    DataType::FixedSizeBinary(width) => {
+                        cast(col(field.name()), DataType::FixedSizeBinary(*width))
+                    }
+                    _ => col(field.name()),
+                };
+                expression.alias(field.name().to_owned())
+            }),
     );
     let projected = scan
         .project(expressions)
@@ -1950,6 +2036,23 @@ fn validate_materialization_relations(
     Ok(())
 }
 
+fn validate_provider_statistics_relations(
+    provider_statistics: &BTreeMap<ProgrammaticRelationId, ExactDeltaStatisticsInspection>,
+    registry: &ProgrammaticObservationHistoryRegistry,
+) -> Result<(), ProgrammaticObservationDeltaConfigurationError> {
+    let expected = expected_relation_ids(registry);
+    let actual = provider_statistics.keys().cloned().collect::<BTreeSet<_>>();
+    if actual != expected {
+        return Err(
+            ProgrammaticObservationDeltaConfigurationError::ProviderStatisticsSetMismatch {
+                expected,
+                actual,
+            },
+        );
+    }
+    Ok(())
+}
+
 fn failure(
     committed: &BTreeMap<ProgrammaticRelationId, ExactDeltaPin>,
     source: ProgrammaticObservationDeltaError,
@@ -2053,7 +2156,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::fabric::epoch::{FABRIC_CATALOG, FabricEpochRuntimeConfig};
+    use crate::fabric::epoch_runtime::{FABRIC_CATALOG, FabricEpochRuntimeConfig};
     use crate::fabric::programmatic_epoch::{
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
@@ -2140,6 +2243,22 @@ mod tests {
             }
         }
         assert!(rows > 0);
+    }
+
+    fn assert_full_statistics_equal(
+        expected: &ExactDeltaStatisticsInspection,
+        actual: &ExactDeltaStatisticsInspection,
+    ) {
+        assert_eq!(actual.add_actions(), expected.add_actions());
+        assert_eq!(actual.fields(), expected.fields());
+        assert_eq!(
+            actual.optimizer_statistics_reported(),
+            expected.optimizer_statistics_reported()
+        );
+        assert_eq!(
+            actual.optimizer_statistics(),
+            expected.optimizer_statistics()
+        );
     }
 
     #[tokio::test]
@@ -2298,6 +2417,13 @@ mod tests {
             first.observation_publication().materializations().len(),
             TEST_OBSERVATION_RELATION_IDS.len()
         );
+        assert_eq!(
+            first
+                .observation_publication()
+                .provider_statistics_inspections()
+                .len(),
+            TEST_OBSERVATION_RELATION_IDS.len()
+        );
         assert!(
             first
                 .observation_publication()
@@ -2309,6 +2435,23 @@ mod tests {
                 .observation_publication()
                 .table_versions()
                 .all(|(_, pin)| pin.version() == 1)
+        );
+        let statistics_relation = ProgrammaticRelationId::new(RELATION_OBSERVATION_RELATION_ID);
+        let first_statistics = first
+            .observation_publication()
+            .provider_statistics(&statistics_relation)
+            .expect("published exact provider retains statistics inspection");
+        let file_count = first_statistics.add_actions().num_rows();
+        assert!(file_count > 0);
+        assert_eq!(
+            first_statistics
+                .field("partition.fabric_epoch_id")
+                .expect("non-partitioned history column remains explicit")
+                .availability(),
+            super::super::delta_exact::ExactDeltaStatisticAvailability::UnknownForFiles {
+                file_count,
+                unknown_file_count: file_count,
+            }
         );
         let first_current = current_relation_batches(&first).await;
         assert_current_epoch(&first_current, first_identity.epoch_id());
@@ -2333,6 +2476,23 @@ mod tests {
             reopened.observation_publication().table_version_set_ref(),
             first.observation_publication().table_version_set_ref()
         );
+        assert_eq!(
+            reopened
+                .observation_publication()
+                .provider_statistics_inspections()
+                .len(),
+            TEST_OBSERVATION_RELATION_IDS.len()
+        );
+        for (relation_id, first_statistics) in first
+            .observation_publication()
+            .provider_statistics_inspections()
+        {
+            let reopened_statistics = reopened
+                .observation_publication()
+                .provider_statistics(relation_id)
+                .expect("exact-version reopen retains every statistics inspection");
+            assert_full_statistics_equal(first_statistics, reopened_statistics);
+        }
         let reopened_current = current_relation_batches(&reopened).await;
         assert_current_epoch(&reopened_current, first_identity.epoch_id());
         for (_, pin) in reopened.observation_publication().table_versions() {

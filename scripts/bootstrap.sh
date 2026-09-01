@@ -7,9 +7,9 @@
 #   ./scripts/bootstrap.sh --context compact one-block summary for agent context
 #   ./scripts/bootstrap.sh --baseline run the gate and cache the verdict for --context
 #
-# It deliberately does not activate Python, alter PATH, or select a persistent Rust
-# toolchain. `just` recipes use scripts/repo-shell.sh and are self-contained in fresh
-# non-interactive shells; .envrc only adds interactive conveniences.
+# It deliberately does not activate Python or persistently alter the caller. When executed,
+# it re-enters through scripts/repo-shell.sh so direct hooks and Just recipes inspect the
+# same canonical PATH and exact toolchain; sourcing it remains a no-op.
 
 # ---------------------------------------------------------------- detect mode
 
@@ -18,6 +18,12 @@ if [ -n "${ZSH_VERSION:-}" ]; then
   case "${ZSH_EVAL_CONTEXT:-}" in *:file) _cf_sourced=1 ;; esac
 elif [ -n "${BASH_VERSION:-}" ]; then
   (return 0 2>/dev/null) && _cf_sourced=1
+fi
+
+# Sourcing is intentionally inert: do not even leave convenience variables behind.
+if [ "$_cf_sourced" = 1 ]; then
+  unset _cf_sourced
+  return 0 2>/dev/null || true
 fi
 
 # Repo root, resolved from this file rather than the caller's cwd.
@@ -29,12 +35,19 @@ fi
 CF_ROOT="$(cd "$(dirname "$_cf_self")/.." && pwd)"
 CF_ADAPTER_ROOT="${CF_ROOT}/codefabric-cpg-mcp"
 CF_UV_CACHE_DIR="${CF_ROOT}/target/uv-cache"
+# shellcheck source=../tooling/rust-tool-versions.env
+source "${CF_ROOT}/tooling/rust-tool-versions.env"
+
+if [ "$_cf_sourced" = 0 ] && [ "${CODEFABRIC_REPO_SHELL:-}" != 1 ]; then
+  exec "${CF_ROOT}/scripts/repo-shell.sh" \
+    'exec "$CF_ROOT/scripts/bootstrap.sh" "$@"' bootstrap "$@"
+fi
 
 # ------------------------------------------------------------------- checks
 
 # The root is the stable daemon/data plane. The nightly extractor, Pyrefly sidecar, and
 # FastMCP adapter are independent build domains added by WP02-WP04.
-CF_STABLE_COMPONENTS="rustfmt clippy rust-src llvm-tools"
+CF_STABLE_COMPONENTS="rustfmt clippy rust-analyzer rust-src llvm-tools"
 
 # Tools the repository contract depends on. sccache is required because
 # .cargo/config.toml commits the repository sccache wrapper (repo spec section 13.1), so
@@ -58,13 +71,13 @@ cf_check() {
   if command -v rustup >/dev/null 2>&1; then
     v="$(cd "$CF_ROOT" && rustup show active-toolchain 2>/dev/null | head -1)"
     case "$v" in
-      stable*) _cf_pass "active toolchain ${v%% *} ($(rustup run stable rustc --version 2>/dev/null | awk '{print $2}'))" ;;
+      "$CODEFABRIC_STABLE_TOOLCHAIN"*) _cf_pass "active toolchain ${v%% *} ($(rustup run "$CODEFABRIC_STABLE_TOOLCHAIN" rustc --version 2>/dev/null | awk '{print $2}'))" ;;
       "") _cf_fail "no active toolchain resolved -- is rust-toolchain.toml readable?" ;;
-      *) _cf_warns "active toolchain is ${v%% *}; rust-toolchain.toml pins stable" ;;
+      *) _cf_warns "active toolchain is ${v%% *}; rust-toolchain.toml pins ${CODEFABRIC_STABLE_TOOLCHAIN}" ;;
     esac
 
     local installed missing=""
-    installed="$(rustup component list --toolchain stable --installed 2>/dev/null)"
+    installed="$(rustup component list --toolchain "$CODEFABRIC_STABLE_TOOLCHAIN" --installed 2>/dev/null)"
     for c in $CF_STABLE_COMPONENTS; do
       case "$installed" in *"$c"*) ;; *) missing="${missing} ${c}" ;; esac
     done
@@ -76,15 +89,15 @@ cf_check() {
 
     # WP02 turns the dated nightly into the extractor domain's production toolchain.
     # Until that root exists, nightly availability is informational only.
-    if rustup run nightly rustc --version >/dev/null 2>&1; then
-      _cf_pass "nightly available for extractor/assurance ($(rustup run nightly rustc --version 2>/dev/null | awk '{print $2}'))"
+    if rustup run "$CODEFABRIC_ASSURANCE_TOOLCHAIN" rustc --version >/dev/null 2>&1; then
+      _cf_pass "dated nightly available for extractor/assurance ($(rustup run "$CODEFABRIC_ASSURANCE_TOOLCHAIN" rustc --version 2>/dev/null | awk '{print $2}'))"
     else
-      _cf_say "  note  no nightly toolchain -- WP02 will install the dated extractor pin"
+      _cf_fail "missing dated extractor/assurance toolchain ${CODEFABRIC_ASSURANCE_TOOLCHAIN} -- run 'just setup-tools'"
     fi
 
     local stable_cargo extractor_rustc
-    stable_cargo="$(rustup which cargo --toolchain stable 2>/dev/null)"
-    extractor_rustc="$(rustup which rustc --toolchain nightly-2026-08-18 2>/dev/null)"
+    stable_cargo="$(rustup which cargo --toolchain "$CODEFABRIC_STABLE_TOOLCHAIN" 2>/dev/null)"
+    extractor_rustc="$(rustup which rustc --toolchain "$CODEFABRIC_ASSURANCE_TOOLCHAIN" 2>/dev/null)"
     if [ -n "$stable_cargo" ] && [ -n "$extractor_rustc" ]; then
       _cf_say "  note  Rust executables: stable cargo=${stable_cargo}; extractor rustc=${extractor_rustc}"
     fi
@@ -96,7 +109,7 @@ cf_check() {
   _cf_pass "stable domain: root Cargo package"
   if [ -f "${CF_ROOT}/rustc-extractor/Cargo.toml" ]; then
     local extractor_rust
-    extractor_rust="$(rustup run nightly-2026-08-18 rustc --version 2>/dev/null)"
+    extractor_rust="$(rustup run "$CODEFABRIC_ASSURANCE_TOOLCHAIN" rustc --version 2>/dev/null)"
     case "$extractor_rust" in
       *nightly*2026*) _cf_pass "rustc extractor domain: ${extractor_rust}" ;;
       *) _cf_fail "rustc extractor toolchain did not resolve its dated nightly" ;;
@@ -159,6 +172,13 @@ cf_check() {
     _cf_pass "gate tools present: ${CF_GATE_TOOLS// /, }"
   fi
 
+  local tool_contract
+  if tool_contract="$("${CF_ROOT}/scripts/tool-versions.sh" check 2>&1)"; then
+    _cf_pass "exact CLI version contract"
+  else
+    _cf_fail "${tool_contract}"
+  fi
+
   # Validate current service health, then report cumulative lookup and non-cacheable
   # telemetry without presenting a hit percentage as repository performance proof.
   if [ -x "${CF_ROOT}/scripts/sccache-service.sh" ]; then
@@ -181,8 +201,11 @@ cf_check() {
     fi
   fi
 
-  # Randomly named test sockets cannot be safely allowlisted. Confirm the three
-  # exact, non-mutating recipes that are permitted to leave the Codex sandbox.
+  # Randomly named test sockets cannot be safely allowlisted, so only exact,
+  # non-mutating recipes may leave a confining Codex sandbox. The project config
+  # currently selects danger-full-access, which confines nothing and leaves these
+  # rules inert; they are still validated so the narrow answer stays correct for
+  # whenever the sandbox is restored.
   if command -v codex >/dev/null 2>&1 && [ -f "${CF_ROOT}/.codex/rules/codefabric.rules" ]; then
     local uds_recipe uds_decision uds_rules_ok=1
     for uds_recipe in adapter-test root-test ci-fast environment-regression; do
@@ -192,7 +215,7 @@ cf_check() {
       [ "$uds_decision" = allow ] || uds_rules_ok=0
     done
     if [ "$uds_rules_ok" = 1 ]; then
-      _cf_pass "Codex UDS rules apply only to: adapter-test, root-test, ci-fast, environment-regression"
+      _cf_pass "Codex UDS rules allow only: adapter-test, root-test, ci-fast, environment-regression (bind only under a confining sandbox_mode)"
     else
       _cf_fail "Codex UDS test rules are missing or do not resolve to allow"
     fi
@@ -456,10 +479,7 @@ EOF
 
 # ---------------------------------------------------------------- dispatch
 
-if [ "$_cf_sourced" = 1 ]; then
-  unset _cf_sourced _cf_self
-  return 0 2>/dev/null || true
-else
+if [ "$_cf_sourced" = 0 ]; then
   set -uo pipefail
   CF_MODE=report
   case "${1:-}" in

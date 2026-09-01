@@ -356,7 +356,7 @@ from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2 as pb
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2_grpc as rpc
 
 async def main():
-    async with create_local_channel(f'unix:{sys.argv[1]}') as channel:
+    async with create_local_channel(f'unix://{sys.argv[1]}') as channel:
         response = await rpc.CpgQueryServiceStub(channel).Handshake(
             pb.HandshakeRequest(adapter_version='python-client', required_feature_bits=1)
         )

@@ -7,7 +7,7 @@
 //! bounded IPC, and [`PublishedArrowResultRegistry`] owns external result authorization and
 //! lifetime. Relation and field identities remain stable programmatic data throughout.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
@@ -18,7 +18,7 @@ use crate::relational_program::{
     RelationalProgramError,
 };
 
-use super::admission::{AdmissionError, FabricAdmissionRuntime};
+use super::admission::{AdmissionError, FabricAdmissionRuntime, FabricQueryLease};
 use super::arrow_result_resource::{
     ArrowResultResourceError, ArrowResultResourceLimits, ArrowResultResourcePackage,
     QueryExecutionPin, ResultCoverage, ResultRelationInput, ResultResourceLease,
@@ -37,6 +37,7 @@ use super::published_arrow_result::{
     PublishedReleaseOutcome, PublishedResultAccess, PublishedResultChunk, PublishedResultOwner,
     PublishedResultReadRequest, PublishedResultRegistryError,
 };
+use super::request_owned_relation::RequestOwnedRelationCollection;
 
 /// Exact table and resource authorization inputs used to derive one reduced child session.
 ///
@@ -103,6 +104,85 @@ impl RelationalQueryAuthorization {
             max_output_rows,
             registries,
         })
+    }
+
+    /// Exact normalized access-scope identity consumed by the child-session policy.
+    #[must_use]
+    pub const fn access_scope(&self) -> &[u8; 32] {
+        &self.access_scope
+    }
+
+    /// Exact semantic-query policy identity consumed by the child-session policy.
+    #[must_use]
+    pub const fn query_policy(&self) -> &[u8; 32] {
+        &self.query_policy
+    }
+
+    /// Exact epoch resource-policy identity consumed by the child-session policy.
+    #[must_use]
+    pub const fn resource_policy(&self) -> &[u8; 32] {
+        &self.resource_policy
+    }
+
+    /// Stable relation identities in the installed baseline table-grant set.
+    pub fn table_relations(&self) -> impl ExactSizeIterator<Item = &ProgrammaticRelationId> {
+        self.table_grants.iter().map(ChildTableGrant::relation_id)
+    }
+
+    /// Maximum output rows allowed by the installed baseline authorization.
+    #[must_use]
+    pub const fn max_output_rows(&self) -> usize {
+        self.max_output_rows
+    }
+
+    /// Derive a scope-specific authorization that can only remove baseline capabilities.
+    ///
+    /// Query and resource-policy identities, child resource limits, and registry capabilities are
+    /// preserved exactly. The caller supplies a new non-sentinel access-scope identity, a strict
+    /// subset of baseline table grants, and an output-row bound no larger than the installed
+    /// baseline. This makes scope policy a capability-narrowing operation rather than an
+    /// independent authority mint.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an absent access-scope identity, any table not present in the baseline, an empty
+    /// resulting table set, or an output-row bound that is zero or wider than the baseline.
+    pub fn narrow_to(
+        &self,
+        access_scope: [u8; 32],
+        table_relations: &BTreeSet<ProgrammaticRelationId>,
+        max_output_rows: usize,
+    ) -> Result<Self, RelationalQueryRuntimeError> {
+        if max_output_rows > self.max_output_rows {
+            return Err(
+                RelationalQueryRuntimeError::AuthorizationOutputRowsWidened {
+                    baseline: self.max_output_rows,
+                    requested: max_output_rows,
+                },
+            );
+        }
+        let baseline = self
+            .table_grants
+            .iter()
+            .map(|grant| (grant.relation_id(), grant))
+            .collect::<BTreeMap<_, _>>();
+        let table_grants = table_relations
+            .iter()
+            .map(|relation_id| {
+                baseline.get(relation_id).cloned().cloned().ok_or_else(|| {
+                    RelationalQueryRuntimeError::AuthorizationTableWidened(relation_id.clone())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Self::try_new(
+            access_scope,
+            self.query_policy,
+            self.resource_policy,
+            table_grants,
+            self.child_resources.clone(),
+            max_output_rows,
+            self.registries.clone(),
+        )
     }
 
     fn into_child_policy(self, epoch_id: EpochId) -> Result<ChildSessionPolicy, ChildSessionError> {
@@ -173,6 +253,7 @@ pub struct RelationalQueryTransaction {
     result_lease: ResultResourceLease,
     lease_token: OpaqueResultLeaseToken,
     result_limits: ArrowResultResourceLimits,
+    request_inputs: BTreeMap<RelationId, Arc<RequestOwnedRelationCollection>>,
     observed_at_unix_ms: i64,
     cancellation: Cancellation,
 }
@@ -229,9 +310,72 @@ impl RelationalQueryTransaction {
             result_lease,
             lease_token,
             result_limits,
+            request_inputs: BTreeMap::new(),
             observed_at_unix_ms,
             cancellation,
         })
+    }
+
+    /// Attach the exact request-owned Arrow relations emitted by the epoch-bound compiler.
+    ///
+    /// The collection remains query-local and is retained until terminal execution. It is never
+    /// installed in the epoch catalog or treated as durable authority. An empty collection is
+    /// rejected so the ordinary epoch-only execution path remains explicit.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an empty collection, which cannot causally affect this transaction.
+    pub fn with_request_inputs(
+        self,
+        request_inputs: Arc<RequestOwnedRelationCollection>,
+    ) -> Result<Self, RelationalQueryRuntimeError> {
+        if self.outputs.len() != 1 {
+            return Err(RelationalQueryRuntimeError::RequestInputOutputAmbiguous);
+        }
+        let output_relation = self.outputs[0].relation_id.clone();
+        self.with_request_inputs_by_output([(output_relation, request_inputs)])
+    }
+
+    /// Attach independently bounded request-owned relations to their exact output programs.
+    ///
+    /// A multi-block request must not expose one block's request relation to another block merely
+    /// because both execute in the same authenticated transaction. Each map entry therefore names
+    /// the selected output whose program may consume the collection.
+    ///
+    /// # Errors
+    ///
+    /// Rejects no entries, an empty collection, an output that is not selected by this transaction,
+    /// or a duplicate output key.
+    pub fn with_request_inputs_by_output(
+        mut self,
+        request_inputs: impl IntoIterator<Item = (RelationId, Arc<RequestOwnedRelationCollection>)>,
+    ) -> Result<Self, RelationalQueryRuntimeError> {
+        let selected = self
+            .outputs
+            .iter()
+            .map(|output| output.relation_id.clone())
+            .collect::<BTreeSet<_>>();
+        let mut attached = BTreeMap::new();
+        for (output_relation, inputs) in request_inputs {
+            if inputs.is_empty() {
+                return Err(RelationalQueryRuntimeError::RequestInputsEmpty);
+            }
+            if !selected.contains(&output_relation) {
+                return Err(RelationalQueryRuntimeError::UnknownRequestInputOutput(
+                    output_relation.as_str().to_owned(),
+                ));
+            }
+            if attached.insert(output_relation.clone(), inputs).is_some() {
+                return Err(RelationalQueryRuntimeError::DuplicateRequestInputOutput(
+                    output_relation.as_str().to_owned(),
+                ));
+            }
+        }
+        if attached.is_empty() {
+            return Err(RelationalQueryRuntimeError::RequestInputsEmpty);
+        }
+        self.request_inputs = attached;
+        Ok(self)
     }
 }
 
@@ -323,6 +467,30 @@ impl RelationalQueryRuntime {
         }
     }
 
+    /// Workspace identity bound by this query composition root.
+    #[must_use]
+    pub const fn workspace_id(&self) -> WorkspaceId {
+        self.workspace_id
+    }
+
+    /// Exact admission runtime shared with workspace activation.
+    #[must_use]
+    pub const fn admission(&self) -> &Arc<FabricAdmissionRuntime> {
+        &self.admission
+    }
+
+    /// Cross-workspace published-result registry installed by the daemon composition root.
+    #[must_use]
+    pub const fn published_results(&self) -> &Arc<PublishedArrowResultRegistry> {
+        &self.results
+    }
+
+    /// Exact epoch resource coordinator used for query admission and execution.
+    #[must_use]
+    pub const fn resources(&self) -> &Arc<EpochResourceCoordinator> {
+        &self.resources
+    }
+
     /// Admit, authorize, execute, package, and publish one exact query transaction.
     ///
     /// # Errors
@@ -334,13 +502,6 @@ impl RelationalQueryRuntime {
         &self,
         transaction: RelationalQueryTransaction,
     ) -> Result<RelationalQueryPublication, RelationalQueryRuntimeError> {
-        if transaction.owner.workspace_id() != self.workspace_id {
-            return Err(RelationalQueryRuntimeError::WorkspaceNotAuthorized);
-        }
-        if all_zero(transaction.owner.agent_id().as_bytes()) {
-            return Err(RelationalQueryRuntimeError::AgentNotAuthorized);
-        }
-
         let epoch_lease = match self.admission.admit() {
             Ok(lease) => lease,
             Err(AdmissionError::NoActiveEpoch) => {
@@ -348,8 +509,42 @@ impl RelationalQueryRuntime {
             }
             Err(error) => return Err(RelationalQueryRuntimeError::Admission(error)),
         };
+        self.execute_admitted_and_publish(epoch_lease, Arc::clone(&self.resources), transaction)
+            .await
+    }
+
+    /// Execute and publish against an epoch lease acquired by the caller before semantic
+    /// compilation.
+    ///
+    /// This is the production composition seam for request compilers. The caller admits exactly
+    /// once, compiles against `epoch_lease.epoch()`, resolves the matching epoch-scoped resource
+    /// authority, and transfers both values here. Re-admitting after compilation would allow an
+    /// activation between planning and execution to mix two epochs.
+    ///
+    /// # Errors
+    ///
+    /// In addition to ordinary transaction failures, rejects a resource coordinator belonging to
+    /// any epoch other than the immutable admitted lease.
+    pub async fn execute_admitted_and_publish(
+        &self,
+        epoch_lease: FabricQueryLease,
+        resources: Arc<EpochResourceCoordinator>,
+        transaction: RelationalQueryTransaction,
+    ) -> Result<RelationalQueryPublication, RelationalQueryRuntimeError> {
+        if transaction.owner.workspace_id() != self.workspace_id {
+            return Err(RelationalQueryRuntimeError::WorkspaceNotAuthorized);
+        }
+        if all_zero(transaction.owner.agent_id().as_bytes()) {
+            return Err(RelationalQueryRuntimeError::AgentNotAuthorized);
+        }
         let admission_generation = epoch_lease.admission_generation();
         let epoch_id = epoch_lease.epoch_id();
+        if resources.epoch_id() != epoch_id {
+            return Err(RelationalQueryRuntimeError::ResourceEpochMismatch {
+                admitted: epoch_id,
+                coordinator: resources.epoch_id(),
+            });
+        }
         let epoch = Arc::clone(epoch_lease.epoch());
         let RelationalQueryTransaction {
             owner,
@@ -359,11 +554,11 @@ impl RelationalQueryRuntime {
             result_lease,
             lease_token,
             result_limits,
+            request_inputs,
             observed_at_unix_ms,
             cancellation,
         } = transaction;
-        let work = self
-            .resources
+        let work = resources
             .admit(EpochWorkRequest {
                 epoch_id,
                 principal_id: owner.agent_id(),
@@ -371,13 +566,13 @@ impl RelationalQueryRuntime {
                 cancellation: cancellation.clone(),
             })
             .await?;
-        let resources = Arc::clone(&self.resources);
+        let execution_resources = Arc::clone(&resources);
         let (package, observations) = work
             .run(async move {
                 let child = epoch
                     .authorized_child_session(
                         authorization.into_child_policy(epoch_id)?,
-                        &resources,
+                        &execution_resources,
                     )
                     .await?;
                 let mut relation_inputs = Vec::with_capacity(outputs.len());
@@ -399,7 +594,17 @@ impl RelationalQueryRuntime {
                             session_bound: session_relation.as_str().to_owned(),
                         });
                     }
-                    let result = child.execute_relational_program(&output.program).await?;
+                    let result =
+                        if let Some(request_inputs) = request_inputs.get(&output.relation_id) {
+                            child
+                                .execute_relational_program_with_request_inputs(
+                                    &output.program,
+                                    request_inputs.as_ref(),
+                                )
+                                .await?
+                        } else {
+                            child.execute_relational_program(&output.program).await?
+                        };
                     let row_count = u64::try_from(result.row_count())
                         .map_err(|_| RelationalQueryRuntimeError::ResultCountOverflow)?;
                     let batch_count = u64::try_from(result.batches().len())
@@ -430,7 +635,7 @@ impl RelationalQueryRuntime {
             .await??;
         work.checkpoint()?;
         drop(work);
-        let resource_lease = self.resources.retain_result(
+        let resource_lease = resources.retain_result(
             owner.agent_id(),
             result_lease,
             &package,
@@ -500,6 +705,13 @@ pub enum RelationalQueryRuntimeError {
     AgentNotAuthorized,
     #[error("CURRENT_FACTS_UNAVAILABLE:NO_ACTIVE_EPOCH")]
     NoActiveEpoch,
+    #[error(
+        "INTERNAL_INVARIANT_VIOLATION:QUERY_RESOURCE_EPOCH_MISMATCH:admitted={admitted:?}:coordinator={coordinator:?}"
+    )]
+    ResourceEpochMismatch {
+        admitted: EpochId,
+        coordinator: EpochId,
+    },
     #[error("INVALID_REQUEST_SCHEMA:QUERY_EXECUTION_PIN")]
     QueryExecutionPinMissing,
     #[error("INVALID_REQUEST_SCHEMA:QUERY_AUTHORIZATION_PIN:{0}")]
@@ -508,6 +720,12 @@ pub enum RelationalQueryRuntimeError {
     AuthorizationTablesEmpty,
     #[error("INVALID_REQUEST_SCHEMA:DUPLICATE_QUERY_AUTHORIZATION_TABLE:{0:?}")]
     DuplicateAuthorizationTable(ProgrammaticRelationId),
+    #[error("QUERY_AUTHORIZATION_SCOPE_WIDENED:TABLE:{0:?}")]
+    AuthorizationTableWidened(ProgrammaticRelationId),
+    #[error(
+        "QUERY_AUTHORIZATION_SCOPE_WIDENED:OUTPUT_ROWS:baseline={baseline}:requested={requested}"
+    )]
+    AuthorizationOutputRowsWidened { baseline: usize, requested: usize },
     #[error("INVALID_REQUEST_SCHEMA:QUERY_OUTPUT_ROW_BOUND_ZERO")]
     OutputRowBoundZero,
     #[error("INVALID_REQUEST_SCHEMA:QUERY_OUTPUT_RELATIONS_EMPTY")]
@@ -525,6 +743,14 @@ pub enum RelationalQueryRuntimeError {
     },
     #[error("INTERNAL_INVARIANT_VIOLATION:QUERY_RESULT_COUNT_OVERFLOW")]
     ResultCountOverflow,
+    #[error("REQUEST_INPUT_AUTHORITY_INVALID:request-owned relation collection is empty")]
+    RequestInputsEmpty,
+    #[error("REQUEST_INPUT_AUTHORITY_INVALID:multi-output request input attachment is ambiguous")]
+    RequestInputOutputAmbiguous,
+    #[error("REQUEST_INPUT_AUTHORITY_INVALID:request inputs name unknown output relation {0}")]
+    UnknownRequestInputOutput(String),
+    #[error("REQUEST_INPUT_AUTHORITY_INVALID:request inputs repeat output relation {0}")]
+    DuplicateRequestInputOutput(String),
     #[error(transparent)]
     Admission(AdmissionError),
     #[error(transparent)]
@@ -549,6 +775,7 @@ mod tests {
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::common::TableReference;
     use datafusion::datasource::MemTable;
+    use serde_json::Value;
 
     use super::*;
     use crate::fabric::activation::{
@@ -558,13 +785,13 @@ mod tests {
     };
     use crate::fabric::arrow_result_resource::{ResultCompleteness, ResultUnknownCause};
     use crate::fabric::command::{
-        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins,
-        CompilerReleaseRef, ExecutionOwner, ExpectedHead, FabricCommand, FabricCommandPayload,
-        IdempotencyKey, LeaseId, ModelHeadRef, OperationId, OperationSelectionRef, PrincipalId,
+        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins, ExecutionOwner,
+        ExpectedHead, FabricCommand, FabricCommandPayload, IdempotencyKey, InputReleaseRef,
+        LeaseId, OperationId, OperationSelectionRef, PrincipalId, ProgramReleaseRef,
         ProofReceiptRef, ProviderSetRef, ResourceEnvelopeRef, RetentionPolicyRef, SourceGeneration,
         TransactionRef, WriterFence, WriterGeneration,
     };
-    use crate::fabric::epoch::{FABRIC_CATALOG, FabricEpochRuntimeConfig};
+    use crate::fabric::epoch_runtime::{FABRIC_CATALOG, FabricEpochRuntimeConfig};
     use crate::fabric::programmatic_epoch::{
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
@@ -576,6 +803,17 @@ mod tests {
         FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY, SchemaContract,
         SchemaRole,
     };
+
+    const WP33_FIXTURES: &str =
+        include_str!("../../contracts/acceptance/relational-fabric-v3/negative-fixtures.jsonl");
+
+    fn claim_015_negative_fixture() -> Value {
+        WP33_FIXTURES
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("valid WP33 fixture row"))
+            .find(|row| row["claim_id"] == "RFV3-CLAIM-015" && row["kind"] == "negative")
+            .expect("frozen Claim 015 negative fixture")
+    }
 
     const fn id16(seed: u8) -> [u8; 16] {
         [seed; 16]
@@ -608,8 +846,13 @@ mod tests {
                 generation: WriterGeneration::new(generation).unwrap(),
             },
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes(id32(5)),
-                model_head: ModelHeadRef::from_bytes(id32(6)),
+                input_release: InputReleaseRef::from_bytes(id32(5)),
+                program_release: ProgramReleaseRef::from_bytes(id32(6)),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    id32(6),
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(id32(6)),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(id32(6)),
                 source_generation: SourceGeneration::new(7),
                 provider_set: ProviderSetRef::from_bytes(id32(8)),
             },
@@ -642,8 +885,11 @@ mod tests {
             ActivationOrdinal::new(ordinal).unwrap(),
             FabricEpochPins {
                 epoch: target,
-                compiler_release: command.pins.compiler_release,
-                model_head: command.pins.model_head,
+                input_release: command.pins.input_release,
+                program_release: command.pins.program_release,
+                application_release: command.pins.application_release,
+                source_authority: command.pins.source_authority,
+                provider_release: command.pins.provider_release,
                 source_generation: command.pins.source_generation,
                 provider_set: command.pins.provider_set,
                 table_versions: TableVersionSetRef::from_bytes(id32(11)),
@@ -937,6 +1183,48 @@ mod tests {
         bytes
     }
 
+    #[test]
+    fn scope_authorization_can_only_narrow_baseline_capabilities() {
+        let baseline = RelationalQueryAuthorization::try_new(
+            id32(0x11),
+            id32(0x22),
+            id32(0x33),
+            vec![grant(ALLOWED_RELATION), grant(SECOND_RELATION)],
+            child_resources(),
+            100,
+            ChildRegistryAllowlist::default(),
+        )
+        .unwrap();
+        let retained = BTreeSet::from([ProgrammaticRelationId::new(ALLOWED_RELATION)]);
+        let narrowed = baseline.narrow_to(id32(0x44), &retained, 10).unwrap();
+        assert_eq!(narrowed.access_scope(), &id32(0x44));
+        assert_eq!(narrowed.query_policy(), baseline.query_policy());
+        assert_eq!(narrowed.resource_policy(), baseline.resource_policy());
+        assert_eq!(narrowed.max_output_rows(), 10);
+        assert_eq!(
+            narrowed.table_relations().cloned().collect::<BTreeSet<_>>(),
+            retained
+        );
+
+        assert!(matches!(
+            baseline.narrow_to(
+                id32(0x45),
+                &BTreeSet::from([ProgrammaticRelationId::new("facts.not-authorized")]),
+                10,
+            ),
+            Err(RelationalQueryRuntimeError::AuthorizationTableWidened(_))
+        ));
+        assert!(matches!(
+            baseline.narrow_to(id32(0x46), &retained, 101),
+            Err(
+                RelationalQueryRuntimeError::AuthorizationOutputRowsWidened {
+                    baseline: 100,
+                    requested: 101,
+                }
+            )
+        ));
+    }
+
     #[tokio::test]
     async fn success_is_arrow_native_deterministic_and_causally_observed() {
         let workspace = WorkspaceId::from_bytes(id16(1));
@@ -1192,6 +1480,67 @@ mod tests {
         assert_eq!(observation.queued_work, 0);
         assert_eq!(observation.live_result_leases, 0);
         assert_eq!(observation.retained_result_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn wp38_claim_015_negative_cancellation_releases_without_publication() {
+        let fixture = claim_015_negative_fixture();
+        let mutation = &fixture["mutation"];
+        assert_eq!(mutation["input_role"], "cancellation_state");
+        assert_eq!(mutation["json_pointer"], "");
+        assert_eq!(mutation["before"]["cancelled"], false);
+        assert_eq!(mutation["after"]["cancelled"], true);
+
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let epoch = epoch(EpochId::from_bytes(id16(20))).await;
+        let (admission, _) = admitted_runtime(workspace, Arc::clone(&epoch));
+        let resources = resource_coordinator(&epoch);
+        let runtime = RelationalQueryRuntime::new(
+            workspace,
+            admission,
+            Arc::new(PublishedArrowResultRegistry::new()),
+            Arc::clone(&resources),
+        );
+        let cancellation = Cancellation::with_check_interval(1);
+        let mut transaction = transaction(
+            &epoch,
+            owner(workspace, 0x31),
+            &[ALLOWED_RELATION],
+            &[ALLOWED_RELATION],
+            10_000,
+            result_limits(),
+            0x51,
+            0x61,
+            0x71,
+        );
+        transaction.cancellation = cancellation.clone();
+        cancellation.cancel();
+        assert!(matches!(
+            runtime.execute_and_publish(transaction).await,
+            Err(RelationalQueryRuntimeError::ResourceGovernance(
+                EpochResourceError::Cancelled
+            ))
+        ));
+
+        let observation = resources.observation().unwrap();
+        assert_eq!(observation.active_work, 0);
+        assert_eq!(observation.queued_work, 0);
+        assert_eq!(observation.live_result_leases, 0);
+        assert_eq!(observation.retained_result_bytes, 0);
+        let expected = &fixture["expected_decoded"];
+        assert_eq!(expected["state"], "cancelled");
+        assert_eq!(expected["public_error"], "CANCELLED");
+        assert_eq!(expected["published_rows"], 0);
+        assert_eq!(expected["published_resources"], 0);
+        assert!(expected["resource_uri"].is_null());
+        assert_eq!(
+            expected["terminal_provenance"]["cancellation"],
+            mutation["after"]
+        );
+        assert_eq!(
+            expected["terminal_provenance"]["publication_state"],
+            "not_published"
+        );
     }
 
     #[tokio::test]
@@ -1459,5 +1808,89 @@ mod tests {
             )
             .unwrap();
         assert!(first_weak.upgrade().is_none());
+    }
+
+    #[tokio::test]
+    async fn caller_admitted_execution_cannot_mix_compilation_and_execution_epochs() {
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let first_id = EpochId::from_bytes(id16(20));
+        let second_id = EpochId::from_bytes(id16(21));
+        let first = epoch(first_id).await;
+        let second = epoch(second_id).await;
+        let (admission, first_event) = admitted_runtime(workspace, Arc::clone(&first));
+        let first_resources = resource_coordinator(&first);
+        let runtime = RelationalQueryRuntime::new(
+            workspace,
+            Arc::clone(&admission),
+            Arc::new(PublishedArrowResultRegistry::new()),
+            Arc::clone(&first_resources),
+        );
+
+        // The semantic compiler pins this lease before activation moves the current head.
+        let compiled_epoch_lease = admission.admit().unwrap();
+        let second_command = command(2, workspace, ExpectedHead::Epoch(first_id), second_id, 1);
+        let barrier = admission
+            .close_admission(second_command.expected_head, second_command.writer_fence)
+            .unwrap();
+        let second_event = activation_event(
+            2,
+            &second_command,
+            Some(first_event.event_id()),
+            2,
+            second_id,
+        );
+        let second_chain = ActivationChain::derive(workspace, [second_event, first_event]).unwrap();
+        admission
+            .publish_selected_epoch(barrier, &second_chain, Arc::clone(&second))
+            .unwrap();
+        admission
+            .reopen_after_reconciliation(barrier, ExpectedHead::Epoch(second_id))
+            .unwrap();
+
+        let publication = runtime
+            .execute_admitted_and_publish(
+                compiled_epoch_lease,
+                Arc::clone(&first_resources),
+                transaction(
+                    &first,
+                    owner(workspace, 0x31),
+                    &[ALLOWED_RELATION],
+                    &[ALLOWED_RELATION],
+                    10_000,
+                    result_limits(),
+                    0x51,
+                    0x61,
+                    0x71,
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(publication.descriptor().epoch_id, first_id);
+        assert_eq!(admission.admit().unwrap().epoch_id(), second_id);
+
+        let second_lease = admission.admit().unwrap();
+        assert!(matches!(
+            runtime
+                .execute_admitted_and_publish(
+                    second_lease,
+                    first_resources,
+                    transaction(
+                        &second,
+                        owner(workspace, 0x31),
+                        &[ALLOWED_RELATION],
+                        &[ALLOWED_RELATION],
+                        10_000,
+                        result_limits(),
+                        0x52,
+                        0x62,
+                        0x72,
+                    ),
+                )
+                .await,
+            Err(RelationalQueryRuntimeError::ResourceEpochMismatch {
+                admitted,
+                coordinator,
+            }) if admitted == second_id && coordinator == first_id
+        ));
     }
 }

@@ -1,0 +1,878 @@
+{
+  "schema_version": 1,
+  "record_id": "codefabric.relational-fabric-v3.wp40.development-evidence.2026-08-31",
+  "content_id": "sha256:084eb0cf18d556ed2334c9e4d42347a204249be314bc5a3512fcbe98a7eaa83f",
+  "evidence_class": "development",
+  "suite": "codefabric-relational-data-fabric@2.1.0",
+  "created_at": "2026-08-31T15:35:46-04:00",
+  "proving_state": {
+    "base_head": "f12329f05e3678698ff9a43ec4f69f95f42db12f",
+    "head_role": "development_base_only",
+    "worktree_state": "dirty_concurrent_implementation",
+    "release_certification": "blocked",
+    "reason": "The successor implementation is uncommitted and concurrent WP38 evidence remains subject to supported-host limitations. This record cannot identify a proving commit."
+  },
+  "environment": {
+    "deployment_profile": "local-workstation-v1",
+    "platform": "Linux x86_64",
+    "kernel": "7.0.0-30-generic",
+    "rust": "1.98.0 (88d9e12ae 2026-08-18)",
+    "python": "3.14.7",
+    "host_containment": {
+      "cgroup_v2": "supported",
+      "delegated_controllers": [
+        "cpu",
+        "memory",
+        "pids"
+      ],
+      "kernel_accounting": [
+        "cpu",
+        "memory",
+        "pids",
+        "swap"
+      ],
+      "launcher": {
+        "kind": "bubblewrap",
+        "path": "/usr/bin/bwrap",
+        "observed_version": "bubblewrap 0.9.0",
+        "version_role": "diagnostic_only",
+        "observed_root_owned": true,
+        "observed_mode": "0755",
+        "observed_setuid": false
+      },
+      "admission_authority": "capability_matrix",
+      "unmet_requirements": [
+        "compiled-seccomp-policy-authorized",
+        "credential-read-denied",
+        "inherited-fd-read-denied",
+        "live-workspace-read-denied",
+        "network-denied",
+        "seccomp-active"
+      ],
+      "untrusted_execution": "unavailable",
+      "trusted_local": "authorization_and_receipt_required"
+    }
+  },
+  "frozen_inputs": [
+    {
+      "path": "Cargo.lock",
+      "sha256": "92f4ae7f7049936ef7caadb6bfb33cf9e969e5383aa136c50734a20aba10b92a",
+      "role": "exact Rust dependency graph"
+    },
+    {
+      "path": "codefabric-cpg-mcp/uv.lock",
+      "sha256": "ddbf0e9f1a73dc0afba62e861b9826beddf4baab78862fb62ccb7984c2a196a2",
+      "role": "exact Python presentation dependency graph"
+    },
+    {
+      "path": "rustc-extractor/Cargo.lock",
+      "sha256": "e6e7faefdafb00ebff6ca814c79586126c5d73c5f9200c58c4fcc95bf4193f09",
+      "role": "exact dated-nightly extractor dependency graph"
+    },
+    {
+      "path": "pyrefly-sidecar/Cargo.lock",
+      "sha256": "ae559aeddd6b4bdd8949b2873256e338cfa54f2637f2a821fdf54d90e9f1b680",
+      "role": "exact pinned Pyrefly sidecar dependency graph"
+    },
+    {
+      "path": "docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.1.md",
+      "sha256": "97c61518f88f820390ff073582ca9224cac4413cc623c4e6fa4fe4c44a69bda9",
+      "role": "current authoritative suite identity and governance"
+    },
+    {
+      "path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v3_2026-08-30.md",
+      "sha256": "426b018ba33f8e73a1eacdff5c7fa415b367c855e3d588472d8f43706f0560f1",
+      "role": "current successor implementation plan"
+    },
+    {
+      "path": "contracts/acceptance/relational-fabric-v3/evidence-issuance.json",
+      "sha256": "c743c1e165a5c44f589e049277482ba7a663aaa32e25f7c4c85088433f5d8659",
+      "role": "independent expectation issuance"
+    },
+    {
+      "path": "contracts/acceptance/relational-fabric-v3/expectations.jsonl",
+      "sha256": "15a82d25c2cbe4bb115f353627b46c6564e8ad25441c1e29f9739a6b4771821c",
+      "role": "independently decoded successor expectations"
+    },
+    {
+      "path": "contracts/acceptance/relational-fabric-v3/negative-fixtures.jsonl",
+      "sha256": "7bf51524f3d1b364c05172d49e2b2c9d5bd12ae7d2d1bb00eac57dc460675dd9",
+      "role": "independent causal and negative fixtures"
+    },
+    {
+      "path": "contracts/acceptance/relational-fabric-v3/production-evidence-transaction.jsonl",
+      "sha256": "a335c85da9064df4c6c74adb37a5ac85fa559029d1b6dbe2608564e500ee6899",
+      "role": "independently reviewed WP38 production evidence transaction"
+    },
+    {
+      "path": "contracts/rpc/cpg_query_service.proto",
+      "sha256": "ec5c773af9f9cc3ba503ca3ed0b10a91471c8696d0a8aedbcd1afedd8bfa10b8",
+      "role": "released lifecycle and query wire contract"
+    },
+    {
+      "path": "tooling/proto/production-descriptor.pb",
+      "sha256": "247f2f9cc05e8a94f4f88eeb60447f43ffd5f22cddd464e9f6552edf8c53d7e8",
+      "role": "hermetic production Protobuf descriptor"
+    }
+  ],
+  "matrix": [
+    {
+      "dimension": "provider",
+      "live_recipes": [
+        "provider-ipc-contract-integrity-check",
+        "exact-provider-batch-check"
+      ],
+      "selected_tests": [
+        "exact_provider_native_relations_are_typed_and_source_pinned",
+        "workspace_transaction_aggregates_all_four_exact_provider_lanes",
+        "orchestrated_clean_and_incremental_generations_emit_equal_arrow_semantics"
+      ],
+      "exact_inputs": [
+        "source images",
+        "provider launch plans",
+        "provider release pins"
+      ],
+      "expected_outputs": [
+        "application-owned typed Arrow provider relations",
+        "explicit coverage and remainder terminals"
+      ],
+      "provenance_nodes": [
+        "source_image",
+        "provider_execution",
+        "provider_batch"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "transformation",
+      "live_recipes": [
+        "datafusion-contract-matrix-integrity-check",
+        "datafusion-plan-schema-cache-check"
+      ],
+      "selected_tests": [
+        "programmatic_bindings_compile_from_live_schema_contracts_without_model_rows",
+        "provider_plan_schema_observations_and_query_share_one_sealed_session"
+      ],
+      "exact_inputs": [
+        "admitted provider relations",
+        "typed transformation definitions",
+        "resource policies"
+      ],
+      "expected_outputs": [
+        "native DataFusion plans",
+        "observed plan and schema relations"
+      ],
+      "provenance_nodes": [
+        "provider_batch",
+        "transformation_execution"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "analysis",
+      "live_recipes": [
+        "analysis-producer-semantic-check",
+        "analysis-causal-fault-check",
+        "analysis-fixed-point-resource-check"
+      ],
+      "selected_tests": [
+        "existing_family_census_executes_fifteen_real_catalog_input_producers",
+        "changed_catalog_inputs_causally_change_real_producer_outputs",
+        "execution_bound_aborts_seal_without_returning_partial_epoch"
+      ],
+      "exact_inputs": [
+        "live catalog relations",
+        "producer dependency closure",
+        "aggregate resource envelope"
+      ],
+      "expected_outputs": [
+        "typed derived relations",
+        "causal output changes",
+        "no partial sealed epoch"
+      ],
+      "provenance_nodes": [
+        "transformation_execution",
+        "analysis_execution"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "query",
+      "live_recipes": [
+        "semantic-request-program-check",
+        "query-unknown-negative-proof-check",
+        "graph-query-resource-operations-check"
+      ],
+      "selected_tests": [
+        "all_eight_released_forms_compile_from_typed_program_rows",
+        "all_eight_epoch_bound_forms_execute_through_one_real_authorized_child",
+        "success_is_arrow_native_deterministic_and_causally_observed"
+      ],
+      "exact_inputs": [
+        "released semantic request",
+        "epoch-bound typed program rows",
+        "authorized child catalog"
+      ],
+      "expected_outputs": [
+        "bounded native query results",
+        "explicit unknowns",
+        "Arrow result package"
+      ],
+      "provenance_nodes": [
+        "analysis_execution",
+        "query_execution",
+        "arrow_result"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "delta",
+      "live_recipes": [
+        "delta-durability-protocol-integrity-check",
+        "delta-exact-reconstruction-v3-check"
+      ],
+      "selected_tests": [
+        "exact_delta_append_readback_and_marker_reconciliation_round_trip",
+        "exact_process_reopen_restores_all_nine_relations",
+        "exact_cdf_range_has_an_inclusive_end_and_excludes_a_newer_head"
+      ],
+      "exact_inputs": [
+        "exact Delta roots",
+        "exact versions",
+        "transaction identities"
+      ],
+      "expected_outputs": [
+        "exact table version set",
+        "read-back durable proof relations",
+        "bounded CDF range"
+      ],
+      "provenance_nodes": [
+        "arrow_result",
+        "delta_publication"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "activation",
+      "live_recipes": [
+        "activation-receipt-nonauthority-check",
+        "candidate-free-recovery-check"
+      ],
+      "selected_tests": [
+        "missing_and_wrong_version_vectors_fail_closed",
+        "unknown_commit_recovers_only_from_exact_operation_marker_and_chain",
+        "split_head_and_stale_fence_reject_before_native_checkpoint"
+      ],
+      "exact_inputs": [
+        "activation event chain",
+        "writer fence",
+        "exact proof receipt and version vector"
+      ],
+      "expected_outputs": [
+        "one exact selected activation head",
+        "closed admission on uncertainty"
+      ],
+      "provenance_nodes": [
+        "delta_publication",
+        "activation_event"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "recovery",
+      "live_recipes": [
+        "candidate-free-recovery-check",
+        "lifecycle-production-vertical-check"
+      ],
+      "selected_tests": [
+        "cache_loss_and_process_reopen_reconstruct_durable_authority",
+        "real_delta_sqlite_daemon_query_activation_and_process_reopen"
+      ],
+      "exact_inputs": [
+        "durable Delta histories",
+        "private SQLite command state",
+        "empty process cache"
+      ],
+      "expected_outputs": [
+        "reconstructed exact head",
+        "identical authorized successor query rows"
+      ],
+      "provenance_nodes": [
+        "activation_event",
+        "query_execution"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "authorization",
+      "live_recipes": [
+        "authorized-child-schema-rejection-check",
+        "public-lifecycle-wire-contract-integrity-check"
+      ],
+      "selected_tests": [
+        "granted_view_graph_rejects_a_transitively_denied_parent_provider",
+        "public_lifecycle_identity_contract_rejects_substitution_and_duplicate_workspaces",
+        "negotiated_query_session_binds_workspace_and_host_profile"
+      ],
+      "exact_inputs": [
+        "peer credential",
+        "agent identity",
+        "workspace grant",
+        "request identity"
+      ],
+      "expected_outputs": [
+        "workspace-scoped child catalog",
+        "identity substitution rejection"
+      ],
+      "provenance_nodes": [
+        "activation_event",
+        "authorized_session"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "security",
+      "live_recipes": [
+        "provider-trust-coverage-remainder-check",
+        "causal-fault-discrimination-check"
+      ],
+      "selected_tests": [
+        "credential_proxy_agent_and_unknown_environment_are_rejected",
+        "orchestrated_untrusted_accounting_failure_never_executes_host_cargo"
+      ],
+      "exact_inputs": [
+        "provider execution plan",
+        "host containment observation",
+        "independent causal fault"
+      ],
+      "expected_outputs": [
+        "rejected untrusted execution on unsupported host",
+        "no provider semantic publication"
+      ],
+      "provenance_nodes": [
+        "source_image",
+        "provider_execution"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "resource",
+      "live_recipes": [
+        "provider-trust-coverage-remainder-check",
+        "resource-cancellation-recovery-check"
+      ],
+      "selected_tests": [
+        "flow_control_credit_is_bounded_and_cancellation_is_terminal",
+        "cancelled_transaction_never_consumes_epoch_capacity_or_result_lease",
+        "result_release_returns_epoch_capacity_after_causal_backpressure"
+      ],
+      "exact_inputs": [
+        "flow-control credit",
+        "query resource envelope",
+        "cancellation token"
+      ],
+      "expected_outputs": [
+        "bounded allocation",
+        "terminal cancellation",
+        "released capacity and leases"
+      ],
+      "provenance_nodes": [
+        "query_execution",
+        "arrow_result"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "lifecycle",
+      "live_recipes": [
+        "lifecycle-production-vertical-check",
+        "resource-cancellation-recovery-check"
+      ],
+      "selected_tests": [
+        "real_delta_sqlite_daemon_query_activation_and_process_reopen",
+        "ordered_shutdown_closes_every_ingress_clone",
+        "shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order"
+      ],
+      "exact_inputs": [
+        "programmatic daemon composition",
+        "activation command",
+        "shutdown command"
+      ],
+      "expected_outputs": [
+        "exact activated epoch",
+        "clean endpoint retirement",
+        "restart recovery"
+      ],
+      "provenance_nodes": [
+        "activation_event",
+        "authorized_session"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "public_wire",
+      "live_recipes": [
+        "public-lifecycle-wire-contract-integrity-check",
+        "fastmcp-presentation-boundary-check"
+      ],
+      "selected_tests": [
+        "wp10_behavioral_acceptance",
+        "test_wp15_arrow_descriptor_resources_and_release_cross_real_generated_grpc",
+        "test_transport_loss_rehandshakes_and_attaches_exact_cursor"
+      ],
+      "exact_inputs": [
+        "production Protobuf descriptor",
+        "private UDS",
+        "daemon-owned Arrow package"
+      ],
+      "expected_outputs": [
+        "generated gRPC interoperability",
+        "presentation-only FastMCP resource",
+        "checksum-bound reconnect"
+      ],
+      "provenance_nodes": [
+        "authorized_session",
+        "query_execution",
+        "served_row"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "provenance",
+      "live_recipes": [
+        "analysis-causal-fault-check",
+        "first-principles-production-behavior-check"
+      ],
+      "selected_tests": [
+        "changed_catalog_inputs_causally_change_real_producer_outputs",
+        "real_delta_sqlite_daemon_query_activation_and_process_reopen"
+      ],
+      "exact_inputs": [
+        "source and provider identities",
+        "transformation and analysis identities",
+        "table, release, proof, and expectation identities"
+      ],
+      "expected_outputs": [
+        "acyclic served-row provenance closure",
+        "activation rejection on missing closure"
+      ],
+      "provenance_nodes": [
+        "source_image",
+        "provider_execution",
+        "transformation_execution",
+        "analysis_execution",
+        "delta_publication",
+        "activation_event",
+        "query_execution",
+        "served_row"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "legacy_absence",
+      "live_recipes": [
+        "legacy-disposition-artifact-integrity-check",
+        "retained-target-post-purge-behavior-check",
+        "remaining-legacy-zero-state-check",
+        "post-purge-package-build-operations-check"
+      ],
+      "selected_tests": [
+        "test_wp39_beh_recipe_keeps_every_retained_target_consumer",
+        "test_wp39_ops_live_four_domain_package_inventory_is_exact",
+        "test_live_remaining_legacy_inventory_is_zero_without_replaying_specialists"
+      ],
+      "exact_inputs": [
+        "post-purge source tree",
+        "retained released contracts",
+        "successor package inputs"
+      ],
+      "expected_outputs": [
+        "no retired runtime, build, package, or acceptance reader",
+        "retained successor behavior unchanged"
+      ],
+      "provenance_nodes": [
+        "source_image",
+        "served_row"
+      ],
+      "observation_mode": "live_gate_execution"
+    },
+    {
+      "dimension": "independent_expectations",
+      "live_recipes": [
+        "successor-evidence-transaction-integrity-check",
+        "successor-expected-behavior-review-check",
+        "successor-negative-fixture-independence-check",
+        "production-evidence-input-integrity-check"
+      ],
+      "selected_tests": [
+        "test_int_repository_evidence_transaction_is_closed_and_frozen",
+        "test_beh_repository_decoded_values_have_independent_acceptance",
+        "test_neg_every_claim_has_semantic_causal_and_negative_fixture"
+      ],
+      "exact_inputs": [
+        "independently decoded expectations",
+        "independent causal and negative fixtures",
+        "production evidence input transaction"
+      ],
+      "expected_outputs": [
+        "closed frozen expectation set",
+        "target-output-independent fault discrimination"
+      ],
+      "provenance_nodes": [
+        "independent_expectation",
+        "served_row"
+      ],
+      "observation_mode": "live_gate_execution"
+    }
+  ],
+  "rejection_matrix": [
+    {
+      "fault_class": "authorization",
+      "live_recipes": [
+        "authorized-child-schema-rejection-check"
+      ],
+      "selected_tests": [
+        "granted_view_graph_rejects_a_transitively_denied_parent_provider"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "credential",
+      "live_recipes": [
+        "provider-trust-coverage-remainder-check"
+      ],
+      "selected_tests": [
+        "credential_proxy_agent_and_unknown_environment_are_rejected"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "network",
+      "live_recipes": [
+        "production-evidence-recovery-operations-check"
+      ],
+      "selected_tests": [
+        "semantic_sandbox_current_host_escape_matrix"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "unsafe_source",
+      "live_recipes": [
+        "provider-admission-exclusivity-check"
+      ],
+      "selected_tests": [
+        "orchestrated_trusted_local_bypass_is_rejected_before_spawn"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "resource_exhaustion",
+      "live_recipes": [
+        "provider-trust-coverage-remainder-check"
+      ],
+      "selected_tests": [
+        "policy_closure_and_all_resource_limits_are_enforced"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "flow_control",
+      "live_recipes": [
+        "resource-cancellation-recovery-check"
+      ],
+      "selected_tests": [
+        "frame_count_byte_budget_and_backpressure_are_enforced_before_allocation"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "cancellation",
+      "live_recipes": [
+        "resource-cancellation-recovery-check"
+      ],
+      "selected_tests": [
+        "cancelled_transaction_never_consumes_epoch_capacity_or_result_lease"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "partial_or_corrupt_provider",
+      "live_recipes": [
+        "provider-admission-exclusivity-check"
+      ],
+      "selected_tests": [
+        "truncation_and_corruption_are_distinct_typed_failures"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "uncertain_delta_commit",
+      "live_recipes": [
+        "candidate-free-recovery-check"
+      ],
+      "selected_tests": [
+        "unknown_marker_keeps_restart_admission_closed_and_requires_reconciliation"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "stale_fence",
+      "live_recipes": [
+        "candidate-free-recovery-check"
+      ],
+      "selected_tests": [
+        "split_head_and_stale_fence_reject_before_native_checkpoint"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "split_activation_chain",
+      "live_recipes": [
+        "candidate-free-recovery-check"
+      ],
+      "selected_tests": [
+        "split_head_and_stale_fence_reject_before_native_checkpoint"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "retention_guard",
+      "live_recipes": [
+        "candidate-free-recovery-check"
+      ],
+      "selected_tests": [
+        "active_pins_cdf_and_proof_references_refuse_destructive_vacuum"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "adapter_protocol",
+      "live_recipes": [
+        "resource-cancellation-recovery-check"
+      ],
+      "selected_tests": [
+        "test_transport_loss_rehandshakes_and_attaches_exact_cursor"
+      ],
+      "required_terminal": "rejected_without_publication"
+    },
+    {
+      "fault_class": "provenance_gap",
+      "live_recipes": [
+        "causal-fault-discrimination-check"
+      ],
+      "selected_tests": [
+        "test_beh_missing_or_cyclic_provenance_rejects_release_evidence"
+      ],
+      "required_terminal": "rejected_without_publication"
+    }
+  ],
+  "operations_matrix": [
+    {
+      "variation": "clean",
+      "live_recipes": [
+        "exact-provider-batch-check"
+      ],
+      "selected_tests": [
+        "orchestrated_clean_and_incremental_generations_emit_equal_arrow_semantics"
+      ],
+      "comparison": "typed_successor_outputs_only"
+    },
+    {
+      "variation": "incremental",
+      "live_recipes": [
+        "exact-provider-batch-check"
+      ],
+      "selected_tests": [
+        "incremental_run_emits_structural_changed_ranges"
+      ],
+      "comparison": "typed_successor_outputs_only"
+    },
+    {
+      "variation": "partition_layout",
+      "live_recipes": [
+        "graph-query-resource-operations-check"
+      ],
+      "selected_tests": [
+        "partition_and_batch_layout_preserve_deterministic_graph_rows"
+      ],
+      "comparison": "typed_successor_outputs_only"
+    },
+    {
+      "variation": "batch_boundaries",
+      "live_recipes": [
+        "graph-query-resource-operations-check"
+      ],
+      "selected_tests": [
+        "partition_and_batch_layout_preserve_deterministic_graph_rows"
+      ],
+      "comparison": "typed_successor_outputs_only"
+    },
+    {
+      "variation": "restart",
+      "live_recipes": [
+        "lifecycle-production-vertical-check"
+      ],
+      "selected_tests": [
+        "real_delta_sqlite_daemon_query_activation_and_process_reopen"
+      ],
+      "comparison": "typed_successor_outputs_only"
+    },
+    {
+      "variation": "cdf_gap",
+      "live_recipes": [
+        "delta-exact-reconstruction-v3-check"
+      ],
+      "selected_tests": [
+        "exact_cdf_range_has_an_inclusive_end_and_excludes_a_newer_head"
+      ],
+      "comparison": "typed_successor_outputs_only"
+    },
+    {
+      "variation": "cache_state",
+      "live_recipes": [
+        "candidate-free-recovery-check"
+      ],
+      "selected_tests": [
+        "cache_loss_and_process_reopen_reconstruct_durable_authority"
+      ],
+      "comparison": "typed_successor_outputs_only"
+    },
+    {
+      "variation": "resource_pressure",
+      "live_recipes": [
+        "production-evidence-recovery-operations-check"
+      ],
+      "selected_tests": [
+        "linux_run_cgroup_limits_placement_and_descendant_cleanup"
+      ],
+      "comparison": "typed_successor_outputs_only"
+    }
+  ],
+  "development_observations": [
+    {
+      "command": "just public-lifecycle-wire-contract-integrity-check",
+      "selected_test_count": 12,
+      "exit_code": 0,
+      "elapsed_seconds": "88.49",
+      "max_rss_kib": 3606480,
+      "measurement_scope": "one live development run including a cold integration-test rebuild",
+      "certification_role": "development_only"
+    },
+    {
+      "command": "just lifecycle-production-vertical-check",
+      "selected_test_count": 3,
+      "exit_code": 0,
+      "elapsed_seconds": "2.04",
+      "max_rss_kib": 190604,
+      "measurement_scope": "one warm development run of the real production vertical",
+      "certification_role": "development_only"
+    },
+    {
+      "command": "just fastmcp-presentation-boundary-check",
+      "selected_test_count": 40,
+      "exit_code": 0,
+      "elapsed_seconds": "2.19",
+      "max_rss_kib": 115608,
+      "measurement_scope": "one warm development run",
+      "certification_role": "development_only"
+    },
+    {
+      "command": "just resource-cancellation-recovery-check",
+      "selected_test_count": 17,
+      "exit_code": 0,
+      "elapsed_seconds": "1.69",
+      "max_rss_kib": 162244,
+      "measurement_scope": "one warm development run",
+      "certification_role": "development_only"
+    }
+  ],
+  "provenance_graph": {
+    "served_row_root": "served_row",
+    "exact_source_terminal": "source_image",
+    "edges": [
+      {
+        "subject": "served_row",
+        "depends_on": "query_execution"
+      },
+      {
+        "subject": "query_execution",
+        "depends_on": "authorized_session"
+      },
+      {
+        "subject": "authorized_session",
+        "depends_on": "activation_event"
+      },
+      {
+        "subject": "activation_event",
+        "depends_on": "delta_publication"
+      },
+      {
+        "subject": "delta_publication",
+        "depends_on": "proof_receipt"
+      },
+      {
+        "subject": "proof_receipt",
+        "depends_on": "independent_expectation"
+      },
+      {
+        "subject": "delta_publication",
+        "depends_on": "analysis_execution"
+      },
+      {
+        "subject": "analysis_execution",
+        "depends_on": "transformation_execution"
+      },
+      {
+        "subject": "transformation_execution",
+        "depends_on": "provider_batch"
+      },
+      {
+        "subject": "provider_batch",
+        "depends_on": "provider_execution"
+      },
+      {
+        "subject": "provider_execution",
+        "depends_on": "source_image"
+      }
+    ]
+  },
+  "performance": {
+    "claim_status": "not_claimed",
+    "benchmark_comparison": "not_performed",
+    "supported_kernel_metrics": [
+      "cpu",
+      "memory",
+      "pids",
+      "swap"
+    ],
+    "observation": "The cgroup-v2 substrate supports aggregate kernel accounting and bounds. Single development-run elapsed/RSS observations above are not a regression baseline.",
+    "uncertainty": "No clean proving tree, repeated workload distribution, application-owned seccomp authorization, or full hostile escape matrix exists on this workstation. The observed launcher version is diagnostic and is not admission authority."
+  },
+  "limitations": [
+    {
+      "limitation_id": "WORKTREE-NOT-PROVING-COMMIT",
+      "severity": "blocking",
+      "waivability": "non_waivable",
+      "detail": "The record is based on an uncommitted concurrent development tree; its base HEAD does not contain the observed successor implementation."
+    },
+    {
+      "limitation_id": "UNTRUSTED-PROVIDER-PROFILE-UNAVAILABLE",
+      "severity": "profile_limited",
+      "waivability": "non_waivable",
+      "detail": "The untrusted provider profile fails closed because its capability matrix lacks an authorized active seccomp policy and complete hostile network, credential, live-workspace, inherited-descriptor, and cleanup proof. Launcher version is observational only; trusted-local execution requires explicit authorization and a launcher receipt."
+    },
+    {
+      "limitation_id": "PERFORMANCE-EVIDENCE-NOT-CLAIMED",
+      "severity": "informational",
+      "waivability": "not_applicable",
+      "detail": "No representative production workload or regression baseline is accepted; WP40 makes no performance or regression claim."
+    },
+    {
+      "limitation_id": "EXECUTION-STATE-UNAVAILABLE",
+      "severity": "blocking",
+      "waivability": "non_waivable",
+      "detail": "No activated v3 execution state or proving commit exists; the invalidated predecessor state is not accepted as a substitute."
+    }
+  ]
+}

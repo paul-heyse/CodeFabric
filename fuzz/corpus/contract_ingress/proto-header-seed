@@ -1,7 +1,0 @@
-4// artifact_id: codefabric.test
-// artifact_kind: protobuf-schema
-// version: 1.0
-// compatible_suite_major: 1
-// status: draft
-// canonical_digest: b3:1111111111111111111111111111111111111111111111111111111111111111
-syntax = "proto3";

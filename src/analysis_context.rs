@@ -7,10 +7,6 @@ use crate::identity::{
     CbefField, CbefRecord, CbefValue, IdentityDomain, IdentityError, SOURCE_CONTEXT_ID,
     StringNormalization, decode_public_id, derive_identity, encode_public_id,
 };
-use crate::model_generated::semantic_lane_fragments::{
-    SEMANTIC_CONTEXT_CONTRACTS, SemanticContextContract, SemanticLane,
-};
-
 /// Closed analysis context kinds accepted by the public contract.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -102,8 +98,6 @@ pub enum AnalysisContextError {
     DiscoveredSourceContext,
     #[error("semantic context discovery emitted a duplicate canonical context")]
     DuplicateDiscoveredContext,
-    #[error("semantic context kind {0} has no shared and lane-specific generated contract")]
-    UnregisteredSemanticContextKind(String),
 }
 
 /// Materialize and deterministically order application-owned discovery candidates.
@@ -122,10 +116,6 @@ pub fn materialize_discovered_contexts(
             if candidate.context_kind == AnalysisContextKind::Source {
                 return Err(AnalysisContextError::DiscoveredSourceContext);
             }
-            validate_semantic_context_contracts(
-                SEMANTIC_CONTEXT_CONTRACTS,
-                candidate.context_kind,
-            )?;
             if let Some(fingerprint) = candidate.manifest_fingerprint {
                 AnalysisContext::new_from_manifest_fingerprint(
                     &request.workspace_id,
@@ -155,30 +145,6 @@ pub fn materialize_discovered_contexts(
         return Err(AnalysisContextError::DuplicateDiscoveredContext);
     }
     Ok(contexts)
-}
-
-fn validate_semantic_context_contracts(
-    contracts: &[SemanticContextContract],
-    context_kind: AnalysisContextKind,
-) -> Result<(), AnalysisContextError> {
-    let name = context_kind.canonical_name();
-    let shared = contracts.iter().any(|contract| {
-        contract.lane == SemanticLane::Shared && contract.context_kinds.contains(&name)
-    });
-    let lane = contracts.iter().any(|contract| {
-        matches!(
-            (context_kind, contract.lane),
-            (AnalysisContextKind::Python, SemanticLane::Python)
-                | (AnalysisContextKind::Rust, SemanticLane::Rust)
-        ) && contract.context_kinds.contains(&name)
-    });
-    if shared && lane {
-        Ok(())
-    } else {
-        Err(AnalysisContextError::UnregisteredSemanticContextKind(
-            name.to_owned(),
-        ))
-    }
 }
 
 impl AnalysisContext {
@@ -592,20 +558,9 @@ mod tests {
     }
 
     #[test]
-    fn semantic_context_materialization_requires_generated_lane_authority() {
-        assert_eq!(
-            validate_semantic_context_contracts(&[], AnalysisContextKind::Python),
-            Err(AnalysisContextError::UnregisteredSemanticContextKind(
-                "python".to_owned()
-            ))
-        );
-        validate_semantic_context_contracts(
-            SEMANTIC_CONTEXT_CONTRACTS,
-            AnalysisContextKind::Python,
-        )
-        .unwrap();
-        validate_semantic_context_contracts(SEMANTIC_CONTEXT_CONTRACTS, AnalysisContextKind::Rust)
-            .unwrap();
+    fn semantic_context_kind_is_closed_by_the_application_owned_type() {
+        assert_eq!(AnalysisContextKind::Python.canonical_name(), "python");
+        assert_eq!(AnalysisContextKind::Rust.canonical_name(), "rust");
     }
 
     #[test]

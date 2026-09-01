@@ -84,7 +84,6 @@ pub struct PythonContextDiscoveryRequest {
     pub pyrefly_bundle_digest: [u8; 32],
     pub ruff_bundle_digest: [u8; 32],
     pub provider_bundle_version: String,
-    pub enabled_model_packs: Vec<PythonModelPack>,
 }
 
 /// Python implementation of the lane-neutral analysis-context discovery port.
@@ -160,14 +159,6 @@ pub struct PythonContextArtifact {
     pub digest: String,
 }
 
-/// One enabled semantic model pack.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct PythonModelPack {
-    pub pack_id: String,
-    pub digest: String,
-}
-
 /// The complete compatibility-sensitive Python context identity authority.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -187,7 +178,6 @@ pub struct PythonAnalysisContextManifest {
     pub project_config_artifacts: Vec<PythonContextArtifact>,
     pub pyrefly_bundle_digest: String,
     pub ruff_bundle_digest: String,
-    pub enabled_model_packs: Vec<PythonModelPack>,
 }
 
 /// Why a configuration artifact participates in invalidation.
@@ -538,8 +528,6 @@ fn assemble_manifest(
         "source roots",
         diagnostics,
     )?;
-    let mut model_packs = request.enabled_model_packs.clone();
-    validate_model_packs(&mut model_packs)?;
     Ok((
         PythonAnalysisContextManifest {
             context_kind: AnalysisContextKind::Python,
@@ -560,35 +548,9 @@ fn assemble_manifest(
             project_config_artifacts,
             pyrefly_bundle_digest: digest_string(&request.pyrefly_bundle_digest),
             ruff_bundle_digest: digest_string(&request.ruff_bundle_digest),
-            enabled_model_packs: model_packs,
         },
         dependencies,
     ))
-}
-
-fn validate_model_packs(
-    model_packs: &mut [PythonModelPack],
-) -> Result<(), PythonContextDiscoveryError> {
-    if model_packs
-        .iter()
-        .any(|pack| pack.pack_id.is_empty() || !valid_digest(&pack.digest))
-    {
-        return Err(PythonContextDiscoveryError::terminal(
-            "CONTEXT_MODEL_PACK_INVALID",
-            "model pack IDs and digests must be non-empty and canonical",
-        ));
-    }
-    model_packs.sort();
-    if model_packs
-        .windows(2)
-        .any(|pair| pair[0].pack_id == pair[1].pack_id)
-    {
-        return Err(PythonContextDiscoveryError::terminal(
-            "CONTEXT_MODEL_PACK_CONFLICT",
-            "duplicate model-pack identity",
-        ));
-    }
-    Ok(())
 }
 
 fn validate_request(
@@ -1315,7 +1277,6 @@ mod tests {
             pyrefly_bundle_digest: [0x32; 32],
             ruff_bundle_digest: [0x33; 32],
             provider_bundle_version: "python-providers-v1".to_owned(),
-            enabled_model_packs: Vec::new(),
         }
     }
 
@@ -1441,7 +1402,6 @@ mod tests {
             "project_config_artifacts",
             "pyrefly_bundle_digest",
             "ruff_bundle_digest",
-            "enabled_model_packs",
         ]
         .into_iter()
         .collect::<BTreeSet<_>>();

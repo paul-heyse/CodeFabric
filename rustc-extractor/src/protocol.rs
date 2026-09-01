@@ -1,4 +1,4 @@
-//! Model-generated protocol bindings shared with the stable daemon.
+//! Released protocol bindings shared with the stable daemon.
 
 #[allow(clippy::all, clippy::pedantic)]
 pub(crate) mod generated {
@@ -20,20 +20,9 @@ pub(crate) mod generated {
             }
         }
     }
-
-    #[allow(dead_code)]
-    pub(crate) mod observation_schema {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/generated/model_schema_tables.rs"
-        ));
-    }
-
-    #[allow(dead_code)]
-    pub(crate) mod registries {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/generated/registries.rs"
-        ));
-    }
 }
+
+/// Released append-only `RUST_MIR` capability allocation on the provider-control wire.
+///
+/// This is a compatibility constant, not a generated semantic registry or runtime authority.
+pub(crate) const RUST_MIR_CAPABILITY_CODE: u32 = 120;

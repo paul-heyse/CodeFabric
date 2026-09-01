@@ -1,1 +1,0 @@
-{"included":["Cargo.toml","pyproject.toml","python/golden_pkg/core.py","rust/src/lib.rs"],"inventory_only":["generated/bindings.py","malformed/broken.py"],"profile":"gate-b-v1"}

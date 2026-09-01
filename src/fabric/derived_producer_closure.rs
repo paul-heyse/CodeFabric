@@ -1,7 +1,7 @@
 //! Execution-proved closure from accepted fact families to derived-analysis producers.
 //!
-//! All relation, field, authority, semantic-class, and release identities are supplied by the
-//! active model. The compiler binds those identities and execution-count evidence to exact Arrow
+//! All relation, field, authority, semantic-class, and release identities come from the installed
+//! application contract. The compiler binds those identities and execution-count evidence to exact Arrow
 //! schemas and constructs ordinary DataFusion logical operators. It owns no fact-family registry
 //! and no SQL text. A family is closed only by exactly one execution-proved complete,
 //! application-owned runtime producer or exactly one application-owned unsupported remainder.
@@ -78,7 +78,7 @@ const STATE_INVALID: &str = "invalid";
 const STATE_MISSING: &str = "missing";
 const STATE_SATISFIED: &str = "satisfied";
 
-/// One exact model-bound relation supplied to the closure compiler.
+/// One exact contract-bound relation supplied to the closure compiler.
 #[derive(Clone, Debug)]
 pub struct ProducerClosureRelationInput {
     relation_id: RelationId,
@@ -111,7 +111,7 @@ pub struct DerivedProducerClosureInputs {
     pub unsupported_remainder: ProducerClosureRelationInput,
 }
 
-/// A model relation plus its exact Arrow contract and role-to-field bindings.
+/// An application relation plus its exact Arrow contract and role-to-field bindings.
 #[derive(Clone, Debug)]
 pub struct ProducerClosureRelationContract<F> {
     relation_id: RelationId,
@@ -145,14 +145,14 @@ impl<F> ProducerClosureRelationContract<F> {
     }
 }
 
-/// Field roles in the `accepted_fact_family` model relation.
+/// Field roles in the `accepted_fact_family` runtime relation.
 #[derive(Clone, Debug)]
 pub struct AcceptedFactFamilyFields {
     pub family_id: FieldId,
     pub semantic_class_id: FieldId,
 }
 
-/// Field roles in the `runtime_producer` model relation.
+/// Field roles in the `runtime_producer` runtime relation.
 #[derive(Clone, Debug)]
 pub struct RuntimeProducerFields {
     pub family_id: FieldId,
@@ -171,14 +171,14 @@ pub struct RuntimeProducerFields {
     pub proof_pin: FieldId,
 }
 
-/// Field roles in the `query_family_requirement` model relation.
+/// Field roles in the `query_family_requirement` runtime relation.
 #[derive(Clone, Debug)]
 pub struct QueryFamilyRequirementFields {
     pub query_family_id: FieldId,
     pub required_family_id: FieldId,
 }
 
-/// Field roles in the `unsupported_remainder` model relation.
+/// Field roles in the `unsupported_remainder` runtime relation.
 #[derive(Clone, Debug)]
 pub struct UnsupportedRemainderFields {
     pub family_id: FieldId,
@@ -231,7 +231,7 @@ pub struct ProducerClosureViolationFields {
     pub related_id: FieldId,
 }
 
-/// Model-supplied identities whose values execution must read.
+/// Application-contract identities whose values execution must read.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProducerClosureSemanticIdentities {
     application_owned_authority_id: Arc<str>,
@@ -239,7 +239,7 @@ pub struct ProducerClosureSemanticIdentities {
 }
 
 impl ProducerClosureSemanticIdentities {
-    /// Construct the semantic identities selected by the active model epoch.
+    /// Construct the semantic identities installed in the active fabric epoch.
     ///
     /// # Errors
     ///
@@ -274,7 +274,7 @@ impl ProducerClosureSemanticIdentities {
     }
 }
 
-/// Complete model binding for input, output, and semantic identities.
+/// Complete application binding for input, output, and semantic identities.
 #[derive(Clone, Debug)]
 pub struct DerivedProducerClosureBindings {
     operation_id: Arc<str>,
@@ -290,7 +290,7 @@ pub struct DerivedProducerClosureBindings {
 }
 
 impl DerivedProducerClosureBindings {
-    /// Validate the complete model binding before any executable plan is built.
+    /// Validate the complete application binding before any executable plan is built.
     ///
     /// # Errors
     ///
@@ -441,7 +441,7 @@ pub enum ProducerClosureNativeOperator {
     OutputOverflowProbeLimit,
 }
 
-/// Exact model/runtime dependency observed by the compiler that constructed the plans.
+/// Exact application/runtime dependency observed by the compiler that constructed the plans.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ProducerClosureCompilationDependency {
     InputRelation(RelationId),
@@ -1984,7 +1984,7 @@ async fn execute_bounded(
 pub enum DerivedProducerClosureError {
     #[error("invalid {kind} identity {value:?}")]
     InvalidText { kind: &'static str, value: String },
-    #[error("model relation identity {0:?} is bound more than once")]
+    #[error("runtime relation identity {0:?} is bound more than once")]
     DuplicateRelationId(String),
     #[error("{relation} binds field identity {field:?} more than once")]
     DuplicateFieldId {
@@ -2016,13 +2016,13 @@ pub enum DerivedProducerClosureError {
         expected: String,
         actual: String,
     },
-    #[error("{role} input schema differs from the active model binding")]
+    #[error("{role} input schema differs from the installed application binding")]
     InputSchemaMismatch {
         role: &'static str,
         expected: SchemaRef,
         actual: SchemaRef,
     },
-    #[error("compiled {role} schema differs from the active model binding")]
+    #[error("compiled {role} schema differs from the installed application binding")]
     CompiledSchemaMismatch {
         role: &'static str,
         expected: SchemaRef,
@@ -2153,7 +2153,7 @@ mod tests {
         };
 
         let accepted = ProducerClosureRelationContract::new(
-            relation_id("model.accepted_fact_family"),
+            relation_id("runtime.accepted_fact_family"),
             schema(vec![
                 utf8_field(accepted_fields.family_id.as_str(), false),
                 utf8_field(accepted_fields.semantic_class_id.as_str(), false),
@@ -2197,7 +2197,7 @@ mod tests {
             producer_fields,
         );
         let query = ProducerClosureRelationContract::new(
-            relation_id("model.query_family_requirement"),
+            relation_id("runtime.query_family_requirement"),
             schema(vec![
                 utf8_field(query_fields.query_family_id.as_str(), false),
                 utf8_field(query_fields.required_family_id.as_str(), false),
@@ -2205,7 +2205,7 @@ mod tests {
             query_fields,
         );
         let remainder = ProducerClosureRelationContract::new(
-            relation_id("model.unsupported_remainder"),
+            relation_id("runtime.unsupported_remainder"),
             schema(vec![
                 utf8_field(remainder_fields.family_id.as_str(), false),
                 utf8_field(remainder_fields.remainder_id.as_str(), false),

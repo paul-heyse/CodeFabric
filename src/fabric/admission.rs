@@ -41,6 +41,7 @@ impl ActivationBarrier {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AdmissionPhase {
     Open,
+    Draining,
     Recovering {
         durable_head: ExpectedHead,
     },
@@ -176,6 +177,66 @@ impl FabricAdmissionRuntime {
         })
     }
 
+    /// Install and open one clean-restart selection after external durable-history and receipt
+    /// reconciliation have completed.
+    ///
+    /// This is the production clean-start counterpart to marker-driven interrupted-operation
+    /// recovery. The runtime must have been created in the admission-closed
+    /// [`AdmissionPhase::Recovering`] posture. The caller first reconstructs the exact selected
+    /// epoch from the durable head's reversible table-version vector and reconciles the
+    /// receipt-only cache; this method then validates the unique head, workspace, execution/current
+    /// fence relation, and epoch identity before publishing and opening in one locked transition.
+    /// No empty chain, non-head event, stale fence, or process-local candidate can select state.
+    ///
+    /// # Errors
+    ///
+    /// Rejects any mismatch in durable head, workspace, fence, epoch identity, process cache, or
+    /// recovery posture and leaves query admission closed.
+    pub fn install_reconciled_selected_head(
+        &self,
+        event: ActivationEvent,
+        chain: &ActivationChain,
+        candidate: Arc<ProgrammaticFabricEpoch>,
+        active_recovery_fence: WriterFence,
+    ) -> Result<(), AdmissionError> {
+        Self::require_recovery_fence(event.execution_fence(), active_recovery_fence)?;
+        if chain.workspace_id() != self.workspace_id {
+            return Err(AdmissionError::WorkspaceMismatch);
+        }
+        if chain.head_event().copied() != Some(event) {
+            return Err(AdmissionError::RecoveryEventIsNotHead);
+        }
+        let selected_epoch = event.pins().epoch;
+        if chain.current_head() != ExpectedHead::Epoch(selected_epoch)
+            || *candidate.identity() != selected_epoch
+        {
+            return Err(AdmissionError::SelectedCandidateMismatch {
+                selected: selected_epoch,
+                candidate: *candidate.identity(),
+            });
+        }
+
+        let mut state = self.lock_state()?;
+        let AdmissionPhase::Recovering { durable_head } = state.phase else {
+            return Err(AdmissionError::RecoveryAdmissionUnexpectedlyOpen);
+        };
+        let active = self.active_head();
+        if durable_head != ExpectedHead::Epoch(selected_epoch)
+            || (active != ExpectedHead::Empty && active != ExpectedHead::Epoch(selected_epoch))
+        {
+            return Err(AdmissionError::RecoveryHeadMismatch {
+                durable: ExpectedHead::Epoch(selected_epoch),
+                active,
+            });
+        }
+        if active == ExpectedHead::Empty {
+            self.active.store(Some(candidate));
+        }
+        Self::advance_admission_generation(&mut state)?;
+        state.phase = AdmissionPhase::Open;
+        Ok(())
+    }
+
     fn recover_with_posture(
         chain: &ActivationChain,
         resolver: impl FnOnce(EpochId) -> Option<Arc<ProgrammaticFabricEpoch>>,
@@ -234,6 +295,25 @@ impl FabricAdmissionRuntime {
             epoch,
             admission_generation: state.admission_generation,
         })
+    }
+
+    /// Permanently close new-query admission before joined daemon shutdown.
+    ///
+    /// The transition is idempotent once draining. An activation or recovery transition already
+    /// in progress must first converge through its durable protocol; shutdown never overwrites
+    /// that state or reinterprets it as a clean close.
+    pub fn close_for_shutdown(&self) -> Result<(), AdmissionError> {
+        let mut state = self.lock_state()?;
+        match state.phase {
+            AdmissionPhase::Open => {
+                state.phase = AdmissionPhase::Draining;
+                Ok(())
+            }
+            AdmissionPhase::Draining => Ok(()),
+            AdmissionPhase::Recovering { .. }
+            | AdmissionPhase::Closed { .. }
+            | AdmissionPhase::Swapped { .. } => Err(AdmissionError::ShutdownTransitionInProgress),
+        }
     }
 
     /// Close new-query admission against the exact active predecessor and
@@ -344,6 +424,7 @@ impl FabricAdmissionRuntime {
             } if active == barrier => selected_epoch,
             AdmissionPhase::Swapped { .. } => return Err(AdmissionError::StaleBarrier),
             AdmissionPhase::Open
+            | AdmissionPhase::Draining
             | AdmissionPhase::Recovering { .. }
             | AdmissionPhase::Closed { .. } => {
                 return Err(AdmissionError::SelectionNotPublished);
@@ -501,7 +582,9 @@ impl FabricAdmissionRuntime {
             {
                 Ok(RecoverySelectionPublication::AlreadyReopened)
             }
-            AdmissionPhase::Open => Err(AdmissionError::RecoveryAdmissionUnexpectedlyOpen),
+            AdmissionPhase::Open | AdmissionPhase::Draining => {
+                Err(AdmissionError::RecoveryAdmissionUnexpectedlyOpen)
+            }
         }
     }
 
@@ -546,6 +629,7 @@ impl FabricAdmissionRuntime {
             AdmissionPhase::Open if self.active_head() == ExpectedHead::Epoch(selected_epoch) => {
                 Ok(())
             }
+            AdmissionPhase::Draining => Err(AdmissionError::RecoveryAdmissionUnexpectedlyOpen),
             _ => Err(AdmissionError::RecoveryPublishedSelectionMismatch),
         }
     }
@@ -588,6 +672,7 @@ impl FabricAdmissionRuntime {
                 Ok(())
             }
             AdmissionPhase::Open if self.active_head() == expected_head => Ok(()),
+            AdmissionPhase::Draining => Err(AdmissionError::RecoveryAdmissionUnexpectedlyOpen),
             _ => Err(AdmissionError::CannotAbortAfterSelection),
         }
     }
@@ -612,7 +697,7 @@ impl FabricAdmissionRuntime {
         match state.phase {
             AdmissionPhase::Closed { barrier: active } if active == barrier => Ok(()),
             AdmissionPhase::Closed { .. } => Err(AdmissionError::StaleBarrier),
-            AdmissionPhase::Open | AdmissionPhase::Recovering { .. } => {
+            AdmissionPhase::Open | AdmissionPhase::Draining | AdmissionPhase::Recovering { .. } => {
                 Err(AdmissionError::AdmissionNotClosed)
             }
             AdmissionPhase::Swapped { .. } => Err(AdmissionError::SelectionAlreadyPublished),
@@ -739,6 +824,8 @@ pub enum AdmissionError {
     RecoveryPublishedSelectionMismatch,
     #[error("admission is open before marker/cache recovery authorizes reopening")]
     RecoveryAdmissionUnexpectedlyOpen,
+    #[error("shutdown cannot replace an in-flight activation or recovery transition")]
+    ShutdownTransitionInProgress,
     #[error(
         "active recovery fence {active:?} does not authorize convergence of execution fence {execution:?}"
     )]
@@ -746,6 +833,12 @@ pub enum AdmissionError {
         execution: WriterFence,
         active: WriterFence,
     },
+    #[error("successor query authority for epoch {0:?} could not be reconstructed")]
+    SuccessorQueryAuthorityUnavailable(EpochId),
+    #[error("successor query authority for epoch {0:?} differs from activation authority")]
+    SuccessorQueryAuthorityMismatch(EpochId),
+    #[error("successor query authority for epoch {0:?} could not be installed")]
+    SuccessorQueryAuthorityInstallFailed(EpochId),
     #[error("admission mutex is poisoned")]
     StatePoisoned,
     #[error("internal admission invariant failed: {0}")]
@@ -761,13 +854,13 @@ mod tests {
         OverlaySegmentSetRef, PolicySetRef, TableVersionSetRef,
     };
     use crate::fabric::command::{
-        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins,
-        CompilerReleaseRef, ExecutionOwner, FabricCommand, FabricCommandPayload, IdempotencyKey,
-        LeaseId, ModelHeadRef, OperationId, OperationSelectionRef, PrincipalId, ProofReceiptRef,
-        ProviderSetRef, ResourceEnvelopeRef, RetentionPolicyRef, SourceGeneration, TransactionRef,
+        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins, ExecutionOwner,
+        FabricCommand, FabricCommandPayload, IdempotencyKey, InputReleaseRef, LeaseId, OperationId,
+        OperationSelectionRef, PrincipalId, ProgramReleaseRef, ProofReceiptRef, ProviderSetRef,
+        ResourceEnvelopeRef, RetentionPolicyRef, SourceGeneration, TransactionRef,
         WriterGeneration,
     };
-    use crate::fabric::epoch::FabricEpochRuntimeConfig;
+    use crate::fabric::epoch_runtime::FabricEpochRuntimeConfig;
     use crate::fabric::programmatic_epoch::{
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
@@ -803,8 +896,13 @@ mod tests {
                 generation: WriterGeneration::new(generation).unwrap(),
             },
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes(id32(5)),
-                model_head: ModelHeadRef::from_bytes(id32(6)),
+                input_release: InputReleaseRef::from_bytes(id32(5)),
+                program_release: ProgramReleaseRef::from_bytes(id32(6)),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    id32(6),
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(id32(6)),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(id32(6)),
                 source_generation: SourceGeneration::new(7),
                 provider_set: ProviderSetRef::from_bytes(id32(8)),
             },
@@ -837,8 +935,11 @@ mod tests {
             ActivationOrdinal::new(ordinal).unwrap(),
             FabricEpochPins {
                 epoch: target,
-                compiler_release: command.pins.compiler_release,
-                model_head: command.pins.model_head,
+                input_release: command.pins.input_release,
+                program_release: command.pins.program_release,
+                application_release: command.pins.application_release,
+                source_authority: command.pins.source_authority,
+                provider_release: command.pins.provider_release,
                 source_generation: command.pins.source_generation,
                 provider_set: command.pins.provider_set,
                 table_versions: TableVersionSetRef::from_bytes(id32(11)),
@@ -1002,6 +1103,89 @@ mod tests {
             .reopen_recovered_selection(event, &chain, active_recovery_fence)
             .unwrap();
         assert_eq!(runtime.admit().unwrap().epoch_id(), selected);
+    }
+
+    #[tokio::test]
+    async fn clean_restart_installs_only_the_reconciled_exact_selected_head() {
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let selected = EpochId::from_bytes(id16(20));
+        let selected_epoch = epoch(selected).await;
+        let command = command(1, workspace, ExpectedHead::Empty, selected, 1);
+        let event = activation_event(1, &command, None, 1, selected);
+        let chain = ActivationChain::derive(workspace, [event]).unwrap();
+        let runtime =
+            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&chain).unwrap();
+        let active_recovery_fence = WriterFence {
+            lease_id: LeaseId::from_bytes(id16(44)),
+            generation: WriterGeneration::new(2).unwrap(),
+        };
+
+        assert_eq!(
+            runtime.admit().unwrap_err(),
+            AdmissionError::AdmissionClosed
+        );
+        runtime
+            .install_reconciled_selected_head(
+                event,
+                &chain,
+                Arc::clone(&selected_epoch),
+                active_recovery_fence,
+            )
+            .unwrap();
+        let lease = runtime.admit().unwrap();
+        assert_eq!(lease.epoch_id(), selected);
+        assert!(Arc::ptr_eq(lease.epoch(), &selected_epoch));
+    }
+
+    #[tokio::test]
+    async fn clean_restart_rejects_wrong_epoch_and_keeps_admission_closed() {
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let selected = EpochId::from_bytes(id16(20));
+        let wrong = EpochId::from_bytes(id16(21));
+        let wrong_epoch = epoch(wrong).await;
+        let command = command(1, workspace, ExpectedHead::Empty, selected, 1);
+        let event = activation_event(1, &command, None, 1, selected);
+        let chain = ActivationChain::derive(workspace, [event]).unwrap();
+        let runtime =
+            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&chain).unwrap();
+
+        assert_eq!(
+            runtime
+                .install_reconciled_selected_head(event, &chain, wrong_epoch, command.writer_fence,)
+                .unwrap_err(),
+            AdmissionError::SelectedCandidateMismatch {
+                selected,
+                candidate: wrong,
+            }
+        );
+        assert_eq!(
+            runtime.admit().unwrap_err(),
+            AdmissionError::AdmissionClosed
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_close_is_idempotent_and_never_reopens_query_admission() {
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let selected = EpochId::from_bytes(id16(20));
+        let selected_epoch = epoch(selected).await;
+        let command = command(1, workspace, ExpectedHead::Empty, selected, 1);
+        let event = activation_event(1, &command, None, 1, selected);
+        let chain = ActivationChain::derive(workspace, [event]).unwrap();
+        let runtime = FabricAdmissionRuntime::recover(&chain, |_| Some(selected_epoch)).unwrap();
+
+        runtime.close_for_shutdown().unwrap();
+        runtime.close_for_shutdown().unwrap();
+        assert_eq!(
+            runtime.admit().unwrap_err(),
+            AdmissionError::AdmissionClosed
+        );
+        assert_eq!(
+            runtime
+                .close_admission(ExpectedHead::Epoch(selected), command.writer_fence)
+                .unwrap_err(),
+            AdmissionError::AdmissionAlreadyClosed
+        );
     }
 
     #[test]

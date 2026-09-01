@@ -18,7 +18,7 @@ service ProviderControl {
   rpc Cancel(CancelProviderRunRequest) returns (CancelAcknowledgement);
 }
 
-// Values match the ontology ProviderRunState registry codes exactly.
+// Released provider-state wire allocations; names and numbers remain compatibility-stable.
 enum ProviderRunState {
   PROVIDER_RUN_STATE_UNSPECIFIED = 0;
   PROVIDER_RUN_STATE_QUEUED = 10;

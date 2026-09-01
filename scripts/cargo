@@ -5,6 +5,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+# shellcheck source=../tooling/rust-tool-versions.env
+source "$repo_root/tooling/rust-tool-versions.env"
 rustup_bin="$HOME/.cargo/bin/rustup"
 if [ ! -x "$rustup_bin" ]; then
   rustup_bin="$(command -v rustup || true)"
@@ -16,7 +18,7 @@ fi
 
 unset RUSTUP_TOOLCHAIN RUSTC RUSTDOC
 
-toolchain="stable"
+toolchain="$CODEFABRIC_STABLE_TOOLCHAIN"
 toolchain_explicit=0
 if [[ "${1:-}" == +* ]]; then
   toolchain="${1#+}"
@@ -26,7 +28,7 @@ fi
 
 case "$PWD/" in
   "$repo_root/rustc-extractor/"*)
-    [ "$toolchain_explicit" = 1 ] || toolchain="nightly-2026-08-18"
+    [ "$toolchain_explicit" = 1 ] || toolchain="$CODEFABRIC_ASSURANCE_TOOLCHAIN"
     ;;
 esac
 
@@ -40,7 +42,7 @@ for argument in "$@"; do
   fi
   case "$manifest" in
     rustc-extractor/* | */rustc-extractor/*)
-      [ "$toolchain_explicit" = 1 ] || toolchain="nightly-2026-08-18"
+      [ "$toolchain_explicit" = 1 ] || toolchain="$CODEFABRIC_ASSURANCE_TOOLCHAIN"
       ;;
   esac
   previous="$argument"

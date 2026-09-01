@@ -1,0 +1,1511 @@
+//! Production semantic-query backend over exact programmatic epoch authority.
+//!
+//! The RPC layer owns authentication and released-envelope validation. This backend admits one
+//! immutable epoch before semantic projection, resolves only that epoch's application catalogs,
+//! compiles directly by program binding ID, materializes request-owned Arrow relations, derives a
+//! reduced child authorization from normalized scope rows, and publishes Arrow resources into the
+//! daemon-wide registry. No bootstrap catalog or form-selected executor participates.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use async_trait::async_trait;
+
+use crate::cancellation::Cancellation;
+use crate::identity::{IdentityDomain, encode_public_id};
+use crate::query_service::{
+    PublishedArrowSemanticSuccess, SemanticBackendExecutionContext, SemanticBackendOutcome,
+    SemanticQueryBackend,
+};
+use crate::registries::FreshnessState;
+use crate::relational_semantic_query::{
+    CompiledEpochBoundScopeHandoff, EpochBoundSemanticExecutionCatalog, EpochBoundSemanticIngress,
+    SemanticBlockDisposition, SemanticClauseValue, compile_epoch_bound_semantic_request,
+    validate_epoch_bound_semantic_ingress,
+};
+use crate::semantic_query_contract::{
+    FreshnessPolicy, ParsedSemanticRequest, SemanticQueryError, SemanticSnapshotResponse,
+};
+
+use super::admission::AdmissionError;
+use super::arrow_result_resource::ResultResourceLease;
+use super::command::ExpectedHead;
+use super::programmatic_schema::ProgrammaticRelationId;
+use super::programmatic_workspace::{
+    ProgrammaticDaemonComposition, ProgrammaticWorkspaceRuntime, WorkspaceEpochQueryAuthority,
+};
+use super::published_arrow_result::PublishedResultOwner;
+use super::query_artifact::{
+    QueryArtifactStage, QueryArtifactStageState, QueryExecutionArtifactAccumulator,
+};
+use super::relational_query_runtime::{RelationalQueryAuthorization, RelationalQueryTransaction};
+use super::request_owned_relation::RequestOwnedRelationCollection;
+
+const REQUEST_CONTENT_PIN_DOMAIN: &[u8] = b"codefabric.programmatic-semantic-request-content.v1\0";
+
+/// Explicit application port from the released request DTO to normalized epoch-bound relations.
+///
+/// Implementations are supplied during production composition. There is intentionally no default
+/// implementation and no lookup by released query form inside this backend.
+pub trait ProgrammaticSemanticIngressPort: Send + Sync + 'static {
+    /// Stable non-sentinel identity of this transformation release.
+    fn authority_pin(&self) -> [u8; 32];
+
+    /// Cheap request-shape preflight used before the asynchronous accepted-query task is spawned.
+    fn validate_request(
+        &self,
+        request: &ParsedSemanticRequest,
+    ) -> Result<(), ProgrammaticQueryPortError>;
+
+    /// Project one request against exactly the already-admitted epoch authority.
+    fn project(
+        &self,
+        request: &ParsedSemanticRequest,
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+    ) -> Result<EpochBoundSemanticIngress, ProgrammaticQueryPortError>;
+}
+
+/// Application policy port consuming every normalized scope handoff.
+pub trait ProgrammaticScopeAuthorizationPort: Send + Sync + 'static {
+    /// Exact policy identity implemented by this port.
+    fn policy_pin(&self) -> [u8; 32];
+
+    /// Derive the complete reduced-child authorization for one authenticated owner.
+    fn authorize(
+        &self,
+        request: &ParsedSemanticRequest,
+        owner: PublishedResultOwner,
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+        scopes: &[CompiledEpochBoundScopeHandoff],
+    ) -> Result<RelationalQueryAuthorization, ProgrammaticQueryPortError>;
+}
+
+/// One exact normalized scope outcome admitted by application policy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProgrammaticScopeCapabilityGrant {
+    authorization_input_id: Arc<str>,
+    scope_content_pin: [u8; 32],
+    table_relations: BTreeSet<ProgrammaticRelationId>,
+    max_output_rows: usize,
+}
+
+impl ProgrammaticScopeCapabilityGrant {
+    /// Construct a non-empty capability-narrowing rule for one exact scope relation value.
+    ///
+    /// # Errors
+    ///
+    /// Rejects absent identities, an empty table subset, or a zero output-row bound.
+    pub fn try_new(
+        authorization_input_id: impl Into<Arc<str>>,
+        scope_content_pin: [u8; 32],
+        table_relations: BTreeSet<ProgrammaticRelationId>,
+        max_output_rows: usize,
+    ) -> Result<Self, ProgrammaticQueryPortError> {
+        let authorization_input_id = authorization_input_id.into();
+        if authorization_input_id.trim().is_empty()
+            || scope_content_pin == [0; 32]
+            || table_relations.is_empty()
+            || max_output_rows == 0
+        {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "scope capability rule is incomplete".to_owned(),
+            ));
+        }
+        Ok(Self {
+            authorization_input_id,
+            scope_content_pin,
+            table_relations,
+            max_output_rows,
+        })
+    }
+}
+
+/// Exact application policy which can only narrow an epoch's baseline child capabilities.
+#[derive(Clone, Debug)]
+pub struct ExactProgrammaticScopeAuthorization {
+    policy_pin: [u8; 32],
+    grants: BTreeMap<(Arc<str>, [u8; 32]), ProgrammaticScopeCapabilityGrant>,
+}
+
+impl ExactProgrammaticScopeAuthorization {
+    /// Install the complete accepted scope-value relation for one policy release.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a missing policy identity, duplicate exact scope keys, or an empty rule set.
+    pub fn try_new(
+        policy_pin: [u8; 32],
+        grants: impl IntoIterator<Item = ProgrammaticScopeCapabilityGrant>,
+    ) -> Result<Self, ProgrammaticQueryPortError> {
+        if policy_pin == [0; 32] {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "scope policy identity is absent".to_owned(),
+            ));
+        }
+        let mut by_scope = BTreeMap::new();
+        for grant in grants {
+            let key = (
+                Arc::clone(&grant.authorization_input_id),
+                grant.scope_content_pin,
+            );
+            if by_scope.insert(key, grant).is_some() {
+                return Err(ProgrammaticQueryPortError::Rejected(
+                    "scope capability rule is duplicated".to_owned(),
+                ));
+            }
+        }
+        if by_scope.is_empty() {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "scope policy has no accepted values".to_owned(),
+            ));
+        }
+        Ok(Self {
+            policy_pin,
+            grants: by_scope,
+        })
+    }
+}
+
+impl ProgrammaticScopeAuthorizationPort for ExactProgrammaticScopeAuthorization {
+    fn policy_pin(&self) -> [u8; 32] {
+        self.policy_pin
+    }
+
+    fn authorize(
+        &self,
+        request: &ParsedSemanticRequest,
+        owner: PublishedResultOwner,
+        _workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+        scopes: &[CompiledEpochBoundScopeHandoff],
+    ) -> Result<RelationalQueryAuthorization, ProgrammaticQueryPortError> {
+        let baseline = authority.authorization();
+        if baseline.query_policy() != &self.policy_pin {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "scope policy differs from the installed baseline authorization".to_owned(),
+            ));
+        }
+        let mut retained_tables = baseline.table_relations().cloned().collect::<BTreeSet<_>>();
+        let mut max_output_rows = baseline.max_output_rows();
+        let mut consumed_inputs = BTreeSet::new();
+        let mut scope_identity = blake3::Hasher::new();
+        frame_scope_identity(
+            &mut scope_identity,
+            b"codefabric.programmatic-scope-authorization.v1",
+        );
+        frame_scope_identity(&mut scope_identity, &self.policy_pin);
+        frame_scope_identity(&mut scope_identity, owner.agent_id().as_bytes());
+        frame_scope_identity(
+            &mut scope_identity,
+            &canonical_request_content_pin(&request.canonical_bytes),
+        );
+        for scope in scopes {
+            if !consumed_inputs.insert(Arc::clone(&scope.authorization_input_id)) {
+                return Err(ProgrammaticQueryPortError::Rejected(format!(
+                    "authorization input {} is repeated",
+                    scope.authorization_input_id
+                )));
+            }
+            let key = (Arc::clone(&scope.authorization_input_id), scope.content_pin);
+            let grant = self.grants.get(&key).ok_or_else(|| {
+                ProgrammaticQueryPortError::Rejected(format!(
+                    "scope {} has no exact application-policy grant",
+                    scope.authorization_input_id
+                ))
+            })?;
+            retained_tables.retain(|relation_id| grant.table_relations.contains(relation_id));
+            max_output_rows = max_output_rows.min(grant.max_output_rows);
+            frame_scope_identity(&mut scope_identity, scope.authorization_input_id.as_bytes());
+            frame_scope_identity(&mut scope_identity, &scope.handoff_pin);
+            frame_scope_identity(&mut scope_identity, &scope.content_pin);
+        }
+        let access_scope = *scope_identity.finalize().as_bytes();
+        baseline
+            .narrow_to(access_scope, &retained_tables, max_output_rows)
+            .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ReleasedV13ScopeRule {
+    authorization_input_id: Arc<str>,
+    handoff_pin: [u8; 32],
+}
+
+/// Request-independent application policy for the exact released 1.3 scope projection.
+///
+/// The execution catalog supplies the preinstalled scope identities and handoff pins. At request
+/// time this port reconstructs every expected normalized value from the parsed request, validates
+/// the compiler handoff row-for-row, and only then narrows the epoch baseline. It never learns a
+/// request content pin during backend construction and therefore remains valid for later requests.
+#[derive(Clone, Debug)]
+pub struct ReleasedV13ProgrammaticScopeAuthorization {
+    policy_pin: [u8; 32],
+    rules: BTreeMap<Arc<str>, ReleasedV13ScopeRule>,
+    table_relations: BTreeSet<ProgrammaticRelationId>,
+    max_output_rows: usize,
+}
+
+impl ReleasedV13ProgrammaticScopeAuthorization {
+    /// Bind the exact released 1.3 scope policy to one installed execution catalog.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a policy mismatch, an incomplete/duplicate scope set, sentinel handoff pins, an
+    /// empty table capability, or a zero result bound.
+    pub fn try_new(
+        policy_pin: [u8; 32],
+        execution_catalog: &EpochBoundSemanticExecutionCatalog,
+        table_relations: BTreeSet<ProgrammaticRelationId>,
+        max_output_rows: usize,
+    ) -> Result<Self, ProgrammaticQueryPortError> {
+        if policy_pin == [0; 32]
+            || execution_catalog.policy_pin != policy_pin
+            || table_relations.is_empty()
+            || max_output_rows == 0
+        {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "released 1.3 scope policy authority is incomplete".to_owned(),
+            ));
+        }
+        let expected = [
+            "scope.specification",
+            "scope.version",
+            "scope.workspace",
+            "scope.freshness",
+            "scope.cost-maximum-rows",
+            "scope.response-projection-field",
+            "scope.response-projection-enabled",
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        let mut rules = BTreeMap::new();
+        for row in &execution_catalog.scopes {
+            if row.handoff_pin == [0; 32]
+                || row.authorization_input_id.trim().is_empty()
+                || rules
+                    .insert(
+                        Arc::clone(&row.scope_id),
+                        ReleasedV13ScopeRule {
+                            authorization_input_id: Arc::clone(&row.authorization_input_id),
+                            handoff_pin: row.handoff_pin,
+                        },
+                    )
+                    .is_some()
+            {
+                return Err(ProgrammaticQueryPortError::Rejected(
+                    "released 1.3 scope catalog is ambiguous".to_owned(),
+                ));
+            }
+        }
+        if rules.keys().map(AsRef::as_ref).collect::<BTreeSet<_>>() != expected {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "released 1.3 scope catalog is incomplete".to_owned(),
+            ));
+        }
+        Ok(Self {
+            policy_pin,
+            rules,
+            table_relations,
+            max_output_rows,
+        })
+    }
+}
+
+impl ProgrammaticScopeAuthorizationPort for ReleasedV13ProgrammaticScopeAuthorization {
+    fn policy_pin(&self) -> [u8; 32] {
+        self.policy_pin
+    }
+
+    fn authorize(
+        &self,
+        request: &ParsedSemanticRequest,
+        owner: PublishedResultOwner,
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+        scopes: &[CompiledEpochBoundScopeHandoff],
+    ) -> Result<RelationalQueryAuthorization, ProgrammaticQueryPortError> {
+        let baseline = authority.authorization();
+        if baseline.query_policy() != &self.policy_pin
+            || workspace.workspace_id() != authority.workspace_id()
+            || request.request.workspace_id
+                != workspace
+                    .public_workspace_id()
+                    .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))?
+        {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "released 1.3 scope policy differs from admitted authority".to_owned(),
+            ));
+        }
+        let expected = released_v1_3_scope_values(request)?;
+        if scopes.len() != expected.len() {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "released 1.3 scope handoff set is incomplete".to_owned(),
+            ));
+        }
+
+        let mut observed = BTreeSet::new();
+        let mut scope_identity = blake3::Hasher::new();
+        frame_scope_identity(
+            &mut scope_identity,
+            b"codefabric.released-v1.3-scope-authorization.v1",
+        );
+        frame_scope_identity(&mut scope_identity, &self.policy_pin);
+        frame_scope_identity(&mut scope_identity, owner.agent_id().as_bytes());
+        frame_scope_identity(
+            &mut scope_identity,
+            &canonical_request_content_pin(&request.canonical_bytes),
+        );
+        for scope in scopes {
+            let rule = self.rules.get(scope.scope_id.as_ref()).ok_or_else(|| {
+                ProgrammaticQueryPortError::Rejected(format!(
+                    "scope {} is outside released 1.3 policy",
+                    scope.scope_id
+                ))
+            })?;
+            let values = expected.get(scope.scope_id.as_ref()).ok_or_else(|| {
+                ProgrammaticQueryPortError::Rejected(format!(
+                    "scope {} was not caused by the released request",
+                    scope.scope_id
+                ))
+            })?;
+            if !observed.insert(Arc::clone(&scope.scope_id))
+                || scope.authorization_input_id != rule.authorization_input_id
+                || scope.handoff_pin != rule.handoff_pin
+                || scope.rows.len() != values.len()
+                || scope.rows.iter().zip(values).enumerate().any(
+                    |(ordinal, (row, expected_value))| {
+                        row.scope_id != scope.scope_id
+                            || usize::try_from(row.ordinal).ok() != Some(ordinal)
+                            || &row.value != expected_value
+                    },
+                )
+            {
+                return Err(ProgrammaticQueryPortError::Rejected(format!(
+                    "scope {} differs from the released 1.3 request projection",
+                    scope.scope_id
+                )));
+            }
+            frame_scope_identity(&mut scope_identity, scope.scope_id.as_bytes());
+            frame_scope_identity(&mut scope_identity, scope.authorization_input_id.as_bytes());
+            frame_scope_identity(&mut scope_identity, &scope.handoff_pin);
+            frame_scope_identity(&mut scope_identity, &scope.content_pin);
+        }
+        if observed
+            != expected
+                .keys()
+                .map(|scope| Arc::<str>::from(*scope))
+                .collect::<BTreeSet<_>>()
+        {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "released 1.3 scope handoff omitted a request scope".to_owned(),
+            ));
+        }
+
+        let retained_tables = baseline
+            .table_relations()
+            .filter(|relation| self.table_relations.contains(*relation))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let request_max_output_rows = request
+            .request
+            .cost_budget
+            .map_or(usize::MAX, |budget| budget.maximum_rows);
+        baseline
+            .narrow_to(
+                *scope_identity.finalize().as_bytes(),
+                &retained_tables,
+                baseline
+                    .max_output_rows()
+                    .min(self.max_output_rows)
+                    .min(request_max_output_rows),
+            )
+            .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))
+    }
+}
+
+fn released_v1_3_scope_values(
+    request: &ParsedSemanticRequest,
+) -> Result<BTreeMap<&'static str, Vec<SemanticClauseValue>>, ProgrammaticQueryPortError> {
+    let request = &request.request;
+    let freshness = match request.freshness_policy {
+        FreshnessPolicy::CurrentRequired => "current_required",
+        FreshnessPolicy::WaitForCurrent => "wait_for_current",
+        FreshnessPolicy::BestAvailableSnapshot => "best_available_snapshot",
+        FreshnessPolicy::AwaitLatest => "await_latest",
+        FreshnessPolicy::RequireCurrentForTargets => "require_current_for_targets",
+        FreshnessPolicy::RequireSourceCurrent => "require_source_current",
+        FreshnessPolicy::RequireSemanticCurrent => "require_semantic_current",
+    };
+    let mut expected = BTreeMap::from([
+        (
+            "scope.specification",
+            vec![SemanticClauseValue::Text(Arc::from(
+                request.specification.as_str(),
+            ))],
+        ),
+        (
+            "scope.version",
+            vec![SemanticClauseValue::Text(Arc::from(
+                request.version.as_str(),
+            ))],
+        ),
+        (
+            "scope.workspace",
+            vec![SemanticClauseValue::Text(Arc::from(
+                request.workspace_id.as_str(),
+            ))],
+        ),
+        (
+            "scope.freshness",
+            vec![SemanticClauseValue::Text(Arc::from(freshness))],
+        ),
+    ]);
+    if let Some(cost) = request.cost_budget {
+        expected.insert(
+            "scope.cost-maximum-rows",
+            vec![SemanticClauseValue::UInt64(
+                u64::try_from(cost.maximum_rows).map_err(|_| {
+                    ProgrammaticQueryPortError::Rejected(
+                        "released cost budget exceeds u64".to_owned(),
+                    )
+                })?,
+            )],
+        );
+    }
+    if let Some(projection) = &request.response_projection {
+        if !projection.is_empty() {
+            expected.insert(
+                "scope.response-projection-field",
+                projection
+                    .keys()
+                    .map(|field| SemanticClauseValue::Text(Arc::from(field.as_str())))
+                    .collect(),
+            );
+            expected.insert(
+                "scope.response-projection-enabled",
+                projection
+                    .values()
+                    .copied()
+                    .map(SemanticClauseValue::Boolean)
+                    .collect(),
+            );
+        }
+    }
+    Ok(expected)
+}
+
+/// Public, non-authoritative projection of one exact programmatic epoch.
+pub trait ProgrammaticSnapshotProjectionPort: Send + Sync + 'static {
+    /// Stable non-sentinel identity of the public projection implementation.
+    fn authority_pin(&self) -> [u8; 32];
+
+    fn project(
+        &self,
+        public_workspace_id: &str,
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+        freshness: FreshnessState,
+    ) -> Result<SemanticSnapshotResponse, ProgrammaticQueryPortError>;
+}
+
+/// Deterministic public compatibility projection over one exact programmatic epoch.
+///
+/// Every internal authority value comes from the composed workspace's activation event, exact
+/// table vector, release vector, or sealed epoch observation. Compatibility-only strings are
+/// explicitly labelled rather than being consulted by any internal planner or selector.
+#[derive(Clone, Debug)]
+pub struct ExactProgrammaticSnapshotProjection {
+    authority_pin: [u8; 32],
+}
+
+impl ExactProgrammaticSnapshotProjection {
+    // This exact implementation has a stable built-in identity, but the production port bundle
+    // must still select it explicitly. Providing `Default` would create an unintended fallback.
+    #[allow(clippy::new_without_default)]
+    #[must_use]
+    pub fn new() -> Self {
+        let mut hasher = blake3::Hasher::new();
+        frame_scope_identity(
+            &mut hasher,
+            b"codefabric.programmatic-public-snapshot-projection.v1",
+        );
+        Self {
+            authority_pin: *hasher.finalize().as_bytes(),
+        }
+    }
+}
+
+impl ProgrammaticSnapshotProjectionPort for ExactProgrammaticSnapshotProjection {
+    fn authority_pin(&self) -> [u8; 32] {
+        self.authority_pin
+    }
+
+    fn project(
+        &self,
+        public_workspace_id: &str,
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+        freshness: FreshnessState,
+    ) -> Result<SemanticSnapshotResponse, ProgrammaticQueryPortError> {
+        let startup = workspace.startup_observation();
+        let pins = authority.activation_pins();
+        if startup.workspace_id != authority.workspace_id()
+            || pins.epoch != authority.epoch_id()
+            || pins.table_versions
+                != authority
+                    .epoch()
+                    .observation_publication()
+                    .table_version_set_ref()
+            || pins.resource_envelope.as_bytes() != authority.resources().resource_policy()
+            || workspace.admission().active_head() != ExpectedHead::Epoch(authority.epoch_id())
+            || public_workspace_id
+                != workspace
+                    .public_workspace_id()
+                    .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))?
+        {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "snapshot projection authority differs from the admitted workspace epoch"
+                    .to_owned(),
+            ));
+        }
+        let snapshot_id = encode_public_id(
+            IdentityDomain::ServingSnapshot,
+            None,
+            *authority.epoch_id().as_bytes(),
+        )
+        .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))?;
+        let publication_id = encode_public_id(
+            IdentityDomain::Publication,
+            None,
+            public_id16(
+                b"codefabric.programmatic-activation-publication.v1",
+                pins.proof_receipt.as_bytes(),
+            ),
+        )
+        .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))?;
+        let application_release = startup.releases.application_release();
+        let context_id = public_id16(
+            b"codefabric.programmatic-analysis-context.v1",
+            application_release.as_bytes(),
+        );
+        let analysis_context_set_id =
+            encode_public_id(IdentityDomain::ContextSet, None, context_id)
+                .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))?;
+        let analysis_context_id =
+            encode_public_id(IdentityDomain::AnalysisContext, None, context_id)
+                .map_err(|error| ProgrammaticQueryPortError::Rejected(error.to_string()))?;
+        let mut table_hasher = blake3::Hasher::new();
+        frame_scope_identity(
+            &mut table_hasher,
+            b"codefabric.programmatic-public-table-vector.v1",
+        );
+        for (relation_id, table) in authority
+            .epoch()
+            .observation_publication()
+            .table_version_set()
+            .components()
+        {
+            frame_scope_identity(&mut table_hasher, relation_id.as_bytes());
+            frame_scope_identity(
+                &mut table_hasher,
+                table.canonical_root().as_str().as_bytes(),
+            );
+            frame_scope_identity(&mut table_hasher, &table.version().to_be_bytes());
+        }
+        let mut capability = BTreeMap::new();
+        capability.insert("factory_id".to_owned(), startup.factory_id.to_owned());
+        capability.insert(
+            "program_catalog_pin".to_owned(),
+            digest_text(&authority.ingress_catalog().program_catalog_pin),
+        );
+        capability.insert(
+            "producer_closure_proof_pin".to_owned(),
+            digest_text(&authority.producer_closure().proof_pin),
+        );
+        capability.insert(
+            "policy_set_pin".to_owned(),
+            digest_text(pins.policy_set.as_bytes()),
+        );
+        capability.insert(
+            "proof_receipt_pin".to_owned(),
+            digest_text(pins.proof_receipt.as_bytes()),
+        );
+        Ok(SemanticSnapshotResponse {
+            snapshot_id,
+            workspace_id: public_workspace_id.to_owned(),
+            repository_id: None,
+            worktree_id: None,
+            source_generation: pins.source_generation.get(),
+            source_inventory_digest: digest_text(startup.releases.source_authority().as_bytes()),
+            durable_base_publication: publication_id,
+            base_table_version_digest: digest_text(table_hasher.finalize().as_bytes()),
+            // The target has one immutable overlay-set pin, not a mutable overlay generation.
+            overlay_generation: 0,
+            overlay_checksum: digest_text(pins.overlay_segments.as_bytes()),
+            analysis_context_set_id,
+            analysis_context_ids: vec![analysis_context_id],
+            freshness_state: freshness,
+            source_trust_state: "EXACT_TYPED_INPUTS".to_owned(),
+            event_stream_health: "ACTIVATION_CHAIN_SELECTED".to_owned(),
+            git_acceleration_status: "NON_AUTHORITY".to_owned(),
+            git_operation_summary: None,
+            pending_update_count: 0,
+            ontology_version: "not-applicable-programmatic-authority".to_owned(),
+            schema_bundle_version: authority.epoch().schema_authority_id().to_owned(),
+            provider_bundle_version: digest_text(pins.provider_set.as_bytes()),
+            derivation_bundle_version: digest_text(
+                startup.releases.application_release().as_bytes(),
+            ),
+            query_language_version: "1.3".to_owned(),
+            capability_summaries: vec![capability],
+            diagnostic_references: Vec::new(),
+        })
+    }
+}
+
+/// Complete, explicit backend ports. No member has a fallback or `Default` implementation.
+pub struct ProgrammaticSemanticQueryPorts {
+    application_release: [u8; 32],
+    ingress: Arc<dyn ProgrammaticSemanticIngressPort>,
+    scope_authorization: Arc<dyn ProgrammaticScopeAuthorizationPort>,
+    snapshot: Arc<dyn ProgrammaticSnapshotProjectionPort>,
+}
+
+impl fmt::Debug for ProgrammaticSemanticQueryPorts {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProgrammaticSemanticQueryPorts")
+            .field("application_release", &"REDACTED_IDENTITY")
+            .field("ingress", &"installed")
+            .field("scope_authorization", &"installed")
+            .field("snapshot", &"installed")
+            .finish()
+    }
+}
+
+impl ProgrammaticSemanticQueryPorts {
+    /// Construct ports only when every implementation names a real release/policy identity.
+    pub fn try_new(
+        application_release: [u8; 32],
+        ingress: Arc<dyn ProgrammaticSemanticIngressPort>,
+        scope_authorization: Arc<dyn ProgrammaticScopeAuthorizationPort>,
+        snapshot: Arc<dyn ProgrammaticSnapshotProjectionPort>,
+    ) -> Result<Self, ProgrammaticSemanticQueryBackendError> {
+        if application_release == [0; 32] {
+            return Err(ProgrammaticSemanticQueryBackendError::MissingApplicationRelease);
+        }
+        for (kind, pin) in [
+            ("semantic ingress", ingress.authority_pin()),
+            ("scope authorization", scope_authorization.policy_pin()),
+            ("snapshot projection", snapshot.authority_pin()),
+        ] {
+            if pin == [0; 32] {
+                return Err(ProgrammaticSemanticQueryBackendError::MissingPortPin(kind));
+            }
+        }
+        Ok(Self {
+            application_release,
+            ingress,
+            scope_authorization,
+            snapshot,
+        })
+    }
+
+    #[must_use]
+    pub const fn application_release(&self) -> [u8; 32] {
+        self.application_release
+    }
+}
+
+/// Read-only query routing over an atomically composed programmatic daemon.
+pub struct ProgrammaticSemanticQueryBackend {
+    workspaces: BTreeMap<String, Arc<ProgrammaticWorkspaceRuntime>>,
+    published_results: Arc<super::published_arrow_result::PublishedArrowResultRegistry>,
+    ports: ProgrammaticSemanticQueryPorts,
+    startup_ready: AtomicBool,
+}
+
+impl fmt::Debug for ProgrammaticSemanticQueryBackend {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProgrammaticSemanticQueryBackend")
+            .field("workspace_count", &self.workspaces.len())
+            .field("ports", &self.ports)
+            .field("startup_ready", &self.startup_ready.load(Ordering::Acquire))
+            .finish_non_exhaustive()
+    }
+}
+
+impl ProgrammaticSemanticQueryBackend {
+    /// Snapshot the already-composed workspace routes and exact shared result registry.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an empty daemon composition, invalid public workspace identity, or duplicate public
+    /// route. It never synthesizes a workspace or empty-success backend.
+    pub fn try_new(
+        composition: &ProgrammaticDaemonComposition,
+        ports: ProgrammaticSemanticQueryPorts,
+    ) -> Result<Self, ProgrammaticSemanticQueryBackendError> {
+        Self::try_new_with_startup_readiness(composition, ports, true)
+    }
+
+    /// Snapshot the production routes while keeping query execution closed until the daemon has
+    /// durably completed and read back its startup authority transaction.
+    ///
+    /// This is a transport-readiness gate, not semantic authority: every workspace, epoch,
+    /// program, policy, and result registry is still validated during construction. The gate can
+    /// move only from closed to open and therefore cannot become a process-local rollback toggle.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same complete-composition errors as [`Self::try_new`].
+    pub fn try_new_staged(
+        composition: &ProgrammaticDaemonComposition,
+        ports: ProgrammaticSemanticQueryPorts,
+    ) -> Result<Self, ProgrammaticSemanticQueryBackendError> {
+        Self::try_new_with_startup_readiness(composition, ports, false)
+    }
+
+    fn try_new_with_startup_readiness(
+        composition: &ProgrammaticDaemonComposition,
+        ports: ProgrammaticSemanticQueryPorts,
+        startup_ready: bool,
+    ) -> Result<Self, ProgrammaticSemanticQueryBackendError> {
+        if startup_ready && !composition.command_runtimes_ready() {
+            return Err(ProgrammaticSemanticQueryBackendError::CommandRecoveryPending);
+        }
+        let mut workspaces = BTreeMap::new();
+        for (_, workspace) in composition.workspaces() {
+            let public = workspace
+                .public_workspace_id()
+                .map_err(ProgrammaticSemanticQueryBackendError::WorkspaceIdentity)?;
+            let startup = workspace.startup_observation();
+            if *startup.releases.application_release().as_bytes() != ports.application_release() {
+                return Err(
+                    ProgrammaticSemanticQueryBackendError::ApplicationReleaseMismatch {
+                        workspace_id: public,
+                    },
+                );
+            }
+            let authority = workspace
+                .query_authorities()
+                .resolve(startup.epoch_id)
+                .map_err(
+                    |source| ProgrammaticSemanticQueryBackendError::EpochAuthority {
+                        workspace_id: public.clone(),
+                        source,
+                    },
+                )?;
+            if authority.authorization().query_policy() != &ports.scope_authorization.policy_pin() {
+                return Err(ProgrammaticSemanticQueryBackendError::ScopePolicyMismatch {
+                    workspace_id: public,
+                });
+            }
+            if workspaces
+                .insert(public.clone(), Arc::clone(workspace))
+                .is_some()
+            {
+                return Err(ProgrammaticSemanticQueryBackendError::DuplicateWorkspace(
+                    public,
+                ));
+            }
+        }
+        if workspaces.is_empty() {
+            return Err(ProgrammaticSemanticQueryBackendError::EmptyWorkspaceSet);
+        }
+        Ok(Self {
+            workspaces,
+            published_results: Arc::clone(composition.published_results()),
+            ports,
+            startup_ready: AtomicBool::new(startup_ready),
+        })
+    }
+
+    /// Open query execution after the daemon has read back the durable startup/cutover authority.
+    ///
+    /// This transition is intentionally one-way and idempotent. Shutdown remains owned by the
+    /// workspace admission runtimes and joined daemon lifecycle rather than this startup gate.
+    pub fn open_after_startup_authority(&self) {
+        self.startup_ready.store(true, Ordering::Release);
+    }
+
+    /// Whether the one-way startup authority barrier has opened.
+    #[must_use]
+    pub fn startup_authority_is_ready(&self) -> bool {
+        self.startup_ready.load(Ordering::Acquire)
+    }
+
+    fn require_startup_authority(&self) -> Result<(), SemanticQueryError> {
+        if self.startup_authority_is_ready() {
+            Ok(())
+        } else {
+            Err(query_error(
+                "startup_admission",
+                "programmatic daemon startup authority is not yet durable and ready",
+            ))
+        }
+    }
+
+    #[must_use]
+    pub const fn published_results(
+        &self,
+    ) -> &Arc<super::published_arrow_result::PublishedArrowResultRegistry> {
+        &self.published_results
+    }
+
+    fn workspace(
+        &self,
+        public_workspace_id: &str,
+    ) -> Result<Arc<ProgrammaticWorkspaceRuntime>, SemanticQueryError> {
+        self.workspaces
+            .get(public_workspace_id)
+            .cloned()
+            .ok_or_else(|| query_error("workspace_route", "programmatic workspace is not admitted"))
+    }
+
+    fn project_snapshot(
+        &self,
+        public_workspace_id: &str,
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+        freshness: FreshnessState,
+    ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
+        let snapshot = self
+            .ports
+            .snapshot
+            .project(public_workspace_id, workspace, authority, freshness)
+            .map_err(|error| query_error("snapshot_projection", error.to_string()))?;
+        if snapshot.workspace_id != public_workspace_id
+            || snapshot.freshness_state != freshness
+            || snapshot.snapshot_id.is_empty()
+            || snapshot.source_inventory_digest.is_empty()
+            || snapshot.durable_base_publication.is_empty()
+            || snapshot.base_table_version_digest.is_empty()
+        {
+            return Err(query_error(
+                "snapshot_projection",
+                "programmatic public snapshot differs from its admitted authority",
+            ));
+        }
+        Ok(snapshot)
+    }
+}
+
+#[async_trait]
+impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
+    fn validate_execution_request(
+        &self,
+        request: &ParsedSemanticRequest,
+    ) -> Result<(), SemanticQueryError> {
+        self.require_startup_authority()?;
+        self.workspace(&request.request.workspace_id)?;
+        self.ports
+            .ingress
+            .validate_request(request)
+            .map_err(|error| query_error("programmatic_ingress", error.to_string()))
+    }
+
+    async fn execute(
+        &self,
+        request: ParsedSemanticRequest,
+        freshness: FreshnessState,
+        cancellation: Cancellation,
+        context: SemanticBackendExecutionContext,
+        artifacts: QueryExecutionArtifactAccumulator,
+    ) -> SemanticBackendOutcome {
+        if cancellation.is_cancelled() {
+            return cancelled(
+                &artifacts,
+                "admission",
+                "query was cancelled before admission",
+            );
+        }
+        if let Err(error) = self.require_startup_authority() {
+            return failed_error(&artifacts, "startup_admission", error);
+        }
+        if request.request.workspace_id != context.workspace_id() {
+            return failed(
+                &artifacts,
+                "workspace_route",
+                "authenticated workspace differs from request workspace",
+            );
+        }
+        let workspace = match self.workspace(context.workspace_id()) {
+            Ok(workspace) => workspace,
+            Err(error) => return failed_error(&artifacts, "workspace_route", error),
+        };
+        let context_registry = context.published_results();
+        if !Arc::ptr_eq(&context_registry, &self.published_results)
+            || !Arc::ptr_eq(workspace.published_results(), &self.published_results)
+        {
+            return failed(
+                &artifacts,
+                "result_authority",
+                "query and workspace do not share the daemon result registry",
+            );
+        }
+
+        let epoch_lease = match workspace.admission().admit() {
+            Ok(lease) => lease,
+            Err(AdmissionError::NoActiveEpoch) => {
+                return failed(&artifacts, "admission", "workspace has no active epoch");
+            }
+            Err(error) => return failed(&artifacts, "admission", error.to_string()),
+        };
+        let authority = match workspace
+            .query_authorities()
+            .resolve(epoch_lease.epoch_id())
+        {
+            Ok(authority) => authority,
+            Err(error) => return failed(&artifacts, "epoch_authority", error.to_string()),
+        };
+        if !Arc::ptr_eq(authority.epoch(), epoch_lease.epoch()) {
+            return failed(
+                &artifacts,
+                "epoch_authority",
+                "admission and query authority retain different epoch capabilities",
+            );
+        }
+        // Project control metadata before publishing any Arrow resource. A projection failure can
+        // therefore terminate without leaving a live registry entry that the legacy failure path
+        // cannot authenticate and release.
+        let snapshot = match self.project_snapshot(
+            context.workspace_id(),
+            &workspace,
+            &authority,
+            freshness,
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(error) => return failed_error(&artifacts, "snapshot_projection", error),
+        };
+
+        artifacts.set_phase("semantic_binding");
+        let ingress = match self.ports.ingress.project(&request, &workspace, &authority) {
+            Ok(ingress) => ingress,
+            Err(error) => return failed(&artifacts, "programmatic_ingress", error.to_string()),
+        };
+        if ingress.semantic_request_id.as_ref() != request.request.semantic_request_id
+            || ingress.request_content_pin
+                != canonical_request_content_pin(&request.canonical_bytes)
+        {
+            return failed(
+                &artifacts,
+                "programmatic_ingress",
+                "epoch-bound ingress is not causally bound to the accepted canonical request",
+            );
+        }
+        let validated =
+            match validate_epoch_bound_semantic_ingress(ingress, authority.ingress_catalog()) {
+                Ok(validated) => validated,
+                Err(error) => return failed(&artifacts, "semantic_binding", error.to_string()),
+            };
+        let compiled = match compile_epoch_bound_semantic_request(
+            &validated,
+            authority.execution_catalog(),
+            authority.producer_closure(),
+        ) {
+            Ok(compiled) => compiled,
+            Err(error) => return failed(&artifacts, "logical_planning", error.to_string()),
+        };
+        record_complete_stage(
+            &artifacts,
+            "binding",
+            [("semantic_blocks", compiled.compiled().blocks().len())],
+        );
+
+        let (compiled, handoff) = compiled.into_parts();
+        let mut outputs = Vec::with_capacity(compiled.blocks().len());
+        let mut output_by_query = BTreeMap::new();
+        for block in compiled.blocks() {
+            if block.disposition() != SemanticBlockDisposition::Compiled {
+                return failed(
+                    &artifacts,
+                    "logical_planning",
+                    format!(
+                        "query block {} is not executable: {:?} {:?}",
+                        block.query_id(),
+                        block.disposition(),
+                        block.issues()
+                    ),
+                );
+            }
+            let Some(output) = block.output().cloned() else {
+                return failed(
+                    &artifacts,
+                    "logical_planning",
+                    format!(
+                        "compiled query block {} has no selected output",
+                        block.query_id()
+                    ),
+                );
+            };
+            if output_by_query
+                .insert(Arc::clone(block.query_id()), output.relation_id().clone())
+                .is_some()
+            {
+                return failed(
+                    &artifacts,
+                    "logical_planning",
+                    format!("compiled query block {} is duplicated", block.query_id()),
+                );
+            }
+            outputs.push(output);
+        }
+        if outputs.is_empty() {
+            return failed(
+                &artifacts,
+                "logical_planning",
+                "epoch-bound compiler produced no executable outputs",
+            );
+        }
+        if self.ports.scope_authorization.policy_pin() != handoff.policy_pin {
+            return failed(
+                &artifacts,
+                "scope_authorization",
+                "scope authorization port differs from the compiled policy pin",
+            );
+        }
+        let authorization = match self.ports.scope_authorization.authorize(
+            &request,
+            context.owner(),
+            &workspace,
+            &authority,
+            &handoff.scopes,
+        ) {
+            Ok(authorization) => authorization,
+            Err(error) => return failed(&artifacts, "scope_authorization", error.to_string()),
+        };
+        if authorization.query_policy() != &handoff.policy_pin {
+            return failed(
+                &artifacts,
+                "scope_authorization",
+                "scope authorization returned a query-policy identity outside the compiled handoff",
+            );
+        }
+        if authorization.resource_policy() != authority.resources().resource_policy() {
+            return failed(
+                &artifacts,
+                "scope_authorization",
+                "scope authorization returned a resource-policy identity outside the admitted epoch",
+            );
+        }
+        let mut handoffs_by_output = BTreeMap::new();
+        for request_input in handoff.request_inputs {
+            let Some(output_relation) = output_by_query.get(&request_input.query_id).cloned()
+            else {
+                return failed(
+                    &artifacts,
+                    "request_input",
+                    format!(
+                        "request input {} names unknown query {}",
+                        request_input.input_id, request_input.query_id
+                    ),
+                );
+            };
+            handoffs_by_output
+                .entry(output_relation)
+                .or_insert_with(Vec::new)
+                .push(request_input);
+        }
+        let mut request_inputs_by_output = Vec::with_capacity(handoffs_by_output.len());
+        let mut request_owned_relation_count = 0_usize;
+        for (output_relation, request_handoffs) in handoffs_by_output {
+            let inputs = match RequestOwnedRelationCollection::try_materialize(
+                request_handoffs,
+                authority.request_owned_relation_limits(),
+            ) {
+                Ok(inputs) => inputs,
+                Err(error) => return failed(&artifacts, "request_input", error.to_string()),
+            };
+            request_owned_relation_count =
+                request_owned_relation_count.saturating_add(inputs.len());
+            request_inputs_by_output.push((output_relation, Arc::new(inputs)));
+        }
+        record_complete_stage(
+            &artifacts,
+            "logical_planning",
+            [
+                ("selected_outputs", outputs.len()),
+                ("request_owned_relations", request_owned_relation_count),
+                ("scope_handoffs", handoff.scopes.len()),
+            ],
+        );
+
+        let issued_at = crate::query_service::now_millis();
+        let lease_duration = match i64::try_from(authority.result_lease_millis()) {
+            Ok(duration) => duration,
+            Err(_) => return failed(&artifacts, "result_lease", "result lease is too large"),
+        };
+        let Some(expires_at) = issued_at.checked_add(lease_duration) else {
+            return failed(
+                &artifacts,
+                "result_lease",
+                "result lease timestamp overflows",
+            );
+        };
+        let result_lease =
+            match ResultResourceLease::try_new(context.result_lease_id(), issued_at, expires_at) {
+                Ok(lease) => lease,
+                Err(error) => return failed(&artifacts, "result_lease", error.to_string()),
+            };
+        let transaction = match RelationalQueryTransaction::try_new(
+            context.owner(),
+            context.query_execution_pin(),
+            authorization,
+            outputs,
+            result_lease,
+            context.result_lease_token(),
+            authority.result_limits(),
+            issued_at,
+            cancellation.clone(),
+        ) {
+            Ok(transaction) => transaction,
+            Err(error) => return failed(&artifacts, "logical_planning", error.to_string()),
+        };
+        let transaction = if request_inputs_by_output.is_empty() {
+            transaction
+        } else {
+            match transaction.with_request_inputs_by_output(request_inputs_by_output) {
+                Ok(transaction) => transaction,
+                Err(error) => return failed(&artifacts, "request_input", error.to_string()),
+            }
+        };
+        if cancellation.is_cancelled() {
+            return cancelled(
+                &artifacts,
+                "physical_execution",
+                "query was cancelled before execution",
+            );
+        }
+        artifacts.set_phase("physical_execution");
+        let publication = match workspace
+            .query_runtime()
+            .execute_admitted_and_publish(
+                epoch_lease,
+                Arc::clone(authority.resources()),
+                transaction,
+            )
+            .await
+        {
+            Ok(publication) => publication,
+            Err(error) if cancellation.is_cancelled() => {
+                return cancelled(&artifacts, "physical_execution", error.to_string());
+            }
+            Err(error) => return failed(&artifacts, "physical_execution", error.to_string()),
+        };
+        record_complete_stage(
+            &artifacts,
+            "physical_execution",
+            [
+                ("result_relations", publication.output_observations().len()),
+                ("result_rows", publication.descriptor().total_rows as usize),
+            ],
+        );
+        artifacts.set_phase("published_arrow");
+        record_complete_stage(&artifacts, "response_encoding", []);
+        artifacts.record_coverage("result_rows", publication.descriptor().total_rows);
+        SemanticBackendOutcome::PublishedArrow(PublishedArrowSemanticSuccess::new(
+            publication,
+            context.result_lease_token(),
+            snapshot,
+            artifacts.snapshot(),
+        ))
+    }
+
+    async fn public_snapshot(
+        &self,
+        workspace_id: &str,
+    ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
+        let workspace = self.workspace(workspace_id)?;
+        let lease = workspace
+            .admission()
+            .admit()
+            .map_err(|error| query_error("admission", error.to_string()))?;
+        let authority = workspace
+            .query_authorities()
+            .resolve(lease.epoch_id())
+            .map_err(|error| query_error("epoch_authority", error.to_string()))?;
+        if !Arc::ptr_eq(authority.epoch(), lease.epoch()) {
+            return Err(query_error(
+                "epoch_authority",
+                "admission and query authority retain different epoch capabilities",
+            ));
+        }
+        self.project_snapshot(
+            workspace_id,
+            &workspace,
+            &authority,
+            FreshnessState::Current,
+        )
+    }
+}
+
+/// Deterministic pin of the already canonical released request bytes.
+#[must_use]
+pub fn canonical_request_content_pin(canonical_bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    for part in [REQUEST_CONTENT_PIN_DOMAIN, canonical_bytes] {
+        hasher.update(&(part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    *hasher.finalize().as_bytes()
+}
+
+fn frame_scope_identity(hasher: &mut blake3::Hasher, bytes: &[u8]) {
+    hasher.update(&(bytes.len() as u64).to_be_bytes());
+    hasher.update(bytes);
+}
+
+fn digest_text(bytes: &[u8; 32]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut text = String::with_capacity(67);
+    text.push_str("b3:");
+    for byte in bytes {
+        text.push(char::from(HEX[usize::from(byte >> 4)]));
+        text.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    text
+}
+
+fn public_id16(domain: &[u8], authority: &[u8]) -> [u8; 16] {
+    let mut hasher = blake3::Hasher::new();
+    frame_scope_identity(&mut hasher, domain);
+    frame_scope_identity(&mut hasher, authority);
+    let mut id = [0_u8; 16];
+    id.copy_from_slice(&hasher.finalize().as_bytes()[..16]);
+    id
+}
+
+fn record_complete_stage<const N: usize>(
+    artifacts: &QueryExecutionArtifactAccumulator,
+    stage: &str,
+    metrics: [(&str, usize); N],
+) {
+    artifacts.record_stage(QueryArtifactStage {
+        block_id: "request".to_owned(),
+        stage: stage.to_owned(),
+        state: QueryArtifactStageState::Complete,
+        artifact: None,
+        unavailable_reason: None,
+        metrics: metrics
+            .into_iter()
+            .map(|(name, value)| (name.to_owned(), u64::try_from(value).unwrap_or(u64::MAX)))
+            .collect(),
+    });
+}
+
+fn failed(
+    artifacts: &QueryExecutionArtifactAccumulator,
+    stage: &str,
+    message: impl Into<String>,
+) -> SemanticBackendOutcome {
+    failed_error(artifacts, stage, query_error(stage, message))
+}
+
+fn failed_error(
+    artifacts: &QueryExecutionArtifactAccumulator,
+    stage: &str,
+    error: SemanticQueryError,
+) -> SemanticBackendOutcome {
+    artifacts.set_phase("failed");
+    artifacts.set_failure(stage);
+    SemanticBackendOutcome::Failed {
+        error,
+        evidence: artifacts.snapshot(),
+    }
+}
+
+fn cancelled(
+    artifacts: &QueryExecutionArtifactAccumulator,
+    stage: &str,
+    message: impl Into<String>,
+) -> SemanticBackendOutcome {
+    artifacts.set_phase("cancelled");
+    artifacts.set_failure(stage);
+    SemanticBackendOutcome::Cancelled {
+        error: query_error(stage, message),
+        evidence: artifacts.snapshot(),
+    }
+}
+
+fn query_error(stage: &str, message: impl Into<String>) -> SemanticQueryError {
+    SemanticQueryError::Phase {
+        code: "PROGRAMMATIC_QUERY_REJECTED",
+        phase: "programmatic_query",
+        pointer: stage.to_owned(),
+        message: message.into(),
+    }
+}
+
+/// Explicit construction/projection failures raised by application ports.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ProgrammaticQueryPortError {
+    #[error("programmatic query port rejected input: {0}")]
+    Rejected(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProgrammaticSemanticQueryBackendError {
+    #[error("programmatic daemon contains no admitted workspace")]
+    EmptyWorkspaceSet,
+    #[error("programmatic command recovery is incomplete; unstaged query ingress is forbidden")]
+    CommandRecoveryPending,
+    #[error("programmatic query ports have no application release identity")]
+    MissingApplicationRelease,
+    #[error("programmatic query {0} port has no authority pin")]
+    MissingPortPin(&'static str),
+    #[error("programmatic query application release differs for workspace {workspace_id}")]
+    ApplicationReleaseMismatch { workspace_id: String },
+    #[error("programmatic scope policy differs for workspace {workspace_id}")]
+    ScopePolicyMismatch { workspace_id: String },
+    #[error(
+        "programmatic query epoch authority is unavailable for workspace {workspace_id}: {source}"
+    )]
+    EpochAuthority {
+        workspace_id: String,
+        #[source]
+        source: super::programmatic_workspace::WorkspaceEpochQueryAuthorityRegistryError,
+    },
+    #[error("public workspace route {0} is duplicated")]
+    DuplicateWorkspace(String),
+    #[error("programmatic workspace has an invalid public identity: {0}")]
+    WorkspaceIdentity(#[source] crate::identity::IdentityError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct IngressProbe([u8; 32]);
+
+    impl ProgrammaticSemanticIngressPort for IngressProbe {
+        fn authority_pin(&self) -> [u8; 32] {
+            self.0
+        }
+
+        fn validate_request(
+            &self,
+            _request: &ParsedSemanticRequest,
+        ) -> Result<(), ProgrammaticQueryPortError> {
+            Err(ProgrammaticQueryPortError::Rejected(
+                "probe is construction-only".to_owned(),
+            ))
+        }
+
+        fn project(
+            &self,
+            _request: &ParsedSemanticRequest,
+            _workspace: &ProgrammaticWorkspaceRuntime,
+            _authority: &WorkspaceEpochQueryAuthority,
+        ) -> Result<EpochBoundSemanticIngress, ProgrammaticQueryPortError> {
+            Err(ProgrammaticQueryPortError::Rejected(
+                "probe is construction-only".to_owned(),
+            ))
+        }
+    }
+
+    struct ScopeProbe([u8; 32]);
+
+    impl ProgrammaticScopeAuthorizationPort for ScopeProbe {
+        fn policy_pin(&self) -> [u8; 32] {
+            self.0
+        }
+
+        fn authorize(
+            &self,
+            _request: &ParsedSemanticRequest,
+            _owner: PublishedResultOwner,
+            _workspace: &ProgrammaticWorkspaceRuntime,
+            _authority: &WorkspaceEpochQueryAuthority,
+            _scopes: &[CompiledEpochBoundScopeHandoff],
+        ) -> Result<RelationalQueryAuthorization, ProgrammaticQueryPortError> {
+            Err(ProgrammaticQueryPortError::Rejected(
+                "probe is construction-only".to_owned(),
+            ))
+        }
+    }
+
+    struct SnapshotProbe([u8; 32]);
+
+    impl ProgrammaticSnapshotProjectionPort for SnapshotProbe {
+        fn authority_pin(&self) -> [u8; 32] {
+            self.0
+        }
+
+        fn project(
+            &self,
+            _public_workspace_id: &str,
+            _workspace: &ProgrammaticWorkspaceRuntime,
+            _authority: &WorkspaceEpochQueryAuthority,
+            _freshness: FreshnessState,
+        ) -> Result<SemanticSnapshotResponse, ProgrammaticQueryPortError> {
+            Err(ProgrammaticQueryPortError::Rejected(
+                "probe is construction-only".to_owned(),
+            ))
+        }
+    }
+
+    fn probes(
+        application_release: [u8; 32],
+        ingress: [u8; 32],
+        policy: [u8; 32],
+        snapshot: [u8; 32],
+    ) -> Result<ProgrammaticSemanticQueryPorts, ProgrammaticSemanticQueryBackendError> {
+        ProgrammaticSemanticQueryPorts::try_new(
+            application_release,
+            Arc::new(IngressProbe(ingress)),
+            Arc::new(ScopeProbe(policy)),
+            Arc::new(SnapshotProbe(snapshot)),
+        )
+    }
+
+    #[test]
+    fn port_bundle_requires_application_and_every_component_identity() {
+        assert!(matches!(
+            probes([0; 32], [1; 32], [2; 32], [3; 32]),
+            Err(ProgrammaticSemanticQueryBackendError::MissingApplicationRelease)
+        ));
+        for (expected, pins) in [
+            ("semantic ingress", ([0; 32], [2; 32], [3; 32])),
+            ("scope authorization", ([1; 32], [0; 32], [3; 32])),
+            ("snapshot projection", ([1; 32], [2; 32], [0; 32])),
+        ] {
+            assert!(matches!(
+                probes([9; 32], pins.0, pins.1, pins.2),
+                Err(ProgrammaticSemanticQueryBackendError::MissingPortPin(kind)) if kind == expected
+            ));
+        }
+        let ports = probes([9; 32], [1; 32], [2; 32], [3; 32]).unwrap();
+        assert_eq!(ports.application_release(), [9; 32]);
+    }
+
+    #[test]
+    fn startup_authority_gate_is_fail_closed_one_way_and_idempotent() {
+        let backend = ProgrammaticSemanticQueryBackend {
+            workspaces: BTreeMap::new(),
+            published_results: Arc::new(
+                super::super::published_arrow_result::PublishedArrowResultRegistry::new(),
+            ),
+            ports: probes([9; 32], [1; 32], [2; 32], [3; 32]).unwrap(),
+            startup_ready: AtomicBool::new(false),
+        };
+
+        assert!(!backend.startup_authority_is_ready());
+        let error = backend.require_startup_authority().unwrap_err();
+        assert!(matches!(
+            error,
+            SemanticQueryError::Phase { ref pointer, .. } if pointer == "startup_admission"
+        ));
+
+        backend.open_after_startup_authority();
+        backend.open_after_startup_authority();
+        assert!(backend.startup_authority_is_ready());
+        backend.require_startup_authority().unwrap();
+    }
+}

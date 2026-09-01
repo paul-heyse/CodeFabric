@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "contract_id": "codefabric.relational-fabric-v3.successor-certification.v1",
+  "suite": "codefabric-relational-data-fabric@2.1.0",
+  "plan_path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v3_2026-08-30.md",
+  "state_path": "docs/plans/state/codefabric-execution-proved-relational-data-fabric_v3_state.json",
+  "certification_record_schema_path": "contracts/acceptance/relational-fabric-v3/successor-certification-record.schema.json",
+  "scope": {
+    "packets": [
+      "WP29",
+      "WP30",
+      "WP31",
+      "WP32",
+      "WP33",
+      "WP34",
+      "WP35",
+      "WP36",
+      "WP37",
+      "WP38",
+      "WP39",
+      "WP40",
+      "WP41",
+      "WP42"
+    ],
+    "excluded_packets": [
+      "WP28"
+    ],
+    "oracle_categories": [
+      "INT",
+      "BEH",
+      "NEG",
+      "OPS"
+    ],
+    "oracle_count": 56,
+    "required_milestones": [
+      "M02",
+      "M03",
+      "M04",
+      "M05",
+      "M06"
+    ],
+    "excluded_milestones": [
+      "M01"
+    ],
+    "required_decommission_batches": [
+      "DB09",
+      "DB10",
+      "DB11",
+      "DB12",
+      "DB13",
+      "DB14"
+    ]
+  },
+  "terminal_gate_recipes": {
+    "INT": "successor-provenance-state-integrity-check",
+    "BEH": "relational-fabric-v3-certification",
+    "NEG": "successor-final-zero-state-check",
+    "OPS": "successor-four-domain-release-check"
+  },
+  "four_domain_release": [
+    {
+      "domain": "stable-root",
+      "recipes": [
+        "root-fmt",
+        "root-check",
+        "root-clippy",
+        "root-test-rust",
+        "root-doctest",
+        "features-no-default",
+        "features-each",
+        "stable-graph-check"
+      ]
+    },
+    {
+      "domain": "rustc-extractor",
+      "recipes": [
+        "extractor-fmt",
+        "extractor-check",
+        "extractor-test",
+        "extractor-identity"
+      ]
+    },
+    {
+      "domain": "pyrefly-sidecar",
+      "recipes": [
+        "sidecar-fmt",
+        "sidecar-check",
+        "sidecar-test",
+        "sidecar-policy"
+      ]
+    },
+    {
+      "domain": "python-adapter",
+      "recipes": [
+        "adapter-lint",
+        "adapter-type",
+        "adapter-test",
+        "adapter-stdio-test",
+        "adapter-wheel-test"
+      ]
+    }
+  ],
+  "cross_domain_recipes": [
+    "tool-version-contract-check",
+    "proto-repro-check",
+    "provider-ipc-contract-integrity-check",
+    "semantic-sandbox-host-matrix-check"
+  ],
+  "zero_state_recipes": [
+    "remaining-legacy-zero-state-check",
+    "bootstrap-model-dual-authority-zero-state-check",
+    "legacy-disposition-artifact-integrity-check",
+    "post-purge-package-build-operations-check",
+    "predecessor-restart-revocation-check",
+    "tracked-target-zero-state-check"
+  ],
+  "host_capability_policy": {
+    "profile": "untrusted-provider-execution",
+    "observation_recipe": "semantic-sandbox-host-matrix-check",
+    "unavailable_terminal": "UNAVAILABLE",
+    "fallback": "forbidden",
+    "certification_effect": "profile_unavailable",
+    "architecture_effect": "not_global_failure_if_fail_closed"
+  }
+}

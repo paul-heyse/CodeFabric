@@ -59,7 +59,7 @@ pub struct ProviderOracleProof {
     pub receipt: [u8; 32],
 }
 
-/// Model-owned association between one provider contract family and one executable proof oracle.
+/// Application-owned association between one provider contract family and one proof oracle.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderOracleProofBinding {
     pub provider_oracle_id: ProviderOracleId,
@@ -175,7 +175,7 @@ struct DerivedCapability<'a> {
 
 /// Derive exact provider-family proof receipts from the executable proof engine's sealed output.
 ///
-/// Bindings are model data. A binding whose proof oracle has no observation produces no receipt,
+/// Bindings are typed application inputs. A binding whose proof oracle has no observation produces no receipt,
 /// so downstream capability remains explicitly unknown. No status is accepted from a separate
 /// boolean or provider-authored claim.
 ///
@@ -262,10 +262,13 @@ fn executable_proof_receipt(
     }
     hasher.update(&[u8::try_from(observation.status().code())
         .expect("proof status codes are positive and bounded")]);
-    hasher.update(pins.compiler_release.as_bytes());
-    hasher.update(pins.model_head.as_bytes());
+    hasher.update(pins.input_release.as_bytes());
+    hasher.update(pins.program_release.as_bytes());
+    hasher.update(pins.application_release.as_bytes());
+    hasher.update(pins.source_authority.as_bytes());
     hasher.update(&pins.source_generation.get().to_be_bytes());
     hasher.update(pins.source_images.as_bytes());
+    hasher.update(pins.provider_release.as_bytes());
     hasher.update(pins.provider_set.as_bytes());
     hasher.update(pins.table_versions.as_bytes());
     hasher.update(pins.overlay_segments.as_bytes());

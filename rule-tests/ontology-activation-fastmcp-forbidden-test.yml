@@ -1,9 +1,0 @@
-id: ontology-activation-fastmcp-forbidden
-valid:
-  - |
-      def query_codefabric(request: Request) -> Response:
-          return daemon.query(request)
-invalid:
-  - |
-      def activate_ontology(candidate_id: str) -> None:
-          daemon.activate(candidate_id)

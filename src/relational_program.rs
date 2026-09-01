@@ -11,44 +11,42 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Not;
 use std::sync::Arc;
 
-use arrow_array::{Array, BooleanArray, RecordBatch, StringArray, UInt32Array};
-use arrow_schema::DataType;
+use arrow_schema::{DataType, SchemaRef};
 use datafusion::common::{Column, DFSchema, ScalarValue, TableReference};
 use datafusion::error::DataFusionError;
 use datafusion::functions_aggregate::expr_fn::{avg, count, count_distinct, max, min, sum};
 use datafusion::logical_expr::{Expr, ExprSchemable, JoinType, LogicalPlan, LogicalPlanBuilder};
 
-use crate::relational_model::{ModelEpoch, ModelRelation};
 use crate::schema_contract::{SchemaContract, SchemaRole};
 
-/// A stable identifier for a relation row in the active model epoch.
+/// A stable application-owned relation identity.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RelationId(String);
 
 impl RelationId {
-    /// Construct a bounded, non-empty model relation identifier.
+    /// Construct a bounded, non-empty relation identifier.
     pub fn new(value: impl Into<String>) -> Result<Self, RelationalProgramError> {
         bounded_id(value.into(), "relation").map(Self)
     }
 
-    /// Return the model-owned identifier.
+    /// Return the application-owned identifier.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-/// A stable identifier for a field row in the active model epoch.
+/// A stable application-owned field identity.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct FieldId(String);
 
 impl FieldId {
-    /// Construct a bounded, non-empty model field identifier.
+    /// Construct a bounded, non-empty field identifier.
     pub fn new(value: impl Into<String>) -> Result<Self, RelationalProgramError> {
         bounded_id(value.into(), "field").map(Self)
     }
 
-    /// Return the model-owned identifier.
+    /// Return the application-owned identifier.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -143,19 +141,19 @@ fn bounded_id(value: String, kind: &str) -> Result<String, RelationalProgramErro
     Ok(value)
 }
 
-/// One epoch-pinned logical input plan associated with a model relation.
+/// One epoch-pinned logical input plan associated with an admitted relation.
 #[derive(Clone, Debug)]
 pub struct RelationInput {
-    /// Model relation resolved against the current epoch.
+    /// Relation resolved against the current epoch.
     pub relation_id: RelationId,
     /// Live logical input. Its `DFSchema` is validated before use.
     pub plan: LogicalPlan,
 }
 
-/// One model-resolved catalog object required by a relational program.
+/// One session-resolved catalog object required by a relational program.
 ///
 /// The relation identity remains the semantic binding key; the table
-/// reference is model data used to resolve the concrete provider inside one
+/// reference is typed session data used to resolve the concrete provider inside one
 /// sealed epoch catalog.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CatalogRelationBinding {
@@ -173,6 +171,91 @@ pub struct ProgramRelationContract {
     pub relation_id: RelationId,
     pub table_reference: TableReference,
     pub contract: Arc<SchemaContract>,
+}
+
+/// One query-local relation contract appended to immutable epoch bindings for a single compile.
+///
+/// Supplemental relations are never installed in the epoch catalog. Their exact Arrow schema,
+/// stable field identities, scan reference, and independently verified content authority travel
+/// together so a request-owned input cannot inherit authority merely by matching a schema.
+#[derive(Clone, Debug)]
+pub struct SupplementalProgramRelationBinding {
+    relation_id: RelationId,
+    table_reference: TableReference,
+    schema: SchemaRef,
+    field_ids: Arc<[FieldId]>,
+    authority_pin: [u8; 32],
+}
+
+impl SupplementalProgramRelationBinding {
+    /// Construct one exact supplemental relation binding.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an absent authority pin, empty schema, field-count drift, or duplicate field IDs.
+    pub fn try_new(
+        relation_id: RelationId,
+        table_reference: TableReference,
+        schema: SchemaRef,
+        field_ids: impl Into<Arc<[FieldId]>>,
+        authority_pin: [u8; 32],
+    ) -> Result<Self, RelationalProgramError> {
+        let field_ids = field_ids.into();
+        if authority_pin == [0; 32] {
+            return Err(RelationalProgramError::InvalidProgram(format!(
+                "supplemental relation {} has no content authority",
+                relation_id.as_str()
+            )));
+        }
+        if schema.fields().is_empty() || schema.fields().len() != field_ids.len() {
+            return Err(RelationalProgramError::InvalidProgram(format!(
+                "supplemental relation {} schema/field contract is empty or has different widths",
+                relation_id.as_str()
+            )));
+        }
+        let mut unique = BTreeSet::new();
+        for field_id in field_ids.iter() {
+            if !unique.insert(field_id) {
+                return Err(RelationalProgramError::InvalidProgram(format!(
+                    "supplemental relation {} repeats field {}",
+                    relation_id.as_str(),
+                    field_id.as_str()
+                )));
+            }
+        }
+        Ok(Self {
+            relation_id,
+            table_reference,
+            schema,
+            field_ids,
+            authority_pin,
+        })
+    }
+
+    #[must_use]
+    pub const fn relation_id(&self) -> &RelationId {
+        &self.relation_id
+    }
+
+    #[must_use]
+    pub const fn table_reference(&self) -> &TableReference {
+        &self.table_reference
+    }
+
+    #[must_use]
+    pub const fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    #[must_use]
+    pub fn field_ids(&self) -> &[FieldId] {
+        &self.field_ids
+    }
+
+    #[must_use]
+    pub const fn authority_pin(&self) -> [u8; 32] {
+        self.authority_pin
+    }
 }
 
 /// Closed scalar operations that map to native DataFusion expressions.
@@ -330,7 +413,7 @@ pub enum RelationalExpression {
     },
 }
 
-/// A relational program and its exact model-owned output field contract.
+/// A relational program and its exact application-owned output field contract.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct RelationalProgram {
     pub root: RelationalExpression,
@@ -342,8 +425,6 @@ pub struct RelationalProgram {
 pub enum CompilationDependency {
     /// Exact programmatic session/schema authority used for this compilation.
     SessionAuthority(String),
-    /// Transitional replay authority retained only until legacy callers are removed.
-    ModelEpoch(String),
     Relation(RelationId),
     Field(FieldId),
     Primitive {
@@ -386,18 +467,16 @@ pub struct CompiledRelationalProgram {
     pub observations: CompilationObservations,
 }
 
-/// Fail-closed model binding, typing, and native planning failures.
+/// Fail-closed binding, typing, and native planning failures.
 #[derive(Debug, thiserror::Error)]
 pub enum RelationalProgramError {
     #[error("invalid {kind} identifier {value:?}")]
     InvalidIdentifier { kind: String, value: String },
-    #[error("invalid model epoch: {0}")]
-    InvalidModelEpoch(String),
     #[error("duplicate logical input for relation {0}")]
     DuplicateInput(String),
-    #[error("model relation {0} is unresolved")]
+    #[error("relation {0} is unresolved")]
     UnresolvedRelation(String),
-    #[error("model field {0} is unresolved")]
+    #[error("field {0} is unresolved")]
     UnresolvedField(String),
     #[error("intrinsic primitive {0} is unresolved or incompatible with this compiler")]
     UnresolvedPrimitive(String),
@@ -425,7 +504,7 @@ pub enum RelationalProgramError {
     },
     #[error("invalid relational program: {0}")]
     InvalidProgram(String),
-    #[error("compiled output schema differs from the declared model fields: {0}")]
+    #[error("compiled output schema differs from the declared fields: {0}")]
     OutputSchema(String),
     #[error(transparent)]
     DataFusion(#[from] DataFusionError),
@@ -435,21 +514,6 @@ pub enum RelationalProgramError {
 pub struct RelationalProgramCompiler;
 
 impl RelationalProgramCompiler {
-    /// Transitional replay-backed form of
-    /// [`Self::resolve_output_relation_with_bindings`].
-    ///
-    /// # Errors
-    ///
-    /// Rejects an empty/repeated output contract, an unresolved field, or fields owned by more
-    /// than one model relation.
-    pub fn resolve_output_relation(
-        epoch: &ModelEpoch,
-        program: &RelationalProgram,
-    ) -> Result<RelationId, RelationalProgramError> {
-        let bindings = ProgramBindings::from_model_epoch(epoch)?;
-        Self::resolve_output_relation_with_bindings(&bindings, program)
-    }
-
     /// Resolve the single live-session relation that owns a program's output fields.
     ///
     /// # Errors
@@ -479,7 +543,7 @@ impl RelationalProgramCompiler {
                 None => output_relation = Some(relation_id.clone()),
                 Some(expected) if expected != relation_id => {
                     return Err(RelationalProgramError::InvalidProgram(
-                        "declared output fields must belong to one model relation".to_owned(),
+                        "declared output fields must belong to one relation".to_owned(),
                     ));
                 }
                 Some(_) => {}
@@ -488,16 +552,6 @@ impl RelationalProgramCompiler {
         output_relation.ok_or_else(|| {
             RelationalProgramError::InvalidProgram("the output field contract is empty".to_owned())
         })
-    }
-
-    /// Transitional replay-backed form of
-    /// [`Self::bind_catalog_inputs_with_bindings`].
-    pub fn bind_catalog_inputs(
-        epoch: &ModelEpoch,
-        program: &RelationalProgram,
-    ) -> Result<Vec<CatalogRelationBinding>, RelationalProgramError> {
-        let bindings = ProgramBindings::from_model_epoch(epoch)?;
-        Self::bind_catalog_inputs_with_bindings(&bindings, program)
     }
 
     /// Resolve exactly the catalog relations referenced by a program's input
@@ -518,23 +572,6 @@ impl RelationalProgramCompiler {
                 })
             })
             .collect()
-    }
-
-    /// Transitional replay-backed form of [`Self::compile_with_bindings`].
-    pub fn compile(
-        epoch: &ModelEpoch,
-        inputs: impl IntoIterator<Item = RelationInput>,
-        program: &RelationalProgram,
-    ) -> Result<CompiledRelationalProgram, RelationalProgramError> {
-        let bindings = ProgramBindings::from_model_epoch(epoch)?;
-        let mut compiled = Self::compile_with_bindings(&bindings, inputs, program)?;
-        compiled
-            .observations
-            .dependencies
-            .insert(CompilationDependency::ModelEpoch(
-                epoch.model_epoch_id().to_owned(),
-            ));
-        Ok(compiled)
     }
 
     /// Compile a program against one immutable programmatic session authority
@@ -615,7 +652,6 @@ struct FieldDefinition {
     name: String,
     data_type: DataType,
     nullable: bool,
-    ordinal: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -624,7 +660,7 @@ struct IntrinsicDefinition {
     semantic_level: String,
     implementation_id: String,
     package_id: String,
-    compiler_release_id: String,
+    compiler_authority_id: String,
 }
 
 /// Immutable relation/field bindings compiled from the exact schema contracts
@@ -636,7 +672,7 @@ pub struct ProgramBindings {
     fields: BTreeMap<FieldId, FieldDefinition>,
     intrinsics: BTreeMap<PrimitiveId, IntrinsicDefinition>,
     expected_intrinsic_package: String,
-    expected_compiler_release: String,
+    expected_compiler_authority: String,
 }
 
 impl ProgramBindings {
@@ -706,18 +742,11 @@ impl ProgramBindings {
                             ))
                         })?,
                 )?;
-                let ordinal = u32::try_from(ordinal).map_err(|_| {
-                    RelationalProgramError::InvalidProgram(format!(
-                        "relation {} has more fields than u32 ordinals can represent",
-                        binding.relation_id.0
-                    ))
-                })?;
                 let definition = FieldDefinition {
                     relation_id: binding.relation_id.clone(),
                     name: field.name().clone(),
                     data_type: field.data_type().clone(),
                     nullable: field.is_nullable(),
-                    ordinal,
                 };
                 if fields.insert(field_id.clone(), definition).is_some() {
                     return Err(RelationalProgramError::InvalidProgram(format!(
@@ -748,7 +777,7 @@ impl ProgramBindings {
         }
 
         let expected_intrinsic_package = PROGRAM_COMPILER_AUTHORITY.to_owned();
-        let expected_compiler_release = PROGRAM_COMPILER_AUTHORITY.to_owned();
+        let expected_compiler_authority = PROGRAM_COMPILER_AUTHORITY.to_owned();
         let intrinsics = RelationalPrimitive::ALL
             .into_iter()
             .map(|primitive| {
@@ -763,7 +792,7 @@ impl ProgramBindings {
                             primitive.id()
                         ),
                         package_id: expected_intrinsic_package.clone(),
-                        compiler_release_id: expected_compiler_release.clone(),
+                        compiler_authority_id: expected_compiler_authority.clone(),
                     },
                 ))
             })
@@ -774,163 +803,95 @@ impl ProgramBindings {
             fields,
             intrinsics,
             expected_intrinsic_package,
-            expected_compiler_release,
+            expected_compiler_authority,
         })
+    }
+
+    /// Extend these immutable epoch bindings for one compilation with exact query-local inputs.
+    ///
+    /// The returned binding set has a new authority identity derived from the parent authority and
+    /// every supplemental relation/schema/content pin. The parent is not mutated, and supplemental
+    /// relations cannot shadow an epoch relation, field, or table reference.
+    ///
+    /// # Errors
+    ///
+    /// Rejects duplicate/shadowing relations, fields, table references, ambiguous Arrow field
+    /// names, or field ordinals outside `u32`.
+    pub fn with_supplemental_relations(
+        &self,
+        supplemental: impl IntoIterator<Item = SupplementalProgramRelationBinding>,
+    ) -> Result<Self, RelationalProgramError> {
+        let mut supplemental = supplemental.into_iter().collect::<Vec<_>>();
+        if supplemental.is_empty() {
+            return Ok(self.clone());
+        }
+        supplemental.sort_by(|left, right| left.relation_id.cmp(&right.relation_id));
+
+        let authority_id = supplemental_program_authority(&self.authority_id, &supplemental);
+        let mut extended = self.clone();
+        extended.authority_id = authority_id;
+        let mut table_references = extended
+            .relations
+            .values()
+            .map(|relation| relation.table_reference.clone())
+            .collect::<BTreeSet<_>>();
+
+        for binding in supplemental {
+            if extended.relations.contains_key(&binding.relation_id) {
+                return Err(RelationalProgramError::InvalidProgram(format!(
+                    "supplemental relation {} shadows an epoch relation",
+                    binding.relation_id.as_str()
+                )));
+            }
+            if !table_references.insert(binding.table_reference.clone()) {
+                return Err(RelationalProgramError::InvalidProgram(format!(
+                    "supplemental table reference {} shadows another relation",
+                    binding.table_reference
+                )));
+            }
+
+            let mut relation_fields = Vec::with_capacity(binding.field_ids.len());
+            let mut field_names = BTreeSet::new();
+            for (field_id, field) in binding.field_ids.iter().zip(binding.schema.fields()) {
+                if !field_names.insert(field.name()) {
+                    return Err(RelationalProgramError::InvalidProgram(format!(
+                        "supplemental relation {} repeats Arrow field name {}",
+                        binding.relation_id.as_str(),
+                        field.name()
+                    )));
+                }
+                if extended.fields.contains_key(field_id) {
+                    return Err(RelationalProgramError::InvalidProgram(format!(
+                        "supplemental field {} shadows an epoch or request field",
+                        field_id.as_str()
+                    )));
+                }
+                extended.fields.insert(
+                    field_id.clone(),
+                    FieldDefinition {
+                        relation_id: binding.relation_id.clone(),
+                        name: field.name().clone(),
+                        data_type: field.data_type().clone(),
+                        nullable: field.is_nullable(),
+                    },
+                );
+                relation_fields.push(field_id.clone());
+            }
+            extended.relations.insert(
+                binding.relation_id,
+                RelationDefinition {
+                    table_reference: binding.table_reference,
+                    fields: relation_fields,
+                },
+            );
+        }
+        Ok(extended)
     }
 
     /// Exact candidate-session authority represented by these bindings.
     #[must_use]
     pub fn authority_id(&self) -> &str {
         &self.authority_id
-    }
-
-    /// Transitional loader for callers that have not yet crossed the
-    /// programmatic-session cutover. New code must use [`Self::try_new`].
-    fn from_model_epoch(epoch: &ModelEpoch) -> Result<Self, RelationalProgramError> {
-        let semantic_types =
-            load_semantic_types(epoch.relations().batch(ModelRelation::SemanticType))?;
-        let relations_batch = epoch.relations().batch(ModelRelation::Relation);
-        let relation_ids = utf8_column(relations_batch, "relation_id")?;
-        let schema_names = utf8_column(relations_batch, "schema_name")?;
-        let relation_names = utf8_column(relations_batch, "relation_name")?;
-        let mut relations = BTreeMap::new();
-        for row in 0..relations_batch.num_rows() {
-            require_present(relation_ids, row, "relation.relation_id")?;
-            require_present(schema_names, row, "relation.schema_name")?;
-            require_present(relation_names, row, "relation.relation_name")?;
-            let id = RelationId::new(relation_ids.value(row))?;
-            let definition = RelationDefinition {
-                table_reference: TableReference::partial(
-                    schema_names.value(row),
-                    relation_names.value(row),
-                ),
-                fields: Vec::new(),
-            };
-            if relations.insert(id.clone(), definition).is_some() {
-                return Err(invalid_epoch(format!("duplicate relation ID {}", id.0)));
-            }
-        }
-
-        let fields_batch = epoch.relations().batch(ModelRelation::Field);
-        let field_ids = utf8_column(fields_batch, "field_id")?;
-        let field_relations = utf8_column(fields_batch, "relation_id")?;
-        let field_names = utf8_column(fields_batch, "field_name")?;
-        let semantic_type_ids = utf8_column(fields_batch, "semantic_type_id")?;
-        let ordinals = u32_column(fields_batch, "ordinal")?;
-        let nullability = bool_column(fields_batch, "nullable")?;
-        let mut fields = BTreeMap::new();
-        for row in 0..fields_batch.num_rows() {
-            for (column, name) in [
-                (field_ids, "field.field_id"),
-                (field_relations, "field.relation_id"),
-                (field_names, "field.field_name"),
-                (semantic_type_ids, "field.semantic_type_id"),
-            ] {
-                require_present(column, row, name)?;
-            }
-            require_present(ordinals, row, "field.ordinal")?;
-            require_present(nullability, row, "field.nullable")?;
-            let id = FieldId::new(field_ids.value(row))?;
-            let relation_id = RelationId::new(field_relations.value(row))?;
-            if !relations.contains_key(&relation_id) {
-                return Err(invalid_epoch(format!(
-                    "field {} references missing relation {}",
-                    id.0, relation_id.0
-                )));
-            }
-            let semantic_type = semantic_types
-                .get(semantic_type_ids.value(row))
-                .ok_or_else(|| {
-                    invalid_epoch(format!(
-                        "field {} references missing semantic type {}",
-                        id.0,
-                        semantic_type_ids.value(row)
-                    ))
-                })?;
-            let nullable = nullability.value(row);
-            if nullable && !semantic_type.allows_null {
-                return Err(invalid_epoch(format!(
-                    "field {} is nullable but semantic type {} forbids null",
-                    id.0,
-                    semantic_type_ids.value(row)
-                )));
-            }
-            let definition = FieldDefinition {
-                relation_id: relation_id.clone(),
-                name: field_names.value(row).to_owned(),
-                data_type: semantic_type.data_type.clone(),
-                nullable,
-                ordinal: ordinals.value(row),
-            };
-            if fields.insert(id.clone(), definition).is_some() {
-                return Err(invalid_epoch(format!("duplicate field ID {}", id.0)));
-            }
-            relations
-                .get_mut(&relation_id)
-                .expect("relation existence checked above")
-                .fields
-                .push(id);
-        }
-        for (relation_id, relation) in &mut relations {
-            relation.fields.sort_by_key(|field_id| {
-                fields
-                    .get(field_id)
-                    .expect("relation field was inserted above")
-                    .ordinal
-            });
-            let mut ordinals = BTreeSet::new();
-            let mut names = BTreeSet::new();
-            for field_id in &relation.fields {
-                let field = &fields[field_id];
-                if !ordinals.insert(field.ordinal) || !names.insert(field.name.as_str()) {
-                    return Err(invalid_epoch(format!(
-                        "relation {} has duplicate field ordinal or name",
-                        relation_id.0
-                    )));
-                }
-            }
-        }
-
-        let intrinsic_batch = epoch.relations().batch(ModelRelation::IntrinsicPrimitive);
-        let primitive_ids = utf8_column(intrinsic_batch, "primitive_id")?;
-        let signatures = utf8_column(intrinsic_batch, "signature")?;
-        let semantic_levels = utf8_column(intrinsic_batch, "semantic_level")?;
-        let implementation_ids = utf8_column(intrinsic_batch, "implementation_id")?;
-        let package_ids = utf8_column(intrinsic_batch, "package_id")?;
-        let release_ids = utf8_column(intrinsic_batch, "compiler_release_id")?;
-        let mut intrinsics = BTreeMap::new();
-        for row in 0..intrinsic_batch.num_rows() {
-            for (column, name) in [
-                (primitive_ids, "intrinsic_primitive.primitive_id"),
-                (signatures, "intrinsic_primitive.signature"),
-                (semantic_levels, "intrinsic_primitive.semantic_level"),
-                (implementation_ids, "intrinsic_primitive.implementation_id"),
-                (package_ids, "intrinsic_primitive.package_id"),
-                (release_ids, "intrinsic_primitive.compiler_release_id"),
-            ] {
-                require_present(column, row, name)?;
-            }
-            let id = PrimitiveId::new(primitive_ids.value(row))?;
-            let definition = IntrinsicDefinition {
-                signature: signatures.value(row).to_owned(),
-                semantic_level: semantic_levels.value(row).to_owned(),
-                implementation_id: implementation_ids.value(row).to_owned(),
-                package_id: package_ids.value(row).to_owned(),
-                compiler_release_id: release_ids.value(row).to_owned(),
-            };
-            if intrinsics.insert(id.clone(), definition).is_some() {
-                return Err(invalid_epoch(format!("duplicate primitive ID {}", id.0)));
-            }
-        }
-
-        Ok(Self {
-            authority_id: epoch.model_epoch_id().to_owned(),
-            relations,
-            fields,
-            intrinsics,
-            expected_intrinsic_package: epoch.compiler_release().intrinsic_package_id().to_owned(),
-            expected_compiler_release: epoch.compiler_release().release_id().to_owned(),
-        })
     }
 
     fn relation(&self, id: &RelationId) -> Result<&RelationDefinition, RelationalProgramError> {
@@ -957,121 +918,52 @@ impl ProgramBindings {
                 definition.signature == primitive.signature()
                     && definition.semantic_level == primitive.semantic_level()
                     && definition.package_id == self.expected_intrinsic_package
-                    && definition.compiler_release_id == self.expected_compiler_release
+                    && definition.compiler_authority_id == self.expected_compiler_authority
             })
             .ok_or_else(|| RelationalProgramError::UnresolvedPrimitive(id.0.clone()))?;
         Ok((id, definition))
     }
 }
 
-#[derive(Clone, Debug)]
-struct SemanticTypeDefinition {
-    data_type: DataType,
-    allows_null: bool,
-}
+fn supplemental_program_authority(
+    parent_authority: &str,
+    supplemental: &[SupplementalProgramRelationBinding],
+) -> String {
+    fn frame(hasher: &mut blake3::Hasher, value: &[u8]) {
+        hasher.update(&(value.len() as u64).to_be_bytes());
+        hasher.update(value);
+    }
 
-fn load_semantic_types(
-    batch: &RecordBatch,
-) -> Result<BTreeMap<String, SemanticTypeDefinition>, RelationalProgramError> {
-    let ids = utf8_column(batch, "semantic_type_id")?;
-    let logical_types = utf8_column(batch, "logical_type")?;
-    let allows_null = bool_column(batch, "allows_null")?;
-    let mut definitions = BTreeMap::new();
-    for row in 0..batch.num_rows() {
-        require_present(ids, row, "semantic_type.semantic_type_id")?;
-        require_present(logical_types, row, "semantic_type.logical_type")?;
-        require_present(allows_null, row, "semantic_type.allows_null")?;
-        let id = ids.value(row).to_owned();
-        let definition = SemanticTypeDefinition {
-            data_type: model_data_type(logical_types.value(row))?,
-            allows_null: allows_null.value(row),
-        };
-        if definitions.insert(id.clone(), definition).is_some() {
-            return Err(invalid_epoch(format!("duplicate semantic type ID {id}")));
+    let mut hasher = blake3::Hasher::new();
+    frame(
+        &mut hasher,
+        b"codefabric.relational-program.supplemental-authority.v1",
+    );
+    frame(&mut hasher, parent_authority.as_bytes());
+    for binding in supplemental {
+        frame(&mut hasher, binding.relation_id.as_str().as_bytes());
+        frame(&mut hasher, binding.table_reference.to_string().as_bytes());
+        frame(&mut hasher, &binding.authority_pin);
+        let mut schema_metadata = binding.schema.metadata().iter().collect::<Vec<_>>();
+        schema_metadata.sort_by(|left, right| left.0.cmp(right.0));
+        for (key, value) in schema_metadata {
+            frame(&mut hasher, key.as_bytes());
+            frame(&mut hasher, value.as_bytes());
+        }
+        for (field_id, field) in binding.field_ids.iter().zip(binding.schema.fields()) {
+            frame(&mut hasher, field_id.as_str().as_bytes());
+            frame(&mut hasher, field.name().as_bytes());
+            frame(&mut hasher, format!("{:?}", field.data_type()).as_bytes());
+            frame(&mut hasher, &[u8::from(field.is_nullable())]);
+            let mut metadata = field.metadata().iter().collect::<Vec<_>>();
+            metadata.sort_by(|left, right| left.0.cmp(right.0));
+            for (key, value) in metadata {
+                frame(&mut hasher, key.as_bytes());
+                frame(&mut hasher, value.as_bytes());
+            }
         }
     }
-    Ok(definitions)
-}
-
-fn model_data_type(logical_type: &str) -> Result<DataType, RelationalProgramError> {
-    match logical_type {
-        "bool" | "boolean" => Ok(DataType::Boolean),
-        "i8" => Ok(DataType::Int8),
-        "i16" => Ok(DataType::Int16),
-        "i32" => Ok(DataType::Int32),
-        "i64" => Ok(DataType::Int64),
-        "u8" => Ok(DataType::UInt8),
-        "u16" => Ok(DataType::UInt16),
-        "u32" => Ok(DataType::UInt32),
-        "u64" => Ok(DataType::UInt64),
-        "f32" => Ok(DataType::Float32),
-        "f64" => Ok(DataType::Float64),
-        "utf8" => Ok(DataType::Utf8),
-        "large_utf8" => Ok(DataType::LargeUtf8),
-        "binary" => Ok(DataType::Binary),
-        "large_binary" => Ok(DataType::LargeBinary),
-        other => Err(invalid_epoch(format!(
-            "unsupported semantic logical type {other:?}"
-        ))),
-    }
-}
-
-fn invalid_epoch(message: String) -> RelationalProgramError {
-    RelationalProgramError::InvalidModelEpoch(message)
-}
-
-fn column_index(batch: &RecordBatch, name: &str) -> Result<usize, RelationalProgramError> {
-    batch
-        .schema()
-        .index_of(name)
-        .map_err(|error| invalid_epoch(format!("missing model column {name}: {error}")))
-}
-
-fn utf8_column<'a>(
-    batch: &'a RecordBatch,
-    name: &str,
-) -> Result<&'a StringArray, RelationalProgramError> {
-    batch
-        .column(column_index(batch, name)?)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .ok_or_else(|| invalid_epoch(format!("model column {name} is not Utf8")))
-}
-
-fn u32_column<'a>(
-    batch: &'a RecordBatch,
-    name: &str,
-) -> Result<&'a UInt32Array, RelationalProgramError> {
-    batch
-        .column(column_index(batch, name)?)
-        .as_any()
-        .downcast_ref::<UInt32Array>()
-        .ok_or_else(|| invalid_epoch(format!("model column {name} is not UInt32")))
-}
-
-fn bool_column<'a>(
-    batch: &'a RecordBatch,
-    name: &str,
-) -> Result<&'a BooleanArray, RelationalProgramError> {
-    batch
-        .column(column_index(batch, name)?)
-        .as_any()
-        .downcast_ref::<BooleanArray>()
-        .ok_or_else(|| invalid_epoch(format!("model column {name} is not Boolean")))
-}
-
-fn require_present(
-    array: &dyn Array,
-    row: usize,
-    name: &str,
-) -> Result<(), RelationalProgramError> {
-    if array.is_null(row) {
-        Err(invalid_epoch(format!(
-            "required model cell {name} is null at row {row}"
-        )))
-    } else {
-        Ok(())
-    }
+    format!("codefabric.request-bindings:{}", hasher.finalize().to_hex())
 }
 
 #[derive(Clone, Debug)]
@@ -1577,7 +1469,7 @@ impl CompileState {
                 None => relation = Some(definition.relation_id.clone()),
                 Some(relation_id) if relation_id != &definition.relation_id => {
                     return Err(RelationalProgramError::InvalidProgram(
-                        "named outputs must belong to one model relation".to_owned(),
+                        "named outputs must belong to one relation".to_owned(),
                     ));
                 }
                 Some(_) => {}
@@ -1800,10 +1692,6 @@ mod tests {
     use datafusion::logical_expr::logical_plan::builder::LogicalTableSource;
 
     use super::*;
-    use crate::relational_model::{
-        BootstrapMetamodel, FabricCompilerRelease, IntrinsicInstaller, ModelDecision,
-        ModelMigration, ModelOperation, ModelRowBuilder, ReplayEngine,
-    };
     use crate::schema_contract::{
         FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY,
     };
@@ -1825,136 +1713,6 @@ mod tests {
 
     fn relation_id(value: &str) -> RelationId {
         RelationId::new(value).unwrap()
-    }
-
-    fn release() -> FabricCompilerRelease {
-        FabricCompilerRelease::builder("test.release", "source:test", "build:test")
-            .with_abis(1, 1, 1)
-            .with_intrinsic_package("test.intrinsics")
-            .add_dependency("arrow", "59.2.0")
-            .unwrap()
-            .add_dependency("datafusion", "55.0.0")
-            .unwrap()
-            .add_dependency("deltalake", "43a0cf10")
-            .unwrap()
-            .add_provider_schema("test", "v1")
-            .unwrap()
-            .with_policy_and_configuration("policy.v1", "config.v1")
-            .add_toolchain("rust", "1.95.0")
-            .unwrap()
-            .add_wire_contract("test.wire")
-            .unwrap()
-            .build()
-            .unwrap()
-    }
-
-    fn model_epoch() -> ModelEpoch {
-        let metamodel = BootstrapMetamodel::new();
-        let mut operations = Vec::new();
-        operations.push(ModelOperation::Add(
-            ModelRowBuilder::new(ModelRelation::SemanticType)
-                .value("semantic_type_id", "test.scalar.i64")
-                .unwrap()
-                .value("name", "i64")
-                .unwrap()
-                .value("logical_type", "i64")
-                .unwrap()
-                .value("allows_null", true)
-                .unwrap()
-                .build(&metamodel)
-                .unwrap(),
-        ));
-        for (relation_id, relation_name) in [(LEFT, "left"), (RIGHT, "right"), (SUMMARY, "summary")]
-        {
-            operations.push(ModelOperation::Add(
-                ModelRowBuilder::new(ModelRelation::Relation)
-                    .value("relation_id", relation_id)
-                    .unwrap()
-                    .value("schema_name", "test")
-                    .unwrap()
-                    .value("relation_name", relation_name)
-                    .unwrap()
-                    .value("semantic_role", "test-fixture")
-                    .unwrap()
-                    .build(&metamodel)
-                    .unwrap(),
-            ));
-        }
-        for (field_id, relation_id, name, semantic_type, ordinal, nullable) in [
-            (LEFT_ID, LEFT, "id", "test.scalar.i64", 0_u32, false),
-            (
-                LEFT_GROUP,
-                LEFT,
-                "group_name",
-                "bootstrap.scalar.utf8",
-                1,
-                false,
-            ),
-            (LEFT_VALUE, LEFT, "value", "test.scalar.i64", 2, true),
-            (RIGHT_ID, RIGHT, "id", "test.scalar.i64", 0, false),
-            (
-                RIGHT_LABEL,
-                RIGHT,
-                "label",
-                "bootstrap.scalar.utf8",
-                1,
-                true,
-            ),
-            (
-                SUMMARY_GROUP,
-                SUMMARY,
-                "group_name",
-                "bootstrap.scalar.utf8",
-                0,
-                false,
-            ),
-            (SUMMARY_TOTAL, SUMMARY, "total", "test.scalar.i64", 1, true),
-        ] {
-            operations.push(ModelOperation::Add(
-                ModelRowBuilder::new(ModelRelation::Field)
-                    .value("field_id", field_id)
-                    .unwrap()
-                    .value("relation_id", relation_id)
-                    .unwrap()
-                    .value("field_name", name)
-                    .unwrap()
-                    .value("semantic_type_id", semantic_type)
-                    .unwrap()
-                    .value("ordinal", ordinal)
-                    .unwrap()
-                    .value("nullable", nullable)
-                    .unwrap()
-                    .value("semantic_role", "test-fixture")
-                    .unwrap()
-                    .build(&metamodel)
-                    .unwrap(),
-            ));
-        }
-        let decision = ModelDecision::new(
-            "test.decision",
-            "tests",
-            "relational compiler fixture",
-            "exercise live model resolution",
-            operations,
-        )
-        .unwrap();
-        let migration = ModelMigration::new(
-            "test.migration",
-            None,
-            "model.bootstrap.test.release",
-            "test.epoch",
-            1,
-            "tests",
-            vec![decision],
-        )
-        .unwrap();
-        ReplayEngine::new(
-            release(),
-            IntrinsicInstaller::new("test.intrinsics", "test.impl").unwrap(),
-        )
-        .unwrap()
-        .replay(&[migration])
-        .unwrap()
     }
 
     fn scan(name: &str, fields: Vec<Field>) -> LogicalPlan {
@@ -2104,13 +1862,6 @@ mod tests {
         assert!(compiled.observations.dependencies.contains(
             &CompilationDependency::SessionAuthority("candidate-session:test".to_owned())
         ));
-        assert!(
-            !compiled
-                .observations
-                .dependencies
-                .iter()
-                .any(|dependency| matches!(dependency, CompilationDependency::ModelEpoch(_)))
-        );
     }
 
     #[test]
@@ -2152,8 +1903,12 @@ mod tests {
             },
             output_fields: vec![id(SUMMARY_GROUP), id(SUMMARY_TOTAL)],
         };
-        let compiled =
-            RelationalProgramCompiler::compile(&model_epoch(), inputs(), &program).unwrap();
+        let compiled = RelationalProgramCompiler::compile_with_bindings(
+            &program_bindings(),
+            inputs(),
+            &program,
+        )
+        .unwrap();
         assert!(matches!(compiled.plan, LogicalPlan::Limit(_)));
         for selection in [
             NativeLogicalSelection::Filter,
@@ -2174,18 +1929,20 @@ mod tests {
         assert!(compiled.observations.extension_selections.contains(
             &ExtensionSelection::BuiltInScalar(ScalarOperator::GreaterThan)
         ));
+        let expected_aggregate_implementation =
+            format!("{PROGRAM_COMPILER_AUTHORITY}:rel.aggregate");
         assert!(compiled.observations.dependencies.iter().any(|dependency| {
             matches!(
                 dependency,
                 CompilationDependency::Primitive { primitive_id, implementation_id }
                     if primitive_id.as_str() == "rel.aggregate"
-                        && implementation_id == "test.impl:rel.aggregate"
+                        && implementation_id == &expected_aggregate_implementation
             )
         }));
     }
 
     #[test]
-    fn projection_uses_model_output_identity_and_live_schema() {
+    fn projection_uses_program_output_identity_and_live_schema() {
         let program = RelationalProgram {
             root: RelationalExpression::Projection {
                 input: Box::new(RelationalExpression::Input(relation_id(LEFT))),
@@ -2202,8 +1959,12 @@ mod tests {
             },
             output_fields: vec![id(LEFT_GROUP), id(LEFT_VALUE)],
         };
-        let compiled =
-            RelationalProgramCompiler::compile(&model_epoch(), inputs(), &program).unwrap();
+        let compiled = RelationalProgramCompiler::compile_with_bindings(
+            &program_bindings(),
+            inputs(),
+            &program,
+        )
+        .unwrap();
         assert!(matches!(compiled.plan, LogicalPlan::SubqueryAlias(_)));
         assert_eq!(compiled.plan.schema().field(0).name(), "group_name");
         assert_eq!(compiled.plan.schema().field(1).name(), "value");
@@ -2232,8 +1993,12 @@ mod tests {
                 },
                 output_fields,
             };
-            let compiled =
-                RelationalProgramCompiler::compile(&model_epoch(), inputs(), &program).unwrap();
+            let compiled = RelationalProgramCompiler::compile_with_bindings(
+                &program_bindings(),
+                inputs(),
+                &program,
+            )
+            .unwrap();
             assert!(matches!(compiled.plan, LogicalPlan::Join(_)));
             assert!(compiled.observations.extension_selections.contains(
                 &ExtensionSelection::NativeLogical(NativeLogicalSelection::Join(kind))
@@ -2284,7 +2049,11 @@ mod tests {
             output_fields: vec![id(LEFT_ID), id(LEFT_GROUP)],
         };
         assert!(matches!(
-            RelationalProgramCompiler::compile(&model_epoch(), inputs(), &invalid),
+            RelationalProgramCompiler::compile_with_bindings(
+                &program_bindings(),
+                inputs(),
+                &invalid,
+            ),
             Err(RelationalProgramError::TypeMismatch { .. })
         ));
 
@@ -2311,8 +2080,12 @@ mod tests {
                 },
                 output_fields: vec![id(LEFT_ID)],
             };
-            let compiled =
-                RelationalProgramCompiler::compile(&model_epoch(), inputs(), &program).unwrap();
+            let compiled = RelationalProgramCompiler::compile_with_bindings(
+                &program_bindings(),
+                inputs(),
+                &program,
+            )
+            .unwrap();
             assert!(compiled.observations.extension_selections.contains(
                 &ExtensionSelection::NativeLogical(NativeLogicalSelection::Union(kind))
             ));
@@ -2329,7 +2102,11 @@ mod tests {
             output_fields: vec![id(LEFT_ID), id(LEFT_GROUP), id(LEFT_VALUE)],
         };
         assert!(matches!(
-            RelationalProgramCompiler::compile(&model_epoch(), inputs(), &unresolved),
+            RelationalProgramCompiler::compile_with_bindings(
+                &program_bindings(),
+                inputs(),
+                &unresolved,
+            ),
             Err(RelationalProgramError::FieldOutOfScope { .. })
         ));
 
@@ -2341,7 +2118,11 @@ mod tests {
             output_fields: vec![id(LEFT_ID), id(LEFT_GROUP), id(LEFT_VALUE)],
         };
         assert!(matches!(
-            RelationalProgramCompiler::compile(&model_epoch(), inputs(), &ill_typed),
+            RelationalProgramCompiler::compile_with_bindings(
+                &program_bindings(),
+                inputs(),
+                &ill_typed,
+            ),
             Err(RelationalProgramError::TypeMismatch { .. })
         ));
 
@@ -2361,7 +2142,11 @@ mod tests {
             output_fields: vec![id(LEFT_ID), id(LEFT_GROUP), id(LEFT_VALUE)],
         };
         assert!(matches!(
-            RelationalProgramCompiler::compile(&model_epoch(), wrong_schema, &input_only),
+            RelationalProgramCompiler::compile_with_bindings(
+                &program_bindings(),
+                wrong_schema,
+                &input_only,
+            ),
             Err(RelationalProgramError::TypeMismatch { .. })
         ));
     }
@@ -2373,7 +2158,11 @@ mod tests {
             output_fields: vec![id(LEFT_GROUP), id(LEFT_ID), id(LEFT_VALUE)],
         };
         assert!(matches!(
-            RelationalProgramCompiler::compile(&model_epoch(), inputs(), &reordered),
+            RelationalProgramCompiler::compile_with_bindings(
+                &program_bindings(),
+                inputs(),
+                &reordered,
+            ),
             Err(RelationalProgramError::OutputSchema(_))
         ));
 
@@ -2394,8 +2183,105 @@ mod tests {
             output_fields: vec![id(LEFT_ID), id(LEFT_GROUP), id(LEFT_VALUE)],
         };
         assert!(matches!(
-            RelationalProgramCompiler::compile(&model_epoch(), duplicated, &input_only),
+            RelationalProgramCompiler::compile_with_bindings(
+                &program_bindings(),
+                duplicated,
+                &input_only,
+            ),
             Err(RelationalProgramError::DuplicateInput(_))
+        ));
+    }
+
+    #[test]
+    fn supplemental_request_binding_is_causal_and_compilable_without_mutating_epoch_bindings() {
+        let base = program_bindings();
+        let request_relation = relation_id("request.input.entities");
+        let request_field = id("request.input.entity_id");
+        let request_schema = Arc::new(Schema::new(vec![Field::new(
+            "entity_id",
+            DataType::Utf8,
+            false,
+        )]));
+        let supplemental = SupplementalProgramRelationBinding::try_new(
+            request_relation.clone(),
+            TableReference::bare("request_input_entities"),
+            Arc::clone(&request_schema),
+            vec![request_field.clone()],
+            [0x51; 32],
+        )
+        .unwrap();
+        let extended = base.with_supplemental_relations([supplemental]).unwrap();
+        assert_ne!(extended.authority_id(), base.authority_id());
+        assert!(base.relation(&request_relation).is_err());
+
+        let program = RelationalProgram {
+            root: RelationalExpression::Input(request_relation.clone()),
+            output_fields: vec![request_field.clone()],
+        };
+        let compiled = RelationalProgramCompiler::compile_with_bindings(
+            &extended,
+            [RelationInput {
+                relation_id: request_relation,
+                plan: scan(
+                    "request_input_entities",
+                    vec![Field::new("entity_id", DataType::Utf8, false)],
+                ),
+            }],
+            &program,
+        )
+        .unwrap();
+        assert_eq!(compiled.plan.schema().fields().len(), 1);
+        assert!(compiled.observations.dependencies.contains(
+            &CompilationDependency::SessionAuthority(extended.authority_id().to_owned())
+        ));
+    }
+
+    #[test]
+    fn supplemental_bindings_reject_shadowing_and_bind_content_into_authority() {
+        let base = program_bindings();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        let binding = |relation: &str, field: &str, pin: u8| {
+            SupplementalProgramRelationBinding::try_new(
+                relation_id(relation),
+                TableReference::bare(relation.replace('.', "_")),
+                Arc::clone(&schema),
+                vec![id(field)],
+                [pin; 32],
+            )
+            .unwrap()
+        };
+        let first = base
+            .with_supplemental_relations([binding(
+                "request.input.values",
+                "request.field.value",
+                1,
+            )])
+            .unwrap();
+        let second = base
+            .with_supplemental_relations([binding(
+                "request.input.values",
+                "request.field.value",
+                2,
+            )])
+            .unwrap();
+        assert_ne!(first.authority_id(), second.authority_id());
+
+        let shadow = SupplementalProgramRelationBinding::try_new(
+            relation_id(LEFT),
+            TableReference::bare("shadow"),
+            schema,
+            vec![id("request.field.shadow")],
+            [3; 32],
+        )
+        .unwrap();
+        assert!(matches!(
+            base.with_supplemental_relations([shadow]),
+            Err(RelationalProgramError::InvalidProgram(message))
+                if message.contains("shadows an epoch relation")
         ));
     }
 }

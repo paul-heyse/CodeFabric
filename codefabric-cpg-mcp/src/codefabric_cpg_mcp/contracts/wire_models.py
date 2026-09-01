@@ -1,17 +1,25 @@
-# @generated from codefabric.adapter.model-ir source b3:e8572d05a57be81326b49cf6515d455a96c6df1fe9e0d9f65c3efdd27ce7c6a4; codefabric-model-adapter-driver-v1; do not edit.
-"""Statically typed public adapter contracts compiled from Contract IR."""
+"""Strict application-owned projections of the released adapter wire contract."""
 
-from typing import Annotated, Literal
+from enum import StrEnum
+from functools import lru_cache
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, TypeAdapter
+
+from .json import JsonValue as CanonicalJsonValue
+from .json import canonicalize_value, checksum
 
 Checksum = Annotated[str, StringConstraints(pattern=r"^b3:[0-9a-f]{64}$")]
 NonNegativeInt = Annotated[int, Field(ge=0)]
 type JsonObject = dict[str, JsonValue]
+type WireSchemaMode = Literal["validation", "serialization"]
+
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+_PUBLIC_SCHEMA_BASE_URI = "https://codefabric.dev/schema/adapter/1.0"
 
 
 class StrictWireModel(BaseModel):
-    """Closed immutable model-visible MCP contract."""
+    """Closed immutable public MCP contract."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -33,7 +41,7 @@ JSON_OBJECT_ADAPTER = TypeAdapter(
 
 
 class SnapshotSummary(StrictWireModel):
-    """Generated SnapshotSummary wire contract."""
+    """Released SnapshotSummary wire contract."""
 
     snapshot_id: str = Field(description="Immutable snapshot identity.")
     workspace_id: str = Field(description="Authorized workspace identity.")
@@ -75,7 +83,7 @@ class SnapshotSummary(StrictWireModel):
 
 
 class QueryCounts(StrictWireModel):
-    """Generated QueryCounts wire contract."""
+    """Released QueryCounts wire contract."""
 
     fact_count: NonNegativeInt = Field(description="Facts returned.")
     result_count: NonNegativeInt = Field(description="Logical query results returned.")
@@ -83,7 +91,7 @@ class QueryCounts(StrictWireModel):
 
 
 class QueryStatus(StrictWireModel):
-    """Generated QueryStatus wire contract."""
+    """Released QueryStatus wire contract."""
 
     query_id: str = Field(description="Logical query identity.")
     state: Literal[
@@ -93,7 +101,7 @@ class QueryStatus(StrictWireModel):
 
 
 class ResultResource(StrictWireModel):
-    """Generated ResultResource wire contract."""
+    """Released ResultResource wire contract."""
 
     uri: str = Field(description="Immutable result URI.")
     manifest_uri: str = Field(description="Result manifest URI.")
@@ -102,7 +110,7 @@ class ResultResource(StrictWireModel):
 
 
 class InlineDelivery(StrictWireModel):
-    """Generated InlineDelivery wire contract."""
+    """Released InlineDelivery wire contract."""
 
     mode: Literal["inline"] = Field(default="inline", description="Inline delivery discriminator.")
     canonical_mime_type: Literal["application/json"] = Field(
@@ -114,7 +122,7 @@ class InlineDelivery(StrictWireModel):
 
 
 class ResourceDelivery(StrictWireModel):
-    """Generated ResourceDelivery wire contract."""
+    """Released ResourceDelivery wire contract."""
 
     mode: Literal["resource"] = Field(
         default="resource", description="Resource delivery discriminator."
@@ -129,7 +137,7 @@ class ResourceDelivery(StrictWireModel):
 
 
 class PublicToolMeta(StrictWireModel):
-    """Generated PublicToolMeta wire contract."""
+    """Released PublicToolMeta wire contract."""
 
     contract_version: str = Field(description="Adapter public-contract version.")
     semantic_request_id: str = Field(description="Semantic request identity.")
@@ -139,7 +147,7 @@ class PublicToolMeta(StrictWireModel):
 
 
 class ValidationIssue(StrictWireModel):
-    """Generated ValidationIssue wire contract."""
+    """Released ValidationIssue wire contract."""
 
     code: str = Field(description="Stable validation code.")
     path: tuple[str, ...] = Field(description="Safe logical path.")
@@ -147,7 +155,7 @@ class ValidationIssue(StrictWireModel):
 
 
 class ValidateQueryOutput(StrictWireModel):
-    """Generated ValidateQueryOutput wire contract."""
+    """Released ValidateQueryOutput wire contract."""
 
     valid: bool = Field(description="Whether the semantic request is valid.")
     request_id: str = Field(description="Validation request identity.")
@@ -163,7 +171,7 @@ class ValidateQueryOutput(StrictWireModel):
 
 
 class StatusToolOutput(StrictWireModel):
-    """Generated StatusToolOutput wire contract."""
+    """Released StatusToolOutput wire contract."""
 
     ready: bool = Field(description="Adapter readiness.")
     workspace_id: str = Field(description="Authorized workspace identity.")
@@ -187,7 +195,7 @@ class StatusToolOutput(StrictWireModel):
 
 
 class InlineReference(StrictWireModel):
-    """Generated InlineReference wire contract."""
+    """Released InlineReference wire contract."""
 
     mode: Literal["inline"] = Field(default="inline", description="Inline reference discriminator.")
     media_type: str = Field(description="Reference media type.")
@@ -195,7 +203,7 @@ class InlineReference(StrictWireModel):
 
 
 class ResourceReference(StrictWireModel):
-    """Generated ResourceReference wire contract."""
+    """Released ResourceReference wire contract."""
 
     mode: Literal["resource"] = Field(
         default="resource", description="Resource reference discriminator."
@@ -205,7 +213,7 @@ class ResourceReference(StrictWireModel):
 
 
 class QueryToolInput(StrictWireModel):
-    """Generated QueryToolInput wire contract."""
+    """Released QueryToolInput wire contract."""
 
     request: JsonObject = Field(description="Complete daemon-owned semantic request object.")
     delivery: Literal["automatic", "inline", "resource"] = Field(
@@ -214,19 +222,19 @@ class QueryToolInput(StrictWireModel):
 
 
 class ValidateToolInput(StrictWireModel):
-    """Generated ValidateToolInput wire contract."""
+    """Released ValidateToolInput wire contract."""
 
     request: JsonObject = Field(description="Complete daemon-owned semantic request object.")
 
 
 class StatusToolInput(StrictWireModel):
-    """Generated StatusToolInput wire contract."""
+    """Released StatusToolInput wire contract."""
 
     pass
 
 
 class ReferenceToolInput(StrictWireModel):
-    """Generated ReferenceToolInput wire contract."""
+    """Released ReferenceToolInput wire contract."""
 
     reference: Literal[
         "agent_guide",
@@ -254,7 +262,7 @@ type ReferenceToolOutput = Annotated[
 
 
 class QueryToolOutput(StrictWireModel):
-    """Generated QueryToolOutput wire contract."""
+    """Released QueryToolOutput wire contract."""
 
     semantic_request_id: str = Field(description="Semantic idempotency identity.")
     mcp_call_id: str = Field(description="MCP invocation correlation identity.")
@@ -280,50 +288,87 @@ class QueryToolOutput(StrictWireModel):
     notices: tuple[str, ...] = Field(description="Safe public notices.")
 
 
-MODEL_TYPES = (
-    SnapshotSummary,
-    QueryCounts,
-    QueryStatus,
-    ResultResource,
-    InlineDelivery,
-    ResourceDelivery,
-    PublicToolMeta,
-    ValidationIssue,
-    ValidateQueryOutput,
-    StatusToolOutput,
-    InlineReference,
-    ResourceReference,
-    QueryToolInput,
-    ValidateToolInput,
-    StatusToolInput,
-    ReferenceToolInput,
-    QueryToolOutput,
-)
-MODEL_BY_NAME = {model.__name__: model for model in MODEL_TYPES}
-TYPE_ADAPTERS = {
-    "JsonObject": JSON_OBJECT_ADAPTER,
-    "Delivery": TypeAdapter(Delivery),
-    "ReferenceToolOutput": TypeAdapter(ReferenceToolOutput),
+class WireSchemaName(StrEnum):
+    """Released adapter schema identities used by the RPC compatibility handshake."""
+
+    DELIVERY = "Delivery"
+    INLINE_DELIVERY = "InlineDelivery"
+    INLINE_REFERENCE = "InlineReference"
+    JSON_OBJECT = "JsonObject"
+    PUBLIC_TOOL_META = "PublicToolMeta"
+    QUERY_COUNTS = "QueryCounts"
+    QUERY_STATUS = "QueryStatus"
+    QUERY_TOOL_INPUT = "QueryToolInput"
+    QUERY_TOOL_OUTPUT = "QueryToolOutput"
+    REFERENCE_TOOL_INPUT = "ReferenceToolInput"
+    REFERENCE_TOOL_OUTPUT = "ReferenceToolOutput"
+    RESOURCE_DELIVERY = "ResourceDelivery"
+    RESOURCE_REFERENCE = "ResourceReference"
+    RESULT_RESOURCE = "ResultResource"
+    SNAPSHOT_SUMMARY = "SnapshotSummary"
+    STATUS_TOOL_INPUT = "StatusToolInput"
+    STATUS_TOOL_OUTPUT = "StatusToolOutput"
+    VALIDATE_QUERY_OUTPUT = "ValidateQueryOutput"
+    VALIDATE_TOOL_INPUT = "ValidateToolInput"
+    VALIDATION_ISSUE = "ValidationIssue"
+
+
+REFERENCE_TOOL_OUTPUT_ADAPTER = TypeAdapter(ReferenceToolOutput)
+_WIRE_SCHEMA_ADAPTERS: dict[WireSchemaName, TypeAdapter[Any]] = {
+    WireSchemaName.DELIVERY: TypeAdapter(Delivery),
+    WireSchemaName.INLINE_DELIVERY: TypeAdapter(InlineDelivery),
+    WireSchemaName.INLINE_REFERENCE: TypeAdapter(InlineReference),
+    WireSchemaName.JSON_OBJECT: JSON_OBJECT_ADAPTER,
+    WireSchemaName.PUBLIC_TOOL_META: TypeAdapter(PublicToolMeta),
+    WireSchemaName.QUERY_COUNTS: TypeAdapter(QueryCounts),
+    WireSchemaName.QUERY_STATUS: TypeAdapter(QueryStatus),
+    WireSchemaName.QUERY_TOOL_INPUT: TypeAdapter(QueryToolInput),
+    WireSchemaName.QUERY_TOOL_OUTPUT: TypeAdapter(QueryToolOutput),
+    WireSchemaName.REFERENCE_TOOL_INPUT: TypeAdapter(ReferenceToolInput),
+    WireSchemaName.REFERENCE_TOOL_OUTPUT: REFERENCE_TOOL_OUTPUT_ADAPTER,
+    WireSchemaName.RESOURCE_DELIVERY: TypeAdapter(ResourceDelivery),
+    WireSchemaName.RESOURCE_REFERENCE: TypeAdapter(ResourceReference),
+    WireSchemaName.RESULT_RESOURCE: TypeAdapter(ResultResource),
+    WireSchemaName.SNAPSHOT_SUMMARY: TypeAdapter(SnapshotSummary),
+    WireSchemaName.STATUS_TOOL_INPUT: TypeAdapter(StatusToolInput),
+    WireSchemaName.STATUS_TOOL_OUTPUT: TypeAdapter(StatusToolOutput),
+    WireSchemaName.VALIDATE_QUERY_OUTPUT: TypeAdapter(ValidateQueryOutput),
+    WireSchemaName.VALIDATE_TOOL_INPUT: TypeAdapter(ValidateToolInput),
+    WireSchemaName.VALIDATION_ISSUE: TypeAdapter(ValidationIssue),
 }
-MODEL_ADAPTERS = {
-    "SnapshotSummary": TypeAdapter(SnapshotSummary),
-    "QueryCounts": TypeAdapter(QueryCounts),
-    "QueryStatus": TypeAdapter(QueryStatus),
-    "ResultResource": TypeAdapter(ResultResource),
-    "InlineDelivery": TypeAdapter(InlineDelivery),
-    "ResourceDelivery": TypeAdapter(ResourceDelivery),
-    "QueryToolOutput": TypeAdapter(QueryToolOutput),
-    "PublicToolMeta": TypeAdapter(PublicToolMeta),
-    "ValidationIssue": TypeAdapter(ValidationIssue),
-    "ValidateQueryOutput": TypeAdapter(ValidateQueryOutput),
-    "StatusToolOutput": TypeAdapter(StatusToolOutput),
-    "InlineReference": TypeAdapter(InlineReference),
-    "ResourceReference": TypeAdapter(ResourceReference),
-    "QueryToolInput": TypeAdapter(QueryToolInput),
-    "ValidateToolInput": TypeAdapter(ValidateToolInput),
-    "StatusToolInput": TypeAdapter(StatusToolInput),
-    "ReferenceToolInput": TypeAdapter(ReferenceToolInput),
-}
+
+
+def _schema_slug(name: WireSchemaName) -> str:
+    return "".join(
+        f"-{character.lower()}" if index and character.isupper() else character.lower()
+        for index, character in enumerate(name.value)
+    )
+
+
+def wire_schema(name: WireSchemaName, mode: WireSchemaMode) -> dict[str, Any]:
+    """Derive one released JSON Schema directly from its executable Pydantic type."""
+
+    schema = _WIRE_SCHEMA_ADAPTERS[name].json_schema(mode=mode)
+    schema["$id"] = f"{_PUBLIC_SCHEMA_BASE_URI}/{_schema_slug(name)}.{mode}.schema.json"
+    schema["$schema"] = JSON_SCHEMA_DIALECT
+    return schema
+
+
+@lru_cache(maxsize=2)
+def wire_schema_fingerprints(
+    mode: WireSchemaMode,
+) -> tuple[tuple[WireSchemaName, str], ...]:
+    """Derive deterministic handshake digests without packaged schema caches."""
+
+    return tuple(
+        (
+            name,
+            checksum(canonicalize_value(cast(CanonicalJsonValue, wire_schema(name, mode)))),
+        )
+        for name in sorted(WireSchemaName, key=lambda value: value.value)
+    )
+
+
 __all__ = [
     "SnapshotSummary",
     "QueryCounts",
@@ -345,6 +390,10 @@ __all__ = [
     "Delivery",
     "ReferenceToolOutput",
     "JSON_OBJECT_ADAPTER",
-    "MODEL_ADAPTERS",
-    "TYPE_ADAPTERS",
+    "JSON_SCHEMA_DIALECT",
+    "REFERENCE_TOOL_OUTPUT_ADAPTER",
+    "WireSchemaMode",
+    "WireSchemaName",
+    "wire_schema",
+    "wire_schema_fingerprints",
 ]

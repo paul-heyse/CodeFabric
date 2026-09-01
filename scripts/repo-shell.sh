@@ -34,16 +34,30 @@ esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 export CF_ROOT="$repo_root"
+export CODEFABRIC_REPO_SHELL=1
 
 # Repository commands never inherit another Python environment, an ambient Rust
 # toolchain override, or caller-owned build output locations. Recipes may set a
 # value again after this boundary when that value is part of their contract.
 unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT PYTHONPATH CONDA_PREFIX
-unset RUSTUP_TOOLCHAIN RUSTC_WRAPPER CARGO_TARGET_DIR
+unset RUSTUP_TOOLCHAIN RUSTC RUSTDOC RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER
+unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS RUSTDOCFLAGS CARGO_ENCODED_RUSTDOCFLAGS
+unset CARGO_HOME CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR CARGO_BUILD_BUILD_DIR
+unset CARGO_BUILD_RUSTC_WRAPPER CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER
+unset CARGO_BUILD_TARGET CARGO_BUILD_JOBS CODEFABRIC_SCCACHE_CONF
 
 while IFS= read -r variable_name; do
   unset "$variable_name"
-done < <(compgen -A variable | LC_ALL=C sort | sed -n '/^CONDA_/p; /^DIRENV_/p')
+done < <(compgen -A variable | LC_ALL=C sort | sed -n \
+  '/^CONDA_/p; /^DIRENV_/p; /^CARGO_TARGET_.*_LINKER$/p; /^CARGO_TARGET_.*_RUSTFLAGS$/p')
+
+# Local recipes own the complete sccache mode/backend contract. GitHub Actions injects
+# its cache backend before this boundary, so retain SCCACHE_* only in an actual CI job.
+if [ "${CI:-}" != true ]; then
+  while IFS= read -r variable_name; do
+    unset "$variable_name"
+  done < <(compgen -A variable | LC_ALL=C sort | sed -n '/^SCCACHE_/p')
+fi
 
 # Remove the adapter venv inherited by an already-running app, then make the
 # repository's Rustup/Cargo router and user-installed tools win over Homebrew.
@@ -62,6 +76,7 @@ for path_entry in ${PATH:-}; do
 done
 IFS="$old_ifs"
 export PATH="$repo_root/scripts:$HOME/.cargo/bin:$HOME/.local/bin${clean_path:+:$clean_path}"
+export CARGO_HOME="$HOME/.cargo"
 
 export UV_CACHE_DIR="$repo_root/target/uv-cache"
 mkdir -p "$UV_CACHE_DIR"

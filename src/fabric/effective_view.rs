@@ -45,7 +45,7 @@ impl EffectiveViewInput {
     }
 }
 
-/// Model-owned direction for one deterministic ordering field after generation.
+/// Application-owned direction for one deterministic ordering field.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum EffectiveViewSortDirection {
     Ascending,
@@ -58,7 +58,7 @@ impl EffectiveViewSortDirection {
     }
 }
 
-/// One model-supplied deterministic ordering field.
+/// One application-contract deterministic ordering field.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct EffectiveViewOrderField {
     field_name: Arc<str>,
@@ -90,7 +90,7 @@ impl EffectiveViewOrderField {
     }
 }
 
-/// Model-supplied physical field bindings and exact schemas for one effective relation.
+/// Application-owned physical field bindings and exact schemas for one effective relation.
 #[derive(Clone, Debug)]
 pub struct EffectiveViewFieldBindings {
     input_schema: SchemaRef,
@@ -578,7 +578,7 @@ fn build_tie_violation_plan(
     bindings: &EffectiveViewFieldBindings,
 ) -> Result<LogicalPlan, EffectiveViewError> {
     // This proof spans base and overlays. It rejects two rows that claim the same complete
-    // model-owned ordering identity, even when the duplicate crosses the storage boundary.
+    // application-owned ordering identity, even when the duplicate crosses the storage boundary.
     // Effective replacement semantics remain separate and never compare base generations.
     let mut proof_union = base.clone();
     for segment in overlays {

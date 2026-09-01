@@ -16,8 +16,18 @@ use thiserror::Error;
 
 use super::activation::{OverlaySegmentSetRef, PolicySetRef, TableVersionSetRef};
 use super::command::{
-    CompilerReleaseRef, EpochId, ModelHeadRef, ProviderSetRef, ResourceEnvelopeRef,
-    SourceGeneration, SourceImageSetRef,
+    ApplicationReleaseRef, EpochId, InputReleaseRef, ProgramReleaseRef, ProviderReleaseRef,
+    ProviderSetRef, ResourceEnvelopeRef, SourceAuthorityRef, SourceGeneration, SourceImageSetRef,
+};
+
+mod delta_history;
+
+#[cfg(feature = "daemon")]
+pub use delta_history::DeltaActivationCandidateProofRelations;
+pub use delta_history::{
+    ProofDeltaHistoryPublication, ProofDeltaHistoryTargets, ProofDeltaWorkspaceRoot,
+    ProofDeltaWriteIdentity, ProofRelationsDeltaError, persist_proof_relations,
+    provision_proof_relation_histories, reopen_proof_relations,
 };
 
 const MAX_ORACLES: usize = 4_096;
@@ -95,7 +105,7 @@ proof_identity!(
     16
 );
 proof_identity!(
-    /// Stable proof relation identity supplied by the model compiler.
+    /// Stable proof relation identity supplied by the application proof contract.
     ProofRelationId,
     16
 );
@@ -129,10 +139,13 @@ proof_identity!(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProofCandidatePins {
     pub epoch: EpochId,
-    pub compiler_release: CompilerReleaseRef,
-    pub model_head: ModelHeadRef,
+    pub input_release: InputReleaseRef,
+    pub program_release: ProgramReleaseRef,
+    pub application_release: ApplicationReleaseRef,
+    pub source_authority: SourceAuthorityRef,
     pub source_generation: SourceGeneration,
     pub source_images: SourceImageSetRef,
+    pub provider_release: ProviderReleaseRef,
     pub provider_set: ProviderSetRef,
     pub table_versions: TableVersionSetRef,
     pub overlay_segments: OverlaySegmentSetRef,
@@ -315,10 +328,13 @@ pub enum ProvenanceSubject {
     CausalFault(CausalFaultId),
     CausalFaultProgram(CausalFaultProgramRef),
     Epoch(EpochId),
-    CompilerRelease(CompilerReleaseRef),
-    ModelHead(ModelHeadRef),
+    InputRelease(InputReleaseRef),
+    ProgramRelease(ProgramReleaseRef),
+    ApplicationRelease(ApplicationReleaseRef),
+    SourceAuthority(SourceAuthorityRef),
     SourceGeneration(SourceGeneration),
     SourceImages(SourceImageSetRef),
+    ProviderRelease(ProviderReleaseRef),
     ProviderSet(ProviderSetRef),
     TableVersions(TableVersionSetRef),
     OverlaySegments(OverlaySegmentSetRef),
@@ -341,15 +357,18 @@ impl ProvenanceSubject {
             Self::CausalFault(_) => 8,
             Self::CausalFaultProgram(_) => 9,
             Self::Epoch(_) => 10,
-            Self::CompilerRelease(_) => 11,
-            Self::ModelHead(_) => 12,
-            Self::SourceGeneration(_) => 13,
-            Self::SourceImages(_) => 14,
-            Self::ProviderSet(_) => 15,
-            Self::TableVersions(_) => 16,
-            Self::OverlaySegments(_) => 17,
-            Self::PolicySet(_) => 18,
-            Self::ResourceEnvelope(_) => 19,
+            Self::InputRelease(_) => 11,
+            Self::ProgramRelease(_) => 12,
+            Self::ApplicationRelease(_) => 13,
+            Self::SourceAuthority(_) => 14,
+            Self::SourceGeneration(_) => 15,
+            Self::SourceImages(_) => 16,
+            Self::ProviderRelease(_) => 17,
+            Self::ProviderSet(_) => 18,
+            Self::TableVersions(_) => 19,
+            Self::OverlaySegments(_) => 20,
+            Self::PolicySet(_) => 21,
+            Self::ResourceEnvelope(_) => 22,
         }
     }
 
@@ -366,12 +385,15 @@ impl ProvenanceSubject {
             Self::CausalFault(value) => encoded[..16].copy_from_slice(value.as_bytes()),
             Self::CausalFaultProgram(value) => encoded.copy_from_slice(value.as_bytes()),
             Self::Epoch(value) => encoded[..16].copy_from_slice(value.as_bytes()),
-            Self::CompilerRelease(value) => encoded.copy_from_slice(value.as_bytes()),
-            Self::ModelHead(value) => encoded.copy_from_slice(value.as_bytes()),
+            Self::InputRelease(value) => encoded.copy_from_slice(value.as_bytes()),
+            Self::ProgramRelease(value) => encoded.copy_from_slice(value.as_bytes()),
+            Self::ApplicationRelease(value) => encoded.copy_from_slice(value.as_bytes()),
+            Self::SourceAuthority(value) => encoded.copy_from_slice(value.as_bytes()),
             Self::SourceGeneration(value) => {
                 encoded[24..].copy_from_slice(&value.get().to_be_bytes());
             }
             Self::SourceImages(value) => encoded.copy_from_slice(value.as_bytes()),
+            Self::ProviderRelease(value) => encoded.copy_from_slice(value.as_bytes()),
             Self::ProviderSet(value) => encoded.copy_from_slice(value.as_bytes()),
             Self::TableVersions(value) => encoded.copy_from_slice(value.as_bytes()),
             Self::OverlaySegments(value) => encoded.copy_from_slice(value.as_bytes()),
@@ -389,7 +411,7 @@ pub struct ProofProvenanceEdge {
     pub to: ProvenanceSubject,
 }
 
-/// Candidate evidence emitted by the production model/compiler/provider path.
+/// Candidate evidence emitted by the programmatic production/provider path.
 #[derive(Clone, Copy, Debug)]
 pub struct CandidateProofInput<'a> {
     pub producer_owner: ProofOwnerId,
@@ -1064,9 +1086,12 @@ fn validate_resource_bounds(
 fn validate_candidate_pins(pins: &ProofCandidatePins) -> Result<(), ProofError> {
     let nonzero = [
         pins.epoch.as_bytes().as_slice(),
-        pins.compiler_release.as_bytes().as_slice(),
-        pins.model_head.as_bytes().as_slice(),
+        pins.input_release.as_bytes().as_slice(),
+        pins.program_release.as_bytes().as_slice(),
+        pins.application_release.as_bytes().as_slice(),
+        pins.source_authority.as_bytes().as_slice(),
         pins.source_images.as_bytes().as_slice(),
+        pins.provider_release.as_bytes().as_slice(),
         pins.provider_set.as_bytes().as_slice(),
         pins.table_versions.as_bytes().as_slice(),
         pins.overlay_segments.as_bytes().as_slice(),
@@ -1694,10 +1719,13 @@ fn required_provenance_subjects(
 ) -> BTreeSet<ProvenanceSubject> {
     let mut required = BTreeSet::from([
         ProvenanceSubject::Epoch(pins.epoch),
-        ProvenanceSubject::CompilerRelease(pins.compiler_release),
-        ProvenanceSubject::ModelHead(pins.model_head),
+        ProvenanceSubject::InputRelease(pins.input_release),
+        ProvenanceSubject::ProgramRelease(pins.program_release),
+        ProvenanceSubject::ApplicationRelease(pins.application_release),
+        ProvenanceSubject::SourceAuthority(pins.source_authority),
         ProvenanceSubject::SourceGeneration(pins.source_generation),
         ProvenanceSubject::SourceImages(pins.source_images),
+        ProvenanceSubject::ProviderRelease(pins.provider_release),
         ProvenanceSubject::ProviderSet(pins.provider_set),
         ProvenanceSubject::TableVersions(pins.table_versions),
         ProvenanceSubject::OverlaySegments(pins.overlay_segments),
@@ -1870,10 +1898,13 @@ fn fixed_binary_array<const WIDTH: usize>(
 fn proof_run_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         Field::new("epoch_id", DataType::FixedSizeBinary(16), false),
-        Field::new("compiler_release", DataType::FixedSizeBinary(32), false),
-        Field::new("model_head", DataType::FixedSizeBinary(32), false),
+        Field::new("input_release", DataType::FixedSizeBinary(32), false),
+        Field::new("program_release", DataType::FixedSizeBinary(32), false),
+        Field::new("application_release", DataType::FixedSizeBinary(32), false),
+        Field::new("source_authority", DataType::FixedSizeBinary(32), false),
         Field::new("source_generation", DataType::UInt64, false),
         Field::new("source_images", DataType::FixedSizeBinary(32), false),
+        Field::new("provider_release", DataType::FixedSizeBinary(32), false),
         Field::new("provider_set", DataType::FixedSizeBinary(32), false),
         Field::new("table_versions", DataType::FixedSizeBinary(32), false),
         Field::new("overlay_segments", DataType::FixedSizeBinary(32), false),
@@ -1937,10 +1968,13 @@ fn build_proof_run_relation(
         Arc::clone(&schema),
         vec![
             fixed_binary_array([Some(*pins.epoch.as_bytes())])?,
-            fixed_binary_array([Some(*pins.compiler_release.as_bytes())])?,
-            fixed_binary_array([Some(*pins.model_head.as_bytes())])?,
+            fixed_binary_array([Some(*pins.input_release.as_bytes())])?,
+            fixed_binary_array([Some(*pins.program_release.as_bytes())])?,
+            fixed_binary_array([Some(*pins.application_release.as_bytes())])?,
+            fixed_binary_array([Some(*pins.source_authority.as_bytes())])?,
             Arc::new(UInt64Array::from(vec![pins.source_generation.get()])),
             fixed_binary_array([Some(*pins.source_images.as_bytes())])?,
+            fixed_binary_array([Some(*pins.provider_release.as_bytes())])?,
             fixed_binary_array([Some(*pins.provider_set.as_bytes())])?,
             fixed_binary_array([Some(*pins.table_versions.as_bytes())])?,
             fixed_binary_array([Some(*pins.overlay_segments.as_bytes())])?,
@@ -2391,8 +2425,11 @@ pub(super) fn test_relations_for_epoch(epoch: EpochId) -> ProofRelations {
         terminal: ProofTerminalStatus::Unknown,
         candidate_pins: ProofCandidatePins {
             epoch,
-            compiler_release: CompilerReleaseRef::from_bytes([1; 32]),
-            model_head: ModelHeadRef::from_bytes([2; 32]),
+            input_release: InputReleaseRef::from_bytes([1; 32]),
+            program_release: ProgramReleaseRef::from_bytes([2; 32]),
+            application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes([2; 32]),
+            source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes([2; 32]),
+            provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes([2; 32]),
             source_generation: SourceGeneration::new(1),
             source_images: SourceImageSetRef::from_bytes([3; 32]),
             provider_set: ProviderSetRef::from_bytes([4; 32]),
@@ -2491,8 +2528,13 @@ mod tests {
     fn pins() -> ProofCandidatePins {
         ProofCandidatePins {
             epoch: EpochId::from_bytes(id16(30)),
-            compiler_release: CompilerReleaseRef::from_bytes(id32(31)),
-            model_head: ModelHeadRef::from_bytes(id32(32)),
+            input_release: InputReleaseRef::from_bytes(id32(31)),
+            program_release: ProgramReleaseRef::from_bytes(id32(32)),
+            application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(id32(
+                32,
+            )),
+            source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(id32(32)),
+            provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(id32(32)),
             source_generation: SourceGeneration::new(33),
             source_images: SourceImageSetRef::from_bytes(id32(34)),
             provider_set: ProviderSetRef::from_bytes(id32(35)),
@@ -2560,10 +2602,13 @@ mod tests {
             let root = ProvenanceSubject::OracleRun(run_id());
             let provenance_subjects = [
                 ProvenanceSubject::Epoch(pins.epoch),
-                ProvenanceSubject::CompilerRelease(pins.compiler_release),
-                ProvenanceSubject::ModelHead(pins.model_head),
+                ProvenanceSubject::InputRelease(pins.input_release),
+                ProvenanceSubject::ProgramRelease(pins.program_release),
+                ProvenanceSubject::ApplicationRelease(pins.application_release),
+                ProvenanceSubject::SourceAuthority(pins.source_authority),
                 ProvenanceSubject::SourceGeneration(pins.source_generation),
                 ProvenanceSubject::SourceImages(pins.source_images),
+                ProvenanceSubject::ProviderRelease(pins.provider_release),
                 ProvenanceSubject::ProviderSet(pins.provider_set),
                 ProvenanceSubject::TableVersions(pins.table_versions),
                 ProvenanceSubject::OverlaySegments(pins.overlay_segments),
@@ -2700,7 +2745,7 @@ mod tests {
         assert_eq!(result.coverage_results.batch.num_rows(), 1);
         assert_eq!(result.fault_results.batch.num_rows(), 1);
         assert_eq!(result.violation_results.batch.num_rows(), 1);
-        assert_eq!(result.provenance_edges.batch.num_rows(), 18);
+        assert_eq!(result.provenance_edges.batch.num_rows(), 21);
         assert_eq!(result.issues.batch.num_rows(), 0);
     }
 
@@ -2760,9 +2805,9 @@ mod tests {
     #[test]
     fn missing_provenance_is_explicit_unknown() {
         let mut fixture = Fixture::complete();
-        fixture
-            .provenance
-            .retain(|edge| edge.to != ProvenanceSubject::ModelHead(fixture.pins.model_head));
+        fixture.provenance.retain(|edge| {
+            edge.to != ProvenanceSubject::ProgramRelease(fixture.pins.program_release)
+        });
         let result = fixture.evaluate().unwrap();
         assert_eq!(result.terminal, ProofTerminalStatus::Unknown);
         assert_eq!(
@@ -2850,7 +2895,7 @@ mod tests {
     #[test]
     fn zero_candidate_pin_is_rejected_before_proof_execution() {
         let mut fixture = Fixture::complete();
-        fixture.pins.model_head = ModelHeadRef::from_bytes([0; 32]);
+        fixture.pins.program_release = ProgramReleaseRef::from_bytes([0; 32]);
         let error = fixture.evaluate().unwrap_err();
         assert!(matches!(error, ProofError::ZeroCandidatePin));
     }

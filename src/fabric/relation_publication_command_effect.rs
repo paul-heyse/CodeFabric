@@ -121,7 +121,7 @@ pub enum RelationPublicationResolution {
 
 /// Read-only catalog/request resolver.
 ///
-/// Implementations may validate schemas, resolve model-selected relations and plans, and derive
+/// Implementations may validate schemas, resolve policy-selected relations and plans, and derive
 /// an application transaction. They must not write Delta, operation markers, control history, or
 /// any other durable target.
 #[async_trait]
@@ -202,7 +202,7 @@ pub enum RelationPublicationCommitObservation {
 
 /// Sole durable relation-publication authority.
 ///
-/// A production implementation resolves the model-selected component plans from the exact
+/// A production implementation resolves the policy-selected component plans from the exact
 /// request, binds every `ControlledDeltaWriteSpec` to `operation_id` and
 /// `attempt.owner().fence.generation`, and calls `write_exact_delta_plan` once per selected
 /// component. It must not internally retry, rebase, discover latest, or reduce command state.
@@ -502,8 +502,8 @@ mod tests {
     use crate::fabric::command::{
         ActorId, AdmissionContext, AdmissionOutcome, AnalysisRunRef, AuthorizationDecision,
         AuthorizationRef, CommandEvent, CommandIdentity, CommandOwnership, CommandPins,
-        CommandReducer, CompilerReleaseRef, IdempotencyKey, LeaseId, ModelHeadRef, OwnerSetRef,
-        PrincipalId, ProviderSetRef, RelationSetRef, ResourceEnvelopeRef, SourceGeneration,
+        CommandReducer, IdempotencyKey, InputReleaseRef, LeaseId, OwnerSetRef, PrincipalId,
+        ProgramReleaseRef, ProviderSetRef, RelationSetRef, ResourceEnvelopeRef, SourceGeneration,
         WorkspaceId, WriterFence,
     };
 
@@ -846,8 +846,17 @@ mod tests {
             expected_head: ExpectedHead::Empty,
             writer_fence,
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes([0x05; 32]),
-                model_head: ModelHeadRef::from_bytes([0x06; 32]),
+                input_release: InputReleaseRef::from_bytes([0x05; 32]),
+                program_release: ProgramReleaseRef::from_bytes([0x06; 32]),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    [0x06; 32],
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(
+                    [0x06; 32],
+                ),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(
+                    [0x06; 32],
+                ),
                 source_generation: SourceGeneration::new(7),
                 provider_set: ProviderSetRef::from_bytes([0x08; 32]),
             },

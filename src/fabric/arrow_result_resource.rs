@@ -1,7 +1,7 @@
 //! Bounded, epoch-pinned Arrow IPC result resources.
 //!
 //! Semantic rows remain Arrow from execution through delivery. This module packages each
-//! model-supplied relation as one immutable Arrow IPC stream and exposes only lease-checked,
+//! application-owned relation as one immutable Arrow IPC stream and exposes only lease-checked,
 //! deterministic byte-range reads. The small public manifest is a control projection over
 //! typed artifact metadata; it never transforms or duplicates semantic rows as JSON.
 
@@ -202,7 +202,7 @@ impl ResultCoverage {
     }
 }
 
-/// Model-supplied schema, rows, and coverage for one result relation.
+/// Application-owned schema, rows, and coverage for one result relation.
 #[derive(Clone, Debug)]
 pub struct ResultRelationInput {
     relation_id: RelationId,
@@ -511,7 +511,7 @@ struct StoredResource {
 }
 
 impl ArrowResultResourcePackage {
-    /// Build a bounded package from exact epoch/query pins and model-supplied relations.
+    /// Build a bounded package from exact epoch/query pins and application-owned relations.
     ///
     /// # Errors
     ///
@@ -806,7 +806,7 @@ impl ArrowResultResourcePackage {
         })
     }
 
-    /// Resolve one model relation to its immutable resource identity.
+    /// Resolve one application relation to its immutable resource identity.
     #[must_use]
     pub fn relation_resource_id(&self, relation_id: &RelationId) -> Option<ResultResourceId> {
         self.relation_resources.get(relation_id).copied()
@@ -1240,13 +1240,40 @@ pub enum ArrowResultResourceError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::io::Cursor;
 
-    use arrow_array::{Int64Array, RecordBatch, StringArray};
+    use arrow_array::{Int64Array, RecordBatch, StringArray, UInt64Array};
     use arrow_ipc::reader::StreamReader;
     use arrow_schema::{DataType, Field, Schema};
+    use serde_json::Value;
 
     use super::*;
+    use crate::cancellation::Cancellation;
+    use crate::identity::{
+        ResultArtifactIdentityInput, issue_result_artifact_identity, result_artifact_resource_uri,
+    };
+
+    const WP33_EXPECTATIONS: &str =
+        include_str!("../../contracts/acceptance/relational-fabric-v3/expectations.jsonl");
+    const WP33_FIXTURES: &str =
+        include_str!("../../contracts/acceptance/relational-fabric-v3/negative-fixtures.jsonl");
+
+    fn claim_015() -> Value {
+        WP33_EXPECTATIONS
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("valid WP33 expectation row"))
+            .find(|row| row["claim_id"] == "RFV3-CLAIM-015")
+            .expect("frozen Claim 015 expectation")
+    }
+
+    fn claim_015_fixture(kind: &str) -> Value {
+        WP33_FIXTURES
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("valid WP33 fixture row"))
+            .find(|row| row["claim_id"] == "RFV3-CLAIM-015" && row["kind"] == kind)
+            .unwrap_or_else(|| panic!("frozen Claim 015 {kind} fixture"))
+    }
 
     fn limits() -> ArrowResultResourceLimits {
         ArrowResultResourceLimits::try_new(
@@ -1293,6 +1320,108 @@ mod tests {
         )]))
     }
 
+    fn claim_015_relation(claim: &Value) -> ResultRelationInput {
+        let output = &claim["complete_input_universe"]["inputs"]["actual_output_batch"];
+        let contract = &output["schema_contract"];
+        let relation_id = contract["relation_id"]
+            .as_str()
+            .expect("Claim 015 relation ID");
+        let field = &contract["fields"][0];
+        assert_eq!(field["data_type"], "uint64");
+        let field_metadata = field["metadata"]
+            .as_object()
+            .expect("Claim 015 field metadata")
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    value
+                        .as_str()
+                        .expect("Claim 015 field metadata value")
+                        .to_owned(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let schema_metadata = contract["metadata"]
+            .as_object()
+            .expect("Claim 015 schema metadata")
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    value
+                        .as_str()
+                        .expect("Claim 015 schema metadata value")
+                        .to_owned(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let schema = Arc::new(Schema::new_with_metadata(
+            vec![
+                Field::new(
+                    field["name"].as_str().expect("Claim 015 field name"),
+                    DataType::UInt64,
+                    field["nullable"]
+                        .as_bool()
+                        .expect("Claim 015 nullable flag"),
+                )
+                .with_metadata(field_metadata),
+            ],
+            schema_metadata,
+        ));
+        let rows = output["rows"]
+            .as_array()
+            .expect("Claim 015 rows")
+            .iter()
+            .map(|row| row[0].as_u64().expect("Claim 015 ordinal must be unsigned"))
+            .collect::<Vec<_>>();
+        let batch =
+            RecordBatch::try_new(Arc::clone(&schema), vec![Arc::new(UInt64Array::from(rows))])
+                .expect("typed Claim 015 result batch");
+        ResultRelationInput::new(
+            RelationId::new(relation_id).expect("Claim 015 relation identity"),
+            schema,
+            vec![batch],
+            ResultCoverage::complete(output["row_count"].as_u64().expect("Claim 015 row count")),
+        )
+    }
+
+    fn claim_015_limits(rows: u64, bytes: usize) -> ArrowResultResourceLimits {
+        ArrowResultResourceLimits::try_new(
+            1,
+            1,
+            rows,
+            1,
+            rows,
+            1 << 20,
+            1 << 20,
+            bytes,
+            bytes,
+            1 << 20,
+            bytes,
+        )
+        .expect("bounded Claim 015 result limits")
+    }
+
+    fn claim_015_package(
+        claim: &Value,
+        rows: u64,
+    ) -> Result<ArrowResultResourcePackage, ArrowResultResourceError> {
+        let bytes = usize::try_from(
+            claim["complete_input_universe"]["inputs"]["resource_budget"]["bytes"]
+                .as_u64()
+                .expect("Claim 015 byte budget"),
+        )
+        .expect("Claim 015 byte budget fits usize");
+        ArrowResultResourcePackage::try_new(
+            EpochId::from_bytes([0x11; 16]),
+            QueryExecutionPin::from_bytes([0x22; 32]),
+            vec![claim_015_relation(claim)],
+            lease(),
+            claim_015_limits(rows, bytes),
+        )
+    }
+
     fn string_relation(id: &str, values: &[&str]) -> ResultRelationInput {
         let schema = string_schema();
         let batch = RecordBatch::try_new(
@@ -1331,6 +1460,159 @@ mod tests {
             }
         };
         (bytes, checksum)
+    }
+
+    #[test]
+    fn wp38_claim_015_positive_executes_typed_arrow_ipc_and_canonical_artifact_identity() {
+        let claim = claim_015();
+        let cancellation = Cancellation::default();
+        assert!(!cancellation.is_cancelled());
+        let row_budget = claim["complete_input_universe"]["inputs"]["resource_budget"]["rows"]
+            .as_u64()
+            .expect("Claim 015 row budget");
+        let package = claim_015_package(&claim, row_budget)
+            .expect("frozen Claim 015 Arrow package must publish");
+        let expected = &claim["decoded_expectation"]["rows"][0][0];
+        assert_eq!(package.metadata().total_rows(), 3);
+        assert_eq!(package.metadata().relations().len(), 1);
+        assert_eq!(
+            package.metadata().relations()[0].relation_id().as_str(),
+            claim["complete_input_universe"]["inputs"]["actual_output_batch"]
+                ["schema_contract"]["relation_id"]
+                .as_str()
+                .expect("Claim 015 relation ID")
+        );
+
+        let relation_id = RelationId::new("query.result.ordinals.v1").unwrap();
+        let resource_id = package
+            .relation_resource_id(&relation_id)
+            .expect("published Claim 015 relation resource");
+        let (ipc, checksum) = read_all(&package, resource_id);
+        assert!(!ipc.is_empty(), "execution must observe exact IPC bytes");
+        assert_eq!(
+            u64::try_from(ipc.len()).unwrap(),
+            package.metadata().relations()[0].byte_length()
+        );
+        assert_eq!(
+            &checksum,
+            package.metadata().relations()[0].content_checksum()
+        );
+        let mut reader = StreamReader::try_new(Cursor::new(ipc), None).unwrap();
+        let schema = reader.schema();
+        assert_eq!(
+            schema.metadata()["codefabric.relation_id"],
+            relation_id.as_str()
+        );
+        assert_eq!(
+            schema.field(0).metadata()["codefabric.field_id"],
+            "query.result.ordinals.v1.ordinal"
+        );
+        let batches = reader
+            .by_ref()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode Claim 015 IPC stream");
+        assert!(reader.is_finished());
+        let observed_rows = batches
+            .iter()
+            .flat_map(|batch| {
+                let ordinals = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<UInt64Array>()
+                    .expect("Claim 015 UInt64 ordinals");
+                (0..ordinals.len())
+                    .map(|row| serde_json::json!([ordinals.value(row)]))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            Value::Array(observed_rows),
+            claim["complete_input_universe"]["inputs"]["actual_output_batch"]["rows"]
+        );
+        assert_eq!(expected["state"], "complete");
+        assert_eq!(expected["published_rows"], package.metadata().total_rows());
+        assert_eq!(expected["published_resources"], 1);
+
+        let frozen_identity =
+            &claim["complete_input_universe"]["inputs"]["actual_output_batch"]["artifact_identity"];
+        let identity = issue_result_artifact_identity(&ResultArtifactIdentityInput {
+            workspace_id: frozen_identity["workspace_id"]
+                .as_str()
+                .expect("Claim 015 workspace ID")
+                .to_owned(),
+            owning_agent_id: frozen_identity["owning_agent_id"]
+                .as_str()
+                .expect("Claim 015 owning agent")
+                .to_owned(),
+            fabric_epoch_id: frozen_identity["fabric_epoch_id"]
+                .as_str()
+                .expect("Claim 015 fabric epoch ID")
+                .to_owned(),
+            snapshot_id: frozen_identity["snapshot_id"]
+                .as_str()
+                .expect("Claim 015 snapshot ID")
+                .to_owned(),
+            canonical_response_checksum: frozen_identity["canonical_response_checksum"]
+                .as_str()
+                .expect("Claim 015 response checksum")
+                .to_owned(),
+            format: frozen_identity["format"]
+                .as_str()
+                .expect("Claim 015 result format")
+                .to_owned(),
+            format_version: frozen_identity["format_version"]
+                .as_str()
+                .expect("Claim 015 result format version")
+                .to_owned(),
+        })
+        .expect("production CBEF result-artifact identity");
+        assert_eq!(identity.public_id, frozen_identity["artifact_id"]);
+        assert_eq!(
+            identity.recipe_evidence(),
+            frozen_identity["identity_recipe"]
+        );
+        assert_eq!(
+            result_artifact_resource_uri(
+                frozen_identity["workspace_id"].as_str().unwrap(),
+                &identity.public_id,
+            )
+            .unwrap(),
+            expected["resource_uri"]
+        );
+    }
+
+    #[test]
+    fn wp38_claim_015_causal_row_budget_rejects_before_resource_publication() {
+        let claim = claim_015();
+        let fixture = claim_015_fixture("causal");
+        let mutation = &fixture["mutation"];
+        assert_eq!(mutation["input_role"], "resource_budget");
+        assert_eq!(mutation["json_pointer"], "/rows");
+        assert_eq!(mutation["before"], 4);
+        let mutated_rows = mutation["after"]
+            .as_u64()
+            .expect("Claim 015 mutated row limit");
+        let error = claim_015_package(&claim, mutated_rows)
+            .expect_err("three semantic rows must not fit a two-row result budget");
+        assert!(matches!(
+            error,
+            ArrowResultResourceError::RowLimitExceeded {
+                observed: 3,
+                limit: 2,
+                ..
+            }
+        ));
+        let expected = &fixture["expected_decoded"];
+        assert_eq!(expected["state"], "failed");
+        assert_eq!(expected["public_error"], "QUERY_HARD_LIMIT_EXCEEDED");
+        assert_eq!(expected["published_rows"], 0);
+        assert_eq!(expected["published_resources"], 0);
+        assert!(expected["resource_uri"].is_null());
+        assert_eq!(
+            expected["terminal_provenance"]["publication_state"],
+            "not_published"
+        );
+        assert_eq!(expected["terminal_provenance"]["lease_state"], "released");
     }
 
     #[test]

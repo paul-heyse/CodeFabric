@@ -4,7 +4,7 @@
 //! application-internal lease. This module adds the serving boundary: public identities bind the
 //! owning workspace and agent, opaque tokens never become an internal [`LeaseId`], and the exact
 //! [`FabricQueryLease`] keeps the admitted epoch alive until release or expiry. Semantic relation
-//! IDs remain model data carried in descriptors; they are never a dispatch registry.
+//! IDs remain typed descriptor data; they are never a dispatch registry.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -172,7 +172,7 @@ pub struct PublishedResultCoverage {
     pub unknown_cause: Option<String>,
 }
 
-/// Owner-bound descriptor for one model-supplied Arrow relation.
+/// Owner-bound descriptor for one application-owned Arrow relation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PublishedRelationDescriptor {
     pub relation_id: RelationId,
@@ -853,13 +853,13 @@ mod tests {
         test_lifecycle_work_class_policies,
     };
     use crate::fabric::command::{
-        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins,
-        CompilerReleaseRef, ExecutionOwner, ExpectedHead, FabricCommand, FabricCommandPayload,
-        IdempotencyKey, ModelHeadRef, OperationId, OperationSelectionRef, ProofReceiptRef,
-        ProviderSetRef, ResourceEnvelopeRef, RetentionPolicyRef, SourceGeneration, TransactionRef,
-        WriterFence, WriterGeneration,
+        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins, ExecutionOwner,
+        ExpectedHead, FabricCommand, FabricCommandPayload, IdempotencyKey, InputReleaseRef,
+        OperationId, OperationSelectionRef, ProgramReleaseRef, ProofReceiptRef, ProviderSetRef,
+        ResourceEnvelopeRef, RetentionPolicyRef, SourceGeneration, TransactionRef, WriterFence,
+        WriterGeneration,
     };
-    use crate::fabric::epoch::FabricEpochRuntimeConfig;
+    use crate::fabric::epoch_runtime::FabricEpochRuntimeConfig;
     use crate::fabric::programmatic_epoch::{
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
@@ -895,8 +895,13 @@ mod tests {
                 generation: WriterGeneration::new(generation).unwrap(),
             },
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes(id32(5)),
-                model_head: ModelHeadRef::from_bytes(id32(6)),
+                input_release: InputReleaseRef::from_bytes(id32(5)),
+                program_release: ProgramReleaseRef::from_bytes(id32(6)),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    id32(6),
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(id32(6)),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(id32(6)),
                 source_generation: SourceGeneration::new(7),
                 provider_set: ProviderSetRef::from_bytes(id32(8)),
             },
@@ -929,8 +934,11 @@ mod tests {
             ActivationOrdinal::new(ordinal).unwrap(),
             FabricEpochPins {
                 epoch: target,
-                compiler_release: command.pins.compiler_release,
-                model_head: command.pins.model_head,
+                input_release: command.pins.input_release,
+                program_release: command.pins.program_release,
+                application_release: command.pins.application_release,
+                source_authority: command.pins.source_authority,
+                provider_release: command.pins.provider_release,
                 source_generation: command.pins.source_generation,
                 provider_set: command.pins.provider_set,
                 table_versions: TableVersionSetRef::from_bytes(id32(11)),

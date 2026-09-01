@@ -1,4 +1,4 @@
-"""Model, schema, fingerprint, and FastMCP equivalence tests."""
+"""Released model, derived-schema, handshake, and FastMCP equivalence tests."""
 
 import asyncio
 import json
@@ -11,19 +11,17 @@ from fastmcp import Client
 from mcp.types import Tool as MCPTool
 from pydantic import ValidationError
 
-from codefabric_cpg_mcp.contracts.fingerprints import (
-    FASTMCP_TOOL_KEYS,
-    fastmcp_protocol_manifest,
-    normalize_mcp_tool,
-)
-from codefabric_cpg_mcp.contracts.schemas import schema_fingerprints, schema_manifest
 from codefabric_cpg_mcp.contracts.wire_models import (
     JSON_OBJECT_ADAPTER,
+    JSON_SCHEMA_DIALECT,
     InlineDelivery,
     QueryCounts,
     QueryToolInput,
     ResourceDelivery,
     StatusToolOutput,
+    WireSchemaName,
+    wire_schema,
+    wire_schema_fingerprints,
 )
 from codefabric_cpg_mcp.server import mcp
 from codefabric_cpg_mcp.settings import process_settings
@@ -32,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_SERVER = ROOT / "codefabric-cpg-mcp/tests/production_server_entry.py:mcp"
 
 
-def test_generated_models_are_strict_closed_frozen_and_discriminated() -> None:
+def test_released_models_are_strict_closed_frozen_and_discriminated() -> None:
     with pytest.raises(ValidationError, match="extra_forbidden"):
         QueryCounts(fact_count=1, result_count=1, truncated=False, leaked=True)  # type: ignore[call-arg]
     with pytest.raises(ValidationError, match="int_type"):
@@ -108,34 +106,17 @@ def test_module_scoped_json_adapter_rejects_non_json_values() -> None:
 
 
 def test_schema_modes_are_canonical_named_and_fingerprinted() -> None:
-    schemas = schema_manifest()
-    fingerprints = schema_fingerprints()
-
     for mode in ("validation", "serialization"):
-        assert set(schemas[mode]) == set(fingerprints[mode])  # type: ignore[arg-type]
-        for schema in schemas[mode].values():  # type: ignore[union-attr]
-            assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"  # type: ignore[index]
-            assert str(schema["$id"]).endswith(f".{mode}.schema.json")  # type: ignore[index]
+        fingerprints = dict(wire_schema_fingerprints(mode))
+        assert set(fingerprints) == set(WireSchemaName)
+        for name in WireSchemaName:
+            schema = wire_schema(name, mode)
+            assert schema["$schema"] == JSON_SCHEMA_DIALECT
+            assert str(schema["$id"]).endswith(f".{mode}.schema.json")
     assert (
-        fingerprints["validation"]["StatusToolOutput"]
-        != fingerprints["serialization"]["StatusToolOutput"]
-    )  # type: ignore[index]
-
-
-def test_fingerprint_policy_fails_unknown_protocol_fields() -> None:
-    assert FASTMCP_TOOL_KEYS == (
-        "name",
-        "title",
-        "description",
-        "inputSchema",
-        "outputSchema",
-        "icons",
-        "annotations",
-        "_meta",
-        "execution",
+        dict(wire_schema_fingerprints("validation"))[WireSchemaName.STATUS_TOOL_OUTPUT]
+        != dict(wire_schema_fingerprints("serialization"))[WireSchemaName.STATUS_TOOL_OUTPUT]
     )
-    with pytest.raises(ValueError, match="unexpected MCP Tool fields"):
-        normalize_mcp_tool({"name": "probe", "future": True})
 
 
 def test_cli_inspect_matches_production_protocol_manifest(
@@ -176,21 +157,19 @@ def test_cli_inspect_matches_production_protocol_manifest(
             monkeypatch.setenv(name, value)
     process_settings.cache_clear()
 
-    async def in_process() -> dict[str, object]:
+    async def in_process() -> list[dict[str, object]]:
         async with Client(mcp) as client:
-            return fastmcp_protocol_manifest(await client.list_tools())
+            return [
+                tool.model_dump(mode="json", by_alias=True, exclude_none=True)
+                for tool in await client.list_tools()
+            ]
 
     expected = asyncio.run(in_process())
     cli_tools = cli["tools"] if isinstance(cli, dict) else []
-    normalized_cli_tools = [
-        normalize_mcp_tool(
-            MCPTool.model_validate(tool).model_dump(mode="json", by_alias=True, exclude_none=True)
-        )
+    actual = [
+        MCPTool.model_validate(tool).model_dump(mode="json", by_alias=True, exclude_none=True)
         for tool in cli_tools
     ]
-    normalized_cli_tools.sort(key=lambda tool: str(tool["name"]))
-    actual = {
-        "profile": expected["profile"],
-        "tools": normalized_cli_tools,
-    }
+    expected.sort(key=lambda tool: str(tool["name"]))
+    actual.sort(key=lambda tool: str(tool["name"]))
     assert actual == expected

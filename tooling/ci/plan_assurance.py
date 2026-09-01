@@ -158,53 +158,6 @@ def _known_touch_resources(block: str) -> set[str]:
     return resources
 
 
-ONTOLOGY_FABRIC_REQUIRED_ANCESTORS: dict[str, frozenset[str]] = {
-    "WP05": frozenset(("WP03",)),
-    "WP06": frozenset(("WP03",)),
-    "WP09": frozenset(("WP08",)),
-    "WP17": frozenset(("WP09", "WP10", "WP11", "WP12", "WP16")),
-    "WP14": frozenset(("WP17",)),
-    "WP15": frozenset(("WP17",)),
-}
-
-
-def _validate_ontology_fabric_readiness_states(
-    dependencies: Mapping[str, set[str]],
-) -> int:
-    """Exhaust legal completion states and enforce the plan's release barriers."""
-    if set(dependencies) != {f"WP{index:02d}" for index in range(1, 18)}:
-        return 0
-    ancestors = {packet: _ancestors(dependencies, packet) for packet in dependencies}
-    for packet, required in ONTOLOGY_FABRIC_REQUIRED_ANCESTORS.items():
-        missing = required - ancestors[packet]
-        if missing:
-            raise PlanAssuranceError(
-                f"{packet} lacks required release-barrier ancestors {sorted(missing)}"
-            )
-
-    initial = frozenset()
-    pending = [initial]
-    visited = {initial}
-    while pending:
-        complete = pending.pop()
-        ready = {
-            packet
-            for packet, required in dependencies.items()
-            if packet not in complete and required <= complete
-        }
-        for packet in ready:
-            required = ONTOLOGY_FABRIC_REQUIRED_ANCESTORS.get(packet, frozenset())
-            if not required <= complete:
-                raise PlanAssuranceError(
-                    f"legal readiness state exposes {packet} before {sorted(required)}"
-                )
-            successor = frozenset((*complete, packet))
-            if successor not in visited:
-                visited.add(successor)
-                pending.append(successor)
-    return len(visited)
-
-
 def _load_overlap_dispositions(
     root: Path,
 ) -> dict[tuple[str, str, frozenset[str]], Mapping[str, Any]]:
@@ -295,7 +248,6 @@ def validate_dependencies(
     plan_path, plan = _selected_plan(root, plan_path)
     dependencies = _dependency_map(plan_path)
     _topological_order(dependencies)
-    _validate_ontology_fabric_readiness_states(dependencies)
     blocks = artifact_contracts._packet_blocks(plan_path)
     resources = {
         packet: _known_touch_resources(block) for packet, block in blocks.items()
@@ -623,8 +575,44 @@ def _rust_definitions(root: Path, wanted: set[str]) -> list[OracleDefinition]:
     return definitions
 
 
+def _just_fragment_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        return " ".join(_just_fragment_text(item) for item in value.values())
+    if isinstance(value, Sequence):
+        return " ".join(_just_fragment_text(item) for item in value)
+    return ""
+
+
+def _just_definitions(root: Path, wanted: set[str]) -> list[OracleDefinition]:
+    if not wanted or not (root / "justfile").is_file():
+        return []
+    recipes = artifact_contracts.load_just_recipes(root)
+    definitions: list[OracleDefinition] = []
+    for oracle in sorted(wanted):
+        recipe = recipes.get(oracle)
+        if not isinstance(recipe, Mapping):
+            continue
+        parameters = recipe.get("parameters")
+        if isinstance(parameters, list) and parameters:
+            continue
+        body_text = re.sub(r"\s+", " ", _just_fragment_text(recipe.get("body"))).strip()
+        dependencies = recipe.get("dependencies")
+        if not body_text and not dependencies:
+            continue
+        if body_text and re.fullmatch(r"@?just\s+[A-Za-z0-9_-]+", body_text):
+            raise PlanAssuranceError(f"{oracle} is a single-call Just alias")
+        definitions.append(OracleDefinition(oracle, "just", "justfile", oracle))
+    return definitions
+
+
 def oracle_definitions(root: Path, wanted: set[str]) -> list[OracleDefinition]:
-    return _python_definitions(root, wanted) + _rust_definitions(root, wanted)
+    return (
+        _python_definitions(root, wanted)
+        + _rust_definitions(root, wanted)
+        + _just_definitions(root, wanted)
+    )
 
 
 def _require_exact_definitions(
@@ -673,17 +661,7 @@ def validate_oracle_substance(root: Path = ROOT) -> tuple[int, int]:
 
 def _rust_selector_command(domain: str, oracles: Sequence[str]) -> list[str]:
     command = ["cargo", "nextest", "run", "--locked", "--no-fail-fast"]
-    if domain == "root-model-compiler":
-        command.extend(
-            (
-                "--no-default-features",
-                "--features",
-                "model-compiler",
-                "--bin",
-                "codefabric-model",
-            )
-        )
-    elif domain != "root":
+    if domain != "root":
         command.extend(("--manifest-path", domain))
     expression = "test(/(" + "|".join(sorted(map(re.escape, oracles))) + ")/)"
     command.extend(("-E", expression, "--no-tests=fail"))
@@ -731,6 +709,9 @@ def run_packet_oracles(
     rust_definitions = [
         value for value in by_oracle.values() if value.language == "rust"
     ]
+    just_definitions = [
+        value for value in by_oracle.values() if value.language == "just"
+    ]
     if python_nodes:
         subprocess.run(
             (
@@ -755,9 +736,7 @@ def run_packet_oracles(
         roots: dict[str, list[str]] = defaultdict(list)
         for definition in rust_definitions:
             domain = "root"
-            if definition.path.startswith("src/bin/codefabric_model/"):
-                domain = "root-model-compiler"
-            elif definition.path.startswith("rustc-extractor/"):
+            if definition.path.startswith("rustc-extractor/"):
                 domain = "rustc-extractor/Cargo.toml"
             elif definition.path.startswith("pyrefly-sidecar/"):
                 domain = "pyrefly-sidecar/Cargo.toml"
@@ -765,6 +744,8 @@ def run_packet_oracles(
         for domain, oracles in roots.items():
             command = _rust_selector_command(domain, oracles)
             subprocess.run(command, cwd=root, check=True)
+    for definition in sorted(just_definitions, key=lambda value: value.oracle):
+        subprocess.run(("just", definition.function), cwd=root, check=True)
 
 
 def _parser() -> argparse.ArgumentParser:

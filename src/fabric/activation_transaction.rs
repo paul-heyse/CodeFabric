@@ -878,6 +878,16 @@ impl ActivationTransactionRequest {
     }
 
     #[must_use]
+    pub const fn compatibility(&self) -> CompatibilityClassRef {
+        self.compatibility
+    }
+
+    #[must_use]
+    pub const fn retention(&self) -> RetentionPolicyRef {
+        self.retention
+    }
+
+    #[must_use]
     pub const fn operation_selection(&self) -> OperationSelectionRef {
         self.operation_selection
     }
@@ -968,6 +978,16 @@ impl ActivationRecoveryRequest {
     }
 
     #[must_use]
+    pub const fn compatibility(&self) -> CompatibilityClassRef {
+        self.compatibility
+    }
+
+    #[must_use]
+    pub const fn retention(&self) -> RetentionPolicyRef {
+        self.retention
+    }
+
+    #[must_use]
     pub const fn operation_selection(&self) -> OperationSelectionRef {
         self.operation_selection
     }
@@ -1003,9 +1023,12 @@ fn validate_request_contract(
     if activation_proof.is_some_and(|proof| proof != pins.proof_receipt) {
         return Err(ActivationTransactionRequestError::ProofReceiptMismatch);
     }
-    if pins.compiler_release != command.pins.compiler_release
-        || pins.model_head != command.pins.model_head
+    if pins.input_release != command.pins.input_release
+        || pins.program_release != command.pins.program_release
+        || pins.application_release != command.pins.application_release
+        || pins.source_authority != command.pins.source_authority
         || pins.source_generation != command.pins.source_generation
+        || pins.provider_release != command.pins.provider_release
         || pins.provider_set != command.pins.provider_set
         || pins.resource_envelope != command.resources
     {
@@ -2330,12 +2353,12 @@ mod tests {
         SealedActivationControlBinding, TableVersionSet, TableVersionSetRef,
     };
     use crate::fabric::command::{
-        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins,
-        CompilerReleaseRef, ExecutionOwner, IdempotencyKey, LeaseId, ModelHeadRef, PrincipalId,
-        ProviderSetRef, ResourceEnvelopeRef, SourceGeneration, WriterGeneration,
+        ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins, ExecutionOwner,
+        IdempotencyKey, InputReleaseRef, LeaseId, PrincipalId, ProgramReleaseRef, ProviderSetRef,
+        ResourceEnvelopeRef, SourceGeneration, WriterGeneration,
     };
     use crate::fabric::delta_exact::ExactDeltaPin;
-    use crate::fabric::epoch::FabricEpochRuntimeConfig;
+    use crate::fabric::epoch_runtime::FabricEpochRuntimeConfig;
     use crate::fabric::programmatic_epoch::{
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
@@ -2377,8 +2400,13 @@ mod tests {
                 generation: WriterGeneration::new(7).unwrap(),
             },
             pins: CommandPins {
-                compiler_release: CompilerReleaseRef::from_bytes(id32(8)),
-                model_head: ModelHeadRef::from_bytes(id32(9)),
+                input_release: InputReleaseRef::from_bytes(id32(8)),
+                program_release: ProgramReleaseRef::from_bytes(id32(9)),
+                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
+                    id32(9),
+                ),
+                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(id32(9)),
+                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(id32(9)),
                 source_generation: SourceGeneration::new(10),
                 provider_set: ProviderSetRef::from_bytes(id32(11)),
             },
@@ -2426,8 +2454,11 @@ mod tests {
             candidate,
             FabricEpochPins {
                 epoch: *candidate_identity(&command),
-                compiler_release: command.pins.compiler_release,
-                model_head: command.pins.model_head,
+                input_release: command.pins.input_release,
+                program_release: command.pins.program_release,
+                application_release: command.pins.application_release,
+                source_authority: command.pins.source_authority,
+                provider_release: command.pins.provider_release,
                 source_generation: command.pins.source_generation,
                 provider_set: command.pins.provider_set,
                 table_versions,

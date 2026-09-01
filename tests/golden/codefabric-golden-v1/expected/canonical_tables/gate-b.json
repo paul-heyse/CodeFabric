@@ -1,1 +1,0 @@
-{"required_tables":["source_file","source_token","source_annotation","entity","relation","property_fact","fact_evidence","syntax_detail"],"ordering":"primary-key","profile":"gate-b-v1"}

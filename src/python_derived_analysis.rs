@@ -47,7 +47,7 @@ const MAX_INVALIDATED_OWNERS: usize = 262_144;
 /// Exact immutable inputs repeated on every derived output row.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PythonFlowProvenance {
-    pub model_epoch_id: [u8; 32],
+    pub fabric_epoch_id: [u8; 32],
     pub source_pin: [u8; 32],
     pub analysis_context_id: [u8; 32],
     pub source_generation: u64,
@@ -269,7 +269,7 @@ pub struct PythonOwnerFlowInput {
     pub pyrefly: PyreflySemanticEvidence,
 }
 
-/// Model-selected relation identities. Runtime code never dispatches on these strings.
+/// Application-owned relation identities. Runtime code never dispatches on these strings.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PythonFlowRelations {
     pub cfg_nodes: RelationId,
@@ -288,7 +288,7 @@ pub struct PythonFlowRelations {
     pub unknowns: RelationId,
 }
 
-/// Static output roles. Model bindings own every semantic relation identity.
+/// Static output roles. Typed analysis bindings own every semantic relation identity.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum PythonDerivedRelation {
     CfgNode,
@@ -326,10 +326,10 @@ impl PythonDerivedRelation {
     ];
 }
 
-/// Model-selected physical names for every semantic field consumed or emitted by this slice.
+/// Contract-selected physical names for every semantic field consumed or emitted by this slice.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PythonFlowFields {
-    pub model_epoch_id: Arc<str>,
+    pub fabric_epoch_id: Arc<str>,
     pub source_pin: Arc<str>,
     pub analysis_context_id: Arc<str>,
     pub source_generation: Arc<str>,
@@ -420,7 +420,7 @@ impl PythonFlowFields {
 
     fn all_names(&self) -> [&Arc<str>; 59] {
         [
-            &self.model_epoch_id,
+            &self.fabric_epoch_id,
             &self.source_pin,
             &self.analysis_context_id,
             &self.source_generation,
@@ -483,7 +483,7 @@ impl PythonFlowFields {
     }
 }
 
-/// Model-selected meanings whose spellings are data rather than Rust dispatch keys.
+/// Contract-selected meanings whose spellings are data rather than Rust dispatch keys.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PythonFlowSemanticValues {
     pub sequential_edge: Arc<str>,
@@ -498,7 +498,7 @@ pub struct PythonFlowSemanticValues {
     pub live_exit: Arc<str>,
 }
 
-/// Full model binding and application-owned authority selection for this compilation.
+/// Full typed binding and application-owned authority selection for this compilation.
 #[derive(Clone, Debug)]
 pub struct PythonFlowBindings {
     pub relations: PythonFlowRelations,
@@ -751,7 +751,7 @@ struct PythonFixedPointResult {
 ///
 /// # Errors
 ///
-/// Rejects provider-native output authority, invalid model bindings/provenance, resource-bound
+/// Rejects provider-native output authority, invalid analysis bindings/provenance, resource-bound
 /// violations, inconsistent ordinals/edges, or Arrow/DataFusion construction failures.
 pub fn compile_python_owner_flow(
     input: PythonOwnerFlowInput,
@@ -1205,7 +1205,7 @@ fn validate_provenance(
     provenance: &PythonFlowProvenance,
     pyrefly: &PyreflySemanticEvidence,
 ) -> Result<(), PythonDerivedAnalysisError> {
-    if provenance.model_epoch_id == [0; 32]
+    if provenance.fabric_epoch_id == [0; 32]
         || provenance.source_pin == [0; 32]
         || provenance.analysis_context_id == [0; 32]
         || provenance.owner_id == [0; 16]
@@ -1967,7 +1967,7 @@ fn sequential_edge_plan(
             ],
         )?
         .project([
-            qualified(NODE_SOURCE_ALIAS, &fields.model_epoch_id),
+            qualified(NODE_SOURCE_ALIAS, &fields.fabric_epoch_id),
             qualified(NODE_SOURCE_ALIAS, &fields.source_pin),
             qualified(NODE_SOURCE_ALIAS, &fields.analysis_context_id),
             qualified(NODE_SOURCE_ALIAS, &fields.source_generation),
@@ -2016,7 +2016,7 @@ fn reaching_definitions_plan(
             ],
         )?
         .project([
-            qualified(USES_ALIAS, &fields.model_epoch_id),
+            qualified(USES_ALIAS, &fields.fabric_epoch_id),
             qualified(USES_ALIAS, &fields.source_pin),
             qualified(USES_ALIAS, &fields.analysis_context_id),
             qualified(USES_ALIAS, &fields.source_generation),
@@ -2053,7 +2053,7 @@ fn reaching_definitions_plan(
     let selected = LogicalPlanBuilder::from(ranked)
         .filter(col(REACHING_RANK).eq(lit(1_u64)))?
         .project([
-            col(fields.model_epoch_id.as_ref()),
+            col(fields.fabric_epoch_id.as_ref()),
             col(fields.source_pin.as_ref()),
             col(fields.analysis_context_id.as_ref()),
             col(fields.source_generation.as_ref()),
@@ -2098,7 +2098,7 @@ fn qualified(alias: &'static str, field: &Arc<str>) -> Expr {
 fn derived_id(domain: &[u8], provenance: &PythonFlowProvenance, parts: &[&[u8]]) -> [u8; 16] {
     let mut hasher = blake3::Hasher::new_derive_key("codefabric.python-derived-analysis.v2");
     hasher.update(domain);
-    hasher.update(&provenance.model_epoch_id);
+    hasher.update(&provenance.fabric_epoch_id);
     hasher.update(&provenance.source_pin);
     hasher.update(&provenance.analysis_context_id);
     hasher.update(&provenance.owner_id);
@@ -2114,7 +2114,7 @@ fn derived_id(domain: &[u8], provenance: &PythonFlowProvenance, parts: &[&[u8]])
 fn common_fields(fields: &PythonFlowFields) -> Vec<Field> {
     vec![
         Field::new(
-            fields.model_epoch_id.as_ref(),
+            fields.fabric_epoch_id.as_ref(),
             DataType::FixedSizeBinary(32),
             false,
         ),
@@ -2163,7 +2163,7 @@ fn common_columns(
     completeness: PythonAnalysisCompleteness,
 ) -> Vec<ArrayRef> {
     vec![
-        fixed_repeat(Some(&provenance.model_epoch_id), rows),
+        fixed_repeat(Some(&provenance.fabric_epoch_id), rows),
         fixed_repeat(Some(&provenance.source_pin), rows),
         fixed_repeat(Some(&provenance.analysis_context_id), rows),
         Arc::new(UInt64Array::from_iter_values(std::iter::repeat_n(
@@ -2869,7 +2869,7 @@ fn unknown_batch(
 
 fn cfg_node_output_columns(fields: &PythonFlowFields) -> Vec<Expr> {
     [
-        &fields.model_epoch_id,
+        &fields.fabric_epoch_id,
         &fields.source_pin,
         &fields.analysis_context_id,
         &fields.source_generation,
@@ -2965,7 +2965,7 @@ fn bool_values(values: impl IntoIterator<Item = bool>) -> ArrayRef {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use arrow_array::{Array, FixedSizeBinaryArray};
 
@@ -2973,7 +2973,7 @@ mod tests {
         RelationId::new(value).expect("test relation")
     }
 
-    fn bindings() -> PythonFlowBindings {
+    pub(crate) fn bindings() -> PythonFlowBindings {
         PythonFlowBindings {
             relations: PythonFlowRelations {
                 cfg_nodes: relation("application.python.cfg_node"),
@@ -2992,7 +2992,7 @@ mod tests {
                 unknowns: relation("application.python.unknown"),
             },
             fields: PythonFlowFields {
-                model_epoch_id: "model_epoch_id".into(),
+                fabric_epoch_id: "fabric_epoch_id".into(),
                 source_pin: "source_pin".into(),
                 analysis_context_id: "analysis_context_id".into(),
                 source_generation: "source_generation".into(),
@@ -3074,7 +3074,7 @@ mod tests {
 
     fn provenance() -> PythonFlowProvenance {
         PythonFlowProvenance {
-            model_epoch_id: [1; 32],
+            fabric_epoch_id: [1; 32],
             source_pin: [2; 32],
             analysis_context_id: [3; 32],
             source_generation: 7,
