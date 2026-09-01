@@ -1,7 +1,7 @@
 //! Atomic composition of application-owned derived analyses into a programmatic epoch.
 //!
 //! Exact provider admission remains the only raw-input authority. This module consumes that
-//! admission outcome, closes a runtime-supplied derived-family inventory with exactly one
+//! admission outcome, closes the compiled release-owned derived-family inventory with exactly one
 //! application producer or one explicit remainder, and registers native DataFusion
 //! transformations into the same candidate builder. Producer metadata is projected onto every
 //! output row and is also folded into the transformation provenance identity, so changing an
@@ -27,9 +27,19 @@ use datafusion::logical_expr::{
 use datafusion::prelude::{col, lit};
 use thiserror::Error;
 
-use crate::common_derived_analysis::{CommonAnalysisBindings, CommonAnalysisFamilies};
+#[cfg(test)]
+use crate::common_derived_analysis::CommonAnalysisBindings;
+use crate::common_derived_analysis::CommonAnalysisFamilies;
+use crate::fabric::derived_producer_closure::{
+    ReleaseAcceptedFactFamilyRow, ReleaseProducerClosureCatalog,
+    ReleaseProducerClosureCatalogError, ReleaseQueryFamilyRequirementRow,
+    ReleaseRuntimeProducerRow, ReleaseUnsupportedRemainderRow,
+    install_release_producer_closure_catalog,
+};
 use crate::fabric::epoch_runtime::FabricEpochId;
-use crate::fabric::production_kernel::CompiledTransformationAuthority;
+use crate::fabric::production_kernel::{
+    CompiledProofAuthority, CompiledQueryAuthority, CompiledTransformationAuthority,
+};
 use crate::fabric::programmatic_epoch::{
     ProgrammaticFabricEpochBuilder, ProgrammaticFabricEpochError,
 };
@@ -41,6 +51,9 @@ use crate::fabric::programmatic_schema::{
     TransformationProvenance, TransformationProvenanceIdentity, TransformationRecursionPolicy,
     TransformationReleaseIdentity, TransformationResourceClass, TransformationSemanticVersion,
 };
+use crate::production_query_recipe::{
+    ProductionQueryRecipeError, released_query_family_requirements,
+};
 use crate::provider_admission::{
     ExactProgrammaticProviderReports, ExactProgrammaticProviderRuns,
     ProgrammaticProviderAdmissionOutcome, ProviderAdmissionError, ProviderAuthorityClass,
@@ -48,9 +61,15 @@ use crate::provider_admission::{
 };
 use crate::provider_native_syntax::NativeSyntaxRelation;
 use crate::pyrefly_service::PyreflyRelation;
-use crate::python_derived_analysis::{PythonDerivedRelation, PythonFlowBindings};
+use crate::python_derived_analysis::{
+    PYTHON_DERIVED_AUTHORITY, PythonDerivedRelation, PythonFlowBindings, PythonFlowFields,
+    PythonFlowRelations, PythonFlowSemanticValues,
+};
 use crate::relation_ipc::{CoverageTrailer, RemainderReason, TerminalStatus};
-use crate::rust_mir_derived_analysis::{RustMirAnalysisBindings, RustMirDerivedRelation};
+use crate::relational_program::RelationId;
+use crate::rust_mir_derived_analysis::{
+    RustMirAnalysisBindings, RustMirAnalysisRelations, RustMirDerivedRelation,
+};
 use crate::rustc_relation_schema::RustcRelation;
 use crate::schema_contract::FIELD_ID_METADATA_KEY;
 
@@ -81,7 +100,7 @@ impl DerivedAnalysisResourceEnvelope {
     ///
     /// Rejects every zero limit so no bound can be interpreted as unlimited.
     #[allow(clippy::result_large_err)]
-    pub fn try_new(
+    pub(crate) fn try_new(
         max_producers: u64,
         max_remainders: u64,
         max_dependency_edges: u64,
@@ -594,6 +613,30 @@ impl DerivedMetadataBindings {
             .into_iter()
             .map(|role| self.column(role))
     }
+
+    fn scoped_to_relation(
+        &self,
+        relation_id: &ProgrammaticRelationId,
+    ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
+        let mut columns = BTreeMap::new();
+        for column in self.ordered() {
+            let scoped = DerivedMetadataColumnBinding {
+                role: column.role,
+                field_id: ProgrammaticFieldId::new(format!(
+                    "{}.metadata.{}",
+                    relation_id.as_str(),
+                    column.physical_name
+                )),
+                physical_name: Arc::clone(&column.physical_name),
+            };
+            validate_text(
+                "relation-scoped derived metadata field",
+                scoped.field_id.as_str(),
+            )?;
+            columns.insert(scoped.role, scoped);
+        }
+        Ok(Self { columns })
+    }
 }
 
 /// Extra closed roles on the explicit-remainder relation.
@@ -682,7 +725,7 @@ impl DerivedRemainderRelationBinding {
 }
 
 /// Complete runtime input for one atomic derived-analysis composition.
-pub struct ProgrammaticDerivedAnalysisComposition {
+pub(crate) struct ProgrammaticDerivedAnalysisComposition {
     release_authority: CompiledTransformationAuthority,
     families: Arc<[AcceptedDerivedFamily]>,
     dispositions: Vec<DerivedFamilyDisposition>,
@@ -697,7 +740,7 @@ impl ProgrammaticDerivedAnalysisComposition {
     /// Use [`Self::try_new_with_resource_envelope`] when a deployment owns a narrower explicit
     /// aggregate budget. Per-transformation resource contracts are still mandatory and enforced
     /// independently during DataFusion execution.
-    pub(crate) fn try_new(
+    fn try_new(
         authority: &CompiledTransformationAuthority,
         families: impl Into<Arc<[AcceptedDerivedFamily]>>,
         dispositions: Vec<DerivedFamilyDisposition>,
@@ -715,7 +758,7 @@ impl ProgrammaticDerivedAnalysisComposition {
     }
 
     /// Construct a composition under an explicit aggregate planning envelope.
-    pub(crate) fn try_new_with_resource_envelope(
+    fn try_new_with_resource_envelope(
         authority: &CompiledTransformationAuthority,
         families: impl Into<Arc<[AcceptedDerivedFamily]>>,
         dispositions: Vec<DerivedFamilyDisposition>,
@@ -744,12 +787,12 @@ impl ProgrammaticDerivedAnalysisComposition {
     }
 }
 
-/// Closed common-analysis roles currently exposed by [`CommonAnalysisBindings`].
+/// Closed common-analysis roles compiled into this release.
 ///
-/// The ten semantic fact families share the application-owned `facts` relation. Support relations are
-/// separate roles because unknown, completeness, and invalidation evidence are not facts.
+/// Every role owns a distinct relation identity. The procedural common-analysis module's
+/// multiplexed `facts` relation is not release authority for this catalog.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum ExistingCommonDerivedFamilyRole {
+pub(crate) enum ReleasedCommonDerivedFamilyRole {
     Dominator,
     PostDominator,
     ControlDependence,
@@ -765,8 +808,8 @@ pub enum ExistingCommonDerivedFamilyRole {
     Invalidation,
 }
 
-impl ExistingCommonDerivedFamilyRole {
-    pub const ALL: [Self; 13] = [
+impl ReleasedCommonDerivedFamilyRole {
+    const ALL: [Self; 13] = [
         Self::Dominator,
         Self::PostDominator,
         Self::ControlDependence,
@@ -799,24 +842,21 @@ impl ExistingCommonDerivedFamilyRole {
         }
     }
 
-    fn output_relation<'a>(
-        self,
-        bindings: &'a CommonAnalysisBindings,
-    ) -> &'a crate::relational_program::RelationId {
+    const fn output_relation(self) -> &'static str {
         match self {
-            Self::Dominator
-            | Self::PostDominator
-            | Self::ControlDependence
-            | Self::DataDependence
-            | Self::CallGraph
-            | Self::SccMembership
-            | Self::Reachability
-            | Self::CallableEffect
-            | Self::CallableResource
-            | Self::CallableSummary => &bindings.relations.facts,
-            Self::Unknown => &bindings.relations.unknowns,
-            Self::Completeness => &bindings.relations.completeness,
-            Self::Invalidation => &bindings.relations.invalidation,
+            Self::Dominator => "application.common.dominator",
+            Self::PostDominator => "application.common.post_dominator",
+            Self::ControlDependence => "application.common.control_dependence",
+            Self::DataDependence => "application.common.data_dependence",
+            Self::CallGraph => "application.common.call_graph",
+            Self::SccMembership => "application.common.scc_membership",
+            Self::Reachability => "application.common.reachability",
+            Self::CallableEffect => "application.common.callable_effect",
+            Self::CallableResource => "application.common.callable_resource",
+            Self::CallableSummary => "application.common.callable_summary",
+            Self::Unknown => "application.common.unknown",
+            Self::Completeness => "application.common.completeness",
+            Self::Invalidation => "application.common.invalidation",
         }
     }
 
@@ -838,24 +878,343 @@ impl ExistingCommonDerivedFamilyRole {
     }
 }
 
-/// Closed census role over the three existing application-analysis modules.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum ExistingDerivedFamilyRole {
-    Python(PythonDerivedRelation),
-    RustMir(RustMirDerivedRelation),
-    Common(ExistingCommonDerivedFamilyRole),
+/// Typed bindings embedded in the compiled release.
+///
+/// Only exact provider data and its candidate epoch vary at runtime. Relation/field/family
+/// identities are constructed here, never accepted from a caller or recovered from a static row
+/// census.
+#[derive(Clone)]
+struct ReleasedAnalysisBindings {
+    python: PythonFlowBindings,
+    rust_mir: RustMirAnalysisBindings,
+    common_families: CommonAnalysisFamilies,
 }
 
-impl ExistingDerivedFamilyRole {
+fn released_analysis_bindings() -> Result<ReleasedAnalysisBindings, ProgrammaticDerivedAnalysisError>
+{
+    let relation = |value: &'static str| {
+        RelationId::new(value)
+            .map_err(|error| ProgrammaticDerivedAnalysisError::ReleasedBinding(error.to_string()))
+    };
+    let python = PythonFlowBindings {
+        relations: PythonFlowRelations {
+            cfg_nodes: relation("application.python.cfg_node")?,
+            cfg_edges: relation("application.python.cfg_edge")?,
+            evaluation_order: relation("application.python.evaluation_order")?,
+            def_use: relation("application.python.def_use")?,
+            reaching_definitions: relation("application.python.reaching_definition")?,
+            liveness: relation("application.python.liveness")?,
+            value_flow: relation("application.python.value_flow")?,
+            memory_locations: relation("application.python.memory_location")?,
+            alias_points_to: relation("application.python.alias_points_to")?,
+            effects: relation("application.python.effect")?,
+            resource_lifecycle: relation("application.python.resource_lifecycle")?,
+            async_suspension: relation("application.python.async_suspension")?,
+            invalidations: relation("application.python.invalidation")?,
+            unknowns: relation("application.python.unknown")?,
+        },
+        fields: PythonFlowFields {
+            fabric_epoch_id: "fabric_epoch_id".into(),
+            source_pin: "source_pin".into(),
+            analysis_context_id: "analysis_context_id".into(),
+            source_generation: "source_generation".into(),
+            owner_id: "owner_id".into(),
+            ruff_provider_run_id: "ruff_provider_run_id".into(),
+            ruff_provider_release: "ruff_provider_release".into(),
+            pyrefly_provider_run_id: "pyrefly_provider_run_id".into(),
+            pyrefly_provider_release: "pyrefly_provider_release".into(),
+            algorithm_release: "algorithm_release".into(),
+            precision_release: "precision_release".into(),
+            authority: "authority".into(),
+            analysis_completeness: "analysis_completeness".into(),
+            node_id: "node_id".into(),
+            node_ordinal: "node_ordinal".into(),
+            node_kind: "node_kind".into(),
+            start_byte: "start_byte".into(),
+            end_byte: "end_byte".into(),
+            next_node_id: "next_node_id".into(),
+            next_edge_id: "next_edge_id".into(),
+            next_enabled: "next_enabled".into(),
+            edge_id: "edge_id".into(),
+            source_node_id: "source_node_id".into(),
+            target_node_id: "target_node_id".into(),
+            edge_kind: "edge_kind".into(),
+            event_id: "event_id".into(),
+            event_ordinal: "event_ordinal".into(),
+            event_role: "event_role".into(),
+            location_id: "location_id".into(),
+            definition_event_id: "definition_event_id".into(),
+            use_event_id: "use_event_id".into(),
+            relation_kind: "relation_kind".into(),
+            boundary: "boundary".into(),
+            predecessor_id: "predecessor_id".into(),
+            successor_id: "successor_id".into(),
+            memory_kind: "memory_kind".into(),
+            base_location_id: "base_location_id".into(),
+            selector: "selector".into(),
+            selector_dynamic: "selector_dynamic".into(),
+            allocation_node_id: "allocation_node_id".into(),
+            alias_source_location_id: "alias_source_location_id".into(),
+            alias_target_location_id: "alias_target_location_id".into(),
+            evidence: "evidence".into(),
+            effect_id: "effect_id".into(),
+            effect_ordinal: "effect_ordinal".into(),
+            effect_kind: "effect_kind".into(),
+            subject_location_id: "subject_location_id".into(),
+            resource_kind: "resource_kind".into(),
+            suspension_id: "suspension_id".into(),
+            suspension_ordinal: "suspension_ordinal".into(),
+            suspension_kind: "suspension_kind".into(),
+            resume_node_id: "resume_node_id".into(),
+            exceptional_resume_node_id: "exceptional_resume_node_id".into(),
+            invalidated_owner_id: "invalidated_owner_id".into(),
+            invalidation_reason: "invalidation_reason".into(),
+            bounded: "bounded".into(),
+            unknown_family: "unknown_family".into(),
+            unknown_reason: "unknown_reason".into(),
+            unknown_detail: "unknown_detail".into(),
+        },
+        values: PythonFlowSemanticValues {
+            sequential_edge: "next".into(),
+            definition_event: "definition".into(),
+            use_event: "use".into(),
+            reaching_definition: "reaching_definition".into(),
+            def_use: "def_use".into(),
+            value_flow: "value_flow".into(),
+            may_alias: "may_alias".into(),
+            may_point_to: "may_point_to".into(),
+            live_entry: "live_entry".into(),
+            live_exit: "live_exit".into(),
+        },
+        cfg_authority: ProviderAuthorityClass::PythonCfg,
+        dataflow_authority: ProviderAuthorityClass::PythonDataflow,
+        alias_authority: ProviderAuthorityClass::PythonAlias,
+        effect_authority: ProviderAuthorityClass::PythonEffect,
+        summary_authority: ProviderAuthorityClass::PythonSummary,
+    };
+    let rust_mir = RustMirAnalysisBindings {
+        relations: RustMirAnalysisRelations {
+            cfg_edges: relation("application.rust_mir.cfg_edge")?,
+            def_use: relation("application.rust_mir.def_use")?,
+            reaching_definitions: relation("application.rust_mir.reaching_definition")?,
+            liveness: relation("application.rust_mir.liveness")?,
+            ownership_state: relation("application.rust_mir.ownership_state")?,
+            alias_points_to: relation("application.rust_mir.alias_points_to")?,
+            resource_lifecycle: relation("application.rust_mir.resource_lifecycle")?,
+            async_lowering: relation("application.rust_mir.async_lowering")?,
+            unsafe_ffi: relation("application.rust_mir.unsafe_ffi")?,
+            control_dependence_inputs: relation("application.rust_mir.control_dependence_input")?,
+            unknowns: relation("application.rust_mir.unknown")?,
+        },
+        authority_class: ProviderAuthorityClass::RustApplicationDerived,
+        private_enrichment: None,
+    };
+    Ok(ReleasedAnalysisBindings {
+        python,
+        rust_mir,
+        common_families: CommonAnalysisFamilies {
+            dominator: Arc::from("family.dom"),
+            post_dominator: Arc::from("family.postdom"),
+            control_dependence: Arc::from("family.control"),
+            data_dependence: Arc::from("family.data"),
+            call_graph: Arc::from("family.call"),
+            scc_membership: Arc::from("family.scc"),
+            reachability: Arc::from("family.reach"),
+            callable_effect: Arc::from("family.effect"),
+            callable_resource: Arc::from("family.resource"),
+            callable_summary: Arc::from("family.summary"),
+        },
+    })
+}
+
+fn released_typed_identity(domain: &'static [u8], values: &[&[u8]]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(domain);
+    for value in values {
+        frame(&mut hasher, value);
+    }
+    let mut identity = *hasher.finalize().as_bytes();
+    if identity == [0; 32] {
+        identity[0] = 1;
+    }
+    identity
+}
+
+fn released_transformation_contract(
+    semantic_id: &'static str,
+    max_rows: u64,
+) -> ProgrammaticTransformationContract {
+    let version = TransformationSemanticVersion::new(3, 0, 0);
+    let version_frame = [
+        version.major().to_be_bytes(),
+        version.minor().to_be_bytes(),
+        version.patch().to_be_bytes(),
+    ]
+    .concat();
+    ProgrammaticTransformationContract::new(
+        ProgrammaticTransformationId::new(semantic_id),
+        version,
+        TransformationResourceClass::BoundedInMemory {
+            max_rows,
+            max_memory_bytes: 64 * 1024 * 1024,
+        },
+        TransformationDeterminismPolicy::DeterministicSet,
+        TransformationOrderingPolicy::Unordered,
+        TransformationRecursionPolicy::Forbidden,
+        TransformationProvenance::new(
+            TransformationProvenanceIdentity::from_bytes(released_typed_identity(
+                b"codefabric.released-analysis-authority.v1",
+                &[semantic_id.as_bytes(), &version_frame],
+            )),
+            TransformationReleaseIdentity::from_bytes(released_typed_identity(
+                b"codefabric.released-analysis-implementation.v1",
+                &[semantic_id.as_bytes(), &version_frame],
+            )),
+        ),
+    )
+}
+
+fn released_output(
+    relation_id: ProgrammaticRelationId,
+    table_name: &'static str,
+    field_prefix: &'static str,
+    field_count: usize,
+) -> TransformationOutput {
+    TransformationOutput::new(
+        relation_id,
+        datafusion::common::TableReference::full(
+            crate::fabric::epoch_runtime::FABRIC_CATALOG,
+            crate::fabric::epoch_runtime::FabricSchemaRole::Derived.as_str(),
+            table_name,
+        ),
+        (0..field_count)
+            .map(|ordinal| {
+                TransformationFieldIdentity::new(ProgrammaticFieldId::new(format!(
+                    "{field_prefix}.{ordinal}"
+                )))
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn released_algorithm(
+    authority: &CompiledTransformationAuthority,
+    contract: &ProgrammaticTransformationContract,
+) -> DerivedAlgorithmContract {
+    DerivedAlgorithmContract::new(
+        authority,
+        contract.semantic_id().clone(),
+        contract.semantic_version(),
+        contract.provenance().release_identity(),
+    )
+}
+
+fn released_metadata_name(role: DerivedMetadataRole) -> &'static str {
+    match role {
+        DerivedMetadataRole::FamilyIdentity => "__cf_derived_family",
+        DerivedMetadataRole::Domain => "__cf_derived_domain",
+        DerivedMetadataRole::AuthorityIdentity => "__cf_derived_authority",
+        DerivedMetadataRole::AlgorithmIdentity => "__cf_derived_algorithm",
+        DerivedMetadataRole::AlgorithmVersionMajor => "__cf_derived_version_major",
+        DerivedMetadataRole::AlgorithmVersionMinor => "__cf_derived_version_minor",
+        DerivedMetadataRole::AlgorithmVersionPatch => "__cf_derived_version_patch",
+        DerivedMetadataRole::ReleaseIdentity => "__cf_derived_release",
+        DerivedMetadataRole::PrecisionIdentity => "__cf_derived_precision",
+        DerivedMetadataRole::InputVectorIdentity => "__cf_derived_input_vector",
+        DerivedMetadataRole::CompletenessState => "__cf_derived_completeness",
+        DerivedMetadataRole::ProvenanceClosureIdentity => "__cf_derived_provenance",
+    }
+}
+
+fn released_metadata_bindings(
+    authority: &CompiledTransformationAuthority,
+) -> Result<DerivedMetadataBindings, ProgrammaticDerivedAnalysisError> {
+    DerivedMetadataBindings::try_new(
+        authority,
+        DerivedMetadataRole::ALL.into_iter().map(|role| {
+            let name = released_metadata_name(role);
+            DerivedMetadataColumnBinding::new(
+                authority,
+                role,
+                ProgrammaticFieldId::new(format!("application.analysis.metadata.{name}")),
+                name,
+            )
+        }),
+    )
+}
+
+fn released_remainder_binding(
+    authority: &CompiledTransformationAuthority,
+    metadata: &DerivedMetadataBindings,
+) -> Result<DerivedRemainderRelationBinding, ProgrammaticDerivedAnalysisError> {
+    let contract = released_transformation_contract("analysis.remainder.programmatic.v3", 4_096);
+    let columns = [
+        DerivedRemainderMetadataColumnBinding::new(
+            authority,
+            DerivedRemainderMetadataRole::Reason,
+            ProgrammaticFieldId::new("application.analysis.remainder.reason"),
+            "__cf_derived_remainder_reason",
+        ),
+        DerivedRemainderMetadataColumnBinding::new(
+            authority,
+            DerivedRemainderMetadataRole::EvidenceIdentity,
+            ProgrammaticFieldId::new("application.analysis.remainder.evidence_identity"),
+            "__cf_derived_remainder_evidence",
+        ),
+        DerivedRemainderMetadataColumnBinding::new(
+            authority,
+            DerivedRemainderMetadataRole::Retryability,
+            ProgrammaticFieldId::new("application.analysis.remainder.retryability"),
+            "__cf_derived_remainder_retryability",
+        ),
+    ];
+    let fields = metadata
+        .ordered()
+        .map(|column| TransformationFieldIdentity::new(column.field_id.clone()))
+        .chain(
+            columns
+                .iter()
+                .map(|column| TransformationFieldIdentity::new(column.field_id.clone())),
+        )
+        .collect::<Vec<_>>();
+    DerivedRemainderRelationBinding::try_new(
+        authority,
+        released_typed_identity(
+            b"codefabric.released-analysis-remainder-authority.v1",
+            &[contract.semantic_id().as_str().as_bytes()],
+        ),
+        contract,
+        TransformationOutput::new(
+            ProgrammaticRelationId::new("proof.application_analysis_remainder"),
+            datafusion::common::TableReference::full(
+                crate::fabric::epoch_runtime::FABRIC_CATALOG,
+                crate::fabric::epoch_runtime::FabricSchemaRole::Proof.as_str(),
+                "application_analysis_remainder",
+            ),
+            fields,
+        ),
+        columns,
+    )
+}
+
+/// Closed census role over the three existing application-analysis modules.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum ReleasedDerivedFamilyRole {
+    Python(PythonDerivedRelation),
+    RustMir(RustMirDerivedRelation),
+    Common(ReleasedCommonDerivedFamilyRole),
+}
+
+impl ReleasedDerivedFamilyRole {
     /// Return the complete current role census without deriving it from strings.
     #[must_use]
-    pub fn all() -> Vec<Self> {
+    fn all() -> Vec<Self> {
         PythonDerivedRelation::ALL
             .into_iter()
             .map(Self::Python)
             .chain(RustMirDerivedRelation::ALL.into_iter().map(Self::RustMir))
             .chain(
-                ExistingCommonDerivedFamilyRole::ALL
+                ReleasedCommonDerivedFamilyRole::ALL
                     .into_iter()
                     .map(Self::Common),
             )
@@ -879,18 +1238,41 @@ impl ExistingDerivedFamilyRole {
         }
     }
 
+    fn released_output_relation(
+        self,
+        python: &PythonFlowBindings,
+        rust_mir: &RustMirAnalysisBindings,
+    ) -> ProgrammaticRelationId {
+        match self {
+            Self::Python(role) => ProgrammaticRelationId::new(python.relation_id(role).as_str()),
+            Self::RustMir(role) => ProgrammaticRelationId::new(rust_mir.relation_id(role).as_str()),
+            Self::Common(role) => ProgrammaticRelationId::new(role.output_relation()),
+        }
+    }
+
+    #[cfg(test)]
     fn output_relation(
         self,
         python: &PythonFlowBindings,
         rust_mir: &RustMirAnalysisBindings,
-        common: &CommonAnalysisBindings,
+        _common: &CommonAnalysisBindings,
     ) -> ProgrammaticRelationId {
-        let relation = match self {
-            Self::Python(role) => python.relation_id(role),
-            Self::RustMir(role) => rust_mir.relation_id(role),
-            Self::Common(role) => role.output_relation(common),
+        self.released_output_relation(python, rust_mir)
+    }
+
+    fn family_identity(
+        self,
+        authority: &CompiledTransformationAuthority,
+        bindings: &ReleasedAnalysisBindings,
+    ) -> Result<DerivedFamilyId, ProgrammaticDerivedAnalysisError> {
+        let identity = match self {
+            Self::Python(role) => bindings.python.relation_id(role).as_str(),
+            Self::RustMir(role) => bindings.rust_mir.relation_id(role).as_str(),
+            Self::Common(role) => role
+                .semantic_identity(&bindings.common_families)
+                .unwrap_or_else(|| role.output_relation()),
         };
-        ProgrammaticRelationId::new(relation.as_str())
+        DerivedFamilyId::try_new(authority, identity)
     }
 
     /// Return the exact intended catalog-input vector for this existing family role.
@@ -901,11 +1283,10 @@ impl ExistingDerivedFamilyRole {
     /// still records the inputs that adapter must consume, so its remainder cannot erase causal
     /// dependency intent.
     #[must_use]
-    pub fn dependency_contract(
+    fn released_dependency_contract(
         self,
         python: &PythonFlowBindings,
         rust_mir: &RustMirAnalysisBindings,
-        common: &CommonAnalysisBindings,
     ) -> Arc<[ProgrammaticRelationId]> {
         let syntax =
             |relation: NativeSyntaxRelation| ProgrammaticRelationId::new(relation.as_str());
@@ -918,8 +1299,8 @@ impl ExistingDerivedFamilyRole {
         let rust_output = |role: RustMirDerivedRelation| {
             ProgrammaticRelationId::new(rust_mir.relation_id(role).as_str())
         };
-        let common_input = |relation: &crate::relational_program::RelationId| {
-            ProgrammaticRelationId::new(relation.as_str())
+        let common_output = |role: ReleasedCommonDerivedFamilyRole| {
+            ProgrammaticRelationId::new(role.output_relation())
         };
 
         let dependencies = match self {
@@ -1081,37 +1462,42 @@ impl ExistingDerivedFamilyRole {
                 relations
             }
             Self::Common(
-                ExistingCommonDerivedFamilyRole::Dominator
-                | ExistingCommonDerivedFamilyRole::PostDominator
-                | ExistingCommonDerivedFamilyRole::ControlDependence,
+                ReleasedCommonDerivedFamilyRole::Dominator
+                | ReleasedCommonDerivedFamilyRole::PostDominator
+                | ReleasedCommonDerivedFamilyRole::ControlDependence,
             ) => vec![
-                common_input(&common.relations.cfg_nodes),
-                common_input(&common.relations.cfg_edges),
+                python_output(PythonDerivedRelation::CfgNode),
+                python_output(PythonDerivedRelation::CfgEdge),
+                rustc(RustcRelation::MirBlock),
+                rust_output(RustMirDerivedRelation::CfgEdge),
             ],
-            Self::Common(ExistingCommonDerivedFamilyRole::DataDependence) => {
-                vec![common_input(&common.relations.def_use_reaching)]
-            }
-            Self::Common(ExistingCommonDerivedFamilyRole::CallGraph) => {
-                vec![pyrefly(PyreflyRelation::CallTarget)]
-            }
+            Self::Common(ReleasedCommonDerivedFamilyRole::DataDependence) => vec![
+                python_output(PythonDerivedRelation::ReachingDefinition),
+                rust_output(RustMirDerivedRelation::ReachingDefinition),
+            ],
+            Self::Common(ReleasedCommonDerivedFamilyRole::CallGraph) => vec![
+                pyrefly(PyreflyRelation::CallTarget),
+                rustc(RustcRelation::Call),
+                rustc(RustcRelation::Instance),
+            ],
             Self::Common(
-                ExistingCommonDerivedFamilyRole::SccMembership
-                | ExistingCommonDerivedFamilyRole::Reachability,
-            ) => vec![common_input(&common.relations.call_targets)],
+                ReleasedCommonDerivedFamilyRole::SccMembership
+                | ReleasedCommonDerivedFamilyRole::Reachability,
+            ) => vec![common_output(ReleasedCommonDerivedFamilyRole::CallGraph)],
             Self::Common(
-                ExistingCommonDerivedFamilyRole::CallableEffect
-                | ExistingCommonDerivedFamilyRole::CallableResource
-                | ExistingCommonDerivedFamilyRole::CallableSummary,
+                ReleasedCommonDerivedFamilyRole::CallableEffect
+                | ReleasedCommonDerivedFamilyRole::CallableResource
+                | ReleasedCommonDerivedFamilyRole::CallableSummary,
             ) => vec![
-                common_input(&common.relations.call_targets),
-                common_input(&common.relations.local_semantics),
+                common_output(ReleasedCommonDerivedFamilyRole::CallGraph),
+                python_output(PythonDerivedRelation::Effect),
+                python_output(PythonDerivedRelation::ResourceLifecycle),
+                rust_output(RustMirDerivedRelation::ResourceLifecycle),
+                rust_output(RustMirDerivedRelation::UnsafeFfi),
             ],
-            Self::Common(ExistingCommonDerivedFamilyRole::Unknown) => vec![
-                common_input(&common.relations.cfg_nodes),
-                common_input(&common.relations.cfg_edges),
-                common_input(&common.relations.def_use_reaching),
-                common_input(&common.relations.call_targets),
-                common_input(&common.relations.local_semantics),
+            Self::Common(ReleasedCommonDerivedFamilyRole::Unknown) => vec![
+                python_output(PythonDerivedRelation::Unknown),
+                rust_output(RustMirDerivedRelation::Unknown),
                 syntax(NativeSyntaxRelation::TreeSitterCoverage),
                 syntax(NativeSyntaxRelation::TreeSitterRemainder),
                 syntax(NativeSyntaxRelation::RuffCoverage),
@@ -1122,12 +1508,10 @@ impl ExistingDerivedFamilyRole {
                 rustc(RustcRelation::Coverage),
                 rustc(RustcRelation::Remainder),
             ],
-            Self::Common(ExistingCommonDerivedFamilyRole::Completeness) => vec![
-                common_input(&common.relations.cfg_nodes),
-                common_input(&common.relations.cfg_edges),
-                common_input(&common.relations.def_use_reaching),
-                common_input(&common.relations.call_targets),
-                common_input(&common.relations.local_semantics),
+            Self::Common(ReleasedCommonDerivedFamilyRole::Completeness) => vec![
+                python_output(PythonDerivedRelation::Unknown),
+                rust_output(RustMirDerivedRelation::Unknown),
+                common_output(ReleasedCommonDerivedFamilyRole::Unknown),
                 syntax(NativeSyntaxRelation::TreeSitterCoverage),
                 syntax(NativeSyntaxRelation::TreeSitterRemainder),
                 syntax(NativeSyntaxRelation::RuffCoverage),
@@ -1136,8 +1520,7 @@ impl ExistingDerivedFamilyRole {
                 rustc(RustcRelation::Coverage),
                 rustc(RustcRelation::Remainder),
             ],
-            Self::Common(ExistingCommonDerivedFamilyRole::Invalidation) => vec![
-                common_input(&common.relations.call_targets),
+            Self::Common(ReleasedCommonDerivedFamilyRole::Invalidation) => vec![
                 python_output(PythonDerivedRelation::Invalidation),
                 syntax(NativeSyntaxRelation::TreeSitterChangedRange),
                 pyrefly(PyreflyRelation::AffectedModule),
@@ -1146,12 +1529,22 @@ impl ExistingDerivedFamilyRole {
         };
         dependencies.into()
     }
+
+    #[cfg(test)]
+    fn dependency_contract(
+        self,
+        python: &PythonFlowBindings,
+        rust_mir: &RustMirAnalysisBindings,
+        _common: &CommonAnalysisBindings,
+    ) -> Arc<[ProgrammaticRelationId]> {
+        self.released_dependency_contract(python, rust_mir)
+    }
 }
 
 /// One self-observed exact dependency vector in the closed existing-family census.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ExistingDerivedDependencyObservation {
-    pub role: ExistingDerivedFamilyRole,
+struct ReleasedDerivedDependencyObservation {
+    role: ReleasedDerivedFamilyRole,
     pub dependencies: Arc<[ProgrammaticRelationId]>,
 }
 
@@ -1160,8 +1553,8 @@ pub struct ExistingDerivedDependencyObservation {
 /// Algorithms, dependencies, authorities, and evidence are compiled release declarations. This
 /// type has no public constructor and never derives authority from runtime or legacy data.
 #[derive(Clone, Debug)]
-pub struct ExistingDerivedFamilyDeclaration {
-    role: ExistingDerivedFamilyRole,
+struct ReleasedDerivedFamilyDeclaration {
+    role: ReleasedDerivedFamilyRole,
     family_id: DerivedFamilyId,
     algorithm: DerivedAlgorithmContract,
     precision: DerivedPrecisionPolicy,
@@ -1169,11 +1562,495 @@ pub struct ExistingDerivedFamilyDeclaration {
     disposition: DerivedFamilyDisposition,
 }
 
-impl ExistingDerivedFamilyDeclaration {
+#[derive(Clone)]
+struct ReleasedNativeAnalysisImplementation {
+    algorithm: DerivedAlgorithmContract,
+    precision: DerivedPrecisionPolicy,
+    witness_field_id: ProgrammaticFieldId,
+    transformation: Arc<dyn ProgrammaticTransformation>,
+}
+
+/// Internal extension point for procedural implementations compiled into this release.
+///
+/// Adding a producer requires adding one typed role arm to the native implementation compiler;
+/// callers cannot register a role, schema, family identity, or alternate program at runtime.
+enum ReleasedApplicationAnalysisImplementation {
+    Native(ReleasedNativeAnalysisImplementation),
+    Unsupported {
+        algorithm: DerivedAlgorithmContract,
+        precision: DerivedPrecisionPolicy,
+    },
+}
+
+fn insert_released_native(
+    authority: &CompiledTransformationAuthority,
+    bindings: &ReleasedAnalysisBindings,
+    implementations: &mut BTreeMap<ReleasedDerivedFamilyRole, ReleasedNativeAnalysisImplementation>,
+    role: ReleasedDerivedFamilyRole,
+    contract: &ProgrammaticTransformationContract,
+    precision: DerivedPrecisionPolicy,
+    witness_field_id: ProgrammaticFieldId,
+    transformation: Arc<dyn ProgrammaticTransformation>,
+) -> Result<(), ProgrammaticDerivedAnalysisError> {
+    if implementations
+        .insert(
+            role,
+            ReleasedNativeAnalysisImplementation {
+                algorithm: released_algorithm(authority, contract),
+                precision,
+                witness_field_id,
+                transformation,
+            },
+        )
+        .is_some()
+    {
+        return Err(
+            ProgrammaticDerivedAnalysisError::ReleasedCompositionInvariant {
+                role: role
+                    .family_identity(authority, bindings)?
+                    .as_str()
+                    .to_owned(),
+                detail: "compiled native producer repeated the typed role",
+            },
+        );
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn released_native_implementations(
+    authority: &CompiledTransformationAuthority,
+    epoch_id: FabricEpochId,
+    bindings: &ReleasedAnalysisBindings,
+) -> Result<
+    BTreeMap<ReleasedDerivedFamilyRole, ReleasedNativeAnalysisImplementation>,
+    ProgrammaticDerivedAnalysisError,
+> {
+    let mut implementations = BTreeMap::new();
+
+    let python_node_role = ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode);
+    let python_node_contract =
+        released_transformation_contract("analysis.python.cfg_node.programmatic.v3", 65_536);
+    let python_node_output = released_output(
+        ProgrammaticRelationId::new(
+            bindings
+                .python
+                .relation_id(PythonDerivedRelation::CfgNode)
+                .as_str(),
+        ),
+        "python_cfg_node_programmatic",
+        "application.python.cfg_node.field",
+        ProgrammaticPythonCfgNodeTransformation::OUTPUT_FIELD_COUNT,
+    );
+    let python_node_witness = python_node_output.fields()[13].field_id().clone();
+    let python_node = Arc::new(ProgrammaticPythonCfgNodeTransformation::try_new(
+        authority,
+        python_node_contract.clone(),
+        python_node_output,
+        &bindings.python,
+        epoch_id,
+        ProgrammaticPythonCfgNodeRowContract::try_new(
+            authority,
+            "codefabric.python-cfg-node.programmatic-datafusion-55.v3",
+            "ruff-typed-ast-node-normalization.v3",
+            PYTHON_DERIVED_AUTHORITY,
+        )?,
+    )?);
+    insert_released_native(
+        authority,
+        bindings,
+        &mut implementations,
+        python_node_role,
+        &python_node_contract,
+        DerivedPrecisionPolicy::Exact,
+        python_node_witness,
+        python_node,
+    )?;
+
+    let python_cfg_role = ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgEdge);
+    let python_cfg_contract =
+        released_transformation_contract("analysis.python.cfg.programmatic.v3", 65_536);
+    let python_cfg_output = released_output(
+        ProgrammaticRelationId::new(
+            bindings
+                .python
+                .relation_id(PythonDerivedRelation::CfgEdge)
+                .as_str(),
+        ),
+        "python_cfg_edge_programmatic",
+        "application.python.cfg_edge.field",
+        ProgrammaticPythonCfgEdgeTransformation::OUTPUT_FIELD_COUNT,
+    );
+    let python_cfg_witness = python_cfg_output.fields()[13].field_id().clone();
+    let python_cfg = Arc::new(ProgrammaticPythonCfgEdgeTransformation::try_new(
+        authority,
+        python_cfg_contract.clone(),
+        python_cfg_output,
+        &bindings.python,
+        epoch_id,
+        ProgrammaticPythonCfgEdgeRowContract::try_new(
+            authority,
+            "codefabric.python-cfg.programmatic-datafusion-55.v3",
+            "ruff-evaluation-order-sequential-cfg.v3",
+            PYTHON_DERIVED_AUTHORITY,
+            "sequential",
+        )?,
+    )?);
+    insert_released_native(
+        authority,
+        bindings,
+        &mut implementations,
+        python_cfg_role,
+        &python_cfg_contract,
+        DerivedPrecisionPolicy::SoundMay,
+        python_cfg_witness,
+        python_cfg,
+    )?;
+
+    for (
+        role,
+        semantic_id,
+        table_name,
+        field_prefix,
+        algorithm_release,
+        precision_release,
+        precision,
+    ) in [
+        (
+            PythonDerivedRelation::EvaluationOrder,
+            "analysis.python.evaluation_order.programmatic.v3",
+            "python_evaluation_order_programmatic",
+            "application.python.evaluation_order.field",
+            "codefabric.python-evaluation-order.programmatic-datafusion-55.v3",
+            "sequential-cfg-node-order.v3",
+            DerivedPrecisionPolicy::SoundMay,
+        ),
+        (
+            PythonDerivedRelation::DefUse,
+            "analysis.python.def_use.programmatic.v3",
+            "python_def_use_programmatic",
+            "application.python.def_use.field",
+            "codefabric.python-def-use.programmatic-datafusion-55.v3",
+            "resolved-reference-owner-candidate.v3",
+            DerivedPrecisionPolicy::SoundMay,
+        ),
+        (
+            PythonDerivedRelation::ReachingDefinition,
+            "analysis.python.reaching_definition.programmatic.v3",
+            "python_reaching_definition_programmatic",
+            "application.python.reaching_definition.field",
+            "codefabric.python-reaching-definition.programmatic-datafusion-55.v3",
+            "complete-sequential-cfg-latest-definition.v3",
+            DerivedPrecisionPolicy::Exact,
+        ),
+        (
+            PythonDerivedRelation::Liveness,
+            "analysis.python.liveness.programmatic.v3",
+            "python_liveness_programmatic",
+            "application.python.liveness.field",
+            "codefabric.python-liveness.programmatic-datafusion-55.v3",
+            "complete-sequential-cfg-live-range.v3",
+            DerivedPrecisionPolicy::Exact,
+        ),
+        (
+            PythonDerivedRelation::ValueFlow,
+            "analysis.python.value_flow.programmatic.v3",
+            "python_value_flow_programmatic",
+            "application.python.value_flow.field",
+            "codefabric.python-value-flow.programmatic-datafusion-55.v3",
+            "selected-reaching-definition-value-flow.v3",
+            DerivedPrecisionPolicy::Exact,
+        ),
+    ] {
+        let typed_role = ReleasedDerivedFamilyRole::Python(role);
+        let contract = released_transformation_contract(semantic_id, 262_144);
+        let output = released_output(
+            ProgrammaticRelationId::new(bindings.python.relation_id(role).as_str()),
+            table_name,
+            field_prefix,
+            match role {
+                PythonDerivedRelation::EvaluationOrder => {
+                    ProgrammaticPythonDataflowTransformation::EVALUATION_OUTPUT_FIELD_COUNT
+                }
+                PythonDerivedRelation::Liveness => {
+                    ProgrammaticPythonDataflowTransformation::LIVENESS_OUTPUT_FIELD_COUNT
+                }
+                _ => ProgrammaticPythonDataflowTransformation::FLOW_LINK_OUTPUT_FIELD_COUNT,
+            },
+        );
+        let witness = output.fields()[13].field_id().clone();
+        let transformation = Arc::new(ProgrammaticPythonDataflowTransformation::try_new(
+            authority,
+            contract.clone(),
+            output,
+            &bindings.python,
+            epoch_id,
+            role,
+            ProgrammaticPythonDataflowRowContract::try_new(
+                authority,
+                algorithm_release,
+                precision_release,
+                PYTHON_DERIVED_AUTHORITY,
+            )?,
+        )?);
+        insert_released_native(
+            authority,
+            bindings,
+            &mut implementations,
+            typed_role,
+            &contract,
+            precision,
+            witness,
+            transformation,
+        )?;
+    }
+
+    let rust_cfg_role = ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::CfgEdge);
+    let rust_cfg_contract =
+        released_transformation_contract("analysis.rust_mir.cfg.programmatic.v3", 65_536);
+    let rust_cfg_output = released_output(
+        ProgrammaticRelationId::new(
+            bindings
+                .rust_mir
+                .relation_id(RustMirDerivedRelation::CfgEdge)
+                .as_str(),
+        ),
+        "rust_mir_cfg_edge_programmatic",
+        "application.rust_mir.cfg_edge.field",
+        ProgrammaticRustMirCfgEdgeTransformation::OUTPUT_FIELD_COUNT,
+    );
+    let rust_cfg_witness = rust_cfg_output.fields()[8].field_id().clone();
+    let rust_cfg = Arc::new(ProgrammaticRustMirCfgEdgeTransformation::try_new(
+        authority,
+        rust_cfg_contract.clone(),
+        rust_cfg_output,
+        &bindings.rust_mir,
+    )?);
+    insert_released_native(
+        authority,
+        bindings,
+        &mut implementations,
+        rust_cfg_role,
+        &rust_cfg_contract,
+        DerivedPrecisionPolicy::Exact,
+        rust_cfg_witness,
+        rust_cfg,
+    )?;
+
+    for (role, semantic_id, table_name, field_prefix, precision) in [
+        (
+            RustMirDerivedRelation::OwnershipState,
+            "analysis.rust_mir.ownership.programmatic.v3",
+            "rust_mir_ownership_programmatic",
+            "application.rust_mir.ownership_state.field",
+            DerivedPrecisionPolicy::SoundMay,
+        ),
+        (
+            RustMirDerivedRelation::AliasPointsTo,
+            "analysis.rust_mir.alias.programmatic.v3",
+            "rust_mir_alias_programmatic",
+            "application.rust_mir.alias_points_to.field",
+            DerivedPrecisionPolicy::SoundMay,
+        ),
+        (
+            RustMirDerivedRelation::ResourceLifecycle,
+            "analysis.rust_mir.resource.programmatic.v3",
+            "rust_mir_resource_programmatic",
+            "application.rust_mir.resource_lifecycle.field",
+            DerivedPrecisionPolicy::Exact,
+        ),
+        (
+            RustMirDerivedRelation::AsyncLowering,
+            "analysis.rust_mir.async.programmatic.v3",
+            "rust_mir_async_programmatic",
+            "application.rust_mir.async_lowering.field",
+            DerivedPrecisionPolicy::SoundMay,
+        ),
+        (
+            RustMirDerivedRelation::UnsafeFfi,
+            "analysis.rust_mir.unsafe_ffi.programmatic.v3",
+            "rust_mir_unsafe_ffi_programmatic",
+            "application.rust_mir.unsafe_ffi.field",
+            DerivedPrecisionPolicy::SoundMay,
+        ),
+    ] {
+        let typed_role = ReleasedDerivedFamilyRole::RustMir(role);
+        let contract = released_transformation_contract(semantic_id, 262_144);
+        let output = released_output(
+            ProgrammaticRelationId::new(bindings.rust_mir.relation_id(role).as_str()),
+            table_name,
+            field_prefix,
+            ProgrammaticRustMirStructuralTransformation::output_field_count(role),
+        );
+        let witness = output.fields()[9].field_id().clone();
+        let transformation = Arc::new(ProgrammaticRustMirStructuralTransformation::try_new(
+            authority,
+            role,
+            contract.clone(),
+            output,
+            &bindings.rust_mir,
+        )?);
+        insert_released_native(
+            authority,
+            bindings,
+            &mut implementations,
+            typed_role,
+            &contract,
+            precision,
+            witness,
+            transformation,
+        )?;
+    }
+
+    let rust_control_role =
+        ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::ControlDependenceInput);
+    let rust_control_contract =
+        released_transformation_contract("analysis.rust_mir.control_input.programmatic.v3", 65_536);
+    let rust_control_output = released_output(
+        ProgrammaticRelationId::new(
+            bindings
+                .rust_mir
+                .relation_id(RustMirDerivedRelation::ControlDependenceInput)
+                .as_str(),
+        ),
+        "rust_mir_control_input_programmatic",
+        "application.rust_mir.control_dependence_input.field",
+        ProgrammaticRustMirControlInputTransformation::OUTPUT_FIELD_COUNT,
+    );
+    let rust_control_witness = rust_control_output.fields()[9].field_id().clone();
+    let rust_control = Arc::new(ProgrammaticRustMirControlInputTransformation::try_new(
+        authority,
+        rust_control_contract.clone(),
+        rust_control_output,
+        &bindings.rust_mir,
+    )?);
+    insert_released_native(
+        authority,
+        bindings,
+        &mut implementations,
+        rust_control_role,
+        &rust_control_contract,
+        DerivedPrecisionPolicy::Exact,
+        rust_control_witness,
+        rust_control,
+    )?;
+
+    Ok(implementations)
+}
+
+fn released_unavailable_implementation(
+    authority: &CompiledTransformationAuthority,
+    role: ReleasedDerivedFamilyRole,
+    bindings: &ReleasedAnalysisBindings,
+) -> ReleasedApplicationAnalysisImplementation {
+    let output = role.released_output_relation(&bindings.python, &bindings.rust_mir);
+    let semantic_id = format!("analysis.{}.programmatic.v3", output.as_str());
+    let version = TransformationSemanticVersion::new(3, 0, 0);
+    let version_frame = [
+        version.major().to_be_bytes(),
+        version.minor().to_be_bytes(),
+        version.patch().to_be_bytes(),
+    ]
+    .concat();
+    let algorithm = DerivedAlgorithmContract::new(
+        authority,
+        ProgrammaticTransformationId::new(semantic_id.clone()),
+        version,
+        TransformationReleaseIdentity::from_bytes(released_typed_identity(
+            b"codefabric.released-analysis-unimplemented.v1",
+            &[semantic_id.as_bytes(), &version_frame],
+        )),
+    );
+    let precision = match role {
+        ReleasedDerivedFamilyRole::Python(
+            PythonDerivedRelation::CfgNode
+            | PythonDerivedRelation::ReachingDefinition
+            | PythonDerivedRelation::Liveness
+            | PythonDerivedRelation::ValueFlow
+            | PythonDerivedRelation::Invalidation
+            | PythonDerivedRelation::Unknown,
+        )
+        | ReleasedDerivedFamilyRole::RustMir(
+            RustMirDerivedRelation::CfgEdge
+            | RustMirDerivedRelation::DefUse
+            | RustMirDerivedRelation::ReachingDefinition
+            | RustMirDerivedRelation::Liveness
+            | RustMirDerivedRelation::ResourceLifecycle
+            | RustMirDerivedRelation::ControlDependenceInput
+            | RustMirDerivedRelation::Unknown,
+        )
+        | ReleasedDerivedFamilyRole::Common(
+            ReleasedCommonDerivedFamilyRole::Unknown
+            | ReleasedCommonDerivedFamilyRole::Completeness
+            | ReleasedCommonDerivedFamilyRole::Invalidation,
+        ) => DerivedPrecisionPolicy::Exact,
+        ReleasedDerivedFamilyRole::Python(_)
+        | ReleasedDerivedFamilyRole::RustMir(_)
+        | ReleasedDerivedFamilyRole::Common(_) => DerivedPrecisionPolicy::SoundMay,
+    };
+    ReleasedApplicationAnalysisImplementation::Unsupported {
+        algorithm,
+        precision,
+    }
+}
+
+fn released_dependency_evidence(
+    role: ReleasedDerivedFamilyRole,
+    algorithm: &DerivedAlgorithmContract,
+    dependencies: &[ProgrammaticRelationId],
+    evidence_by_relation: &BTreeMap<ProgrammaticRelationId, [u8; 32]>,
+    reason: DerivedRemainderReason,
+) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"codefabric.released-analysis-disposition-evidence.v1");
+    hasher.update(&[match role.domain() {
+        DerivedAnalysisDomain::Python => 0,
+        DerivedAnalysisDomain::RustMir => 1,
+        DerivedAnalysisDomain::Common => 2,
+    }]);
+    frame(&mut hasher, algorithm.semantic_id().as_str().as_bytes());
+    let version = algorithm.semantic_version();
+    hasher.update(&version.major().to_be_bytes());
+    hasher.update(&version.minor().to_be_bytes());
+    hasher.update(&version.patch().to_be_bytes());
+    hasher.update(algorithm.release_identity().as_bytes());
+    hasher.update(&[remainder_reason_code(reason)]);
+    for dependency in dependencies {
+        frame(&mut hasher, dependency.as_str().as_bytes());
+        hasher.update(evidence_by_relation.get(dependency).unwrap_or(&[0_u8; 32]));
+    }
+    let mut identity = *hasher.finalize().as_bytes();
+    if identity == [0; 32] {
+        identity[0] = 1;
+    }
+    identity
+}
+
+fn released_producer_output_evidence(
+    algorithm: &DerivedAlgorithmContract,
+    dependencies: &[ProgrammaticRelationId],
+    evidence_by_relation: &BTreeMap<ProgrammaticRelationId, [u8; 32]>,
+) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"codefabric.released-analysis-producer-output.v1");
+    frame(&mut hasher, algorithm.semantic_id().as_str().as_bytes());
+    hasher.update(algorithm.release_identity().as_bytes());
+    for dependency in dependencies {
+        frame(&mut hasher, dependency.as_str().as_bytes());
+        hasher.update(
+            evidence_by_relation
+                .get(dependency)
+                .expect("released producer dependencies were proved available"),
+        );
+    }
+    *hasher.finalize().as_bytes()
+}
+
+impl ReleasedDerivedFamilyDeclaration {
     #[must_use]
     pub(crate) fn producer(
         _authority: &CompiledTransformationAuthority,
-        role: ExistingDerivedFamilyRole,
+        role: ReleasedDerivedFamilyRole,
         family_id: DerivedFamilyId,
         algorithm: DerivedAlgorithmContract,
         precision: DerivedPrecisionPolicy,
@@ -1190,13 +2067,14 @@ impl ExistingDerivedFamilyDeclaration {
         }
     }
 
-    pub(crate) fn adapter_unavailable(
+    fn remainder(
         authority: &CompiledTransformationAuthority,
-        role: ExistingDerivedFamilyRole,
+        role: ReleasedDerivedFamilyRole,
         family_id: DerivedFamilyId,
         algorithm: DerivedAlgorithmContract,
         precision: DerivedPrecisionPolicy,
         dependencies: impl Into<Arc<[ProgrammaticRelationId]>>,
+        reason: DerivedRemainderReason,
         evidence_identity: [u8; 32],
         retryability: DerivedRemainderRetryability,
     ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
@@ -1204,7 +2082,7 @@ impl ExistingDerivedFamilyDeclaration {
             authority,
             family_id.clone(),
             algorithm.clone(),
-            DerivedRemainderReason::TypedTransformationAdapterUnavailable,
+            reason,
             evidence_identity,
             retryability,
         )?);
@@ -1219,31 +2097,320 @@ impl ExistingDerivedFamilyDeclaration {
     }
 }
 
-/// Exact current census and its producer/remainder closure.
-pub struct ExistingDerivedAnalysisCensus {
+/// Exact compiled-release census and its producer/remainder closure.
+struct ReleasedDerivedAnalysisCensus {
     families: Arc<[AcceptedDerivedFamily]>,
     dispositions: Vec<DerivedFamilyDisposition>,
-    observation: ExistingDerivedAnalysisCensusObservation,
+    observation: ReleasedDerivedAnalysisCensusObservation,
 }
 
-/// Typed observation proving which current-module roles execute and which remain unavailable.
+/// Typed observation proving which compiled roles execute and which have explicit remainders.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ExistingDerivedAnalysisCensusObservation {
-    pub accepted_roles: Arc<[ExistingDerivedFamilyRole]>,
-    pub programmatic_producer_roles: Arc<[ExistingDerivedFamilyRole]>,
-    pub explicit_remainder_roles: Arc<[ExistingDerivedFamilyRole]>,
-    pub dependency_contracts: Arc<[ExistingDerivedDependencyObservation]>,
-    pub common_semantic_identities: Arc<[Arc<str>]>,
+pub(crate) struct ReleasedDerivedAnalysisCensusObservation {
+    accepted_roles: Arc<[ReleasedDerivedFamilyRole]>,
+    programmatic_producer_roles: Arc<[ReleasedDerivedFamilyRole]>,
+    explicit_remainder_roles: Arc<[ReleasedDerivedFamilyRole]>,
+    dependency_contracts: Arc<[ReleasedDerivedDependencyObservation]>,
+    common_semantic_identities: Arc<[Arc<str>]>,
 }
 
-impl ExistingDerivedAnalysisCensus {
+impl ReleasedDerivedAnalysisCensus {
+    fn compile(
+        authority: &CompiledTransformationAuthority,
+        epoch_id: FabricEpochId,
+        provider_reports: &ExactProgrammaticProviderReports,
+    ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
+        let bindings = released_analysis_bindings()?;
+        bindings.python.fields.validate().map_err(|error| {
+            ProgrammaticDerivedAnalysisError::ReleasedBinding(error.to_string())
+        })?;
+        RustMirDerivedRelation::CfgEdge
+            .schema(&bindings.rust_mir)
+            .map_err(|error| {
+                ProgrammaticDerivedAnalysisError::ReleasedBinding(error.to_string())
+            })?;
+
+        let mut native = released_native_implementations(authority, epoch_id, &bindings)?;
+        let (provider_authorities, _) = provider_relation_authorities(provider_reports)?;
+        let mut complete_relations = provider_authorities
+            .iter()
+            .filter_map(|(relation_id, relation)| {
+                (relation.available
+                    && relation.observation.completeness == DerivedInputCompleteness::Complete)
+                    .then(|| relation_id.clone())
+            })
+            .collect::<BTreeSet<_>>();
+        let mut evidence_by_relation = provider_authorities
+            .iter()
+            .map(|(relation_id, relation)| {
+                (relation_id.clone(), relation.observation.authority_identity)
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let roles = ReleasedDerivedFamilyRole::all();
+        let mut declarations = Vec::with_capacity(roles.len());
+        for role in &roles {
+            let role = *role;
+            let family_id = role.family_identity(authority, &bindings)?;
+            let dependencies =
+                role.released_dependency_contract(&bindings.python, &bindings.rust_mir);
+            let implementation = native
+                .remove(&role)
+                .map(ReleasedApplicationAnalysisImplementation::Native)
+                .unwrap_or_else(|| released_unavailable_implementation(authority, role, &bindings));
+            let output_relation =
+                role.released_output_relation(&bindings.python, &bindings.rust_mir);
+            let declaration = match implementation {
+                ReleasedApplicationAnalysisImplementation::Native(implementation)
+                    if dependencies
+                        .iter()
+                        .all(|dependency| complete_relations.contains(dependency)) =>
+                {
+                    let authority_identity = released_typed_identity(
+                        b"codefabric.released-analysis-producer-authority.v1",
+                        &[
+                            family_id.as_str().as_bytes(),
+                            implementation.algorithm.semantic_id().as_str().as_bytes(),
+                            implementation.algorithm.release_identity().as_bytes(),
+                        ],
+                    );
+                    let output_evidence = released_producer_output_evidence(
+                        &implementation.algorithm,
+                        &dependencies,
+                        &evidence_by_relation,
+                    );
+                    complete_relations.insert(output_relation.clone());
+                    evidence_by_relation.insert(output_relation, output_evidence);
+                    ReleasedDerivedFamilyDeclaration::producer(
+                        authority,
+                        role,
+                        family_id.clone(),
+                        implementation.algorithm.clone(),
+                        implementation.precision.clone(),
+                        Arc::clone(&dependencies),
+                        AcceptedDerivedProducer::new(
+                            authority,
+                            family_id,
+                            DerivedProducerAuthority::ApplicationOwned(authority_identity),
+                            implementation.algorithm,
+                            implementation.precision,
+                            DerivedCompletenessPolicy::Complete,
+                            implementation.witness_field_id,
+                            implementation.transformation,
+                        ),
+                    )
+                }
+                ReleasedApplicationAnalysisImplementation::Native(implementation) => {
+                    let evidence = released_dependency_evidence(
+                        role,
+                        &implementation.algorithm,
+                        &dependencies,
+                        &evidence_by_relation,
+                        DerivedRemainderReason::ProviderUnavailable,
+                    );
+                    evidence_by_relation.insert(output_relation, evidence);
+                    ReleasedDerivedFamilyDeclaration::remainder(
+                        authority,
+                        role,
+                        family_id,
+                        implementation.algorithm,
+                        implementation.precision,
+                        dependencies,
+                        DerivedRemainderReason::ProviderUnavailable,
+                        evidence,
+                        DerivedRemainderRetryability::Retryable,
+                    )?
+                }
+                ReleasedApplicationAnalysisImplementation::Unsupported {
+                    algorithm,
+                    precision,
+                } => {
+                    let evidence = released_dependency_evidence(
+                        role,
+                        &algorithm,
+                        &dependencies,
+                        &evidence_by_relation,
+                        DerivedRemainderReason::AlgorithmUnavailable,
+                    );
+                    evidence_by_relation.insert(output_relation, evidence);
+                    ReleasedDerivedFamilyDeclaration::remainder(
+                        authority,
+                        role,
+                        family_id,
+                        algorithm,
+                        precision,
+                        dependencies,
+                        DerivedRemainderReason::AlgorithmUnavailable,
+                        evidence,
+                        DerivedRemainderRetryability::RequiresReleaseChange,
+                    )?
+                }
+            };
+            declarations.push(declaration);
+        }
+        if let Some((role, _)) = native.into_iter().next() {
+            return Err(
+                ProgrammaticDerivedAnalysisError::ReleasedCompositionInvariant {
+                    role: role
+                        .family_identity(authority, &bindings)?
+                        .as_str()
+                        .to_owned(),
+                    detail: "compiled native producer was not consumed by the exhaustive role set",
+                },
+            );
+        }
+        Self::close_compiled(authority, &bindings, declarations)
+    }
+
+    fn close_compiled(
+        authority: &CompiledTransformationAuthority,
+        bindings: &ReleasedAnalysisBindings,
+        declarations: Vec<ReleasedDerivedFamilyDeclaration>,
+    ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
+        let expected = ReleasedDerivedFamilyRole::all();
+        let expected_set = expected.iter().copied().collect::<BTreeSet<_>>();
+        let mut by_role = BTreeMap::new();
+        for declaration in declarations {
+            let role = declaration.role;
+            if !expected_set.contains(&role) || by_role.insert(role, declaration).is_some() {
+                return Err(
+                    ProgrammaticDerivedAnalysisError::ReleasedCompositionInvariant {
+                        role: role
+                            .family_identity(authority, bindings)?
+                            .as_str()
+                            .to_owned(),
+                        detail: "compiled role is unexpected or duplicated",
+                    },
+                );
+            }
+        }
+
+        let mut families = Vec::with_capacity(expected.len());
+        let mut dispositions = Vec::with_capacity(expected.len());
+        let mut producers = Vec::new();
+        let mut remainders = Vec::new();
+        let mut dependency_contracts = Vec::with_capacity(expected.len());
+        for role in &expected {
+            let Some(declaration) = by_role.remove(role) else {
+                return Err(
+                    ProgrammaticDerivedAnalysisError::ReleasedCompositionInvariant {
+                        role: role
+                            .family_identity(authority, bindings)?
+                            .as_str()
+                            .to_owned(),
+                        detail: "compiled exhaustive role has no disposition",
+                    },
+                );
+            };
+            let dependencies =
+                role.released_dependency_contract(&bindings.python, &bindings.rust_mir);
+            if dependencies.is_empty() || dependencies != declaration.dependencies {
+                return Err(
+                    ProgrammaticDerivedAnalysisError::ReleasedCompositionInvariant {
+                        role: declaration.family_id.as_str().to_owned(),
+                        detail: "compiled dependency vector is empty or differs from the typed role",
+                    },
+                );
+            }
+            let output_relation =
+                role.released_output_relation(&bindings.python, &bindings.rust_mir);
+            if declaration.disposition.family_id() != &declaration.family_id {
+                return Err(
+                    ProgrammaticDerivedAnalysisError::ReleasedCompositionInvariant {
+                        role: declaration.family_id.as_str().to_owned(),
+                        detail: "disposition family differs from compiled role family",
+                    },
+                );
+            }
+            match &declaration.disposition {
+                DerivedFamilyDisposition::Producer(producer) => {
+                    if producer.algorithm != declaration.algorithm
+                        || producer.precision != declaration.precision
+                        || producer.transformation.output().relation_id() != &output_relation
+                        || producer.transformation.dependencies() != dependencies.as_ref()
+                    {
+                        return Err(
+                            ProgrammaticDerivedAnalysisError::ReleasedCompositionInvariant {
+                                role: declaration.family_id.as_str().to_owned(),
+                                detail: "native producer differs from the compiled role contract",
+                            },
+                        );
+                    }
+                    producers.push(*role);
+                }
+                DerivedFamilyDisposition::Remainder(remainder) => {
+                    if remainder.algorithm != declaration.algorithm
+                        || !matches!(
+                            remainder.reason,
+                            DerivedRemainderReason::ProviderUnavailable
+                                | DerivedRemainderReason::AlgorithmUnavailable
+                        )
+                    {
+                        return Err(
+                            ProgrammaticDerivedAnalysisError::ReleasedCompositionInvariant {
+                                role: declaration.family_id.as_str().to_owned(),
+                                detail: "remainder differs from the compiled typed disposition",
+                            },
+                        );
+                    }
+                    remainders.push(*role);
+                }
+            }
+            dependency_contracts.push(ReleasedDerivedDependencyObservation {
+                role: *role,
+                dependencies: Arc::clone(&dependencies),
+            });
+            families.push(AcceptedDerivedFamily::try_new(
+                authority,
+                declaration.family_id,
+                role.domain(),
+                role.kind(),
+                declaration.algorithm,
+                declaration.precision,
+                output_relation,
+                dependencies,
+            )?);
+            dispositions.push(declaration.disposition);
+        }
+        let observed = producers
+            .iter()
+            .chain(remainders.iter())
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if observed != expected_set {
+            return Err(
+                ProgrammaticDerivedAnalysisError::ReleasedCompositionInvariant {
+                    role: "compiled-release".to_owned(),
+                    detail: "producer/remainder closure differs from exhaustive typed role set",
+                },
+            );
+        }
+        Ok(Self {
+            families: families.into(),
+            dispositions,
+            observation: ReleasedDerivedAnalysisCensusObservation {
+                accepted_roles: expected.into(),
+                programmatic_producer_roles: producers.into(),
+                explicit_remainder_roles: remainders.into(),
+                dependency_contracts: dependency_contracts.into(),
+                common_semantic_identities: ReleasedCommonDerivedFamilyRole::ALL
+                    .into_iter()
+                    .filter_map(|role| role.semantic_identity(&bindings.common_families))
+                    .map(Arc::from)
+                    .collect::<Vec<_>>()
+                    .into(),
+            },
+        })
+    }
+
     /// Validate the exact role census against the real module binding types.
+    #[cfg(test)]
     pub(crate) fn try_new(
         authority: &CompiledTransformationAuthority,
         python: &PythonFlowBindings,
         rust_mir: &RustMirAnalysisBindings,
         common: &CommonAnalysisBindings,
-        declarations: Vec<ExistingDerivedFamilyDeclaration>,
+        declarations: Vec<ReleasedDerivedFamilyDeclaration>,
     ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
         python.fields.validate().map_err(|error| {
             ProgrammaticDerivedAnalysisError::ExistingBinding(error.to_string())
@@ -1267,7 +2434,7 @@ impl ExistingDerivedAnalysisCensus {
             ProgrammaticDerivedAnalysisError::ExistingBinding(error.to_string())
         })?;
 
-        let expected = ExistingDerivedFamilyRole::all();
+        let expected = ReleasedDerivedFamilyRole::all();
         let expected_set = expected.iter().copied().collect::<BTreeSet<_>>();
         let mut declarations_by_role = BTreeMap::new();
         for declaration in declarations {
@@ -1310,7 +2477,7 @@ impl ExistingDerivedAnalysisCensus {
                     ProgrammaticDerivedAnalysisError::ExistingCensusDependencyMismatch(*role),
                 );
             }
-            dependency_contracts.push(ExistingDerivedDependencyObservation {
+            dependency_contracts.push(ReleasedDerivedDependencyObservation {
                 role: *role,
                 dependencies: Arc::clone(&expected_dependencies),
             });
@@ -1355,7 +2522,7 @@ impl ExistingDerivedAnalysisCensus {
             )?);
             dispositions.push(declaration.disposition);
         }
-        let common_semantic_identities = ExistingCommonDerivedFamilyRole::ALL
+        let common_semantic_identities = ReleasedCommonDerivedFamilyRole::ALL
             .into_iter()
             .filter_map(|role| role.semantic_identity(&common.families))
             .map(Arc::from)
@@ -1363,7 +2530,7 @@ impl ExistingDerivedAnalysisCensus {
         Ok(Self {
             families: families.into(),
             dispositions,
-            observation: ExistingDerivedAnalysisCensusObservation {
+            observation: ReleasedDerivedAnalysisCensusObservation {
                 accepted_roles: expected.into(),
                 programmatic_producer_roles: producers.into(),
                 explicit_remainder_roles: remainders.into(),
@@ -1374,7 +2541,7 @@ impl ExistingDerivedAnalysisCensus {
     }
 
     #[must_use]
-    pub const fn observation(&self) -> &ExistingDerivedAnalysisCensusObservation {
+    pub const fn observation(&self) -> &ReleasedDerivedAnalysisCensusObservation {
         &self.observation
     }
 
@@ -1395,19 +2562,19 @@ impl ExistingDerivedAnalysisCensus {
 }
 
 /// Result of the exact provider-admission plus existing-family-census transaction.
-pub struct ExistingProgrammaticDerivedAnalysisOutcome {
+pub(crate) struct ReleasedProgrammaticDerivedAnalysisOutcome {
     derived: ProgrammaticDerivedAnalysisOutcome,
-    census: ExistingDerivedAnalysisCensusObservation,
+    census: ReleasedDerivedAnalysisCensusObservation,
 }
 
-impl ExistingProgrammaticDerivedAnalysisOutcome {
+impl ReleasedProgrammaticDerivedAnalysisOutcome {
     #[must_use]
-    pub const fn derived(&self) -> &ProgrammaticDerivedAnalysisOutcome {
+    pub(crate) const fn derived(&self) -> &ProgrammaticDerivedAnalysisOutcome {
         &self.derived
     }
 
     #[must_use]
-    pub const fn census(&self) -> &ExistingDerivedAnalysisCensusObservation {
+    pub(crate) const fn census(&self) -> &ReleasedDerivedAnalysisCensusObservation {
         &self.census
     }
 
@@ -1416,29 +2583,170 @@ impl ExistingProgrammaticDerivedAnalysisOutcome {
         self,
     ) -> (
         ProgrammaticDerivedAnalysisOutcome,
-        ExistingDerivedAnalysisCensusObservation,
+        ReleasedDerivedAnalysisCensusObservation,
     ) {
         (self.derived, self.census)
     }
 }
 
-/// Admit the exact four provider lanes and close every role exposed by the three current modules.
-pub(crate) fn admit_and_compose_existing_programmatic_derived_analyses(
+/// Admit the exact provider lanes and compile the release-owned application-analysis closure.
+pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
     authority: &CompiledTransformationAuthority,
+    proof_authority: &CompiledProofAuthority,
+    query_authority: &CompiledQueryAuthority,
     builder: ProgrammaticFabricEpochBuilder,
     runs: ExactProgrammaticProviderRuns<'_>,
-    census: ExistingDerivedAnalysisCensus,
-    metadata: DerivedMetadataBindings,
-    remainder_relation: DerivedRemainderRelationBinding,
-) -> Result<ExistingProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
+) -> Result<ReleasedProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
+    let admitted = admit_provider_relations_programmatic(builder, runs)?;
+    let epoch_id = *admitted.candidate_epoch_id();
+    let census = ReleasedDerivedAnalysisCensus::compile(authority, epoch_id, admitted.reports())?;
     let census_observation = census.observation.clone();
+    let metadata = released_metadata_bindings(authority)?;
+    let remainder_relation = released_remainder_binding(authority, &metadata)?;
     let composition = census.into_composition(authority, metadata, remainder_relation)?;
-    let derived =
-        admit_and_compose_programmatic_derived_analyses(authority, builder, runs, composition)?;
-    Ok(ExistingProgrammaticDerivedAnalysisOutcome {
+    let derived = compose_programmatic_derived_analyses(authority, admitted, composition)?;
+    let query_requirements = released_query_family_requirements(query_authority)?;
+    let closure_catalog = released_producer_closure_catalog(
+        proof_authority,
+        derived.observation(),
+        query_requirements,
+    )?;
+    let (builder, provider_reports, observation) = derived.into_parts();
+    let builder =
+        install_release_producer_closure_catalog(proof_authority, builder, closure_catalog)?;
+    let derived = ProgrammaticDerivedAnalysisOutcome {
+        builder,
+        provider_reports,
+        observation,
+    };
+    Ok(ReleasedProgrammaticDerivedAnalysisOutcome {
         derived,
         census: census_observation,
     })
+}
+
+fn released_producer_closure_catalog(
+    proof_authority: &CompiledProofAuthority,
+    observation: &DerivedAnalysisCompositionObservation,
+    query_requirements: Vec<(Arc<str>, Arc<str>)>,
+) -> Result<ReleaseProducerClosureCatalog, ProgrammaticDerivedAnalysisError> {
+    let mut accepted = BTreeSet::new();
+    let mut runtime_producers = Vec::with_capacity(observation.producers.len());
+    let mut unsupported_remainders = Vec::with_capacity(observation.remainders.len());
+    for producer in &observation.producers {
+        let family_id: Arc<str> = Arc::from(producer.family_id.as_str());
+        accepted.insert(Arc::clone(&family_id));
+        let requested_unit_count = u64::try_from(producer.inputs.len())
+            .map_err(|_| ProgrammaticDerivedAnalysisError::ReleasedProducerUnitOverflow)?
+            .max(1);
+        let version = producer.algorithm.semantic_version();
+        runtime_producers.push(ReleaseRuntimeProducerRow {
+            family_id,
+            producer_id: Arc::from(format!("producer:{}", producer.output_relation_id.as_str())),
+            algorithm_release: Arc::from(format!(
+                "{}@{}.{}.{}",
+                producer.algorithm.semantic_id().as_str(),
+                version.major(),
+                version.minor(),
+                version.patch(),
+            )),
+            precision_id: Arc::from(released_precision_label(&producer.precision)),
+            input_pin: release_pin(producer.input_vector_identity),
+            invalidation_pin: release_pin(observation.provider_authority_identity),
+            materialization_pin: release_pin(producer.provenance_closure_identity),
+            requested_unit_count,
+            completed_unit_count: requested_unit_count,
+            remainder_unit_count: 0,
+            unknown_unit_count: 0,
+            completeness_proof_pin: release_pin(released_typed_identity(
+                b"codefabric.released-producer-completeness.v1",
+                &[
+                    producer.family_id.as_str().as_bytes(),
+                    &observation.closure_identity,
+                ],
+            )),
+            proof_pin: release_pin(released_typed_identity(
+                b"codefabric.released-producer-execution.v1",
+                &[
+                    producer.family_id.as_str().as_bytes(),
+                    &producer.provenance_closure_identity,
+                ],
+            )),
+        });
+    }
+    for remainder in &observation.remainders {
+        let family_id: Arc<str> = Arc::from(remainder.family_id.as_str());
+        accepted.insert(Arc::clone(&family_id));
+        unsupported_remainders.push(ReleaseUnsupportedRemainderRow {
+            remainder_id: Arc::from(format!("remainder:{family_id}")),
+            family_id,
+            reason_id: Arc::from(released_remainder_reason_label(remainder.reason)),
+            proof_pin: release_pin(remainder.evidence_identity),
+        });
+    }
+
+    let query_rows = query_requirements
+        .into_iter()
+        .map(|(query_family_id, required_family_id)| {
+            if accepted.insert(Arc::clone(&required_family_id)) {
+                unsupported_remainders.push(ReleaseUnsupportedRemainderRow {
+                    family_id: Arc::clone(&required_family_id),
+                    remainder_id: Arc::from(format!("remainder:{required_family_id}")),
+                    reason_id: Arc::from("query-family-materialization-unavailable"),
+                    proof_pin: release_pin(released_typed_identity(
+                        b"codefabric.released-query-family-remainder.v1",
+                        &[query_family_id.as_bytes(), required_family_id.as_bytes()],
+                    )),
+                });
+            }
+            ReleaseQueryFamilyRequirementRow {
+                query_family_id,
+                required_family_id,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    ReleaseProducerClosureCatalog::try_new(
+        proof_authority,
+        accepted
+            .into_iter()
+            .map(|family_id| ReleaseAcceptedFactFamilyRow { family_id })
+            .collect(),
+        runtime_producers,
+        query_rows,
+        unsupported_remainders,
+    )
+    .map_err(Into::into)
+}
+
+fn release_pin(identity: [u8; 32]) -> Arc<str> {
+    Arc::from(format!("b3:{}", hex_bytes(&identity)))
+}
+
+fn released_precision_label(precision: &DerivedPrecisionPolicy) -> String {
+    match precision {
+        DerivedPrecisionPolicy::Exact => "precision.exact".to_owned(),
+        DerivedPrecisionPolicy::SoundMay => "precision.sound-may".to_owned(),
+        DerivedPrecisionPolicy::SoundMust => "precision.sound-must".to_owned(),
+        DerivedPrecisionPolicy::Bounded { max_steps } => {
+            format!("precision.bounded:{}", max_steps.get())
+        }
+    }
+}
+
+const fn released_remainder_reason_label(reason: DerivedRemainderReason) -> &'static str {
+    match reason {
+        DerivedRemainderReason::Unsupported => "unsupported",
+        DerivedRemainderReason::ProviderUnavailable => "provider-unavailable",
+        DerivedRemainderReason::ResourceLimit => "resource-limit",
+        DerivedRemainderReason::AlgorithmUnavailable => "algorithm-unavailable",
+        DerivedRemainderReason::PrivateCompilerEvidenceUnavailable => {
+            "private-compiler-evidence-unavailable"
+        }
+        DerivedRemainderReason::TypedTransformationAdapterUnavailable => {
+            "typed-transformation-adapter-unavailable"
+        }
+    }
 }
 
 const PYTHON_CFG_SOURCE_NODE: &str = "__cf_programmatic_python_cfg_source_node";
@@ -1592,7 +2900,7 @@ impl ProgrammaticPythonCfgNodeTransformation {
                 .as_str(),
         );
         validate_existing_output(
-            ExistingDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode),
+            ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode),
             &output,
             &expected,
             Self::OUTPUT_FIELD_COUNT,
@@ -1756,7 +3064,7 @@ impl ProgrammaticPythonCfgEdgeTransformation {
                 .as_str(),
         );
         validate_existing_output(
-            ExistingDerivedFamilyRole::Python(PythonDerivedRelation::CfgEdge),
+            ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgEdge),
             &output,
             &expected,
             Self::OUTPUT_FIELD_COUNT,
@@ -1997,7 +3305,7 @@ impl ProgrammaticPythonDataflowTransformation {
         };
         let expected = ProgrammaticRelationId::new(bindings.relation_id(role).as_str());
         validate_existing_output(
-            ExistingDerivedFamilyRole::Python(role),
+            ReleasedDerivedFamilyRole::Python(role),
             &output,
             &expected,
             output_field_count,
@@ -2946,7 +4254,7 @@ impl ProgrammaticRustMirCfgEdgeTransformation {
                 .as_str(),
         );
         validate_existing_output(
-            ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::CfgEdge),
+            ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::CfgEdge),
             &output,
             &expected,
             Self::OUTPUT_FIELD_COUNT,
@@ -3052,7 +4360,7 @@ impl ProgrammaticRustMirControlInputTransformation {
                 .as_str(),
         );
         validate_existing_output(
-            ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::ControlDependenceInput),
+            ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::ControlDependenceInput),
             &output,
             &expected,
             Self::OUTPUT_FIELD_COUNT,
@@ -3296,7 +4604,7 @@ impl ProgrammaticRustMirStructuralTransformation {
         })?;
         let expected = ProgrammaticRelationId::new(bindings.relation_id(role).as_str());
         validate_existing_output(
-            ExistingDerivedFamilyRole::RustMir(role),
+            ReleasedDerivedFamilyRole::RustMir(role),
             &output,
             &expected,
             Self::output_field_count(role),
@@ -4069,98 +5377,8 @@ impl ProgrammaticTransformation for ProgrammaticRustMirStructuralTransformation 
     }
 }
 
-/// Native programmatic common call-graph facts derived from accepted Pyrefly call-target rows.
-///
-/// Resolved and unresolved candidates coexist; `complete` is true only for provider-resolved
-/// targets. This preserves explicit uncertainty instead of filtering it into apparent absence.
-pub struct ProgrammaticCommonCallGraphTransformation {
-    contract: ProgrammaticTransformationContract,
-    output: TransformationOutput,
-    dependency: Arc<[ProgrammaticRelationId]>,
-    bindings: CommonAnalysisBindings,
-    call_site_identity: Arc<ScalarUDF>,
-}
-
-impl ProgrammaticCommonCallGraphTransformation {
-    pub const OUTPUT_FIELD_COUNT: usize = 10;
-
-    pub(crate) fn try_new(
-        _authority: &CompiledTransformationAuthority,
-        contract: ProgrammaticTransformationContract,
-        output: TransformationOutput,
-        bindings: &CommonAnalysisBindings,
-    ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
-        bindings.validate().map_err(|error| {
-            ProgrammaticDerivedAnalysisError::ExistingBinding(error.to_string())
-        })?;
-        let expected = ProgrammaticRelationId::new(bindings.relations.facts.as_str());
-        validate_existing_output(
-            ExistingDerivedFamilyRole::Common(ExistingCommonDerivedFamilyRole::CallGraph),
-            &output,
-            &expected,
-            Self::OUTPUT_FIELD_COUNT,
-        )?;
-        Ok(Self {
-            contract,
-            output,
-            dependency: Arc::from([ProgrammaticRelationId::new(
-                PyreflyRelation::CallTarget.relation_id(),
-            )]),
-            bindings: bindings.clone(),
-            call_site_identity: common_call_site_identity_udf(),
-        })
-    }
-}
-
-impl ProgrammaticTransformation for ProgrammaticCommonCallGraphTransformation {
-    fn contract(&self) -> &ProgrammaticTransformationContract {
-        &self.contract
-    }
-
-    fn output(&self) -> &TransformationOutput {
-        &self.output
-    }
-
-    fn dependencies(&self) -> &[ProgrammaticRelationId] {
-        &self.dependency
-    }
-
-    fn build(&self, inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
-        let fields = &self.bindings.fields;
-        let input = inputs.plan(&self.dependency[0])?;
-        let call_site = self.call_site_identity.call(vec![
-            col("module_id"),
-            col("content_digest"),
-            col("start_byte"),
-            col("end_byte"),
-            col("call_occurrence_ordinal"),
-        ]);
-        let resolved = col("resolution_state").eq(lit("resolved"));
-        Ok(LogicalPlanBuilder::from(input)
-            .project([
-                utf8_literal(&self.bindings.families.call_graph).alias(fields.family_id.as_str()),
-                col("module_id").alias(fields.subject_id.as_str()),
-                col("qualified_target").alias(fields.object_id.as_str()),
-                call_site.alias(fields.value_id.as_str()),
-                resolved.alias(fields.complete.as_str()),
-                col("resolution_state"),
-                col("call_occurrence_ordinal"),
-                col("target_ordinal"),
-                col("source_generation"),
-                col("content_digest"),
-            ])?
-            .distinct()?
-            .sort([
-                col(fields.subject_id.as_str()).sort(true, false),
-                col(fields.object_id.as_str()).sort(true, false),
-                col(fields.value_id.as_str()).sort(true, false),
-            ])?
-            .build()?)
-    }
-}
-
 fn validate_existing_output(
-    role: ExistingDerivedFamilyRole,
+    role: ReleasedDerivedFamilyRole,
     output: &TransformationOutput,
     expected_relation: &ProgrammaticRelationId,
     expected_fields: usize,
@@ -5474,51 +6692,6 @@ fn rust_mir_unsafe_identity_udf() -> Arc<ScalarUDF> {
     ))
 }
 
-fn common_call_site_identity_udf() -> Arc<ScalarUDF> {
-    Arc::new(create_udf(
-        "codefabric_common_call_site_identity_v3",
-        vec![
-            DataType::Utf8,
-            DataType::FixedSizeBinary(32),
-            DataType::UInt64,
-            DataType::UInt64,
-            DataType::UInt64,
-        ],
-        DataType::Utf8,
-        Volatility::Immutable,
-        Arc::new(|values| {
-            let arrays = ColumnarValue::values_to_arrays(values)?;
-            let module = string_array(&arrays[0], "module_id")?;
-            let content = fixed_array(&arrays[1], 32, "content_digest")?;
-            let start = u64_array(&arrays[2], "start_byte")?;
-            let end = u64_array(&arrays[3], "end_byte")?;
-            let occurrence = u64_array(&arrays[4], "call_occurrence_ordinal")?;
-            let values = (0..module.len())
-                .map(|row| {
-                    if arrays.iter().any(|array| array.is_null(row)) {
-                        return None;
-                    }
-                    let mut hasher = blake3::Hasher::new();
-                    hasher.update(b"codefabric.common-programmatic-call-site.v3\0");
-                    for part in [
-                        module.value(row).as_bytes(),
-                        content.value(row),
-                        start.value(row).to_be_bytes().as_slice(),
-                        end.value(row).to_be_bytes().as_slice(),
-                        occurrence.value(row).to_be_bytes().as_slice(),
-                    ] {
-                        frame(&mut hasher, part);
-                    }
-                    Some(format!("b3:{}", hasher.finalize().to_hex()))
-                })
-                .collect::<Vec<_>>();
-            Ok(ColumnarValue::Array(
-                Arc::new(StringArray::from(values)) as ArrayRef
-            ))
-        }),
-    ))
-}
-
 fn fixed_array<'a>(
     array: &'a ArrayRef,
     width: i32,
@@ -5682,20 +6855,6 @@ impl ProgrammaticDerivedAnalysisOutcome {
     ) {
         (self.builder, self.provider_reports, self.observation)
     }
-}
-
-/// Admit all four exact provider lanes and compose all accepted derived families in one call.
-///
-/// Both stages consume their candidate. A provider or later producer failure returns no builder,
-/// so a partially registered session cannot escape.
-pub(crate) fn admit_and_compose_programmatic_derived_analyses(
-    authority: &CompiledTransformationAuthority,
-    builder: ProgrammaticFabricEpochBuilder,
-    runs: ExactProgrammaticProviderRuns<'_>,
-    composition: ProgrammaticDerivedAnalysisComposition,
-) -> Result<ProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
-    let admitted = admit_provider_relations_programmatic(builder, runs)?;
-    compose_programmatic_derived_analyses(authority, admitted, composition)
 }
 
 /// Bind accepted Python, Rust MIR, and common producers into an admitted candidate.
@@ -6607,6 +7766,7 @@ impl MetadataBoundDerivedTransformation {
         values: MetadataValues,
         provenance_closure_identity: [u8; 32],
     ) -> Result<Self, ProgrammaticDerivedAnalysisError> {
+        let metadata = metadata.scoped_to_relation(inner.output().relation_id())?;
         let inner_contract = inner.contract();
         let contract = ProgrammaticTransformationContract::new(
             inner_contract.semantic_id().clone(),
@@ -6655,7 +7815,7 @@ impl MetadataBoundDerivedTransformation {
             inner,
             contract,
             output,
-            metadata: metadata.clone(),
+            metadata,
             values,
         })
     }
@@ -7272,7 +8432,9 @@ const fn retryability_code(retryability: DerivedRemainderRetryability) -> u8 {
 
 /// Fail-closed errors for derived-family closure and registration.
 #[derive(Debug, Error)]
-pub enum ProgrammaticDerivedAnalysisError {
+pub(crate) enum ProgrammaticDerivedAnalysisError {
+    #[error("release producer input unit count exceeds u64")]
+    ReleasedProducerUnitOverflow,
     #[error("invalid {kind} identity {value:?}")]
     InvalidIdentity { kind: &'static str, value: String },
     #[error("derived-analysis aggregate resource bound {0} must be non-zero")]
@@ -7292,23 +8454,27 @@ pub enum ProgrammaticDerivedAnalysisError {
     },
     #[error("existing derived-analysis binding is invalid: {0}")]
     ExistingBinding(String),
+    #[error("compiled released derived-analysis binding is invalid: {0}")]
+    ReleasedBinding(String),
+    #[error("compiled released derived-analysis role {role:?} violates closure: {detail}")]
+    ReleasedCompositionInvariant { role: String, detail: &'static str },
     #[error("existing derived-analysis census contains unexpected role {0:?}")]
-    UnexpectedExistingCensusRole(ExistingDerivedFamilyRole),
+    UnexpectedExistingCensusRole(ReleasedDerivedFamilyRole),
     #[error("existing derived-analysis census repeats role {0:?}")]
-    DuplicateExistingCensusRole(ExistingDerivedFamilyRole),
+    DuplicateExistingCensusRole(ReleasedDerivedFamilyRole),
     #[error("existing derived-analysis census is missing role {0:?}")]
-    MissingExistingCensusRole(ExistingDerivedFamilyRole),
+    MissingExistingCensusRole(ReleasedDerivedFamilyRole),
     #[error("existing derived-analysis census disposition does not match role {0:?}")]
-    ExistingCensusDispositionMismatch(ExistingDerivedFamilyRole),
+    ExistingCensusDispositionMismatch(ReleasedDerivedFamilyRole),
     #[error("existing derived-analysis role {0:?} has no catalog-input dependency contract")]
-    ExistingCensusSourceFreeRole(ExistingDerivedFamilyRole),
+    ExistingCensusSourceFreeRole(ReleasedDerivedFamilyRole),
     #[error("existing derived-analysis dependency contract does not match role {0:?}")]
-    ExistingCensusDependencyMismatch(ExistingDerivedFamilyRole),
+    ExistingCensusDependencyMismatch(ReleasedDerivedFamilyRole),
     #[error(
         "programmatic output for {role:?} is {actual_relation:?}/{actual_fields} fields; expected {expected_relation:?}/{expected_fields} fields"
     )]
     ExistingProgrammaticOutputMismatch {
-        role: ExistingDerivedFamilyRole,
+        role: ReleasedDerivedFamilyRole,
         expected_relation: ProgrammaticRelationId,
         actual_relation: ProgrammaticRelationId,
         expected_fields: usize,
@@ -7445,6 +8611,10 @@ pub enum ProgrammaticDerivedAnalysisError {
     ProviderAdmission(#[from] ProviderAdmissionError),
     #[error(transparent)]
     Epoch(#[from] ProgrammaticFabricEpochError),
+    #[error(transparent)]
+    ProducerClosureCatalog(#[from] ReleaseProducerClosureCatalogError),
+    #[error(transparent)]
+    ProductionQueryRecipe(#[from] ProductionQueryRecipeError),
 }
 
 #[cfg(test)]
@@ -7498,24 +8668,12 @@ mod tests {
             ProgrammaticDerivedAnalysisOutcome,
             ProgrammaticDerivedAnalysisError,
         > = compose_programmatic_derived_analyses;
-        let _raw_admit: for<'a> fn(
-            &CompiledTransformationAuthority,
-            ProgrammaticFabricEpochBuilder,
-            ExactProgrammaticProviderRuns<'a>,
-            ProgrammaticDerivedAnalysisComposition,
-        ) -> Result<
-            ProgrammaticDerivedAnalysisOutcome,
-            ProgrammaticDerivedAnalysisError,
-        > = admit_and_compose_programmatic_derived_analyses;
-
         let analysis_source = include_str!("programmatic_derived_analysis.rs");
-        for route in [
-            concat!(
-                "pub",
-                " fn admit_and_compose_programmatic_derived_analyses("
-            ),
-            concat!("pub", " fn compose_programmatic_derived_analyses("),
-        ] {
+        assert!(!analysis_source.contains(concat!(
+            "fn admit_and_compose_",
+            "programmatic_derived_analyses("
+        )));
+        for route in [concat!("pub", " fn compose_programmatic_derived_analyses(")] {
             assert!(
                 !analysis_source.contains(route),
                 "raw semantic-composition route became public: {route}"
@@ -7742,7 +8900,6 @@ mod tests {
         rust_mir_resource: ProgrammaticRelationId,
         rust_mir_async: ProgrammaticRelationId,
         rust_mir_unsafe_ffi: ProgrammaticRelationId,
-        common_call_graph: ProgrammaticRelationId,
     }
 
     fn programmatic_output(
@@ -7784,10 +8941,10 @@ mod tests {
         rust_bindings: &RustMirAnalysisBindings,
         common_bindings: &CommonAnalysisBindings,
     ) -> (
-        Vec<ExistingDerivedFamilyDeclaration>,
+        Vec<ReleasedDerivedFamilyDeclaration>,
         ExistingProducerRelations,
     ) {
-        let roles = ExistingDerivedFamilyRole::all();
+        let roles = ReleasedDerivedFamilyRole::all();
         let family_ids = roles
             .iter()
             .enumerate()
@@ -7836,7 +8993,7 @@ mod tests {
         );
         let python_node_algorithm = algorithm_from_contract(&python_node_contract);
         let python_node_precision = DerivedPrecisionPolicy::Exact;
-        let python_node_role = ExistingDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode);
+        let python_node_role = ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode);
         let python_node_dependencies = python_node.dependencies().to_vec();
 
         let python_contract =
@@ -7873,7 +9030,7 @@ mod tests {
         );
         let python_algorithm = algorithm_from_contract(&python_contract);
         let python_precision = DerivedPrecisionPolicy::SoundMay;
-        let python_role = ExistingDerivedFamilyRole::Python(PythonDerivedRelation::CfgEdge);
+        let python_role = ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgEdge);
         let python_dependencies = python.dependencies().to_vec();
 
         let make_python_dataflow =
@@ -7921,10 +9078,10 @@ mod tests {
                     )
                     .unwrap(),
                 );
-                let role = ExistingDerivedFamilyRole::Python(role);
+                let role = ReleasedDerivedFamilyRole::Python(role);
                 let dependencies = transformation.dependencies().to_vec();
                 let algorithm = algorithm_from_contract(&contract);
-                let declaration = ExistingDerivedFamilyDeclaration::producer(
+                let declaration = ReleasedDerivedFamilyDeclaration::producer(
                     &transformation_authority(),
                     role,
                     family_ids[&role].clone(),
@@ -8025,7 +9182,7 @@ mod tests {
         );
         let rust_algorithm = algorithm_from_contract(&rust_contract);
         let rust_precision = DerivedPrecisionPolicy::Exact;
-        let rust_role = ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::CfgEdge);
+        let rust_role = ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::CfgEdge);
         let rust_dependencies = rust.dependencies().to_vec();
 
         let rust_control_contract = transformation_contract(
@@ -8057,7 +9214,7 @@ mod tests {
         let rust_control_algorithm = algorithm_from_contract(&rust_control_contract);
         let rust_control_precision = DerivedPrecisionPolicy::Exact;
         let rust_control_role =
-            ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::ControlDependenceInput);
+            ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::ControlDependenceInput);
         let rust_control_dependencies = rust_control.dependencies().to_vec();
 
         let make_rust_structural =
@@ -8087,10 +9244,10 @@ mod tests {
                     )
                     .unwrap(),
                 );
-                let role = ExistingDerivedFamilyRole::RustMir(role);
+                let role = ReleasedDerivedFamilyRole::RustMir(role);
                 let dependencies = transformation.dependencies().to_vec();
                 let algorithm = algorithm_from_contract(&contract);
-                let declaration = ExistingDerivedFamilyDeclaration::producer(
+                let declaration = ReleasedDerivedFamilyDeclaration::producer(
                     &transformation_authority(),
                     role,
                     family_ids[&role].clone(),
@@ -8151,35 +9308,10 @@ mod tests {
             DerivedPrecisionPolicy::SoundMay,
         );
 
-        let common_contract =
-            transformation_contract("analysis.common.call_graph.programmatic.v3", 73, 65_536);
-        let common_relation = ProgrammaticRelationId::new(common_bindings.relations.facts.as_str());
-        let common_output = programmatic_output(
-            common_relation.clone(),
-            "common_call_graph_programmatic",
-            "programmatic.common.call_graph",
-            ProgrammaticCommonCallGraphTransformation::OUTPUT_FIELD_COUNT,
-        );
-        let common_witness = common_output.fields()[3].field_id().clone();
-        let common = Arc::new(
-            ProgrammaticCommonCallGraphTransformation::try_new(
-                &transformation_authority(),
-                common_contract.clone(),
-                common_output,
-                common_bindings,
-            )
-            .unwrap(),
-        );
-        let common_algorithm = algorithm_from_contract(&common_contract);
-        let common_precision = DerivedPrecisionPolicy::SoundMay;
-        let common_role =
-            ExistingDerivedFamilyRole::Common(ExistingCommonDerivedFamilyRole::CallGraph);
-        let common_dependencies = common.dependencies().to_vec();
-
         let mut producers = BTreeMap::from([
             (
                 python_node_role,
-                ExistingDerivedFamilyDeclaration::producer(
+                ReleasedDerivedFamilyDeclaration::producer(
                     &transformation_authority(),
                     python_node_role,
                     family_ids[&python_node_role].clone(),
@@ -8200,7 +9332,7 @@ mod tests {
             ),
             (
                 python_role,
-                ExistingDerivedFamilyDeclaration::producer(
+                ReleasedDerivedFamilyDeclaration::producer(
                     &transformation_authority(),
                     python_role,
                     family_ids[&python_role].clone(),
@@ -8221,7 +9353,7 @@ mod tests {
             ),
             (
                 rust_role,
-                ExistingDerivedFamilyDeclaration::producer(
+                ReleasedDerivedFamilyDeclaration::producer(
                     &transformation_authority(),
                     rust_role,
                     family_ids[&rust_role].clone(),
@@ -8242,7 +9374,7 @@ mod tests {
             ),
             (
                 rust_control_role,
-                ExistingDerivedFamilyDeclaration::producer(
+                ReleasedDerivedFamilyDeclaration::producer(
                     &transformation_authority(),
                     rust_control_role,
                     family_ids[&rust_control_role].clone(),
@@ -8258,27 +9390,6 @@ mod tests {
                         DerivedCompletenessPolicy::Complete,
                         rust_control_witness,
                         rust_control,
-                    ),
-                ),
-            ),
-            (
-                common_role,
-                ExistingDerivedFamilyDeclaration::producer(
-                    &transformation_authority(),
-                    common_role,
-                    family_ids[&common_role].clone(),
-                    common_algorithm.clone(),
-                    common_precision.clone(),
-                    common_dependencies,
-                    AcceptedDerivedProducer::new(
-                        &transformation_authority(),
-                        family_ids[&common_role].clone(),
-                        DerivedProducerAuthority::ApplicationOwned([173; 32]),
-                        common_algorithm,
-                        common_precision,
-                        DerivedCompletenessPolicy::Complete,
-                        common_witness,
-                        common,
                     ),
                 ),
             ),
@@ -8314,13 +9425,14 @@ mod tests {
                     TransformationSemanticVersion::new(1, 0, 0),
                     TransformationReleaseIdentity::from_bytes([marker; 32]),
                 );
-                ExistingDerivedFamilyDeclaration::adapter_unavailable(
+                ReleasedDerivedFamilyDeclaration::remainder(
                     &transformation_authority(),
                     role,
                     family_ids[&role].clone(),
                     algorithm,
                     DerivedPrecisionPolicy::Exact,
                     role.dependency_contract(python_bindings, rust_bindings, common_bindings),
+                    DerivedRemainderReason::TypedTransformationAdapterUnavailable,
                     [marker.wrapping_add(1); 32],
                     DerivedRemainderRetryability::RequiresReleaseChange,
                 )
@@ -8343,7 +9455,6 @@ mod tests {
                 rust_mir_resource: rust_resource_relation,
                 rust_mir_async: rust_async_relation,
                 rust_mir_unsafe_ffi: rust_unsafe_relation,
-                common_call_graph: common_relation,
             },
         )
     }
@@ -8352,11 +9463,11 @@ mod tests {
         python_bindings: &PythonFlowBindings,
         rust_bindings: &RustMirAnalysisBindings,
         common_bindings: &CommonAnalysisBindings,
-    ) -> (ExistingDerivedAnalysisCensus, ExistingProducerRelations) {
+    ) -> (ReleasedDerivedAnalysisCensus, ExistingProducerRelations) {
         let (declarations, relations) =
             existing_declarations(python_bindings, rust_bindings, common_bindings);
         (
-            ExistingDerivedAnalysisCensus::try_new(
+            ReleasedDerivedAnalysisCensus::try_new(
                 &transformation_authority(),
                 python_bindings,
                 rust_bindings,
@@ -8926,21 +10037,97 @@ mod tests {
     ) -> (
         SealedProgrammaticSchemaAssembly,
         DerivedAnalysisCompositionObservation,
-        ExistingDerivedAnalysisCensusObservation,
+        ReleasedDerivedAnalysisCensusObservation,
         ExistingProducerRelations,
     ) {
-        let python = python_flow_bindings();
-        let rust = rust_mir_bindings("programmatic.rust_mir");
-        let common = common_analysis_bindings();
-        let (census, relations) = existing_census(&python, &rust, &common);
-        let metadata = metadata_bindings();
-        let outcome = admit_and_compose_existing_programmatic_derived_analyses(
-            &transformation_authority(),
+        let bindings = released_analysis_bindings().unwrap();
+        let relations = ExistingProducerRelations {
+            python_cfg_node: ProgrammaticRelationId::new(
+                bindings
+                    .python
+                    .relation_id(PythonDerivedRelation::CfgNode)
+                    .as_str(),
+            ),
+            python_cfg: ProgrammaticRelationId::new(
+                bindings
+                    .python
+                    .relation_id(PythonDerivedRelation::CfgEdge)
+                    .as_str(),
+            ),
+            python_evaluation_order: ProgrammaticRelationId::new(
+                bindings
+                    .python
+                    .relation_id(PythonDerivedRelation::EvaluationOrder)
+                    .as_str(),
+            ),
+            python_def_use: ProgrammaticRelationId::new(
+                bindings
+                    .python
+                    .relation_id(PythonDerivedRelation::DefUse)
+                    .as_str(),
+            ),
+            python_reaching_definition: ProgrammaticRelationId::new(
+                bindings
+                    .python
+                    .relation_id(PythonDerivedRelation::ReachingDefinition)
+                    .as_str(),
+            ),
+            python_liveness: ProgrammaticRelationId::new(
+                bindings
+                    .python
+                    .relation_id(PythonDerivedRelation::Liveness)
+                    .as_str(),
+            ),
+            python_value_flow: ProgrammaticRelationId::new(
+                bindings
+                    .python
+                    .relation_id(PythonDerivedRelation::ValueFlow)
+                    .as_str(),
+            ),
+            rust_mir_cfg: ProgrammaticRelationId::new(
+                bindings
+                    .rust_mir
+                    .relation_id(RustMirDerivedRelation::CfgEdge)
+                    .as_str(),
+            ),
+            rust_mir_ownership: ProgrammaticRelationId::new(
+                bindings
+                    .rust_mir
+                    .relation_id(RustMirDerivedRelation::OwnershipState)
+                    .as_str(),
+            ),
+            rust_mir_alias: ProgrammaticRelationId::new(
+                bindings
+                    .rust_mir
+                    .relation_id(RustMirDerivedRelation::AliasPointsTo)
+                    .as_str(),
+            ),
+            rust_mir_resource: ProgrammaticRelationId::new(
+                bindings
+                    .rust_mir
+                    .relation_id(RustMirDerivedRelation::ResourceLifecycle)
+                    .as_str(),
+            ),
+            rust_mir_async: ProgrammaticRelationId::new(
+                bindings
+                    .rust_mir
+                    .relation_id(RustMirDerivedRelation::AsyncLowering)
+                    .as_str(),
+            ),
+            rust_mir_unsafe_ffi: ProgrammaticRelationId::new(
+                bindings
+                    .rust_mir
+                    .relation_id(RustMirDerivedRelation::UnsafeFfi)
+                    .as_str(),
+            ),
+        };
+        let release = crate::fabric::production_kernel::CompiledSemanticRelease::current();
+        let outcome = admit_and_compose_released_programmatic_derived_analyses(
+            release.transformation_authority(),
+            release.proof_authority(),
+            release.query_authority(),
             programmatic_epoch_builder(),
             fixture.runs(),
-            census,
-            metadata.clone(),
-            remainder_binding(&metadata),
         )
         .unwrap();
         let (derived, census_observation) = outcome.into_parts();
@@ -8955,17 +10142,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn existing_family_census_executes_fifteen_real_catalog_input_producers() {
+    async fn wp35_beh_existing_family_census_executes_all_real_catalog_input_producers() {
         let fixture = exact_workspace_fixture();
         let (sealed, observation, census, relations) = execute_existing_fixture(&fixture, 91).await;
 
         assert_eq!(census.accepted_roles.len(), 38);
-        assert_eq!(census.programmatic_producer_roles.len(), 15);
-        assert_eq!(census.explicit_remainder_roles.len(), 23);
+        assert_eq!(census.programmatic_producer_roles.len(), 14);
+        assert_eq!(census.explicit_remainder_roles.len(), 24);
         assert_eq!(census.dependency_contracts.len(), 38);
         assert_eq!(census.common_semantic_identities.len(), 10);
-        assert_eq!(observation.producers.len(), 15);
-        assert_eq!(observation.remainders.len(), 23);
+        assert_eq!(observation.producers.len(), 14);
+        assert_eq!(observation.remainders.len(), 24);
         assert_eq!(
             census
                 .programmatic_producer_roles
@@ -8973,26 +10160,50 @@ mod tests {
                 .copied()
                 .collect::<BTreeSet<_>>(),
             BTreeSet::from([
-                ExistingDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode),
-                ExistingDerivedFamilyRole::Python(PythonDerivedRelation::CfgEdge),
-                ExistingDerivedFamilyRole::Python(PythonDerivedRelation::EvaluationOrder),
-                ExistingDerivedFamilyRole::Python(PythonDerivedRelation::DefUse),
-                ExistingDerivedFamilyRole::Python(PythonDerivedRelation::ReachingDefinition),
-                ExistingDerivedFamilyRole::Python(PythonDerivedRelation::Liveness),
-                ExistingDerivedFamilyRole::Python(PythonDerivedRelation::ValueFlow),
-                ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::CfgEdge),
-                ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::OwnershipState),
-                ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::AliasPointsTo),
-                ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::ResourceLifecycle),
-                ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::AsyncLowering),
-                ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::UnsafeFfi),
-                ExistingDerivedFamilyRole::RustMir(RustMirDerivedRelation::ControlDependenceInput,),
-                ExistingDerivedFamilyRole::Common(ExistingCommonDerivedFamilyRole::CallGraph,),
+                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode),
+                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgEdge),
+                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::EvaluationOrder),
+                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::DefUse),
+                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::ReachingDefinition),
+                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::Liveness),
+                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::ValueFlow),
+                ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::CfgEdge),
+                ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::OwnershipState),
+                ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::AliasPointsTo),
+                ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::ResourceLifecycle),
+                ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::AsyncLowering),
+                ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::UnsafeFfi),
+                ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::ControlDependenceInput,),
             ])
         );
-        assert!(observation.remainders.iter().all(|remainder| {
-            remainder.reason == DerivedRemainderReason::TypedTransformationAdapterUnavailable
-        }));
+        let common_call_graph_role =
+            ReleasedDerivedFamilyRole::Common(ReleasedCommonDerivedFamilyRole::CallGraph);
+        assert!(
+            census
+                .explicit_remainder_roles
+                .contains(&common_call_graph_role)
+        );
+        let common_call_graph_family = common_call_graph_role
+            .family_identity(
+                &transformation_authority(),
+                &released_analysis_bindings().unwrap(),
+            )
+            .unwrap();
+        let common_call_graph_remainder = observation
+            .remainders
+            .iter()
+            .find(|remainder| remainder.family_id == common_call_graph_family)
+            .expect("Common CallGraph remains explicit until its typed producer is released");
+        assert_eq!(
+            common_call_graph_remainder.reason,
+            DerivedRemainderReason::AlgorithmUnavailable
+        );
+        assert_eq!(common_call_graph_remainder.inputs.len(), 3);
+        assert_ne!(common_call_graph_remainder.input_vector_identity, [0; 32]);
+        assert_ne!(
+            common_call_graph_remainder.provenance_closure_identity,
+            [0; 32]
+        );
 
         let raw_python = collect_relation(
             &sealed,
@@ -9242,68 +10453,13 @@ mod tests {
             assert!(alias_plan.contains(operator), "{alias_plan}");
         }
 
-        let common_rows = collect_relation(&sealed, &relations.common_call_graph).await;
-        assert_eq!(
-            common_rows
-                .iter()
-                .map(arrow_array::RecordBatch::num_rows)
-                .sum::<usize>(),
-            2
-        );
-        let common_bindings = common_analysis_bindings();
-        let subjects = common_rows
-            .iter()
-            .flat_map(|batch| {
-                let values = batch
-                    .column_by_name(common_bindings.fields.subject_id.as_str())
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .unwrap();
-                (0..values.len())
-                    .map(|row| values.value(row).to_owned())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<BTreeSet<_>>();
-        let objects = common_rows
-            .iter()
-            .flat_map(|batch| {
-                let values = batch
-                    .column_by_name(common_bindings.fields.object_id.as_str())
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .unwrap();
-                (0..values.len())
-                    .map(|row| values.value(row).to_owned())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<BTreeSet<_>>();
-        assert_eq!(
-            subjects,
-            BTreeSet::from([
-                "module:pyrefly:31".to_owned(),
-                "module:pyrefly:32".to_owned(),
-            ])
-        );
-        assert_eq!(objects, BTreeSet::from(["fixture.target".to_owned()]));
-        assert!(common_rows.iter().all(|batch| {
-            let complete = batch
-                .column_by_name(common_bindings.fields.complete.as_str())
-                .unwrap()
-                .as_any()
-                .downcast_ref::<BooleanArray>()
-                .unwrap();
-            (0..complete.len()).all(|row| complete.value(row))
-        }));
-
         let remainder_rows = collect_relation(&sealed, &observation.remainder_relation_id).await;
         assert_eq!(
             remainder_rows
                 .iter()
                 .map(arrow_array::RecordBatch::num_rows)
                 .sum::<usize>(),
-            23
+            24
         );
         let baseline_def_use_count = collect_relation(&sealed, &relations.python_def_use)
             .await
@@ -9314,10 +10470,10 @@ mod tests {
         let changed = changed_exact_workspace_fixture();
         let (changed_sealed, changed_observation, changed_census, changed_relations) =
             execute_existing_fixture(&changed, 92).await;
-        assert_eq!(changed_census.programmatic_producer_roles.len(), 15);
-        assert_eq!(changed_census.explicit_remainder_roles.len(), 23);
-        assert_eq!(changed_observation.producers.len(), 15);
-        assert_eq!(changed_observation.remainders.len(), 23);
+        assert_eq!(changed_census.programmatic_producer_roles.len(), 14);
+        assert_eq!(changed_census.explicit_remainder_roles.len(), 24);
+        assert_eq!(changed_observation.producers.len(), 14);
+        assert_eq!(changed_observation.remainders.len(), 24);
 
         let def_use = collect_relation(&changed_sealed, &changed_relations.python_def_use).await;
         let reaching = collect_relation(
@@ -9684,8 +10840,8 @@ mod tests {
         let observation = census.observation();
 
         assert_eq!(observation.accepted_roles.len(), 38);
-        assert_eq!(observation.programmatic_producer_roles.len(), 15);
-        assert_eq!(observation.explicit_remainder_roles.len(), 23);
+        assert_eq!(observation.programmatic_producer_roles.len(), 14);
+        assert_eq!(observation.explicit_remainder_roles.len(), 24);
         assert_eq!(observation.dependency_contracts.len(), 38);
         let by_role = observation
             .dependency_contracts
@@ -9712,7 +10868,7 @@ mod tests {
         }
 
         assert_eq!(
-            by_role[&ExistingDerivedFamilyRole::Python(PythonDerivedRelation::Invalidation,)],
+            by_role[&ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::Invalidation,)],
             [
                 ProgrammaticRelationId::new(NativeSyntaxRelation::TreeSitterChangedRange.as_str(),),
                 ProgrammaticRelationId::new(NativeSyntaxRelation::RuffImport.as_str()),
@@ -9721,7 +10877,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            by_role[&ExistingDerivedFamilyRole::RustMir(
+            by_role[&ReleasedDerivedFamilyRole::RustMir(
                 RustMirDerivedRelation::ControlDependenceInput,
             )],
             [
@@ -9734,12 +10890,28 @@ mod tests {
             ]
         );
         assert_eq!(
-            by_role[&ExistingDerivedFamilyRole::Common(
-                ExistingCommonDerivedFamilyRole::CallableSummary,
+            by_role[&ReleasedDerivedFamilyRole::Common(
+                ReleasedCommonDerivedFamilyRole::CallableSummary,
             )],
             [
-                ProgrammaticRelationId::new(common.relations.call_targets.as_str()),
-                ProgrammaticRelationId::new(common.relations.local_semantics.as_str()),
+                ProgrammaticRelationId::new(
+                    ReleasedCommonDerivedFamilyRole::CallGraph.output_relation(),
+                ),
+                ProgrammaticRelationId::new(
+                    python.relation_id(PythonDerivedRelation::Effect).as_str(),
+                ),
+                ProgrammaticRelationId::new(
+                    python
+                        .relation_id(PythonDerivedRelation::ResourceLifecycle)
+                        .as_str(),
+                ),
+                ProgrammaticRelationId::new(
+                    rust.relation_id(RustMirDerivedRelation::ResourceLifecycle)
+                        .as_str(),
+                ),
+                ProgrammaticRelationId::new(
+                    rust.relation_id(RustMirDerivedRelation::UnsafeFfi).as_str(),
+                ),
             ]
         );
     }
@@ -9752,7 +10924,7 @@ mod tests {
         let (mut missing, _) = existing_declarations(&python, &rust, &common);
         let missing_role = missing.pop().unwrap().role;
         assert!(matches!(
-            ExistingDerivedAnalysisCensus::try_new(
+            ReleasedDerivedAnalysisCensus::try_new(
                 &transformation_authority(),
                 &python,
                 &rust,
@@ -9767,7 +10939,7 @@ mod tests {
         let duplicate_role = duplicate[0].role;
         duplicate.push(duplicate[0].clone());
         assert!(matches!(
-            ExistingDerivedAnalysisCensus::try_new(
+            ReleasedDerivedAnalysisCensus::try_new(
                 &transformation_authority(),
                 &python,
                 &rust,
@@ -9789,13 +10961,13 @@ mod tests {
             .iter_mut()
             .find(|declaration| {
                 declaration.role
-                    == ExistingDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode)
+                    == ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode)
             })
             .expect("closed census includes Python CFG nodes");
         drifted.dependencies = Arc::from([]);
 
         assert!(matches!(
-            ExistingDerivedAnalysisCensus::try_new(
+            ReleasedDerivedAnalysisCensus::try_new(
                 &transformation_authority(),
                 &python,
                 &rust,
@@ -9804,14 +10976,14 @@ mod tests {
             ),
             Err(
                 ProgrammaticDerivedAnalysisError::ExistingCensusDependencyMismatch(
-                    ExistingDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode),
+                    ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode),
                 )
             )
         ));
     }
 
     #[tokio::test]
-    async fn changed_catalog_inputs_causally_change_real_producer_outputs() {
+    async fn wp35_beh_changed_catalog_inputs_causally_change_real_producer_outputs() {
         let baseline = exact_workspace_fixture();
         let changed = changed_exact_workspace_fixture();
         let (baseline_sealed, baseline_observation, _, baseline_relations) =
@@ -9831,13 +11003,35 @@ mod tests {
         for domain in [
             DerivedAnalysisDomain::Python,
             DerivedAnalysisDomain::RustMir,
-            DerivedAnalysisDomain::Common,
         ] {
             assert_ne!(
                 producer_authority(&baseline_observation, domain),
                 producer_authority(&changed_observation, domain)
             );
         }
+        let common_call_graph_family =
+            ReleasedDerivedFamilyRole::Common(ReleasedCommonDerivedFamilyRole::CallGraph)
+                .family_identity(
+                    &transformation_authority(),
+                    &released_analysis_bindings().unwrap(),
+                )
+                .unwrap();
+        let common_call_graph_remainder_identity =
+            |observation: &DerivedAnalysisCompositionObservation| {
+                let remainder = observation
+                    .remainders
+                    .iter()
+                    .find(|remainder| remainder.family_id == common_call_graph_family)
+                    .expect("Common CallGraph remains an explicit typed remainder");
+                (
+                    remainder.input_vector_identity,
+                    remainder.provenance_closure_identity,
+                )
+            };
+        let baseline_common = common_call_graph_remainder_identity(&baseline_observation);
+        let changed_common = common_call_graph_remainder_identity(&changed_observation);
+        assert_ne!(baseline_common.0, changed_common.0);
+        assert_ne!(baseline_common.1, changed_common.1);
 
         let fixed_identity_values = |batches: &[arrow_array::RecordBatch], name: &str| {
             batches
@@ -9902,49 +11096,20 @@ mod tests {
             u64_values(&baseline_rust, "source_block"),
             u64_values(&changed_rust, "source_block")
         );
-
-        let string_values = |batches: &[arrow_array::RecordBatch], name: &str| {
-            batches
-                .iter()
-                .flat_map(|batch| {
-                    let values = batch
-                        .column_by_name(name)
-                        .unwrap()
-                        .as_any()
-                        .downcast_ref::<StringArray>()
-                        .unwrap();
-                    (0..values.len())
-                        .map(|row| values.value(row).to_owned())
-                        .collect::<Vec<_>>()
-                })
-                .collect::<BTreeSet<_>>()
-        };
-        let baseline_common =
-            collect_relation(&baseline_sealed, &baseline_relations.common_call_graph).await;
-        let changed_common =
-            collect_relation(&changed_sealed, &changed_relations.common_call_graph).await;
-        let common_bindings = common_analysis_bindings();
-        assert_ne!(
-            string_values(&baseline_common, common_bindings.fields.value_id.as_str()),
-            string_values(&changed_common, common_bindings.fields.value_id.as_str())
-        );
     }
 
     #[tokio::test]
-    async fn compiled_release_admits_all_domains_and_queryable_remainder() {
+    async fn wp35_int_compiled_release_admits_all_domains_and_queryable_remainder() {
         let fixture = exact_workspace_fixture();
         let release = crate::fabric::production_kernel::CompiledSemanticRelease::current();
         let outcome = release
-            .admit_and_compose_derived_analyses(
-                programmatic_epoch_builder(),
-                fixture.runs(),
-                composition(DerivedPrecisionPolicy::Exact, 4_096),
-            )
+            .admit_and_compose_derived_analyses(programmatic_epoch_builder(), fixture.runs())
             .unwrap();
-        assert_eq!(outcome.observation().producers.len(), 3);
-        assert_eq!(outcome.observation().remainders.len(), 1);
+        assert_eq!(outcome.derived().observation().producers.len(), 14);
+        assert_eq!(outcome.derived().observation().remainders.len(), 24);
         assert_eq!(
             outcome
+                .derived()
                 .observation()
                 .producers
                 .iter()
@@ -9953,16 +11118,34 @@ mod tests {
             BTreeSet::from([
                 DerivedAnalysisDomain::Python,
                 DerivedAnalysisDomain::RustMir,
-                DerivedAnalysisDomain::Common,
             ])
         );
-        assert!(outcome.observation().producers.iter().all(|producer| {
-            !producer.inputs.is_empty()
-                && producer.input_vector_identity != [0; 32]
-                && producer.provenance_closure_identity != [0; 32]
-        }));
+        assert!(
+            outcome
+                .derived()
+                .observation()
+                .producers
+                .iter()
+                .all(|producer| {
+                    !producer.inputs.is_empty()
+                        && producer.input_vector_identity != [0; 32]
+                        && producer.provenance_closure_identity != [0; 32]
+                })
+        );
+        for report in [
+            outcome.derived().provider_reports().tree_sitter(),
+            outcome.derived().provider_reports().ruff(),
+            outcome.derived().provider_reports().pyrefly(),
+            outcome.derived().provider_reports().rustc(),
+        ] {
+            assert!(
+                !report.relations.is_empty(),
+                "every exact provider lane remains admitted even when producers consume derived inputs"
+            );
+        }
         assert_eq!(
             outcome
+                .derived()
                 .observation()
                 .producers
                 .iter()
@@ -9973,35 +11156,34 @@ mod tests {
                     | DerivedInputAuthoritySource::DeclaredRemainder(_) => None,
                 })
                 .collect::<BTreeSet<_>>(),
-            BTreeSet::from([0, 1, 2, 3])
+            BTreeSet::from([1, 3])
         );
 
-        let observation = outcome.observation().clone();
-        let (builder, _, _) = outcome.into_parts();
+        let observation = outcome.derived().observation().clone();
+        let (derived, census) = outcome.into_parts();
+        assert_eq!(census.accepted_roles.len(), 38);
+        assert_eq!(census.programmatic_producer_roles.len(), 14);
+        assert_eq!(census.explicit_remainder_roles.len(), 24);
+        assert_eq!(
+            census.accepted_roles.len(),
+            census.programmatic_producer_roles.len() + census.explicit_remainder_roles.len()
+        );
+        assert!(
+            census
+                .explicit_remainder_roles
+                .contains(&ReleasedDerivedFamilyRole::Common(
+                    ReleasedCommonDerivedFamilyRole::CallGraph,
+                ))
+        );
+        let (builder, _, _) = derived.into_parts();
         let (_, _, _, assembly) = builder.into_assembly_parts();
         let sealed = assembly
             .seal(FabricEpochId::from_bytes([90; 16]))
             .await
             .unwrap();
+        let mut non_empty_producers = 0;
         for producer in &observation.producers {
             let batches = collect_relation(&sealed, &producer.output_relation_id).await;
-            assert!(
-                batches
-                    .iter()
-                    .map(arrow_array::RecordBatch::num_rows)
-                    .sum::<usize>()
-                    > 0
-            );
-            let provenance = batches
-                .iter()
-                .find(|batch| batch.num_rows() != 0)
-                .unwrap()
-                .column_by_name("__cf_derived_provenance")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<FixedSizeBinaryArray>()
-                .unwrap();
-            assert_eq!(provenance.value(0), producer.provenance_closure_identity);
             let observed_contract = sealed
                 .observations()
                 .provenance(&producer.output_relation_id)
@@ -10014,15 +11196,123 @@ mod tests {
                     .as_bytes(),
                 &producer.provenance_closure_identity
             );
+            if let Some(batch) = batches.iter().find(|batch| batch.num_rows() != 0) {
+                non_empty_producers += 1;
+                let provenance = batch
+                    .column_by_name("__cf_derived_provenance")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<FixedSizeBinaryArray>()
+                    .unwrap();
+                assert_eq!(provenance.value(0), producer.provenance_closure_identity);
+            }
         }
+        assert!(non_empty_producers > 0);
         let remainder_batches = collect_relation(&sealed, &observation.remainder_relation_id).await;
         assert_eq!(
             remainder_batches
                 .iter()
                 .map(arrow_array::RecordBatch::num_rows)
                 .sum::<usize>(),
-            1
+            24
         );
+    }
+
+    #[tokio::test]
+    async fn wp35_ops_release_owned_fixed_point_resource_cancellation_and_restart_are_atomic() {
+        use crate::fabric::derived_producer_closure::{
+            DerivedProducerClosureError, ProducerClosureCancellation,
+            ProducerClosureNativeOperator, ProducerClosureResourceBounds,
+        };
+        use crate::fabric::production_kernel::CompiledProducerClosureProofError;
+        use crate::fabric::proof::ProofTerminalStatus;
+
+        let fixture = exact_workspace_fixture();
+        let release = crate::fabric::production_kernel::CompiledSemanticRelease::current();
+        let outcome = release
+            .admit_and_compose_derived_analyses(programmatic_epoch_builder(), fixture.runs())
+            .expect("compiled release composes its provider, analysis, and closure catalog");
+        let accepted_analysis_families = outcome.census().accepted_roles.len();
+        let (derived, _) = outcome.into_parts();
+        let (builder, _, _) = derived.into_parts();
+        let epoch = builder
+            .seal_for_test()
+            .await
+            .expect("real observation histories reach fixed point and seal");
+        for relation in [
+            "runtime.accepted_fact_family",
+            "runtime.derived_producer",
+            "runtime.query_family_requirement",
+            "runtime.unsupported_remainder",
+        ] {
+            assert!(
+                epoch
+                    .relation(&ProgrammaticRelationId::new(relation))
+                    .is_some(),
+                "release closure input {relation} was not observed in the sealed catalog"
+            );
+        }
+
+        let bounds = ProducerClosureResourceBounds::try_new(16, 4_096, 256, 16 * 1024 * 1024)
+            .expect("production-shaped closure bounds");
+        let reserved_before = epoch.memory_reserved_bytes();
+        let first = release
+            .prove_producer_closure(&epoch, bounds, &ProducerClosureCancellation::new())
+            .await
+            .expect("decoded catalog rows prove the release closure");
+        assert_eq!(first.proof().terminal(), ProofTerminalStatus::Pass);
+        assert!(first.proof().families().len() >= accepted_analysis_families);
+        assert_eq!(first.proof().query_requirements().len(), 8);
+        assert!(first.proof().violations().is_empty());
+        assert!(first.proof().issues().is_empty());
+        assert!(
+            first
+                .execution()
+                .observation()
+                .operators()
+                .contains(&ProducerClosureNativeOperator::RecursiveQueryDistinct)
+        );
+
+        let restarted = release
+            .prove_producer_closure(&epoch, bounds, &ProducerClosureCancellation::new())
+            .await
+            .expect("same exact epoch re-executes deterministically after transient state drops");
+        assert_eq!(
+            first.execution().family_closure(),
+            restarted.execution().family_closure()
+        );
+        assert_eq!(
+            first.execution().query_requirement_closure(),
+            restarted.execution().query_requirement_closure()
+        );
+        assert_eq!(
+            first.execution().violations(),
+            restarted.execution().violations()
+        );
+
+        let constrained = ProducerClosureResourceBounds::try_new(16, 1, 256, 16 * 1024 * 1024)
+            .expect("one-row bound remains structurally valid");
+        assert!(matches!(
+            release
+                .prove_producer_closure(&epoch, constrained, &ProducerClosureCancellation::new(),)
+                .await,
+            Err(CompiledProducerClosureProofError::Closure(
+                DerivedProducerClosureError::OutputRowsExceeded { .. }
+            ))
+        ));
+
+        let cancelled = ProducerClosureCancellation::new();
+        assert!(cancelled.cancel());
+        assert!(!cancelled.cancel());
+        assert!(matches!(
+            release
+                .prove_producer_closure(&epoch, bounds, &cancelled)
+                .await,
+            Err(CompiledProducerClosureProofError::Closure(
+                DerivedProducerClosureError::Cancelled { .. }
+            ))
+        ));
+        assert_eq!(epoch.memory_reserved_bytes(), reserved_before);
     }
 
     #[test]

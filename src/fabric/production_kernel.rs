@@ -17,7 +17,8 @@ use super::activation::ActivationEventId;
 use super::command::{EpochId, WorkspaceId, WriterFence};
 use super::derived_producer_closure::{
     CompiledDerivedProducerClosure, DerivedProducerClosureError, DerivedProducerClosureExecution,
-    ProducerClosureResourceBounds, compile_release_owned_derived_producer_closure,
+    ProducerClosureCancellation, ProducerClosureResourceBounds,
+    compile_release_owned_derived_producer_closure,
 };
 use super::programmatic_epoch::{ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder};
 use super::programmatic_ingress_port::ApplicationOwnedSemanticIngressPort;
@@ -30,6 +31,10 @@ use super::programmatic_schema::ProgrammaticRelationId;
 use super::programmatic_workspace::{
     ProgrammaticTableVersionObservation, ProgrammaticWorkspaceRuntime,
 };
+use super::proof::{
+    ProofError, ProofTerminalStatus, ReleaseProducerClosureProofInput,
+    ReleaseProducerClosureProofResult, evaluate_release_producer_closure,
+};
 use crate::production_provider_recipe::{
     ProductionProviderAuthority, ProductionProviderRecipeError, ProductionProviderRuns,
     admit_production_provider_relations,
@@ -38,8 +43,8 @@ use crate::production_query_recipe::{
     ProductionQueryRecipeError, ProductionSemanticQueryRecipe, ProductionSemanticQueryRecipeInput,
 };
 use crate::programmatic_derived_analysis::{
-    ProgrammaticDerivedAnalysisComposition, ProgrammaticDerivedAnalysisError,
-    ProgrammaticDerivedAnalysisOutcome, admit_and_compose_programmatic_derived_analyses,
+    ProgrammaticDerivedAnalysisError, ReleasedProgrammaticDerivedAnalysisOutcome,
+    admit_and_compose_released_programmatic_derived_analyses,
 };
 use crate::provider_admission::{
     ExactProgrammaticProviderRuns, ProgrammaticProviderAdmissionOutcome,
@@ -201,13 +206,13 @@ impl CompiledSemanticRelease {
         &self,
         builder: ProgrammaticFabricEpochBuilder,
         runs: ExactProgrammaticProviderRuns<'_>,
-        composition: ProgrammaticDerivedAnalysisComposition,
-    ) -> Result<ProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
-        admit_and_compose_programmatic_derived_analyses(
+    ) -> Result<ReleasedProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
+        admit_and_compose_released_programmatic_derived_analyses(
             self.transformation_authority(),
+            self.proof_authority(),
+            self.query_authority(),
             builder,
             runs,
-            composition,
         )
     }
 
@@ -252,6 +257,43 @@ impl CompiledSemanticRelease {
         compile_release_owned_derived_producer_closure(self.proof_authority(), epoch, bounds).await
     }
 
+    /// Compile, execute, decode, and prove the release-owned producer closure for one exact epoch.
+    ///
+    /// This is the sole production bridge from a sealed candidate into queryable producer
+    /// authority. The returned capability contains the actual decoded Arrow rows and can only be
+    /// constructed when their release binding is valid and their derived terminal status is
+    /// `Pass`. Cancellation or a resource failure returns no partially proved value.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed compilation, execution, cancellation, proof-binding, or semantic-closure
+    /// failure.
+    pub(crate) async fn prove_producer_closure(
+        &self,
+        epoch: &ProgrammaticFabricEpoch,
+        bounds: ProducerClosureResourceBounds,
+        cancellation: &ProducerClosureCancellation,
+    ) -> Result<ProvedDerivedProducerClosure, CompiledProducerClosureProofError> {
+        let compiled = self.compile_producer_closure(epoch, bounds).await?;
+        let execution = compiled
+            .execute_with_cancellation(&epoch.context(), cancellation)
+            .await?;
+        let proof = evaluate_release_producer_closure(
+            ReleaseProducerClosureProofInput::try_from_execution(
+                self.proof_authority(),
+                &execution,
+            )?,
+        );
+        if proof.terminal() != ProofTerminalStatus::Pass {
+            return Err(CompiledProducerClosureProofError::SemanticClosureRejected {
+                operation_id: Arc::clone(proof.operation_id()),
+                violation_rows: proof.violations().len(),
+                issue_rows: proof.issues().len(),
+            });
+        }
+        Ok(ProvedDerivedProducerClosure { execution, proof })
+    }
+
     /// Compose the exact ingress, authorization, and snapshot ports for one compiled query recipe.
     ///
     /// The recipe is a non-forgeable output of [`Self::compile_semantic_query_recipe`]. The caller
@@ -286,6 +328,42 @@ impl CompiledSemanticRelease {
             Arc::new(ExactProgrammaticSnapshotProjection::new()),
         )?)
     }
+}
+
+/// Non-forgeable successful producer closure retained for query-program compilation.
+#[derive(Clone, Debug)]
+pub(crate) struct ProvedDerivedProducerClosure {
+    execution: DerivedProducerClosureExecution,
+    proof: ReleaseProducerClosureProofResult,
+}
+
+impl ProvedDerivedProducerClosure {
+    #[must_use]
+    pub(crate) const fn execution(&self) -> &DerivedProducerClosureExecution {
+        &self.execution
+    }
+
+    #[must_use]
+    pub(crate) const fn proof(&self) -> &ReleaseProducerClosureProofResult {
+        &self.proof
+    }
+}
+
+/// Closed failures before a candidate can acquire proved producer authority.
+#[derive(Debug, Error)]
+pub(crate) enum CompiledProducerClosureProofError {
+    #[error(transparent)]
+    Closure(#[from] DerivedProducerClosureError),
+    #[error(transparent)]
+    Proof(#[from] ProofError),
+    #[error(
+        "release producer closure {operation_id:?} was rejected by decoded rows: {violation_rows} violation rows, {issue_rows} structural issue rows"
+    )]
+    SemanticClosureRejected {
+        operation_id: Arc<str>,
+        violation_rows: usize,
+        issue_rows: usize,
+    },
 }
 
 /// Closed failures while composing the release-owned semantic query ports.

@@ -8,31 +8,44 @@
 //! Query requirements traverse the same closure and preserve unsupported, unknown, invalid, and
 //! missing states.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::{NonZeroU16, NonZeroUsize};
 use std::ops::Not;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use arrow_array::RecordBatch;
+use arrow_array::{Array, RecordBatch, StringArray, UInt32Array, UInt64Array};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use datafusion::common::{Column, ScalarValue, TableReference};
+use datafusion::common::{Column, DFSchema, DFSchemaRef, ScalarValue, TableReference};
 use datafusion::datasource::cte_worktable::CteWorkTable;
 use datafusion::datasource::provider_as_source;
 use datafusion::execution::context::SessionContext;
 use datafusion::functions::core::expr_fn::coalesce;
 use datafusion::functions_aggregate::expr_fn::{count, count_distinct, min};
+use datafusion::logical_expr::logical_plan::EmptyRelation;
 use datafusion::logical_expr::{Expr, JoinType, LogicalPlan, LogicalPlanBuilder};
 use datafusion::physical_plan::execute_stream;
 use datafusion::prelude::{col, lit};
 use futures::StreamExt;
 use thiserror::Error;
+use tokio::sync::Notify;
 
 use crate::relational_program::{FieldId, RelationId};
 use crate::schema_contract::SchemaRole;
 
+use super::epoch_runtime::{FABRIC_CATALOG, FabricSchemaRole};
 use super::production_kernel::CompiledProofAuthority;
-use super::programmatic_epoch::ProgrammaticFabricEpoch;
-use super::programmatic_schema::ProgrammaticRelationId;
+use super::programmatic_epoch::{
+    ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder, ProgrammaticFabricEpochError,
+};
+use super::programmatic_schema::{
+    ProgrammaticFieldId, ProgrammaticRelationId, ProgrammaticTransformation,
+    ProgrammaticTransformationContract, ProgrammaticTransformationId,
+    TransformationDeterminismPolicy, TransformationFieldIdentity, TransformationInputs,
+    TransformationOrderingPolicy, TransformationOutput, TransformationPlanError,
+    TransformationProvenance, TransformationProvenanceIdentity, TransformationRecursionPolicy,
+    TransformationReleaseIdentity, TransformationResourceClass, TransformationSemanticVersion,
+};
 
 const ACCEPTED_FACT_FAMILY_RELATION_ID: &str = "runtime.accepted_fact_family";
 const RUNTIME_PRODUCER_RELATION_ID: &str = "runtime.derived_producer";
@@ -45,6 +58,30 @@ const PRODUCER_CLOSURE_OPERATION_ID: &str = "operation.derived-producer-closure.
 const PRODUCER_CLOSURE_IMPLEMENTATION_RELEASE: &str = "derived-producer-closure@1.0.0";
 const APPLICATION_DERIVED_AUTHORITY_ID: &str = "authority.application-derived.v2";
 const FACTUAL_SEMANTIC_CLASS_ID: &str = "semantic.fact.v2";
+
+const ACCEPTED_FAMILY_FIELD_ID: &str = "accepted_family_id";
+const ACCEPTED_SEMANTIC_CLASS_FIELD_ID: &str = "accepted_semantic_class_id";
+const PRODUCER_FAMILY_FIELD_ID: &str = "producer_family_id";
+const RUNTIME_PRODUCER_FIELD_ID: &str = "runtime_producer_id";
+const RUNTIME_AUTHORITY_FIELD_ID: &str = "runtime_authority_id";
+const ALGORITHM_RELEASE_FIELD_ID: &str = "algorithm_release_pin";
+const PRECISION_PROFILE_FIELD_ID: &str = "precision_profile_id";
+const PRODUCER_INPUT_FIELD_ID: &str = "producer_input_pin";
+const INVALIDATION_POLICY_FIELD_ID: &str = "invalidation_policy_pin";
+const MATERIALIZATION_POLICY_FIELD_ID: &str = "materialization_policy_pin";
+const PRODUCER_REQUESTED_UNITS_FIELD_ID: &str = "producer_requested_unit_count";
+const PRODUCER_COMPLETED_UNITS_FIELD_ID: &str = "producer_completed_unit_count";
+const PRODUCER_REMAINDER_UNITS_FIELD_ID: &str = "producer_remainder_unit_count";
+const PRODUCER_UNKNOWN_UNITS_FIELD_ID: &str = "producer_unknown_unit_count";
+const PRODUCER_COMPLETENESS_PROOF_FIELD_ID: &str = "producer_completeness_proof_pin";
+const PRODUCER_EXECUTION_PROOF_FIELD_ID: &str = "producer_execution_proof_pin";
+const QUERY_FAMILY_FIELD_ID: &str = "query_family_id";
+const QUERY_REQUIRED_FAMILY_FIELD_ID: &str = "query_required_family_id";
+const REMAINDER_FAMILY_FIELD_ID: &str = "remainder_family_id";
+const UNSUPPORTED_REMAINDER_FIELD_ID: &str = "unsupported_remainder_id";
+const REMAINDER_AUTHORITY_FIELD_ID: &str = "remainder_authority_id";
+const UNSUPPORTED_REASON_FIELD_ID: &str = "unsupported_reason_id";
+const REMAINDER_PROOF_FIELD_ID: &str = "remainder_proof_pin";
 
 const ACCEPTED_ALIAS: &str = "__codefabric_accepted_family";
 const PRODUCER_ALIAS: &str = "__codefabric_runtime_producer";
@@ -380,6 +417,503 @@ pub struct ProducerClosureResourceBounds {
     max_total_bytes: NonZeroUsize,
 }
 
+/// Request-owned cancellation observed while executing the release producer closure.
+///
+/// Cancellation is monotonic and cloneable so the daemon can retain the handle while the
+/// DataFusion execution future owns another clone. Dropping an in-flight physical stream is the
+/// cancellation boundary; no partially decoded closure or proof result is returned.
+#[derive(Clone, Debug, Default)]
+pub struct ProducerClosureCancellation {
+    state: Arc<ProducerClosureCancellationState>,
+}
+
+#[derive(Debug, Default)]
+struct ProducerClosureCancellationState {
+    cancelled: AtomicBool,
+    notify: Notify,
+}
+
+impl ProducerClosureCancellation {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mark this request cancelled and wake every in-flight closure stream.
+    ///
+    /// Returns `true` only for the transition from live to cancelled.
+    pub fn cancel(&self) -> bool {
+        let transitioned = !self.state.cancelled.swap(true, Ordering::AcqRel);
+        if transitioned {
+            self.state.notify.notify_waiters();
+        }
+        transitioned
+    }
+
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.state.cancelled.load(Ordering::Acquire)
+    }
+
+    async fn cancelled(&self) {
+        loop {
+            let notified = self.state.notify.notified();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+/// One release-owned accepted-family row installed into the candidate catalog.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReleaseAcceptedFactFamilyRow {
+    pub(crate) family_id: Arc<str>,
+}
+
+/// One release-owned executable producer row installed into the candidate catalog.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReleaseRuntimeProducerRow {
+    pub(crate) family_id: Arc<str>,
+    pub(crate) producer_id: Arc<str>,
+    pub(crate) algorithm_release: Arc<str>,
+    pub(crate) precision_id: Arc<str>,
+    pub(crate) input_pin: Arc<str>,
+    pub(crate) invalidation_pin: Arc<str>,
+    pub(crate) materialization_pin: Arc<str>,
+    pub(crate) requested_unit_count: u64,
+    pub(crate) completed_unit_count: u64,
+    pub(crate) remainder_unit_count: u64,
+    pub(crate) unknown_unit_count: u64,
+    pub(crate) completeness_proof_pin: Arc<str>,
+    pub(crate) proof_pin: Arc<str>,
+}
+
+/// One exact compiled query-program dependency edge.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReleaseQueryFamilyRequirementRow {
+    pub(crate) query_family_id: Arc<str>,
+    pub(crate) required_family_id: Arc<str>,
+}
+
+/// One explicit release-owned unsupported-family remainder.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReleaseUnsupportedRemainderRow {
+    pub(crate) family_id: Arc<str>,
+    pub(crate) remainder_id: Arc<str>,
+    pub(crate) reason_id: Arc<str>,
+    pub(crate) proof_pin: Arc<str>,
+}
+
+/// Closed typed rows from the released analysis and query-program compilers.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReleaseProducerClosureCatalog {
+    accepted_families: Arc<[ReleaseAcceptedFactFamilyRow]>,
+    runtime_producers: Arc<[ReleaseRuntimeProducerRow]>,
+    query_requirements: Arc<[ReleaseQueryFamilyRequirementRow]>,
+    unsupported_remainders: Arc<[ReleaseUnsupportedRemainderRow]>,
+}
+
+impl ReleaseProducerClosureCatalog {
+    /// Validate exact-one producer-or-remainder closure before catalog registration.
+    pub(crate) fn try_new(
+        _authority: &CompiledProofAuthority,
+        accepted_families: Vec<ReleaseAcceptedFactFamilyRow>,
+        runtime_producers: Vec<ReleaseRuntimeProducerRow>,
+        query_requirements: Vec<ReleaseQueryFamilyRequirementRow>,
+        unsupported_remainders: Vec<ReleaseUnsupportedRemainderRow>,
+    ) -> Result<Self, ReleaseProducerClosureCatalogError> {
+        if accepted_families.is_empty() {
+            return Err(ReleaseProducerClosureCatalogError::EmptyAcceptedFamilies);
+        }
+        if query_requirements.is_empty() {
+            return Err(ReleaseProducerClosureCatalogError::EmptyQueryRequirements);
+        }
+        let accepted = unique_family_set(
+            "accepted family",
+            accepted_families.iter().map(|row| row.family_id.as_ref()),
+        )?;
+        let producers = unique_family_set(
+            "runtime producer",
+            runtime_producers.iter().map(|row| row.family_id.as_ref()),
+        )?;
+        let remainders = unique_family_set(
+            "unsupported remainder",
+            unsupported_remainders
+                .iter()
+                .map(|row| row.family_id.as_ref()),
+        )?;
+        if !producers.is_disjoint(&remainders)
+            || producers
+                .union(&remainders)
+                .copied()
+                .collect::<BTreeSet<_>>()
+                != accepted
+        {
+            return Err(ReleaseProducerClosureCatalogError::DispositionClosure);
+        }
+        for producer in &runtime_producers {
+            for (kind, value) in [
+                ("producer family", producer.family_id.as_ref()),
+                ("producer identity", producer.producer_id.as_ref()),
+                ("algorithm release", producer.algorithm_release.as_ref()),
+                ("precision", producer.precision_id.as_ref()),
+                ("input pin", producer.input_pin.as_ref()),
+                ("invalidation pin", producer.invalidation_pin.as_ref()),
+                ("materialization pin", producer.materialization_pin.as_ref()),
+                (
+                    "completeness proof pin",
+                    producer.completeness_proof_pin.as_ref(),
+                ),
+                ("producer proof pin", producer.proof_pin.as_ref()),
+            ] {
+                validate_catalog_text(kind, value)?;
+            }
+            if producer.requested_unit_count == 0
+                || producer.requested_unit_count != producer.completed_unit_count
+                || producer.remainder_unit_count != 0
+                || producer.unknown_unit_count != 0
+            {
+                return Err(
+                    ReleaseProducerClosureCatalogError::IncompleteRuntimeProducer(Arc::clone(
+                        &producer.family_id,
+                    )),
+                );
+            }
+        }
+        for remainder in &unsupported_remainders {
+            for (kind, value) in [
+                ("remainder family", remainder.family_id.as_ref()),
+                ("remainder identity", remainder.remainder_id.as_ref()),
+                ("remainder reason", remainder.reason_id.as_ref()),
+                ("remainder proof pin", remainder.proof_pin.as_ref()),
+            ] {
+                validate_catalog_text(kind, value)?;
+            }
+        }
+        let mut query_edges = BTreeSet::new();
+        for requirement in &query_requirements {
+            validate_catalog_text("query family", &requirement.query_family_id)?;
+            validate_catalog_text("query required family", &requirement.required_family_id)?;
+            if !accepted.contains(requirement.required_family_id.as_ref()) {
+                return Err(ReleaseProducerClosureCatalogError::UnknownQueryFamily(
+                    Arc::clone(&requirement.required_family_id),
+                ));
+            }
+            if !query_edges.insert((
+                requirement.query_family_id.as_ref(),
+                requirement.required_family_id.as_ref(),
+            )) {
+                return Err(ReleaseProducerClosureCatalogError::DuplicateQueryEdge);
+            }
+        }
+        Ok(Self {
+            accepted_families: accepted_families.into(),
+            runtime_producers: runtime_producers.into(),
+            query_requirements: query_requirements.into(),
+            unsupported_remainders: unsupported_remainders.into(),
+        })
+    }
+}
+
+fn unique_family_set<'a>(
+    kind: &'static str,
+    values: impl Iterator<Item = &'a str>,
+) -> Result<BTreeSet<&'a str>, ReleaseProducerClosureCatalogError> {
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_catalog_text(kind, value)?;
+        if !unique.insert(value) {
+            return Err(ReleaseProducerClosureCatalogError::DuplicateFamily {
+                kind,
+                value: value.to_owned(),
+            });
+        }
+    }
+    Ok(unique)
+}
+
+fn validate_catalog_text(
+    kind: &'static str,
+    value: &str,
+) -> Result<(), ReleaseProducerClosureCatalogError> {
+    if value.trim().is_empty() || value.len() > 240 {
+        return Err(ReleaseProducerClosureCatalogError::InvalidText {
+            kind,
+            value: value.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// Register the four release producer-closure inputs as native, self-observed transformations.
+///
+/// The rows come from the release's typed analysis/query compilers. They are not provider inputs,
+/// static generated registries, or caller-selected schemas. Registration makes their relation,
+/// field, schema, and provenance contracts participate in the candidate's normal fixed-point
+/// catalog observation before the closure is compiled back from the sealed session.
+pub(crate) fn install_release_producer_closure_catalog(
+    _authority: &CompiledProofAuthority,
+    mut builder: ProgrammaticFabricEpochBuilder,
+    catalog: ReleaseProducerClosureCatalog,
+) -> Result<ProgrammaticFabricEpochBuilder, ReleaseProducerClosureCatalogError> {
+    let transformations: [Arc<dyn ProgrammaticTransformation>; 4] = [
+        Arc::new(ReleaseClosureLiteralTransformation::try_new(
+            "runtime.producer-closure.accepted-families.v1",
+            ACCEPTED_FACT_FAMILY_RELATION_ID,
+            "runtime_accepted_fact_family",
+            Arc::new(Schema::new(vec![
+                Field::new(ACCEPTED_FAMILY_FIELD_ID, DataType::Utf8, false),
+                Field::new(ACCEPTED_SEMANTIC_CLASS_FIELD_ID, DataType::Utf8, false),
+            ])),
+            catalog
+                .accepted_families
+                .iter()
+                .map(|row| {
+                    vec![
+                        ScalarValue::Utf8(Some(row.family_id.to_string())),
+                        ScalarValue::Utf8(Some(FACTUAL_SEMANTIC_CLASS_ID.to_owned())),
+                    ]
+                })
+                .collect(),
+        )?),
+        Arc::new(ReleaseClosureLiteralTransformation::try_new(
+            "runtime.producer-closure.runtime-producers.v1",
+            RUNTIME_PRODUCER_RELATION_ID,
+            "runtime_derived_producer",
+            Arc::new(Schema::new(vec![
+                Field::new(PRODUCER_FAMILY_FIELD_ID, DataType::Utf8, false),
+                Field::new(RUNTIME_PRODUCER_FIELD_ID, DataType::Utf8, false),
+                Field::new(RUNTIME_AUTHORITY_FIELD_ID, DataType::Utf8, false),
+                Field::new(ALGORITHM_RELEASE_FIELD_ID, DataType::Utf8, false),
+                Field::new(PRECISION_PROFILE_FIELD_ID, DataType::Utf8, false),
+                Field::new(PRODUCER_INPUT_FIELD_ID, DataType::Utf8, false),
+                Field::new(INVALIDATION_POLICY_FIELD_ID, DataType::Utf8, false),
+                Field::new(MATERIALIZATION_POLICY_FIELD_ID, DataType::Utf8, false),
+                Field::new(PRODUCER_REQUESTED_UNITS_FIELD_ID, DataType::UInt64, false),
+                Field::new(PRODUCER_COMPLETED_UNITS_FIELD_ID, DataType::UInt64, false),
+                Field::new(PRODUCER_REMAINDER_UNITS_FIELD_ID, DataType::UInt64, false),
+                Field::new(PRODUCER_UNKNOWN_UNITS_FIELD_ID, DataType::UInt64, false),
+                Field::new(PRODUCER_COMPLETENESS_PROOF_FIELD_ID, DataType::Utf8, false),
+                Field::new(PRODUCER_EXECUTION_PROOF_FIELD_ID, DataType::Utf8, false),
+            ])),
+            catalog
+                .runtime_producers
+                .iter()
+                .map(|row| {
+                    vec![
+                        ScalarValue::Utf8(Some(row.family_id.to_string())),
+                        ScalarValue::Utf8(Some(row.producer_id.to_string())),
+                        ScalarValue::Utf8(Some(APPLICATION_DERIVED_AUTHORITY_ID.to_owned())),
+                        ScalarValue::Utf8(Some(row.algorithm_release.to_string())),
+                        ScalarValue::Utf8(Some(row.precision_id.to_string())),
+                        ScalarValue::Utf8(Some(row.input_pin.to_string())),
+                        ScalarValue::Utf8(Some(row.invalidation_pin.to_string())),
+                        ScalarValue::Utf8(Some(row.materialization_pin.to_string())),
+                        ScalarValue::UInt64(Some(row.requested_unit_count)),
+                        ScalarValue::UInt64(Some(row.completed_unit_count)),
+                        ScalarValue::UInt64(Some(row.remainder_unit_count)),
+                        ScalarValue::UInt64(Some(row.unknown_unit_count)),
+                        ScalarValue::Utf8(Some(row.completeness_proof_pin.to_string())),
+                        ScalarValue::Utf8(Some(row.proof_pin.to_string())),
+                    ]
+                })
+                .collect(),
+        )?),
+        Arc::new(ReleaseClosureLiteralTransformation::try_new(
+            "runtime.producer-closure.query-requirements.v1",
+            QUERY_FAMILY_REQUIREMENT_RELATION_ID,
+            "runtime_query_family_requirement",
+            Arc::new(Schema::new(vec![
+                Field::new(QUERY_FAMILY_FIELD_ID, DataType::Utf8, false),
+                Field::new(QUERY_REQUIRED_FAMILY_FIELD_ID, DataType::Utf8, false),
+            ])),
+            catalog
+                .query_requirements
+                .iter()
+                .map(|row| {
+                    vec![
+                        ScalarValue::Utf8(Some(row.query_family_id.to_string())),
+                        ScalarValue::Utf8(Some(row.required_family_id.to_string())),
+                    ]
+                })
+                .collect(),
+        )?),
+        Arc::new(ReleaseClosureLiteralTransformation::try_new(
+            "runtime.producer-closure.unsupported-remainders.v1",
+            UNSUPPORTED_REMAINDER_RELATION_ID,
+            "runtime_unsupported_remainder",
+            Arc::new(Schema::new(vec![
+                Field::new(REMAINDER_FAMILY_FIELD_ID, DataType::Utf8, false),
+                Field::new(UNSUPPORTED_REMAINDER_FIELD_ID, DataType::Utf8, false),
+                Field::new(REMAINDER_AUTHORITY_FIELD_ID, DataType::Utf8, false),
+                Field::new(UNSUPPORTED_REASON_FIELD_ID, DataType::Utf8, false),
+                Field::new(REMAINDER_PROOF_FIELD_ID, DataType::Utf8, false),
+            ])),
+            catalog
+                .unsupported_remainders
+                .iter()
+                .map(|row| {
+                    vec![
+                        ScalarValue::Utf8(Some(row.family_id.to_string())),
+                        ScalarValue::Utf8(Some(row.remainder_id.to_string())),
+                        ScalarValue::Utf8(Some(APPLICATION_DERIVED_AUTHORITY_ID.to_owned())),
+                        ScalarValue::Utf8(Some(row.reason_id.to_string())),
+                        ScalarValue::Utf8(Some(row.proof_pin.to_string())),
+                    ]
+                })
+                .collect(),
+        )?),
+    ];
+    for transformation in transformations {
+        builder.add_transformation(transformation)?;
+    }
+    Ok(builder)
+}
+
+#[derive(Clone, Debug)]
+struct ReleaseClosureLiteralTransformation {
+    contract: ProgrammaticTransformationContract,
+    output: TransformationOutput,
+    schema: DFSchemaRef,
+    rows: Arc<[Arc<[ScalarValue]>]>,
+}
+
+impl ReleaseClosureLiteralTransformation {
+    fn try_new(
+        semantic_id: &'static str,
+        relation_id: &'static str,
+        table_name: &'static str,
+        arrow_schema: SchemaRef,
+        rows: Vec<Vec<ScalarValue>>,
+    ) -> Result<Self, ReleaseProducerClosureCatalogError> {
+        let schema = Arc::new(DFSchema::try_from(arrow_schema.as_ref().clone())?);
+        let provenance = literal_relation_identity(semantic_id, relation_id, &rows);
+        let release = literal_relation_identity(
+            "codefabric.release-producer-closure-catalog.v1",
+            relation_id,
+            &[],
+        );
+        let output = TransformationOutput::new(
+            ProgrammaticRelationId::new(relation_id),
+            TableReference::full(
+                FABRIC_CATALOG,
+                FabricSchemaRole::System.as_str(),
+                table_name,
+            ),
+            arrow_schema
+                .fields()
+                .iter()
+                .map(|field| {
+                    TransformationFieldIdentity::new(ProgrammaticFieldId::new(
+                        field.name().as_str(),
+                    ))
+                })
+                .collect::<Vec<_>>(),
+        );
+        Ok(Self {
+            contract: ProgrammaticTransformationContract::new(
+                ProgrammaticTransformationId::new(semantic_id),
+                TransformationSemanticVersion::new(1, 0, 0),
+                TransformationResourceClass::BoundedInMemory {
+                    max_rows: 16_384,
+                    max_memory_bytes: 16 * 1024 * 1024,
+                },
+                TransformationDeterminismPolicy::DeterministicSet,
+                TransformationOrderingPolicy::Unordered,
+                TransformationRecursionPolicy::Forbidden,
+                TransformationProvenance::new(
+                    TransformationProvenanceIdentity::from_bytes(provenance),
+                    TransformationReleaseIdentity::from_bytes(release),
+                ),
+            ),
+            output,
+            schema,
+            rows: rows
+                .into_iter()
+                .map(|row| Arc::<[ScalarValue]>::from(row))
+                .collect::<Vec<_>>()
+                .into(),
+        })
+    }
+}
+
+impl ProgrammaticTransformation for ReleaseClosureLiteralTransformation {
+    fn contract(&self) -> &ProgrammaticTransformationContract {
+        &self.contract
+    }
+
+    fn output(&self) -> &TransformationOutput {
+        &self.output
+    }
+
+    fn dependencies(&self) -> &[ProgrammaticRelationId] {
+        &[]
+    }
+
+    fn build(
+        &self,
+        _inputs: &TransformationInputs,
+    ) -> Result<LogicalPlan, TransformationPlanError> {
+        if self.rows.is_empty() {
+            return Ok(LogicalPlan::EmptyRelation(EmptyRelation {
+                produce_one_row: false,
+                schema: Arc::clone(&self.schema),
+            }));
+        }
+        Ok(LogicalPlanBuilder::values_with_schema(
+            self.rows
+                .iter()
+                .map(|row| row.iter().cloned().map(lit).collect())
+                .collect(),
+            &self.schema,
+        )?
+        .project(
+            self.schema
+                .fields()
+                .iter()
+                .enumerate()
+                .map(|(ordinal, field)| col(format!("column{}", ordinal + 1)).alias(field.name()))
+                .collect::<Vec<_>>(),
+        )?
+        .build()?)
+    }
+}
+
+fn literal_relation_identity(
+    domain: &str,
+    relation_id: &str,
+    rows: &[Vec<ScalarValue>],
+) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    for value in [domain, relation_id] {
+        hasher.update(&(value.len() as u64).to_be_bytes());
+        hasher.update(value.as_bytes());
+    }
+    hasher.update(&(rows.len() as u64).to_be_bytes());
+    for row in rows {
+        hasher.update(&(row.len() as u64).to_be_bytes());
+        for value in row {
+            match value {
+                ScalarValue::Utf8(Some(value)) => {
+                    hasher.update(&[1]);
+                    hasher.update(&(value.len() as u64).to_be_bytes());
+                    hasher.update(value.as_bytes());
+                }
+                ScalarValue::UInt64(Some(value)) => {
+                    hasher.update(&[2]);
+                    hasher.update(&value.to_be_bytes());
+                }
+                _ => {
+                    hasher.update(&[0]);
+                }
+            }
+        }
+    }
+    *hasher.finalize().as_bytes()
+}
+
 impl ProducerClosureResourceBounds {
     /// Construct a non-zero closure resource envelope.
     ///
@@ -482,6 +1016,210 @@ pub struct ProducerClosureCompilationObservation {
     bounds: ProducerClosureResourceBounds,
 }
 
+/// One exact producer-family row decoded from the executed Arrow closure relation.
+///
+/// The fields remain private so callers cannot manufacture semantic closure. The release proof
+/// path can only obtain rows through [`DerivedProducerClosureExecution::release_evidence`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReleaseProducerFamilyClosureRow {
+    family_id: Arc<str>,
+    semantic_class_id: Arc<str>,
+    closure_state: Arc<str>,
+    producer_id: Option<Arc<str>>,
+    authority_id: Option<Arc<str>>,
+    algorithm_release: Option<Arc<str>>,
+    precision_id: Option<Arc<str>>,
+    input_pin: Option<Arc<str>>,
+    invalidation_pin: Option<Arc<str>>,
+    materialization_pin: Option<Arc<str>>,
+    requested_unit_count: Option<u64>,
+    completed_unit_count: Option<u64>,
+    remainder_unit_count: Option<u64>,
+    unknown_unit_count: Option<u64>,
+    completeness_proof_pin: Option<Arc<str>>,
+    producer_proof_pin: Option<Arc<str>>,
+    unsupported_remainder_id: Option<Arc<str>>,
+    unsupported_reason_id: Option<Arc<str>>,
+    unsupported_proof_pin: Option<Arc<str>>,
+}
+
+impl ReleaseProducerFamilyClosureRow {
+    #[must_use]
+    pub(crate) const fn family_id(&self) -> &Arc<str> {
+        &self.family_id
+    }
+
+    #[must_use]
+    pub(crate) const fn semantic_class_id(&self) -> &Arc<str> {
+        &self.semantic_class_id
+    }
+
+    #[must_use]
+    pub(crate) const fn closure_state(&self) -> &Arc<str> {
+        &self.closure_state
+    }
+
+    #[must_use]
+    pub(crate) const fn authority_id(&self) -> Option<&Arc<str>> {
+        self.authority_id.as_ref()
+    }
+
+    #[must_use]
+    pub(crate) const fn producer_proof_pin(&self) -> Option<&Arc<str>> {
+        self.producer_proof_pin.as_ref()
+    }
+
+    #[must_use]
+    pub(crate) const fn completeness_proof_pin(&self) -> Option<&Arc<str>> {
+        self.completeness_proof_pin.as_ref()
+    }
+}
+
+/// One exact transitive query-requirement row decoded from Arrow execution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReleaseQueryRequirementClosureRow {
+    query_family_id: Arc<str>,
+    required_family_id: Arc<str>,
+    minimum_depth: u32,
+    requirement_state: Arc<str>,
+    unknown_cause: Option<Arc<str>>,
+}
+
+impl ReleaseQueryRequirementClosureRow {
+    #[must_use]
+    pub(crate) const fn query_family_id(&self) -> &Arc<str> {
+        &self.query_family_id
+    }
+
+    #[must_use]
+    pub(crate) const fn required_family_id(&self) -> &Arc<str> {
+        &self.required_family_id
+    }
+
+    #[must_use]
+    pub(crate) const fn requirement_state(&self) -> &Arc<str> {
+        &self.requirement_state
+    }
+}
+
+/// One exact violation row decoded from the executed proof relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReleaseProducerClosureViolationRow {
+    subject_kind: Arc<str>,
+    subject_id: Arc<str>,
+    violation_code: Arc<str>,
+    related_id: Option<Arc<str>>,
+}
+
+impl ReleaseProducerClosureViolationRow {
+    #[must_use]
+    pub(crate) const fn subject_id(&self) -> &Arc<str> {
+        &self.subject_id
+    }
+
+    #[must_use]
+    pub(crate) const fn violation_code(&self) -> &Arc<str> {
+        &self.violation_code
+    }
+}
+
+/// Stable structural issue derived from decoded release rows and compiled dependencies.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReleaseProducerClosureIssue {
+    code: &'static str,
+    subject_id: Option<Arc<str>>,
+    related_id: Option<Arc<str>>,
+}
+
+impl ReleaseProducerClosureIssue {
+    fn new(code: &'static str, subject_id: Option<Arc<str>>, related_id: Option<Arc<str>>) -> Self {
+        Self {
+            code,
+            subject_id,
+            related_id,
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn code(&self) -> &'static str {
+        self.code
+    }
+
+    #[must_use]
+    pub(crate) const fn subject_id(&self) -> Option<&Arc<str>> {
+        self.subject_id.as_ref()
+    }
+}
+
+/// Release-owned, row-decoded producer closure consumed by executable proof.
+///
+/// This is derived from the exact DataFusion results and their compiled dependency observation.
+/// It is not constructible from counts, digests, plan text, or caller-authored declarations.
+#[derive(Clone, Debug)]
+pub(crate) struct ReleaseProducerClosureEvidence {
+    operation_id: Arc<str>,
+    implementation_release: Arc<str>,
+    application_authority_id: Arc<str>,
+    factual_semantic_class_id: Arc<str>,
+    families: Arc<[ReleaseProducerFamilyClosureRow]>,
+    query_requirements: Arc<[ReleaseQueryRequirementClosureRow]>,
+    violations: Arc<[ReleaseProducerClosureViolationRow]>,
+    issues: Arc<[ReleaseProducerClosureIssue]>,
+    dependencies: Arc<[ProducerClosureCompilationDependency]>,
+}
+
+impl ReleaseProducerClosureEvidence {
+    #[must_use]
+    pub(crate) const fn operation_id(&self) -> &Arc<str> {
+        &self.operation_id
+    }
+
+    #[must_use]
+    pub(crate) const fn implementation_release(&self) -> &Arc<str> {
+        &self.implementation_release
+    }
+
+    #[must_use]
+    pub(crate) const fn application_authority_id(&self) -> &Arc<str> {
+        &self.application_authority_id
+    }
+
+    #[must_use]
+    pub(crate) const fn factual_semantic_class_id(&self) -> &Arc<str> {
+        &self.factual_semantic_class_id
+    }
+
+    #[must_use]
+    pub(crate) fn families(&self) -> &[ReleaseProducerFamilyClosureRow] {
+        &self.families
+    }
+
+    #[must_use]
+    pub(crate) fn query_requirements(&self) -> &[ReleaseQueryRequirementClosureRow] {
+        &self.query_requirements
+    }
+
+    #[must_use]
+    pub(crate) fn violations(&self) -> &[ReleaseProducerClosureViolationRow] {
+        &self.violations
+    }
+
+    #[must_use]
+    pub(crate) fn issues(&self) -> &[ReleaseProducerClosureIssue] {
+        &self.issues
+    }
+
+    #[must_use]
+    pub(crate) fn dependencies(&self) -> &[ProducerClosureCompilationDependency] {
+        &self.dependencies
+    }
+
+    #[must_use]
+    pub(crate) fn is_conformant(&self) -> bool {
+        self.issues.is_empty()
+    }
+}
+
 impl ProducerClosureCompilationObservation {
     #[must_use]
     pub const fn operation_id(&self) -> &Arc<str> {
@@ -518,7 +1256,12 @@ pub struct CompiledDerivedProducerClosure {
     family_closure_schema: SchemaRef,
     query_requirement_closure_schema: SchemaRef,
     violation_schema: SchemaRef,
+    input_fields: Arc<[FieldId]>,
     family_closure_fields: FamilyClosureFields,
+    query_requirement_closure_fields: QueryRequirementClosureFields,
+    violation_fields: ProducerClosureViolationFields,
+    semantic_identities: ProducerClosureSemanticIdentities,
+    implementation_release: Arc<str>,
     observation: ProducerClosureCompilationObservation,
 }
 
@@ -556,6 +1299,23 @@ impl CompiledDerivedProducerClosure {
         &self,
         context: &SessionContext,
     ) -> Result<DerivedProducerClosureExecution, DerivedProducerClosureError> {
+        self.execute_with_cancellation(context, &ProducerClosureCancellation::new())
+            .await
+    }
+
+    /// Execute under an explicit request cancellation authority.
+    ///
+    /// A cancellation drops the current DataFusion stream and returns no decoded relation or
+    /// proof-capable value. Resource failures have the same atomic behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed cancellation, optimizer, planner, execution, schema, or resource failure.
+    pub async fn execute_with_cancellation(
+        &self,
+        context: &SessionContext,
+        cancellation: &ProducerClosureCancellation,
+    ) -> Result<DerivedProducerClosureExecution, DerivedProducerClosureError> {
         let mut budget = ExecutionBudget::default();
         let family_closure = execute_bounded(
             context,
@@ -564,6 +1324,7 @@ impl CompiledDerivedProducerClosure {
             self.observation.bounds,
             "family_closure",
             &mut budget,
+            cancellation,
         )
         .await?;
         let query_requirement_closure = execute_bounded(
@@ -573,6 +1334,7 @@ impl CompiledDerivedProducerClosure {
             self.observation.bounds,
             "query_requirement_closure",
             &mut budget,
+            cancellation,
         )
         .await?;
         let violations = execute_bounded(
@@ -582,8 +1344,22 @@ impl CompiledDerivedProducerClosure {
             self.observation.bounds,
             "violations",
             &mut budget,
+            cancellation,
         )
         .await?;
+
+        let release_evidence = decode_release_producer_closure_evidence(
+            &family_closure,
+            &self.family_closure_fields,
+            &query_requirement_closure,
+            &self.query_requirement_closure_fields,
+            &violations,
+            &self.violation_fields,
+            &self.input_fields,
+            &self.semantic_identities,
+            &self.implementation_release,
+            &self.observation,
+        )?;
 
         Ok(DerivedProducerClosureExecution {
             family_closure_schema: Arc::clone(&self.family_closure_schema),
@@ -594,6 +1370,7 @@ impl CompiledDerivedProducerClosure {
             violations,
             family_closure_fields: self.family_closure_fields.clone(),
             observation: self.observation.clone(),
+            release_evidence,
         })
     }
 }
@@ -609,6 +1386,7 @@ pub struct DerivedProducerClosureExecution {
     violations: Vec<RecordBatch>,
     family_closure_fields: FamilyClosureFields,
     observation: ProducerClosureCompilationObservation,
+    release_evidence: ReleaseProducerClosureEvidence,
 }
 
 impl DerivedProducerClosureExecution {
@@ -652,9 +1430,15 @@ impl DerivedProducerClosureExecution {
         &self.observation
     }
 
+    /// Borrow the exact decoded rows and their release-owned conformance result.
+    #[must_use]
+    pub(crate) const fn release_evidence(&self) -> &ReleaseProducerClosureEvidence {
+        &self.release_evidence
+    }
+
     #[must_use]
     pub fn is_conformant(&self) -> bool {
-        self.violations.iter().all(|batch| batch.num_rows() == 0)
+        self.release_evidence.is_conformant()
     }
 }
 
@@ -1147,7 +1931,12 @@ pub(crate) fn compile_derived_producer_closure(
         family_closure_schema,
         query_requirement_closure_schema,
         violation_schema,
+        input_fields: release_input_field_ids(bindings).into(),
         family_closure_fields: bindings.family_closure.fields.clone(),
+        query_requirement_closure_fields: bindings.query_requirement_closure.fields.clone(),
+        violation_fields: bindings.violation.fields.clone(),
+        semantic_identities: bindings.semantic_identities.clone(),
+        implementation_release: Arc::clone(&bindings.implementation_release),
         observation: ProducerClosureCompilationObservation {
             operation_id: Arc::clone(&bindings.operation_id),
             rung: ProducerClosureExecutionRung::NativeLogicalPlans,
@@ -1436,6 +2225,7 @@ fn compile_family_closure_internal(
             col(COMPLETENESS_PROOF_PIN),
             col(PRODUCER_PROOF_PIN),
             col(REMAINDER),
+            col(REMAINDER_AUTHORITY),
             col(REMAINDER_REASON),
             col(REMAINDER_PROOF_PIN),
         ])?
@@ -1454,7 +2244,8 @@ fn compile_family_closure_output(
             col(SEMANTIC_CLASS).alias(fields.semantic_class_id.as_str()),
             col(CLOSURE_STATE).alias(fields.closure_state.as_str()),
             col(PRODUCER).alias(fields.producer_id.as_str()),
-            col(PRODUCER_AUTHORITY).alias(fields.authority_id.as_str()),
+            coalesce(vec![col(PRODUCER_AUTHORITY), col(REMAINDER_AUTHORITY)])
+                .alias(fields.authority_id.as_str()),
             col(ALGORITHM_RELEASE).alias(fields.algorithm_release.as_str()),
             col(PRECISION).alias(fields.precision_id.as_str()),
             col(INPUT_PIN).alias(fields.input_pin.as_str()),
@@ -2368,6 +3159,802 @@ fn observe_dependencies(
     dependencies
 }
 
+fn release_input_field_ids(bindings: &DerivedProducerClosureBindings) -> Vec<FieldId> {
+    vec![
+        bindings.accepted_fact_family.fields.family_id.clone(),
+        bindings
+            .accepted_fact_family
+            .fields
+            .semantic_class_id
+            .clone(),
+        bindings.runtime_producer.fields.family_id.clone(),
+        bindings.runtime_producer.fields.producer_id.clone(),
+        bindings.runtime_producer.fields.authority_id.clone(),
+        bindings.runtime_producer.fields.algorithm_release.clone(),
+        bindings.runtime_producer.fields.precision_id.clone(),
+        bindings.runtime_producer.fields.input_pin.clone(),
+        bindings.runtime_producer.fields.invalidation_pin.clone(),
+        bindings.runtime_producer.fields.materialization_pin.clone(),
+        bindings
+            .runtime_producer
+            .fields
+            .requested_unit_count
+            .clone(),
+        bindings
+            .runtime_producer
+            .fields
+            .completed_unit_count
+            .clone(),
+        bindings
+            .runtime_producer
+            .fields
+            .remainder_unit_count
+            .clone(),
+        bindings.runtime_producer.fields.unknown_unit_count.clone(),
+        bindings
+            .runtime_producer
+            .fields
+            .completeness_proof_pin
+            .clone(),
+        bindings.runtime_producer.fields.proof_pin.clone(),
+        bindings
+            .query_family_requirement
+            .fields
+            .query_family_id
+            .clone(),
+        bindings
+            .query_family_requirement
+            .fields
+            .required_family_id
+            .clone(),
+        bindings.unsupported_remainder.fields.family_id.clone(),
+        bindings.unsupported_remainder.fields.remainder_id.clone(),
+        bindings.unsupported_remainder.fields.authority_id.clone(),
+        bindings.unsupported_remainder.fields.reason_id.clone(),
+        bindings.unsupported_remainder.fields.proof_pin.clone(),
+    ]
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decode_release_producer_closure_evidence(
+    family_batches: &[RecordBatch],
+    family_fields: &FamilyClosureFields,
+    query_batches: &[RecordBatch],
+    query_fields: &QueryRequirementClosureFields,
+    violation_batches: &[RecordBatch],
+    violation_fields: &ProducerClosureViolationFields,
+    input_fields: &[FieldId],
+    semantic_identities: &ProducerClosureSemanticIdentities,
+    implementation_release: &Arc<str>,
+    observation: &ProducerClosureCompilationObservation,
+) -> Result<ReleaseProducerClosureEvidence, DerivedProducerClosureError> {
+    let mut families = decode_family_closure_rows(family_batches, family_fields)?;
+    let mut query_requirements = decode_query_requirement_rows(query_batches, query_fields)?;
+    let mut violations = decode_violation_rows(violation_batches, violation_fields)?;
+    families.sort_by(|left, right| left.family_id.cmp(&right.family_id));
+    query_requirements.sort_by(|left, right| {
+        (
+            &left.query_family_id,
+            left.minimum_depth,
+            &left.required_family_id,
+        )
+            .cmp(&(
+                &right.query_family_id,
+                right.minimum_depth,
+                &right.required_family_id,
+            ))
+    });
+    violations.sort_by(|left, right| {
+        (
+            &left.subject_kind,
+            &left.subject_id,
+            &left.violation_code,
+            &left.related_id,
+        )
+            .cmp(&(
+                &right.subject_kind,
+                &right.subject_id,
+                &right.violation_code,
+                &right.related_id,
+            ))
+    });
+
+    let mut issues = Vec::new();
+    validate_compilation_observation(
+        observation,
+        family_fields,
+        query_fields,
+        violation_fields,
+        input_fields,
+        semantic_identities,
+        implementation_release,
+        &mut issues,
+    )?;
+    validate_decoded_families(&families, semantic_identities, &mut issues);
+    validate_decoded_queries(&query_requirements, &families, &mut issues);
+    for violation in &violations {
+        issues.push(ReleaseProducerClosureIssue::new(
+            "reported_producer_closure_violation",
+            Some(Arc::clone(&violation.subject_id)),
+            Some(Arc::clone(&violation.violation_code)),
+        ));
+    }
+
+    Ok(ReleaseProducerClosureEvidence {
+        operation_id: Arc::clone(&observation.operation_id),
+        implementation_release: Arc::clone(implementation_release),
+        application_authority_id: Arc::clone(semantic_identities.application_owned_authority_id()),
+        factual_semantic_class_id: Arc::clone(semantic_identities.factual_semantic_class_id()),
+        families: families.into(),
+        query_requirements: query_requirements.into(),
+        violations: violations.into(),
+        issues: issues.into(),
+        dependencies: observation
+            .dependencies
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
+    })
+}
+
+fn decode_family_closure_rows(
+    batches: &[RecordBatch],
+    fields: &FamilyClosureFields,
+) -> Result<Vec<ReleaseProducerFamilyClosureRow>, DerivedProducerClosureError> {
+    let mut rows = Vec::new();
+    for batch in batches {
+        for row in 0..batch.num_rows() {
+            rows.push(ReleaseProducerFamilyClosureRow {
+                family_id: required_executed_text(batch, &fields.family_id, row, "family_closure")?,
+                semantic_class_id: required_executed_text(
+                    batch,
+                    &fields.semantic_class_id,
+                    row,
+                    "family_closure",
+                )?,
+                closure_state: required_executed_text(
+                    batch,
+                    &fields.closure_state,
+                    row,
+                    "family_closure",
+                )?,
+                producer_id: optional_executed_text(
+                    batch,
+                    &fields.producer_id,
+                    row,
+                    "family_closure",
+                )?,
+                authority_id: optional_executed_text(
+                    batch,
+                    &fields.authority_id,
+                    row,
+                    "family_closure",
+                )?,
+                algorithm_release: optional_executed_text(
+                    batch,
+                    &fields.algorithm_release,
+                    row,
+                    "family_closure",
+                )?,
+                precision_id: optional_executed_text(
+                    batch,
+                    &fields.precision_id,
+                    row,
+                    "family_closure",
+                )?,
+                input_pin: optional_executed_text(batch, &fields.input_pin, row, "family_closure")?,
+                invalidation_pin: optional_executed_text(
+                    batch,
+                    &fields.invalidation_pin,
+                    row,
+                    "family_closure",
+                )?,
+                materialization_pin: optional_executed_text(
+                    batch,
+                    &fields.materialization_pin,
+                    row,
+                    "family_closure",
+                )?,
+                requested_unit_count: optional_executed_u64(
+                    batch,
+                    &fields.requested_unit_count,
+                    row,
+                    "family_closure",
+                )?,
+                completed_unit_count: optional_executed_u64(
+                    batch,
+                    &fields.completed_unit_count,
+                    row,
+                    "family_closure",
+                )?,
+                remainder_unit_count: optional_executed_u64(
+                    batch,
+                    &fields.remainder_unit_count,
+                    row,
+                    "family_closure",
+                )?,
+                unknown_unit_count: optional_executed_u64(
+                    batch,
+                    &fields.unknown_unit_count,
+                    row,
+                    "family_closure",
+                )?,
+                completeness_proof_pin: optional_executed_text(
+                    batch,
+                    &fields.completeness_proof_pin,
+                    row,
+                    "family_closure",
+                )?,
+                producer_proof_pin: optional_executed_text(
+                    batch,
+                    &fields.producer_proof_pin,
+                    row,
+                    "family_closure",
+                )?,
+                unsupported_remainder_id: optional_executed_text(
+                    batch,
+                    &fields.unsupported_remainder_id,
+                    row,
+                    "family_closure",
+                )?,
+                unsupported_reason_id: optional_executed_text(
+                    batch,
+                    &fields.unsupported_reason_id,
+                    row,
+                    "family_closure",
+                )?,
+                unsupported_proof_pin: optional_executed_text(
+                    batch,
+                    &fields.unsupported_proof_pin,
+                    row,
+                    "family_closure",
+                )?,
+            });
+        }
+    }
+    Ok(rows)
+}
+
+fn decode_query_requirement_rows(
+    batches: &[RecordBatch],
+    fields: &QueryRequirementClosureFields,
+) -> Result<Vec<ReleaseQueryRequirementClosureRow>, DerivedProducerClosureError> {
+    let mut rows = Vec::new();
+    for batch in batches {
+        for row in 0..batch.num_rows() {
+            rows.push(ReleaseQueryRequirementClosureRow {
+                query_family_id: required_executed_text(
+                    batch,
+                    &fields.query_family_id,
+                    row,
+                    "query_requirement_closure",
+                )?,
+                required_family_id: required_executed_text(
+                    batch,
+                    &fields.required_family_id,
+                    row,
+                    "query_requirement_closure",
+                )?,
+                minimum_depth: required_executed_u32(
+                    batch,
+                    &fields.minimum_depth,
+                    row,
+                    "query_requirement_closure",
+                )?,
+                requirement_state: required_executed_text(
+                    batch,
+                    &fields.requirement_state,
+                    row,
+                    "query_requirement_closure",
+                )?,
+                unknown_cause: optional_executed_text(
+                    batch,
+                    &fields.unknown_cause,
+                    row,
+                    "query_requirement_closure",
+                )?,
+            });
+        }
+    }
+    Ok(rows)
+}
+
+fn decode_violation_rows(
+    batches: &[RecordBatch],
+    fields: &ProducerClosureViolationFields,
+) -> Result<Vec<ReleaseProducerClosureViolationRow>, DerivedProducerClosureError> {
+    let mut rows = Vec::new();
+    for batch in batches {
+        for row in 0..batch.num_rows() {
+            rows.push(ReleaseProducerClosureViolationRow {
+                subject_kind: required_executed_text(
+                    batch,
+                    &fields.subject_kind,
+                    row,
+                    "producer_closure_violation",
+                )?,
+                subject_id: required_executed_text(
+                    batch,
+                    &fields.subject_id,
+                    row,
+                    "producer_closure_violation",
+                )?,
+                violation_code: required_executed_text(
+                    batch,
+                    &fields.violation_code,
+                    row,
+                    "producer_closure_violation",
+                )?,
+                related_id: optional_executed_text(
+                    batch,
+                    &fields.related_id,
+                    row,
+                    "producer_closure_violation",
+                )?,
+            });
+        }
+    }
+    Ok(rows)
+}
+
+fn executed_string_column<'a>(
+    batch: &'a RecordBatch,
+    field: &FieldId,
+    relation: &'static str,
+) -> Result<&'a StringArray, DerivedProducerClosureError> {
+    let column = batch.column_by_name(field.as_str()).ok_or_else(|| {
+        DerivedProducerClosureError::ExecutedColumnMissing {
+            relation,
+            field: field.as_str().to_owned(),
+        }
+    })?;
+    column
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or_else(|| DerivedProducerClosureError::ExecutedColumnType {
+            relation,
+            field: field.as_str().to_owned(),
+            expected: DataType::Utf8,
+            actual: column.data_type().clone(),
+        })
+}
+
+fn required_executed_text(
+    batch: &RecordBatch,
+    field: &FieldId,
+    row: usize,
+    relation: &'static str,
+) -> Result<Arc<str>, DerivedProducerClosureError> {
+    optional_executed_text(batch, field, row, relation)?.ok_or_else(|| {
+        DerivedProducerClosureError::ExecutedRequiredValueNull {
+            relation,
+            field: field.as_str().to_owned(),
+            row,
+        }
+    })
+}
+
+fn optional_executed_text(
+    batch: &RecordBatch,
+    field: &FieldId,
+    row: usize,
+    relation: &'static str,
+) -> Result<Option<Arc<str>>, DerivedProducerClosureError> {
+    let values = executed_string_column(batch, field, relation)?;
+    if values.is_null(row) {
+        return Ok(None);
+    }
+    let value = values.value(row);
+    if value.is_empty()
+        || value.len() > 4_096
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+    {
+        return Err(DerivedProducerClosureError::ExecutedInvalidText {
+            relation,
+            field: field.as_str().to_owned(),
+            row,
+            value: value.to_owned(),
+        });
+    }
+    Ok(Some(Arc::from(value)))
+}
+
+fn optional_executed_u64(
+    batch: &RecordBatch,
+    field: &FieldId,
+    row: usize,
+    relation: &'static str,
+) -> Result<Option<u64>, DerivedProducerClosureError> {
+    let column = batch.column_by_name(field.as_str()).ok_or_else(|| {
+        DerivedProducerClosureError::ExecutedColumnMissing {
+            relation,
+            field: field.as_str().to_owned(),
+        }
+    })?;
+    let values = column
+        .as_any()
+        .downcast_ref::<UInt64Array>()
+        .ok_or_else(|| DerivedProducerClosureError::ExecutedColumnType {
+            relation,
+            field: field.as_str().to_owned(),
+            expected: DataType::UInt64,
+            actual: column.data_type().clone(),
+        })?;
+    Ok((!values.is_null(row)).then(|| values.value(row)))
+}
+
+fn required_executed_u32(
+    batch: &RecordBatch,
+    field: &FieldId,
+    row: usize,
+    relation: &'static str,
+) -> Result<u32, DerivedProducerClosureError> {
+    let column = batch.column_by_name(field.as_str()).ok_or_else(|| {
+        DerivedProducerClosureError::ExecutedColumnMissing {
+            relation,
+            field: field.as_str().to_owned(),
+        }
+    })?;
+    let values = column
+        .as_any()
+        .downcast_ref::<UInt32Array>()
+        .ok_or_else(|| DerivedProducerClosureError::ExecutedColumnType {
+            relation,
+            field: field.as_str().to_owned(),
+            expected: DataType::UInt32,
+            actual: column.data_type().clone(),
+        })?;
+    if values.is_null(row) {
+        return Err(DerivedProducerClosureError::ExecutedRequiredValueNull {
+            relation,
+            field: field.as_str().to_owned(),
+            row,
+        });
+    }
+    Ok(values.value(row))
+}
+
+fn validate_decoded_families(
+    families: &[ReleaseProducerFamilyClosureRow],
+    identities: &ProducerClosureSemanticIdentities,
+    issues: &mut Vec<ReleaseProducerClosureIssue>,
+) {
+    if families.is_empty() {
+        issues.push(ReleaseProducerClosureIssue::new(
+            "empty_accepted_family_closure",
+            None,
+            None,
+        ));
+        return;
+    }
+    for pair in families.windows(2) {
+        if pair[0].family_id == pair[1].family_id {
+            issues.push(ReleaseProducerClosureIssue::new(
+                "duplicate_decoded_family_closure",
+                Some(Arc::clone(&pair[0].family_id)),
+                None,
+            ));
+        }
+    }
+    for family in families {
+        if family.semantic_class_id != *identities.factual_semantic_class_id() {
+            issues.push(ReleaseProducerClosureIssue::new(
+                "decoded_family_semantic_class_mismatch",
+                Some(Arc::clone(&family.family_id)),
+                Some(Arc::clone(&family.semantic_class_id)),
+            ));
+        }
+        if family.authority_id.as_ref() != Some(identities.application_owned_authority_id()) {
+            issues.push(ReleaseProducerClosureIssue::new(
+                "decoded_family_authority_mismatch",
+                Some(Arc::clone(&family.family_id)),
+                family.authority_id.clone(),
+            ));
+        }
+
+        let producer_binding_complete = family.producer_id.is_some()
+            && family.algorithm_release.is_some()
+            && family.precision_id.is_some()
+            && family.input_pin.is_some()
+            && family.invalidation_pin.is_some()
+            && family.materialization_pin.is_some()
+            && family.requested_unit_count.is_some()
+            && family.completed_unit_count.is_some()
+            && family.remainder_unit_count.is_some()
+            && family.unknown_unit_count.is_some()
+            && family.completeness_proof_pin.is_some()
+            && family.producer_proof_pin.is_some();
+        let producer_binding_present = family.producer_id.is_some()
+            || family.algorithm_release.is_some()
+            || family.precision_id.is_some()
+            || family.input_pin.is_some()
+            || family.invalidation_pin.is_some()
+            || family.materialization_pin.is_some()
+            || family.requested_unit_count.is_some()
+            || family.completed_unit_count.is_some()
+            || family.remainder_unit_count.is_some()
+            || family.unknown_unit_count.is_some()
+            || family.completeness_proof_pin.is_some()
+            || family.producer_proof_pin.is_some();
+        let remainder_binding_complete = family.unsupported_remainder_id.is_some()
+            && family.unsupported_reason_id.is_some()
+            && family.unsupported_proof_pin.is_some();
+        let remainder_binding_present = family.unsupported_remainder_id.is_some()
+            || family.unsupported_reason_id.is_some()
+            || family.unsupported_proof_pin.is_some();
+
+        match family.closure_state.as_ref() {
+            STATE_SUPPORTED => {
+                if !producer_binding_complete || remainder_binding_present {
+                    issues.push(ReleaseProducerClosureIssue::new(
+                        "decoded_supported_family_binding_mismatch",
+                        Some(Arc::clone(&family.family_id)),
+                        None,
+                    ));
+                }
+                if family.requested_unit_count == Some(0) {
+                    issues.push(ReleaseProducerClosureIssue::new(
+                        "empty_runtime_producer_scope",
+                        Some(Arc::clone(&family.family_id)),
+                        family.producer_id.clone(),
+                    ));
+                }
+                if family.requested_unit_count != family.completed_unit_count
+                    || family.remainder_unit_count != Some(0)
+                    || family.unknown_unit_count != Some(0)
+                {
+                    issues.push(ReleaseProducerClosureIssue::new(
+                        "decoded_runtime_producer_incomplete",
+                        Some(Arc::clone(&family.family_id)),
+                        family.producer_id.clone(),
+                    ));
+                }
+            }
+            STATE_UNSUPPORTED => {
+                if producer_binding_present || !remainder_binding_complete {
+                    issues.push(ReleaseProducerClosureIssue::new(
+                        "decoded_unsupported_family_binding_mismatch",
+                        Some(Arc::clone(&family.family_id)),
+                        family.unsupported_remainder_id.clone(),
+                    ));
+                }
+            }
+            STATE_UNKNOWN | STATE_INVALID => {
+                issues.push(ReleaseProducerClosureIssue::new(
+                    "decoded_family_not_closed",
+                    Some(Arc::clone(&family.family_id)),
+                    Some(Arc::clone(&family.closure_state)),
+                ));
+            }
+            _ => {
+                issues.push(ReleaseProducerClosureIssue::new(
+                    "decoded_family_state_unknown",
+                    Some(Arc::clone(&family.family_id)),
+                    Some(Arc::clone(&family.closure_state)),
+                ));
+            }
+        }
+    }
+}
+
+fn validate_decoded_queries(
+    queries: &[ReleaseQueryRequirementClosureRow],
+    families: &[ReleaseProducerFamilyClosureRow],
+    issues: &mut Vec<ReleaseProducerClosureIssue>,
+) {
+    if queries.is_empty() {
+        issues.push(ReleaseProducerClosureIssue::new(
+            "empty_query_requirement_closure",
+            None,
+            None,
+        ));
+        return;
+    }
+    for pair in queries.windows(2) {
+        if pair[0].query_family_id == pair[1].query_family_id
+            && pair[0].required_family_id == pair[1].required_family_id
+        {
+            issues.push(ReleaseProducerClosureIssue::new(
+                "duplicate_decoded_query_requirement",
+                Some(Arc::clone(&pair[0].query_family_id)),
+                Some(Arc::clone(&pair[0].required_family_id)),
+            ));
+        }
+    }
+    let family_by_id = families
+        .iter()
+        .map(|family| (family.family_id.as_ref(), family))
+        .collect::<BTreeMap<_, _>>();
+    for query in queries {
+        if query.minimum_depth == 0 {
+            issues.push(ReleaseProducerClosureIssue::new(
+                "zero_query_requirement_depth",
+                Some(Arc::clone(&query.query_family_id)),
+                Some(Arc::clone(&query.required_family_id)),
+            ));
+        }
+        let family = family_by_id.get(query.required_family_id.as_ref()).copied();
+        let state_matches = match (query.requirement_state.as_ref(), family) {
+            (STATE_SATISFIED, Some(family)) => {
+                family.closure_state.as_ref() == STATE_SUPPORTED && query.unknown_cause.is_none()
+            }
+            (STATE_UNSUPPORTED, Some(family)) => {
+                family.closure_state.as_ref() == STATE_UNSUPPORTED
+                    && query.unknown_cause.as_ref() == family.unsupported_reason_id.as_ref()
+            }
+            _ => false,
+        };
+        if !state_matches {
+            issues.push(ReleaseProducerClosureIssue::new(
+                "decoded_query_requirement_binding_mismatch",
+                Some(Arc::clone(&query.query_family_id)),
+                Some(Arc::clone(&query.required_family_id)),
+            ));
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_compilation_observation(
+    observation: &ProducerClosureCompilationObservation,
+    family_fields: &FamilyClosureFields,
+    query_fields: &QueryRequirementClosureFields,
+    violation_fields: &ProducerClosureViolationFields,
+    input_fields: &[FieldId],
+    identities: &ProducerClosureSemanticIdentities,
+    implementation_release: &Arc<str>,
+    issues: &mut Vec<ReleaseProducerClosureIssue>,
+) -> Result<(), DerivedProducerClosureError> {
+    let dependencies = observation.dependencies();
+    let mut required = vec![
+        ProducerClosureCompilationDependency::ApplicationOwnedAuthority(Arc::clone(
+            identities.application_owned_authority_id(),
+        )),
+        ProducerClosureCompilationDependency::FactualSemanticClass(Arc::clone(
+            identities.factual_semantic_class_id(),
+        )),
+        ProducerClosureCompilationDependency::ImplementationRelease(Arc::clone(
+            implementation_release,
+        )),
+    ];
+    for relation in [
+        ACCEPTED_FACT_FAMILY_RELATION_ID,
+        RUNTIME_PRODUCER_RELATION_ID,
+        QUERY_FAMILY_REQUIREMENT_RELATION_ID,
+        UNSUPPORTED_REMAINDER_RELATION_ID,
+    ] {
+        required.push(ProducerClosureCompilationDependency::InputRelation(
+            compiled_relation_id(relation)?,
+        ));
+    }
+    required.extend(
+        input_fields
+            .iter()
+            .cloned()
+            .map(ProducerClosureCompilationDependency::InputField),
+    );
+    for relation in [
+        FAMILY_CLOSURE_RELATION_ID,
+        QUERY_REQUIREMENT_CLOSURE_RELATION_ID,
+        PRODUCER_CLOSURE_VIOLATION_RELATION_ID,
+    ] {
+        required.push(ProducerClosureCompilationDependency::OutputRelation(
+            compiled_relation_id(relation)?,
+        ));
+    }
+    let output_fields = [
+        &family_fields.family_id,
+        &family_fields.semantic_class_id,
+        &family_fields.closure_state,
+        &family_fields.producer_id,
+        &family_fields.authority_id,
+        &family_fields.algorithm_release,
+        &family_fields.precision_id,
+        &family_fields.input_pin,
+        &family_fields.invalidation_pin,
+        &family_fields.materialization_pin,
+        &family_fields.requested_unit_count,
+        &family_fields.completed_unit_count,
+        &family_fields.remainder_unit_count,
+        &family_fields.unknown_unit_count,
+        &family_fields.completeness_proof_pin,
+        &family_fields.producer_proof_pin,
+        &family_fields.unsupported_remainder_id,
+        &family_fields.unsupported_reason_id,
+        &family_fields.unsupported_proof_pin,
+        &query_fields.query_family_id,
+        &query_fields.required_family_id,
+        &query_fields.minimum_depth,
+        &query_fields.requirement_state,
+        &query_fields.unknown_cause,
+        &violation_fields.subject_kind,
+        &violation_fields.subject_id,
+        &violation_fields.violation_code,
+        &violation_fields.related_id,
+    ];
+    required.extend(
+        output_fields
+            .into_iter()
+            .cloned()
+            .map(ProducerClosureCompilationDependency::OutputField),
+    );
+    for dependency in required {
+        if !dependencies.contains(&dependency) {
+            issues.push(ReleaseProducerClosureIssue::new(
+                "missing_compiled_release_dependency",
+                None,
+                Some(compilation_dependency_identity(&dependency)),
+            ));
+        }
+    }
+    for operator in [
+        ProducerClosureNativeOperator::Projection,
+        ProducerClosureNativeOperator::Aggregate,
+        ProducerClosureNativeOperator::LeftJoin,
+        ProducerClosureNativeOperator::LeftAntiJoin,
+        ProducerClosureNativeOperator::Filter,
+        ProducerClosureNativeOperator::RecursiveQueryDistinct,
+        ProducerClosureNativeOperator::UnionAll,
+        ProducerClosureNativeOperator::DeterministicSort,
+        ProducerClosureNativeOperator::OutputOverflowProbeLimit,
+    ] {
+        if !observation.operators().contains(&operator) {
+            issues.push(ReleaseProducerClosureIssue::new(
+                "missing_typed_native_operator_observation",
+                None,
+                Some(Arc::from(native_operator_identity(operator))),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn compilation_dependency_identity(dependency: &ProducerClosureCompilationDependency) -> Arc<str> {
+    match dependency {
+        ProducerClosureCompilationDependency::InputRelation(value) => {
+            Arc::from(format!("input-relation:{}", value.as_str()))
+        }
+        ProducerClosureCompilationDependency::InputField(value) => {
+            Arc::from(format!("input-field:{}", value.as_str()))
+        }
+        ProducerClosureCompilationDependency::OutputRelation(value) => {
+            Arc::from(format!("output-relation:{}", value.as_str()))
+        }
+        ProducerClosureCompilationDependency::OutputField(value) => {
+            Arc::from(format!("output-field:{}", value.as_str()))
+        }
+        ProducerClosureCompilationDependency::ApplicationOwnedAuthority(value) => {
+            Arc::from(format!("application-authority:{value}"))
+        }
+        ProducerClosureCompilationDependency::FactualSemanticClass(value) => {
+            Arc::from(format!("factual-semantic-class:{value}"))
+        }
+        ProducerClosureCompilationDependency::ImplementationRelease(value) => {
+            Arc::from(format!("implementation-release:{value}"))
+        }
+        ProducerClosureCompilationDependency::SessionMemoryPool => Arc::from("session-memory-pool"),
+        ProducerClosureCompilationDependency::DataFusionExecuteStreamDropAbort => {
+            Arc::from("datafusion-execute-stream-drop-abort")
+        }
+    }
+}
+
+const fn native_operator_identity(operator: ProducerClosureNativeOperator) -> &'static str {
+    match operator {
+        ProducerClosureNativeOperator::Projection => "projection",
+        ProducerClosureNativeOperator::Aggregate => "aggregate",
+        ProducerClosureNativeOperator::LeftJoin => "left-join",
+        ProducerClosureNativeOperator::LeftAntiJoin => "left-anti-join",
+        ProducerClosureNativeOperator::Filter => "filter",
+        ProducerClosureNativeOperator::RecursiveQueryDistinct => "recursive-query-distinct",
+        ProducerClosureNativeOperator::UnionAll => "union-all",
+        ProducerClosureNativeOperator::DeterministicSort => "deterministic-sort",
+        ProducerClosureNativeOperator::OutputOverflowProbeLimit => "output-overflow-probe-limit",
+    }
+}
+
 #[derive(Default)]
 struct ExecutionBudget {
     batches: usize,
@@ -2381,13 +3968,27 @@ async fn execute_bounded(
     bounds: ProducerClosureResourceBounds,
     relation: &'static str,
     budget: &mut ExecutionBudget,
+    cancellation: &ProducerClosureCancellation,
 ) -> Result<Vec<RecordBatch>, DerivedProducerClosureError> {
+    if cancellation.is_cancelled() {
+        return Err(DerivedProducerClosureError::Cancelled { relation });
+    }
     let optimized = context.state().optimize(plan)?;
     let physical = context.state().create_physical_plan(&optimized).await?;
     let mut stream = execute_stream(physical, context.task_ctx())?;
     let mut batches = Vec::new();
     let mut relation_rows = 0_usize;
-    while let Some(batch) = stream.next().await {
+    loop {
+        let next = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => {
+                return Err(DerivedProducerClosureError::Cancelled { relation });
+            }
+            batch = stream.next() => batch,
+        };
+        let Some(batch) = next else {
+            break;
+        };
         let batch = batch?;
         if batch.schema_ref().as_ref() != expected_schema.as_ref() {
             return Err(DerivedProducerClosureError::ExecutedSchemaMismatch {
@@ -2434,6 +4035,33 @@ async fn execute_bounded(
         batches.push(RecordBatch::new_empty(Arc::clone(expected_schema)));
     }
     Ok(batches)
+}
+
+/// Fail-closed release-catalog construction and registration errors.
+#[derive(Debug, Error)]
+pub(crate) enum ReleaseProducerClosureCatalogError {
+    #[error("release producer closure has no accepted families")]
+    EmptyAcceptedFamilies,
+    #[error("release producer closure has no query-family requirements")]
+    EmptyQueryRequirements,
+    #[error("release producer closure repeats {kind} {value:?}")]
+    DuplicateFamily { kind: &'static str, value: String },
+    #[error(
+        "release producer closure producer/remainder dispositions are not exact and exhaustive"
+    )]
+    DispositionClosure,
+    #[error("release runtime producer for {0:?} is incomplete")]
+    IncompleteRuntimeProducer(Arc<str>),
+    #[error("release query requirement references unknown family {0:?}")]
+    UnknownQueryFamily(Arc<str>),
+    #[error("release query requirement repeats an exact edge")]
+    DuplicateQueryEdge,
+    #[error("release producer-closure {kind} has invalid text {value:?}")]
+    InvalidText { kind: &'static str, value: String },
+    #[error(transparent)]
+    Epoch(#[from] ProgrammaticFabricEpochError),
+    #[error(transparent)]
+    DataFusion(#[from] datafusion::error::DataFusionError),
 }
 
 /// Fail-closed binding, planning, execution, and resource errors.
@@ -2520,6 +4148,31 @@ pub enum DerivedProducerClosureError {
         expected: SchemaRef,
         actual: SchemaRef,
     },
+    #[error("executed {relation} relation is missing compiled field {field:?}")]
+    ExecutedColumnMissing {
+        relation: &'static str,
+        field: String,
+    },
+    #[error("executed {relation} field {field:?} has type {actual:?}; expected {expected:?}")]
+    ExecutedColumnType {
+        relation: &'static str,
+        field: String,
+        expected: DataType,
+        actual: DataType,
+    },
+    #[error("executed {relation} field {field:?} is null at row {row}")]
+    ExecutedRequiredValueNull {
+        relation: &'static str,
+        field: String,
+        row: usize,
+    },
+    #[error("executed {relation} field {field:?} has invalid text {value:?} at row {row}")]
+    ExecutedInvalidText {
+        relation: &'static str,
+        field: String,
+        row: usize,
+        value: String,
+    },
     #[error("resource bound {0} must be non-zero")]
     ZeroResourceBound(&'static str),
     #[error("output-row bound cannot reserve an overflow-probe row")]
@@ -2536,6 +4189,8 @@ pub enum DerivedProducerClosureError {
     OutputBytesExceeded { limit: usize, observed: usize },
     #[error("resource counter overflowed for {0}")]
     ResourceCounterOverflow(&'static str),
+    #[error("release producer-closure execution was cancelled while reading {relation}")]
+    Cancelled { relation: &'static str },
     #[error("internal producer-closure compiler constructed no violation branches")]
     InternalNoViolationBranches,
     #[error(transparent)]
@@ -2559,6 +4214,9 @@ mod tests {
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
     use crate::fabric::programmatic_schema::ProviderInput;
+    use crate::fabric::proof::{
+        ProofTerminalStatus, ReleaseProducerClosureProofInput, evaluate_release_producer_closure,
+    };
     use crate::schema_contract::{
         FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY, SchemaContract,
     };
@@ -3173,7 +4831,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exact_application_producer_closes_one_family() {
+    async fn wp35_int_decoded_release_rows_bind_compiled_dependencies_and_provenance() {
         let bindings = bindings();
         let producer = producer("family.control-dependence", "producer.common-cdg@1");
         let execution = execute(
@@ -3182,7 +4840,7 @@ mod tests {
                 &bindings,
                 &[("family.control-dependence", FACT_CLASS)],
                 &[producer],
-                &[],
+                &[("query.graph", "family.control-dependence")],
                 &[],
             ),
         )
@@ -3207,10 +4865,98 @@ mod tests {
                 APP_AUTHORITY,
             ))
         ));
+        for field in release_input_field_ids(&bindings) {
+            assert!(
+                execution
+                    .observation()
+                    .dependencies()
+                    .contains(&ProducerClosureCompilationDependency::InputField(field),)
+            );
+        }
+
+        let evidence = execution.release_evidence();
+        assert_eq!(evidence.families().len(), 1);
+        assert_eq!(
+            evidence.families()[0].family_id().as_ref(),
+            "family.control-dependence",
+        );
+        assert_eq!(
+            evidence.families()[0].semantic_class_id().as_ref(),
+            FACT_CLASS
+        );
+        assert_eq!(
+            evidence.families()[0].closure_state().as_ref(),
+            STATE_SUPPORTED
+        );
+        assert_eq!(
+            evidence.families()[0]
+                .authority_id()
+                .map(|value| value.as_ref()),
+            Some(APP_AUTHORITY),
+        );
+        assert_eq!(
+            evidence.families()[0]
+                .producer_proof_pin()
+                .map(|value| value.as_ref()),
+            Some("proof:b3:44"),
+        );
+        assert_eq!(
+            evidence.families()[0]
+                .completeness_proof_pin()
+                .map(|value| value.as_ref()),
+            Some("completeness-proof:b3:40"),
+        );
+        assert_eq!(evidence.query_requirements().len(), 1);
+        assert_eq!(
+            evidence.query_requirements()[0].query_family_id().as_ref(),
+            "query.graph",
+        );
+        assert_eq!(
+            evidence.query_requirements()[0]
+                .required_family_id()
+                .as_ref(),
+            "family.control-dependence",
+        );
+        assert_eq!(
+            evidence.query_requirements()[0]
+                .requirement_state()
+                .as_ref(),
+            STATE_SATISFIED,
+        );
+        assert!(evidence.violations().is_empty());
+        assert!(evidence.issues().is_empty());
+
+        let release = CompiledSemanticRelease::current();
+        let proof = evaluate_release_producer_closure(
+            ReleaseProducerClosureProofInput::try_from_execution(
+                release.proof_authority(),
+                &execution,
+            )
+            .expect("bind exact executed closure"),
+        );
+        assert_eq!(proof.terminal(), ProofTerminalStatus::Pass);
+        assert_eq!(proof.operation_id(), evidence.operation_id());
+        assert_eq!(
+            proof.implementation_release(),
+            evidence.implementation_release()
+        );
+        assert_eq!(
+            proof.application_authority_id(),
+            evidence.application_authority_id()
+        );
+        assert_eq!(
+            proof.factual_semantic_class_id(),
+            evidence.factual_semantic_class_id(),
+        );
+        assert_eq!(proof.families(), evidence.families());
+        assert_eq!(proof.query_requirements(), evidence.query_requirements());
+        assert_eq!(proof.violations(), evidence.violations());
+        assert_eq!(proof.issues(), evidence.issues());
+        assert_eq!(proof.dependencies(), evidence.dependencies());
     }
 
     #[tokio::test]
-    async fn explicit_remainder_closes_family_and_downgrades_query() {
+    async fn wp35_int_explicit_remainder_closes_family_and_downgrades_query() {
         let bindings = bindings();
         let remainder = remainder("family.dynamic-call-target");
         let execution = execute(
@@ -3255,10 +5001,16 @@ mod tests {
             ),
             vec![Some("unknown.dynamic-dispatch".to_owned())]
         );
+        assert_eq!(
+            execution.release_evidence().families()[0]
+                .authority_id()
+                .map(|value| value.as_ref()),
+            Some(APP_AUTHORITY),
+        );
     }
 
     #[tokio::test]
-    async fn zero_multiple_and_both_are_independent_violations() {
+    async fn wp35_neg_zero_multiple_and_both_are_independent_decoded_violations() {
         let bindings = bindings();
         let producer_a = producer("family.multiple", "producer.a@1");
         let producer_b = producer("family.multiple", "producer.b@1");
@@ -3274,7 +5026,7 @@ mod tests {
                     ("family.both", FACT_CLASS),
                 ],
                 &[producer_a, producer_b, producer_both],
-                &[],
+                &[("query.zero", "family.zero")],
                 &[remainder_both],
             ),
         )
@@ -3296,6 +5048,10 @@ mod tests {
                 Some(STATE_INVALID.to_owned()),
             ]
         );
+        assert!(execution.release_evidence().violations().iter().any(|row| {
+            row.violation_code().as_ref() == "missing_producer_or_remainder"
+                && row.subject_id().as_ref() == "family.zero"
+        }));
     }
 
     #[tokio::test]
@@ -3449,11 +5205,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_relations_preserve_all_declared_output_schemas() {
+    async fn wp35_neg_empty_release_closure_preserves_schema_but_never_conforms() {
         let bindings = bindings();
         let execution = execute(&bindings, inputs(&bindings, &[], &[], &[], &[])).await;
 
-        assert!(execution.is_conformant());
+        assert!(!execution.is_conformant());
+        let issue_codes = execution
+            .release_evidence()
+            .issues()
+            .iter()
+            .map(ReleaseProducerClosureIssue::code)
+            .collect::<BTreeSet<_>>();
+        assert!(issue_codes.contains("empty_accepted_family_closure"));
+        assert!(issue_codes.contains("empty_query_requirement_closure"));
         assert_eq!(execution.family_closure().len(), 1);
         assert_eq!(execution.family_closure()[0].num_rows(), 0);
         assert_eq!(
@@ -3471,6 +5235,158 @@ mod tests {
         assert_eq!(
             execution.violations()[0].schema_ref(),
             execution.violation_schema()
+        );
+
+        let release = CompiledSemanticRelease::current();
+        let proof = evaluate_release_producer_closure(
+            ReleaseProducerClosureProofInput::try_from_execution(
+                release.proof_authority(),
+                &execution,
+            )
+            .expect("bind empty executed closure as negative evidence"),
+        );
+        assert_eq!(proof.terminal(), ProofTerminalStatus::Fail);
+    }
+
+    #[tokio::test]
+    async fn wp35_neg_zero_requested_producer_scope_cannot_be_false_success() {
+        let bindings = bindings();
+        let mut zero_scope = producer("family.empty-scope", "producer.empty-scope@1");
+        zero_scope[8] = "0";
+        zero_scope[9] = "0";
+        let execution = execute(
+            &bindings,
+            inputs(
+                &bindings,
+                &[("family.empty-scope", FACT_CLASS)],
+                &[zero_scope],
+                &[("query.empty-scope", "family.empty-scope")],
+                &[],
+            ),
+        )
+        .await;
+
+        assert!(
+            execution
+                .violations()
+                .iter()
+                .all(|batch| batch.num_rows() == 0)
+        );
+        assert!(!execution.is_conformant());
+        assert!(execution.release_evidence().issues().iter().any(|issue| {
+            issue.code() == "empty_runtime_producer_scope"
+                && issue.subject_id().map(|value| value.as_ref()) == Some("family.empty-scope")
+        }));
+
+        let release = CompiledSemanticRelease::current();
+        let proof = evaluate_release_producer_closure(
+            ReleaseProducerClosureProofInput::try_from_execution(
+                release.proof_authority(),
+                &execution,
+            )
+            .expect("bind zero-scope execution"),
+        );
+        assert_eq!(proof.terminal(), ProofTerminalStatus::Fail);
+        assert!(proof.violations().is_empty());
+    }
+
+    #[tokio::test]
+    async fn wp35_neg_missing_compiled_input_field_dependency_fails_row_proof() {
+        let bindings = bindings();
+        let producer = producer("family.dependency", "producer.dependency@1");
+        let release = CompiledSemanticRelease::current();
+        let mut compiled = compile_derived_producer_closure(
+            release.proof_authority(),
+            inputs(
+                &bindings,
+                &[("family.dependency", FACT_CLASS)],
+                &[producer],
+                &[("query.dependency", "family.dependency")],
+                &[],
+            ),
+            &bindings,
+            bounds(),
+        )
+        .expect("compile closure");
+        let missing = ProducerClosureCompilationDependency::InputField(
+            bindings
+                .accepted_fact_family
+                .fields
+                .semantic_class_id
+                .clone(),
+        );
+        assert!(compiled.observation.dependencies.remove(&missing));
+        let execution = compiled
+            .execute(&SessionContext::new())
+            .await
+            .expect("execute closure with incomplete observation");
+
+        assert!(!execution.is_conformant());
+        assert!(execution.release_evidence().issues().iter().any(|issue| {
+            issue.code() == "missing_compiled_release_dependency" && issue.subject_id().is_none()
+        }));
+        let proof = evaluate_release_producer_closure(
+            ReleaseProducerClosureProofInput::try_from_execution(
+                release.proof_authority(),
+                &execution,
+            )
+            .expect("bind incomplete-dependency execution"),
+        );
+        assert_eq!(proof.terminal(), ProofTerminalStatus::Fail);
+        assert!(!proof.dependencies().contains(&missing));
+    }
+
+    #[tokio::test]
+    async fn wp35_beh_authority_mutation_changes_decoded_proof_result() {
+        let bindings = bindings();
+        let valid = execute(
+            &bindings,
+            inputs(
+                &bindings,
+                &[("family.authority", FACT_CLASS)],
+                &[producer("family.authority", "producer.authority@1")],
+                &[("query.authority", "family.authority")],
+                &[],
+            ),
+        )
+        .await;
+        let mut mutated_producer = producer("family.authority", "producer.authority@1");
+        mutated_producer[2] = PROVIDER_AUTHORITY;
+        let mutated = execute(
+            &bindings,
+            inputs(
+                &bindings,
+                &[("family.authority", FACT_CLASS)],
+                &[mutated_producer],
+                &[("query.authority", "family.authority")],
+                &[],
+            ),
+        )
+        .await;
+        let release = CompiledSemanticRelease::current();
+        let valid_proof = evaluate_release_producer_closure(
+            ReleaseProducerClosureProofInput::try_from_execution(release.proof_authority(), &valid)
+                .expect("bind valid execution"),
+        );
+        let mutated_proof = evaluate_release_producer_closure(
+            ReleaseProducerClosureProofInput::try_from_execution(
+                release.proof_authority(),
+                &mutated,
+            )
+            .expect("bind mutated execution"),
+        );
+
+        assert_eq!(valid_proof.terminal(), ProofTerminalStatus::Pass);
+        assert_eq!(mutated_proof.terminal(), ProofTerminalStatus::Fail);
+        assert!(mutated_proof.violations().iter().any(|row| {
+            row.violation_code().as_ref() == "wrong_runtime_producer_authority"
+                && row.subject_id().as_ref() == "family.authority"
+        }));
+        assert_eq!(
+            mutated_proof.families()[0]
+                .authority_id()
+                .map(|value| value.as_ref()),
+            Some(PROVIDER_AUTHORITY),
         );
     }
 }

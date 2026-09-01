@@ -684,12 +684,17 @@ provider-trust-coverage-remainder-check:
 [doc("Validate closed producer identities, dependencies, algorithms, inputs, and remainders")]
 [group('test')]
 analysis-producer-contract-integrity-check:
-    cargo nextest run --locked --lib -E 'test(/(existing_family_dependency_contracts_are_closed_and_non_placeholder|existing_family_census_rejects_dependency_contract_drift)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/wp35_int_/)' --no-tests=fail
 
 [doc("Execute every currently realized typed producer against live catalog relations")]
 [group('test')]
 analysis-producer-semantic-check:
-    cargo nextest run --locked --lib -E 'test(/existing_family_census_executes_fifteen_real_catalog_input_producers/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/wp35_beh_/)' --no-tests=fail
+
+[doc("Reject zero or ambiguous producers, missing provider facts, and empty semantic success")]
+[group('test')]
+ambiguous-producer-empty-success-rejection-check:
+    cargo nextest run --locked --lib -E 'test(/wp35_neg_/)' --no-tests=fail
 
 [doc("Prove changed catalog inputs causally change typed producer outputs")]
 [group('test')]
@@ -699,7 +704,7 @@ analysis-causal-fault-check:
 [doc("Enforce aggregate producer/fixed-point resource bounds without partial epochs")]
 [group('test')]
 analysis-fixed-point-resource-check:
-    cargo nextest run --locked --lib -E 'test(/(aggregate_resource_envelope_rejects_zero_and_overcommit_before_registration|resource_contract_is_causal_in_composition_closure_observation|execution_bound_aborts_seal_without_returning_partial_epoch)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/wp35_ops_/)' --no-tests=fail
 
 [doc("Reject unknown-as-empty results, unauthorized child capabilities, predecessor selectors, SQL escapes, and parent authority leaks")]
 [group('test')]

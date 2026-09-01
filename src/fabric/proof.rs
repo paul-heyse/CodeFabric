@@ -19,6 +19,13 @@ use super::command::{
     ApplicationReleaseRef, EpochId, InputReleaseRef, ProgramReleaseRef, ProviderReleaseRef,
     ProviderSetRef, ResourceEnvelopeRef, SourceAuthorityRef, SourceGeneration, SourceImageSetRef,
 };
+use super::derived_producer_closure::{
+    DerivedProducerClosureExecution, ProducerClosureCompilationDependency,
+    ReleaseProducerClosureEvidence, ReleaseProducerClosureIssue,
+    ReleaseProducerClosureViolationRow, ReleaseProducerFamilyClosureRow,
+    ReleaseQueryRequirementClosureRow,
+};
+use super::production_kernel::CompiledProofAuthority;
 
 mod delta_history;
 
@@ -432,6 +439,177 @@ pub struct IndependentProofInput<'a> {
     pub required_faults: &'a [RequiredCausalFault],
 }
 
+/// Non-forgeable bridge from one executed release closure into proof evaluation.
+///
+/// Callers cannot supply family declarations, semantic identities, dependency rows, or proof
+/// dispositions. The sole constructor consumes the compiled proof authority and the exact typed
+/// evidence decoded by [`DerivedProducerClosureExecution`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ReleaseProducerClosureProofInput<'a> {
+    _release_authority: &'a CompiledProofAuthority,
+    evidence: &'a ReleaseProducerClosureEvidence,
+}
+
+impl<'a> ReleaseProducerClosureProofInput<'a> {
+    /// Bind the actual executed closure to its compiled authority/dependency provenance.
+    pub(crate) fn try_from_execution(
+        release_authority: &'a CompiledProofAuthority,
+        execution: &'a DerivedProducerClosureExecution,
+    ) -> Result<Self, ProofError> {
+        let evidence = execution.release_evidence();
+        validate_release_producer_closure_binding(evidence)?;
+        Ok(Self {
+            _release_authority: release_authority,
+            evidence,
+        })
+    }
+}
+
+/// Row-preserving proof observation for the release-owned producer closure.
+///
+/// Terminal status is derived from decoded semantic rows and typed compilation dependencies. The
+/// result retains those rows directly; no count, digest, or rendered plan can substitute for them.
+#[derive(Clone, Debug)]
+pub(crate) struct ReleaseProducerClosureProofResult {
+    terminal: ProofTerminalStatus,
+    operation_id: Arc<str>,
+    implementation_release: Arc<str>,
+    application_authority_id: Arc<str>,
+    factual_semantic_class_id: Arc<str>,
+    families: Arc<[ReleaseProducerFamilyClosureRow]>,
+    query_requirements: Arc<[ReleaseQueryRequirementClosureRow]>,
+    violations: Arc<[ReleaseProducerClosureViolationRow]>,
+    issues: Arc<[ReleaseProducerClosureIssue]>,
+    dependencies: Arc<[ProducerClosureCompilationDependency]>,
+}
+
+impl ReleaseProducerClosureProofResult {
+    #[must_use]
+    pub(crate) const fn terminal(&self) -> ProofTerminalStatus {
+        self.terminal
+    }
+
+    #[must_use]
+    pub(crate) const fn operation_id(&self) -> &Arc<str> {
+        &self.operation_id
+    }
+
+    #[must_use]
+    pub(crate) const fn implementation_release(&self) -> &Arc<str> {
+        &self.implementation_release
+    }
+
+    #[must_use]
+    pub(crate) const fn application_authority_id(&self) -> &Arc<str> {
+        &self.application_authority_id
+    }
+
+    #[must_use]
+    pub(crate) const fn factual_semantic_class_id(&self) -> &Arc<str> {
+        &self.factual_semantic_class_id
+    }
+
+    #[must_use]
+    pub(crate) fn families(&self) -> &[ReleaseProducerFamilyClosureRow] {
+        &self.families
+    }
+
+    #[must_use]
+    pub(crate) fn query_requirements(&self) -> &[ReleaseQueryRequirementClosureRow] {
+        &self.query_requirements
+    }
+
+    #[must_use]
+    pub(crate) fn violations(&self) -> &[ReleaseProducerClosureViolationRow] {
+        &self.violations
+    }
+
+    #[must_use]
+    pub(crate) fn issues(&self) -> &[ReleaseProducerClosureIssue] {
+        &self.issues
+    }
+
+    #[must_use]
+    pub(crate) fn dependencies(&self) -> &[ProducerClosureCompilationDependency] {
+        &self.dependencies
+    }
+}
+
+/// Evaluate the release producer-closure proof over actual decoded rows.
+#[must_use]
+pub(crate) fn evaluate_release_producer_closure(
+    input: ReleaseProducerClosureProofInput<'_>,
+) -> ReleaseProducerClosureProofResult {
+    let evidence = input.evidence;
+    ReleaseProducerClosureProofResult {
+        terminal: if evidence.is_conformant() {
+            ProofTerminalStatus::Pass
+        } else {
+            ProofTerminalStatus::Fail
+        },
+        operation_id: Arc::clone(evidence.operation_id()),
+        implementation_release: Arc::clone(evidence.implementation_release()),
+        application_authority_id: Arc::clone(evidence.application_authority_id()),
+        factual_semantic_class_id: Arc::clone(evidence.factual_semantic_class_id()),
+        families: evidence.families().to_vec().into(),
+        query_requirements: evidence.query_requirements().to_vec().into(),
+        violations: evidence.violations().to_vec().into(),
+        issues: evidence.issues().to_vec().into(),
+        dependencies: evidence.dependencies().to_vec().into(),
+    }
+}
+
+fn validate_release_producer_closure_binding(
+    evidence: &ReleaseProducerClosureEvidence,
+) -> Result<(), ProofError> {
+    let authorities = evidence
+        .dependencies()
+        .iter()
+        .filter_map(|dependency| match dependency {
+            ProducerClosureCompilationDependency::ApplicationOwnedAuthority(value) => {
+                Some(value.as_ref())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    if authorities != BTreeSet::from([evidence.application_authority_id().as_ref()]) {
+        return Err(ProofError::ReleaseProducerClosureBinding(
+            "application authority dependency",
+        ));
+    }
+    let semantic_classes = evidence
+        .dependencies()
+        .iter()
+        .filter_map(|dependency| match dependency {
+            ProducerClosureCompilationDependency::FactualSemanticClass(value) => {
+                Some(value.as_ref())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    if semantic_classes != BTreeSet::from([evidence.factual_semantic_class_id().as_ref()]) {
+        return Err(ProofError::ReleaseProducerClosureBinding(
+            "factual semantic-class dependency",
+        ));
+    }
+    let releases = evidence
+        .dependencies()
+        .iter()
+        .filter_map(|dependency| match dependency {
+            ProducerClosureCompilationDependency::ImplementationRelease(value) => {
+                Some(value.as_ref())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    if releases != BTreeSet::from([evidence.implementation_release().as_ref()]) {
+        return Err(ProofError::ReleaseProducerClosureBinding(
+            "implementation-release dependency",
+        ));
+    }
+    Ok(())
+}
+
 /// Terminal status derived from exact proof rows.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProofTerminalStatus {
@@ -835,6 +1013,8 @@ pub enum ProofError {
     UnknownFaultExecution,
     #[error("duplicate provenance edge")]
     DuplicateProvenanceEdge,
+    #[error("release producer-closure proof binding differs at {0}")]
+    ReleaseProducerClosureBinding(&'static str),
     #[error("Arrow proof relation schema drift")]
     ArrowSchemaDrift,
     #[error(transparent)]

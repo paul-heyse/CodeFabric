@@ -453,6 +453,26 @@ fn compiled_released_form_programs()
     validate_form_coverage(programs)
 }
 
+/// Return the exact query-family edges owned by the compiled eight-form release.
+///
+/// This is consumed while constructing the candidate's producer-closure relations. The private
+/// query authority prevents a caller from substituting a form or family edge, while the returned
+/// rows remain ordinary typed values that DataFusion later executes and proves.
+pub(crate) fn released_query_family_requirements(
+    _authority: &CompiledQueryAuthority,
+) -> Result<Vec<(Arc<str>, Arc<str>)>, ProductionQueryRecipeError> {
+    Ok(compiled_released_form_programs()?
+        .into_values()
+        .flat_map(|program| {
+            let query_family = program.program_binding_id;
+            program
+                .required_fact_families
+                .into_iter()
+                .map(move |family| (Arc::clone(&query_family), family))
+        })
+        .collect())
+}
+
 fn compiled_released_form_program(
     form: ReleasedSemanticForm,
 ) -> Result<ProductionSemanticFormProgram, ProductionQueryRecipeError> {
