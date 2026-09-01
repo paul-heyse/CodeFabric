@@ -4,7 +4,7 @@
 //! package/configuration layout, process identity, private Unix sockets, the OS-lease-backed
 //! command handle, and the Delta activation readback into the typed cutover evidence consumed by
 //! the append-only journal. Artifact digests below are identities only; semantic correctness is
-//! supplied by the programmatic activation/proof authorities.
+//! supplied by the activation/proof authorities.
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -40,9 +40,7 @@ use crate::fabric::forward_cutover::{
     ObservedAvailability, PredecessorRevocationReadback, SupervisorConfigId, SupervisorFactId,
     SupervisorObservation, UdsEndpointId,
 };
-use crate::fabric::programmatic_workspace::{
-    ProgrammaticCommandRuntimeContext, ProgrammaticDaemonComposition,
-};
+use crate::fabric::programmatic_workspace::ProgrammaticCommandRuntimeContext;
 
 pub const FORWARD_CUTOVER_DEPLOYMENT_FILE: &str = "forward-cutover-v1.json";
 pub const FORWARD_CUTOVER_JOURNAL_FILE: &str = "forward-cutover-v1.sqlite3";
@@ -196,81 +194,6 @@ impl ProductionForwardCutoverController {
         DurableForwardCutoverJournal::open(&controller.journal_path)
             .map_err(|error| ProductionForwardCutoverError::Journal(error.to_string()))?;
         Ok(Some(controller))
-    }
-
-    /// Reobserve the deployment and programmatic authorities, reopen the journal, and derive
-    /// current operator status. Nothing is accepted from an in-memory phase projection.
-    pub async fn operator_statuses(
-        &self,
-        config: &DaemonConfig,
-        composition: &ProgrammaticDaemonComposition,
-    ) -> Result<Vec<ProductionCutoverStatus>, ProductionForwardCutoverError> {
-        let authorities = observe_programmatic_authorities(composition).await?;
-        self.operator_statuses_from_authorities(config, &authorities)
-    }
-
-    /// Read the exact cutover-owned command fields from the physical deployment and live
-    /// programmatic composition.
-    pub async fn command_intents(
-        &self,
-        config: &DaemonConfig,
-        composition: &ProgrammaticDaemonComposition,
-    ) -> Result<Vec<ProductionCutoverCommandIntent>, ProductionForwardCutoverError> {
-        let authorities = observe_programmatic_authorities(composition).await?;
-        self.command_intents_from_authorities(config, &authorities)
-    }
-
-    /// Require every configured workspace to be durably and physically observed as the target
-    /// read/write authority before production ingress remains open.
-    pub async fn require_target_read_write(
-        &self,
-        config: &DaemonConfig,
-        composition: &ProgrammaticDaemonComposition,
-    ) -> Result<Vec<ProductionCutoverStatus>, ProductionForwardCutoverError> {
-        let statuses = self.operator_statuses(config, composition).await?;
-        if let Some(closed) = statuses
-            .iter()
-            .find(|status| status.status.admission != CutoverAdmission::TargetReadWrite)
-        {
-            return Err(ProductionForwardCutoverError::AdmissionClosed {
-                workspace_id: *closed.workspace_id.as_bytes(),
-                code: closed.status.code,
-            });
-        }
-        Ok(statuses)
-    }
-
-    /// Append or idempotently converge the target-only physical-zero transition at the exact
-    /// durable `CommitPrepared` boundary of the sole programmatic command runtime.
-    ///
-    /// The command must be `Administer::ReconcileOperation`, name the cutover plan as its typed
-    /// request identity, expect the activation-selected epoch, and carry the live OS-backed writer
-    /// fence. The controller independently reobserves package/config/process/UDS authority and the
-    /// Delta activation before constructing the event. It never manufactures a predecessor phase.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn advance_from_prepared_command(
-        &self,
-        config: &DaemonConfig,
-        composition: &ProgrammaticDaemonComposition,
-        record: &CommandRecord,
-        owner: ExecutionOwner,
-        transaction: TransactionRef,
-        context: ReductionContext,
-    ) -> Result<ProductionCutoverAdvanceOutcome, ProductionForwardCutoverError> {
-        let workspace_id = record.command().ownership.workspace_id;
-        let evidence = self
-            .current_evidence_from_authorities(
-                config,
-                &observe_programmatic_authorities(composition).await?,
-            )?
-            .into_iter()
-            .find(|candidate| candidate.identity.workspace_id() == workspace_id)
-            .ok_or_else(|| {
-                ProductionForwardCutoverError::Authority(
-                    "prepared command workspace is not in the cutover deployment".to_owned(),
-                )
-            })?;
-        self.advance_with_evidence(record, owner, transaction, context, &evidence)
     }
 
     async fn advance_from_runtime_authority(
@@ -436,6 +359,7 @@ impl ProductionForwardCutoverController {
         self.advance_with_evidence(record, owner, transaction, context, &evidence)
     }
 
+    #[cfg(test)]
     fn operator_statuses_from_authorities(
         &self,
         config: &DaemonConfig,
@@ -462,6 +386,7 @@ impl ProductionForwardCutoverController {
             .collect()
     }
 
+    #[cfg(test)]
     fn command_intents_from_authorities(
         &self,
         config: &DaemonConfig,
@@ -480,6 +405,7 @@ impl ProductionForwardCutoverController {
             .collect()
     }
 
+    #[cfg(test)]
     fn current_evidence_from_authorities(
         &self,
         config: &DaemonConfig,
@@ -1155,49 +1081,6 @@ fn require_strict_writer_successor(
         ));
     }
     Ok(())
-}
-
-async fn observe_programmatic_authorities(
-    composition: &ProgrammaticDaemonComposition,
-) -> Result<Vec<ProgrammaticAuthorityObservation>, ProductionForwardCutoverError> {
-    let mut observations = Vec::with_capacity(composition.workspaces().len());
-    for (workspace_id, workspace) in composition.workspaces() {
-        let handle = composition
-            .command_runtime_handle(*workspace_id)
-            .ok_or_else(|| {
-                ProductionForwardCutoverError::Authority(
-                    "programmatic workspace has no ready OS-lease-backed command handle".to_owned(),
-                )
-            })?;
-        let snapshot = workspace
-            .activation_authority()
-            .current_snapshot()
-            .await
-            .map_err(|error| ProductionForwardCutoverError::Authority(error.to_string()))?;
-        let activation = CutoverActivationAuthority::try_from_chain(&snapshot.chain)
-            .map_err(|error| ProductionForwardCutoverError::Authority(error.to_string()))?;
-        let startup = workspace.startup_observation();
-        // The startup observation records the activation-event fence before command-runtime
-        // ownership is acquired. The same durable generation store later supplies both the live
-        // handle fence and `snapshot.active_fence`; those two are the strict successor pair.
-        if handle.fence() != snapshot.active_fence
-            || startup.active_fence != activation.writer_fence()
-            || startup.epoch_id != activation.selected_epoch()
-            || startup.activation_event_id != activation.event_id()
-        {
-            return Err(ProductionForwardCutoverError::Authority(
-                "command lease, activation readback, and installed startup authority disagree"
-                    .to_owned(),
-            ));
-        }
-        require_strict_writer_successor(activation.writer_fence(), handle.fence())?;
-        observations.push(ProgrammaticAuthorityObservation {
-            workspace_id: *workspace_id,
-            activation,
-            writer_fence: handle.fence(),
-        });
-    }
-    Ok(observations)
 }
 
 fn verify_live_process_and_sockets(

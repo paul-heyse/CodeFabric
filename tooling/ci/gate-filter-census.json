@@ -71,10 +71,6 @@
       "command": "cargo nextest run --locked --lib -E 'test(/(all_eight_epoch_bound_forms_execute_through_one_real_authorized_child|relational_program_executes_only_through_authorized_child_inputs)/)' --no-tests=fail"
     },
     {
-      "recipe": "semantic-request-program-check",
-      "command": "cargo nextest run --locked --lib -E 'test(real_delta_sqlite_daemon_query_activation_and_process_reopen)' --no-tests=fail"
-    },
-    {
       "recipe": "production-composition-contract-integrity-check",
       "command": "cargo nextest run --locked --lib -E 'test(/(release_pins_reject_every_missing_identity|source_authority_is_explicit_and_independent_of_release_vector|semantic_catalog_authority_rejects_pin_and_program_drift|request_owned_limits_identity_is_complete_and_stable)/)' --no-tests=fail"
     },
@@ -84,7 +80,7 @@
     },
     {
       "recipe": "programmatic-production-composition-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(epoch_query_registry_is_exact_and_workspace_scoped|activation_admission_installs_before_swap_and_rejects_substituted_authority|real_delta_sqlite_daemon_query_activation_and_process_reopen)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(epoch_query_registry_is_exact_and_workspace_scoped|activation_admission_installs_before_swap_and_rejects_substituted_authority)/)' --no-tests=fail"
     },
     {
       "recipe": "programmatic-production-composition-check",
@@ -92,11 +88,11 @@
     },
     {
       "recipe": "daemon-bootstrap-route-denial-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(production_factory_rejects_empty_workspace_without_endpoint_or_lease_leaks|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|daemon_factory_rejects_an_empty_workspace_set|lifecycle_rejects_skips_stale_writers_and_false_ready|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(production_factory_rejects_empty_workspace_without_endpoint_or_lease_leaks|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|lifecycle_rejects_skips_stale_writers_and_false_ready|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail"
     },
     {
       "recipe": "programmatic-runtime-lifecycle-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|real_delta_sqlite_daemon_query_activation_and_process_reopen|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail"
     },
     {
       "recipe": "programmatic-runtime-lifecycle-check",
@@ -112,7 +108,11 @@
     },
     {
       "recipe": "lifecycle-production-vertical-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(real_delta_sqlite_daemon_query_activation_and_process_reopen|production_serve_requires_programmatic_composition|wp12_behavioral_acceptance)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)' --no-tests=fail"
+    },
+    {
+      "recipe": "lifecycle-production-vertical-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail"
     },
     {
       "recipe": "resource-cancellation-recovery-check",
@@ -124,31 +124,35 @@
     },
     {
       "recipe": "cutover-event-contract-integrity-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/wp41_int_/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/wp41_int_/) | test(/wp41_prod_int_/)' --no-tests=fail"
     },
     {
       "recipe": "fenced-authority-cutover-v3-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/wp41_beh_/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/wp41_beh_/) | test(/wp41_prod_beh_/)' --no-tests=fail"
     },
     {
       "recipe": "predecessor-restart-revocation-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/wp41_neg_/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/wp41_neg_/) | test(/wp41_prod_neg_/)' --no-tests=fail"
     },
     {
       "recipe": "unknown-cutover-reconciliation-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/wp41_ops_/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/wp41_ops_/) | test(/wp41_prod_ops_/)' --no-tests=fail"
     },
     {
-      "recipe": "bootstrap-model-consumer-cutover-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(provider_plan_schema_observations_and_query_share_one_sealed_session|real_delta_sqlite_daemon_query_activation_and_process_reopen)/)' --no-tests=fail"
+      "recipe": "compiled-release-consumer-cutover-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)/)' --no-tests=fail"
     },
     {
-      "recipe": "bootstrap-model-dual-authority-zero-state-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(released_request_parser_rejects_unreleased_fields|production_serve_requires_programmatic_composition)/)' --no-tests=fail"
+      "recipe": "compiled-release-consumer-cutover-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail"
     },
     {
       "recipe": "programmatic-model-free-restart-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(real_delta_sqlite_daemon_query_activation_and_process_reopen|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "programmatic-model-free-restart-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail"
     },
     {
       "recipe": "datafusion-contract-matrix-integrity-check",
@@ -188,15 +192,15 @@
     },
     {
       "recipe": "wp38-artifact-bound-positive-execution-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(wp38_claim_002_positive_executes_frozen_typed_datafusion_transformation|wp38_claim_00(4|5|6|7|8|9)_positive_production_execution|wp38_claim_01(0|1|4)_positive_production_execution|wp38_claim_018_clean_incremental_equivalence_executes_successor_arrow_datafusion)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(wp38_claim_002_positive_executes_frozen_typed_datafusion_transformation|wp38_claim_003_positive_executes_candidate_preserving_common_call_graph|wp38_claim_004_positive_production_execution|wp38_claim_005_positive_production_execution|wp38_claim_006_positive_production_execution|wp38_claim_007_positive_production_execution|wp38_claim_008_positive_production_execution|wp38_claim_009_positive_production_execution|wp38_claim_010_positive_production_execution|wp38_claim_011_positive_production_execution|wp38_claim_012_positive_executes_frozen_exact_delta_and_cdf_semantics|wp38_claim_013_positive_recovers_the_artifact_bound_exact_epoch|wp38_claim_014_positive_production_execution|wp38_claim_015_positive_executes_typed_arrow_ipc_and_canonical_artifact_identity|wp38_claim_016_positive_executes_fail_closed_production_preflight|wp38_claim_018_clean_incremental_equivalence_executes_successor_arrow_datafusion)/)' --no-tests=fail"
     },
     {
       "recipe": "wp38-artifact-bound-causal-execution-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(wp38_claim_002_causal_fixture_changes_real_datafusion_rows|wp38_claim_00(4|5|6|7|8|9)_causal_production_execution|wp38_claim_01(0|1|4)_causal_production_execution|wp38_claim_018_causal_source_change_is_discriminated_by_successor_execution)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(wp38_claim_002_causal_fixture_changes_real_datafusion_rows|wp38_claim_003_causal_provider_target_changes_common_call_graph|wp38_claim_004_causal_production_execution|wp38_claim_005_causal_production_execution|wp38_claim_006_causal_production_execution|wp38_claim_007_causal_production_execution|wp38_claim_008_causal_production_execution|wp38_claim_009_causal_production_execution|wp38_claim_010_causal_production_execution|wp38_claim_011_causal_production_execution|wp38_claim_012_causal_exact_version_changes_the_decoded_snapshot|wp38_claim_013_causal_new_head_changes_the_recovered_exact_epoch|wp38_claim_014_causal_production_execution|wp38_claim_015_causal_row_budget_rejects_before_resource_publication|wp38_claim_016_causal_authorization_executes_degraded_trusted_local_plan|wp38_claim_018_causal_source_change_is_discriminated_by_successor_execution)/)' --no-tests=fail"
     },
     {
       "recipe": "wp38-artifact-bound-negative-execution-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(wp38_claim_002_negative_fixture_rejects_undeclared_typed_column|wp38_claim_00(4|5|6|7|8|9)_negative_production_execution|wp38_claim_01(0|1|4)_negative_production_execution|wp38_claim_018_missing_delete_fault_is_rejected_by_successor_execution)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(wp38_claim_001_negative_rejects_open_provider_coverage|wp38_claim_002_negative_fixture_rejects_undeclared_typed_column|wp38_claim_003_negative_preserves_known_fact_and_typed_unknown|wp38_claim_004_negative_production_execution|wp38_claim_005_negative_production_execution|wp38_claim_006_negative_production_execution|wp38_claim_007_negative_production_execution|wp38_claim_008_negative_production_execution|wp38_claim_009_negative_production_execution|wp38_claim_010_negative_production_execution|wp38_claim_011_negative_production_execution|wp38_claim_012_negative_rejects_frozen_unsupported_writer_feature|wp38_claim_013_negative_transaction_mismatch_keeps_admission_closed|wp38_claim_014_negative_production_execution|wp38_claim_015_negative_cancellation_releases_without_publication|wp38_claim_016_negative_rejects_seccomp_requirement_weakening|wp38_claim_018_missing_delete_fault_is_rejected_by_successor_execution)/)' --no-tests=fail"
     },
     {
       "recipe": "provider-ipc-contract-integrity-check",

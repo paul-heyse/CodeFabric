@@ -42,6 +42,16 @@ ORACLE_DEFINITION_GLOBS = (
     "tooling/ci/test_remaining_legacy_zero_state.py",
     "tooling/ci/successor_evidence_issuance.py",
     "tooling/ci/test_successor_evidence_issuance.py",
+    "tooling/ci/record_wp33_v4_acceptance.py",
+    "tooling/ci/successor_evidence_contracts_v4.py",
+    "tooling/ci/successor_evidence_issuance_v4.py",
+    "tooling/ci/supervisor_launch_contract_v4.py",
+    "tooling/ci/test_successor_evidence_contracts_v4.py",
+    "tooling/ci/test_successor_evidence_issuance_v4.py",
+    "tooling/ci/test_supervisor_launch_contract_v4.py",
+    "tooling/ci/wp30_authority_zero_state.py",
+    "tooling/ci/test_wp30_authority_zero_state.py",
+    "tooling/ci/fixtures/wp30-live-legacy-route.rs",
 )
 
 LIVE_SCAN_PATHS = (

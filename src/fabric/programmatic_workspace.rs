@@ -1,60 +1,41 @@
-//! All-or-nothing production composition for one programmatic fabric workspace.
+//! Exact activation and query primitives for one programmatic fabric workspace.
 //!
 //! The workspace record is administrative identity only; it cannot synthesize providers,
-//! transformations, policies, or a query catalog. This module therefore accepts one explicit
-//! typed construction value, reconstructs the exact activation-selected epoch, reconciles the
-//! receipt-only cache, installs epoch-scoped query authority, and opens admission only after the
-//! complete bundle exists. Every workspace created by one factory shares the same daemon-wide
-//! [`PublishedArrowResultRegistry`].
+//! transformations, policies, or a query catalog. The target release owns construction. This
+//! module retains only the exact activation-selected runtime, epoch query authority, command-port
+//! context, and receipt/reconciliation capabilities that the production kernel and WP32 recovery
+//! path consume.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::num::{NonZeroU64, NonZeroUsize};
+use std::num::NonZeroU64;
 use std::sync::{Arc, RwLock};
 
-use tokio::sync::Mutex as AsyncMutex;
-
-use super::activation::{ActivationEventId, FabricEpochPins, TableVersionSet};
-use super::activation_control_delta::{
-    DeltaActivationRuntimeAuthority, DeltaActivationRuntimeAuthoritySnapshotError,
-};
-use super::activation_transaction::{
-    ActivationCacheOutcome, ActivationCachePort, ActivationReconciliationReceiptCache,
-};
+use super::activation::{ActivationEventId, FabricEpochPins};
+use super::activation_control_delta::DeltaActivationRuntimeAuthority;
+use super::activation_transaction::ActivationReconciliationReceiptCache;
 use super::admission::{AdmissionError, FabricAdmissionRuntime};
 use super::arrow_result_resource::ArrowResultResourceLimits;
-use super::child_session::resource_governance::{
-    EpochResourceCoordinator, EpochResourceError, EpochResourcePolicy,
-};
+use super::child_session::resource_governance::{EpochResourceCoordinator, EpochResourceError};
 use super::command::{
-    ApplicationReleaseRef, CommandRecord, EpochId, FabricCommand, InputReleaseRef,
-    ProgramReleaseRef, ProviderReleaseRef, SourceAuthorityRef, WorkspaceId, WriterFence,
+    ApplicationReleaseRef, EpochId, InputReleaseRef, ProgramReleaseRef, ProviderReleaseRef,
+    SourceAuthorityRef, WorkspaceId, WriterFence,
 };
-use super::command_actor::FabricCommandActorError;
-use super::command_record_sqlite::CommandRecoveryPageSize;
 use super::command_runtime_manager::{
-    RegisteredWorkspaceFabricCommandRuntimeFactory,
-    RegisteredWorkspaceFabricCommandRuntimeFactoryError, WorkspaceFabricCommandRuntimeFactoryError,
-    WorkspaceFabricCommandRuntimeHandle, WorkspaceFabricCommandRuntimeManager,
-    WorkspaceFabricCommandRuntimeManagerError, WorkspaceFabricCommandRuntimeParts,
-    WorkspaceFabricCommandRuntimeShutdownFailures, WorkspaceFabricCommandRuntimeState,
+    WorkspaceFabricCommandRuntimeFactoryError, WorkspaceFabricCommandRuntimeParts,
 };
-use super::programmatic_delta_runtime::{
-    ProgrammaticDeltaRuntime, ProgrammaticDeltaRuntimeError, ProgrammaticDeltaRuntimePorts,
-};
-use super::programmatic_epoch::{
-    ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder, ProgrammaticFabricEpochError,
-};
+use super::programmatic_delta_runtime::ProgrammaticDeltaRuntime;
+use super::programmatic_epoch::ProgrammaticFabricEpoch;
 use super::published_arrow_result::PublishedArrowResultRegistry;
 use super::relational_query_runtime::{RelationalQueryAuthorization, RelationalQueryRuntime};
 use super::request_owned_relation::RequestOwnedRelationLimits;
-use crate::identity::{IdentityDomain, IdentityError, decode_public_id, encode_public_id};
+use crate::identity::{IdentityDomain, IdentityError, encode_public_id};
 use crate::relational_semantic_query::{
     EpochBoundSemanticExecutionCatalog, EpochBoundSemanticIngressCatalog, ProducerClosureProof,
     ProducerFamilyDisposition, SemanticQueryAuthority, SemanticQueryClass,
 };
 
-/// Stable identity of the concrete production composition algorithm.
+/// Stable identity of the retained exact workspace runtime shape.
 pub const PROGRAMMATIC_WORKSPACE_FACTORY_ID: &str =
     "codefabric.programmatic-workspace.datafusion55.delta-exact.v1";
 
@@ -393,6 +374,7 @@ impl fmt::Debug for WorkspaceEpochQueryAuthorityRegistry {
 }
 
 impl WorkspaceEpochQueryAuthorityRegistry {
+    #[cfg(test)]
     fn with_initial(authority: Arc<WorkspaceEpochQueryAuthority>) -> Self {
         let workspace_id = authority.workspace_id();
         Self {
@@ -480,100 +462,6 @@ pub enum WorkspaceEpochQueryAuthorityRegistryError {
     UnknownEpoch(EpochId),
     #[error("query authority registry lock is poisoned")]
     Poisoned,
-}
-
-/// Complete typed inputs for one workspace. No field has a default or workspace-derived fallback.
-pub struct ProgrammaticWorkspaceConstruction {
-    workspace_id: WorkspaceId,
-    epoch_builder: ProgrammaticFabricEpochBuilder,
-    table_versions: Arc<TableVersionSet>,
-    activation_authority: Arc<DeltaActivationRuntimeAuthority>,
-    resource_policy: EpochResourcePolicy,
-    resource_policy_pin: [u8; 32],
-    semantic_ingress_catalog: Arc<EpochBoundSemanticIngressCatalog>,
-    semantic_execution_catalog: Arc<EpochBoundSemanticExecutionCatalog>,
-    producer_closure: Arc<ProducerClosureProof>,
-    query_authorization: RelationalQueryAuthorization,
-    request_owned_relation_limits: RequestOwnedRelationLimits,
-    result_limits: ArrowResultResourceLimits,
-    result_lease_millis: u64,
-    delta_runtime_ports: ProgrammaticDeltaRuntimePorts,
-    command_runtime_factory: Arc<dyn ProgrammaticCommandRuntimePartsFactory>,
-    releases: ProgrammaticWorkspaceReleasePins,
-}
-
-impl ProgrammaticWorkspaceConstruction {
-    #[allow(clippy::too_many_arguments)]
-    pub fn try_new(
-        workspace_id: WorkspaceId,
-        epoch_builder: ProgrammaticFabricEpochBuilder,
-        table_versions: Arc<TableVersionSet>,
-        activation_authority: Arc<DeltaActivationRuntimeAuthority>,
-        resource_policy: EpochResourcePolicy,
-        resource_policy_pin: [u8; 32],
-        semantic_ingress_catalog: Arc<EpochBoundSemanticIngressCatalog>,
-        semantic_execution_catalog: Arc<EpochBoundSemanticExecutionCatalog>,
-        producer_closure: Arc<ProducerClosureProof>,
-        query_authorization: RelationalQueryAuthorization,
-        request_owned_relation_limits: RequestOwnedRelationLimits,
-        result_limits: ArrowResultResourceLimits,
-        result_lease_millis: u64,
-        delta_runtime_ports: ProgrammaticDeltaRuntimePorts,
-        command_runtime_factory: Arc<dyn ProgrammaticCommandRuntimePartsFactory>,
-        releases: ProgrammaticWorkspaceReleasePins,
-    ) -> Result<Self, ProgrammaticWorkspaceCompositionError> {
-        releases.validate()?;
-        if all_zero(&resource_policy_pin) {
-            return Err(ProgrammaticWorkspaceCompositionError::MissingResourcePolicyPin);
-        }
-        if activation_authority.workspace_id() != workspace_id {
-            return Err(ProgrammaticWorkspaceCompositionError::ActivationWorkspaceMismatch);
-        }
-        let expected_source_authority = releases.source_authority();
-        if semantic_ingress_catalog.source_pin != *expected_source_authority.as_bytes() {
-            return Err(
-                ProgrammaticWorkspaceCompositionError::ReleaseAuthorityMismatch {
-                    expected: *expected_source_authority.as_bytes(),
-                    supplied: semantic_ingress_catalog.source_pin,
-                },
-            );
-        }
-        if semantic_execution_catalog.program_release_pin != *releases.program_release().as_bytes()
-        {
-            return Err(
-                ProgrammaticWorkspaceCompositionError::ReleaseAuthorityMismatch {
-                    expected: *releases.program_release().as_bytes(),
-                    supplied: semantic_execution_catalog.program_release_pin,
-                },
-            );
-        }
-        validate_semantic_authority(
-            &semantic_ingress_catalog,
-            &semantic_execution_catalog,
-            &producer_closure,
-        )?;
-        if result_lease_millis == 0 {
-            return Err(ProgrammaticWorkspaceCompositionError::ZeroResultLease);
-        }
-        Ok(Self {
-            workspace_id,
-            epoch_builder,
-            table_versions,
-            activation_authority,
-            resource_policy,
-            resource_policy_pin,
-            semantic_ingress_catalog,
-            semantic_execution_catalog,
-            producer_closure,
-            query_authorization,
-            request_owned_relation_limits,
-            result_limits,
-            result_lease_millis,
-            delta_runtime_ports,
-            command_runtime_factory,
-            releases,
-        })
-    }
 }
 
 /// Exact daemon-owned capabilities available when constructing one workspace command router.
@@ -752,639 +640,6 @@ impl Drop for ProgrammaticWorkspaceRuntime {
         let _ = self.admission.close_for_shutdown();
     }
 }
-
-/// Concrete daemon-owned factory sharing exactly one Arrow result registry across workspaces.
-#[derive(Clone)]
-pub struct ProgrammaticWorkspaceRuntimeFactory {
-    published_results: Arc<PublishedArrowResultRegistry>,
-}
-
-impl fmt::Debug for ProgrammaticWorkspaceRuntimeFactory {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ProgrammaticWorkspaceRuntimeFactory")
-            .field("factory_id", &PROGRAMMATIC_WORKSPACE_FACTORY_ID)
-            .field("published_results", &"installed")
-            .finish()
-    }
-}
-
-impl ProgrammaticWorkspaceRuntimeFactory {
-    #[must_use]
-    pub fn new(published_results: Arc<PublishedArrowResultRegistry>) -> Self {
-        Self { published_results }
-    }
-
-    #[must_use]
-    pub const fn published_results(&self) -> &Arc<PublishedArrowResultRegistry> {
-        &self.published_results
-    }
-
-    /// Reconstruct and atomically compose one workspace from its complete explicit inputs.
-    pub async fn build(
-        &self,
-        construction: ProgrammaticWorkspaceConstruction,
-    ) -> Result<ProgrammaticWorkspaceRuntime, ProgrammaticWorkspaceCompositionError> {
-        let ProgrammaticWorkspaceConstruction {
-            workspace_id,
-            epoch_builder,
-            table_versions,
-            activation_authority,
-            resource_policy,
-            resource_policy_pin,
-            semantic_ingress_catalog,
-            semantic_execution_catalog,
-            producer_closure,
-            query_authorization,
-            request_owned_relation_limits,
-            result_limits,
-            result_lease_millis,
-            delta_runtime_ports,
-            command_runtime_factory,
-            releases,
-        } = construction;
-
-        let snapshot = activation_authority.current_snapshot().await?;
-        if snapshot.chain.workspace_id() != workspace_id {
-            return Err(ProgrammaticWorkspaceCompositionError::ActivationWorkspaceMismatch);
-        }
-        let event = snapshot
-            .chain
-            .head_event()
-            .copied()
-            .ok_or(ProgrammaticWorkspaceCompositionError::ActivationHeadMissing)?;
-        let pins = event.pins();
-        let expected_source_authority = releases.source_authority();
-        for (kind, matches) in [
-            ("input", pins.input_release == releases.input_release()),
-            (
-                "program",
-                pins.program_release == releases.program_release(),
-            ),
-            (
-                "application",
-                pins.application_release == releases.application_release(),
-            ),
-            (
-                "source authority",
-                pins.source_authority == expected_source_authority,
-            ),
-            (
-                "provider release",
-                pins.provider_release == releases.provider_release(),
-            ),
-        ] {
-            if !matches {
-                return Err(
-                    ProgrammaticWorkspaceCompositionError::ActivationReleaseVectorMismatch(kind),
-                );
-            }
-        }
-        if *epoch_builder.identity() != pins.epoch {
-            return Err(
-                ProgrammaticWorkspaceCompositionError::SelectedEpochMismatch {
-                    selected: pins.epoch,
-                    supplied: *epoch_builder.identity(),
-                },
-            );
-        }
-        if table_versions.reference() != pins.table_versions {
-            return Err(ProgrammaticWorkspaceCompositionError::SelectedTableVersionsMismatch);
-        }
-        if resource_policy_pin != *pins.resource_envelope.as_bytes() {
-            return Err(ProgrammaticWorkspaceCompositionError::ResourcePolicyMismatch);
-        }
-
-        let epoch = Arc::new(epoch_builder.reopen(Arc::clone(&table_versions)).await?);
-        if epoch.observation_publication().table_version_set_ref() != pins.table_versions {
-            return Err(ProgrammaticWorkspaceCompositionError::ReopenedTableVersionsMismatch);
-        }
-        let resources = Arc::new(EpochResourceCoordinator::try_new(
-            pins.epoch,
-            resource_policy_pin,
-            resource_policy,
-        )?);
-        let query_authority = Arc::new(WorkspaceEpochQueryAuthority::try_new(
-            workspace_id,
-            pins,
-            Arc::clone(&epoch),
-            Arc::clone(&resources),
-            Arc::clone(&semantic_ingress_catalog),
-            Arc::clone(&semantic_execution_catalog),
-            Arc::clone(&producer_closure),
-            query_authorization,
-            request_owned_relation_limits,
-            result_limits,
-            result_lease_millis,
-        )?);
-        let query_authorities = Arc::new(WorkspaceEpochQueryAuthorityRegistry::with_initial(
-            query_authority,
-        ));
-        let receipt_cache = Arc::new(ActivationReconciliationReceiptCache::new(workspace_id));
-        let receipt = match receipt_cache
-            .reconcile_selected(event, &snapshot.chain, snapshot.active_fence)
-            .await
-        {
-            ActivationCacheOutcome::Reconciled(receipt) => receipt,
-            ActivationCacheOutcome::Unknown { .. } => {
-                return Err(ProgrammaticWorkspaceCompositionError::ReceiptReconciliationUnknown);
-            }
-            ActivationCacheOutcome::Cancelled { .. } => {
-                return Err(ProgrammaticWorkspaceCompositionError::ReceiptReconciliationCancelled);
-            }
-        };
-        if receipt.workspace_id != workspace_id
-            || receipt.event_id != event.event_id()
-            || receipt.selected_epoch != pins.epoch
-            || receipt.active_fence != snapshot.active_fence
-        {
-            return Err(ProgrammaticWorkspaceCompositionError::ReceiptMismatch);
-        }
-
-        let admission = Arc::new(
-            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&snapshot.chain)?,
-        );
-        admission.install_reconciled_selected_head(
-            event,
-            &snapshot.chain,
-            Arc::clone(&epoch),
-            snapshot.active_fence,
-        )?;
-        let query_runtime = Arc::new(RelationalQueryRuntime::new(
-            workspace_id,
-            Arc::clone(&admission),
-            Arc::clone(&self.published_results),
-            Arc::clone(&resources),
-        ));
-        let delta_runtime = Arc::new(ProgrammaticDeltaRuntime::try_new(
-            workspace_id,
-            &epoch,
-            Arc::clone(&table_versions),
-            delta_runtime_ports,
-        )?);
-        let command_runtime = command_runtime_factory
-            .build(ProgrammaticCommandRuntimeContext {
-                workspace_id,
-                admission: Arc::clone(&admission),
-                resources,
-                published_results: Arc::clone(&self.published_results),
-                query_authorities: Arc::clone(&query_authorities),
-                query_runtime: Arc::clone(&query_runtime),
-                delta_runtime: Arc::clone(&delta_runtime),
-                activation_authority: Arc::clone(&activation_authority),
-                receipt_cache: Arc::clone(&receipt_cache),
-            })
-            .map_err(
-                |source| ProgrammaticWorkspaceCompositionError::CommandRuntimeComposition {
-                    workspace_id,
-                    source,
-                },
-            )?;
-        if command_runtime.workspace_id() != workspace_id {
-            return Err(ProgrammaticWorkspaceCompositionError::CommandRuntimeWorkspaceMismatch);
-        }
-
-        let control = activation_authority.control_relation().table();
-        let table_versions = Arc::from(
-            table_versions
-                .components()
-                .map(|(relation_id, pin)| ProgrammaticTableVersionObservation {
-                    relation_id: Arc::from(relation_id),
-                    canonical_root: Arc::from(pin.canonical_root().as_str()),
-                    version: pin.version(),
-                })
-                .collect::<Vec<_>>(),
-        );
-        let startup = ProgrammaticWorkspaceStartupObservation {
-            factory_id: PROGRAMMATIC_WORKSPACE_FACTORY_ID,
-            workspace_id,
-            epoch_id: pins.epoch,
-            activation_event_id: event.event_id(),
-            active_fence: snapshot.active_fence,
-            source_generation: pins.source_generation.get(),
-            provider_set_pin: *pins.provider_set.as_bytes(),
-            overlay_segment_set_pin: *pins.overlay_segments.as_bytes(),
-            policy_set_pin: *pins.policy_set.as_bytes(),
-            proof_receipt_pin: *pins.proof_receipt.as_bytes(),
-            activation_control_root: Arc::from(control.canonical_root().as_str()),
-            activation_control_version: control.version(),
-            releases,
-            program_catalog_pin: semantic_ingress_catalog.program_catalog_pin,
-            execution_catalog_pin: semantic_execution_catalog.execution_catalog_pin,
-            program_release_pin: semantic_execution_catalog.program_release_pin,
-            producer_closure_proof_pin: producer_closure.proof_pin,
-            request_owned_relation_limits_pin: request_owned_relation_limits_pin(
-                request_owned_relation_limits,
-            ),
-            resource_policy_pin,
-            runtime_configuration: Arc::from(epoch.runtime_configuration_identity()),
-            schema_authority: Arc::from(epoch.schema_authority_id()),
-            relation_count: epoch.relation_ids().len(),
-            table_versions,
-        };
-        Ok(ProgrammaticWorkspaceRuntime {
-            workspace_id,
-            admission,
-            published_results: Arc::clone(&self.published_results),
-            query_authorities,
-            query_runtime,
-            delta_runtime,
-            activation_authority,
-            receipt_cache,
-            command_runtime,
-            startup,
-        })
-    }
-
-    /// Stage every workspace, start every complete command runtime, then publish one daemon
-    /// composition.
-    ///
-    /// A runtime whose bounded recovery is not yet complete remains owned by the composition with
-    /// command ingress closed and without a published handle. This is intentional staged startup:
-    /// the daemon can establish the external authorities needed to reconcile an unknown durable
-    /// outcome and then call [`ProgrammaticDaemonComposition::retry_command_recovery`]. An actual
-    /// recovery error still tears down the entire partial composition.
-    pub async fn build_daemon(
-        &self,
-        constructions: impl IntoIterator<Item = ProgrammaticWorkspaceConstruction>,
-        recovery_page_size: CommandRecoveryPageSize,
-        maximum_recovery_sweeps: NonZeroUsize,
-    ) -> Result<ProgrammaticDaemonComposition, ProgrammaticDaemonCompositionError> {
-        let mut workspaces = BTreeMap::new();
-        for construction in constructions {
-            let workspace_id = construction.workspace_id;
-            if workspaces.contains_key(&workspace_id) {
-                let _ = close_workspace_admission(&workspaces);
-                return Err(ProgrammaticDaemonCompositionError::DuplicateWorkspace(
-                    workspace_id,
-                ));
-            }
-            let workspace = self.build(construction).await.map_err(|source| {
-                let _ = close_workspace_admission(&workspaces);
-                ProgrammaticDaemonCompositionError::Workspace {
-                    workspace_id,
-                    source,
-                }
-            })?;
-            workspaces.insert(workspace_id, Arc::new(workspace));
-        }
-
-        if workspaces.is_empty() {
-            return Err(ProgrammaticDaemonCompositionError::EmptyWorkspaceSet);
-        }
-
-        let registered = RegisteredWorkspaceFabricCommandRuntimeFactory::try_new(
-            workspaces
-                .values()
-                .map(|workspace| workspace.command_runtime_parts()),
-        )?;
-        let mut command_runtimes = WorkspaceFabricCommandRuntimeManager::new(
-            Arc::new(registered),
-            recovery_page_size,
-            maximum_recovery_sweeps,
-        );
-        for workspace_id in workspaces.keys().copied().collect::<Vec<_>>() {
-            match command_runtimes.start_workspace(workspace_id).await {
-                Ok(WorkspaceFabricCommandRuntimeState::Ready) => {}
-                Ok(WorkspaceFabricCommandRuntimeState::Pending { .. }) => {}
-                Err(source) => {
-                    let _ = close_workspace_admission(&workspaces);
-                    let cleanup = command_runtimes.shutdown_all().await.err();
-                    return Err(ProgrammaticDaemonCompositionError::CommandStartup {
-                        workspace_id,
-                        source,
-                        cleanup,
-                    });
-                }
-            }
-        }
-
-        let command_handles = workspaces
-            .keys()
-            .copied()
-            .filter_map(|workspace_id| {
-                command_runtimes
-                    .handle(workspace_id)
-                    .map(|handle| (workspace_id, handle))
-            })
-            .collect();
-        Ok(ProgrammaticDaemonComposition {
-            published_results: Arc::clone(&self.published_results),
-            workspaces,
-            command_runtimes: AsyncMutex::new(command_runtimes),
-            command_handles: RwLock::new(command_handles),
-        })
-    }
-}
-
-/// Atomically published daemon composition over all admitted workspaces.
-pub struct ProgrammaticDaemonComposition {
-    published_results: Arc<PublishedArrowResultRegistry>,
-    workspaces: BTreeMap<WorkspaceId, Arc<ProgrammaticWorkspaceRuntime>>,
-    command_runtimes: AsyncMutex<WorkspaceFabricCommandRuntimeManager>,
-    command_handles: RwLock<BTreeMap<WorkspaceId, WorkspaceFabricCommandRuntimeHandle>>,
-}
-
-impl fmt::Debug for ProgrammaticDaemonComposition {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let command_runtime_count = self
-            .command_handles
-            .read()
-            .map_or(0, |handles| handles.len());
-        formatter
-            .debug_struct("ProgrammaticDaemonComposition")
-            .field("workspace_count", &self.workspaces.len())
-            .field("command_runtime_count", &command_runtime_count)
-            .field("published_results", &"installed")
-            .finish()
-    }
-}
-
-impl ProgrammaticDaemonComposition {
-    #[must_use]
-    pub const fn published_results(&self) -> &Arc<PublishedArrowResultRegistry> {
-        &self.published_results
-    }
-
-    #[must_use]
-    pub fn workspace(
-        &self,
-        workspace_id: WorkspaceId,
-    ) -> Option<Arc<ProgrammaticWorkspaceRuntime>> {
-        self.workspaces.get(&workspace_id).cloned()
-    }
-
-    /// Resolve an authenticated released public workspace identity without an alias/fallback.
-    ///
-    /// # Errors
-    ///
-    /// Rejects malformed, wrong-domain, wrong-width, or non-canonical public identities.
-    pub fn workspace_by_public_id(
-        &self,
-        public_workspace_id: &str,
-    ) -> Result<Option<Arc<ProgrammaticWorkspaceRuntime>>, IdentityError> {
-        let workspace_id = WorkspaceId::from_bytes(decode_public_id(
-            IdentityDomain::Workspace,
-            None,
-            public_workspace_id,
-        )?);
-        Ok(self.workspace(workspace_id))
-    }
-
-    pub fn workspaces(
-        &self,
-    ) -> impl ExactSizeIterator<Item = (&WorkspaceId, &Arc<ProgrammaticWorkspaceRuntime>)> {
-        self.workspaces.iter()
-    }
-
-    #[must_use]
-    pub fn command_runtime_handle(
-        &self,
-        workspace_id: WorkspaceId,
-    ) -> Option<WorkspaceFabricCommandRuntimeHandle> {
-        self.command_handles
-            .read()
-            .ok()?
-            .get(&workspace_id)
-            .cloned()
-    }
-
-    /// Whether every admitted workspace has a recovery-proved command runtime handle.
-    ///
-    /// This observation is deliberately structural: readiness is the presence of the live
-    /// OS-lease-backed handle published by the runtime manager, not a duplicated status flag.
-    #[must_use]
-    pub fn command_runtimes_ready(&self) -> bool {
-        self.command_handles.read().is_ok_and(|handles| {
-            handles.len() == self.workspaces.len()
-                && self
-                    .workspaces
-                    .keys()
-                    .all(|workspace_id| handles.contains_key(workspace_id))
-        })
-    }
-
-    /// Retry the retained bounded recovery for one workspace and publish command ingress only
-    /// after the runtime manager proves it ready.
-    ///
-    /// A repeated call for an already-ready workspace is idempotent. A still-pending result keeps
-    /// ingress closed, while an error preserves the retained runtime for a later readback-driven
-    /// retry.
-    ///
-    /// # Errors
-    ///
-    /// Returns the exact runtime recovery failure, a missing ready handle, or poisoned handle
-    /// publication state. None of these conditions opens command ingress.
-    pub async fn retry_command_recovery(
-        &self,
-        workspace_id: WorkspaceId,
-    ) -> Result<WorkspaceFabricCommandRuntimeState, ProgrammaticCommandRecoveryError> {
-        let mut manager = self.command_runtimes.lock().await;
-        let state = manager.retry_recovery(workspace_id).await?;
-        if state == WorkspaceFabricCommandRuntimeState::Ready {
-            let handle = manager.handle(workspace_id).ok_or(
-                ProgrammaticCommandRecoveryError::ReadyHandleMissing(workspace_id),
-            )?;
-            self.command_handles
-                .write()
-                .map_err(|_| ProgrammaticCommandRecoveryError::HandleRegistryUnavailable)?
-                .insert(workspace_id, handle);
-        }
-        Ok(state)
-    }
-
-    /// Retry every retained pending runtime in canonical workspace order.
-    ///
-    /// Returns `true` only when every workspace now exposes a recovery-proved command handle.
-    /// One incomplete workspace never prevents later workspaces from being retried, but the first
-    /// actual recovery error is returned fail-closed.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first exact recovery or handle-publication failure.
-    pub async fn retry_pending_command_recovery(
-        &self,
-    ) -> Result<bool, ProgrammaticCommandRecoveryError> {
-        let pending = self
-            .workspaces
-            .keys()
-            .copied()
-            .filter(|workspace_id| self.command_runtime_handle(*workspace_id).is_none())
-            .collect::<Vec<_>>();
-        for workspace_id in pending {
-            self.retry_command_recovery(workspace_id).await?;
-        }
-        Ok(self.command_runtimes_ready())
-    }
-
-    /// Submit one durable mutation through the sole registered workspace actor.
-    ///
-    /// The workspace route and exact writer fence are checked before queue admission. No direct
-    /// command effect, Delta writer, or legacy administrative mutation path is reachable here.
-    ///
-    /// # Errors
-    ///
-    /// Rejects an unregistered workspace, a stale/substituted fence, or the actor's bounded
-    /// admission/execution failure.
-    pub async fn submit_command(
-        &self,
-        command: FabricCommand,
-    ) -> Result<CommandRecord, ProgrammaticCommandIngressError> {
-        let workspace_id = command.ownership.workspace_id;
-        let handle = self.command_runtime_handle(workspace_id).ok_or(
-            ProgrammaticCommandIngressError::WorkspaceNotRegistered(workspace_id),
-        )?;
-        if handle.fence() != command.writer_fence {
-            return Err(ProgrammaticCommandIngressError::WriterFenceMismatch {
-                expected: handle.fence(),
-                supplied: command.writer_fence,
-            });
-        }
-        Ok(handle.actor().submit(command).await?)
-    }
-
-    /// Close new query admission without stopping the registered command runtimes.
-    ///
-    /// The daemon uses this as the first step of joined shutdown so query transport can drain
-    /// already-admitted leases without accepting new work. Repeated calls while draining are
-    /// idempotent.
-    pub fn close_query_admission(&self) -> Result<(), ProgrammaticDaemonCompositionShutdownError> {
-        let admission_failures = close_workspace_admission(&self.workspaces);
-        if admission_failures.is_empty() {
-            Ok(())
-        } else {
-            Err(ProgrammaticDaemonCompositionShutdownError {
-                admission_failures,
-                command_failure: None,
-            })
-        }
-    }
-
-    /// Close durable-command ingress and join every registered workspace actor.
-    ///
-    /// Handles are removed before awaiting actors, so a concurrent caller cannot obtain fresh
-    /// command admission after drain starts. Repeated calls are idempotent because the manager is
-    /// empty after its first joined shutdown.
-    pub async fn shutdown_commands(
-        &self,
-    ) -> Result<(), WorkspaceFabricCommandRuntimeShutdownFailures> {
-        if let Ok(mut handles) = self.command_handles.write() {
-            handles.clear();
-        }
-        self.command_runtimes.lock().await.shutdown_all().await
-    }
-
-    /// Close query admission for every workspace before joining every command runtime.
-    pub async fn shutdown(&mut self) -> Result<(), ProgrammaticDaemonCompositionShutdownError> {
-        let admission_failures = close_workspace_admission(&self.workspaces);
-        let command_failure = self.shutdown_commands().await.err();
-        self.workspaces.clear();
-        if admission_failures.is_empty() && command_failure.is_none() {
-            Ok(())
-        } else {
-            Err(ProgrammaticDaemonCompositionShutdownError {
-                admission_failures,
-                command_failure,
-            })
-        }
-    }
-}
-
-/// Fail-closed programmatic durable-command ingress failures.
-#[derive(Debug, thiserror::Error)]
-pub enum ProgrammaticCommandIngressError {
-    #[error("no registered command runtime exists for workspace {0:?}")]
-    WorkspaceNotRegistered(WorkspaceId),
-    #[error("command writer fence differs from the registered actor fence")]
-    WriterFenceMismatch {
-        expected: WriterFence,
-        supplied: WriterFence,
-    },
-    #[error(transparent)]
-    Actor(#[from] FabricCommandActorError),
-}
-
-/// Fail-closed errors while promoting a retained startup-recovery runtime to command ingress.
-#[derive(Debug, thiserror::Error)]
-pub enum ProgrammaticCommandRecoveryError {
-    #[error(transparent)]
-    Runtime(#[from] WorkspaceFabricCommandRuntimeManagerError),
-    #[error("ready command runtime has no publishable handle for workspace {0:?}")]
-    ReadyHandleMissing(WorkspaceId),
-    #[error("programmatic command handle registry is unavailable")]
-    HandleRegistryUnavailable,
-}
-
-fn close_workspace_admission(
-    workspaces: &BTreeMap<WorkspaceId, Arc<ProgrammaticWorkspaceRuntime>>,
-) -> Vec<(WorkspaceId, AdmissionError)> {
-    workspaces
-        .iter()
-        .filter_map(|(workspace_id, workspace)| {
-            workspace
-                .admission()
-                .close_for_shutdown()
-                .err()
-                .map(|error| (*workspace_id, error))
-        })
-        .collect()
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ProgrammaticDaemonCompositionError {
-    #[error("programmatic daemon composition requires at least one explicit workspace")]
-    EmptyWorkspaceSet,
-    #[error("programmatic workspace {workspace_id:?} composition failed: {source}")]
-    Workspace {
-        workspace_id: WorkspaceId,
-        #[source]
-        source: ProgrammaticWorkspaceCompositionError,
-    },
-    #[error("programmatic workspace {0:?} is supplied more than once")]
-    DuplicateWorkspace(WorkspaceId),
-    #[error(transparent)]
-    CommandFactory(#[from] RegisteredWorkspaceFabricCommandRuntimeFactoryError),
-    #[error(
-        "command runtime startup failed for workspace {workspace_id:?}: {source}; cleanup={cleanup:?}"
-    )]
-    CommandStartup {
-        workspace_id: WorkspaceId,
-        #[source]
-        source: WorkspaceFabricCommandRuntimeManagerError,
-        cleanup: Option<WorkspaceFabricCommandRuntimeShutdownFailures>,
-    },
-}
-
-#[derive(Debug)]
-pub struct ProgrammaticDaemonCompositionShutdownError {
-    admission_failures: Vec<(WorkspaceId, AdmissionError)>,
-    command_failure: Option<WorkspaceFabricCommandRuntimeShutdownFailures>,
-}
-
-impl ProgrammaticDaemonCompositionShutdownError {
-    #[must_use]
-    pub fn admission_failures(&self) -> &[(WorkspaceId, AdmissionError)] {
-        &self.admission_failures
-    }
-
-    #[must_use]
-    pub const fn command_failure(&self) -> Option<&WorkspaceFabricCommandRuntimeShutdownFailures> {
-        self.command_failure.as_ref()
-    }
-}
-
-impl fmt::Display for ProgrammaticDaemonCompositionShutdownError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{} query-admission close failure(s); command shutdown failure={}",
-            self.admission_failures.len(),
-            self.command_failure.is_some()
-        )
-    }
-}
-
-impl std::error::Error for ProgrammaticDaemonCompositionShutdownError {}
 
 /// Derive the only semantic epoch pin accepted by the workspace query authority.
 ///
@@ -1705,34 +960,11 @@ const fn all_zero<const N: usize>(value: &[u8; N]) -> bool {
     true
 }
 
-/// Fail-closed production composition errors. No variant authorizes a fallback backend.
+/// Fail-closed exact workspace-authority errors. No variant authorizes a fallback backend.
 #[derive(Debug, thiserror::Error)]
 pub enum ProgrammaticWorkspaceCompositionError {
     #[error("required {0} release pin is absent")]
     MissingReleasePin(&'static str),
-    #[error("resource-policy identity is absent")]
-    MissingResourcePolicyPin,
-    #[error("activation authority belongs to another workspace")]
-    ActivationWorkspaceMismatch,
-    #[error(
-        "semantic catalog source authority differs from the explicit release vector: expected {expected:02x?}, supplied {supplied:02x?}"
-    )]
-    ReleaseAuthorityMismatch {
-        expected: [u8; 32],
-        supplied: [u8; 32],
-    },
-    #[error("activation head {0} release authority differs from workspace construction")]
-    ActivationReleaseVectorMismatch(&'static str),
-    #[error("command runtime belongs to another workspace")]
-    CommandRuntimeWorkspaceMismatch,
-    #[error("command runtime composition failed for workspace {workspace_id:?}: {source}")]
-    CommandRuntimeComposition {
-        workspace_id: WorkspaceId,
-        #[source]
-        source: WorkspaceFabricCommandRuntimeFactoryError,
-    },
-    #[error("activation history has no selected head")]
-    ActivationHeadMissing,
     #[error("selected epoch {selected:?} differs from supplied builder {supplied:?}")]
     SelectedEpochMismatch {
         selected: EpochId,
@@ -1740,8 +972,6 @@ pub enum ProgrammaticWorkspaceCompositionError {
     },
     #[error("selected activation table-version reference differs from the supplied exact vector")]
     SelectedTableVersionsMismatch,
-    #[error("reopened epoch table-version reference differs from the selected activation head")]
-    ReopenedTableVersionsMismatch,
     #[error("selected activation resource envelope differs from the supplied policy")]
     ResourcePolicyMismatch,
     #[error("query authorization policy differs from the installed semantic catalog policy")]
@@ -1789,18 +1019,6 @@ pub enum ProgrammaticWorkspaceCompositionError {
     DuplicateProducerFamily(String),
     #[error("producer closure does not cover every execution-catalog fact family")]
     ProducerClosureCoverageMismatch,
-    #[error("activation receipt reconciliation returned unknown")]
-    ReceiptReconciliationUnknown,
-    #[error("activation receipt reconciliation was cancelled")]
-    ReceiptReconciliationCancelled,
-    #[error("activation receipt differs from the exact durable selected head")]
-    ReceiptMismatch,
-    #[error(transparent)]
-    ActivationSnapshot(#[from] DeltaActivationRuntimeAuthoritySnapshotError),
-    #[error(transparent)]
-    Epoch(#[from] ProgrammaticFabricEpochError),
-    #[error(transparent)]
-    DeltaRuntime(#[from] ProgrammaticDeltaRuntimeError),
     #[error(transparent)]
     Resources(#[from] EpochResourceError),
     #[error(transparent)]
@@ -1816,12 +1034,13 @@ mod tests {
         OverlaySegmentSetRef, PolicySetRef,
     };
     use crate::fabric::activation_transaction::ActivationAdmissionPort;
+    use crate::fabric::child_session::resource_governance::EpochResourcePolicy;
     use crate::fabric::child_session::{
         ChildRegistryAllowlist, ChildResourceLimits, ChildTableGrant,
     };
     use crate::fabric::command::{
         ActorId, AuthorizationRef, CommandIdentity, CommandOwnership, CommandPins, ExecutionOwner,
-        FabricCommandPayload, IdempotencyKey, InputReleaseRef, LeaseId, OperationId,
+        FabricCommand, FabricCommandPayload, IdempotencyKey, InputReleaseRef, LeaseId, OperationId,
         OperationSelectionRef, PrincipalId, ProgramReleaseRef, ProofReceiptRef, ProviderSetRef,
         ResourceEnvelopeRef, RetentionPolicyRef, SourceGeneration, TransactionRef,
         WriterGeneration,
@@ -1829,7 +1048,9 @@ mod tests {
     use crate::fabric::programmatic_activation_admission::{
         ExactProgrammaticSuccessorQueryAuthorityRecipe, ProgrammaticActivationAdmission,
     };
+    use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
     use crate::fabric::programmatic_schema::ProgrammaticRelationId;
+    use crate::identity::decode_public_id;
     use crate::relational_program::{FieldId, RelationId};
     use crate::relational_semantic_query::{
         EpochBoundExecutionProgramRow, EpochBoundProgramBindingRow, ReleasedSemanticForm,
@@ -2184,23 +1405,6 @@ mod tests {
             ))
         ));
         assert!(release_pins(1, 2, 3, 4, 5).is_ok());
-    }
-
-    #[tokio::test]
-    async fn daemon_factory_rejects_an_empty_workspace_set() {
-        let factory =
-            ProgrammaticWorkspaceRuntimeFactory::new(Arc::new(PublishedArrowResultRegistry::new()));
-        let result = factory
-            .build_daemon(
-                std::iter::empty(),
-                CommandRecoveryPageSize::new(1).unwrap(),
-                NonZeroUsize::new(1).unwrap(),
-            )
-            .await;
-        assert!(matches!(
-            result,
-            Err(ProgrammaticDaemonCompositionError::EmptyWorkspaceSet)
-        ));
     }
 
     #[test]

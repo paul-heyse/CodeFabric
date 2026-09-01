@@ -83,8 +83,6 @@ pub mod programmatic_query_backend;
 pub mod programmatic_schema;
 #[cfg(feature = "daemon")]
 pub mod programmatic_workspace;
-#[cfg(all(test, feature = "daemon"))]
-mod programmatic_workspace_vertical_tests;
 pub mod proof;
 pub mod provider;
 #[cfg(feature = "daemon")]

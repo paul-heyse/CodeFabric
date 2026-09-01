@@ -1,0 +1,72 @@
+{
+  "schema": "codefabric.wp30.activation-residue.v1",
+  "owner_packet": "WP32",
+  "entries": [
+    {
+      "symbol": "DeltaActivationRuntimeAuthority",
+      "path": "src/fabric/activation_control_delta.rs",
+      "target_consumer": "ProgrammaticWorkspaceRuntime::activation_authority",
+      "wp32_action": "Reopen the exact Delta activation chain into the active-workspace slot; retain durable readback and remove any candidate-like process-local selection role."
+    },
+    {
+      "symbol": "ActivationCacheReceipt",
+      "path": "src/fabric/activation_transaction.rs",
+      "target_consumer": "ActivationReconciliationReceiptCache",
+      "wp32_action": "Prove the receipt is observation-only after exact Delta readback, then delete or demote it so it cannot select an epoch."
+    },
+    {
+      "symbol": "ActivationCacheOutcome",
+      "path": "src/fabric/activation_transaction.rs",
+      "target_consumer": "ActivationReconciliationReceiptCache::reconcile_selected",
+      "wp32_action": "Replace cache outcome branching with durable selected-event reconstruction and explicit genesis or reconciliation outcomes."
+    },
+    {
+      "symbol": "ActivationReconciliationReceiptCache",
+      "path": "src/fabric/activation_transaction.rs",
+      "target_consumer": "ProgrammaticWorkspaceRuntime::receipt_cache",
+      "wp32_action": "Remove the process-local cache from recovery authority after exact event and table-version reconstruction is causal."
+    },
+    {
+      "symbol": "ActivatedEpochReceipt",
+      "path": "src/fabric/activation_transaction.rs",
+      "target_consumer": "ProgrammaticActivationAdmission",
+      "wp32_action": "Retain only an acknowledgement projection, never an epoch selector; delete it if no target acknowledgement consumer remains."
+    },
+    {
+      "symbol": "ProgrammaticWorkspaceReleasePins",
+      "path": "src/fabric/programmatic_workspace.rs",
+      "target_consumer": "ProgrammaticWorkspaceStartupObservation::releases",
+      "wp32_action": "Replace the independently assembled release vector with the private CompiledSemanticRelease closure shared by reopen and activation."
+    },
+    {
+      "symbol": "ProgrammaticDeltaRuntimePorts",
+      "path": "src/fabric/programmatic_delta_runtime.rs",
+      "target_consumer": "ProgrammaticDeltaRuntime::try_new",
+      "wp32_action": "Supply exact checkpoint and guarded-maintenance capabilities only from the target workspace rebuild closure; remove any independently assembled port route."
+    },
+    {
+      "symbol": "ProgrammaticDeltaRuntime",
+      "path": "src/fabric/programmatic_delta_runtime.rs",
+      "target_consumer": "ProgrammaticWorkspaceRuntime::delta_runtime",
+      "wp32_action": "Construct from the exact reopened epoch and selected TableVersionSet inside active-workspace installation; keep exact Delta reads and remove the orphan pre-WP32 constructor seam."
+    },
+    {
+      "symbol": "ProgrammaticWorkspaceStartupObservation",
+      "path": "src/fabric/programmatic_workspace.rs",
+      "target_consumer": "ActiveWorkspace::try_from_runtime",
+      "wp32_action": "Reshape to the minimal exact selected-event record derived from durable activation readback; remove duplicated catalog and release observations."
+    },
+    {
+      "symbol": "WorkspaceEpochQueryAuthorityRegistry",
+      "path": "src/fabric/programmatic_workspace.rs",
+      "target_consumer": "ProgrammaticWorkspaceRuntime::query_authorities",
+      "wp32_action": "Move successor installation behind the active-workspace slot and remove the independent epoch/current lookup role."
+    },
+    {
+      "symbol": "ProgrammaticWorkspaceRuntime",
+      "path": "src/fabric/programmatic_workspace.rs",
+      "target_consumer": "ActiveWorkspace",
+      "wp32_action": "Construct only from exact recovered or genesis activation plus the private compiled release, then install atomically while admission is closed."
+    }
+  ]
+}

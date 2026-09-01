@@ -9,12 +9,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 
 use crate::cancellation::Cancellation;
-use crate::identity::{IdentityDomain, encode_public_id};
+use crate::identity::{IdentityDomain, decode_public_id, encode_public_id};
 use crate::query_service::{
     PublishedArrowSemanticSuccess, SemanticBackendExecutionContext, SemanticBackendOutcome,
     SemanticQueryBackend,
@@ -31,11 +30,10 @@ use crate::semantic_query_contract::{
 
 use super::admission::AdmissionError;
 use super::arrow_result_resource::ResultResourceLease;
-use super::command::ExpectedHead;
+use super::command::{ExpectedHead, WorkspaceId};
+use super::production_kernel::{ActiveWorkspaceLease, LifecycleAuthority, WorkspaceSlotRegistry};
 use super::programmatic_schema::ProgrammaticRelationId;
-use super::programmatic_workspace::{
-    ProgrammaticDaemonComposition, ProgrammaticWorkspaceRuntime, WorkspaceEpochQueryAuthority,
-};
+use super::programmatic_workspace::{ProgrammaticWorkspaceRuntime, WorkspaceEpochQueryAuthority};
 use super::published_arrow_result::PublishedResultOwner;
 use super::query_artifact::{
     QueryArtifactStage, QueryArtifactStageState, QueryExecutionArtifactAccumulator,
@@ -47,8 +45,8 @@ const REQUEST_CONTENT_PIN_DOMAIN: &[u8] = b"codefabric.programmatic-semantic-req
 
 /// Explicit application port from the released request DTO to normalized epoch-bound relations.
 ///
-/// Implementations are supplied during production composition. There is intentionally no default
-/// implementation and no lookup by released query form inside this backend.
+/// Implementations are installed by the compiled semantic release. There is intentionally no
+/// default implementation and no lookup by released query form inside this backend.
 pub trait ProgrammaticSemanticIngressPort: Send + Sync + 'static {
     /// Stable non-sentinel identity of this transformation release.
     fn authority_pin(&self) -> [u8; 32];
@@ -722,132 +720,33 @@ impl ProgrammaticSemanticQueryPorts {
     }
 }
 
-/// Read-only query routing over an atomically composed programmatic daemon.
+/// Read-only query routing over target-owned active-workspace and lifecycle authority.
 pub struct ProgrammaticSemanticQueryBackend {
-    workspaces: BTreeMap<String, Arc<ProgrammaticWorkspaceRuntime>>,
+    workspace_slots: Arc<WorkspaceSlotRegistry>,
+    lifecycle: Arc<LifecycleAuthority>,
     published_results: Arc<super::published_arrow_result::PublishedArrowResultRegistry>,
     ports: ProgrammaticSemanticQueryPorts,
-    startup_ready: AtomicBool,
 }
 
 impl fmt::Debug for ProgrammaticSemanticQueryBackend {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ProgrammaticSemanticQueryBackend")
-            .field("workspace_count", &self.workspaces.len())
+            .field("workspace_count", &self.workspace_slots.len())
+            .field("lifecycle", &self.lifecycle.observe())
             .field("ports", &self.ports)
-            .field("startup_ready", &self.startup_ready.load(Ordering::Acquire))
             .finish_non_exhaustive()
     }
 }
 
 impl ProgrammaticSemanticQueryBackend {
-    /// Snapshot the already-composed workspace routes and exact shared result registry.
-    ///
-    /// # Errors
-    ///
-    /// Rejects an empty daemon composition, invalid public workspace identity, or duplicate public
-    /// route. It never synthesizes a workspace or empty-success backend.
-    pub fn try_new(
-        composition: &ProgrammaticDaemonComposition,
-        ports: ProgrammaticSemanticQueryPorts,
-    ) -> Result<Self, ProgrammaticSemanticQueryBackendError> {
-        Self::try_new_with_startup_readiness(composition, ports, true)
-    }
-
-    /// Snapshot the production routes while keeping query execution closed until the daemon has
-    /// durably completed and read back its startup authority transaction.
-    ///
-    /// This is a transport-readiness gate, not semantic authority: every workspace, epoch,
-    /// program, policy, and result registry is still validated during construction. The gate can
-    /// move only from closed to open and therefore cannot become a process-local rollback toggle.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same complete-composition errors as [`Self::try_new`].
-    pub fn try_new_staged(
-        composition: &ProgrammaticDaemonComposition,
-        ports: ProgrammaticSemanticQueryPorts,
-    ) -> Result<Self, ProgrammaticSemanticQueryBackendError> {
-        Self::try_new_with_startup_readiness(composition, ports, false)
-    }
-
-    fn try_new_with_startup_readiness(
-        composition: &ProgrammaticDaemonComposition,
-        ports: ProgrammaticSemanticQueryPorts,
-        startup_ready: bool,
-    ) -> Result<Self, ProgrammaticSemanticQueryBackendError> {
-        if startup_ready && !composition.command_runtimes_ready() {
-            return Err(ProgrammaticSemanticQueryBackendError::CommandRecoveryPending);
-        }
-        let mut workspaces = BTreeMap::new();
-        for (_, workspace) in composition.workspaces() {
-            let public = workspace
-                .public_workspace_id()
-                .map_err(ProgrammaticSemanticQueryBackendError::WorkspaceIdentity)?;
-            let startup = workspace.startup_observation();
-            if *startup.releases.application_release().as_bytes() != ports.application_release() {
-                return Err(
-                    ProgrammaticSemanticQueryBackendError::ApplicationReleaseMismatch {
-                        workspace_id: public,
-                    },
-                );
-            }
-            let authority = workspace
-                .query_authorities()
-                .resolve(startup.epoch_id)
-                .map_err(
-                    |source| ProgrammaticSemanticQueryBackendError::EpochAuthority {
-                        workspace_id: public.clone(),
-                        source,
-                    },
-                )?;
-            if authority.authorization().query_policy() != &ports.scope_authorization.policy_pin() {
-                return Err(ProgrammaticSemanticQueryBackendError::ScopePolicyMismatch {
-                    workspace_id: public,
-                });
-            }
-            if workspaces
-                .insert(public.clone(), Arc::clone(workspace))
-                .is_some()
-            {
-                return Err(ProgrammaticSemanticQueryBackendError::DuplicateWorkspace(
-                    public,
-                ));
-            }
-        }
-        if workspaces.is_empty() {
-            return Err(ProgrammaticSemanticQueryBackendError::EmptyWorkspaceSet);
-        }
-        Ok(Self {
-            workspaces,
-            published_results: Arc::clone(composition.published_results()),
-            ports,
-            startup_ready: AtomicBool::new(startup_ready),
-        })
-    }
-
-    /// Open query execution after the daemon has read back the durable startup/cutover authority.
-    ///
-    /// This transition is intentionally one-way and idempotent. Shutdown remains owned by the
-    /// workspace admission runtimes and joined daemon lifecycle rather than this startup gate.
-    pub fn open_after_startup_authority(&self) {
-        self.startup_ready.store(true, Ordering::Release);
-    }
-
-    /// Whether the one-way startup authority barrier has opened.
-    #[must_use]
-    pub fn startup_authority_is_ready(&self) -> bool {
-        self.startup_ready.load(Ordering::Acquire)
-    }
-
-    fn require_startup_authority(&self) -> Result<(), SemanticQueryError> {
-        if self.startup_authority_is_ready() {
+    fn require_semantic_admission(&self) -> Result<(), SemanticQueryError> {
+        if self.lifecycle.observe().semantic_admission_open() {
             Ok(())
         } else {
             Err(query_error(
-                "startup_admission",
-                "programmatic daemon startup authority is not yet durable and ready",
+                "semantic_admission",
+                "production lifecycle authority has not opened semantic admission",
             ))
         }
     }
@@ -859,14 +758,46 @@ impl ProgrammaticSemanticQueryBackend {
         &self.published_results
     }
 
-    fn workspace(
+    /// Lease the exact active workspace selected by the target-owned slot registry.
+    ///
+    /// Release and policy validation deliberately happens after the lease is acquired: a later
+    /// slot swap cannot change this request's runtime while these checks and its execution run.
+    fn workspace_lease(
         &self,
         public_workspace_id: &str,
-    ) -> Result<Arc<ProgrammaticWorkspaceRuntime>, SemanticQueryError> {
-        self.workspaces
-            .get(public_workspace_id)
-            .cloned()
-            .ok_or_else(|| query_error("workspace_route", "programmatic workspace is not admitted"))
+    ) -> Result<ActiveWorkspaceLease, SemanticQueryError> {
+        let workspace_id = decode_public_id(IdentityDomain::Workspace, None, public_workspace_id)
+            .map(WorkspaceId::from_bytes)
+            .map_err(|error| query_error("workspace_route", error.to_string()))?;
+        let slot = self.workspace_slots.slot(workspace_id).ok_or_else(|| {
+            query_error(
+                "workspace_route",
+                "workspace is absent from the production slot registry",
+            )
+        })?;
+        let lease = slot
+            .lease()
+            .map_err(|error| query_error("workspace_route", error.to_string()))?;
+        let workspace = lease.workspace().runtime();
+        let startup = workspace.startup_observation();
+        if *startup.releases.application_release().as_bytes() != self.ports.application_release() {
+            return Err(query_error(
+                "application_release",
+                "active workspace differs from the installed query application release",
+            ));
+        }
+        let authority = workspace
+            .query_authorities()
+            .resolve(lease.workspace().selection().epoch_id())
+            .map_err(|error| query_error("epoch_authority", error.to_string()))?;
+        if authority.authorization().query_policy() != &self.ports.scope_authorization.policy_pin()
+        {
+            return Err(query_error(
+                "scope_policy",
+                "active workspace differs from the installed query-policy release",
+            ));
+        }
+        Ok(lease)
     }
 
     fn project_snapshot(
@@ -903,12 +834,15 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         &self,
         request: &ParsedSemanticRequest,
     ) -> Result<(), SemanticQueryError> {
-        self.require_startup_authority()?;
-        self.workspace(&request.request.workspace_id)?;
-        self.ports
+        self.require_semantic_admission()?;
+        let workspace_lease = self.workspace_lease(&request.request.workspace_id)?;
+        let validation = self
+            .ports
             .ingress
             .validate_request(request)
-            .map_err(|error| query_error("programmatic_ingress", error.to_string()))
+            .map_err(|error| query_error("programmatic_ingress", error.to_string()));
+        drop(workspace_lease);
+        validation
     }
 
     async fn execute(
@@ -926,8 +860,8 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "query was cancelled before admission",
             );
         }
-        if let Err(error) = self.require_startup_authority() {
-            return failed_error(&artifacts, "startup_admission", error);
+        if let Err(error) = self.require_semantic_admission() {
+            return failed_error(&artifacts, "semantic_admission", error);
         }
         if request.request.workspace_id != context.workspace_id() {
             return failed(
@@ -936,10 +870,11 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "authenticated workspace differs from request workspace",
             );
         }
-        let workspace = match self.workspace(context.workspace_id()) {
+        let workspace_lease = match self.workspace_lease(context.workspace_id()) {
             Ok(workspace) => workspace,
             Err(error) => return failed_error(&artifacts, "workspace_route", error),
         };
+        let workspace = workspace_lease.workspace().runtime();
         let context_registry = context.published_results();
         if !Arc::ptr_eq(&context_registry, &self.published_results)
             || !Arc::ptr_eq(workspace.published_results(), &self.published_results)
@@ -977,7 +912,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         // cannot authenticate and release.
         let snapshot = match self.project_snapshot(
             context.workspace_id(),
-            &workspace,
+            workspace.as_ref(),
             &authority,
             freshness,
         ) {
@@ -986,7 +921,11 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         };
 
         artifacts.set_phase("semantic_binding");
-        let ingress = match self.ports.ingress.project(&request, &workspace, &authority) {
+        let ingress = match self
+            .ports
+            .ingress
+            .project(&request, workspace.as_ref(), &authority)
+        {
             Ok(ingress) => ingress,
             Err(error) => return failed(&artifacts, "programmatic_ingress", error.to_string()),
         };
@@ -1074,7 +1013,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         let authorization = match self.ports.scope_authorization.authorize(
             &request,
             context.owner(),
-            &workspace,
+            workspace.as_ref(),
             &authority,
             &handoff.scopes,
         ) {
@@ -1222,7 +1161,9 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         &self,
         workspace_id: &str,
     ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
-        let workspace = self.workspace(workspace_id)?;
+        self.require_semantic_admission()?;
+        let workspace_lease = self.workspace_lease(workspace_id)?;
+        let workspace = workspace_lease.workspace().runtime();
         let lease = workspace
             .admission()
             .admit()
@@ -1239,7 +1180,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         }
         self.project_snapshot(
             workspace_id,
-            &workspace,
+            workspace.as_ref(),
             &authority,
             FreshnessState::Current,
         )
@@ -1352,30 +1293,10 @@ pub enum ProgrammaticQueryPortError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProgrammaticSemanticQueryBackendError {
-    #[error("programmatic daemon contains no admitted workspace")]
-    EmptyWorkspaceSet,
-    #[error("programmatic command recovery is incomplete; unstaged query ingress is forbidden")]
-    CommandRecoveryPending,
     #[error("programmatic query ports have no application release identity")]
     MissingApplicationRelease,
     #[error("programmatic query {0} port has no authority pin")]
     MissingPortPin(&'static str),
-    #[error("programmatic query application release differs for workspace {workspace_id}")]
-    ApplicationReleaseMismatch { workspace_id: String },
-    #[error("programmatic scope policy differs for workspace {workspace_id}")]
-    ScopePolicyMismatch { workspace_id: String },
-    #[error(
-        "programmatic query epoch authority is unavailable for workspace {workspace_id}: {source}"
-    )]
-    EpochAuthority {
-        workspace_id: String,
-        #[source]
-        source: super::programmatic_workspace::WorkspaceEpochQueryAuthorityRegistryError,
-    },
-    #[error("public workspace route {0} is duplicated")]
-    DuplicateWorkspace(String),
-    #[error("programmatic workspace has an invalid public identity: {0}")]
-    WorkspaceIdentity(#[source] crate::identity::IdentityError),
 }
 
 #[cfg(test)]
@@ -1486,26 +1407,61 @@ mod tests {
     }
 
     #[test]
-    fn startup_authority_gate_is_fail_closed_one_way_and_idempotent() {
+    fn lifecycle_authority_is_the_only_semantic_admission_gate() {
+        use super::super::production_kernel::ProductionLifecyclePhase;
+
+        let lifecycle = Arc::new(LifecycleAuthority::new());
         let backend = ProgrammaticSemanticQueryBackend {
-            workspaces: BTreeMap::new(),
+            workspace_slots: Arc::new(WorkspaceSlotRegistry::new()),
+            lifecycle: Arc::clone(&lifecycle),
             published_results: Arc::new(
                 super::super::published_arrow_result::PublishedArrowResultRegistry::new(),
             ),
             ports: probes([9; 32], [1; 32], [2; 32], [3; 32]).unwrap(),
-            startup_ready: AtomicBool::new(false),
         };
 
-        assert!(!backend.startup_authority_is_ready());
-        let error = backend.require_startup_authority().unwrap_err();
+        let error = backend.require_semantic_admission().unwrap_err();
         assert!(matches!(
             error,
-            SemanticQueryError::Phase { ref pointer, .. } if pointer == "startup_admission"
+            SemanticQueryError::Phase { ref pointer, .. } if pointer == "semantic_admission"
         ));
 
-        backend.open_after_startup_authority();
-        backend.open_after_startup_authority();
-        assert!(backend.startup_authority_is_ready());
-        backend.require_startup_authority().unwrap();
+        for (expected, next) in [
+            (
+                ProductionLifecyclePhase::Configured,
+                ProductionLifecyclePhase::DaemonLeased,
+            ),
+            (
+                ProductionLifecyclePhase::DaemonLeased,
+                ProductionLifecyclePhase::WriterFenced,
+            ),
+            (
+                ProductionLifecyclePhase::WriterFenced,
+                ProductionLifecyclePhase::EndpointsBoundBootstrapping,
+            ),
+            (
+                ProductionLifecyclePhase::EndpointsBoundBootstrapping,
+                ProductionLifecyclePhase::SoleTargetAuthorityObserved,
+            ),
+            (
+                ProductionLifecyclePhase::SoleTargetAuthorityObserved,
+                ProductionLifecyclePhase::SoleTargetAuthorityCommitted,
+            ),
+            (
+                ProductionLifecyclePhase::SoleTargetAuthorityCommitted,
+                ProductionLifecyclePhase::Ready,
+            ),
+        ] {
+            lifecycle.advance(expected, next).unwrap();
+        }
+        backend.require_semantic_admission().unwrap();
+
+        lifecycle
+            .advance(
+                ProductionLifecyclePhase::Ready,
+                ProductionLifecyclePhase::Draining,
+            )
+            .unwrap();
+        assert!(backend.require_semantic_admission().is_err());
     }
 }

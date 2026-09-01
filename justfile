@@ -345,7 +345,6 @@ semantic-request-contract-integrity-check:
 semantic-request-program-check:
     cargo nextest run --locked --lib -E 'test(/(all_eight_released_forms_compile_from_typed_program_rows|epoch_bound_ingress_consumes_every_typed_relation_row_once|epoch_bound_direct_compiler_lowers_exact_programs_returns_and_handoffs)/)' --no-tests=fail
     cargo nextest run --locked --lib -E 'test(/(all_eight_epoch_bound_forms_execute_through_one_real_authorized_child|relational_program_executes_only_through_authorized_child_inputs)/)' --no-tests=fail
-    cargo nextest run --locked --lib -E 'test(real_delta_sqlite_daemon_query_activation_and_process_reopen)' --no-tests=fail
 
 [doc("Validate the exact production workspace factory, typed inputs, ports, and release pins")]
 [group('test')]
@@ -356,18 +355,18 @@ production-composition-contract-integrity-check:
 [doc("Exercise the real typed-input daemon composition and causal query/activation vertical")]
 [group('test')]
 programmatic-production-composition-check:
-    cargo nextest run --locked --lib -E 'test(/(epoch_query_registry_is_exact_and_workspace_scoped|activation_admission_installs_before_swap_and_rejects_substituted_authority|real_delta_sqlite_daemon_query_activation_and_process_reopen)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(epoch_query_registry_is_exact_and_workspace_scoped|activation_admission_installs_before_swap_and_rejects_substituted_authority)/)' --no-tests=fail
     cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
 
 [doc("Reject default, bootstrap, empty, and arbitrary-label production authority")]
 [group('test')]
 daemon-bootstrap-route-denial-check:
-    cargo nextest run --locked --lib -E 'test(/(production_factory_rejects_empty_workspace_without_endpoint_or_lease_leaks|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|daemon_factory_rejects_an_empty_workspace_set|lifecycle_rejects_skips_stale_writers_and_false_ready|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(production_factory_rejects_empty_workspace_without_endpoint_or_lease_leaks|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|lifecycle_rejects_skips_stale_writers_and_false_ready|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail
 
 [doc("Prove bounded cancellation, shutdown, restart, and durable runtime reconstruction")]
 [group('test')]
 programmatic-runtime-lifecycle-check:
-    cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|real_delta_sqlite_daemon_query_activation_and_process_reopen|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
     cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
 
 [doc("Prove released lifecycle identity, Protobuf descriptors, UDS peer policy, deadlines, and frame limits")]
@@ -377,10 +376,11 @@ public-lifecycle-wire-contract-integrity-check:
     cargo nextest run --locked --test integration -E 'test(/(wp10_behavioral_acceptance|missing_or_mismatched_identity_is_rejected_before_handler_dispatch|rust_client_deadline_cancels_a_slow_rpc|rust_client_and_server_apply_symmetric_four_mib_limits)/)' --no-tests=fail
     uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_proto.py codefabric-cpg-mcp/tests/test_settings.py -k 'wp10 or generated_descriptors or python_channel or daemon_scheme'
 
-[doc("Exercise real Delta activation and restart through the production UDS daemon and FastMCP Arrow resources")]
+[doc("Exercise the target production binary lifecycle without predecessor serving composition")]
 [group('test')]
 lifecycle-production-vertical-check:
-    cargo nextest run --locked --lib -E 'test(/(real_delta_sqlite_daemon_query_activation_and_process_reopen|production_serve_requires_programmatic_composition|wp12_behavioral_acceptance)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
 
 [doc("Keep FastMCP UDS-only and presentation-only while proving real generated-gRPC Arrow delivery")]
 [group('test')]
@@ -467,23 +467,30 @@ successor-four-domain-release-check:
 [doc("Prove retired bootstrap, model, ontology, dual-epoch, and candidate authority stays absent")]
 [group('test')]
 bootstrap-model-decommission-integrity-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/wp30_authority_zero_state.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_wp30_authority_zero_state.py -k 'int_'
     ./scripts/model_zero_state_check.sh
 
-[doc("Prove cold programmatic composition constructs and queries without predecessor artifacts")]
+[doc("Prove the compiled release reaches honest target lifecycle states without predecessor inputs")]
 [group('test')]
-bootstrap-model-consumer-cutover-check:
-    cargo nextest run --locked --lib -E 'test(/(provider_plan_schema_observations_and_query_share_one_sealed_session|real_delta_sqlite_daemon_query_activation_and_process_reopen)/)' --no-tests=fail
+compiled-release-consumer-cutover-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/wp30_authority_zero_state.py
+    cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
 
-[doc("Reject every released request or daemon attempt to select predecessor authority")]
+[doc("Reject every live legacy path, symbol, feature, target, package, recipe, and selector")]
 [group('test')]
-bootstrap-model-dual-authority-zero-state-check:
+bootstrap-ontology-authority-zero-state-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/wp30_authority_zero_state.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_wp30_authority_zero_state.py -k 'neg_'
     ./scripts/model_zero_state_check.sh
-    cargo nextest run --locked --lib -E 'test(/(released_request_parser_rejects_unreleased_fields|production_serve_requires_programmatic_composition)/)' --no-tests=fail
 
-[doc("Reopen exact programmatic command and query authority without model artifacts")]
+[doc("Rebuild, package, drain, stop, and restart the target binary without model artifacts")]
 [group('test')]
 programmatic-model-free-restart-check:
-    cargo nextest run --locked --lib -E 'test(/(real_delta_sqlite_daemon_query_activation_and_process_reopen|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/wp30_authority_zero_state.py
+    cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
 
 [doc("Validate the plan-derived schema, transformation, native-rung, and observation contract matrix")]
 [group('test')]

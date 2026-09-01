@@ -962,7 +962,6 @@ PROVENANCE        -> before/after versions and spec/config/code/environment IDs,
 | `src/fabric/publication.rs` | multi-table publication and snapshot activation | MOD-07, OBS-03, STA-03 |
 | `src/fabric/result_checksum.rs` | durable result identity over query output | MOD-06, OBS-08 |
 | `src/contracts/models.rs` | wire models carrying table/version identity | SCH-10, OBS-03 |
-| `src/bin/codefabric_model/aggregate_driver.rs` | model-compiler side Delta usage | MOD, SCH |
 | `scripts/stable_graph_check.sh` | exact revision, feature, and type-universe enforcement | INT-10, STO-08, TST-14 |
 
 **Constraints** (repository invariants these documents serve):

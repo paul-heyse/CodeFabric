@@ -277,7 +277,6 @@ programmatic_epoch_consumers=(
   src/fabric/programmatic_epoch.rs
   src/fabric/programmatic_observation_delta.rs
   src/fabric/programmatic_workspace.rs
-  src/fabric/programmatic_workspace_vertical_tests.rs
   src/fabric/relational_query_runtime.rs
 )
 if rg -n \

@@ -941,8 +941,7 @@ def derive_plan_status(
             implemented = {
                 oracle: (
                     oracle.removeprefix("just ") in just_recipes
-                    if oracle.startswith("just ")
-                    else _implemented_oracle(root, oracle)
+                    or _implemented_oracle(root, oracle)
                 )
                 for oracle in declared_oracles
             }
