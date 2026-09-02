@@ -56,8 +56,8 @@ R2_FROZEN_BYTES_SHA256 = {
 R3_FROZEN_BYTES_SHA256 = {
     "causal-fixtures.yaml": "753cf58067d344bbb946d340de0ae5f9fc95d32a01b068c6ffe84dde60d7f3a0",
     "expectations.yaml": "ec5caeed0532f8109dd4519c3d05a10190a8480293ed7b5a12da048a6cf3acf2",
-    "independent-review.yaml": "912311626f40e617444edb8ccd4206e86b872c11a4c747b35caec0434ca77fae",
-    "issuance.yaml": "7a8b4f0ba65735d9759b470648187a58fa11699fc24fc0b390538ae0c33a0311",
+    "independent-review.yaml": "0cbcfef1b8ba3c2d3d74d66555abbf01ca13b8e362773714c5fab7f5896ee512",
+    "issuance.yaml": "07a2db5ed0a636e343f7186c1ea1ed061c74adaf12b684001b140fb0c281376a",
     "negative-fixtures.yaml": "aa21f762eb9b60edfe667c2cf0bcf377fcf19cca9a8141330aeb40ad95dbfb28",
     "performance-method.yaml": "ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df",
 }
@@ -203,7 +203,7 @@ RELEASE_SPECS = {
         performance_release_id=R1_RELEASE_ID,
         frozen_bytes_sha256=R3_FROZEN_BYTES_SHA256,
         source_input_paths=R3_SOURCE_INPUT_PATHS,
-        review_status="pending",
+        review_status="accepted",
     ),
 }
 
@@ -1052,6 +1052,61 @@ def validate_independent_review(bundle: Bundle) -> int:
             and handoff.get("changed_claim_falsification_completed") is True,
             "RFV5_REVIEW_NOT_INDEPENDENT",
             "r2 acceptance is not distinct, claim-specific, or candidate-bound",
+        )
+    elif bundle.spec.release_id == R3_RELEASE_ID:
+        authoring = _mapping(
+            bundle.issuance.get("authoring_constraints"), "authoring_constraints"
+        )
+        reviewer_identity = review.get("reviewer_identity")
+        dispositions = _rows(review.get("dispositions"), "review.dispositions")
+        disposition_ids = [str(row.get("claim_id")) for row in dispositions]
+        required_scopes = {
+            "suite-causality",
+            "expectation-independence",
+            "relational-observation-grounding",
+            "negative-fixture-discrimination",
+            "changed-resource-denial-status-and-safe-code-grounding",
+            "release-lineage-mechanics",
+            "no-history-comparator-or-target-output-authority",
+            "performance-method-byte-identity-and-candidate-neutrality",
+            "r1-r2-byte-preservation",
+        }
+        handoff = _mapping(review.get("handoff"), "review.handoff")
+        limitations = review.get("limitations")
+        _require(
+            review.get("acceptance_authority") is True
+            and review.get("author_identity") == authoring.get("author_identity")
+            and isinstance(reviewer_identity, str)
+            and bool(reviewer_identity)
+            and reviewer_identity != authoring.get("author_identity")
+            and review.get("reviewed_candidate_commit")
+            == "0664fb351b0d76c190cfdf84a3f50d895edcc911"
+            and review.get("changed_claim_ids")
+            == ["RFV5-FM4-011", "RFV5-FM4-015", "RFV5-FM4-016"]
+            and review.get("inherited_performance_release_id") == R1_RELEASE_ID
+            and set(review.get("scopes", [])) == required_scopes
+            and len(disposition_ids) == len(set(disposition_ids)) == 16
+            and set(disposition_ids) == set(expectations)
+            and all(
+                row.get("disposition") == "accepted"
+                and isinstance(row.get("rationale"), str)
+                and bool(row.get("rationale"))
+                for row in dispositions
+            )
+            and isinstance(limitations, list)
+            and len(limitations) == 2
+            and all(isinstance(item, str) and bool(item) for item in limitations)
+            and "filename and claim, base-case, and fault labels" in str(limitations[1])
+            and "no file body, behavior, expected or observed values, runtime output"
+            in str(limitations[1])
+            and handoff.get("author_may_accept") is False
+            and handoff.get("r2_acceptance_reused") is False
+            and handoff.get("target_output_used_as_expected_value_authority") is False
+            and handoff.get("distinct_reviewer_completed") is True
+            and handoff.get("exact_candidate_hash_binding_completed") is True
+            and handoff.get("changed_claim_falsification_completed") is True,
+            "RFV5_REVIEW_NOT_INDEPENDENT",
+            "r3 acceptance is not distinct, complete, limited, or candidate-bound",
         )
     _require(
         review.get("reviewed_expectations_sha256")

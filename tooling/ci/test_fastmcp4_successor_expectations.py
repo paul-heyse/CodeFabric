@@ -66,19 +66,19 @@ def _copy_root(tmp_path: Path, release_path: Path = RELEASE_PATH) -> Path:
 def test_int_public_issuance_api_returns_all_independent_cases() -> None:
     r1 = validate_issuance(release_path=R1_RELEASE_PATH, require_review=True)
     r2 = validate_issuance(release_path=R2_RELEASE_PATH, require_review=True)
-    r3 = validate_issuance(release_path=R3_RELEASE_PATH, require_review=False)
+    r3 = validate_issuance(release_path=R3_RELEASE_PATH, require_review=True)
     for bundle in (r1, r2, r3):
         assert len(bundle.expectations) == 16
         assert len(bundle.causal) == 16
         assert len(bundle.negative) == 16
 
 
-def test_int_active_release_is_allowlisted_r3_candidate() -> None:
+def test_int_active_release_is_allowlisted_accepted_r3() -> None:
     bundle = load_bundle()
     assert RELEASE_PATH == R3_RELEASE_PATH
     assert bundle.spec.release_id == R3_RELEASE_ID
     assert bundle.release_dir == ROOT / R3_RELEASE_PATH
-    assert bundle.spec.review_status == "pending"
+    assert bundle.spec.review_status == "accepted"
 
 
 def test_int_all_release_paths_are_allowlisted_and_absolute_form_is_supported() -> None:
@@ -153,7 +153,7 @@ def test_ops_every_r2_selector_reports_nonzero_selection(command: str) -> None:
 
 @pytest.mark.parametrize(
     "command",
-    sorted(set(SUBCOMMANDS) - {"independent-expectation-review"}),
+    sorted(SUBCOMMANDS),
 )
 def test_ops_every_review_independent_r3_selector_reports_nonzero_selection(
     command: str,
@@ -164,10 +164,21 @@ def test_ops_every_review_independent_r3_selector_reports_nonzero_selection(
     assert int(report["selected_count"]) > 0
 
 
-def test_beh_r3_independent_review_remains_pending() -> None:
-    with pytest.raises(ExpectationReleaseError) as failure:
-        validate_issuance(release_path=R3_RELEASE_PATH, require_review=True)
-    assert failure.value.code == "RFV5_REVIEW_PENDING"
+def test_beh_r3_independent_review_is_commit_bound_and_claim_specific() -> None:
+    bundle = validate_issuance(release_path=R3_RELEASE_PATH, require_review=True)
+    review = bundle.review["review"]
+    assert review["status"] == "accepted"
+    assert review["acceptance_authority"] is True
+    assert review["reviewer_identity"] != review["author_identity"]
+    assert review["reviewed_candidate_commit"] == (
+        "0664fb351b0d76c190cfdf84a3f50d895edcc911"
+    )
+    assert review["changed_claim_ids"] == [
+        "RFV5-FM4-011",
+        "RFV5-FM4-015",
+        "RFV5-FM4-016",
+    ]
+    assert len(review["dispositions"]) == 16
 
 
 def test_beh_r3_provenance_separates_gap_discovery_from_expected_value_authority() -> (
@@ -192,19 +203,15 @@ def test_beh_r3_provenance_separates_gap_discovery_from_expected_value_authority
     assert audit["static_authority_adjudication_completed"] is True
 
 
-def test_beh_r3_pending_handoff_cannot_reuse_r2_acceptance_or_drift_hash() -> None:
+def test_beh_r3_acceptance_cannot_reuse_r2_acceptance() -> None:
     bundle = _bundle()
     review_document = copy.deepcopy(bundle.review)
     review = review_document["review"]
-    assert review["status"] == "pending"
-    assert review["acceptance_authority"] is False
-    assert review["reviewed_claim_ids"] == []
-    assert review["dispositions"] == []
-    assert review["handoff"]["r2_acceptance_may_be_reused"] is False
-    review["candidate_expectations_sha256"] = "0" * 64
+    assert review["handoff"]["r2_acceptance_reused"] is False
+    review["handoff"]["r2_acceptance_reused"] = True
     with pytest.raises(ExpectationReleaseError) as failure:
-        validate_drift(replace(bundle, review=review_document))
-    assert failure.value.code == "RFV5_REVIEW_HANDOFF_INVALID"
+        validate_independent_review(replace(bundle, review=review_document))
+    assert failure.value.code == "RFV5_REVIEW_NOT_INDEPENDENT"
 
 
 def test_beh_r2_review_is_distinct_claim_specific_and_accepted() -> None:
@@ -242,14 +249,14 @@ def test_ops_main_emits_machine_readable_report(
     assert report["selected_count"] == 16
 
 
-def test_beh_main_reports_active_r3_review_pending(
+def test_beh_main_reports_active_r3_review_accepted(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert main(["independent-expectation-review"]) == 1
-    captured = capsys.readouterr()
-    report = json.loads(captured.err)
-    assert report["code"] == "RFV5_REVIEW_PENDING"
-    assert report["status"] == "failed"
+    assert main(["independent-expectation-review"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["release_id"] == R3_RELEASE_ID
+    assert report["selected_count"] == 16
+    assert report["status"] == "passed"
 
 
 @pytest.mark.parametrize(
@@ -292,8 +299,7 @@ def test_beh_all_causal_fixtures_change_controlled_input_and_expected_observatio
 ):
     assert validate_independent_review(_r1_bundle()) == 16
     assert validate_independent_review(_r2_bundle()) == 16
-    bundle = validate_issuance(release_path=R3_RELEASE_PATH, require_review=False)
-    assert len(bundle.causal) == 16
+    assert validate_independent_review(_bundle()) == 16
 
 
 def test_beh_independent_review_hash_binding_drift_is_rejected() -> None:

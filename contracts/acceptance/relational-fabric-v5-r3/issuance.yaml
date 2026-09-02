@@ -145,14 +145,14 @@ counts:
   expectations: 16
   causal_fixtures: 16
   negative_fixtures: 16
-  reviewed_claims: 0
-  review_handoff_claims: 16
+  reviewed_claims: 16
+  review_handoff_claims: 0
   frozen_artifacts: 6
 
 artifact_sha256:
   causal-fixtures.yaml: 753cf58067d344bbb946d340de0ae5f9fc95d32a01b068c6ffe84dde60d7f3a0
   expectations.yaml: ec5caeed0532f8109dd4519c3d05a10190a8480293ed7b5a12da048a6cf3acf2
-  independent-review.yaml: 912311626f40e617444edb8ccd4206e86b872c11a4c747b35caec0434ca77fae
+  independent-review.yaml: 0cbcfef1b8ba3c2d3d74d66555abbf01ca13b8e362773714c5fab7f5896ee512
   issuance.yaml: self-excluded-use-sha256sums
   negative-fixtures.yaml: aa21f762eb9b60edfe667c2cf0bcf377fcf19cca9a8141330aeb40ad95dbfb28
   performance-method.yaml: ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df

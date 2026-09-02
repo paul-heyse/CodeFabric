@@ -1,25 +1,84 @@
 schema: codefabric.fastmcp4-successor.independent-review.v1
 release_id: relational-fabric-v5-wp43-r3
 review:
-  status: pending
-  acceptance_authority: false
+  status: accepted
+  acceptance_authority: true
   author_identity: codex-wp43-r3-expectation-release-author
-  reviewer_identity: null
-  reviewer_is_author: null
+  reviewer_identity: codex-wp43-r3-independent-contract-falsification-reviewer
+  reviewer_is_author: false
   production_imports_used: false
   target_execution_used: false
   predecessor_expected_values_used: false
-  reviewed_candidate_commit: null
-  candidate_expectations_sha256: ec5caeed0532f8109dd4519c3d05a10190a8480293ed7b5a12da048a6cf3acf2
-  candidate_causal_fixtures_sha256: 753cf58067d344bbb946d340de0ae5f9fc95d32a01b068c6ffe84dde60d7f3a0
-  candidate_negative_fixtures_sha256: aa21f762eb9b60edfe667c2cf0bcf377fcf19cca9a8141330aeb40ad95dbfb28
-  candidate_performance_method_sha256: ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df
+  reviewed_candidate_commit: 0664fb351b0d76c190cfdf84a3f50d895edcc911
+  reviewed_expectations_sha256: ec5caeed0532f8109dd4519c3d05a10190a8480293ed7b5a12da048a6cf3acf2
+  reviewed_causal_fixtures_sha256: 753cf58067d344bbb946d340de0ae5f9fc95d32a01b068c6ffe84dde60d7f3a0
+  reviewed_negative_fixtures_sha256: aa21f762eb9b60edfe667c2cf0bcf377fcf19cca9a8141330aeb40ad95dbfb28
+  reviewed_performance_method_sha256: ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df
   inherited_performance_release_id: relational-fabric-v5-wp43-r1
   changed_claim_ids:
     - RFV5-FM4-011
     - RFV5-FM4-015
     - RFV5-FM4-016
-  required_claim_ids:
+  scopes:
+    - suite-causality
+    - expectation-independence
+    - relational-observation-grounding
+    - negative-fixture-discrimination
+    - changed-resource-denial-status-and-safe-code-grounding
+    - release-lineage-mechanics
+    - no-history-comparator-or-target-output-authority
+    - performance-method-byte-identity-and-candidate-neutrality
+    - r1-r2-byte-preservation
+  dispositions:
+    - claim_id: RFV5-FM4-001
+      disposition: accepted
+      rationale: The successor suite, pinned stack, protocol era, and daemon bridge are exact static authority observations with a discriminating pin fault.
+    - claim_id: RFV5-FM4-002
+      disposition: accepted
+      rationale: Modern admission and typed legacy pre-dispatch rejection distinguish adapter admission from Rust business dispatch.
+    - claim_id: RFV5-FM4-003
+      disposition: accepted
+      rationale: The exact catalog preserves the permitted empty framework UI advertisement while rejecting application extension drift.
+    - claim_id: RFV5-FM4-004
+      disposition: accepted
+      rationale: Public outer schemas are exact presentation observations while semantic request authority and absence of adapter rewrites remain daemon-owned.
+    - claim_id: RFV5-FM4-005
+      disposition: accepted
+      rationale: The guarded-input relation proves daemon-owned fields and choices, safe presentation, selected-choice equality, and exactly-once resumed admission without runtime literals.
+    - claim_id: RFV5-FM4-006
+      disposition: accepted
+      rationale: ValidateQuery purity and the closed StartQuery outcome relation encode atomic start and reject hidden adapter retry or business dispatch.
+    - claim_id: RFV5-FM4-007
+      disposition: accepted
+      rationale: Completion remains bounded, advisory, selector-authorized, and subject to authoritative daemon revalidation.
+    - claim_id: RFV5-FM4-008
+      disposition: accepted
+      rationale: Resource handles stay daemon-minted and operation-authorized, bounded reads remain exact, and no adapter lease authority is introduced.
+    - claim_id: RFV5-FM4-009
+      disposition: accepted
+      rationale: Cancellation is forwarded once and reconnect resumes the accepted daemon-owned query identity without resubmission.
+    - claim_id: RFV5-FM4-010
+      disposition: accepted
+      rationale: Agent-count causality preserves one workspace daemon while isolating per-agent processes, channels, principals, and STDIO streams.
+    - claim_id: RFV5-FM4-011
+      disposition: accepted
+      rationale: Logical input capacity is separated from transport decode capacity; an invalid requested maximum maps to INVALID_ARGUMENT plus SAFE_ERROR_CODE_INVALID_REQUEST, while an offset past resource extent maps to OUT_OF_RANGE plus SAFE_ERROR_CODE_RANGE_NOT_SATISFIABLE, and the fault swaps both typed pairs before bytes or dispatch.
+    - claim_id: RFV5-FM4-012
+      disposition: accepted
+      rationale: Public errors remain typed and allowlisted, with independent mismatch paths for secret leakage, unsafe text, and STDOUT contamination.
+    - claim_id: RFV5-FM4-013
+      disposition: accepted
+      rationale: The adapter census excludes independent semantic, session, task, cache, resource, and data-plane authority.
+    - claim_id: RFV5-FM4-014
+      disposition: accepted
+      rationale: Live-scope zero state is distinct from immutable predecessor history, which remains neither selectable nor mutable.
+    - claim_id: RFV5-FM4-015
+      disposition: accepted
+      rationale: The r3 registration uses the active path while the method remains byte-identical to r1 and candidate-neutral in controls, ordering, samples, and budgets.
+    - claim_id: RFV5-FM4-016
+      disposition: accepted
+      rationale: The six artifacts and eight immutable inputs are exact hash-bound sets, the review binds the immutable candidate commit, and drift fails closed.
+  reviewed_claim_ids:
     - RFV5-FM4-001
     - RFV5-FM4-002
     - RFV5-FM4-003
@@ -36,12 +95,13 @@ review:
     - RFV5-FM4-014
     - RFV5-FM4-015
     - RFV5-FM4-016
-  reviewed_claim_ids: []
-  dispositions: []
+  limitations:
+    - Static contract review only; no production source, candidate behavior, runtime output, or WP48 observer or evidence content was inspected.
+    - A broad filename search accidentally exposed only the tests/integration/daemon/wp48_observer.rs filename and claim, base-case, and fault labels; no file body, behavior, expected or observed values, runtime output, or evidence content was inspected, and those incidental labels were excluded from adjudication.
   handoff:
     author_may_accept: false
-    r2_acceptance_may_be_reused: false
-    target_output_may_author_expected_values: false
-    acceptance_requires_distinct_reviewer: true
-    acceptance_requires_exact_candidate_hash_binding: true
-    acceptance_requires_falsification_of_all_changed_claims: true
+    r2_acceptance_reused: false
+    target_output_used_as_expected_value_authority: false
+    distinct_reviewer_completed: true
+    exact_candidate_hash_binding_completed: true
+    changed_claim_falsification_completed: true
