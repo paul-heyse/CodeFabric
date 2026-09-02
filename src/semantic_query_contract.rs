@@ -188,6 +188,8 @@ pub struct ParsedSemanticRequest {
 /// Stable failures at the released semantic-query ingress boundary.
 #[derive(Debug, Error)]
 pub enum SemanticQueryError {
+    #[error("SEMANTIC_REQUEST_CAPACITY: request exceeds the released byte bound")]
+    RequestTooLarge,
     #[error("INVALID_REQUEST_SCHEMA:SEMANTIC_QUERY_INVALID:{0}")]
     Invalid(String),
     #[error("{code}:{phase}:{pointer}:{message}")]
@@ -210,9 +212,7 @@ pub enum SemanticQueryError {
 /// Returns an error for oversized, non-canonical, or schema-invalid JSON.
 pub fn parse_request(bytes: &[u8]) -> Result<ParsedSemanticRequest, SemanticQueryError> {
     if bytes.len() > MAX_REQUEST_BYTES {
-        return Err(SemanticQueryError::Invalid(
-            "request exceeds maximum bytes".to_owned(),
-        ));
+        return Err(SemanticQueryError::RequestTooLarge);
     }
     let canonical_bytes = canonicalize_slice(bytes)?;
     let identity: serde_json::Value = serde_json::from_slice(&canonical_bytes)
@@ -1313,6 +1313,15 @@ mod tests {
         let bytes = crate::contracts::jcs::canonicalize_value(&value).unwrap();
         let error = parse_request(&bytes).unwrap_err();
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn released_request_parser_distinguishes_capacity_from_invalid_schema() {
+        let bytes = vec![b'x'; MAX_REQUEST_BYTES + 1];
+        assert!(matches!(
+            parse_request(&bytes),
+            Err(SemanticQueryError::RequestTooLarge)
+        ));
     }
 
     #[test]

@@ -3884,11 +3884,16 @@ fn terminal_state(state: QueryTerminalState) -> QueryExecutionState {
 }
 
 fn semantic_status(error: SemanticQueryError) -> Status {
-    let code = match error {
-        SemanticQueryError::Invalid(_) | SemanticQueryError::Canonical(_) => Code::InvalidArgument,
-        SemanticQueryError::Phase { .. } => Code::FailedPrecondition,
+    let (code, public_code) = match error {
+        SemanticQueryError::RequestTooLarge => {
+            (Code::ResourceExhausted, "SEMANTIC_REQUEST_CAPACITY")
+        }
+        SemanticQueryError::Invalid(_) | SemanticQueryError::Canonical(_) => {
+            (Code::InvalidArgument, "SEMANTIC_REQUEST")
+        }
+        SemanticQueryError::Phase { .. } => (Code::FailedPrecondition, "SEMANTIC_REQUEST"),
     };
-    public_status(code, "SEMANTIC_REQUEST")
+    public_status(code, public_code)
 }
 
 fn session_status(error: SessionAuthorityError) -> Status {
@@ -5442,6 +5447,25 @@ mod tests {
             assert_eq!(outside_extent_detail.layer, SafeErrorLayer::Resource as i32);
             assert!(!outside_extent_detail.retryable);
         }
+    }
+
+    #[test]
+    fn wp48_semantic_request_capacity_is_distinct_from_transport_and_schema_failure() {
+        let status = semantic_status(SemanticQueryError::RequestTooLarge);
+        assert_eq!(status.code(), Code::ResourceExhausted);
+        assert_eq!(status_public_code(&status), "SEMANTIC_REQUEST_CAPACITY");
+        let detail = SafeErrorMetadata::decode(
+            status
+                .metadata()
+                .get_bin("codefabric-safe-error-bin")
+                .unwrap()
+                .to_bytes()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(detail.code, SafeErrorCode::CapacityUnavailable as i32);
+        assert_eq!(detail.layer, SafeErrorLayer::Validation as i32);
+        assert!(detail.retryable);
     }
 
     #[test]
