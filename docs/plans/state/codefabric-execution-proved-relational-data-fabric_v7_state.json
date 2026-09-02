@@ -1,0 +1,203 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v7_2026-09-02.md",
+  "design_path": "docs/designs/codefabric_compiled_release_provider_fabric_runtime_boundary_design_v1_2026-09-02.md",
+  "baseline_commit": "de5db65c2834458eb57c7133183b8cef67a2491a",
+  "status": "executing",
+  "current_packet": "WP53",
+  "packets": {
+    "WP53": {
+      "status": "in_progress",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP54": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP55": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP56": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP57": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP58": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP59": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP60": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP61": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP62": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP63": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP64": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP65": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP66": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "milestones": {
+    "M13": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M14": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M15": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M16": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M17": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "decommission_batches": {
+    "DB19": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB20": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB21": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB22": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB23": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "baseline_failures": [
+    "fact-generation narrow feature check fails on four daemon-gated provider authority imports",
+    "active v5 plan health is false because WP44 and WP47 proving commits are untrusted at current HEAD"
+  ],
+  "discovered_obligations": [
+    {
+      "kind": "activation_tooling_correction",
+      "packet": "WP53",
+      "summary": "Preserve the activation-time ancestry, complete dirty-tree snapshot, baseline-failure seeding, and v7 executable-oracle selector as current governance behavior."
+    }
+  ],
+  "plan_deviations": [
+    {
+      "kind": "successor_plan_revision",
+      "from": "v6",
+      "to": "v7",
+      "summary": "V6 was never activated. V7 corrects its design-order dependency closure and activation assurance without changing the accepted target architecture."
+    }
+  ],
+  "next_action": "Implement WP53 application-owned provider contracts, rustc control projections, feature isolation, and executable boundary oracles.",
+  "updated_at": "2026-09-02T18:08:29Z"
+}

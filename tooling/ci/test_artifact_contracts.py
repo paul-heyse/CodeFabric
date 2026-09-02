@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from tooling.ci.artifact_contracts import (
+    ACTIVATION_WORKTREE_DIGEST_MODE,
     DEFAULT_PLAN,
     JUST_RECIPE,
     REVIEW_REQUIREMENTS,
@@ -18,6 +19,7 @@ from tooling.ci.artifact_contracts import (
     ArtifactContractError,
     _accepted_gate_substitutions,
     _accepted_input_evolution_paths,
+    _activation_working_tree_digest,
     _successor_evidence_claim_count,
     activate_plan,
     active_plan_path,
@@ -102,6 +104,9 @@ design_version: v1
 baseline_commit: {baseline}
 state_path: state.json
 cutover: true
+working_tree_digest_mode: {ACTIVATION_WORKTREE_DIGEST_MODE}
+working_tree_digest: {"0" * 64}
+activation_baseline_failure_1: fixture baseline failure
 ---
 
 ## 1. Outcome and non-goals
@@ -131,6 +136,12 @@ Executable oracle: `fixture_operational`
 
 ### DB01 — Fixture decommission
 """,
+        encoding="utf-8",
+    )
+    plan_values = parse_frontmatter(plan)
+    observed = _activation_working_tree_digest(root, plan, plan_values)
+    plan.write_text(
+        plan.read_text(encoding="utf-8").replace("0" * 64, observed, 1),
         encoding="utf-8",
     )
     return plan
@@ -166,6 +177,35 @@ def test_activation_creates_valid_state_before_pointer_cutover(tmp_path: Path) -
         expected_ids=plan_ids(plan),
     )
     assert state["plan_path"] == "plan.md"
+    assert state["baseline_failures"] == ["fixture baseline failure"]
+
+
+def test_activation_rejects_working_tree_drift(tmp_path: Path) -> None:
+    _init_repository(tmp_path)
+    plan = _write_activation_fixture(tmp_path, status="approved")
+    # The untracked path remains the same, so this proves that activation hashes
+    # its bytes rather than trusting a path-only porcelain inventory.
+    (tmp_path / "design.md").write_text("changed after approval\n", encoding="utf-8")
+
+    with pytest.raises(ArtifactContractError, match="working-tree inventory"):
+        activate_plan(tmp_path, plan)
+    assert not (tmp_path / "state.json").exists()
+
+
+def test_activation_rejects_nonancestor_baseline(tmp_path: Path) -> None:
+    _init_repository(tmp_path)
+    plan = _write_activation_fixture(tmp_path, status="approved")
+    ancestor = _git(tmp_path, "rev-parse", "HEAD")
+    tree = _git(tmp_path, "rev-parse", "HEAD^{tree}")
+    nonancestor = _git(tmp_path, "commit-tree", tree, "-m", "detached baseline")
+    plan.write_text(
+        plan.read_text(encoding="utf-8").replace(ancestor, nonancestor, 1),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ArtifactContractError, match="not an ancestor"):
+        activate_plan(tmp_path, plan)
+    assert not (tmp_path / "state.json").exists()
 
 
 def test_failed_activation_preserves_prior_pointer(tmp_path: Path) -> None:
@@ -222,36 +262,14 @@ def test_active_program_structural_acceptance() -> None:
     assert report["declared_input_count"] == len(declared_inputs(DEFAULT_PLAN))
 
 
-def test_active_v5_artifact_contract_uses_only_v5_evidence(
+def test_v5_artifact_contract_uses_only_v5_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from types import SimpleNamespace
 
-    from tooling.ci import (
-        fastmcp4_successor_expectations,
-        successor_evidence_issuance,
-        successor_evidence_issuance_v4,
-    )
+    from tooling.ci import fastmcp4_successor_expectations
 
     expected_claims = tuple(sorted(fastmcp4_successor_expectations.REQUIRED_FAMILIES))
-
-    def v3_predecessor_must_not_run(_root: Path) -> int:
-        raise AssertionError("v3 evidence remained live after v5 activation")
-
-    def v4_predecessor_must_not_run(_root: Path, *, require_review: bool) -> None:
-        del require_review
-        raise AssertionError("v4 evidence remained live after v5 activation")
-
-    monkeypatch.setattr(
-        successor_evidence_issuance,
-        "validate_transaction_integrity",
-        v3_predecessor_must_not_run,
-    )
-    monkeypatch.setattr(
-        successor_evidence_issuance_v4,
-        "validate_issuance",
-        v4_predecessor_must_not_run,
-    )
     monkeypatch.setattr(
         fastmcp4_successor_expectations,
         "validate_issuance",
@@ -259,8 +277,36 @@ def test_active_v5_artifact_contract_uses_only_v5_evidence(
             expectations=expected_claims if require_review else ()
         ),
     )
-    plan = parse_frontmatter(DEFAULT_PLAN)
+    plan = parse_frontmatter(
+        ROOT
+        / "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md"
+    )
     assert _successor_evidence_claim_count(ROOT, plan) == len(expected_claims)
+
+
+@pytest.mark.parametrize("version", ("v3", "v4"))
+def test_retired_relational_plan_has_no_live_evidence_validator(version: str) -> None:
+    with pytest.raises(ArtifactContractError, match="no evidence validator"):
+        _successor_evidence_claim_count(
+            ROOT,
+            {
+                "plan_id": "codefabric-execution-proved-relational-data-fabric",
+                "version": version,
+            },
+        )
+
+
+def test_v7_uses_only_executable_plan_oracles() -> None:
+    assert (
+        _successor_evidence_claim_count(
+            ROOT,
+            {
+                "plan_id": "codefabric-execution-proved-relational-data-fabric",
+                "version": "v7",
+            },
+        )
+        == 0
+    )
 
 
 def test_non_relational_plan_has_no_implicit_successor_evidence() -> None:

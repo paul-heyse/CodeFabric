@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,10 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 ACTIVE_PLAN_POINTER = Path("docs/plans/active-plan.json")
+ACTIVATION_WORKTREE_DIGEST_MODE = (
+    "git-status-diffs-and-untracked-content-excluding-activation-artifacts-v1"
+)
+ACTIVATION_BASELINE_FAILURE = re.compile(r"activation_baseline_failure_(\d+)")
 
 
 def load_just_recipes(root: Path = ROOT) -> dict[str, Any]:
@@ -531,12 +536,130 @@ def _initial_state(
         "decommission_batches": {
             identifier: entry() for identifier in identifiers["decommission_batches"]
         },
-        "baseline_failures": [],
+        "baseline_failures": _activation_baseline_failures(plan),
         "discovered_obligations": [],
         "plan_deviations": [],
         "next_action": "Reconcile dependency readiness before the first packet edit.",
         "updated_at": datetime.now(UTC).isoformat(),
     }
+
+
+def _activation_baseline_failures(plan: Mapping[str, Any]) -> list[str]:
+    """Return the ordered failures explicitly captured by the approved plan."""
+    failures: list[tuple[int, str]] = []
+    for key, value in plan.items():
+        match = ACTIVATION_BASELINE_FAILURE.fullmatch(key)
+        if match is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise ArtifactContractError(f"{key} must be a nonempty string")
+        failures.append((int(match.group(1)), value))
+    failures.sort()
+    observed = [number for number, _ in failures]
+    expected = list(range(1, len(failures) + 1))
+    if observed != expected:
+        raise ArtifactContractError(
+            "activation baseline failure keys must be contiguous from 1"
+        )
+    return [failure for _, failure in failures]
+
+
+def _activation_pathspecs(
+    root: Path, plan_path: Path, plan: Mapping[str, Any]
+) -> tuple[str, ...]:
+    """Select the whole tree except files created or switched by activation."""
+    excluded = (
+        _relative(plan_path, root),
+        str(plan["state_path"]),
+        ACTIVE_PLAN_POINTER.as_posix(),
+    )
+    for value in excluded:
+        relative = Path(value)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ArtifactContractError(
+                "activation snapshot exclusions must be repository-relative"
+            )
+    return (".", *(f":(top,exclude,literal){value}" for value in excluded))
+
+
+def _activation_working_tree_digest(
+    root: Path, plan_path: Path, plan: Mapping[str, Any]
+) -> str:
+    """Hash tracked state, both diff layers, and every untracked file's bytes."""
+    pathspecs = _activation_pathspecs(root, plan_path, plan)
+    digest = hashlib.sha256()
+    digest.update(b"codefabric-activation-working-tree-v1\0")
+
+    commands = (
+        ("status", "--porcelain=v2", "-z", "--untracked-files=all"),
+        ("diff", "--binary", "--no-ext-diff", "HEAD"),
+        ("diff", "--binary", "--no-ext-diff", "--cached", "HEAD"),
+    )
+    for command in commands:
+        result = _run_git(root, *command, "--", *pathspecs, text=False)
+        payload = bytes(result.stdout)
+        digest.update(command[0].encode("ascii") + b"\0")
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+
+    untracked = _run_git(
+        root,
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        *pathspecs,
+        text=False,
+    )
+    raw_paths = sorted(path for path in bytes(untracked.stdout).split(b"\0") if path)
+    for raw_path in raw_paths:
+        path = root / os.fsdecode(raw_path)
+        metadata = path.lstat()
+        digest.update(b"untracked\0")
+        digest.update(len(raw_path).to_bytes(8, "big"))
+        digest.update(raw_path)
+        digest.update(metadata.st_mode.to_bytes(8, "big"))
+        if stat.S_ISLNK(metadata.st_mode):
+            payload = os.fsencode(os.readlink(path))
+        elif stat.S_ISREG(metadata.st_mode):
+            payload = path.read_bytes()
+        else:
+            raise ArtifactContractError(
+                f"activation snapshot cannot hash untracked special file {raw_path!r}"
+            )
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
+
+
+def _validate_activation_snapshot(
+    root: Path, plan_path: Path, plan: Mapping[str, Any]
+) -> None:
+    """Prove the approved baseline and dirty-tree identity before publication."""
+    baseline = commit_trust(root, str(plan["baseline_commit"]))
+    if not baseline["exists"]:
+        raise ArtifactContractError("activation baseline commit does not exist")
+    if not baseline["ancestor"]:
+        raise ArtifactContractError(
+            "activation baseline commit is not an ancestor of HEAD"
+        )
+
+    mode = plan.get("working_tree_digest_mode")
+    expected = plan.get("working_tree_digest")
+    if mode != ACTIVATION_WORKTREE_DIGEST_MODE:
+        raise ArtifactContractError(
+            "activation requires the supported working_tree_digest_mode"
+        )
+    if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise ArtifactContractError(
+            "activation requires a lowercase SHA-256 working_tree_digest"
+        )
+    observed = _activation_working_tree_digest(root, plan_path, plan)
+    if observed != expected:
+        raise ArtifactContractError(
+            "activation working-tree inventory differs from the approved snapshot"
+        )
 
 
 def _stage_json(path: Path, value: Mapping[str, Any]) -> Path:
@@ -574,6 +697,8 @@ def activate_plan(root: Path, plan_path: Path) -> dict[str, Any]:
     )
     if plan["status"] != "approved":
         raise ArtifactContractError("only an approved plan can become active")
+
+    _validate_activation_snapshot(root, plan_path, plan)
 
     state_path = root / str(plan["state_path"])
     if state_path.exists():
@@ -828,11 +953,11 @@ def validate_artifacts(
 
 
 def _successor_evidence_claim_count(root: Path, plan: Mapping[str, Any]) -> int:
-    """Validate only the evidence transaction owned by the selected plan.
+    """Validate the sole live evidence transaction owned by the selected plan.
 
     The active-plan pointer is the authority for which successor transaction is
-    live.  Importing the predecessor validator unconditionally would keep its
-    expectations in the current governance path after a cutover.
+    live.  Retired plan versions remain immutable history, but their validators
+    are physically absent from the current governance path after the v5 cutover.
     """
 
     if plan.get("plan_id") != "codefabric-execution-proved-relational-data-fabric":
@@ -851,27 +976,10 @@ def _successor_evidence_claim_count(root: Path, plan: Mapping[str, Any]) -> int:
             raise ArtifactContractError(
                 f"v5 FastMCP 4 expectation release {error.code}: {error}"
             ) from error
-    if version == "v4":
-        from tooling.ci import (
-            successor_evidence_contracts_v4,
-            successor_evidence_issuance_v4,
-        )
-
-        try:
-            successor_evidence_contracts_v4.validate_evidence_contracts(root)
-        except successor_evidence_contracts_v4.V4ContractError as error:
-            raise ArtifactContractError(
-                f"v4 typed evidence contract {error.code}: {error}"
-            ) from error
-        return len(
-            successor_evidence_issuance_v4.validate_issuance(
-                root, require_review=True
-            ).expectations
-        )
-    if version == "v3":
-        from tooling.ci import successor_evidence_issuance
-
-        return successor_evidence_issuance.validate_transaction_integrity(root)
+    if version == "v7":
+        # V7 replaces the hand-issued successor-evidence transaction with the
+        # named executable oracles carried by each dependency-closed packet.
+        return 0
     raise ArtifactContractError(
         f"selected relational-fabric plan has no evidence validator: {version!r}"
     )
