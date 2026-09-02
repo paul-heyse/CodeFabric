@@ -1,0 +1,147 @@
+schema: codefabric.fastmcp4-successor.issuance.v1
+release_id: relational-fabric-v5-wp43-r2
+issued_for_packet: WP43
+suite:
+  suite_id: codefabric-relational-data-fabric
+  suite_version: 2.3.0
+  predecessor_version: 2.2.0
+  members:
+    - tag: SUITE
+      path: docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.2.md
+    - tag: ONT
+      path: docs/authoritative_design/code_property_graph_present_state_fact_ontology_specification_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/code_property_graph_present_state_fact_ontology_specification_v2.2.md
+    - tag: GEN
+      path: docs/authoritative_design/present_state_cpg_fact_generation_specification_python_rust_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/present_state_cpg_fact_generation_specification_python_rust_v2.2.md
+    - tag: FAB
+      path: docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v2.2.md
+    - tag: QRY
+      path: docs/authoritative_design/code_property_graph_semantic_query_specification_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/code_property_graph_semantic_query_specification_v2.2.md
+    - tag: LIFE
+      path: docs/authoritative_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v2.2.md
+    - tag: SRV
+      path: docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v2.2.md
+    - tag: RM
+      path: docs/authoritative_design/codefabric_2.3_implementation_roadmap_v1.0.md
+      artifact_version: 1.0.0
+      predecessor_path: docs/authoritative_design/codefabric_2.2_implementation_roadmap_v1.0.md
+  required_authority_tokens:
+    - FastMCP 4.0.0
+    - "2026-07-28"
+    - InputRequiredResult
+    - RequestStateSecurity
+    - StartQueryOutcome
+    - io.modelcontextprotocol/ui
+    - fastmcp  == 4.0.0
+    - mcp      == 2.1.1
+    - pydantic == 2.13.4
+
+immutable_source_inputs:
+  - path: docs/authoritative_design/code_property_graph_semantic_query_specification_v2.3.md
+    sha256: 4968ce530ad4f23df2c08a4780ac3160222ab3ae6c81c183755524721969dcb3
+  - path: docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v2.3.md
+    sha256: b3b9365c2f6d53105f254f0f6a69da5fc950e321a91dfc0880e55d58b7e39143
+  - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+    sha256: 21c957501ca2607c98067ace58ac07f49eddb72154bd2debff72d7f28d122084
+  - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v2.md
+    sha256: 202329441a517e097ac3a045cbf1022bf05242c8de2e8f2e2f58d5ecd3b9ee6f
+  - path: docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md
+    sha256: fe3259191cf8e90f8593d35ca913145789eed4ca6ba7f7592218a88effb398fb
+
+authoring_constraints:
+  author_identity: codex-wp43-r2-forward-expectation-author
+  method: manual-forward-correction-from-accepted-design-and-relational-properties
+  imports_production_modules: false
+  generated_observations_used: false
+  target_execution_used: false
+  predecessor_expected_values_used: false
+  target_execution_revealed_evidence_gap: true
+  target_execution_used_to_author_expected_values: false
+  target_output_copied_as_expected_values: false
+  correction_completed_after_target_execution: true
+  forbidden_sources:
+    - codefabric-cpg-mcp/src
+    - src
+    - tooling/proto/generated
+    - contracts/acceptance/relational-fabric-v3
+    - contracts/acceptance/relational-fabric-v4
+
+lineage:
+  predecessor_release_id: relational-fabric-v5-wp43-r1
+  predecessor_release_path: contracts/acceptance/relational-fabric-v5
+  amendment_kind: forward-corrected-expectation-release
+  reason: Target execution exposed that three r1 fields were synthetic implementation summaries rather than design-derived observations.
+  r1_bytes_mutated: false
+  r1_acceptance_reused_for_r2: false
+  r2_requires_fresh_independent_review: true
+  inherited_artifacts:
+    performance-method.yaml:
+      source_release_id: relational-fabric-v5-wp43-r1
+      source_path: contracts/acceptance/relational-fabric-v5/performance-method.yaml
+      sha256: ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df
+      byte_identical: true
+
+correction_audit:
+  target_execution_revealed_gap: true
+  target_output_used_as_authority: false
+  expected_values_derived_from: accepted-design-and-relational-properties
+  claim_dispositions:
+    - {claim_id: RFV5-FM4-001, disposition: carried-forward, literal_audit: design-identity-and-pin}
+    - {claim_id: RFV5-FM4-002, disposition: carried-forward, literal_audit: decoded-protocol-result}
+    - {claim_id: RFV5-FM4-003, disposition: fault-fixture-corrected, literal_audit: valid-extension-identifier-and-live-catalog}
+    - {claim_id: RFV5-FM4-004, disposition: forward-corrected, literal_audit: decoded-schema-plus-separate-daemon-authority}
+    - {claim_id: RFV5-FM4-005, disposition: forward-corrected, literal_audit: daemon-owned-field-and-authorized-choice-relations}
+    - {claim_id: RFV5-FM4-006, disposition: carried-forward, literal_audit: closed-rpc-outcome-relations}
+    - {claim_id: RFV5-FM4-007, disposition: carried-forward, literal_audit: authorized-reference-fixture}
+    - {claim_id: RFV5-FM4-008, disposition: carried-forward, literal_audit: controlled-handle-fixture-not-frozen-runtime-identity}
+    - {claim_id: RFV5-FM4-009, disposition: forward-corrected, literal_audit: daemon-owned-identity-presence-and-equality-relations}
+    - {claim_id: RFV5-FM4-010, disposition: carried-forward, literal_audit: controlled-principal-and-workspace-fixtures}
+    - {claim_id: RFV5-FM4-011, disposition: carried-forward, literal_audit: typed-denial-contract}
+    - {claim_id: RFV5-FM4-012, disposition: carried-forward, literal_audit: typed-public-error-and-redaction-contract}
+    - {claim_id: RFV5-FM4-013, disposition: carried-forward, literal_audit: executable-zero-state-counts}
+    - {claim_id: RFV5-FM4-014, disposition: carried-forward, literal_audit: executable-live-scope-zero-state-counts}
+    - {claim_id: RFV5-FM4-015, disposition: lineage-path-corrected, literal_audit: inherited-byte-identical-method}
+    - {claim_id: RFV5-FM4-016, disposition: lineage-count-corrected, literal_audit: release-fileset-and-source-count}
+
+selectors:
+  successor-authority-integrity:
+    oracle: fastmcp4-successor-authority-integrity-check
+    criterion: PC-WP43-INT
+  independent-expectation-review:
+    oracle: fastmcp4-independent-expectation-review-check
+    criterion: PC-WP43-BEH
+  negative-fixture-independence:
+    oracle: fastmcp4-negative-fixture-independence-check
+    criterion: PC-WP43-NEG
+  expectation-drift:
+    oracle: fastmcp4-expectation-drift-check
+    criterion: PC-WP43-OPS
+
+counts:
+  expectations: 16
+  causal_fixtures: 16
+  negative_fixtures: 16
+  reviewed_claims: 0
+  review_handoff_claims: 16
+  frozen_artifacts: 6
+
+artifact_sha256:
+  causal-fixtures.yaml: 77842bb7a33c6608e582337c84c88c484cda84ce0bcbdce9f172f6f4e78f6714
+  expectations.yaml: c1c1bb8a394ab02e53a2c91a205630e54dd3357ab1039f9f605fdc1ff65de751
+  independent-review.yaml: f508e21f3817c7eca32d4ed8efc4dd128c3301ef8c896ff1fa5a439c578c3508
+  issuance.yaml: self-excluded-use-sha256sums
+  negative-fixtures.yaml: 471e0e99573ffd59b814d2ffc9165c8755bb46c7389b2d98451a866fd209d60c
+  performance-method.yaml: ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df

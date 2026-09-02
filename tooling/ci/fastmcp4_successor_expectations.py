@@ -21,8 +21,12 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-RELEASE_PATH = Path("contracts/acceptance/relational-fabric-v5")
-RELEASE_ID = "relational-fabric-v5-wp43-r1"
+R1_RELEASE_PATH = Path("contracts/acceptance/relational-fabric-v5")
+R2_RELEASE_PATH = Path("contracts/acceptance/relational-fabric-v5-r2")
+R1_RELEASE_ID = "relational-fabric-v5-wp43-r1"
+R2_RELEASE_ID = "relational-fabric-v5-wp43-r2"
+RELEASE_PATH = R2_RELEASE_PATH
+RELEASE_ID = R2_RELEASE_ID
 EXPECTED_FILES = {
     "causal-fixtures.yaml",
     "expectations.yaml",
@@ -31,7 +35,7 @@ EXPECTED_FILES = {
     "negative-fixtures.yaml",
     "performance-method.yaml",
 }
-FROZEN_BYTES_SHA256 = {
+R1_FROZEN_BYTES_SHA256 = {
     "causal-fixtures.yaml": "aa8f3c8eff736171f04d51d6e4c9ccef2f6cc149be0460026043d48a63a5329f",
     "expectations.yaml": "c9e2fa028343914dac6bb8b1a3266c10f8538cea62ac5dc77f86ae9155865cdc",
     "independent-review.yaml": "0fdb22c5509545bd8f330a805a15223337676ae99a93e1df6d9c82459d64b0f9",
@@ -39,6 +43,15 @@ FROZEN_BYTES_SHA256 = {
     "negative-fixtures.yaml": "12ccb79370b729552926ad69118c444ffdbbaf92db77f4172bf4481df0e387c2",
     "performance-method.yaml": "ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df",
 }
+R2_FROZEN_BYTES_SHA256 = {
+    "causal-fixtures.yaml": "77842bb7a33c6608e582337c84c88c484cda84ce0bcbdce9f172f6f4e78f6714",
+    "expectations.yaml": "c1c1bb8a394ab02e53a2c91a205630e54dd3357ab1039f9f605fdc1ff65de751",
+    "independent-review.yaml": "f508e21f3817c7eca32d4ed8efc4dd128c3301ef8c896ff1fa5a439c578c3508",
+    "issuance.yaml": "e4853f0b03e518fa14dd48d251044543895b107121bffa980c2b6cd607d1446e",
+    "negative-fixtures.yaml": "471e0e99573ffd59b814d2ffc9165c8755bb46c7389b2d98451a866fd209d60c",
+    "performance-method.yaml": "ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df",
+}
+FROZEN_BYTES_SHA256 = R2_FROZEN_BYTES_SHA256
 REQUIRED_FAMILIES = {
     "successor_identity_and_pins",
     "modern_protocol_admission",
@@ -75,6 +88,8 @@ SUBCOMMANDS = {
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 CLAIM_ID = re.compile(r"RFV5-FM4-(\d{3})\Z")
 ALLOWED_DESIGN_PATHS = {
+    "docs/authoritative_design/code_property_graph_semantic_query_specification_v2.3.md",
+    "docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v2.3.md",
     "docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md",
     "docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v2.md",
     "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md",
@@ -89,10 +104,80 @@ class ExpectationReleaseError(ValueError):
         self.code = code
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate mapping keys."""
+
+
+def _construct_unique_mapping(
+    loader: _UniqueKeyLoader, node: yaml.nodes.MappingNode, deep: bool = False
+) -> dict[object, object]:
+    loader.flatten_mapping(node)
+    mapping: dict[object, object] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            duplicate = key in mapping
+        except TypeError as error:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                "found an unhashable key",
+                key_node.start_mark,
+            ) from error
+        if duplicate:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
+
+
+@dataclass(frozen=True)
+class ReleaseSpec:
+    """Immutable identity and hash policy for one allowlisted release directory."""
+
+    path: Path
+    release_id: str
+    performance_release_id: str
+    frozen_bytes_sha256: Mapping[str, str]
+    source_input_count: int
+    review_status: str
+
+
+RELEASE_SPECS = {
+    R1_RELEASE_PATH: ReleaseSpec(
+        path=R1_RELEASE_PATH,
+        release_id=R1_RELEASE_ID,
+        performance_release_id=R1_RELEASE_ID,
+        frozen_bytes_sha256=R1_FROZEN_BYTES_SHA256,
+        source_input_count=3,
+        review_status="accepted",
+    ),
+    R2_RELEASE_PATH: ReleaseSpec(
+        path=R2_RELEASE_PATH,
+        release_id=R2_RELEASE_ID,
+        performance_release_id=R1_RELEASE_ID,
+        frozen_bytes_sha256=R2_FROZEN_BYTES_SHA256,
+        source_input_count=5,
+        review_status="pending",
+    ),
+}
+
+
 @dataclass(frozen=True)
 class Bundle:
     root: Path
     release_dir: Path
+    spec: ReleaseSpec
     issuance: Mapping[str, Any]
     expectations: list[Mapping[str, Any]]
     causal: list[Mapping[str, Any]]
@@ -127,12 +212,12 @@ def _rows(value: object, context: str) -> list[Mapping[str, Any]]:
     return result
 
 
-def _load_yaml(path: Path, schema: str) -> Mapping[str, Any]:
+def _load_yaml(path: Path, schema: str, release_id: str) -> Mapping[str, Any]:
     _require(
         path.is_file(), "RFV5_RELEASE_FILE_MISSING", f"missing release file: {path}"
     )
     try:
-        value = yaml.safe_load(path.read_text(encoding="utf-8"))
+        value = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
     except yaml.YAMLError as error:
         raise ExpectationReleaseError(
             "RFV5_YAML_INVALID", f"{path}: {error}"
@@ -142,41 +227,72 @@ def _load_yaml(path: Path, schema: str) -> Mapping[str, Any]:
         document.get("schema") == schema, "RFV5_SCHEMA_INVALID", f"{path}: wrong schema"
     )
     _require(
-        document.get("release_id") == RELEASE_ID,
+        document.get("release_id") == release_id,
         "RFV5_RELEASE_ID_DRIFT",
         f"{path}: wrong release_id",
     )
     return document
 
 
+def _release_spec(root: Path, release_path: Path) -> tuple[Path, ReleaseSpec]:
+    resolved_root = root.resolve()
+    if release_path.is_absolute():
+        try:
+            relative = release_path.relative_to(resolved_root)
+        except ValueError as error:
+            raise ExpectationReleaseError(
+                "RFV5_RELEASE_NOT_ALLOWLISTED",
+                f"release path is outside root: {release_path}",
+            ) from error
+    else:
+        relative = release_path
+    normalized = Path(*relative.parts)
+    spec = RELEASE_SPECS.get(normalized)
+    _require(
+        spec is not None,
+        "RFV5_RELEASE_NOT_ALLOWLISTED",
+        f"release path is not allowlisted: {normalized}",
+    )
+    assert spec is not None
+    return resolved_root / normalized, spec
+
+
 def load_bundle(root: Path = ROOT, release_path: Path = RELEASE_PATH) -> Bundle:
-    release_dir = release_path if release_path.is_absolute() else root / release_path
+    release_dir, spec = _release_spec(root, release_path)
     issuance = _load_yaml(
-        release_dir / "issuance.yaml", "codefabric.fastmcp4-successor.issuance.v1"
+        release_dir / "issuance.yaml",
+        "codefabric.fastmcp4-successor.issuance.v1",
+        spec.release_id,
     )
     expectations_doc = _load_yaml(
         release_dir / "expectations.yaml",
         "codefabric.fastmcp4-successor.expectations.v1",
+        spec.release_id,
     )
     causal_doc = _load_yaml(
         release_dir / "causal-fixtures.yaml",
         "codefabric.fastmcp4-successor.causal-fixtures.v1",
+        spec.release_id,
     )
     negative_doc = _load_yaml(
         release_dir / "negative-fixtures.yaml",
         "codefabric.fastmcp4-successor.negative-fixtures.v1",
+        spec.release_id,
     )
     review = _load_yaml(
         release_dir / "independent-review.yaml",
         "codefabric.fastmcp4-successor.independent-review.v1",
+        spec.release_id,
     )
     performance = _load_yaml(
         release_dir / "performance-method.yaml",
         "codefabric.fastmcp4-successor.performance-method.v1",
+        spec.performance_release_id,
     )
     return Bundle(
-        root=root,
+        root=root.resolve(),
         release_dir=release_dir,
+        spec=spec,
         issuance=issuance,
         expectations=_rows(expectations_doc.get("expectations"), "expectations"),
         causal=_rows(causal_doc.get("fixtures"), "causal fixtures"),
@@ -272,6 +388,15 @@ def _expectation_index(bundle: Bundle) -> dict[str, Mapping[str, Any]]:
             "RFV5_EXPECTATION_NOT_INDEPENDENT",
             f"{claim_id}: generated, self-imported, target-derived, or predecessor-derived expectation",
         )
+        if bundle.spec.release_id == R2_RELEASE_ID:
+            _require(
+                provenance.get("release_lineage") == R1_RELEASE_ID
+                and provenance.get("target_execution_revealed_evidence_gap") is True
+                and provenance.get("target_output_used_as_expected_value_source")
+                is False,
+                "RFV5_EXPECTATION_NOT_INDEPENDENT",
+                f"{claim_id}: r2 correction provenance is incomplete",
+            )
         basis = _rows(row.get("design_basis"), f"{claim_id}.design_basis")
         _require(
             all(item.get("path") in ALLOWED_DESIGN_PATHS for item in basis),
@@ -351,11 +476,17 @@ def _validate_issuance(bundle: Bundle) -> None:
         "four oracle selectors drifted",
     )
     counts = _mapping(issuance.get("counts"), "issuance.counts")
+    reviewed_claims = 16 if bundle.spec.review_status == "accepted" else 0
     _require(
         counts.get("expectations") == 16
         and counts.get("causal_fixtures") == 16
         and counts.get("negative_fixtures") == 16
-        and counts.get("reviewed_claims") == 16,
+        and counts.get("reviewed_claims") == reviewed_claims
+        and counts.get("frozen_artifacts") == len(EXPECTED_FILES)
+        and (
+            bundle.spec.review_status == "accepted"
+            or counts.get("review_handoff_claims") == 16
+        ),
         "RFV5_COUNT_DRIFT",
         "issuance counts drifted",
     )
@@ -368,10 +499,57 @@ def _validate_issuance(bundle: Bundle) -> None:
         "RFV5_EXPECTATION_NOT_INDEPENDENT",
         "issuance permits generated/self-imported expectations",
     )
+    if bundle.spec.release_id == R2_RELEASE_ID:
+        _require(
+            authoring.get("target_execution_revealed_evidence_gap") is True
+            and authoring.get("target_execution_used_to_author_expected_values")
+            is False
+            and authoring.get("target_output_copied_as_expected_values") is False
+            and authoring.get("correction_completed_after_target_execution") is True,
+            "RFV5_EXPECTATION_NOT_INDEPENDENT",
+            "r2 authoring provenance does not distinguish gap discovery from expected-value authority",
+        )
+        lineage = _mapping(issuance.get("lineage"), "issuance.lineage")
+        inherited = _mapping(
+            lineage.get("inherited_artifacts"), "lineage.inherited_artifacts"
+        )
+        inherited_performance = _mapping(
+            inherited.get("performance-method.yaml"),
+            "lineage.inherited_artifacts.performance-method.yaml",
+        )
+        _require(
+            lineage.get("predecessor_release_id") == R1_RELEASE_ID
+            and lineage.get("predecessor_release_path") == R1_RELEASE_PATH.as_posix()
+            and lineage.get("r1_bytes_mutated") is False
+            and lineage.get("r1_acceptance_reused_for_r2") is False
+            and lineage.get("r2_requires_fresh_independent_review") is True
+            and inherited_performance.get("source_release_id") == R1_RELEASE_ID
+            and inherited_performance.get("source_path")
+            == (R1_RELEASE_PATH / "performance-method.yaml").as_posix()
+            and inherited_performance.get("sha256")
+            == R1_FROZEN_BYTES_SHA256["performance-method.yaml"]
+            and inherited_performance.get("byte_identical") is True,
+            "RFV5_RELEASE_LINEAGE_DRIFT",
+            "r2 lineage or inherited performance method drifted",
+        )
+        audit = _mapping(issuance.get("correction_audit"), "issuance.correction_audit")
+        dispositions = _rows(
+            audit.get("claim_dispositions"),
+            "issuance.correction_audit.claim_dispositions",
+        )
+        _require(
+            audit.get("target_execution_revealed_gap") is True
+            and audit.get("target_output_used_as_authority") is False
+            and {row.get("claim_id") for row in dispositions}
+            == {f"RFV5-FM4-{number:03d}" for number in range(1, 17)}
+            and len(dispositions) == 16,
+            "RFV5_CORRECTION_AUDIT_DRIFT",
+            "r2 correction audit is incomplete or target-authored",
+        )
     artifact_hashes = _mapping(issuance.get("artifact_sha256"), "artifact_sha256")
     expected_hashes = {
         name: digest
-        for name, digest in FROZEN_BYTES_SHA256.items()
+        for name, digest in bundle.spec.frozen_bytes_sha256.items()
         if name != "issuance.yaml"
     }
     _require(
@@ -538,11 +716,55 @@ def _validate_performance(bundle: Bundle) -> None:
     )
 
 
+def _validate_pending_review_handoff(bundle: Bundle) -> None:
+    _require(
+        bundle.spec.review_status == "pending",
+        "RFV5_REVIEW_STATUS_INVALID",
+        "pending review validation requested for an accepted release",
+    )
+    review = _mapping(bundle.review.get("review"), "independent review")
+    expectations = _expectation_index(bundle)
+    handoff = _mapping(review.get("handoff"), "independent review handoff")
+    frozen = bundle.spec.frozen_bytes_sha256
+    _require(
+        review.get("status") == "pending"
+        and review.get("acceptance_authority") is False
+        and review.get("reviewer_identity") is None
+        and review.get("reviewer_is_author") is None
+        and review.get("reviewed_claim_ids") == []
+        and review.get("dispositions") == []
+        and set(review.get("required_claim_ids", [])) == set(expectations)
+        and review.get("candidate_expectations_sha256") == frozen["expectations.yaml"]
+        and review.get("candidate_causal_fixtures_sha256")
+        == frozen["causal-fixtures.yaml"]
+        and review.get("candidate_negative_fixtures_sha256")
+        == frozen["negative-fixtures.yaml"]
+        and review.get("candidate_performance_method_sha256")
+        == frozen["performance-method.yaml"]
+        and review.get("inherited_performance_release_id") == R1_RELEASE_ID
+        and handoff.get("author_may_accept") is False
+        and handoff.get("r1_acceptance_may_be_reused") is False
+        and handoff.get("target_output_may_author_expected_values") is False
+        and handoff.get("acceptance_requires_distinct_reviewer") is True
+        and handoff.get("acceptance_requires_exact_candidate_hash_binding") is True
+        and handoff.get("acceptance_requires_falsification_of_all_changed_claims")
+        is True,
+        "RFV5_REVIEW_HANDOFF_INVALID",
+        "r2 independent-review handoff is not strictly pending or hash-bound",
+    )
+
+
 def validate_independent_review(bundle: Bundle) -> int:
     _validate_issuance(bundle)
     expectations = _expectation_index(bundle)
     causal_count = _validate_fixture_set(bundle, bundle.causal, negative=False)
     _validate_performance(bundle)
+    if bundle.spec.review_status == "pending":
+        _validate_pending_review_handoff(bundle)
+        raise ExpectationReleaseError(
+            "RFV5_REVIEW_PENDING",
+            f"{bundle.spec.release_id}: independent review is pending",
+        )
     review = _mapping(bundle.review.get("review"), "independent review")
     _require(
         review.get("status") == "accepted"
@@ -560,13 +782,13 @@ def validate_independent_review(bundle: Bundle) -> int:
     )
     _require(
         review.get("reviewed_expectations_sha256")
-        == FROZEN_BYTES_SHA256["expectations.yaml"]
+        == bundle.spec.frozen_bytes_sha256["expectations.yaml"]
         and review.get("reviewed_causal_fixtures_sha256")
-        == FROZEN_BYTES_SHA256["causal-fixtures.yaml"]
+        == bundle.spec.frozen_bytes_sha256["causal-fixtures.yaml"]
         and review.get("reviewed_negative_fixtures_sha256")
-        == FROZEN_BYTES_SHA256["negative-fixtures.yaml"]
+        == bundle.spec.frozen_bytes_sha256["negative-fixtures.yaml"]
         and review.get("reviewed_performance_method_sha256")
-        == FROZEN_BYTES_SHA256["performance-method.yaml"],
+        == bundle.spec.frozen_bytes_sha256["performance-method.yaml"],
         "RFV5_REVIEW_HASH_BINDING_DRIFT",
         "independent review does not bind the frozen expectation release bytes",
     )
@@ -588,7 +810,7 @@ def validate_drift(bundle: Bundle) -> int:
         "RFV5_RELEASE_FILESET_DRIFT",
         "release file set drifted",
     )
-    for name, expected in FROZEN_BYTES_SHA256.items():
+    for name, expected in bundle.spec.frozen_bytes_sha256.items():
         actual = _sha256(bundle.release_dir / name)
         _require(
             actual == expected,
@@ -599,9 +821,9 @@ def validate_drift(bundle: Bundle) -> int:
         bundle.issuance.get("immutable_source_inputs"), "immutable_source_inputs"
     )
     _require(
-        len(sources) == 3,
+        len(sources) == bundle.spec.source_input_count,
         "RFV5_SOURCE_HASH_COVERAGE",
-        "expected three immutable sources",
+        f"expected {bundle.spec.source_input_count} immutable sources",
     )
     for source in sources:
         relative = str(source.get("path"))
@@ -617,7 +839,9 @@ def validate_drift(bundle: Bundle) -> int:
             relative,
         )
     _validate_performance(bundle)
-    return len(FROZEN_BYTES_SHA256) + len(sources)
+    if bundle.spec.review_status == "pending":
+        _validate_pending_review_handoff(bundle)
+    return len(bundle.spec.frozen_bytes_sha256) + len(sources)
 
 
 def validate_issuance(
@@ -633,6 +857,12 @@ def validate_issuance(
     if require_review:
         validate_independent_review(bundle)
         validate_negative_fixtures(bundle)
+        validate_drift(bundle)
+    elif bundle.spec.review_status == "pending":
+        _validate_fixture_set(bundle, bundle.causal, negative=False)
+        _validate_fixture_set(bundle, bundle.negative, negative=True)
+        _validate_performance(bundle)
+        _validate_pending_review_handoff(bundle)
         validate_drift(bundle)
     return bundle
 
@@ -652,7 +882,7 @@ def _run(command: str, root: Path, release_path: Path) -> dict[str, object]:
     return {
         "criterion": criterion,
         "oracle": oracle,
-        "release_id": RELEASE_ID,
+        "release_id": bundle.spec.release_id,
         "selected_count": selected,
         "status": "passed",
     }
