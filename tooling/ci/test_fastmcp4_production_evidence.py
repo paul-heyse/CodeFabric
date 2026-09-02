@@ -402,6 +402,10 @@ def test_ops_capture_executes_every_closed_run_and_uses_a_fresh_target(
         len(BEHAVIOR_RUN_SPECS) + len(FAULT_RUN_SPECS) + len(CLEAN_RUN_SPECS)
     )
     assert len(calls) == expected_count
+    clean_topology = next(
+        spec for spec in CLEAN_RUN_SPECS if spec.run_id == "clean-real-topology"
+    )
+    assert "--test-threads=1" in clean_topology.argv
     clean_targets = [target for run_id, target in calls if run_id.startswith("clean-")]
     assert clean_targets and len(set(clean_targets)) == 1
     assert not Path(str(clean_targets[0])).parent.exists()

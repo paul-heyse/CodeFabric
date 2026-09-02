@@ -447,6 +447,7 @@ CLEAN_RUN_SPECS = (
                 "wp47_neg_real_agent_scope_legacy_framing_and_secret_denial|"
                 "wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation)/)"
             ),
+            "--test-threads=1",
             "--no-tests=fail",
         ),
         5,
