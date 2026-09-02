@@ -108,6 +108,7 @@ dependencies = [
     _write(root, "contracts/schema/target.json", "{}\n")
     _write(root, "scripts/target.sh", "#!/bin/sh\nexit 0\n")
     _write(root, "tooling/ci/target.py", "VALUE = 1\n")
+    _write(root, "tooling/benchmarks/target.py", "VALUE = 1\n")
     _write(root, "tooling/fastmcp4_modern_client_driver.py", "VALUE = 1\n")
     _write(root, "tooling/proto/target.py", "VALUE = 1\n")
     _write(root, "tooling/proto/generate.rs", "fn main() {}\n")
