@@ -108,17 +108,19 @@ const RESERVED_CONTROL_CAPACITY: usize = 1;
 struct RpcAdmission {
     data: Arc<Semaphore>,
     control: Arc<Semaphore>,
+    control_waiters: Arc<Semaphore>,
 }
 
 impl RpcAdmission {
-    fn new(data_capacity: usize) -> Self {
+    fn new(data_capacity: usize, control_wait_capacity: usize) -> Self {
         assert!(
-            data_capacity > 0,
-            "query coordinator task capacity is nonzero"
+            data_capacity > 0 && control_wait_capacity > 0,
+            "RPC data and control-wait capacities are nonzero"
         );
         Self {
             data: Arc::new(Semaphore::new(data_capacity)),
             control: Arc::new(Semaphore::new(RESERVED_CONTROL_CAPACITY)),
+            control_waiters: Arc::new(Semaphore::new(control_wait_capacity)),
         }
     }
 
@@ -127,14 +129,20 @@ impl RpcAdmission {
     }
 
     async fn control(&self, budget: RpcBudget) -> Result<OwnedSemaphorePermit, Status> {
-        budget
+        // Bound the cross-connection waiter population before entering Tokio's fair semaphore
+        // queue. The waiter permit is needed only while admission is pending; once the execution
+        // permit is acquired, another bounded waiter may enter the queue.
+        let waiter = acquire_rpc_permit(Arc::clone(&self.control_waiters))?;
+        let admitted = budget
             .run(async {
                 Arc::clone(&self.control)
                     .acquire_owned()
                     .await
                     .map_err(|_| public_status(Code::Unavailable, "RPC_ADMISSION_CLOSED"))
             })
-            .await
+            .await?;
+        drop(waiter);
+        Ok(admitted)
     }
 }
 
@@ -576,8 +584,11 @@ impl<B: SemanticQueryBackend> ProductionQueryService<B> {
         }
         let transport_data_capacity = usize::try_from(MAX_QUERY_TRANSPORT_STREAMS / 2)
             .expect("transport stream bound fits usize");
+        let transport_control_wait_capacity = usize::try_from(MAX_QUERY_TRANSPORT_STREAMS / 2)
+            .expect("transport control-wait bound fits usize");
         let admission = Arc::new(RpcAdmission::new(
             coordinator.maximum_tasks().min(transport_data_capacity),
+            transport_control_wait_capacity,
         ));
         Self {
             backend,
@@ -5182,7 +5193,7 @@ mod tests {
             .collect::<Vec<_>>()
         );
 
-        let admission = RpcAdmission::new(1);
+        let admission = RpcAdmission::new(1, 1);
         let data = admission.data().expect("one data operation admitted");
         let saturated = admission.data().unwrap_err();
         assert_eq!(saturated.code(), Code::ResourceExhausted);
@@ -5201,6 +5212,12 @@ mod tests {
                 .is_err(),
             "a second control operation waits instead of racing the reserved slot"
         );
+        let overflow = admission
+            .control(RpcBudget::from_duration(Duration::from_secs(1)).unwrap())
+            .await
+            .expect_err("the bounded control-wait queue sheds overflow immediately");
+        assert_eq!(overflow.code(), Code::ResourceExhausted);
+        assert_eq!(status_public_code(&overflow), "RPC_CAPACITY");
         drop(control);
         let queued_control =
             tokio::time::timeout(Duration::from_millis(50), waiting_control.as_mut())
@@ -5219,7 +5236,23 @@ mod tests {
             .expect_err("bounded control wait expires under sustained contention");
         assert_eq!(expired.code(), Code::DeadlineExceeded);
         assert_eq!(status_public_code(&expired), "RPC_BUDGET_EXHAUSTED");
+
+        let replacement_waiter =
+            admission.control(RpcBudget::from_duration(Duration::from_secs(1)).unwrap());
+        tokio::pin!(replacement_waiter);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(2), replacement_waiter.as_mut())
+                .await
+                .is_err(),
+            "an expired waiter releases its bounded queue slot"
+        );
         drop(held_control);
+        let replacement_control =
+            tokio::time::timeout(Duration::from_millis(50), replacement_waiter.as_mut())
+                .await
+                .expect("replacement waiter resumes after the active control operation")
+                .expect("replacement waiter is admitted");
+        drop(replacement_control);
         drop(data);
         let _data_again = admission
             .data()
@@ -5326,7 +5359,7 @@ mod tests {
         let (sessions, session, peer) =
             test_session_with_operations(BTreeSet::from([SessionOperation::Watch])).await;
         let temp = tempfile::tempdir().unwrap();
-        let admission = RpcAdmission::new(1);
+        let admission = RpcAdmission::new(1, 1);
         let (_keep_blocked, blocker) = tokio::sync::oneshot::channel();
         let state = WatchState {
             sessions,
@@ -5372,7 +5405,7 @@ mod tests {
     async fn wp45_read_iteration_deadline_releases_admission() {
         let (sessions, session, peer) =
             test_session_with_operations(BTreeSet::from([SessionOperation::ReadResource])).await;
-        let admission = RpcAdmission::new(1);
+        let admission = RpcAdmission::new(1, 1);
         let (_keep_blocked, blocker) = tokio::sync::oneshot::channel();
         let state = ReadState {
             sessions,
