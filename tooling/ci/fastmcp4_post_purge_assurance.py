@@ -164,6 +164,14 @@ ORACLE_SELF_PATHS = {
     Path("tooling/ci/fastmcp4_post_purge_assurance.py"),
     Path("tooling/ci/test_fastmcp4_post_purge_assurance.py"),
 }
+CURRENT_NEGATIVE_ASSURANCE_PATHS = {
+    Path("tooling/ci/fastmcp4_production_evidence.py"),
+    Path("tooling/ci/test_fastmcp4_production_evidence.py"),
+}
+TRANSITIVE_LOCK_ONLY_TOKEN_CLASSES = {
+    "pydantic_settings_import",
+    "fastmcp_slim_import",
+}
 GOVERNED_HISTORY_ROOTS = {Path("tooling/proto/history")}
 ALLOWED_LIVE_SYMLINKS = {
     Path("scripts/lib-outline"): Path("scripts/lib-outline.sh"),
@@ -319,7 +327,9 @@ def _source_authority_files(files: Iterable[Path]) -> list[Path]:
     return [
         path
         for path in files
-        if not any(base == path or base in path.parents for base in GOVERNED_HISTORY_ROOTS)
+        if not any(
+            base == path or base in path.parents for base in GOVERNED_HISTORY_ROOTS
+        )
         if (
             path
             in {
@@ -348,10 +358,15 @@ def validate_zero_state(root: Path = ROOT) -> Mapping[str, object]:
     files, _, _ = _iter_live_files(root)
     matches: list[str] = []
     for path in _source_authority_files(files):
-        if path in ORACLE_SELF_PATHS:
+        if path in ORACLE_SELF_PATHS or path in CURRENT_NEGATIVE_ASSURANCE_PATHS:
             continue
         text = _read_live_text(root, path)
         for category, token in RETIRED_TOKENS.items():
+            if (
+                path == Path("codefabric-cpg-mcp/uv.lock")
+                and category in TRANSITIVE_LOCK_ONLY_TOKEN_CLASSES
+            ):
+                continue
             if token in text:
                 matches.append(f"{category}:{path}")
     _require(

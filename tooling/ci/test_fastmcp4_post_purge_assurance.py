@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tooling.ci.fastmcp4_post_purge_assurance import (
+    CURRENT_NEGATIVE_ASSURANCE_PATHS,
     EXPECTED_RUNTIME_DEPENDENCIES,
     FORBIDDEN_PATHS,
     RETIRED_RECIPE_NAMES,
@@ -175,10 +176,39 @@ def test_neg_every_retired_token_class_is_detected(
     tmp_path: Path, category: str, token: str
 ) -> None:
     root = _minimal_root(tmp_path)
-    _write(root, "src/seed.rs", f"// {category}: {token}\n")
+    _write(root, "tooling/ci/seed.py", f"# {category}: {token}\n")
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_zero_state(root)
     assert failure.value.code == "RFV5_PURGE_RETIRED_TOKEN"
+
+
+def test_neg_transitive_fastmcp_lock_entries_are_not_application_adoption(
+    tmp_path: Path,
+) -> None:
+    root = _minimal_root(tmp_path)
+    lock = root / "codefabric-cpg-mcp/uv.lock"
+    lock.write_text(
+        lock.read_text(encoding="utf-8")
+        + 'name = "pydantic-settings"\n'
+        + 'url = "https://example.invalid/pydantic_settings.whl"\n'
+        + 'name = "fastmcp-slim"\n'
+        + 'url = "https://example.invalid/fastmcp_slim.whl"\n',
+        encoding="utf-8",
+    )
+    assert validate_zero_state(root)["live_matches"] == 0
+
+
+@pytest.mark.parametrize("path", sorted(CURRENT_NEGATIVE_ASSURANCE_PATHS))
+def test_neg_current_fault_runner_tokens_are_classified_not_runtime_authority(
+    tmp_path: Path, path: Path
+) -> None:
+    root = _minimal_root(tmp_path)
+    _write(
+        root,
+        str(path),
+        "\n".join(RETIRED_TOKENS.values()) + "\n",
+    )
+    assert validate_zero_state(root)["live_matches"] == 0
 
 
 def test_int_governed_proto_history_is_covered_but_not_live_authority(
@@ -211,9 +241,7 @@ def test_neg_every_forbidden_path_class_is_detected(
 
 
 @pytest.mark.parametrize("recipe", sorted(RETIRED_RECIPE_NAMES))
-def test_neg_every_retired_recipe_is_detected(
-    tmp_path: Path, recipe: str
-) -> None:
+def test_neg_every_retired_recipe_is_detected(tmp_path: Path, recipe: str) -> None:
     root = _minimal_root(tmp_path)
     _write(root, "justfile", f"{recipe}:\n    true\n")
     with pytest.raises(PostPurgeAssuranceError) as failure:
