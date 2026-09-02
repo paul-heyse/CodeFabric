@@ -126,8 +126,15 @@ impl RpcAdmission {
         acquire_rpc_permit(Arc::clone(&self.data))
     }
 
-    fn control(&self) -> Result<OwnedSemaphorePermit, Status> {
-        acquire_rpc_permit(Arc::clone(&self.control))
+    async fn control(&self, budget: RpcBudget) -> Result<OwnedSemaphorePermit, Status> {
+        budget
+            .run(async {
+                Arc::clone(&self.control)
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| public_status(Code::Unavailable, "RPC_ADMISSION_CLOSED"))
+            })
+            .await
     }
 }
 
@@ -1480,7 +1487,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         request: Request<HandshakeRequest>,
     ) -> Result<Response<HandshakeResponse>, Status> {
         let budget = handshake_budget(request.get_ref())?;
-        let _admission = self.admission.control()?;
+        let _admission = self.admission.control(budget).await?;
         budget
             .run(async {
                 let peer = peer(&request)?;
@@ -1543,7 +1550,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         request: Request<GetStatusRequest>,
     ) -> Result<Response<GetStatusResponse>, Status> {
         let budget = request_budget(request.get_ref().context.as_ref())?;
-        let _admission = self.admission.control()?;
+        let _admission = self.admission.control(budget).await?;
         budget
             .run(async {
                 let session = self
@@ -2133,7 +2140,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         request: Request<CancelQueryRequest>,
     ) -> Result<Response<CancelQueryResponse>, Status> {
         let budget = request_budget(request.get_ref().context.as_ref())?;
-        let _admission = self.admission.control()?;
+        let _admission = self.admission.control(budget).await?;
         budget
             .run(async {
                 let session = self
@@ -2305,7 +2312,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
         request: Request<ReleaseResourceRequest>,
     ) -> Result<Response<ReleaseResourceResponse>, Status> {
         let budget = request_budget(request.get_ref().context.as_ref())?;
-        let _admission = self.admission.control()?;
+        let _admission = self.admission.control(budget).await?;
         budget
             .run(async {
                 let session = self
@@ -5158,8 +5165,8 @@ mod tests {
         assert!(next_challenge_round(0).is_err());
     }
 
-    #[test]
-    fn wp45_reserved_control_keeps_cancel_and_release_admissible() {
+    #[tokio::test]
+    async fn wp45_reserved_control_keeps_cancel_and_release_admissible() {
         let contract = reserved_control_contract();
         assert_eq!(contract.reserved_capacity, 1);
         assert_eq!(
@@ -5181,19 +5188,45 @@ mod tests {
         assert_eq!(saturated.code(), Code::ResourceExhausted);
         assert_eq!(status_public_code(&saturated), "RPC_CAPACITY");
         let control = admission
-            .control()
+            .control(RpcBudget::from_duration(Duration::from_secs(1)).unwrap())
+            .await
             .expect("reserved control is independent of saturated data capacity");
-        assert_eq!(
-            admission.control().unwrap_err().code(),
-            Code::ResourceExhausted
+
+        let waiting_control =
+            admission.control(RpcBudget::from_duration(Duration::from_secs(1)).unwrap());
+        tokio::pin!(waiting_control);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(2), waiting_control.as_mut())
+                .await
+                .is_err(),
+            "a second control operation waits instead of racing the reserved slot"
         );
         drop(control);
+        let queued_control =
+            tokio::time::timeout(Duration::from_millis(50), waiting_control.as_mut())
+                .await
+                .expect("queued control admission resumes within its budget")
+                .expect("queued control admission succeeds");
+        drop(queued_control);
+
+        let held_control = admission
+            .control(RpcBudget::from_duration(Duration::from_secs(1)).unwrap())
+            .await
+            .expect("control capacity remains reusable");
+        let expired = admission
+            .control(RpcBudget::from_duration(Duration::from_millis(2)).unwrap())
+            .await
+            .expect_err("bounded control wait expires under sustained contention");
+        assert_eq!(expired.code(), Code::DeadlineExceeded);
+        assert_eq!(status_public_code(&expired), "RPC_BUDGET_EXHAUSTED");
+        drop(held_control);
         drop(data);
         let _data_again = admission
             .data()
             .expect("released data capacity is reusable");
         let _control_again = admission
-            .control()
+            .control(RpcBudget::from_duration(Duration::from_secs(1)).unwrap())
+            .await
             .expect("released control capacity is reusable");
     }
 
