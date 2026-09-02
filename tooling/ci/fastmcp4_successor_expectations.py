@@ -46,8 +46,8 @@ R1_FROZEN_BYTES_SHA256 = {
 R2_FROZEN_BYTES_SHA256 = {
     "causal-fixtures.yaml": "77842bb7a33c6608e582337c84c88c484cda84ce0bcbdce9f172f6f4e78f6714",
     "expectations.yaml": "c1c1bb8a394ab02e53a2c91a205630e54dd3357ab1039f9f605fdc1ff65de751",
-    "independent-review.yaml": "f508e21f3817c7eca32d4ed8efc4dd128c3301ef8c896ff1fa5a439c578c3508",
-    "issuance.yaml": "e4853f0b03e518fa14dd48d251044543895b107121bffa980c2b6cd607d1446e",
+    "independent-review.yaml": "1d42ccdc723f13c9fc17bbb5551ba612a66a33175b93158cb0a5a0982a81e70d",
+    "issuance.yaml": "8c27a22dcf06365cde7c159b73d41bb8de64760b2b5b74d66700c46b80054c3c",
     "negative-fixtures.yaml": "471e0e99573ffd59b814d2ffc9165c8755bb46c7389b2d98451a866fd209d60c",
     "performance-method.yaml": "ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df",
 }
@@ -94,6 +94,14 @@ ALLOWED_DESIGN_PATHS = {
     "docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v2.md",
     "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md",
 }
+R1_SOURCE_INPUT_PATHS = frozenset(
+    {
+        "docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md",
+        "docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v2.md",
+        "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md",
+    }
+)
+R2_SOURCE_INPUT_PATHS = frozenset(ALLOWED_DESIGN_PATHS)
 
 
 class ExpectationReleaseError(ValueError):
@@ -149,7 +157,7 @@ class ReleaseSpec:
     release_id: str
     performance_release_id: str
     frozen_bytes_sha256: Mapping[str, str]
-    source_input_count: int
+    source_input_paths: frozenset[str]
     review_status: str
 
 
@@ -159,7 +167,7 @@ RELEASE_SPECS = {
         release_id=R1_RELEASE_ID,
         performance_release_id=R1_RELEASE_ID,
         frozen_bytes_sha256=R1_FROZEN_BYTES_SHA256,
-        source_input_count=3,
+        source_input_paths=R1_SOURCE_INPUT_PATHS,
         review_status="accepted",
     ),
     R2_RELEASE_PATH: ReleaseSpec(
@@ -167,8 +175,8 @@ RELEASE_SPECS = {
         release_id=R2_RELEASE_ID,
         performance_release_id=R1_RELEASE_ID,
         frozen_bytes_sha256=R2_FROZEN_BYTES_SHA256,
-        source_input_count=5,
-        review_status="pending",
+        source_input_paths=R2_SOURCE_INPUT_PATHS,
+        review_status="accepted",
     ),
 }
 
@@ -310,6 +318,30 @@ def _pointer(path: tuple[str, ...]) -> str:
     if not path:
         return "/"
     return "/" + "/".join(part.replace("~", "~0").replace("/", "~1") for part in path)
+
+
+def _pointer_set(value: object, context: str) -> set[str]:
+    _require(
+        isinstance(value, list) and all(isinstance(path, str) for path in value),
+        "RFV5_POINTER_PATH_INVALID",
+        f"{context}: paths must be a list of strings",
+    )
+    assert isinstance(value, list)
+    paths = [str(path) for path in value]
+    _require(
+        all(
+            path.startswith("/") and re.search(r"~(?![01])", path) is None
+            for path in paths
+        ),
+        "RFV5_POINTER_PATH_INVALID",
+        f"{context}: paths must be canonical JSON pointers",
+    )
+    _require(
+        len(paths) == len(set(paths)),
+        "RFV5_POINTER_PATH_DUPLICATE",
+        f"{context}: duplicate JSON pointer",
+    )
+    return set(paths)
 
 
 def _diff(left: object, right: object, path: tuple[str, ...] = ()) -> set[str]:
@@ -470,10 +502,14 @@ def _validate_issuance(bundle: Bundle) -> None:
         "suite membership is not the exact eight-role set",
     )
     selectors = _mapping(issuance.get("selectors"), "issuance.selectors")
+    expected_selectors = {
+        name: {"oracle": oracle, "criterion": criterion}
+        for name, (oracle, criterion) in SUBCOMMANDS.items()
+    }
     _require(
-        set(selectors) == set(SUBCOMMANDS),
+        selectors == expected_selectors,
         "RFV5_SELECTOR_DRIFT",
-        "four oracle selectors drifted",
+        "four oracle selectors or their bindings drifted",
     )
     counts = _mapping(issuance.get("counts"), "issuance.counts")
     reviewed_claims = 16 if bundle.spec.review_status == "accepted" else 0
@@ -484,8 +520,14 @@ def _validate_issuance(bundle: Bundle) -> None:
         and counts.get("reviewed_claims") == reviewed_claims
         and counts.get("frozen_artifacts") == len(EXPECTED_FILES)
         and (
-            bundle.spec.review_status == "accepted"
-            or counts.get("review_handoff_claims") == 16
+            (
+                bundle.spec.review_status == "accepted"
+                and counts.get("review_handoff_claims", 0) == 0
+            )
+            or (
+                bundle.spec.review_status == "pending"
+                and counts.get("review_handoff_claims") == 16
+            )
         ),
         "RFV5_COUNT_DRIFT",
         "issuance counts drifted",
@@ -553,7 +595,9 @@ def _validate_issuance(bundle: Bundle) -> None:
         if name != "issuance.yaml"
     }
     _require(
-        {name: artifact_hashes.get(name) for name in expected_hashes} == expected_hashes
+        set(artifact_hashes) == EXPECTED_FILES
+        and {name: artifact_hashes.get(name) for name in expected_hashes}
+        == expected_hashes
         and artifact_hashes.get("issuance.yaml") == "self-excluded-use-sha256sums",
         "RFV5_ISSUANCE_HASH_BINDING_DRIFT",
         "issuance artifact hash bindings drifted",
@@ -635,7 +679,10 @@ def _validate_fixture_set(
             )
             faulty = apply_merge_patch(expected, patch)
             differences = _diff(expected, faulty)
-            declared = {str(value) for value in row.get("expected_mismatch_paths", [])}
+            declared = _pointer_set(
+                row.get("expected_mismatch_paths"),
+                f"{fixture_id}.expected_mismatch_paths",
+            )
             _require(
                 differences and differences == declared,
                 "RFV5_FAULT_NOT_DISCRIMINATING",
@@ -673,11 +720,17 @@ def _validate_fixture_set(
             output_differences = _diff(
                 expected, apply_merge_patch(expected, output_patch)
             )
+            declared_inputs = _pointer_set(
+                row.get("changed_input_paths"),
+                f"{fixture_id}.changed_input_paths",
+            )
+            declared_outputs = _pointer_set(
+                row.get("changed_output_paths"),
+                f"{fixture_id}.changed_output_paths",
+            )
             _require(
-                input_differences
-                == {str(value) for value in row.get("changed_input_paths", [])}
-                and output_differences
-                == {str(value) for value in row.get("changed_output_paths", [])}
+                input_differences == declared_inputs
+                and output_differences == declared_outputs
                 and input_differences
                 and output_differences,
                 "RFV5_CAUSAL_FIXTURE_NOT_DISCRIMINATING",
@@ -780,6 +833,49 @@ def validate_independent_review(bundle: Bundle) -> int:
         "RFV5_REVIEW_COVERAGE",
         "reviewed claim set is incomplete",
     )
+    if bundle.spec.release_id == R2_RELEASE_ID:
+        authoring = _mapping(
+            bundle.issuance.get("authoring_constraints"), "authoring_constraints"
+        )
+        reviewer_identity = review.get("reviewer_identity")
+        dispositions = _rows(review.get("dispositions"), "review.dispositions")
+        disposition_ids = [str(row.get("claim_id")) for row in dispositions]
+        required_scopes = {
+            "suite-causality",
+            "expectation-independence",
+            "relational-observation-grounding",
+            "negative-fixture-discrimination",
+            "no-history-comparator-or-target-output-authority",
+            "performance-method-byte-identity-and-candidate-neutrality",
+        }
+        handoff = _mapping(review.get("handoff"), "review.handoff")
+        _require(
+            review.get("acceptance_authority") is True
+            and review.get("author_identity") == authoring.get("author_identity")
+            and isinstance(reviewer_identity, str)
+            and bool(reviewer_identity)
+            and reviewer_identity != authoring.get("author_identity")
+            and review.get("reviewed_candidate_commit")
+            == "25e10b66453e4d665ffa05e36ec95247691f846f"
+            and review.get("inherited_performance_release_id") == R1_RELEASE_ID
+            and set(review.get("scopes", [])) == required_scopes
+            and len(disposition_ids) == len(set(disposition_ids)) == 16
+            and set(disposition_ids) == set(expectations)
+            and all(
+                row.get("disposition") == "accepted"
+                and isinstance(row.get("rationale"), str)
+                and bool(row.get("rationale"))
+                for row in dispositions
+            )
+            and handoff.get("author_may_accept") is False
+            and handoff.get("r1_acceptance_reused") is False
+            and handoff.get("target_output_used_as_expected_value_authority") is False
+            and handoff.get("distinct_reviewer_completed") is True
+            and handoff.get("exact_candidate_hash_binding_completed") is True
+            and handoff.get("changed_claim_falsification_completed") is True,
+            "RFV5_REVIEW_NOT_INDEPENDENT",
+            "r2 acceptance is not distinct, claim-specific, or candidate-bound",
+        )
     _require(
         review.get("reviewed_expectations_sha256")
         == bundle.spec.frozen_bytes_sha256["expectations.yaml"]
@@ -820,10 +916,12 @@ def validate_drift(bundle: Bundle) -> int:
     sources = _rows(
         bundle.issuance.get("immutable_source_inputs"), "immutable_source_inputs"
     )
+    source_paths = [str(source.get("path")) for source in sources]
     _require(
-        len(sources) == bundle.spec.source_input_count,
+        len(source_paths) == len(set(source_paths))
+        and set(source_paths) == bundle.spec.source_input_paths,
         "RFV5_SOURCE_HASH_COVERAGE",
-        f"expected {bundle.spec.source_input_count} immutable sources",
+        "immutable source paths are not the exact release-specific set",
     )
     for source in sources:
         relative = str(source.get("path"))
@@ -841,7 +939,7 @@ def validate_drift(bundle: Bundle) -> int:
     _validate_performance(bundle)
     if bundle.spec.review_status == "pending":
         _validate_pending_review_handoff(bundle)
-    return len(bundle.spec.frozen_bytes_sha256) + len(sources)
+    return len(bundle.spec.frozen_bytes_sha256) + len(bundle.spec.source_input_paths)
 
 
 def validate_issuance(

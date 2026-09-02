@@ -57,7 +57,7 @@ def _copy_root(tmp_path: Path, release_path: Path = RELEASE_PATH) -> Path:
 
 def test_int_public_issuance_api_returns_all_independent_cases() -> None:
     r1 = validate_issuance(release_path=R1_RELEASE_PATH, require_review=True)
-    r2 = validate_issuance(release_path=R2_RELEASE_PATH, require_review=False)
+    r2 = validate_issuance(release_path=R2_RELEASE_PATH, require_review=True)
     for bundle in (r1, r2):
         assert len(bundle.expectations) == 16
         assert len(bundle.causal) == 16
@@ -125,25 +125,29 @@ def test_ops_every_r1_cli_selector_reports_nonzero_selection(command: str) -> No
     assert report["criterion"] == SUBCOMMANDS[command][1]
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "expectation-drift",
-        "negative-fixture-independence",
-        "successor-authority-integrity",
-    ],
-)
-def test_ops_r2_non_review_selectors_report_nonzero_selection(command: str) -> None:
+@pytest.mark.parametrize("command", sorted(SUBCOMMANDS))
+def test_ops_every_r2_selector_reports_nonzero_selection(command: str) -> None:
     report = _run(command, ROOT, R2_RELEASE_PATH)
     assert report["status"] == "passed"
     assert report["release_id"] == R2_RELEASE_ID
     assert int(report["selected_count"]) > 0
 
 
-def test_beh_r2_review_is_strictly_pending() -> None:
-    with pytest.raises(ExpectationReleaseError) as failure:
-        validate_issuance(release_path=R2_RELEASE_PATH, require_review=True)
-    assert failure.value.code == "RFV5_REVIEW_PENDING"
+def test_beh_r2_review_is_distinct_claim_specific_and_accepted() -> None:
+    bundle = validate_issuance(release_path=R2_RELEASE_PATH, require_review=True)
+    review = bundle.review["review"]
+    assert review["status"] == "accepted"
+    assert review["acceptance_authority"] is True
+    assert review["reviewer_identity"] != review["author_identity"]
+    assert review["reviewed_candidate_commit"] == (
+        "25e10b66453e4d665ffa05e36ec95247691f846f"
+    )
+    dispositions = review["dispositions"]
+    assert len(dispositions) == 16
+    assert {row["claim_id"] for row in dispositions} == {
+        f"RFV5-FM4-{number:03d}" for number in range(1, 17)
+    }
+    assert {row["disposition"] for row in dispositions} == {"accepted"}
 
 
 def test_ops_main_emits_machine_readable_report(
@@ -164,12 +168,13 @@ def test_ops_main_emits_machine_readable_report(
     assert report["selected_count"] == 16
 
 
-def test_beh_main_reports_active_r2_review_pending(
+def test_beh_main_reports_active_r2_review_accepted(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert main(["independent-expectation-review"]) == 1
-    report = json.loads(capsys.readouterr().err)
-    assert report["code"] == "RFV5_REVIEW_PENDING"
+    assert main(["independent-expectation-review"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["release_id"] == R2_RELEASE_ID
+    assert report["selected_count"] == 16
 
 
 @pytest.mark.parametrize(
@@ -211,11 +216,11 @@ def test_beh_all_causal_fixtures_change_controlled_input_and_expected_observatio
     None
 ):
     assert validate_independent_review(_r1_bundle()) == 16
-    assert len(validate_issuance(require_review=False).causal) == 16
+    assert validate_independent_review(_bundle()) == 16
 
 
 def test_beh_independent_review_hash_binding_drift_is_rejected() -> None:
-    bundle = _r1_bundle()
+    bundle = _bundle()
     review_document = copy.deepcopy(bundle.review)
     review = review_document["review"]
     assert isinstance(review, dict)
@@ -223,6 +228,38 @@ def test_beh_independent_review_hash_binding_drift_is_rejected() -> None:
     with pytest.raises(ExpectationReleaseError) as failure:
         validate_independent_review(replace(bundle, review=review_document))
     assert failure.value.code == "RFV5_REVIEW_HASH_BINDING_DRIFT"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("reviewer_identity", "codex-wp43-r2-forward-expectation-author"),
+        ("reviewed_candidate_commit", "0" * 40),
+        ("target_execution_used", True),
+    ],
+)
+def test_beh_r2_non_independent_acceptance_is_rejected(
+    field: str, value: object
+) -> None:
+    bundle = _bundle()
+    review_document = copy.deepcopy(bundle.review)
+    review = review_document["review"]
+    assert isinstance(review, dict)
+    review[field] = value
+    with pytest.raises(ExpectationReleaseError) as failure:
+        validate_independent_review(replace(bundle, review=review_document))
+    assert failure.value.code == "RFV5_REVIEW_NOT_INDEPENDENT"
+
+
+def test_beh_r2_incomplete_claim_dispositions_are_rejected() -> None:
+    bundle = _bundle()
+    review_document = copy.deepcopy(bundle.review)
+    review = review_document["review"]
+    assert isinstance(review, dict)
+    review["dispositions"] = review["dispositions"][:-1]
+    with pytest.raises(ExpectationReleaseError) as failure:
+        validate_independent_review(replace(bundle, review=review_document))
+    assert failure.value.code == "RFV5_REVIEW_NOT_INDEPENDENT"
 
 
 def test_neg_all_fault_fixtures_are_discriminating_and_caught() -> None:
@@ -249,6 +286,33 @@ def test_neg_a_fault_that_does_not_change_the_observation_is_rejected() -> None:
     with pytest.raises(ExpectationReleaseError) as failure:
         validate_negative_fixtures(replace(bundle, negative=fixtures))
     assert failure.value.code == "RFV5_FAULT_NOT_DISCRIMINATING"
+
+
+@pytest.mark.parametrize(
+    ("fixture_kind", "path_field"),
+    [("negative", "expected_mismatch_paths"), ("causal", "changed_output_paths")],
+)
+def test_neg_duplicate_declared_json_pointer_is_rejected(
+    fixture_kind: str, path_field: str
+) -> None:
+    bundle = _bundle()
+    fixtures = copy.deepcopy(
+        bundle.negative if fixture_kind == "negative" else bundle.causal
+    )
+    paths = fixtures[0][path_field]
+    assert isinstance(paths, list) and paths
+    paths.append(paths[0])
+    candidate = replace(
+        bundle,
+        negative=fixtures if fixture_kind == "negative" else bundle.negative,
+        causal=fixtures if fixture_kind == "causal" else bundle.causal,
+    )
+    with pytest.raises(ExpectationReleaseError) as failure:
+        if fixture_kind == "negative":
+            validate_negative_fixtures(candidate)
+        else:
+            validate_independent_review(candidate)
+    assert failure.value.code == "RFV5_POINTER_PATH_DUPLICATE"
 
 
 def test_beh_r2_corrected_claim_and_fault_shapes_are_relational() -> None:
@@ -377,6 +441,39 @@ def test_ops_issuance_hash_binding_drift_is_rejected() -> None:
     with pytest.raises(ExpectationReleaseError) as failure:
         validate_drift(replace(bundle, issuance=issuance))
     assert failure.value.code == "RFV5_ISSUANCE_HASH_BINDING_DRIFT"
+
+
+def test_ops_extra_issuance_hash_binding_is_rejected() -> None:
+    bundle = _bundle()
+    issuance = copy.deepcopy(bundle.issuance)
+    hashes = issuance["artifact_sha256"]
+    assert isinstance(hashes, dict)
+    hashes["unregistered.yaml"] = "0" * 64
+    with pytest.raises(ExpectationReleaseError) as failure:
+        validate_drift(replace(bundle, issuance=issuance))
+    assert failure.value.code == "RFV5_ISSUANCE_HASH_BINDING_DRIFT"
+
+
+def test_ops_selector_binding_drift_is_rejected() -> None:
+    bundle = _bundle()
+    issuance = copy.deepcopy(bundle.issuance)
+    selectors = issuance["selectors"]
+    assert isinstance(selectors, dict)
+    selectors["expectation-drift"]["criterion"] = "PC-WP43-WRONG"
+    with pytest.raises(ExpectationReleaseError) as failure:
+        validate_drift(replace(bundle, issuance=issuance))
+    assert failure.value.code == "RFV5_SELECTOR_DRIFT"
+
+
+def test_ops_duplicate_source_path_cannot_mask_missing_hash_coverage() -> None:
+    bundle = _bundle()
+    issuance = copy.deepcopy(bundle.issuance)
+    sources = issuance["immutable_source_inputs"]
+    assert isinstance(sources, list) and len(sources) == 5
+    sources[-1] = copy.deepcopy(sources[0])
+    with pytest.raises(ExpectationReleaseError) as failure:
+        validate_drift(replace(bundle, issuance=issuance))
+    assert failure.value.code == "RFV5_SOURCE_HASH_COVERAGE"
 
 
 def test_ops_frozen_design_input_drift_is_rejected(tmp_path: Path) -> None:

@@ -1,27 +1,77 @@
 schema: codefabric.fastmcp4-successor.independent-review.v1
 release_id: relational-fabric-v5-wp43-r2
 review:
-  status: pending
-  acceptance_authority: false
+  status: accepted
+  acceptance_authority: true
   author_identity: codex-wp43-r2-forward-expectation-author
-  reviewer_identity: null
-  reviewer_is_author: null
-  production_imports_used: null
-  target_execution_used: null
-  predecessor_expected_values_used: null
-  candidate_expectations_sha256: c1c1bb8a394ab02e53a2c91a205630e54dd3357ab1039f9f605fdc1ff65de751
-  candidate_causal_fixtures_sha256: 77842bb7a33c6608e582337c84c88c484cda84ce0bcbdce9f172f6f4e78f6714
-  candidate_negative_fixtures_sha256: 471e0e99573ffd59b814d2ffc9165c8755bb46c7389b2d98451a866fd209d60c
-  candidate_performance_method_sha256: ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df
+  reviewer_identity: codex-wp43-r2-independent-contract-falsification-reviewer
+  reviewer_is_author: false
+  production_imports_used: false
+  target_execution_used: false
+  predecessor_expected_values_used: false
+  reviewed_candidate_commit: 25e10b66453e4d665ffa05e36ec95247691f846f
+  reviewed_expectations_sha256: c1c1bb8a394ab02e53a2c91a205630e54dd3357ab1039f9f605fdc1ff65de751
+  reviewed_causal_fixtures_sha256: 77842bb7a33c6608e582337c84c88c484cda84ce0bcbdce9f172f6f4e78f6714
+  reviewed_negative_fixtures_sha256: 471e0e99573ffd59b814d2ffc9165c8755bb46c7389b2d98451a866fd209d60c
+  reviewed_performance_method_sha256: ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df
   inherited_performance_release_id: relational-fabric-v5-wp43-r1
-  required_scopes:
+  scopes:
     - suite-causality
     - expectation-independence
     - relational-observation-grounding
     - negative-fixture-discrimination
     - no-history-comparator-or-target-output-authority
     - performance-method-byte-identity-and-candidate-neutrality
-  required_claim_ids:
+  dispositions:
+    - claim_id: RFV5-FM4-001
+      disposition: accepted
+      rationale: The exact suite, stack, protocol, and bridge state are static release authority and do not depend on target output.
+    - claim_id: RFV5-FM4-002
+      disposition: accepted
+      rationale: Modern admission and legacy pre-dispatch rejection are explicit design outcomes with a dispatch-count fault.
+    - claim_id: RFV5-FM4-003
+      disposition: accepted
+      rationale: Catalog observations separate the inert framework advertisement from empty application registries, and the fault uses a valid reverse-DNS extension identifier.
+    - claim_id: RFV5-FM4-004
+      disposition: accepted
+      rationale: The decoded outer schema remains presentation truth while semantic authority and rewrite absence are separately attributed to the Rust daemon.
+    - claim_id: RFV5-FM4-005
+      disposition: accepted
+      rationale: Guard evidence asserts stable daemon ownership, safe presentation, selected-choice equality, and exactly-once admission without freezing a field ID or answer literal.
+    - claim_id: RFV5-FM4-006
+      disposition: accepted
+      rationale: The closed StartQuery variants and pure ValidateQuery path directly encode QRY 13.1 and 13.2.
+    - claim_id: RFV5-FM4-007
+      disposition: accepted
+      rationale: The controlled completion fixture is bounded, authorized, advisory, and revalidated without exposing denied selector classes.
+    - claim_id: RFV5-FM4-008
+      disposition: accepted
+      rationale: The handle literal is controlled fixture input only; expected behavior asserts daemon minting, per-operation authorization, bounds, and no Python lease authority.
+    - claim_id: RFV5-FM4-009
+      disposition: accepted
+      rationale: Cancellation and reconnect assert presence, daemon ownership, and identity equality rather than a fabricated query identifier.
+    - claim_id: RFV5-FM4-010
+      disposition: accepted
+      rationale: Agent-count causality preserves one workspace daemon while isolating per-agent processes, channels, authority, and STDIO streams.
+    - claim_id: RFV5-FM4-011
+      disposition: accepted
+      rationale: The typed denial matrix covers required grant, session, challenge, replay, generation, and bounds failures before bytes or dispatch.
+    - claim_id: RFV5-FM4-012
+      disposition: accepted
+      rationale: Typed public errors remain allowlisted observations and the fault independently exposes secret leakage and STDOUT contamination.
+    - claim_id: RFV5-FM4-013
+      disposition: accepted
+      rationale: The installed adapter census rejects every displaced semantic, session, task, cache, resource, and data-plane authority.
+    - claim_id: RFV5-FM4-014
+      disposition: accepted
+      rationale: Live-scope zero state is distinguished from immutable history, and widening history coverage cannot make history selectable or mutable.
+    - claim_id: RFV5-FM4-015
+      disposition: accepted
+      rationale: The r2 path names a byte-identical inherited preregistration whose control, ordering, sample rules, and budgets remain candidate-neutral.
+    - claim_id: RFV5-FM4-016
+      disposition: accepted
+      rationale: The six-file release and five immutable design inputs are exact independently hashed sets whose drift stops dependent execution.
+  reviewed_claim_ids:
     - RFV5-FM4-001
     - RFV5-FM4-002
     - RFV5-FM4-003
@@ -38,12 +88,10 @@ review:
     - RFV5-FM4-014
     - RFV5-FM4-015
     - RFV5-FM4-016
-  reviewed_claim_ids: []
-  dispositions: []
   handoff:
     author_may_accept: false
-    r1_acceptance_may_be_reused: false
-    target_output_may_author_expected_values: false
-    acceptance_requires_distinct_reviewer: true
-    acceptance_requires_exact_candidate_hash_binding: true
-    acceptance_requires_falsification_of_all_changed_claims: true
+    r1_acceptance_reused: false
+    target_output_used_as_expected_value_authority: false
+    distinct_reviewer_completed: true
+    exact_candidate_hash_binding_completed: true
+    changed_claim_falsification_completed: true
