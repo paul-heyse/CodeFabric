@@ -3464,8 +3464,10 @@ async fn observe_denial_matrix(
 
     // Fault intervention 1: receive the wrong-workspace request, substitute the authorized
     // workspace, and invoke the real start path. Intervention 2: receive a consumed state and use
-    // the still-live successor challenge. Intervention 3: clamp the rejected range before the
-    // same production resource-read seam. Counts/bytes are read only after those invocations.
+    // the still-live successor challenge. Intervention 3: swap the two typed presentations after
+    // observing both distinct failures from the real production resource-read seam, and clamp the
+    // rejected range before that same seam to prove that the fault can release bytes. Counts/bytes
+    // are read only after those invocations.
     assert_eq!(wrong_workspace_status.code(), Code::PermissionDenied);
     let fault_before = coordinator_record_count(&server.journal);
     let (fault_workspace_accepted, _) = drive_atomic_start(
@@ -3564,11 +3566,8 @@ async fn observe_denial_matrix(
             "replayed_query_start": normal_011["denied_cases"]["replayed_query_start"],
             "replayed_release": normal_011["denied_cases"]["replayed_release"],
             "oversized_input_requirement": normal_011["denied_cases"]["oversized_input_requirement"],
-            "invalid_resource_maximum_bytes": normal_011["denied_cases"]["invalid_resource_maximum_bytes"],
-            "resource_offset_past_end": {
-                "grpc_status": if fault_range_bytes.is_empty() { "OUT_OF_RANGE" } else { "OK" },
-                "safe_error_code": Value::Null,
-            },
+            "invalid_resource_maximum_bytes": normal_011["denied_cases"]["resource_offset_past_end"],
+            "resource_offset_past_end": normal_011["denied_cases"]["invalid_resource_maximum_bytes"],
         },
         "denied_before_bytes": fault_range_bytes.is_empty(),
         "denied_before_business_dispatch": fault_after == fault_before,
