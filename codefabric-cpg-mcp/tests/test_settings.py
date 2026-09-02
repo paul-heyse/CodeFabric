@@ -1,134 +1,113 @@
-"""Settings contract tests for SRV section 55."""
+"""Target-only launch authority tests: strict fd3 records, never environment claims."""
 
+from __future__ import annotations
+
+import json
+import os
+import socket
+import sys
+import time
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from codefabric_cpg_mcp.settings import Settings, process_settings
+import codefabric_cpg_mcp.settings as settings_module
+from codefabric_cpg_mcp.settings import Settings, next_settings
 
 
-def required_settings(**overrides: object) -> Settings:
-    values: dict[str, object] = {
-        "daemon_target": "unix:///tmp/codefabric.sock",
-        "workspace_id": "workspace-main",
-        "agent_instance_id": "agent-primary",
-        "capability_token": "test-secret",
+def _record(generation: int = 1) -> dict[str, object]:
+    return {
+        "format": "codefabric.adapter-launch.v1",
+        "query_socket": "/tmp/codefabric-query.sock",
+        "launch_grant_hex": "ab" * 32,
+        "adapter_program": str(Path(sys.executable).resolve()),
+        "adapter_arguments": ["-m", "codefabric_cpg_mcp"],
+        "daemon_generation": generation,
+        "supervisor_generation": 41,
+        "session_expires_at_unix_ms": 4_000_000_000_000,
+        "maximum_request_state_ttl_seconds": 30,
     }
-    values.update(overrides)
-    return Settings(**values)  # type: ignore[arg-type]
 
 
-def test_required_values_are_enforced() -> None:
-    with pytest.raises(ValidationError) as error:
-        Settings()
+def test_launch_record_is_strict_frozen_and_secret() -> None:
+    settings = Settings.model_validate_json(json.dumps(_record()), strict=True)
 
-    rendered = str(error.value)
-    assert "CODEFABRIC_CPG_DAEMON_TARGET" in rendered
-    assert "CODEFABRIC_WORKSPACE_ID" in rendered
-    assert "CODEFABRIC_CPG_CAPABILITY_TOKEN" in rendered
-
-
-def test_environment_values_are_converted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CODEFABRIC_CPG_DAEMON_TARGET", "unix:///tmp/codefabric.sock")
-    monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "workspace-main")
-    monkeypatch.setenv("CODEFABRIC_AGENT_INSTANCE_ID", "agent-primary")
-    monkeypatch.setenv("CODEFABRIC_CPG_CAPABILITY_TOKEN", "test-secret")
-    monkeypatch.setenv("CODEFABRIC_CPG_QUERY_TIMEOUT_SECONDS", "4.5")
-    monkeypatch.setenv("CODEFABRIC_CPG_MAX_JSON_NODES", "250")
-
-    settings = Settings()
-
-    assert settings.query_timeout_seconds == 4.5
-    assert settings.max_json_nodes == 250
-
-
-def test_process_settings_is_one_instance_per_process(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CODEFABRIC_CPG_DAEMON_TARGET", "unix:///tmp/codefabric.sock")
-    monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "workspace-main")
-    monkeypatch.setenv("CODEFABRIC_AGENT_INSTANCE_ID", "agent-primary")
-    monkeypatch.setenv("CODEFABRIC_CPG_CAPABILITY_TOKEN", "test-secret")
-
-    first = process_settings()
-    monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "replacement-workspace")
-
-    assert process_settings() is first
-    assert process_settings().workspace_id == "workspace-main"
-
-
-def test_canonical_daemon_alias_precedes_migration_alias(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CODEFABRIC_CPG_DAEMON_TARGET", "unix:///canonical.sock")
-    monkeypatch.setenv("CODEFABRIC_DAEMON_TARGET", "unix:///migration.sock")
-    monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "workspace-main")
-    monkeypatch.setenv("CODEFABRIC_CPG_CAPABILITY_TOKEN", "test-secret")
-
-    assert Settings().daemon_target == "unix:///canonical.sock"
-
-
-def test_migration_daemon_alias_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CODEFABRIC_DAEMON_TARGET", "unix:///migration.sock")
-    monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "workspace-main")
-    monkeypatch.setenv("CODEFABRIC_CPG_CAPABILITY_TOKEN", "test-secret")
-
-    assert Settings().daemon_target == "unix:///migration.sock"
-
-
-def test_constructor_values_precede_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "environment-workspace")
-
-    assert required_settings(workspace_id="constructor-workspace").workspace_id == (
-        "constructor-workspace"
-    )
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("query_timeout_seconds", 0),
-        ("inline_result_bytes", 16 * 1024 - 1),
-        ("max_request_bytes", 16 * 1024 * 1024 + 1),
-        ("max_json_depth", 129),
-        ("max_json_nodes", 99),
-        ("max_validation_errors", 101),
-        ("result_ttl_seconds", 59),
-    ],
-)
-def test_numeric_ranges_are_enforced(field: str, value: object) -> None:
+    assert settings.daemon_target == "unix:///tmp/codefabric-query.sock"
+    assert settings.launch_grant.get_secret_value() == bytes.fromhex("ab" * 32)
+    assert "abababab" not in repr(settings)
+    assert "abababab" not in repr(settings.model_dump())
+    assert "abababab" not in settings.model_dump_json()
+    assert settings.model_dump_json().count("**********") == 1
     with pytest.raises(ValidationError):
-        required_settings(**{field: value})
+        Settings.model_validate_json(
+            json.dumps({**_record(), "workspace_id": "caller-claim"}), strict=True
+        )
+    with pytest.raises(ValidationError):
+        Settings.model_validate_json(
+            json.dumps({**_record(), "daemon_generation": "1"}), strict=True
+        )
+    with pytest.raises(ValidationError):
+        Settings.model_validate_json(
+            json.dumps({**_record(), "query_socket": "relative.sock"}), strict=True
+        )
+    with pytest.raises(ValidationError):
+        settings.daemon_generation = 2  # type: ignore[misc]
 
 
-def test_daemon_scheme_is_restricted() -> None:
-    with pytest.raises(ValidationError, match="must use unix:/// with an absolute socket path"):
-        required_settings(daemon_target="https://example.invalid")
-    with pytest.raises(ValidationError, match="must use unix:/// with an absolute socket path"):
-        required_settings(daemon_target="tcp://127.0.0.1:50051")
-    with pytest.raises(ValidationError, match="must use unix:/// with an absolute socket path"):
-        required_settings(daemon_target="unix://relative.sock")
+def test_retained_socket_stream_delivers_generation_replacement() -> None:
+    reader, writer = socket.socketpair()
+    writer.sendall(json.dumps(_record(1)).encode() + b"\n")
+    writer.sendall(json.dumps(_record(2)).encode() + b"\n")
+    descriptor = reader.detach()
+    try:
+        first = settings_module._read_launch_descriptor(descriptor)
+        second = next_settings()
+    finally:
+        writer.close()
+
+    assert first.daemon_generation == 1
+    assert second.daemon_generation == 2
+    assert first.supervisor_generation == second.supervisor_generation
+    assert first.session_expires_at_unix_ms == second.session_expires_at_unix_ms
+    with pytest.raises(RuntimeError, match="framing"):
+        next_settings()
 
 
-def test_settings_are_frozen_and_secrets_are_redacted() -> None:
-    settings = required_settings()
+def test_launch_descriptor_rejects_non_socket_and_invalid_framing() -> None:
+    read_fd, write_fd = os.pipe()
+    try:
+        with pytest.raises(RuntimeError, match="not a socket"):
+            settings_module._read_launch_descriptor(read_fd)
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
 
-    assert "test-secret" not in repr(settings)
-    assert settings.model_dump(mode="json")["capability_token"] == "**********"
-    with pytest.raises(ValidationError, match="frozen"):
-        settings.workspace_id = "replacement"  # type: ignore[misc]
+    reader, writer = socket.socketpair()
+    writer.sendall(b'{"format":"not-complete"}')
+    writer.close()
+    descriptor = reader.detach()
+    with pytest.raises(RuntimeError, match="framing"):
+        settings_module._read_launch_descriptor(descriptor)
 
 
-def test_dotenv_is_not_a_settings_source(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    (tmp_path / ".env").write_text(
-        "CODEFABRIC_CPG_DAEMON_TARGET=unix:///dotenv.sock\n"
-        "CODEFABRIC_WORKSPACE_ID=dotenv-workspace\n"
-        "CODEFABRIC_CPG_CAPABILITY_TOKEN=dotenv-secret\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
+def test_replacement_read_is_bounded_when_supervisor_sends_no_complete_record() -> None:
+    reader, writer = socket.socketpair()
+    writer.sendall(b'{"format":"partial')
+    descriptor = reader.detach()
+    started = time.monotonic()
+    try:
+        with pytest.raises(RuntimeError, match="timed out"):
+            settings_module._read_launch_descriptor(descriptor, timeout_seconds=0.05)
+    finally:
+        writer.close()
+
+    assert time.monotonic() - started < 1.0
+
+
+def test_environment_cannot_supply_launch_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CODEFABRIC_CPG_CAPABILITY_TOKEN", "legacy-secret")
+    monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "caller-workspace")
 
     with pytest.raises(ValidationError):
-        Settings()
+        Settings.model_validate({}, strict=True)

@@ -1,55 +1,44 @@
 // artifact_id: codefabric.rpc.cpg-query-service
 // artifact_kind: protobuf-schema
-// version: 1.0
-// compatible_suite_major: 1
+// version: 2.0
+// compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:502dfd819e70a154db899bd6bdbe580d01bb56f1654790d5adb241199d43b434
-// digest_projection: proto-descriptor-v1
+// canonical_digest: b3:3297acf400e5afd8a20a4f17d7a986e5b5f82a04f97850ac13e2a0e0f565be4c
+// digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
-package codefabric.cpgd.v1;
+package codefabric.cpgd.v2;
 
-option java_package = "dev.codefabric.cpgd.v1";
+import "google/protobuf/duration.proto";
 
+option java_package = "dev.codefabric.cpgd.v2";
+
+// The sole public daemon service. The schema owns a typed control boundary;
+// semantic query meaning remains in the canonical application request.
 service CpgQueryService {
   rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
-  rpc GetStatus(StatusRequest) returns (StatusResponse);
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc GetReference(GetReferenceRequest) returns (GetReferenceResponse);
   rpc ValidateQuery(ValidateQueryRequest) returns (ValidateQueryResponse);
   rpc StartQuery(StartQueryRequest) returns (StartQueryResponse);
-  rpc StreamQuery(StreamQueryRequest) returns (stream QueryEvent);
-  rpc AttachQuery(AttachQueryRequest) returns (stream QueryEvent);
+  rpc WatchQuery(WatchQueryRequest) returns (stream QueryEvent);
   rpc CancelQuery(CancelQueryRequest) returns (CancelQueryResponse);
-  rpc ReadResult(ReadResultRequest) returns (stream ResultChunk);
-  rpc ReleaseResult(ReleaseResultRequest) returns (ReleaseResultResponse);
+  rpc ReadResource(ReadResourceRequest) returns (stream ResourceChunk);
+  rpc ReleaseResource(ReleaseResourceRequest) returns (ReleaseResourceResponse);
 }
 
-// Values match the canonical semantic-request freshness vocabulary.
-enum FreshnessPolicy {
-  FRESHNESS_POLICY_UNSPECIFIED = 0;
-  FRESHNESS_POLICY_BEST_AVAILABLE_SNAPSHOT = 1;
-  FRESHNESS_POLICY_AWAIT_LATEST = 2;
-  FRESHNESS_POLICY_REQUIRE_CURRENT_FOR_TARGETS = 3;
-  FRESHNESS_POLICY_REQUIRE_SOURCE_CURRENT = 4;
-  FRESHNESS_POLICY_REQUIRE_SEMANTIC_CURRENT = 5;
-}
-
-enum PayloadCompression {
-  PAYLOAD_COMPRESSION_UNSPECIFIED = 0;
-  PAYLOAD_COMPRESSION_IDENTITY = 1;
-  PAYLOAD_COMPRESSION_ZSTD = 2;
-}
-
-enum DeliveryPreference {
-  DELIVERY_PREFERENCE_UNSPECIFIED = 0;
-  DELIVERY_PREFERENCE_INLINE = 1;
-  DELIVERY_PREFERENCE_RESOURCE = 2;
-  DELIVERY_PREFERENCE_AUTO = 3;
+enum LifecycleState {
+  LIFECYCLE_STATE_UNSPECIFIED = 0;
+  LIFECYCLE_STATE_BOOTSTRAPPING = 1;
+  LIFECYCLE_STATE_READY = 2;
+  LIFECYCLE_STATE_DRAINING = 3;
+  LIFECYCLE_STATE_FAILED_CLOSED = 4;
 }
 
 enum QueryExecutionState {
   QUERY_EXECUTION_STATE_UNSPECIFIED = 0;
   QUERY_EXECUTION_STATE_ACCEPTED = 1;
-  QUERY_EXECUTION_STATE_WAITING_FOR_FRESHNESS = 2;
+  QUERY_EXECUTION_STATE_QUEUED = 2;
   QUERY_EXECUTION_STATE_RUNNING = 3;
   QUERY_EXECUTION_STATE_SUCCEEDED = 4;
   QUERY_EXECUTION_STATE_FAILED = 5;
@@ -57,348 +46,578 @@ enum QueryExecutionState {
   QUERY_EXECUTION_STATE_LOST = 7;
 }
 
-enum CancellationState {
-  CANCELLATION_STATE_UNSPECIFIED = 0;
-  CANCELLATION_STATE_NOT_FOUND = 1;
-  CANCELLATION_STATE_CANCELLATION_REQUESTED = 2;
-  CANCELLATION_STATE_CANCELLED = 3;
-  CANCELLATION_STATE_ALREADY_TERMINAL = 4;
-  CANCELLATION_STATE_FORCE_TERMINATED = 5;
+enum ChallengeInputKind {
+  CHALLENGE_INPUT_KIND_UNSPECIFIED = 0;
+  CHALLENGE_INPUT_KIND_STRING = 1;
+  CHALLENGE_INPUT_KIND_INTEGER = 2;
+  CHALLENGE_INPUT_KIND_BOOLEAN = 3;
+  CHALLENGE_INPUT_KIND_ENUM = 4;
+  CHALLENGE_INPUT_KIND_STRING_COLLECTION = 5;
+  CHALLENGE_INPUT_KIND_INTEGER_COLLECTION = 6;
+  CHALLENGE_INPUT_KIND_BOOLEAN_COLLECTION = 7;
+  CHALLENGE_INPUT_KIND_ENUM_COLLECTION = 8;
 }
 
-enum WorkspaceReadiness {
-  WORKSPACE_READINESS_UNSPECIFIED = 0;
-  WORKSPACE_READINESS_BOOTSTRAPPING = 1;
-  WORKSPACE_READINESS_READY = 2;
-  WORKSPACE_READINESS_DEGRADED = 3;
-  WORKSPACE_READINESS_FAILED = 4;
+enum ChallengeCollectionItemKind {
+  CHALLENGE_COLLECTION_ITEM_KIND_UNSPECIFIED = 0;
+  CHALLENGE_COLLECTION_ITEM_KIND_STRING = 1;
+  CHALLENGE_COLLECTION_ITEM_KIND_INTEGER = 2;
+  CHALLENGE_COLLECTION_ITEM_KIND_BOOLEAN = 3;
+  CHALLENGE_COLLECTION_ITEM_KIND_ENUM = 4;
 }
 
-message VersionRange {
-  string minimum = 1;
-  string maximum = 2;
+enum ChallengeStringFormat {
+  CHALLENGE_STRING_FORMAT_UNSPECIFIED = 0;
+  CHALLENGE_STRING_FORMAT_PLAIN = 1;
+  CHALLENGE_STRING_FORMAT_IDENTIFIER = 2;
+  CHALLENGE_STRING_FORMAT_RELEASE_VERSION = 3;
 }
 
-message SchemaFingerprint {
-  string schema_id = 1;
-  string version = 2;
-  string digest = 3;
+enum ChallengeExplanationCode {
+  CHALLENGE_EXPLANATION_CODE_UNSPECIFIED = 0;
+  CHALLENGE_EXPLANATION_CODE_REQUIRED_INPUT_MISSING = 1;
+  CHALLENGE_EXPLANATION_CODE_REFERENCE_AMBIGUOUS = 2;
+  CHALLENGE_EXPLANATION_CODE_BOUNDED_SELECTION_REQUIRED = 3;
 }
 
-message HostCapabilityProfile {
-  repeated DeliveryPreference delivery_modes = 1;
-  repeated PayloadCompression compression_algorithms = 2;
-  bool supports_resource_links = 3;
-  bool supports_trace_context = 4;
-  uint64 maximum_frame_bytes = 5;
-  // BLAKE3-256 of RFC 8785 canonical JSON over the five preceding typed fields,
-  // with enum values represented by their stable lowercase protocol names and
-  // both repeated fields sorted and duplicate-free.
-  string profile_digest = 6;
+enum SafeErrorLayer {
+  SAFE_ERROR_LAYER_UNSPECIFIED = 0;
+  SAFE_ERROR_LAYER_TRANSPORT = 1;
+  SAFE_ERROR_LAYER_AUTHORIZATION = 2;
+  SAFE_ERROR_LAYER_VALIDATION = 3;
+  SAFE_ERROR_LAYER_QUERY = 4;
+  SAFE_ERROR_LAYER_RESOURCE = 5;
+  SAFE_ERROR_LAYER_LIFECYCLE = 6;
 }
 
-message CredentialProof {
-  string credential_id = 1;
-  bytes capability_token = 2;
+// This append-only allowlist may be encoded in the codefabric-safe-error-bin
+// trailing metadata key. It never carries raw causes, paths, tokens, or prose.
+enum SafeErrorCode {
+  SAFE_ERROR_CODE_UNSPECIFIED = 0;
+  SAFE_ERROR_CODE_INVALID_REQUEST = 1;
+  SAFE_ERROR_CODE_VALIDATION_REJECTED = 2;
+  SAFE_ERROR_CODE_INPUT_REQUIRED = 3;
+  SAFE_ERROR_CODE_NOT_AUTHORIZED = 4;
+  SAFE_ERROR_CODE_IDEMPOTENCY_CONFLICT = 5;
+  SAFE_ERROR_CODE_CONTINUATION_EXPIRED = 6;
+  SAFE_ERROR_CODE_CONTINUATION_REPLAYED = 7;
+  SAFE_ERROR_CODE_GENERATION_MISMATCH = 8;
+  SAFE_ERROR_CODE_QUERY_NOT_FOUND = 9;
+  SAFE_ERROR_CODE_RESOURCE_NOT_FOUND = 10;
+  SAFE_ERROR_CODE_RESOURCE_EXPIRED = 11;
+  SAFE_ERROR_CODE_RANGE_NOT_SATISFIABLE = 12;
+  SAFE_ERROR_CODE_CAPACITY_UNAVAILABLE = 13;
+  SAFE_ERROR_CODE_CANCELLED = 14;
+  SAFE_ERROR_CODE_RESUME_WINDOW_EXPIRED = 15;
+  SAFE_ERROR_CODE_DAEMON_UNAVAILABLE = 16;
+  SAFE_ERROR_CODE_INTERNAL = 17;
+}
+
+enum SafeDiagnosticReference {
+  SAFE_DIAGNOSTIC_REFERENCE_UNSPECIFIED = 0;
+  SAFE_DIAGNOSTIC_REFERENCE_LIFECYCLE_FAILED_CLOSED = 1;
+  SAFE_DIAGNOSTIC_REFERENCE_QUERY_CHALLENGE_REJECTED = 2;
+  SAFE_DIAGNOSTIC_REFERENCE_QUERY_TERMINAL = 3;
+}
+
+enum ProgressStage {
+  PROGRESS_STAGE_UNSPECIFIED = 0;
+  PROGRESS_STAGE_EXECUTING = 1;
+}
+
+enum ResourceKind {
+  RESOURCE_KIND_UNSPECIFIED = 0;
+  RESOURCE_KIND_RESULT_MANIFEST = 1;
+  RESOURCE_KIND_RESULT_PAGE = 2;
+  RESOURCE_KIND_REFERENCE = 3;
+  reserved 4;
+  reserved "RESOURCE_KIND_PROJECTION";
+}
+
+enum ReferenceKind {
+  REFERENCE_KIND_UNSPECIFIED = 0;
+  REFERENCE_KIND_CAPABILITY = 1;
+  REFERENCE_KIND_GUIDE = 2;
+  REFERENCE_KIND_RECIPE = 3;
+  REFERENCE_KIND_REQUEST_SCHEMA = 4;
+  REFERENCE_KIND_RESPONSE_SCHEMA = 5;
+  REFERENCE_KIND_SNAPSHOT = 6;
+}
+
+enum ReferenceTemplateVariable {
+  REFERENCE_TEMPLATE_VARIABLE_UNSPECIFIED = 0;
+  REFERENCE_TEMPLATE_VARIABLE_KIND = 1;
+  REFERENCE_TEMPLATE_VARIABLE_RELEASED_VERSION = 2;
+}
+
+enum CancellationAcknowledgement {
+  CANCELLATION_ACKNOWLEDGEMENT_UNSPECIFIED = 0;
+  CANCELLATION_ACKNOWLEDGEMENT_ACCEPTED = 1;
+  CANCELLATION_ACKNOWLEDGEMENT_REPLAYED = 2;
+  CANCELLATION_ACKNOWLEDGEMENT_ALREADY_TERMINAL = 3;
+  CANCELLATION_ACKNOWLEDGEMENT_QUERY_NOT_FOUND = 4;
+}
+
+enum ReleaseState {
+  RELEASE_STATE_UNSPECIFIED = 0;
+  RELEASE_STATE_RELEASED = 1;
+  RELEASE_STATE_ALREADY_RELEASED = 2;
+  RELEASE_STATE_NOT_FOUND = 3;
+}
+
+enum ReservedControlOperation {
+  RESERVED_CONTROL_OPERATION_UNSPECIFIED = 0;
+  RESERVED_CONTROL_OPERATION_HANDSHAKE = 1;
+  RESERVED_CONTROL_OPERATION_GET_STATUS = 2;
+  RESERVED_CONTROL_OPERATION_CANCEL_QUERY = 3;
+  RESERVED_CONTROL_OPERATION_RELEASE_RESOURCE = 4;
+}
+
+// Assertions in request bodies are never credentials. The session token remains
+// binary gRPC metadata and peer identity remains a verified request extension.
+message RequestContext {
+  string correlation_id = 1;
+  reserved 2, 3, 4;
+  google.protobuf.Duration remaining_budget = 5;
+}
+
+message AuthorityGeneration {
+  string session_id = 1;
+  uint64 session_generation = 2;
+  uint64 daemon_generation = 3;
+  uint64 supervisor_generation = 4;
+  uint64 policy_generation = 5;
+  uint64 revocation_generation = 6;
+}
+
+message ReservedControlContract {
+  uint32 reserved_capacity = 1;
+  repeated ReservedControlOperation operations = 2;
+}
+
+message EffectiveLimits {
+  uint64 maximum_control_message_bytes = 1;
+  uint64 maximum_resource_chunk_bytes = 2;
+  uint64 maximum_result_bytes = 3;
+  uint64 maximum_result_pages = 4;
+  uint32 maximum_concurrent_queries = 5;
+  uint32 maximum_watch_events = 6;
+  uint32 maximum_challenge_fields = 7;
+  uint32 maximum_choices_per_field = 8;
+  uint32 maximum_challenge_rounds = 9;
+  uint32 maximum_reference_completion_candidates = 10;
+  uint32 maximum_validation_issues = 11;
 }
 
 message HandshakeRequest {
-  string adapter_instance_id = 1;
+  bytes launch_grant = 1;
   string adapter_version = 2;
-  string fastmcp_version = 3;
-  string pydantic_version = 4;
-  string python_version = 5;
-  VersionRange rpc_versions = 6;
-  VersionRange semantic_query_versions = 7;
-  repeated SchemaFingerprint schema_fingerprints = 8;
-  uint64 required_feature_bits = 9;
-  uint64 optional_feature_bits = 10;
-  repeated string desired_workspace_ids = 11;
-  HostCapabilityProfile host_capabilities = 12;
-  CredentialProof credential_proof = 13;
-  string agent_instance_id = 14;
-}
-
-message BundleIdentity {
-  string bundle_id = 1;
-  string bundle_version = 2;
-  string bundle_digest = 3;
-}
-
-message WorkspaceClaim {
-  string workspace_id = 1;
-  optional string repository_id = 2;
-  optional string worktree_id = 3;
-  string workspace_kind = 4;
-  WorkspaceReadiness readiness = 5;
-  repeated string permission_claims = 6;
-}
-
-message EffectiveLimitsProfile {
-  uint64 maximum_control_message_bytes = 1;
-  uint64 maximum_payload_chunk_bytes = 2;
-  uint64 maximum_inline_response_bytes = 3;
-  uint32 maximum_concurrent_queries = 4;
-  uint32 query_orphan_replay_seconds = 5;
-  string profile_digest = 6;
-}
-
-message ReadinessSummary {
-  WorkspaceReadiness readiness = 1;
-  optional string reason_code = 2;
-  optional string active_snapshot_id = 3;
-  repeated uint32 supported_language_codes = 4;
-  repeated string supported_query_forms = 5;
-  repeated uint32 capability_codes = 6;
+  uint32 minimum_minor = 3;
+  uint32 maximum_minor = 4;
+  uint64 required_feature_bits = 5;
+  uint64 optional_feature_bits = 6;
+  repeated string desired_semantic_profiles = 7;
+  uint64 maximum_resource_chunk_bytes = 8;
+  google.protobuf.Duration remaining_budget = 9;
+  string correlation_id = 10;
 }
 
 message HandshakeResponse {
-  string daemon_instance_id = 1;
-  string daemon_version = 2;
-  string rust_build = 3;
-  string negotiated_rpc_version = 4;
-  string negotiated_semantic_query_version = 5;
-  uint64 negotiated_feature_bits = 6;
-  PayloadCompression negotiated_compression = 7;
-  repeated BundleIdentity installed_bundles = 8;
-  repeated SchemaFingerprint active_schema_fingerprints = 9;
-  EffectiveLimitsProfile effective_limits = 10;
-  repeated WorkspaceClaim authorized_workspaces = 11;
-  int64 server_time_unix_ms = 12;
-  ReadinessSummary readiness = 13;
+  bytes session_token = 1;
+  AuthorityGeneration authority = 2;
+  uint32 selected_minor = 3;
+  uint64 selected_feature_bits = 4;
+  string selected_semantic_profile = 5;
+  LifecycleState lifecycle = 6;
+  EffectiveLimits effective_limits = 7;
+  int64 session_expires_at_unix_ms = 8;
+  string reference_index_revision = 9;
+  ReservedControlContract reserved_control = 10;
 }
 
-message StatusRequest {
-  string agent_instance_id = 1;
-  string workspace_id = 2;
-  bool include_diagnostics = 3;
+message SafeErrorMetadata {
+  SafeErrorCode code = 1;
+  SafeErrorLayer layer = 2;
+  bool retryable = 3;
+  optional uint64 retry_after_ms = 4;
+  optional SafeDiagnosticReference diagnostic_reference = 5;
+  string correlation_id = 6;
 }
 
-message StatusResponse {
-  string workspace_id = 1;
-  WorkspaceReadiness readiness = 2;
-  bytes canonical_public_status_json = 3;
-  string status_checksum = 4;
-  int64 observed_at_unix_ms = 5;
+message GetStatusRequest {
+  RequestContext context = 1;
+  bool include_diagnostics = 2;
+}
+
+message GetStatusResponse {
+  AuthorityGeneration authority = 1;
+  LifecycleState lifecycle = 2;
+  uint64 lifecycle_sequence = 3;
+  optional SafeErrorMetadata failure = 4;
+  optional string active_epoch_id = 5;
+  uint32 running_queries = 6;
+  uint32 queued_queries = 7;
+  bytes canonical_public_status_json = 8;
+}
+
+message ReferenceReadRequest {
+  ReferenceKind kind = 1;
+  optional string version = 2;
+}
+
+message ReferenceCompletionRequest {
+  ReferenceTemplateVariable variable = 1;
+  string prefix = 2;
+  optional ReferenceKind kind = 3;
+  optional string selector = 4;
+  uint32 maximum_candidates = 5;
+}
+
+message GetReferenceRequest {
+  RequestContext context = 1;
+  oneof operation {
+    ReferenceReadRequest read = 2;
+    ReferenceCompletionRequest completion = 3;
+  }
+}
+
+message ReferenceDocument {
+  string reference_id = 1;
+  ResourceDescriptor resource = 2;
+  reserved 3 to 5;
+}
+
+message ReferenceCompletionCandidate {
+  string value = 1;
+  string presentation_key = 2;
+}
+
+message ReferenceCompletion {
+  repeated ReferenceCompletionCandidate candidates = 1;
+  uint32 total = 2;
+  bool has_more = 3;
+}
+
+message GetReferenceResponse {
+  AuthorityGeneration authority = 1;
+  oneof result {
+    ReferenceDocument reference = 2;
+    ReferenceCompletion completion = 3;
+  }
+}
+
+message ResultLimits {
+  uint64 maximum_result_bytes = 1;
+  uint64 maximum_result_pages = 2;
+}
+
+message QuerySubmission {
+  bytes canonical_request_json = 1;
+  string request_checksum = 2;
+  optional string semantic_request_id = 3;
+  string semantic_profile = 4;
+  ResultLimits result_limits = 5;
+}
+
+message ChallengeStringConstraints {
+  optional uint32 minimum_length = 1;
+  optional uint32 maximum_length = 2;
+  ChallengeStringFormat format = 3;
+}
+
+message ChallengeIntegerConstraints {
+  optional sint64 minimum = 1;
+  optional sint64 maximum = 2;
+}
+
+message ChallengeEnumConstraints {
+  uint32 minimum_selections = 1;
+  uint32 maximum_selections = 2;
+}
+
+message ChallengeCollectionConstraints {
+  ChallengeCollectionItemKind item_kind = 1;
+  uint32 minimum_items = 2;
+  uint32 maximum_items = 3;
+  bool unique_items = 4;
+}
+
+message ChallengeConstraints {
+  oneof constraint {
+    ChallengeStringConstraints string_constraints = 1;
+    ChallengeIntegerConstraints integer_constraints = 2;
+    ChallengeEnumConstraints enum_constraints = 3;
+    ChallengeCollectionConstraints collection_constraints = 4;
+  }
+}
+
+message AuthorizedChoice {
+  string choice_id = 1;
+  string presentation_key = 2;
+  oneof value {
+    string string_value = 3;
+    sint64 integer_value = 4;
+    bool boolean_value = 5;
+  }
+}
+
+message InputRequirement {
+  string semantic_field_id = 1;
+  ChallengeInputKind input_kind = 2;
+  string presentation_key = 3;
+  optional string description_key = 4;
+  bool required = 5;
+  ChallengeConstraints constraints = 6;
+  repeated AuthorizedChoice authorized_choices = 7;
+}
+
+message StringAnswerCollection {
+  repeated string values = 1;
+}
+
+message IntegerAnswerCollection {
+  repeated sint64 values = 1;
+}
+
+message BooleanAnswerCollection {
+  repeated bool values = 1;
+}
+
+message ChoiceAnswerCollection {
+  repeated string choice_ids = 1;
+}
+
+message InputAnswer {
+  string semantic_field_id = 1;
+  oneof value {
+    string string_value = 2;
+    sint64 integer_value = 3;
+    bool boolean_value = 4;
+    string choice_id = 5;
+    StringAnswerCollection string_collection = 6;
+    IntegerAnswerCollection integer_collection = 7;
+    BooleanAnswerCollection boolean_collection = 8;
+    ChoiceAnswerCollection choice_collection = 9;
+  }
+}
+
+message ValidationIssue {
+  SafeErrorCode code = 1;
+  string semantic_field_id = 2;
+  string presentation_key = 3;
+  bool retryable = 4;
+}
+
+message QueryPreparation {
+  bytes canonical_normalized_request_json = 1;
+  string semantic_request_id = 2;
+  repeated InputRequirement input_requirements = 3;
+  repeated ValidationIssue errors = 4;
+  repeated ValidationIssue warnings = 5;
+  string cost_class = 6;
+  uint64 estimated_result_bytes = 7;
+  uint64 estimated_result_pages = 8;
 }
 
 message ValidateQueryRequest {
-  string agent_instance_id = 1;
-  string workspace_id = 2;
-  string semantic_query_version = 3;
-  bytes canonical_request_json = 4;
-  string request_checksum = 5;
-  FreshnessPolicy freshness_policy = 6;
-  string host_capability_profile_digest = 7;
+  RequestContext context = 1;
+  QuerySubmission query = 2;
 }
 
 message ValidateQueryResponse {
-  bool valid = 1;
-  bytes canonical_normalized_request_json = 2;
-  string normalized_request_checksum = 3;
-  string effective_semantic_request_id = 4;
-  repeated string provisional_snapshot_checks = 5;
-  repeated bytes canonical_error_records_json = 6;
-  string cost_class = 7;
+  AuthorityGeneration authority = 1;
+  QueryPreparation preparation = 2;
+}
+
+message InitialQueryStart {
+  QuerySubmission query = 1;
+  reserved 2;
+  reserved "start_idempotency_id";
+}
+
+message QueryChallengeContinuation {
+  bytes daemon_continuation = 1;
+  string challenge_id = 2;
+  uint32 round = 3;
+  repeated InputAnswer answers = 4;
 }
 
 message StartQueryRequest {
-  string agent_instance_id = 1;
-  string workspace_id = 2;
-  string mcp_call_id = 3;
-  string rpc_attempt_id = 4;
-  optional string semantic_request_id = 5;
-  string semantic_query_version = 6;
-  bytes canonical_request_json = 7;
-  string request_checksum = 8;
-  FreshnessPolicy freshness_policy = 9;
-  DeliveryPreference delivery_preference = 10;
-  string host_capability_profile_digest = 11;
-  int64 deadline_unix_ms = 12;
-  string idempotency_key = 13;
-  PayloadCompression payload_compression = 14;
+  RequestContext context = 1;
+  oneof leg {
+    InitialQueryStart initial = 2;
+    QueryChallengeContinuation continuation = 3;
+  }
+}
+
+message AcceptedQuery {
+  AuthorityGeneration authority = 1;
+  string daemon_query_id = 2;
+  string semantic_request_id = 3;
+  string operation_fingerprint = 4;
+  int64 accepted_at_unix_ms = 5;
+  int64 observation_expires_at_unix_ms = 6;
+  QueryExecutionState state = 7;
+  bool idempotent_replay = 8;
+}
+
+message InputChallenge {
+  AuthorityGeneration authority = 1;
+  string semantic_request_id = 2;
+  string challenge_id = 3;
+  uint32 round = 4;
+  uint32 remaining_rounds = 5;
+  int64 issued_at_unix_ms = 6;
+  int64 expires_at_unix_ms = 7;
+  uint32 maximum_answer_bytes = 8;
+  ChallengeExplanationCode explanation_code = 9;
+  repeated InputRequirement requirements = 10;
+  bytes daemon_continuation = 11;
+}
+
+message ValidationRejection {
+  AuthorityGeneration authority = 1;
+  optional string semantic_request_id = 2;
+  repeated ValidationIssue issues = 3;
+  SafeErrorMetadata error = 4;
 }
 
 message StartQueryResponse {
-  string daemon_query_id = 1;
-  bytes resume_token = 2;
-  int64 accepted_at_unix_ms = 3;
-  QueryExecutionState query_execution_state = 4;
-  string queue_class = 5;
-  optional uint32 queue_position = 6;
-  string negotiated_request_version = 7;
-  string negotiated_response_version = 8;
-  string effective_semantic_request_id = 9;
-  bytes cancel_token = 10;
+  oneof outcome {
+    AcceptedQuery accepted = 1;
+    InputChallenge input_challenge = 2;
+    ValidationRejection validation_rejection = 3;
+  }
 }
 
-message StreamQueryRequest {
-  string daemon_query_id = 1;
-  bytes resume_token = 2;
-  uint64 after_sequence = 3;
-}
-
-message AttachQueryRequest {
-  string daemon_query_id = 1;
-  bytes resume_token = 2;
-  uint64 after_sequence = 3;
-  optional string after_event_checksum = 4;
-  string agent_instance_id = 5;
-  string workspace_id = 6;
+message WatchQueryRequest {
+  RequestContext context = 1;
+  string daemon_query_id = 2;
+  optional bytes cursor = 3;
 }
 
 message QueryEventHeader {
-  string daemon_query_id = 1;
-  uint64 sequence = 2;
-  optional string snapshot_id = 3;
-  int64 event_at_unix_ms = 4;
-  string event_checksum = 5;
+  AuthorityGeneration authority = 1;
+  string daemon_query_id = 2;
+  uint64 sequence = 3;
+  int64 emitted_at_unix_ms = 4;
+  bytes cursor = 5;
 }
 
 message SnapshotPinnedEvent {
   QueryEventHeader header = 1;
-  bytes canonical_public_snapshot_metadata_json = 2;
-  string metadata_checksum = 3;
+  string epoch_id = 2;
+  uint64 source_generation = 3;
+  uint64 activation_head = 4;
+  uint64 lifecycle_watermark = 5;
 }
 
 message ProgressEvent {
   QueryEventHeader header = 1;
-  string phase = 2;
-  uint32 completed_units = 3;
-  optional uint32 total_units = 4;
-  string message = 5;
+  ProgressStage stage = 2;
+  uint64 completed = 3;
+  optional uint64 total = 4;
 }
 
-message ResponseChunkEvent {
-  QueryEventHeader header = 1;
-  uint64 offset = 2;
-  uint64 uncompressed_length = 3;
-  bytes payload = 4;
-  string payload_checksum = 5;
-  PayloadCompression encoding = 6;
-  bool final_chunk = 7;
+message ResourceDescriptor {
+  ResourceKind kind = 1;
+  string public_handle = 2;
+  optional string package_id = 3;
+  optional uint32 page_ordinal = 4;
+  string media_type = 5;
+  uint64 byte_length = 6;
+  string content_checksum = 7;
+  int64 expires_at_unix_ms = 8;
+  AuthorityGeneration authority = 9;
 }
 
-message ArtifactReadyEvent {
+message ResultReadyEvent {
   QueryEventHeader header = 1;
-  string artifact_id = 2;
-  string artifact_checksum = 3;
-  string content_type = 4;
-  PayloadCompression encoding = 5;
-  int64 lease_expires_at_unix_ms = 6;
-  string lease_token = 7;
-  // Present for the Arrow-native result route. The bytes are the RFC 8785
-  // control projection emitted by the Rust result registry; they contain
-  // identities, schemas, coverage, bounds, and checksums but no semantic rows.
-  bytes canonical_result_descriptor_json = 8;
-  string result_descriptor_checksum = 9;
-  string result_contract_version = 10;
-  string arrow_release = 11;
+  string package_id = 2;
+  ResourceDescriptor manifest = 3;
+  uint64 total_rows = 4;
+  uint64 total_pages = 5;
+  uint64 total_bytes = 6;
+  repeated ResourceDescriptor pages = 7;
 }
 
 message TerminalEvent {
   QueryEventHeader header = 1;
-  QueryExecutionState execution_state = 2;
-  string availability_state = 3;
-  string freshness_state = 4;
-  string limit_state = 5;
-  string dependency_state = 6;
-  optional string canonical_response_checksum = 7;
-  optional bytes canonical_error_record_json = 8;
-  optional string artifact_id = 9;
-  uint64 result_row_count = 10;
-  uint64 result_byte_count = 11;
-  string cleanup_state = 12;
-  // Registry-native semantic response states. Presentation adapters pass these
-  // values through rather than narrowing or reconstructing them.
-  string semantic_execution_state = 13;
-  string completeness_state = 14;
-  bool truncated = 15;
-  repeated QueryStatusSummary query_statuses = 16;
-  repeated string notices = 17;
+  QueryExecutionState state = 2;
+  optional SafeErrorMetadata error = 3;
 }
 
-message QueryStatusSummary {
-  string query_id = 1;
-  string execution_state = 2;
-  optional bytes canonical_error_record_json = 3;
-  repeated string notices = 4;
-}
-
-// Exactly one of the five AC-G-58 event variants is present.
 message QueryEvent {
   oneof event {
     SnapshotPinnedEvent snapshot_pinned = 1;
     ProgressEvent progress = 2;
-    ResponseChunkEvent response_chunk = 3;
-    ArtifactReadyEvent artifact_ready = 4;
-    TerminalEvent terminal = 5;
+    ResultReadyEvent result_ready = 3;
+    TerminalEvent terminal = 4;
   }
 }
 
 message CancelQueryRequest {
-  string daemon_query_id = 1;
-  bytes cancel_token = 2;
-  string agent_instance_id = 3;
-  string workspace_id = 4;
-  string reason = 5;
+  RequestContext context = 1;
+  string daemon_query_id = 2;
+  string cancellation_id = 3;
+}
+
+message TerminalObservation {
+  QueryExecutionState state = 1;
+  int64 observed_at_unix_ms = 2;
+  optional SafeErrorMetadata error = 3;
 }
 
 message CancelQueryResponse {
-  string daemon_query_id = 1;
-  CancellationState state = 2;
-  int64 acknowledged_at_unix_ms = 3;
-  optional QueryExecutionState terminal_state = 4;
-  repeated string cleaning_up_components = 5;
-  bool forced_termination = 6;
+  AuthorityGeneration authority = 1;
+  string cancellation_id = 2;
+  CancellationAcknowledgement acknowledgement = 3;
+  optional TerminalObservation terminal = 4;
+  bool idempotent_replay = 5;
 }
 
-message ReadResultRequest {
-  string artifact_id = 1;
-  uint64 offset = 2;
-  optional uint64 maximum_bytes = 3;
-  string lease_token = 4;
-  PayloadCompression accepted_compression = 5;
-  // Non-empty only for the Arrow-native route. This is the owner-bound
-  // authorization handle from the descriptor, never the content identity.
-  string authorization_resource_id = 6;
-  ResultOwner owner = 7;
+message ManifestSelector {}
+
+message PageSelector {
+  uint32 page_ordinal = 1;
 }
 
-message ResultOwner {
-  // Lowercase fixed-width identities projected by the Rust daemon. They are
-  // deliberately distinct from display/public workspace identifiers.
-  string workspace_id = 1;
-  string agent_id = 2;
+message ResourceSelector {
+  reserved 4;
+  reserved "projection";
+  oneof selector {
+    ManifestSelector manifest = 1;
+    PageSelector page = 2;
+    ReferenceReadRequest reference = 3;
+  }
 }
 
-message ResultChunk {
-  string artifact_id = 1;
-  uint64 offset = 2;
-  uint64 uncompressed_length = 3;
-  bytes payload = 4;
-  string payload_checksum = 5;
-  string artifact_checksum = 6;
-  string content_type = 7;
-  PayloadCompression encoding = 8;
-  bool final_chunk = 9;
-  int64 lease_expires_at_unix_ms = 10;
-  string authorization_resource_id = 11;
-  uint64 next_offset = 12;
-  uint64 total_length = 13;
-  string content_checksum = 14;
+message ReadResourceRequest {
+  RequestContext context = 1;
+  string public_handle = 2;
+  ResourceSelector selector = 3;
+  uint64 offset = 4;
+  uint64 maximum_bytes = 5;
 }
 
-message ReleaseResultRequest {
-  string artifact_id = 1;
-  string lease_token = 2;
-  ResultOwner owner = 3;
+message ResourceChunk {
+  AuthorityGeneration authority = 1;
+  string public_handle = 2;
+  uint64 offset = 3;
+  bytes content = 4;
+  string content_checksum = 5;
+  bool end_of_resource = 6;
 }
 
-message ReleaseResultResponse {
-  string artifact_id = 1;
-  bool released = 2;
-  optional int64 remaining_lease_expires_at_unix_ms = 3;
-  // "released" or "already_released" for the Arrow-native tombstone route.
-  string release_state = 4;
+message ReleaseResourceRequest {
+  RequestContext context = 1;
+  string public_handle = 2;
+  string release_id = 3;
+}
+
+message ReleaseResourceResponse {
+  AuthorityGeneration authority = 1;
+  string release_id = 2;
+  ReleaseState state = 3;
+  bool idempotent_replay = 4;
 }

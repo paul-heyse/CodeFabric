@@ -1166,36 +1166,6 @@ mod tests {
             .unwrap(),
             result_owner
         );
-        let opaque_token = token(0x71);
-        let event = crate::query_service::published_arrow_artifact_ready_event(
-            crate::rpc::generated::codefabric::cpgd::v1::QueryEventHeader {
-                daemon_query_id: "query:arrow-transport".to_owned(),
-                sequence: 2,
-                snapshot_id: Some("epoch:arrow-transport".to_owned()),
-                event_at_unix_ms: 1_500,
-                event_checksum: String::new(),
-            },
-            &descriptor,
-            &opaque_token,
-        )
-        .unwrap();
-        assert_eq!(event.artifact_id, descriptor.artifact_id.public_id());
-        assert_eq!(event.canonical_result_descriptor_json, control_bytes);
-        assert_eq!(
-            event.result_descriptor_checksum,
-            crate::integrity::framed_digest(&event.canonical_result_descriptor_json)
-        );
-        assert_eq!(event.artifact_checksum, event.result_descriptor_checksum);
-        assert_eq!(event.result_contract_version, PUBLISHED_RESULT_FORMAT);
-        assert_eq!(
-            event.arrow_release,
-            crate::fabric::arrow_result_resource::ARROW_RELEASE
-        );
-        assert_eq!(event.lease_token, opaque_token.public_token());
-        assert_eq!(
-            OpaqueResultLeaseToken::try_from_public_token(&opaque_token.public_token()).unwrap(),
-            opaque_token
-        );
         assert!(PublishedArtifactId::try_from_public_id("b3:NOT-LOWER-HEX").is_err());
 
         let second_registry = PublishedArrowResultRegistry::new();

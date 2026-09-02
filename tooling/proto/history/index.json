@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "census_path": "tooling/proto/history/cpgd-v2-pre-fastmcp4-census.json",
+      "census_sha256": "bc019e4e4622b2f989ef3d334cfd77107fdec6d6718b6781a3d33ff7cb0e93dd",
+      "compatibility_baseline": false,
+      "descriptor_path": "tooling/proto/history/cpgd-v2-pre-fastmcp4-descriptor.pb",
+      "descriptor_sha256": "cd0d47b0a96758d7748023e47b6b0c0a935be9fb6a57b7be7f0849f6270cf791",
+      "history_id": "cpgd-v2-pre-fastmcp4",
+      "live_runtime": false,
+      "package": "codefabric.cpgd.v2",
+      "source_blake3": "4a3c2bc3b63fbefc53711f9b2f4912060753395140b80d5d50e9935366a76bf5",
+      "source_path_at_issuance": "contracts/rpc/cpg_query_service.proto",
+      "source_sha256": "5d4787b3d49bffcbe17292f4b443e80ffe80dcc546346a968901ebd8943f8cb2",
+      "status": "unreleased-displaced-non-live"
+    }
+  ],
+  "schema": 1
+}

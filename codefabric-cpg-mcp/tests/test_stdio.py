@@ -3,7 +3,6 @@
 import json
 import os
 import subprocess
-import time
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -21,14 +20,7 @@ LOCKED_COMMAND = (
 
 def adapter_environment() -> dict[str, str]:
     environment = os.environ.copy()
-    environment.update(
-        {
-            "CODEFABRIC_CPG_DAEMON_TARGET": "unix:///tmp/codefabric.sock",
-            "CODEFABRIC_WORKSPACE_ID": "workspace-main",
-            "CODEFABRIC_AGENT_INSTANCE_ID": "pytest-stdio",
-            "CODEFABRIC_CPG_CAPABILITY_TOKEN": "test-secret",
-        }
-    )
+    environment["FASTMCP_MCP_CAMELCASE_COMPAT"] = "false"
     return environment
 
 
@@ -46,14 +38,15 @@ def test_identity_is_stderr_only_and_exact() -> None:
     identity = json.loads(completed.stderr)
     assert identity == {
         "adapter": "0.1.0",
-        "fastmcp": "3.4.7",
+        "fastmcp": "4.0.0",
+        "grpcio": "1.83.0",
+        "protobuf": "7.36.0",
         "pydantic": "2.13.4",
-        "pydantic-settings": "2.15.0",
         "python": "3.14.7",
     }
 
 
-def test_locked_stdio_process_starts_and_exits_cleanly_without_output() -> None:
+def test_stdio_process_rejects_startup_without_inherited_launch_socket() -> None:
     process = subprocess.Popen(
         LOCKED_COMMAND,
         stdin=subprocess.PIPE,
@@ -65,13 +58,10 @@ def test_locked_stdio_process_starts_and_exits_cleanly_without_output() -> None:
     assert process.stdout is not None
     assert process.stderr is not None
 
-    time.sleep(0.75)
-    assert process.poll() is None, process.stderr.read().decode()
-
-    process.stdin.close()
     returncode = process.wait(timeout=30)
     stdout = process.stdout.read()
     stderr = process.stderr.read()
 
-    assert returncode == 0, stderr.decode()
+    assert returncode != 0
     assert stdout == b""
+    assert b"adapter launch fd 3 is not a socket" in stderr

@@ -6,15 +6,17 @@ from importlib.metadata import version
 from platform import python_version
 
 from . import __version__
-from .server import mcp
+from .server import create_server
+from .settings import process_settings
 
 
 def _identity() -> dict[str, str]:
     return {
         "adapter": __version__,
         "fastmcp": version("fastmcp"),
+        "grpcio": version("grpcio"),
+        "protobuf": version("protobuf"),
         "pydantic": version("pydantic"),
-        "pydantic-settings": version("pydantic-settings"),
         "python": python_version(),
     }
 
@@ -29,7 +31,9 @@ def main() -> int:
         print("usage: python -m codefabric_cpg_mcp [--identity]", file=sys.stderr)
         return 2
 
-    mcp.run(show_banner=False)
+    settings = process_settings()
+    server = create_server(settings)
+    server.run(transport="stdio", show_banner=False)
     return 0
 
 

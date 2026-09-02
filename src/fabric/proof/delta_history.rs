@@ -840,15 +840,7 @@ fn validate_provider_schema(
         return row_error(kind, "exact provider field count differs from history");
     }
     for (observed, expected) in observed.fields().iter().zip(expected.fields()) {
-        let compatible_type = observed.data_type() == expected.data_type()
-            || matches!(
-                (observed.data_type(), expected.data_type()),
-                (DataType::BinaryView, DataType::Binary)
-            );
-        if observed.name() != expected.name()
-            || observed.is_nullable() != expected.is_nullable()
-            || !compatible_type
-        {
+        if !crate::schema_contract::delta_provider_field_compatible(expected, observed) {
             return row_error(
                 kind,
                 format!(

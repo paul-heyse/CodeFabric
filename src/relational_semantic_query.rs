@@ -877,12 +877,24 @@ pub struct EpochBoundConsumerSlotBindingRow {
 
 /// Catalog-side selection value contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EpochBoundSelectionValueResolution {
+    /// Released request value admitted by this exact epoch program.
+    pub request_value: SemanticClauseValue,
+    /// Typed value consumed by the executable relation field.
+    pub execution_value: SemanticClauseValue,
+}
+
+/// Catalog-side selection value contract.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EpochBoundSelectionBindingRow {
     pub program_binding_id: Arc<str>,
     pub selection_id: Arc<str>,
     pub value_kind: SemanticValueKind,
     pub minimum_values: usize,
     pub maximum_values: usize,
+    /// Epoch-derived phrase/value realizations. Empty means the released value is already the
+    /// executable value; non-empty means every request value must resolve through this relation.
+    pub resolutions: Vec<EpochBoundSelectionValueResolution>,
 }
 
 /// Catalog-side return value contract.
@@ -3233,6 +3245,18 @@ fn validate_epoch_bound_ingress_catalog<'a>(
             row.maximum_values,
             limits.max_selection_rows(),
         )?;
+        let mut request_values = BTreeSet::new();
+        for resolution in &row.resolutions {
+            if resolution.request_value.kind() != row.value_kind
+                || resolution.execution_value.kind() != row.value_kind
+                || !request_values.insert(resolution.request_value.clone())
+            {
+                return Err(epoch_duplicate(
+                    "selection value resolution",
+                    format!("{}/{}", row.program_binding_id, row.selection_id),
+                ));
+            }
+        }
         let key = (
             Arc::clone(&row.program_binding_id),
             Arc::clone(&row.selection_id),
@@ -6419,8 +6443,8 @@ mod tests {
         });
         assert!(matches!(
             compile_relational_semantic_request(&cyclic, &catalog, &runtime_closure()),
-            Err(RelationalSemanticQueryError::UnknownCompositionRole { .. })
-                | Err(RelationalSemanticQueryError::QueryDependencyCycle)
+            Err(RelationalSemanticQueryError::UnknownCompositionRole { .. }
+                | RelationalSemanticQueryError::QueryDependencyCycle)
         ));
 
         let fanout_forms = [
@@ -6672,6 +6696,7 @@ mod tests {
                 value_kind: SemanticValueKind::Text,
                 minimum_values: 2,
                 maximum_values: 2,
+                resolutions: Vec::new(),
             }],
             returns: vec![
                 EpochBoundReturnBindingRow {

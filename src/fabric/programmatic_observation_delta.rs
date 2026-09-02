@@ -2027,11 +2027,7 @@ fn validate_native_history_schema(
         );
     }
     for (ordinal, (expected, actual)) in expected.fields().iter().zip(actual.fields()).enumerate() {
-        if expected.name() != actual.name()
-            || expected.data_type() != actual.data_type()
-            || expected.is_nullable() != actual.is_nullable()
-            || (!actual.metadata().is_empty() && actual.metadata() != expected.metadata())
-        {
+        if !crate::schema_contract::delta_provider_field_compatible(expected, actual) {
             return Err(
                 ProgrammaticObservationDeltaConfigurationError::NativeStorageSchema {
                     relation_id: relation_id.clone(),

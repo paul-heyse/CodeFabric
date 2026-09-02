@@ -256,12 +256,12 @@ where
         {
             return Err(CommandPortError::CorruptRecord);
         }
-        let builder =
-            (self.builder)(request.pins.epoch).map_err(|_| CommandPortError::ContextUnavailable)?;
+        let builder = (self.builder)(request.pins.epoch)
+            .map_err(|_error| CommandPortError::ContextUnavailable)?;
         let candidate = builder
             .reopen(Arc::clone(&request.table_versions))
             .await
-            .map_err(|_| CommandPortError::ContextUnavailable)?;
+            .map_err(|_error| CommandPortError::ContextUnavailable)?;
         if candidate.identity() != &request.pins.epoch
             || candidate.table_version_set_ref() != request.pins.table_versions
         {

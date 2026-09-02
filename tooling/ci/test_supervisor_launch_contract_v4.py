@@ -579,12 +579,13 @@ def test_supervisor_contract_rejects_restart_and_revocation_lifecycle_drift(
 
 
 def test_supervisor_contract_rejects_frozen_artifact_drift(tmp_path: Path) -> None:
-    for relative_path in (EXPECTATIONS_PATH, FIXTURES_PATH):
+    for relative_path in (contract.ISSUANCE_PATH, EXPECTATIONS_PATH, FIXTURES_PATH):
         target = tmp_path / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((ROOT / relative_path).read_bytes())
 
     assert _validate_frozen_artifact_hashes(tmp_path) == {
+        contract.ISSUANCE_PATH.as_posix(): contract.FROZEN_ISSUANCE_SHA256,
         EXPECTATIONS_PATH.as_posix(): contract.FROZEN_EXPECTATIONS_SHA256,
         FIXTURES_PATH.as_posix(): contract.FROZEN_FIXTURES_SHA256,
     }

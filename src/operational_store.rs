@@ -88,7 +88,7 @@ pub struct QueryExecutionTerminalRecord {
     pub execution_id: String,
     pub workspace_id: Vec<u8>,
     pub semantic_request_id: String,
-    pub mcp_call_id: String,
+    pub request_correlation_id: String,
     pub terminal_phase: String,
     pub failing_stage: Option<String>,
     pub bundle_checksum: String,
@@ -109,7 +109,7 @@ fn query_execution_terminal_from_row(
         execution_id: row.get(0)?,
         workspace_id: row.get(1)?,
         semantic_request_id: row.get(2)?,
-        mcp_call_id: row.get(3)?,
+        request_correlation_id: row.get(3)?,
         terminal_phase: row.get(4)?,
         failing_stage: row.get(5)?,
         bundle_checksum: row.get(6)?,
@@ -540,7 +540,7 @@ impl OperationalStore {
         self.write_transaction(|transaction| {
             let existing = transaction
                 .query_row(
-                    "SELECT execution_id, workspace_id, semantic_request_id, mcp_call_id,
+                    "SELECT execution_id, workspace_id, semantic_request_id, request_correlation_id,
                        terminal_phase, failing_stage, bundle_checksum, primary_payload_uri,
                        payload_status, fallback_envelope_bytes, snapshot_id, publication_id,
                        source_table_versions_bytes, created_at, expires_at
@@ -559,7 +559,7 @@ impl OperationalStore {
             }
             transaction.execute(
                 "INSERT INTO query_execution_terminal(
-                   execution_id, workspace_id, semantic_request_id, mcp_call_id,
+                   execution_id, workspace_id, semantic_request_id, request_correlation_id,
                    terminal_phase, failing_stage, bundle_checksum, primary_payload_uri,
                    payload_status, fallback_envelope_bytes, snapshot_id, publication_id,
                    source_table_versions_bytes, created_at, expires_at
@@ -570,7 +570,7 @@ impl OperationalStore {
                     record.execution_id,
                     record.workspace_id,
                     record.semantic_request_id,
-                    record.mcp_call_id,
+                    record.request_correlation_id,
                     record.terminal_phase,
                     record.failing_stage,
                     record.bundle_checksum,
@@ -611,7 +611,7 @@ impl OperationalStore {
     ) -> Result<Option<QueryExecutionTerminalRecord>, OperationalStoreError> {
         self.connection
             .query_row(
-                "SELECT execution_id, workspace_id, semantic_request_id, mcp_call_id,
+                "SELECT execution_id, workspace_id, semantic_request_id, request_correlation_id,
                    terminal_phase, failing_stage, bundle_checksum, primary_payload_uri,
                    payload_status, fallback_envelope_bytes, snapshot_id, publication_id,
                    source_table_versions_bytes, created_at, expires_at
@@ -634,7 +634,7 @@ impl OperationalStore {
     ) -> Result<Vec<QueryExecutionTerminalRecord>, OperationalStoreError> {
         let maximum = i64::try_from(maximum).unwrap_or(i64::MAX);
         let mut statement = self.connection.prepare(
-            "SELECT execution_id, workspace_id, semantic_request_id, mcp_call_id,
+            "SELECT execution_id, workspace_id, semantic_request_id, request_correlation_id,
                terminal_phase, failing_stage, bundle_checksum, primary_payload_uri,
                payload_status, fallback_envelope_bytes, snapshot_id, publication_id,
                source_table_versions_bytes, created_at, expires_at

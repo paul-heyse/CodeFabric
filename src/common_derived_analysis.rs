@@ -2024,14 +2024,14 @@ fn propagate_summaries(
         for group in schedule {
             for caller in group {
                 for callee in adjacency.get(caller.as_ref()).into_iter().flatten() {
-                    let callee_effects = prior_effects
+                    let propagated_effects = prior_effects
                         .get(callee.as_ref())
                         .into_iter()
                         .flatten()
                         .take(bounds.max_summary_values.get())
                         .cloned()
                         .collect::<Vec<_>>();
-                    let callee_resources = prior_resources
+                    let propagated_resources = prior_resources
                         .get(callee.as_ref())
                         .into_iter()
                         .flatten()
@@ -2040,28 +2040,28 @@ fn propagate_summaries(
                         .collect::<Vec<_>>();
                     let mut value_bound_hit = false;
                     {
-                        let caller_effects = effects.get_mut(caller.as_ref()).expect("callable");
-                        for effect in callee_effects {
-                            if caller_effects.contains(effect.as_ref()) {
+                        let effect_summary = effects.get_mut(caller.as_ref()).expect("callable");
+                        for effect in propagated_effects {
+                            if effect_summary.contains(effect.as_ref()) {
                                 continue;
                             }
-                            if caller_effects.len() == bounds.max_summary_values.get() {
+                            if effect_summary.len() == bounds.max_summary_values.get() {
                                 value_bound_hit = true;
-                            } else if caller_effects.insert(effect) {
+                            } else if effect_summary.insert(effect) {
                                 changed = true;
                             }
                         }
                     }
                     {
-                        let caller_resources =
+                        let resource_summary =
                             resources.get_mut(caller.as_ref()).expect("callable");
-                        for resource in callee_resources {
-                            if caller_resources.contains(resource.as_ref()) {
+                        for resource in propagated_resources {
+                            if resource_summary.contains(resource.as_ref()) {
                                 continue;
                             }
-                            if caller_resources.len() == bounds.max_summary_values.get() {
+                            if resource_summary.len() == bounds.max_summary_values.get() {
                                 value_bound_hit = true;
-                            } else if caller_resources.insert(resource) {
+                            } else if resource_summary.insert(resource) {
                                 changed = true;
                             }
                         }
@@ -3160,12 +3160,12 @@ pub(crate) mod tests {
         }
     }
 
-    fn exact(site: &str, caller: &str, callee: &str) -> CommonCallSite {
+    fn exact(site: &str, source_callable: &str, target_callable: &str) -> CommonCallSite {
         CommonCallSite {
             call_site_id: Arc::from(site),
-            caller_id: Arc::from(caller),
+            caller_id: Arc::from(source_callable),
             resolution: CommonCallResolution::Exact {
-                callee_id: Arc::from(callee),
+                callee_id: Arc::from(target_callable),
             },
         }
     }
@@ -3244,8 +3244,8 @@ pub(crate) mod tests {
 
     fn expected_call_facts(decoded: &Value) -> BTreeSet<(String, String, String)> {
         let call_site = artifact_column(decoded, "call_site_id");
-        let caller = artifact_column(decoded, "caller_id");
-        let callee = artifact_column(decoded, "callee_id");
+        let source_column = artifact_column(decoded, "caller_id");
+        let target_column = artifact_column(decoded, "callee_id");
         decoded["rows"]
             .as_array()
             .expect("Claim 003 expected rows")
@@ -3254,8 +3254,8 @@ pub(crate) mod tests {
                 let row = row.as_array().expect("Claim 003 expected row");
                 (
                     row[call_site].as_str().unwrap().to_owned(),
-                    row[caller].as_str().unwrap().to_owned(),
-                    row[callee].as_str().unwrap().to_owned(),
+                    row[source_column].as_str().unwrap().to_owned(),
+                    row[target_column].as_str().unwrap().to_owned(),
                 )
             })
             .collect()
@@ -3265,16 +3265,16 @@ pub(crate) mod tests {
         output: &CommonDerivedAnalysisOutput,
     ) -> BTreeSet<(String, String, String)> {
         let families = strings(&output.facts, "family_id");
-        let callers = strings(&output.facts, "subject_id");
-        let callees = strings(&output.facts, "object_id");
+        let subject_values = strings(&output.facts, "subject_id");
+        let object_values = strings(&output.facts, "object_id");
         let call_sites = strings(&output.facts, "value_id");
         (0..output.facts.num_rows())
             .filter(|row| families.value(*row) == "family.call")
             .map(|row| {
                 (
                     call_sites.value(row).to_owned(),
-                    callers.value(row).to_owned(),
-                    callees.value(row).to_owned(),
+                    subject_values.value(row).to_owned(),
+                    object_values.value(row).to_owned(),
                 )
             })
             .collect()

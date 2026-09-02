@@ -23,11 +23,11 @@ from tooling.ci.successor_evidence_issuance_v4 import (
     EVIDENCE_RELEASE,
     EXPECTATIONS_PATH,
     FIXTURES_PATH,
+    ISSUANCE_PATH,
     ROOT,
     SUITE_IDENTITY,
     V4EvidenceError,
     V4Issuance,
-    validate_issuance,
 )
 
 ORACLE = "supervisor-launch-contract-check"
@@ -46,23 +46,27 @@ FROZEN_EXPECTATIONS_SHA256 = (
 FROZEN_FIXTURES_SHA256 = (
     "cce359c558a988ffa104ce4ca463617a79dc08774dc630eec8c8d66613d02d29"
 )
+FROZEN_ISSUANCE_SHA256 = (
+    "795d7e3bb997c3c04876da4fec47cfb62c76ec3a7d98f136f7042ad134b424d6"
+)
+CURRENT_AUTHORITY_SUITE = "codefabric-relational-data-fabric@2.3.0"
 
 DESIGN_PATH = Path(
     "docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v5.md"
 )
 SUITE_PATH = Path(
     "docs/authoritative_design/"
-    "codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.2.md"
+    "codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.3.md"
 )
 LIFE_PATH = Path(
     "docs/authoritative_design/"
-    "codefabric_continuous_cpg_update_lifecycle_management_specification_v2.2.md"
+    "codefabric_continuous_cpg_update_lifecycle_management_specification_v2.3.md"
 )
 SRV_PATH = Path(
-    "docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v2.2.md"
+    "docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v2.3.md"
 )
 ROADMAP_PATH = Path(
-    "docs/authoritative_design/codefabric_2.2_implementation_roadmap_v1.0.md"
+    "docs/authoritative_design/codefabric_2.3_implementation_roadmap_v1.0.md"
 )
 
 REQUIRED_AUTHORITY_TOKENS = {
@@ -104,11 +108,10 @@ REQUIRED_AUTHORITY_TOKENS = {
         "supervisor-launch-contract-check",
     ),
     ROADMAP_PATH: (
-        "`WorkspaceSupervisor`",
-        "`AgentLaunchPolicy`",
-        "attach-only",
-        "allowlisted fd 3 grant delivery",
-        "owner-verified `0600` one-shot fallback",
+        "operator policy -> WorkspaceSupervisor -> codefabricd",
+        "fd3 attach-only launcher",
+        "installed FastMCP 4 wheel",
+        "protocol 2026-07-28 host",
     ),
 }
 
@@ -1857,6 +1860,7 @@ def _validate_authority_tokens(root: Path) -> dict[str, int]:
 
 def _validate_frozen_artifact_hashes(root: Path) -> dict[str, str]:
     expected = {
+        ISSUANCE_PATH: FROZEN_ISSUANCE_SHA256,
         EXPECTATIONS_PATH: FROZEN_EXPECTATIONS_SHA256,
         FIXTURES_PATH: FROZEN_FIXTURES_SHA256,
     }
@@ -1876,6 +1880,120 @@ def _validate_frozen_artifact_hashes(root: Path) -> dict[str, str]:
         )
         observed[path.as_posix()] = actual
     return observed
+
+
+def _reject_duplicate_json_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        _require(
+            key not in value,
+            "SUPERVISOR_FROZEN_ARTIFACT_INVALID",
+            f"frozen supervisor evidence contains duplicate JSON member {key!r}",
+        )
+        value[key] = item
+    return value
+
+
+def _load_frozen_json(path: Path, *, context: str) -> object:
+    try:
+        return json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_json_members,
+        )
+    except SupervisorLaunchContractError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise SupervisorLaunchContractError(
+            "SUPERVISOR_FROZEN_ARTIFACT_INVALID",
+            f"cannot decode {context}: {error}",
+        ) from error
+
+
+def _load_frozen_jsonl(path: Path, *, context: str) -> tuple[dict[str, Any], ...]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as error:
+        raise SupervisorLaunchContractError(
+            "SUPERVISOR_FROZEN_ARTIFACT_INVALID",
+            f"cannot read {context}: {error}",
+        ) from error
+    _require(
+        bool(lines) and all(line.strip() for line in lines),
+        "SUPERVISOR_FROZEN_ARTIFACT_INVALID",
+        f"{context} must contain only nonblank JSONL rows",
+    )
+    rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(lines, 1):
+        try:
+            value = json.loads(line, object_pairs_hook=_reject_duplicate_json_members)
+        except SupervisorLaunchContractError:
+            raise
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise SupervisorLaunchContractError(
+                "SUPERVISOR_FROZEN_ARTIFACT_INVALID",
+                f"cannot decode {context} row {line_number}: {error}",
+            ) from error
+        rows.append(dict(_mapping(value, f"{context} row {line_number}")))
+    return tuple(rows)
+
+
+def validate_issuance(root: Path = ROOT, *, require_review: bool = True) -> V4Issuance:
+    """Load the exact accepted v4 issuance as an immutable inherited input.
+
+    The v4 plan and v2.2 suite are intentionally no longer active. Requiring
+    their active-plan or terminal-authority status would make a successful v5
+    activation invalidate its own inherited supervisor contract. The three
+    acceptance artifacts are instead pinned byte-for-byte, while current v2.3
+    authority is checked independently by ``_validate_authority_tokens``.
+    """
+
+    _require(
+        require_review,
+        "SUPERVISOR_REVIEW_REQUIRED",
+        "the inherited supervisor contract may only load the reviewed issuance",
+    )
+    resolved = root.resolve()
+    _validate_frozen_artifact_hashes(resolved)
+    issuance = dict(
+        _mapping(
+            _load_frozen_json(
+                resolved / ISSUANCE_PATH, context="frozen v4 evidence issuance"
+            ),
+            "frozen v4 evidence issuance",
+        )
+    )
+    expectations = _load_frozen_jsonl(
+        resolved / EXPECTATIONS_PATH, context="frozen v4 expectations"
+    )
+    fixtures = _load_frozen_jsonl(
+        resolved / FIXTURES_PATH, context="frozen v4 negative fixtures"
+    )
+    expected_digests = {
+        "expectations_sha256": FROZEN_EXPECTATIONS_SHA256,
+        "negative_fixtures_sha256": FROZEN_FIXTURES_SHA256,
+    }
+    review = _mapping(issuance.get("independent_review"), "independent review")
+    counts = _mapping(issuance.get("counts"), "frozen issuance counts")
+    _require(
+        issuance.get("suite_identity") == SUITE_IDENTITY
+        and issuance.get("evidence_release") == EVIDENCE_RELEASE
+        and issuance.get("status") == "accepted"
+        and issuance.get("artifact_digests") == expected_digests
+        and review.get("status") == "accepted"
+        and isinstance(review.get("reviewer"), str)
+        and bool(str(review.get("reviewer")).strip())
+        and review.get("reviewed_artifact_digests") == expected_digests
+        and isinstance(review.get("reviewed_issuance_projection_sha256"), str)
+        and SHA256_ID.fullmatch(str(review["reviewed_issuance_projection_sha256"]))
+        is not None
+        and isinstance(review.get("claim_reviews"), list)
+        and len(review["claim_reviews"]) == len(expectations)
+        and counts.get("expectations") == len(expectations) == 41
+        and counts.get("negative_fixtures") == len(fixtures) == 82,
+        "SUPERVISOR_REVIEW_REQUIRED",
+        "the frozen v4 supervisor issuance lacks exact accepted review closure",
+    )
+    return V4Issuance(expectations, fixtures, issuance, {})
 
 
 def _validate_required_authority_tokens(texts: Mapping[Path, str]) -> dict[str, int]:
@@ -1947,7 +2065,8 @@ def validate_selected_contract(root: Path, validated: V4Issuance) -> dict[str, o
     return {
         "oracle": ORACLE,
         "status": "accepted",
-        "suite": SUITE_IDENTITY,
+        "evidence_suite": SUITE_IDENTITY,
+        "current_authority_suite": CURRENT_AUTHORITY_SUITE,
         "evidence_release": EVIDENCE_RELEASE,
         "selector": {
             "claim_ids": list(SELECTED_CLAIMS),

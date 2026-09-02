@@ -16,6 +16,9 @@ use crate::registries::{CpgdFeatureMask, RustcFeatureMask};
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 /// Maximum uncompressed query-event or result payload chunk.
 pub const MAX_PAYLOAD_CHUNK_BYTES: usize = 1024 * 1024;
+/// Per-connection HTTP/2 abuse ceiling. Application data admission remains half this value so
+/// long-lived result streams cannot occupy the transport allowance reserved for control RPCs.
+pub const MAX_QUERY_TRANSPORT_STREAMS: u32 = 512;
 
 /// Wire-mask behavior required by the one registry-generated feature family type.
 pub trait WireFeatureMask: Copy {
@@ -216,8 +219,8 @@ impl Interceptor for SameUserInterceptor {
 pub mod generated {
     pub mod codefabric {
         pub mod cpgd {
-            pub mod v1 {
-                include!("generated/codefabric.cpgd.v1.rs");
+            pub mod v2 {
+                include!("generated/codefabric.cpgd.v2.rs");
             }
         }
         pub mod provider {

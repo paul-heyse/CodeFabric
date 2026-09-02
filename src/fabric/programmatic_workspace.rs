@@ -9,27 +9,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::num::NonZeroU64;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 use super::activation::FabricEpochPins;
-use super::activation_control_delta::DeltaActivationRuntimeAuthority;
 use super::admission::{AdmissionError, FabricAdmissionRuntime};
 use super::arrow_result_resource::ArrowResultResourceLimits;
 use super::child_session::resource_governance::{EpochResourceCoordinator, EpochResourceError};
 use super::command::{EpochId, WorkspaceId};
-use super::command_runtime_manager::{
-    WorkspaceFabricCommandRuntimeFactoryError, WorkspaceFabricCommandRuntimeParts,
-};
-use super::production_kernel::{CompiledSemanticRelease, SelectedEpochRecord, WorkspaceSlot};
+use super::production_kernel::{CompiledSemanticRelease, SelectedEpochRecord};
 use super::programmatic_delta_runtime::ProgrammaticDeltaRuntime;
 use super::programmatic_epoch::ProgrammaticFabricEpoch;
 use super::published_arrow_result::PublishedArrowResultRegistry;
 use super::relational_query_runtime::{RelationalQueryAuthorization, RelationalQueryRuntime};
 use super::request_owned_relation::RequestOwnedRelationLimits;
+use super::switchable_activation_authority::SwitchableActivationAuthority;
 use crate::identity::{IdentityDomain, IdentityError, encode_public_id};
 use crate::relational_semantic_query::{
     EpochBoundSemanticExecutionCatalog, EpochBoundSemanticIngressCatalog, ProducerClosureProof,
-    ProducerFamilyDisposition, SemanticQueryAuthority, SemanticQueryClass,
+    ProducerFamilyDisposition, ReleasedSemanticForm, SemanticQueryAuthority, SemanticQueryClass,
 };
 
 /// Query authority which is valid for exactly one workspace and one immutable epoch.
@@ -171,6 +168,22 @@ impl WorkspaceEpochQueryAuthority {
         &self.producer_closure
     }
 
+    /// Derive the released forms executable by this exact epoch authority.
+    ///
+    /// Compatibility labels are presentation observations only. Support is joined by the exact
+    /// program binding identity and execution pin, then by every required producer-family row in
+    /// the installed closure. An unsupported remainder therefore removes only the programs which
+    /// require that family; it never becomes an empty-result claim.
+    pub(crate) fn advertised_semantic_forms(
+        &self,
+    ) -> Result<BTreeSet<ReleasedSemanticForm>, ProgrammaticWorkspaceCompositionError> {
+        derive_advertised_semantic_forms(
+            &self.ingress_catalog,
+            &self.execution_catalog,
+            &self.producer_closure,
+        )
+    }
+
     #[must_use]
     pub const fn authorization(&self) -> &RelationalQueryAuthorization {
         &self.authorization
@@ -192,85 +205,6 @@ impl WorkspaceEpochQueryAuthority {
     }
 }
 
-/// Exact daemon-owned capabilities available when constructing one workspace command router.
-///
-/// This value is created only after activation selection has been reconstructed, the immutable
-/// epoch has been reopened, query admission and resource governance have been installed, and the
-/// exact epoch query authority is installed. A command effect therefore cannot capture a
-/// parallel admission gate or process-local receipt selector during pre-composition setup.
-#[derive(Clone)]
-pub struct ProgrammaticCommandRuntimeContext {
-    workspace_id: WorkspaceId,
-    admission: Arc<FabricAdmissionRuntime>,
-    resources: Arc<EpochResourceCoordinator>,
-    published_results: Arc<PublishedArrowResultRegistry>,
-    query_authority: Arc<WorkspaceEpochQueryAuthority>,
-    query_runtime: Arc<RelationalQueryRuntime>,
-    delta_runtime: Arc<ProgrammaticDeltaRuntime>,
-    activation_authority: Arc<DeltaActivationRuntimeAuthority>,
-    workspace_slot: Weak<WorkspaceSlot>,
-}
-
-impl ProgrammaticCommandRuntimeContext {
-    #[must_use]
-    pub const fn workspace_id(&self) -> WorkspaceId {
-        self.workspace_id
-    }
-
-    #[must_use]
-    pub const fn admission(&self) -> &Arc<FabricAdmissionRuntime> {
-        &self.admission
-    }
-
-    #[must_use]
-    pub const fn resources(&self) -> &Arc<EpochResourceCoordinator> {
-        &self.resources
-    }
-
-    #[must_use]
-    pub const fn published_results(&self) -> &Arc<PublishedArrowResultRegistry> {
-        &self.published_results
-    }
-
-    #[must_use]
-    pub const fn query_authority(&self) -> &Arc<WorkspaceEpochQueryAuthority> {
-        &self.query_authority
-    }
-
-    #[must_use]
-    pub const fn query_runtime(&self) -> &Arc<RelationalQueryRuntime> {
-        &self.query_runtime
-    }
-
-    #[must_use]
-    pub const fn delta_runtime(&self) -> &Arc<ProgrammaticDeltaRuntime> {
-        &self.delta_runtime
-    }
-
-    #[must_use]
-    pub const fn activation_authority(&self) -> &Arc<DeltaActivationRuntimeAuthority> {
-        &self.activation_authority
-    }
-
-    #[must_use]
-    pub const fn workspace_slot(&self) -> &Weak<WorkspaceSlot> {
-        &self.workspace_slot
-    }
-}
-
-/// Post-authority production constructor for one complete command runtime dependency closure.
-pub trait ProgrammaticCommandRuntimePartsFactory: Send + Sync + 'static {
-    /// Build the exhaustive command-effect router against the exact installed workspace objects.
-    ///
-    /// # Errors
-    ///
-    /// Returns a concrete port-composition failure without opening command ingress.
-    fn build(
-        &self,
-        context: ProgrammaticCommandRuntimeContext,
-    ) -> Result<WorkspaceFabricCommandRuntimeParts, WorkspaceFabricCommandRuntimeFactoryError>;
-}
-
 /// Fully composed workspace retained by the daemon after atomic registration.
 pub struct ProgrammaticWorkspaceRuntime {
     workspace_id: WorkspaceId,
@@ -279,8 +213,7 @@ pub struct ProgrammaticWorkspaceRuntime {
     query_authority: Arc<WorkspaceEpochQueryAuthority>,
     query_runtime: Arc<RelationalQueryRuntime>,
     delta_runtime: Arc<ProgrammaticDeltaRuntime>,
-    activation_authority: Arc<DeltaActivationRuntimeAuthority>,
-    command_runtime: WorkspaceFabricCommandRuntimeParts,
+    activation_authority: Arc<SwitchableActivationAuthority>,
 }
 
 impl fmt::Debug for ProgrammaticWorkspaceRuntime {
@@ -309,9 +242,7 @@ impl ProgrammaticWorkspaceRuntime {
         query_authority: Arc<WorkspaceEpochQueryAuthority>,
         query_runtime: Arc<RelationalQueryRuntime>,
         delta_runtime: Arc<ProgrammaticDeltaRuntime>,
-        activation_authority: Arc<DeltaActivationRuntimeAuthority>,
-        workspace_slot: Weak<WorkspaceSlot>,
-        command_factory: &dyn ProgrammaticCommandRuntimePartsFactory,
+        activation_authority: Arc<SwitchableActivationAuthority>,
     ) -> Result<Self, ProgrammaticWorkspaceCompositionError> {
         let workspace_id = selection.workspace_id();
         let epoch_id = selection.epoch_id();
@@ -343,23 +274,11 @@ impl ProgrammaticWorkspaceRuntime {
         // revalidates protocol, properties, schema, and the new session binding independently.
         // Requiring the predecessor process's session fingerprint here would make lawful restart
         // impossible and turn an execution-observation digest into semantic authority.
-        if activation_authority.control_relation().table()
+        if activation_authority.current().control_relation().table()
             != selection.control_horizon().control_relation().table()
         {
             return Err(ProgrammaticWorkspaceCompositionError::ActivationControlMismatch);
         }
-        let context = ProgrammaticCommandRuntimeContext {
-            workspace_id,
-            admission: Arc::clone(&admission),
-            resources: Arc::clone(query_authority.resources()),
-            published_results: Arc::clone(&published_results),
-            query_authority: Arc::clone(&query_authority),
-            query_runtime: Arc::clone(&query_runtime),
-            delta_runtime: Arc::clone(&delta_runtime),
-            activation_authority: Arc::clone(&activation_authority),
-            workspace_slot,
-        };
-        let command_runtime = command_factory.build(context)?;
         Ok(Self {
             workspace_id,
             admission,
@@ -368,7 +287,6 @@ impl ProgrammaticWorkspaceRuntime {
             query_runtime,
             delta_runtime,
             activation_authority,
-            command_runtime,
         })
     }
 
@@ -421,13 +339,8 @@ impl ProgrammaticWorkspaceRuntime {
     }
 
     #[must_use]
-    pub const fn activation_authority(&self) -> &Arc<DeltaActivationRuntimeAuthority> {
+    pub const fn activation_authority(&self) -> &Arc<SwitchableActivationAuthority> {
         &self.activation_authority
-    }
-
-    #[must_use]
-    pub fn command_runtime_parts(&self) -> WorkspaceFabricCommandRuntimeParts {
-        self.command_runtime.clone()
     }
 }
 
@@ -722,6 +635,87 @@ fn validate_semantic_authority(
     Ok(())
 }
 
+fn derive_advertised_semantic_forms(
+    ingress: &EpochBoundSemanticIngressCatalog,
+    execution: &EpochBoundSemanticExecutionCatalog,
+    producer_closure: &ProducerClosureProof,
+) -> Result<BTreeSet<ReleasedSemanticForm>, ProgrammaticWorkspaceCompositionError> {
+    validate_semantic_authority(ingress, execution, producer_closure)?;
+
+    let execution_programs = execution
+        .programs
+        .iter()
+        .map(|program| {
+            (
+                (
+                    program.program_binding_id.as_ref(),
+                    program.execution_program_pin,
+                ),
+                (),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut required_families = BTreeMap::<(&str, [u8; 32]), BTreeSet<&str>>::new();
+    for row in &execution.required_fact_families {
+        let key = (row.program_binding_id.as_ref(), row.execution_program_pin);
+        if !execution_programs.contains_key(&key) {
+            return Err(
+                ProgrammaticWorkspaceCompositionError::ExecutionProgramReferenceMismatch(
+                    row.program_binding_id.to_string(),
+                ),
+            );
+        }
+        if !required_families
+            .entry(key)
+            .or_default()
+            .insert(row.family_id.as_ref())
+        {
+            return Err(
+                ProgrammaticWorkspaceCompositionError::DuplicateProgramRequiredFamily {
+                    program: row.program_binding_id.to_string(),
+                    family: row.family_id.to_string(),
+                },
+            );
+        }
+    }
+
+    let mut supported_families = BTreeSet::new();
+    for row in &producer_closure.families {
+        if let ProducerFamilyDisposition::RuntimeProducer(runtime) = &row.disposition {
+            if runtime.requested_units != runtime.completed_units
+                || runtime.remainder_units != 0
+                || runtime.unknown_units != 0
+            {
+                return Err(
+                    ProgrammaticWorkspaceCompositionError::IncompleteRuntimeProducer(
+                        row.family_id.to_string(),
+                    ),
+                );
+            }
+            supported_families.insert(row.family_id.as_ref());
+        }
+    }
+
+    let mut forms = BTreeSet::new();
+    for binding in &ingress.program_bindings {
+        let key = (
+            binding.program_binding_id.as_ref(),
+            binding.execution_program_pin,
+        );
+        if !execution_programs.contains_key(&key) {
+            return Err(ProgrammaticWorkspaceCompositionError::ProgramCatalogCoverageMismatch);
+        }
+        if required_families
+            .get(&key)
+            .is_none_or(|families| families.is_subset(&supported_families))
+        {
+            forms.insert(binding.compatibility_form);
+        }
+    }
+    Ok(forms)
+}
+
 fn require_semantic_pin(
     kind: &'static str,
     pin: [u8; 32],
@@ -820,14 +814,16 @@ pub enum ProgrammaticWorkspaceCompositionError {
     ProducerAuthorityMismatch,
     #[error("producer-closure family {0} is duplicated")]
     DuplicateProducerFamily(String),
+    #[error("program {program} repeats required producer family {family}")]
+    DuplicateProgramRequiredFamily { program: String, family: String },
+    #[error("runtime producer family {0} has an incomplete coverage census")]
+    IncompleteRuntimeProducer(String),
     #[error("producer closure does not cover every execution-catalog fact family")]
     ProducerClosureCoverageMismatch,
     #[error(transparent)]
     Resources(#[from] EpochResourceError),
     #[error(transparent)]
     Admission(#[from] AdmissionError),
-    #[error(transparent)]
-    CommandRuntime(#[from] WorkspaceFabricCommandRuntimeFactoryError),
 }
 
 #[cfg(test)]
@@ -847,7 +843,9 @@ mod tests {
     use crate::identity::decode_public_id;
     use crate::relational_program::{FieldId, RelationId};
     use crate::relational_semantic_query::{
-        EpochBoundExecutionProgramRow, EpochBoundProgramBindingRow, ReleasedSemanticForm,
+        EpochBoundExecutionProgramRow, EpochBoundExecutionRequiredFamilyRow,
+        EpochBoundProgramBindingRow, ProducerFamilyClosureRow, ReleasedSemanticForm,
+        RuntimeProducerProof, UnsupportedFamilyRemainder,
     };
 
     const fn id16(seed: u8) -> [u8; 16] {
@@ -1010,6 +1008,97 @@ mod tests {
         assert!(matches!(
             validate_semantic_authority(&ingress, &execution, &closure()),
             Err(ProgrammaticWorkspaceCompositionError::ProgramCatalogCoverageMismatch)
+        ));
+    }
+
+    #[test]
+    fn advertised_forms_join_exact_program_and_producer_closure() {
+        let (ingress, mut execution) = catalogs(id32(10));
+        Arc::make_mut(&mut execution).required_fact_families.push(
+            EpochBoundExecutionRequiredFamilyRow {
+                program_binding_id: Arc::from("program.test"),
+                execution_program_pin: id32(7),
+                family_id: Arc::from("family.test"),
+            },
+        );
+        let runtime = RuntimeProducerProof {
+            producer_id: Arc::from("producer.test"),
+            authority_id: Arc::from("query.application"),
+            algorithm_release: Arc::from("algorithm.test.v1"),
+            precision_id: Arc::from("precision.exact"),
+            input_pin: id32(20),
+            invalidation_pin: id32(21),
+            materialization_pin: id32(22),
+            requested_units: 2,
+            completed_units: 2,
+            remainder_units: 0,
+            unknown_units: 0,
+            completeness_proof_pin: id32(23),
+            producer_proof_pin: id32(24),
+        };
+        let complete = ProducerClosureProof {
+            proof_pin: id32(4),
+            application_authority_id: Arc::from("query.application"),
+            families: vec![ProducerFamilyClosureRow {
+                family_id: Arc::from("family.test"),
+                disposition: ProducerFamilyDisposition::RuntimeProducer(runtime.clone()),
+            }],
+        };
+        assert_eq!(
+            derive_advertised_semantic_forms(&ingress, &execution, &complete).unwrap(),
+            BTreeSet::from([ReleasedSemanticForm::FindCodeEntities])
+        );
+
+        let unsupported = ProducerClosureProof {
+            proof_pin: id32(4),
+            application_authority_id: Arc::from("query.application"),
+            families: vec![ProducerFamilyClosureRow {
+                family_id: Arc::from("family.test"),
+                disposition: ProducerFamilyDisposition::UnsupportedRemainder(
+                    UnsupportedFamilyRemainder {
+                        remainder_id: Arc::from("remainder.test"),
+                        authority_id: Arc::from("query.application"),
+                        reason_id: Arc::from("provider.unavailable"),
+                        proof_pin: id32(25),
+                    },
+                ),
+            }],
+        };
+        assert!(
+            derive_advertised_semantic_forms(&ingress, &execution, &unsupported)
+                .unwrap()
+                .is_empty()
+        );
+
+        let mut incomplete = complete;
+        let ProducerFamilyDisposition::RuntimeProducer(runtime) =
+            &mut incomplete.families[0].disposition
+        else {
+            unreachable!("fixture is a runtime producer")
+        };
+        runtime.completed_units = 1;
+        assert!(matches!(
+            derive_advertised_semantic_forms(&ingress, &execution, &incomplete),
+            Err(ProgrammaticWorkspaceCompositionError::IncompleteRuntimeProducer(family))
+                if family == "family.test"
+        ));
+    }
+
+    #[test]
+    fn advertised_forms_reject_inexact_program_family_rows() {
+        let (ingress, mut execution) = catalogs(id32(10));
+        Arc::make_mut(&mut execution).required_fact_families.push(
+            EpochBoundExecutionRequiredFamilyRow {
+                program_binding_id: Arc::from("program.test"),
+                execution_program_pin: id32(99),
+                family_id: Arc::from("family.test"),
+            },
+        );
+        assert!(matches!(
+            derive_advertised_semantic_forms(&ingress, &execution, &closure()),
+            Err(ProgrammaticWorkspaceCompositionError::ExecutionProgramReferenceMismatch(
+                program
+            )) if program == "program.test"
         ));
     }
 

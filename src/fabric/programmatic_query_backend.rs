@@ -14,11 +14,13 @@ use async_trait::async_trait;
 
 use crate::cancellation::Cancellation;
 use crate::identity::{IdentityDomain, decode_public_id, encode_public_id};
-use crate::query_service::{
-    PublishedArrowSemanticSuccess, SemanticBackendExecutionContext, SemanticBackendOutcome,
-    SemanticQueryBackend,
+use crate::query_backend::{
+    PreparedSemanticExecution, PublishedArrowSemanticSuccess, ResolvedSemanticExecutionRequest,
+    SemanticBackendExecutionContext, SemanticBackendOutcome, SemanticExecutionPreparation,
+    SemanticInputAnswer, SemanticInputRequirement, SemanticQueryBackend,
 };
 use crate::registries::FreshnessState;
+use crate::relational_program::{RelationId, SupplementalProgramRelationBinding};
 use crate::relational_semantic_query::{
     CompiledEpochBoundScopeHandoff, EpochBoundSemanticExecutionCatalog, EpochBoundSemanticIngress,
     SemanticBlockDisposition, SemanticClauseValue, compile_epoch_bound_semantic_request,
@@ -29,6 +31,7 @@ use crate::semantic_query_contract::{
     SemanticSnapshotResponse,
 };
 
+use super::admission::FabricQueryLease;
 use super::arrow_result_resource::ResultResourceLease;
 use super::command::WorkspaceId;
 use super::production_kernel::{
@@ -43,6 +46,7 @@ use super::query_artifact::{
 };
 use super::relational_query_runtime::{RelationalQueryAuthorization, RelationalQueryTransaction};
 use super::request_owned_relation::RequestOwnedRelationCollection;
+use super::streamed_result_package::StreamedResultPackageBuilder;
 
 const REQUEST_CONTENT_PIN_DOMAIN: &[u8] = b"codefabric.programmatic-semantic-request-content.v1\0";
 const COMPILED_QUERY_RELEASE_PIN_DOMAIN: &[u8] =
@@ -62,6 +66,24 @@ pub trait ProgrammaticSemanticIngressPort: Send + Sync + 'static {
         request: &ParsedSemanticRequest,
     ) -> Result<(), ProgrammaticQueryPortError>;
 
+    /// Revalidate accumulated guarded input against the exact admitted catalog and return only
+    /// the next still-missing requirement. The default keeps existing zero-input ports closed.
+    fn prepare_input_requirements(
+        &self,
+        request: &ParsedSemanticRequest,
+        answers: &[SemanticInputAnswer],
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+    ) -> Result<Vec<SemanticInputRequirement>, ProgrammaticQueryPortError> {
+        if !answers.is_empty() {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "guarded input is unsupported by the installed ingress port".to_owned(),
+            ));
+        }
+        self.project(request, workspace, authority)
+            .map(|_| Vec::new())
+    }
+
     /// Project one request against exactly the already-admitted epoch authority.
     fn project(
         &self,
@@ -69,6 +91,21 @@ pub trait ProgrammaticSemanticIngressPort: Send + Sync + 'static {
         workspace: &ProgrammaticWorkspaceRuntime,
         authority: &WorkspaceEpochQueryAuthority,
     ) -> Result<EpochBoundSemanticIngress, ProgrammaticQueryPortError>;
+
+    /// Project an operation whose guarded input was retained through atomic acceptance.
+    fn project_resolved(
+        &self,
+        request: &ResolvedSemanticExecutionRequest,
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+    ) -> Result<EpochBoundSemanticIngress, ProgrammaticQueryPortError> {
+        if !request.answers().is_empty() {
+            return Err(ProgrammaticQueryPortError::Rejected(
+                "guarded input is unsupported by the installed ingress port".to_owned(),
+            ));
+        }
+        self.project(request.parsed(), workspace, authority)
+    }
 }
 
 /// Application policy port consuming every normalized scope handoff.
@@ -625,6 +662,7 @@ pub struct ProgrammaticSemanticQueryPorts {
     ingress: Arc<dyn ProgrammaticSemanticIngressPort>,
     scope_authorization: Arc<dyn ProgrammaticScopeAuthorizationPort>,
     snapshot: Arc<dyn ProgrammaticSnapshotProjectionPort>,
+    program_result_bindings: Arc<BTreeMap<RelationId, SupplementalProgramRelationBinding>>,
 }
 
 impl fmt::Debug for ProgrammaticSemanticQueryPorts {
@@ -647,6 +685,7 @@ impl ProgrammaticSemanticQueryPorts {
         ingress: Arc<dyn ProgrammaticSemanticIngressPort>,
         scope_authorization: Arc<dyn ProgrammaticScopeAuthorizationPort>,
         snapshot: Arc<dyn ProgrammaticSnapshotProjectionPort>,
+        program_result_bindings: Arc<BTreeMap<RelationId, SupplementalProgramRelationBinding>>,
     ) -> Result<Self, ProgrammaticSemanticQueryBackendError> {
         let application_release = compiled_query_release_pin(compiled_release);
         for (kind, pin) in [
@@ -668,6 +707,7 @@ impl ProgrammaticSemanticQueryPorts {
             ingress,
             scope_authorization,
             snapshot,
+            program_result_bindings,
         })
     }
 
@@ -675,14 +715,28 @@ impl ProgrammaticSemanticQueryPorts {
     pub const fn application_release(&self) -> [u8; 32] {
         self.application_release
     }
+
+    #[must_use]
+    pub fn program_result_binding(
+        &self,
+        relation_id: &RelationId,
+    ) -> Option<&SupplementalProgramRelationBinding> {
+        self.program_result_bindings.get(relation_id)
+    }
 }
 
 /// Read-only query routing over target-owned active-workspace and lifecycle authority.
 pub struct ProgrammaticSemanticQueryBackend {
     workspace_slots: Arc<WorkspaceSlotRegistry>,
     lifecycle: Arc<LifecycleAuthority>,
-    published_results: Arc<super::published_arrow_result::PublishedArrowResultRegistry>,
-    ports: ProgrammaticSemanticQueryPorts,
+    package_builder: StreamedResultPackageBuilder,
+}
+
+/// Exact workspace and epoch capabilities acquired on the final atomic-start leg.
+#[derive(Clone, Debug)]
+pub struct ProgrammaticExecutionAuthority {
+    workspace: ActiveWorkspaceLease,
+    epoch: FabricQueryLease,
 }
 
 impl fmt::Debug for ProgrammaticSemanticQueryBackend {
@@ -691,12 +745,27 @@ impl fmt::Debug for ProgrammaticSemanticQueryBackend {
             .debug_struct("ProgrammaticSemanticQueryBackend")
             .field("workspace_count", &self.workspace_slots.len())
             .field("lifecycle", &self.lifecycle.observe())
-            .field("ports", &self.ports)
+            .field("package_builder", &self.package_builder)
             .finish_non_exhaustive()
     }
 }
 
 impl ProgrammaticSemanticQueryBackend {
+    /// Bind the backend to the one lifecycle, atomic workspace registry, and object-backed page
+    /// sealer installed by the daemon composition root.
+    #[must_use]
+    pub fn new(
+        workspace_slots: Arc<WorkspaceSlotRegistry>,
+        lifecycle: Arc<LifecycleAuthority>,
+        package_builder: StreamedResultPackageBuilder,
+    ) -> Self {
+        Self {
+            workspace_slots,
+            lifecycle,
+            package_builder,
+        }
+    }
+
     fn require_semantic_admission(&self) -> Result<(), SemanticQueryError> {
         if self.lifecycle.observe().semantic_admission_open() {
             Ok(())
@@ -706,13 +775,6 @@ impl ProgrammaticSemanticQueryBackend {
                 "production lifecycle authority has not opened semantic admission",
             ))
         }
-    }
-
-    #[must_use]
-    pub const fn published_results(
-        &self,
-    ) -> &Arc<super::published_arrow_result::PublishedArrowResultRegistry> {
-        &self.published_results
     }
 
     /// Lease the exact active workspace selected by the target-owned slot registry.
@@ -737,8 +799,9 @@ impl ProgrammaticSemanticQueryBackend {
             .map_err(|error| query_error("workspace_route", error.to_string()))?;
         let workspace = lease.workspace().runtime();
         let authority = workspace.query_authority();
+        let ports = lease.workspace().query_ports();
         if *authority.activation_pins().application_release.as_bytes()
-            != self.ports.application_release()
+            != ports.application_release()
         {
             return Err(query_error(
                 "application_release",
@@ -751,8 +814,7 @@ impl ProgrammaticSemanticQueryBackend {
                 "active workspace query authority differs from its durable selection",
             ));
         }
-        if authority.authorization().query_policy() != &self.ports.scope_authorization.policy_pin()
-        {
+        if authority.authorization().query_policy() != &ports.scope_authorization.policy_pin() {
             return Err(query_error(
                 "scope_policy",
                 "active workspace differs from the installed query-policy release",
@@ -766,10 +828,10 @@ impl ProgrammaticSemanticQueryBackend {
         public_workspace_id: &str,
         workspace: &ProgrammaticWorkspaceRuntime,
         authority: &WorkspaceEpochQueryAuthority,
+        ports: &ProgrammaticSemanticQueryPorts,
         freshness: FreshnessState,
     ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
-        let snapshot = self
-            .ports
+        let snapshot = ports
             .snapshot
             .project(public_workspace_id, workspace, authority, freshness)
             .map_err(|error| query_error("snapshot_projection", error.to_string()))?;
@@ -791,14 +853,21 @@ impl ProgrammaticSemanticQueryBackend {
 
 #[async_trait]
 impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
+    type ExecutionAuthority = ProgrammaticExecutionAuthority;
+
+    fn retained_package_builder(&self) -> Option<StreamedResultPackageBuilder> {
+        Some(self.package_builder.clone())
+    }
+
     fn validate_execution_request(
         &self,
         request: &ParsedSemanticRequest,
     ) -> Result<(), SemanticQueryError> {
         self.require_semantic_admission()?;
         let workspace_lease = self.workspace_lease(&request.request.workspace_id)?;
-        let validation = self
-            .ports
+        let validation = workspace_lease
+            .workspace()
+            .query_ports()
             .ingress
             .validate_request(request)
             .map_err(|error| query_error("programmatic_ingress", error.to_string()));
@@ -806,9 +875,86 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         validation
     }
 
+    fn prepare_execution_request(
+        &self,
+        request: &ParsedSemanticRequest,
+        answers: &[SemanticInputAnswer],
+    ) -> Result<SemanticExecutionPreparation, SemanticQueryError> {
+        self.require_semantic_admission()?;
+        let workspace_lease = self.workspace_lease(&request.request.workspace_id)?;
+        let workspace = workspace_lease.workspace().runtime();
+        let authority = workspace.query_authority();
+        let requirements = workspace_lease
+            .workspace()
+            .query_ports()
+            .ingress
+            .prepare_input_requirements(request, answers, workspace.as_ref(), &authority)
+            .map_err(|error| query_error("programmatic_ingress", error.to_string()))?;
+        if requirements.is_empty() {
+            Ok(SemanticExecutionPreparation::Ready(
+                ResolvedSemanticExecutionRequest::try_new(request.clone(), answers.to_vec())?,
+            ))
+        } else {
+            // One catalog-owned ambiguity is resolved per leg. This makes every answer re-enter
+            // authorization and supports the configured maximum-round path without ever asking
+            // the adapter to partition or synthesize semantic requirements.
+            Ok(SemanticExecutionPreparation::InputRequired(
+                requirements.into_iter().take(1).collect(),
+            ))
+        }
+    }
+
+    fn admit_execution_request(
+        &self,
+        resolved: ResolvedSemanticExecutionRequest,
+    ) -> Result<PreparedSemanticExecution<Self::ExecutionAuthority>, SemanticQueryError> {
+        self.require_semantic_admission()?;
+        let request = resolved.parsed();
+        let workspace_lease = self.workspace_lease(&request.request.workspace_id)?;
+        let workspace = workspace_lease.workspace().runtime();
+        let authority = workspace.query_authority();
+        let remaining = workspace_lease
+            .workspace()
+            .query_ports()
+            .ingress
+            .prepare_input_requirements(request, resolved.answers(), workspace.as_ref(), &authority)
+            .map_err(|error| query_error("programmatic_ingress", error.to_string()))?;
+        if !remaining.is_empty() {
+            return Err(query_error(
+                "guarded_input",
+                "resolved semantic operation is no longer complete under the active authority",
+            ));
+        }
+        let epoch_lease = workspace
+            .admission()
+            .admit_selected(Arc::clone(authority.epoch()))
+            .map_err(|error| query_error("admission", error.to_string()))?;
+        if !Arc::ptr_eq(authority.epoch(), epoch_lease.epoch()) {
+            return Err(query_error(
+                "epoch_authority",
+                "atomic-start admission retained a different epoch capability",
+            ));
+        }
+        let snapshot = self.project_snapshot(
+            &request.request.workspace_id,
+            workspace.as_ref(),
+            &authority,
+            workspace_lease.workspace().query_ports(),
+            FreshnessState::Current,
+        )?;
+        Ok(PreparedSemanticExecution::new(
+            resolved,
+            ProgrammaticExecutionAuthority {
+                workspace: workspace_lease,
+                epoch: epoch_lease,
+            },
+            snapshot,
+        ))
+    }
+
     async fn execute(
         &self,
-        request: ParsedSemanticRequest,
+        prepared: PreparedSemanticExecution<Self::ExecutionAuthority>,
         freshness: FreshnessState,
         cancellation: Cancellation,
         context: SemanticBackendExecutionContext,
@@ -821,40 +967,19 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "query was cancelled before admission",
             );
         }
-        if let Err(error) = self.require_semantic_admission() {
-            return failed_error(&artifacts, "semantic_admission", error);
-        }
-        if request.request.workspace_id != context.workspace_id() {
+        let (request, prepared_authority, snapshot) = prepared.into_parts();
+        if request.parsed().request.workspace_id != context.workspace_id() {
             return failed(
                 &artifacts,
                 "workspace_route",
                 "authenticated workspace differs from request workspace",
             );
         }
-        let workspace_lease = match self.workspace_lease(context.workspace_id()) {
-            Ok(workspace) => workspace,
-            Err(error) => return failed_error(&artifacts, "workspace_route", error),
-        };
+        let workspace_lease = prepared_authority.workspace;
         let workspace = workspace_lease.workspace().runtime();
-        let context_registry = context.published_results();
-        if !Arc::ptr_eq(&context_registry, &self.published_results)
-            || !Arc::ptr_eq(workspace.published_results(), &self.published_results)
-        {
-            return failed(
-                &artifacts,
-                "result_authority",
-                "query and workspace do not share the daemon result registry",
-            );
-        }
-
+        let ports = workspace_lease.workspace().query_ports();
         let authority = workspace.query_authority();
-        let epoch_lease = match workspace
-            .admission()
-            .admit_selected(Arc::clone(authority.epoch()))
-        {
-            Ok(lease) => lease,
-            Err(error) => return failed(&artifacts, "admission", error.to_string()),
-        };
+        let epoch_lease = prepared_authority.epoch;
         if !Arc::ptr_eq(authority.epoch(), epoch_lease.epoch()) {
             return failed(
                 &artifacts,
@@ -862,31 +987,28 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "admission and query authority retain different epoch capabilities",
             );
         }
-        // Project control metadata before publishing any Arrow resource. A projection failure can
-        // therefore terminate without leaving a live registry entry that the legacy failure path
-        // cannot authenticate and release.
-        let snapshot = match self.project_snapshot(
-            context.workspace_id(),
-            workspace.as_ref(),
-            &authority,
-            freshness,
-        ) {
-            Ok(snapshot) => snapshot,
-            Err(error) => return failed_error(&artifacts, "snapshot_projection", error),
-        };
+        if snapshot.workspace_id != context.workspace_id()
+            || snapshot.freshness_state != freshness
+            || snapshot.snapshot_id.is_empty()
+        {
+            return failed(
+                &artifacts,
+                "snapshot_projection",
+                "atomic-start snapshot differs from its retained execution authority",
+            );
+        }
 
         artifacts.set_phase("semantic_binding");
-        let ingress = match self
-            .ports
+        let ingress = match ports
             .ingress
-            .project(&request, workspace.as_ref(), &authority)
+            .project_resolved(&request, workspace.as_ref(), &authority)
         {
             Ok(ingress) => ingress,
             Err(error) => return failed(&artifacts, "programmatic_ingress", error.to_string()),
         };
-        if ingress.semantic_request_id.as_ref() != request.request.semantic_request_id
+        if ingress.semantic_request_id.as_ref() != request.parsed().request.semantic_request_id
             || ingress.request_content_pin
-                != canonical_request_content_pin(&request.canonical_bytes)
+                != canonical_request_content_pin(&request.parsed().canonical_bytes)
         {
             return failed(
                 &artifacts,
@@ -929,7 +1051,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     ),
                 );
             }
-            let Some(output) = block.output().cloned() else {
+            let Some(mut output) = block.output().cloned() else {
                 return failed(
                     &artifacts,
                     "logical_planning",
@@ -939,6 +1061,9 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     ),
                 );
             };
+            if let Some(binding) = ports.program_result_binding(output.relation_id()) {
+                output = output.with_program_result_binding(binding.clone());
+            }
             if output_by_query
                 .insert(Arc::clone(block.query_id()), output.relation_id().clone())
                 .is_some()
@@ -958,15 +1083,15 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "epoch-bound compiler produced no executable outputs",
             );
         }
-        if self.ports.scope_authorization.policy_pin() != handoff.policy_pin {
+        if ports.scope_authorization.policy_pin() != handoff.policy_pin {
             return failed(
                 &artifacts,
                 "scope_authorization",
                 "scope authorization port differs from the compiled policy pin",
             );
         }
-        let authorization = match self.ports.scope_authorization.authorize(
-            &request,
+        let authorization = match ports.scope_authorization.authorize(
+            request.parsed(),
             context.owner(),
             workspace.as_ref(),
             &authority,
@@ -1031,7 +1156,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             ],
         );
 
-        let issued_at = crate::query_service::now_millis();
+        let issued_at = crate::query_backend::now_millis();
         let lease_duration = match i64::try_from(authority.result_lease_millis()) {
             Ok(duration) => duration,
             Err(_) => return failed(&artifacts, "result_lease", "result lease is too large"),
@@ -1070,6 +1195,18 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 Err(error) => return failed(&artifacts, "request_input", error.to_string()),
             }
         };
+        let response = serde_json::json!({
+            "format": "codefabric.semantic-query-response.v2",
+            "semantic_request_id": request.parsed().request.semantic_request_id,
+            "snapshot": &snapshot,
+        });
+        let canonical_response = match serde_json_canonicalizer::to_vec(&response) {
+            Ok(response) => response,
+            Err(error) => return failed(&artifacts, "response_encoding", error.to_string()),
+        };
+        let transaction = transaction
+            .with_canonical_semantic_response(canonical_response)
+            .with_deadline(context.deadline());
         if cancellation.is_cancelled() {
             return cancelled(
                 &artifacts,
@@ -1080,10 +1217,12 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         artifacts.set_phase("physical_execution");
         let publication = match workspace
             .query_runtime()
-            .execute_admitted_and_publish(
+            .execute_admitted_and_seal(
                 epoch_lease,
                 Arc::clone(authority.resources()),
                 transaction,
+                &self.package_builder,
+                context.publication_intent(),
             )
             .await
         {
@@ -1098,44 +1237,20 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             "physical_execution",
             [
                 ("result_relations", publication.output_observations().len()),
-                ("result_rows", publication.descriptor().total_rows as usize),
+                (
+                    "result_rows",
+                    publication.package().manifest().total_rows as usize,
+                ),
             ],
         );
         artifacts.set_phase("published_arrow");
         record_complete_stage(&artifacts, "response_encoding", []);
-        artifacts.record_coverage("result_rows", publication.descriptor().total_rows);
+        artifacts.record_coverage("result_rows", publication.package().manifest().total_rows);
         SemanticBackendOutcome::PublishedArrow(PublishedArrowSemanticSuccess::new(
             publication,
-            context.result_lease_token(),
             snapshot,
             artifacts.snapshot(),
         ))
-    }
-
-    async fn public_snapshot(
-        &self,
-        workspace_id: &str,
-    ) -> Result<SemanticSnapshotResponse, SemanticQueryError> {
-        self.require_semantic_admission()?;
-        let workspace_lease = self.workspace_lease(workspace_id)?;
-        let workspace = workspace_lease.workspace().runtime();
-        let authority = workspace.query_authority();
-        let lease = workspace
-            .admission()
-            .admit_selected(Arc::clone(authority.epoch()))
-            .map_err(|error| query_error("admission", error.to_string()))?;
-        if !Arc::ptr_eq(authority.epoch(), lease.epoch()) {
-            return Err(query_error(
-                "epoch_authority",
-                "admission and query authority retain different epoch capabilities",
-            ));
-        }
-        self.project_snapshot(
-            workspace_id,
-            workspace.as_ref(),
-            authority,
-            FreshnessState::Current,
-        )
     }
 }
 
@@ -1438,6 +1553,7 @@ mod tests {
             Arc::new(IngressProbe(ingress)),
             Arc::new(ScopeProbe(policy)),
             Arc::new(SnapshotProbe(snapshot)),
+            Arc::new(BTreeMap::new()),
         )
     }
 
@@ -1474,20 +1590,28 @@ mod tests {
         use super::super::production_kernel::ProductionLifecyclePhase;
 
         let lifecycle = Arc::new(LifecycleAuthority::new());
-        let release = super::super::production_kernel::CompiledSemanticRelease::current();
-        let backend = ProgrammaticSemanticQueryBackend {
-            workspace_slots: Arc::new(WorkspaceSlotRegistry::new()),
-            lifecycle: Arc::clone(&lifecycle),
-            published_results: Arc::new(
-                super::super::published_arrow_result::PublishedArrowResultRegistry::new(),
-            ),
-            ports: probes(
-                compiled_query_release_pin(release.query_authority()),
-                [2; 32],
-                [3; 32],
-            )
-            .unwrap(),
-        };
+        let sink = Arc::new(
+            super::super::streamed_result_package::ObjectStoreResultSink::new(Arc::new(
+                object_store::memory::InMemory::new(),
+            )),
+        );
+        let limits = super::super::streamed_result_package::StreamedResultPackageLimits::try_new(
+            8,
+            32,
+            128,
+            1024 * 1024,
+            10_000,
+            16 * 1024 * 1024,
+            1024 * 1024,
+            128,
+            1024 * 1024,
+        )
+        .unwrap();
+        let backend = ProgrammaticSemanticQueryBackend::new(
+            Arc::new(WorkspaceSlotRegistry::new()),
+            Arc::clone(&lifecycle),
+            StreamedResultPackageBuilder::new(sink, limits),
+        );
 
         let error = backend.require_semantic_admission().unwrap_err();
         assert!(matches!(

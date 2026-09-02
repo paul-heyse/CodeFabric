@@ -1,4 +1,7 @@
-# @generated from released Protobuf semantic identities b3:502dfd819e70a154db899bd6bdbe580d01bb56f1654790d5adb241199d43b434,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
+# @generated from released Protobuf semantic identities b3:3297acf400e5afd8a20a4f17d7a986e5b5f82a04f97850ac13e2a0e0f565be4c,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
+import datetime
+
+from google.protobuf import duration_pb2 as _duration_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
@@ -8,644 +11,968 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
-class FreshnessPolicy(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+class LifecycleState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
-    FRESHNESS_POLICY_UNSPECIFIED: _ClassVar[FreshnessPolicy]
-    FRESHNESS_POLICY_BEST_AVAILABLE_SNAPSHOT: _ClassVar[FreshnessPolicy]
-    FRESHNESS_POLICY_AWAIT_LATEST: _ClassVar[FreshnessPolicy]
-    FRESHNESS_POLICY_REQUIRE_CURRENT_FOR_TARGETS: _ClassVar[FreshnessPolicy]
-    FRESHNESS_POLICY_REQUIRE_SOURCE_CURRENT: _ClassVar[FreshnessPolicy]
-    FRESHNESS_POLICY_REQUIRE_SEMANTIC_CURRENT: _ClassVar[FreshnessPolicy]
-
-class PayloadCompression(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    PAYLOAD_COMPRESSION_UNSPECIFIED: _ClassVar[PayloadCompression]
-    PAYLOAD_COMPRESSION_IDENTITY: _ClassVar[PayloadCompression]
-    PAYLOAD_COMPRESSION_ZSTD: _ClassVar[PayloadCompression]
-
-class DeliveryPreference(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    DELIVERY_PREFERENCE_UNSPECIFIED: _ClassVar[DeliveryPreference]
-    DELIVERY_PREFERENCE_INLINE: _ClassVar[DeliveryPreference]
-    DELIVERY_PREFERENCE_RESOURCE: _ClassVar[DeliveryPreference]
-    DELIVERY_PREFERENCE_AUTO: _ClassVar[DeliveryPreference]
+    LIFECYCLE_STATE_UNSPECIFIED: _ClassVar[LifecycleState]
+    LIFECYCLE_STATE_BOOTSTRAPPING: _ClassVar[LifecycleState]
+    LIFECYCLE_STATE_READY: _ClassVar[LifecycleState]
+    LIFECYCLE_STATE_DRAINING: _ClassVar[LifecycleState]
+    LIFECYCLE_STATE_FAILED_CLOSED: _ClassVar[LifecycleState]
 
 class QueryExecutionState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     QUERY_EXECUTION_STATE_UNSPECIFIED: _ClassVar[QueryExecutionState]
     QUERY_EXECUTION_STATE_ACCEPTED: _ClassVar[QueryExecutionState]
-    QUERY_EXECUTION_STATE_WAITING_FOR_FRESHNESS: _ClassVar[QueryExecutionState]
+    QUERY_EXECUTION_STATE_QUEUED: _ClassVar[QueryExecutionState]
     QUERY_EXECUTION_STATE_RUNNING: _ClassVar[QueryExecutionState]
     QUERY_EXECUTION_STATE_SUCCEEDED: _ClassVar[QueryExecutionState]
     QUERY_EXECUTION_STATE_FAILED: _ClassVar[QueryExecutionState]
     QUERY_EXECUTION_STATE_CANCELLED: _ClassVar[QueryExecutionState]
     QUERY_EXECUTION_STATE_LOST: _ClassVar[QueryExecutionState]
 
-class CancellationState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+class ChallengeInputKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
-    CANCELLATION_STATE_UNSPECIFIED: _ClassVar[CancellationState]
-    CANCELLATION_STATE_NOT_FOUND: _ClassVar[CancellationState]
-    CANCELLATION_STATE_CANCELLATION_REQUESTED: _ClassVar[CancellationState]
-    CANCELLATION_STATE_CANCELLED: _ClassVar[CancellationState]
-    CANCELLATION_STATE_ALREADY_TERMINAL: _ClassVar[CancellationState]
-    CANCELLATION_STATE_FORCE_TERMINATED: _ClassVar[CancellationState]
+    CHALLENGE_INPUT_KIND_UNSPECIFIED: _ClassVar[ChallengeInputKind]
+    CHALLENGE_INPUT_KIND_STRING: _ClassVar[ChallengeInputKind]
+    CHALLENGE_INPUT_KIND_INTEGER: _ClassVar[ChallengeInputKind]
+    CHALLENGE_INPUT_KIND_BOOLEAN: _ClassVar[ChallengeInputKind]
+    CHALLENGE_INPUT_KIND_ENUM: _ClassVar[ChallengeInputKind]
+    CHALLENGE_INPUT_KIND_STRING_COLLECTION: _ClassVar[ChallengeInputKind]
+    CHALLENGE_INPUT_KIND_INTEGER_COLLECTION: _ClassVar[ChallengeInputKind]
+    CHALLENGE_INPUT_KIND_BOOLEAN_COLLECTION: _ClassVar[ChallengeInputKind]
+    CHALLENGE_INPUT_KIND_ENUM_COLLECTION: _ClassVar[ChallengeInputKind]
 
-class WorkspaceReadiness(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+class ChallengeCollectionItemKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
-    WORKSPACE_READINESS_UNSPECIFIED: _ClassVar[WorkspaceReadiness]
-    WORKSPACE_READINESS_BOOTSTRAPPING: _ClassVar[WorkspaceReadiness]
-    WORKSPACE_READINESS_READY: _ClassVar[WorkspaceReadiness]
-    WORKSPACE_READINESS_DEGRADED: _ClassVar[WorkspaceReadiness]
-    WORKSPACE_READINESS_FAILED: _ClassVar[WorkspaceReadiness]
-FRESHNESS_POLICY_UNSPECIFIED: FreshnessPolicy
-FRESHNESS_POLICY_BEST_AVAILABLE_SNAPSHOT: FreshnessPolicy
-FRESHNESS_POLICY_AWAIT_LATEST: FreshnessPolicy
-FRESHNESS_POLICY_REQUIRE_CURRENT_FOR_TARGETS: FreshnessPolicy
-FRESHNESS_POLICY_REQUIRE_SOURCE_CURRENT: FreshnessPolicy
-FRESHNESS_POLICY_REQUIRE_SEMANTIC_CURRENT: FreshnessPolicy
-PAYLOAD_COMPRESSION_UNSPECIFIED: PayloadCompression
-PAYLOAD_COMPRESSION_IDENTITY: PayloadCompression
-PAYLOAD_COMPRESSION_ZSTD: PayloadCompression
-DELIVERY_PREFERENCE_UNSPECIFIED: DeliveryPreference
-DELIVERY_PREFERENCE_INLINE: DeliveryPreference
-DELIVERY_PREFERENCE_RESOURCE: DeliveryPreference
-DELIVERY_PREFERENCE_AUTO: DeliveryPreference
+    CHALLENGE_COLLECTION_ITEM_KIND_UNSPECIFIED: _ClassVar[ChallengeCollectionItemKind]
+    CHALLENGE_COLLECTION_ITEM_KIND_STRING: _ClassVar[ChallengeCollectionItemKind]
+    CHALLENGE_COLLECTION_ITEM_KIND_INTEGER: _ClassVar[ChallengeCollectionItemKind]
+    CHALLENGE_COLLECTION_ITEM_KIND_BOOLEAN: _ClassVar[ChallengeCollectionItemKind]
+    CHALLENGE_COLLECTION_ITEM_KIND_ENUM: _ClassVar[ChallengeCollectionItemKind]
+
+class ChallengeStringFormat(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    CHALLENGE_STRING_FORMAT_UNSPECIFIED: _ClassVar[ChallengeStringFormat]
+    CHALLENGE_STRING_FORMAT_PLAIN: _ClassVar[ChallengeStringFormat]
+    CHALLENGE_STRING_FORMAT_IDENTIFIER: _ClassVar[ChallengeStringFormat]
+    CHALLENGE_STRING_FORMAT_RELEASE_VERSION: _ClassVar[ChallengeStringFormat]
+
+class ChallengeExplanationCode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    CHALLENGE_EXPLANATION_CODE_UNSPECIFIED: _ClassVar[ChallengeExplanationCode]
+    CHALLENGE_EXPLANATION_CODE_REQUIRED_INPUT_MISSING: _ClassVar[ChallengeExplanationCode]
+    CHALLENGE_EXPLANATION_CODE_REFERENCE_AMBIGUOUS: _ClassVar[ChallengeExplanationCode]
+    CHALLENGE_EXPLANATION_CODE_BOUNDED_SELECTION_REQUIRED: _ClassVar[ChallengeExplanationCode]
+
+class SafeErrorLayer(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    SAFE_ERROR_LAYER_UNSPECIFIED: _ClassVar[SafeErrorLayer]
+    SAFE_ERROR_LAYER_TRANSPORT: _ClassVar[SafeErrorLayer]
+    SAFE_ERROR_LAYER_AUTHORIZATION: _ClassVar[SafeErrorLayer]
+    SAFE_ERROR_LAYER_VALIDATION: _ClassVar[SafeErrorLayer]
+    SAFE_ERROR_LAYER_QUERY: _ClassVar[SafeErrorLayer]
+    SAFE_ERROR_LAYER_RESOURCE: _ClassVar[SafeErrorLayer]
+    SAFE_ERROR_LAYER_LIFECYCLE: _ClassVar[SafeErrorLayer]
+
+class SafeErrorCode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    SAFE_ERROR_CODE_UNSPECIFIED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_INVALID_REQUEST: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_VALIDATION_REJECTED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_INPUT_REQUIRED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_NOT_AUTHORIZED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_IDEMPOTENCY_CONFLICT: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_CONTINUATION_EXPIRED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_CONTINUATION_REPLAYED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_GENERATION_MISMATCH: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_QUERY_NOT_FOUND: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_RESOURCE_NOT_FOUND: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_RESOURCE_EXPIRED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_RANGE_NOT_SATISFIABLE: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_CAPACITY_UNAVAILABLE: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_CANCELLED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_RESUME_WINDOW_EXPIRED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_DAEMON_UNAVAILABLE: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_INTERNAL: _ClassVar[SafeErrorCode]
+
+class SafeDiagnosticReference(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    SAFE_DIAGNOSTIC_REFERENCE_UNSPECIFIED: _ClassVar[SafeDiagnosticReference]
+    SAFE_DIAGNOSTIC_REFERENCE_LIFECYCLE_FAILED_CLOSED: _ClassVar[SafeDiagnosticReference]
+    SAFE_DIAGNOSTIC_REFERENCE_QUERY_CHALLENGE_REJECTED: _ClassVar[SafeDiagnosticReference]
+    SAFE_DIAGNOSTIC_REFERENCE_QUERY_TERMINAL: _ClassVar[SafeDiagnosticReference]
+
+class ProgressStage(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    PROGRESS_STAGE_UNSPECIFIED: _ClassVar[ProgressStage]
+    PROGRESS_STAGE_EXECUTING: _ClassVar[ProgressStage]
+
+class ResourceKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    RESOURCE_KIND_UNSPECIFIED: _ClassVar[ResourceKind]
+    RESOURCE_KIND_RESULT_MANIFEST: _ClassVar[ResourceKind]
+    RESOURCE_KIND_RESULT_PAGE: _ClassVar[ResourceKind]
+    RESOURCE_KIND_REFERENCE: _ClassVar[ResourceKind]
+
+class ReferenceKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    REFERENCE_KIND_UNSPECIFIED: _ClassVar[ReferenceKind]
+    REFERENCE_KIND_CAPABILITY: _ClassVar[ReferenceKind]
+    REFERENCE_KIND_GUIDE: _ClassVar[ReferenceKind]
+    REFERENCE_KIND_RECIPE: _ClassVar[ReferenceKind]
+    REFERENCE_KIND_REQUEST_SCHEMA: _ClassVar[ReferenceKind]
+    REFERENCE_KIND_RESPONSE_SCHEMA: _ClassVar[ReferenceKind]
+    REFERENCE_KIND_SNAPSHOT: _ClassVar[ReferenceKind]
+
+class ReferenceTemplateVariable(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    REFERENCE_TEMPLATE_VARIABLE_UNSPECIFIED: _ClassVar[ReferenceTemplateVariable]
+    REFERENCE_TEMPLATE_VARIABLE_KIND: _ClassVar[ReferenceTemplateVariable]
+    REFERENCE_TEMPLATE_VARIABLE_RELEASED_VERSION: _ClassVar[ReferenceTemplateVariable]
+
+class CancellationAcknowledgement(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    CANCELLATION_ACKNOWLEDGEMENT_UNSPECIFIED: _ClassVar[CancellationAcknowledgement]
+    CANCELLATION_ACKNOWLEDGEMENT_ACCEPTED: _ClassVar[CancellationAcknowledgement]
+    CANCELLATION_ACKNOWLEDGEMENT_REPLAYED: _ClassVar[CancellationAcknowledgement]
+    CANCELLATION_ACKNOWLEDGEMENT_ALREADY_TERMINAL: _ClassVar[CancellationAcknowledgement]
+    CANCELLATION_ACKNOWLEDGEMENT_QUERY_NOT_FOUND: _ClassVar[CancellationAcknowledgement]
+
+class ReleaseState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    RELEASE_STATE_UNSPECIFIED: _ClassVar[ReleaseState]
+    RELEASE_STATE_RELEASED: _ClassVar[ReleaseState]
+    RELEASE_STATE_ALREADY_RELEASED: _ClassVar[ReleaseState]
+    RELEASE_STATE_NOT_FOUND: _ClassVar[ReleaseState]
+
+class ReservedControlOperation(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    RESERVED_CONTROL_OPERATION_UNSPECIFIED: _ClassVar[ReservedControlOperation]
+    RESERVED_CONTROL_OPERATION_HANDSHAKE: _ClassVar[ReservedControlOperation]
+    RESERVED_CONTROL_OPERATION_GET_STATUS: _ClassVar[ReservedControlOperation]
+    RESERVED_CONTROL_OPERATION_CANCEL_QUERY: _ClassVar[ReservedControlOperation]
+    RESERVED_CONTROL_OPERATION_RELEASE_RESOURCE: _ClassVar[ReservedControlOperation]
+LIFECYCLE_STATE_UNSPECIFIED: LifecycleState
+LIFECYCLE_STATE_BOOTSTRAPPING: LifecycleState
+LIFECYCLE_STATE_READY: LifecycleState
+LIFECYCLE_STATE_DRAINING: LifecycleState
+LIFECYCLE_STATE_FAILED_CLOSED: LifecycleState
 QUERY_EXECUTION_STATE_UNSPECIFIED: QueryExecutionState
 QUERY_EXECUTION_STATE_ACCEPTED: QueryExecutionState
-QUERY_EXECUTION_STATE_WAITING_FOR_FRESHNESS: QueryExecutionState
+QUERY_EXECUTION_STATE_QUEUED: QueryExecutionState
 QUERY_EXECUTION_STATE_RUNNING: QueryExecutionState
 QUERY_EXECUTION_STATE_SUCCEEDED: QueryExecutionState
 QUERY_EXECUTION_STATE_FAILED: QueryExecutionState
 QUERY_EXECUTION_STATE_CANCELLED: QueryExecutionState
 QUERY_EXECUTION_STATE_LOST: QueryExecutionState
-CANCELLATION_STATE_UNSPECIFIED: CancellationState
-CANCELLATION_STATE_NOT_FOUND: CancellationState
-CANCELLATION_STATE_CANCELLATION_REQUESTED: CancellationState
-CANCELLATION_STATE_CANCELLED: CancellationState
-CANCELLATION_STATE_ALREADY_TERMINAL: CancellationState
-CANCELLATION_STATE_FORCE_TERMINATED: CancellationState
-WORKSPACE_READINESS_UNSPECIFIED: WorkspaceReadiness
-WORKSPACE_READINESS_BOOTSTRAPPING: WorkspaceReadiness
-WORKSPACE_READINESS_READY: WorkspaceReadiness
-WORKSPACE_READINESS_DEGRADED: WorkspaceReadiness
-WORKSPACE_READINESS_FAILED: WorkspaceReadiness
+CHALLENGE_INPUT_KIND_UNSPECIFIED: ChallengeInputKind
+CHALLENGE_INPUT_KIND_STRING: ChallengeInputKind
+CHALLENGE_INPUT_KIND_INTEGER: ChallengeInputKind
+CHALLENGE_INPUT_KIND_BOOLEAN: ChallengeInputKind
+CHALLENGE_INPUT_KIND_ENUM: ChallengeInputKind
+CHALLENGE_INPUT_KIND_STRING_COLLECTION: ChallengeInputKind
+CHALLENGE_INPUT_KIND_INTEGER_COLLECTION: ChallengeInputKind
+CHALLENGE_INPUT_KIND_BOOLEAN_COLLECTION: ChallengeInputKind
+CHALLENGE_INPUT_KIND_ENUM_COLLECTION: ChallengeInputKind
+CHALLENGE_COLLECTION_ITEM_KIND_UNSPECIFIED: ChallengeCollectionItemKind
+CHALLENGE_COLLECTION_ITEM_KIND_STRING: ChallengeCollectionItemKind
+CHALLENGE_COLLECTION_ITEM_KIND_INTEGER: ChallengeCollectionItemKind
+CHALLENGE_COLLECTION_ITEM_KIND_BOOLEAN: ChallengeCollectionItemKind
+CHALLENGE_COLLECTION_ITEM_KIND_ENUM: ChallengeCollectionItemKind
+CHALLENGE_STRING_FORMAT_UNSPECIFIED: ChallengeStringFormat
+CHALLENGE_STRING_FORMAT_PLAIN: ChallengeStringFormat
+CHALLENGE_STRING_FORMAT_IDENTIFIER: ChallengeStringFormat
+CHALLENGE_STRING_FORMAT_RELEASE_VERSION: ChallengeStringFormat
+CHALLENGE_EXPLANATION_CODE_UNSPECIFIED: ChallengeExplanationCode
+CHALLENGE_EXPLANATION_CODE_REQUIRED_INPUT_MISSING: ChallengeExplanationCode
+CHALLENGE_EXPLANATION_CODE_REFERENCE_AMBIGUOUS: ChallengeExplanationCode
+CHALLENGE_EXPLANATION_CODE_BOUNDED_SELECTION_REQUIRED: ChallengeExplanationCode
+SAFE_ERROR_LAYER_UNSPECIFIED: SafeErrorLayer
+SAFE_ERROR_LAYER_TRANSPORT: SafeErrorLayer
+SAFE_ERROR_LAYER_AUTHORIZATION: SafeErrorLayer
+SAFE_ERROR_LAYER_VALIDATION: SafeErrorLayer
+SAFE_ERROR_LAYER_QUERY: SafeErrorLayer
+SAFE_ERROR_LAYER_RESOURCE: SafeErrorLayer
+SAFE_ERROR_LAYER_LIFECYCLE: SafeErrorLayer
+SAFE_ERROR_CODE_UNSPECIFIED: SafeErrorCode
+SAFE_ERROR_CODE_INVALID_REQUEST: SafeErrorCode
+SAFE_ERROR_CODE_VALIDATION_REJECTED: SafeErrorCode
+SAFE_ERROR_CODE_INPUT_REQUIRED: SafeErrorCode
+SAFE_ERROR_CODE_NOT_AUTHORIZED: SafeErrorCode
+SAFE_ERROR_CODE_IDEMPOTENCY_CONFLICT: SafeErrorCode
+SAFE_ERROR_CODE_CONTINUATION_EXPIRED: SafeErrorCode
+SAFE_ERROR_CODE_CONTINUATION_REPLAYED: SafeErrorCode
+SAFE_ERROR_CODE_GENERATION_MISMATCH: SafeErrorCode
+SAFE_ERROR_CODE_QUERY_NOT_FOUND: SafeErrorCode
+SAFE_ERROR_CODE_RESOURCE_NOT_FOUND: SafeErrorCode
+SAFE_ERROR_CODE_RESOURCE_EXPIRED: SafeErrorCode
+SAFE_ERROR_CODE_RANGE_NOT_SATISFIABLE: SafeErrorCode
+SAFE_ERROR_CODE_CAPACITY_UNAVAILABLE: SafeErrorCode
+SAFE_ERROR_CODE_CANCELLED: SafeErrorCode
+SAFE_ERROR_CODE_RESUME_WINDOW_EXPIRED: SafeErrorCode
+SAFE_ERROR_CODE_DAEMON_UNAVAILABLE: SafeErrorCode
+SAFE_ERROR_CODE_INTERNAL: SafeErrorCode
+SAFE_DIAGNOSTIC_REFERENCE_UNSPECIFIED: SafeDiagnosticReference
+SAFE_DIAGNOSTIC_REFERENCE_LIFECYCLE_FAILED_CLOSED: SafeDiagnosticReference
+SAFE_DIAGNOSTIC_REFERENCE_QUERY_CHALLENGE_REJECTED: SafeDiagnosticReference
+SAFE_DIAGNOSTIC_REFERENCE_QUERY_TERMINAL: SafeDiagnosticReference
+PROGRESS_STAGE_UNSPECIFIED: ProgressStage
+PROGRESS_STAGE_EXECUTING: ProgressStage
+RESOURCE_KIND_UNSPECIFIED: ResourceKind
+RESOURCE_KIND_RESULT_MANIFEST: ResourceKind
+RESOURCE_KIND_RESULT_PAGE: ResourceKind
+RESOURCE_KIND_REFERENCE: ResourceKind
+REFERENCE_KIND_UNSPECIFIED: ReferenceKind
+REFERENCE_KIND_CAPABILITY: ReferenceKind
+REFERENCE_KIND_GUIDE: ReferenceKind
+REFERENCE_KIND_RECIPE: ReferenceKind
+REFERENCE_KIND_REQUEST_SCHEMA: ReferenceKind
+REFERENCE_KIND_RESPONSE_SCHEMA: ReferenceKind
+REFERENCE_KIND_SNAPSHOT: ReferenceKind
+REFERENCE_TEMPLATE_VARIABLE_UNSPECIFIED: ReferenceTemplateVariable
+REFERENCE_TEMPLATE_VARIABLE_KIND: ReferenceTemplateVariable
+REFERENCE_TEMPLATE_VARIABLE_RELEASED_VERSION: ReferenceTemplateVariable
+CANCELLATION_ACKNOWLEDGEMENT_UNSPECIFIED: CancellationAcknowledgement
+CANCELLATION_ACKNOWLEDGEMENT_ACCEPTED: CancellationAcknowledgement
+CANCELLATION_ACKNOWLEDGEMENT_REPLAYED: CancellationAcknowledgement
+CANCELLATION_ACKNOWLEDGEMENT_ALREADY_TERMINAL: CancellationAcknowledgement
+CANCELLATION_ACKNOWLEDGEMENT_QUERY_NOT_FOUND: CancellationAcknowledgement
+RELEASE_STATE_UNSPECIFIED: ReleaseState
+RELEASE_STATE_RELEASED: ReleaseState
+RELEASE_STATE_ALREADY_RELEASED: ReleaseState
+RELEASE_STATE_NOT_FOUND: ReleaseState
+RESERVED_CONTROL_OPERATION_UNSPECIFIED: ReservedControlOperation
+RESERVED_CONTROL_OPERATION_HANDSHAKE: ReservedControlOperation
+RESERVED_CONTROL_OPERATION_GET_STATUS: ReservedControlOperation
+RESERVED_CONTROL_OPERATION_CANCEL_QUERY: ReservedControlOperation
+RESERVED_CONTROL_OPERATION_RELEASE_RESOURCE: ReservedControlOperation
 
-class VersionRange(_message.Message):
+class RequestContext(_message.Message):
+    __slots__ = ("correlation_id", "remaining_budget")
+    CORRELATION_ID_FIELD_NUMBER: _ClassVar[int]
+    REMAINING_BUDGET_FIELD_NUMBER: _ClassVar[int]
+    correlation_id: str
+    remaining_budget: _duration_pb2.Duration
+    def __init__(self, correlation_id: _Optional[str] = ..., remaining_budget: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ...) -> None: ...
+
+class AuthorityGeneration(_message.Message):
+    __slots__ = ("session_id", "session_generation", "daemon_generation", "supervisor_generation", "policy_generation", "revocation_generation")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    DAEMON_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    SUPERVISOR_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    POLICY_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    REVOCATION_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    session_generation: int
+    daemon_generation: int
+    supervisor_generation: int
+    policy_generation: int
+    revocation_generation: int
+    def __init__(self, session_id: _Optional[str] = ..., session_generation: _Optional[int] = ..., daemon_generation: _Optional[int] = ..., supervisor_generation: _Optional[int] = ..., policy_generation: _Optional[int] = ..., revocation_generation: _Optional[int] = ...) -> None: ...
+
+class ReservedControlContract(_message.Message):
+    __slots__ = ("reserved_capacity", "operations")
+    RESERVED_CAPACITY_FIELD_NUMBER: _ClassVar[int]
+    OPERATIONS_FIELD_NUMBER: _ClassVar[int]
+    reserved_capacity: int
+    operations: _containers.RepeatedScalarFieldContainer[ReservedControlOperation]
+    def __init__(self, reserved_capacity: _Optional[int] = ..., operations: _Optional[_Iterable[_Union[ReservedControlOperation, str]]] = ...) -> None: ...
+
+class EffectiveLimits(_message.Message):
+    __slots__ = ("maximum_control_message_bytes", "maximum_resource_chunk_bytes", "maximum_result_bytes", "maximum_result_pages", "maximum_concurrent_queries", "maximum_watch_events", "maximum_challenge_fields", "maximum_choices_per_field", "maximum_challenge_rounds", "maximum_reference_completion_candidates", "maximum_validation_issues")
+    MAXIMUM_CONTROL_MESSAGE_BYTES_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_RESOURCE_CHUNK_BYTES_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_RESULT_BYTES_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_RESULT_PAGES_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_CONCURRENT_QUERIES_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_WATCH_EVENTS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_CHALLENGE_FIELDS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_CHOICES_PER_FIELD_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_CHALLENGE_ROUNDS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_REFERENCE_COMPLETION_CANDIDATES_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_VALIDATION_ISSUES_FIELD_NUMBER: _ClassVar[int]
+    maximum_control_message_bytes: int
+    maximum_resource_chunk_bytes: int
+    maximum_result_bytes: int
+    maximum_result_pages: int
+    maximum_concurrent_queries: int
+    maximum_watch_events: int
+    maximum_challenge_fields: int
+    maximum_choices_per_field: int
+    maximum_challenge_rounds: int
+    maximum_reference_completion_candidates: int
+    maximum_validation_issues: int
+    def __init__(self, maximum_control_message_bytes: _Optional[int] = ..., maximum_resource_chunk_bytes: _Optional[int] = ..., maximum_result_bytes: _Optional[int] = ..., maximum_result_pages: _Optional[int] = ..., maximum_concurrent_queries: _Optional[int] = ..., maximum_watch_events: _Optional[int] = ..., maximum_challenge_fields: _Optional[int] = ..., maximum_choices_per_field: _Optional[int] = ..., maximum_challenge_rounds: _Optional[int] = ..., maximum_reference_completion_candidates: _Optional[int] = ..., maximum_validation_issues: _Optional[int] = ...) -> None: ...
+
+class HandshakeRequest(_message.Message):
+    __slots__ = ("launch_grant", "adapter_version", "minimum_minor", "maximum_minor", "required_feature_bits", "optional_feature_bits", "desired_semantic_profiles", "maximum_resource_chunk_bytes", "remaining_budget", "correlation_id")
+    LAUNCH_GRANT_FIELD_NUMBER: _ClassVar[int]
+    ADAPTER_VERSION_FIELD_NUMBER: _ClassVar[int]
+    MINIMUM_MINOR_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_MINOR_FIELD_NUMBER: _ClassVar[int]
+    REQUIRED_FEATURE_BITS_FIELD_NUMBER: _ClassVar[int]
+    OPTIONAL_FEATURE_BITS_FIELD_NUMBER: _ClassVar[int]
+    DESIRED_SEMANTIC_PROFILES_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_RESOURCE_CHUNK_BYTES_FIELD_NUMBER: _ClassVar[int]
+    REMAINING_BUDGET_FIELD_NUMBER: _ClassVar[int]
+    CORRELATION_ID_FIELD_NUMBER: _ClassVar[int]
+    launch_grant: bytes
+    adapter_version: str
+    minimum_minor: int
+    maximum_minor: int
+    required_feature_bits: int
+    optional_feature_bits: int
+    desired_semantic_profiles: _containers.RepeatedScalarFieldContainer[str]
+    maximum_resource_chunk_bytes: int
+    remaining_budget: _duration_pb2.Duration
+    correlation_id: str
+    def __init__(self, launch_grant: _Optional[bytes] = ..., adapter_version: _Optional[str] = ..., minimum_minor: _Optional[int] = ..., maximum_minor: _Optional[int] = ..., required_feature_bits: _Optional[int] = ..., optional_feature_bits: _Optional[int] = ..., desired_semantic_profiles: _Optional[_Iterable[str]] = ..., maximum_resource_chunk_bytes: _Optional[int] = ..., remaining_budget: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., correlation_id: _Optional[str] = ...) -> None: ...
+
+class HandshakeResponse(_message.Message):
+    __slots__ = ("session_token", "authority", "selected_minor", "selected_feature_bits", "selected_semantic_profile", "lifecycle", "effective_limits", "session_expires_at_unix_ms", "reference_index_revision", "reserved_control")
+    SESSION_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    SELECTED_MINOR_FIELD_NUMBER: _ClassVar[int]
+    SELECTED_FEATURE_BITS_FIELD_NUMBER: _ClassVar[int]
+    SELECTED_SEMANTIC_PROFILE_FIELD_NUMBER: _ClassVar[int]
+    LIFECYCLE_FIELD_NUMBER: _ClassVar[int]
+    EFFECTIVE_LIMITS_FIELD_NUMBER: _ClassVar[int]
+    SESSION_EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    REFERENCE_INDEX_REVISION_FIELD_NUMBER: _ClassVar[int]
+    RESERVED_CONTROL_FIELD_NUMBER: _ClassVar[int]
+    session_token: bytes
+    authority: AuthorityGeneration
+    selected_minor: int
+    selected_feature_bits: int
+    selected_semantic_profile: str
+    lifecycle: LifecycleState
+    effective_limits: EffectiveLimits
+    session_expires_at_unix_ms: int
+    reference_index_revision: str
+    reserved_control: ReservedControlContract
+    def __init__(self, session_token: _Optional[bytes] = ..., authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., selected_minor: _Optional[int] = ..., selected_feature_bits: _Optional[int] = ..., selected_semantic_profile: _Optional[str] = ..., lifecycle: _Optional[_Union[LifecycleState, str]] = ..., effective_limits: _Optional[_Union[EffectiveLimits, _Mapping]] = ..., session_expires_at_unix_ms: _Optional[int] = ..., reference_index_revision: _Optional[str] = ..., reserved_control: _Optional[_Union[ReservedControlContract, _Mapping]] = ...) -> None: ...
+
+class SafeErrorMetadata(_message.Message):
+    __slots__ = ("code", "layer", "retryable", "retry_after_ms", "diagnostic_reference", "correlation_id")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    LAYER_FIELD_NUMBER: _ClassVar[int]
+    RETRYABLE_FIELD_NUMBER: _ClassVar[int]
+    RETRY_AFTER_MS_FIELD_NUMBER: _ClassVar[int]
+    DIAGNOSTIC_REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    CORRELATION_ID_FIELD_NUMBER: _ClassVar[int]
+    code: SafeErrorCode
+    layer: SafeErrorLayer
+    retryable: bool
+    retry_after_ms: int
+    diagnostic_reference: SafeDiagnosticReference
+    correlation_id: str
+    def __init__(self, code: _Optional[_Union[SafeErrorCode, str]] = ..., layer: _Optional[_Union[SafeErrorLayer, str]] = ..., retryable: _Optional[bool] = ..., retry_after_ms: _Optional[int] = ..., diagnostic_reference: _Optional[_Union[SafeDiagnosticReference, str]] = ..., correlation_id: _Optional[str] = ...) -> None: ...
+
+class GetStatusRequest(_message.Message):
+    __slots__ = ("context", "include_diagnostics")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    INCLUDE_DIAGNOSTICS_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
+    include_diagnostics: bool
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., include_diagnostics: _Optional[bool] = ...) -> None: ...
+
+class GetStatusResponse(_message.Message):
+    __slots__ = ("authority", "lifecycle", "lifecycle_sequence", "failure", "active_epoch_id", "running_queries", "queued_queries", "canonical_public_status_json")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    LIFECYCLE_FIELD_NUMBER: _ClassVar[int]
+    LIFECYCLE_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    FAILURE_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_EPOCH_ID_FIELD_NUMBER: _ClassVar[int]
+    RUNNING_QUERIES_FIELD_NUMBER: _ClassVar[int]
+    QUEUED_QUERIES_FIELD_NUMBER: _ClassVar[int]
+    CANONICAL_PUBLIC_STATUS_JSON_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
+    lifecycle: LifecycleState
+    lifecycle_sequence: int
+    failure: SafeErrorMetadata
+    active_epoch_id: str
+    running_queries: int
+    queued_queries: int
+    canonical_public_status_json: bytes
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., lifecycle: _Optional[_Union[LifecycleState, str]] = ..., lifecycle_sequence: _Optional[int] = ..., failure: _Optional[_Union[SafeErrorMetadata, _Mapping]] = ..., active_epoch_id: _Optional[str] = ..., running_queries: _Optional[int] = ..., queued_queries: _Optional[int] = ..., canonical_public_status_json: _Optional[bytes] = ...) -> None: ...
+
+class ReferenceReadRequest(_message.Message):
+    __slots__ = ("kind", "version")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    kind: ReferenceKind
+    version: str
+    def __init__(self, kind: _Optional[_Union[ReferenceKind, str]] = ..., version: _Optional[str] = ...) -> None: ...
+
+class ReferenceCompletionRequest(_message.Message):
+    __slots__ = ("variable", "prefix", "kind", "selector", "maximum_candidates")
+    VARIABLE_FIELD_NUMBER: _ClassVar[int]
+    PREFIX_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    SELECTOR_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_CANDIDATES_FIELD_NUMBER: _ClassVar[int]
+    variable: ReferenceTemplateVariable
+    prefix: str
+    kind: ReferenceKind
+    selector: str
+    maximum_candidates: int
+    def __init__(self, variable: _Optional[_Union[ReferenceTemplateVariable, str]] = ..., prefix: _Optional[str] = ..., kind: _Optional[_Union[ReferenceKind, str]] = ..., selector: _Optional[str] = ..., maximum_candidates: _Optional[int] = ...) -> None: ...
+
+class GetReferenceRequest(_message.Message):
+    __slots__ = ("context", "read", "completion")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    READ_FIELD_NUMBER: _ClassVar[int]
+    COMPLETION_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
+    read: ReferenceReadRequest
+    completion: ReferenceCompletionRequest
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., read: _Optional[_Union[ReferenceReadRequest, _Mapping]] = ..., completion: _Optional[_Union[ReferenceCompletionRequest, _Mapping]] = ...) -> None: ...
+
+class ReferenceDocument(_message.Message):
+    __slots__ = ("reference_id", "resource")
+    REFERENCE_ID_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_FIELD_NUMBER: _ClassVar[int]
+    reference_id: str
+    resource: ResourceDescriptor
+    def __init__(self, reference_id: _Optional[str] = ..., resource: _Optional[_Union[ResourceDescriptor, _Mapping]] = ...) -> None: ...
+
+class ReferenceCompletionCandidate(_message.Message):
+    __slots__ = ("value", "presentation_key")
+    VALUE_FIELD_NUMBER: _ClassVar[int]
+    PRESENTATION_KEY_FIELD_NUMBER: _ClassVar[int]
+    value: str
+    presentation_key: str
+    def __init__(self, value: _Optional[str] = ..., presentation_key: _Optional[str] = ...) -> None: ...
+
+class ReferenceCompletion(_message.Message):
+    __slots__ = ("candidates", "total", "has_more")
+    CANDIDATES_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_FIELD_NUMBER: _ClassVar[int]
+    HAS_MORE_FIELD_NUMBER: _ClassVar[int]
+    candidates: _containers.RepeatedCompositeFieldContainer[ReferenceCompletionCandidate]
+    total: int
+    has_more: bool
+    def __init__(self, candidates: _Optional[_Iterable[_Union[ReferenceCompletionCandidate, _Mapping]]] = ..., total: _Optional[int] = ..., has_more: _Optional[bool] = ...) -> None: ...
+
+class GetReferenceResponse(_message.Message):
+    __slots__ = ("authority", "reference", "completion")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    COMPLETION_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
+    reference: ReferenceDocument
+    completion: ReferenceCompletion
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., reference: _Optional[_Union[ReferenceDocument, _Mapping]] = ..., completion: _Optional[_Union[ReferenceCompletion, _Mapping]] = ...) -> None: ...
+
+class ResultLimits(_message.Message):
+    __slots__ = ("maximum_result_bytes", "maximum_result_pages")
+    MAXIMUM_RESULT_BYTES_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_RESULT_PAGES_FIELD_NUMBER: _ClassVar[int]
+    maximum_result_bytes: int
+    maximum_result_pages: int
+    def __init__(self, maximum_result_bytes: _Optional[int] = ..., maximum_result_pages: _Optional[int] = ...) -> None: ...
+
+class QuerySubmission(_message.Message):
+    __slots__ = ("canonical_request_json", "request_checksum", "semantic_request_id", "semantic_profile", "result_limits")
+    CANONICAL_REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
+    SEMANTIC_REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    SEMANTIC_PROFILE_FIELD_NUMBER: _ClassVar[int]
+    RESULT_LIMITS_FIELD_NUMBER: _ClassVar[int]
+    canonical_request_json: bytes
+    request_checksum: str
+    semantic_request_id: str
+    semantic_profile: str
+    result_limits: ResultLimits
+    def __init__(self, canonical_request_json: _Optional[bytes] = ..., request_checksum: _Optional[str] = ..., semantic_request_id: _Optional[str] = ..., semantic_profile: _Optional[str] = ..., result_limits: _Optional[_Union[ResultLimits, _Mapping]] = ...) -> None: ...
+
+class ChallengeStringConstraints(_message.Message):
+    __slots__ = ("minimum_length", "maximum_length", "format")
+    MINIMUM_LENGTH_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_LENGTH_FIELD_NUMBER: _ClassVar[int]
+    FORMAT_FIELD_NUMBER: _ClassVar[int]
+    minimum_length: int
+    maximum_length: int
+    format: ChallengeStringFormat
+    def __init__(self, minimum_length: _Optional[int] = ..., maximum_length: _Optional[int] = ..., format: _Optional[_Union[ChallengeStringFormat, str]] = ...) -> None: ...
+
+class ChallengeIntegerConstraints(_message.Message):
     __slots__ = ("minimum", "maximum")
     MINIMUM_FIELD_NUMBER: _ClassVar[int]
     MAXIMUM_FIELD_NUMBER: _ClassVar[int]
-    minimum: str
-    maximum: str
-    def __init__(self, minimum: _Optional[str] = ..., maximum: _Optional[str] = ...) -> None: ...
+    minimum: int
+    maximum: int
+    def __init__(self, minimum: _Optional[int] = ..., maximum: _Optional[int] = ...) -> None: ...
 
-class SchemaFingerprint(_message.Message):
-    __slots__ = ("schema_id", "version", "digest")
-    SCHEMA_ID_FIELD_NUMBER: _ClassVar[int]
-    VERSION_FIELD_NUMBER: _ClassVar[int]
-    DIGEST_FIELD_NUMBER: _ClassVar[int]
-    schema_id: str
-    version: str
-    digest: str
-    def __init__(self, schema_id: _Optional[str] = ..., version: _Optional[str] = ..., digest: _Optional[str] = ...) -> None: ...
+class ChallengeEnumConstraints(_message.Message):
+    __slots__ = ("minimum_selections", "maximum_selections")
+    MINIMUM_SELECTIONS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_SELECTIONS_FIELD_NUMBER: _ClassVar[int]
+    minimum_selections: int
+    maximum_selections: int
+    def __init__(self, minimum_selections: _Optional[int] = ..., maximum_selections: _Optional[int] = ...) -> None: ...
 
-class HostCapabilityProfile(_message.Message):
-    __slots__ = ("delivery_modes", "compression_algorithms", "supports_resource_links", "supports_trace_context", "maximum_frame_bytes", "profile_digest")
-    DELIVERY_MODES_FIELD_NUMBER: _ClassVar[int]
-    COMPRESSION_ALGORITHMS_FIELD_NUMBER: _ClassVar[int]
-    SUPPORTS_RESOURCE_LINKS_FIELD_NUMBER: _ClassVar[int]
-    SUPPORTS_TRACE_CONTEXT_FIELD_NUMBER: _ClassVar[int]
-    MAXIMUM_FRAME_BYTES_FIELD_NUMBER: _ClassVar[int]
-    PROFILE_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    delivery_modes: _containers.RepeatedScalarFieldContainer[DeliveryPreference]
-    compression_algorithms: _containers.RepeatedScalarFieldContainer[PayloadCompression]
-    supports_resource_links: bool
-    supports_trace_context: bool
-    maximum_frame_bytes: int
-    profile_digest: str
-    def __init__(self, delivery_modes: _Optional[_Iterable[_Union[DeliveryPreference, str]]] = ..., compression_algorithms: _Optional[_Iterable[_Union[PayloadCompression, str]]] = ..., supports_resource_links: _Optional[bool] = ..., supports_trace_context: _Optional[bool] = ..., maximum_frame_bytes: _Optional[int] = ..., profile_digest: _Optional[str] = ...) -> None: ...
+class ChallengeCollectionConstraints(_message.Message):
+    __slots__ = ("item_kind", "minimum_items", "maximum_items", "unique_items")
+    ITEM_KIND_FIELD_NUMBER: _ClassVar[int]
+    MINIMUM_ITEMS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_ITEMS_FIELD_NUMBER: _ClassVar[int]
+    UNIQUE_ITEMS_FIELD_NUMBER: _ClassVar[int]
+    item_kind: ChallengeCollectionItemKind
+    minimum_items: int
+    maximum_items: int
+    unique_items: bool
+    def __init__(self, item_kind: _Optional[_Union[ChallengeCollectionItemKind, str]] = ..., minimum_items: _Optional[int] = ..., maximum_items: _Optional[int] = ..., unique_items: _Optional[bool] = ...) -> None: ...
 
-class CredentialProof(_message.Message):
-    __slots__ = ("credential_id", "capability_token")
-    CREDENTIAL_ID_FIELD_NUMBER: _ClassVar[int]
-    CAPABILITY_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    credential_id: str
-    capability_token: bytes
-    def __init__(self, credential_id: _Optional[str] = ..., capability_token: _Optional[bytes] = ...) -> None: ...
+class ChallengeConstraints(_message.Message):
+    __slots__ = ("string_constraints", "integer_constraints", "enum_constraints", "collection_constraints")
+    STRING_CONSTRAINTS_FIELD_NUMBER: _ClassVar[int]
+    INTEGER_CONSTRAINTS_FIELD_NUMBER: _ClassVar[int]
+    ENUM_CONSTRAINTS_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_CONSTRAINTS_FIELD_NUMBER: _ClassVar[int]
+    string_constraints: ChallengeStringConstraints
+    integer_constraints: ChallengeIntegerConstraints
+    enum_constraints: ChallengeEnumConstraints
+    collection_constraints: ChallengeCollectionConstraints
+    def __init__(self, string_constraints: _Optional[_Union[ChallengeStringConstraints, _Mapping]] = ..., integer_constraints: _Optional[_Union[ChallengeIntegerConstraints, _Mapping]] = ..., enum_constraints: _Optional[_Union[ChallengeEnumConstraints, _Mapping]] = ..., collection_constraints: _Optional[_Union[ChallengeCollectionConstraints, _Mapping]] = ...) -> None: ...
 
-class HandshakeRequest(_message.Message):
-    __slots__ = ("adapter_instance_id", "adapter_version", "fastmcp_version", "pydantic_version", "python_version", "rpc_versions", "semantic_query_versions", "schema_fingerprints", "required_feature_bits", "optional_feature_bits", "desired_workspace_ids", "host_capabilities", "credential_proof", "agent_instance_id")
-    ADAPTER_INSTANCE_ID_FIELD_NUMBER: _ClassVar[int]
-    ADAPTER_VERSION_FIELD_NUMBER: _ClassVar[int]
-    FASTMCP_VERSION_FIELD_NUMBER: _ClassVar[int]
-    PYDANTIC_VERSION_FIELD_NUMBER: _ClassVar[int]
-    PYTHON_VERSION_FIELD_NUMBER: _ClassVar[int]
-    RPC_VERSIONS_FIELD_NUMBER: _ClassVar[int]
-    SEMANTIC_QUERY_VERSIONS_FIELD_NUMBER: _ClassVar[int]
-    SCHEMA_FINGERPRINTS_FIELD_NUMBER: _ClassVar[int]
-    REQUIRED_FEATURE_BITS_FIELD_NUMBER: _ClassVar[int]
-    OPTIONAL_FEATURE_BITS_FIELD_NUMBER: _ClassVar[int]
-    DESIRED_WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
-    HOST_CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
-    CREDENTIAL_PROOF_FIELD_NUMBER: _ClassVar[int]
-    AGENT_INSTANCE_ID_FIELD_NUMBER: _ClassVar[int]
-    adapter_instance_id: str
-    adapter_version: str
-    fastmcp_version: str
-    pydantic_version: str
-    python_version: str
-    rpc_versions: VersionRange
-    semantic_query_versions: VersionRange
-    schema_fingerprints: _containers.RepeatedCompositeFieldContainer[SchemaFingerprint]
-    required_feature_bits: int
-    optional_feature_bits: int
-    desired_workspace_ids: _containers.RepeatedScalarFieldContainer[str]
-    host_capabilities: HostCapabilityProfile
-    credential_proof: CredentialProof
-    agent_instance_id: str
-    def __init__(self, adapter_instance_id: _Optional[str] = ..., adapter_version: _Optional[str] = ..., fastmcp_version: _Optional[str] = ..., pydantic_version: _Optional[str] = ..., python_version: _Optional[str] = ..., rpc_versions: _Optional[_Union[VersionRange, _Mapping]] = ..., semantic_query_versions: _Optional[_Union[VersionRange, _Mapping]] = ..., schema_fingerprints: _Optional[_Iterable[_Union[SchemaFingerprint, _Mapping]]] = ..., required_feature_bits: _Optional[int] = ..., optional_feature_bits: _Optional[int] = ..., desired_workspace_ids: _Optional[_Iterable[str]] = ..., host_capabilities: _Optional[_Union[HostCapabilityProfile, _Mapping]] = ..., credential_proof: _Optional[_Union[CredentialProof, _Mapping]] = ..., agent_instance_id: _Optional[str] = ...) -> None: ...
+class AuthorizedChoice(_message.Message):
+    __slots__ = ("choice_id", "presentation_key", "string_value", "integer_value", "boolean_value")
+    CHOICE_ID_FIELD_NUMBER: _ClassVar[int]
+    PRESENTATION_KEY_FIELD_NUMBER: _ClassVar[int]
+    STRING_VALUE_FIELD_NUMBER: _ClassVar[int]
+    INTEGER_VALUE_FIELD_NUMBER: _ClassVar[int]
+    BOOLEAN_VALUE_FIELD_NUMBER: _ClassVar[int]
+    choice_id: str
+    presentation_key: str
+    string_value: str
+    integer_value: int
+    boolean_value: bool
+    def __init__(self, choice_id: _Optional[str] = ..., presentation_key: _Optional[str] = ..., string_value: _Optional[str] = ..., integer_value: _Optional[int] = ..., boolean_value: _Optional[bool] = ...) -> None: ...
 
-class BundleIdentity(_message.Message):
-    __slots__ = ("bundle_id", "bundle_version", "bundle_digest")
-    BUNDLE_ID_FIELD_NUMBER: _ClassVar[int]
-    BUNDLE_VERSION_FIELD_NUMBER: _ClassVar[int]
-    BUNDLE_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    bundle_id: str
-    bundle_version: str
-    bundle_digest: str
-    def __init__(self, bundle_id: _Optional[str] = ..., bundle_version: _Optional[str] = ..., bundle_digest: _Optional[str] = ...) -> None: ...
+class InputRequirement(_message.Message):
+    __slots__ = ("semantic_field_id", "input_kind", "presentation_key", "description_key", "required", "constraints", "authorized_choices")
+    SEMANTIC_FIELD_ID_FIELD_NUMBER: _ClassVar[int]
+    INPUT_KIND_FIELD_NUMBER: _ClassVar[int]
+    PRESENTATION_KEY_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_KEY_FIELD_NUMBER: _ClassVar[int]
+    REQUIRED_FIELD_NUMBER: _ClassVar[int]
+    CONSTRAINTS_FIELD_NUMBER: _ClassVar[int]
+    AUTHORIZED_CHOICES_FIELD_NUMBER: _ClassVar[int]
+    semantic_field_id: str
+    input_kind: ChallengeInputKind
+    presentation_key: str
+    description_key: str
+    required: bool
+    constraints: ChallengeConstraints
+    authorized_choices: _containers.RepeatedCompositeFieldContainer[AuthorizedChoice]
+    def __init__(self, semantic_field_id: _Optional[str] = ..., input_kind: _Optional[_Union[ChallengeInputKind, str]] = ..., presentation_key: _Optional[str] = ..., description_key: _Optional[str] = ..., required: _Optional[bool] = ..., constraints: _Optional[_Union[ChallengeConstraints, _Mapping]] = ..., authorized_choices: _Optional[_Iterable[_Union[AuthorizedChoice, _Mapping]]] = ...) -> None: ...
 
-class WorkspaceClaim(_message.Message):
-    __slots__ = ("workspace_id", "repository_id", "worktree_id", "workspace_kind", "readiness", "permission_claims")
-    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
-    REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
-    WORKTREE_ID_FIELD_NUMBER: _ClassVar[int]
-    WORKSPACE_KIND_FIELD_NUMBER: _ClassVar[int]
-    READINESS_FIELD_NUMBER: _ClassVar[int]
-    PERMISSION_CLAIMS_FIELD_NUMBER: _ClassVar[int]
-    workspace_id: str
-    repository_id: str
-    worktree_id: str
-    workspace_kind: str
-    readiness: WorkspaceReadiness
-    permission_claims: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, workspace_id: _Optional[str] = ..., repository_id: _Optional[str] = ..., worktree_id: _Optional[str] = ..., workspace_kind: _Optional[str] = ..., readiness: _Optional[_Union[WorkspaceReadiness, str]] = ..., permission_claims: _Optional[_Iterable[str]] = ...) -> None: ...
+class StringAnswerCollection(_message.Message):
+    __slots__ = ("values",)
+    VALUES_FIELD_NUMBER: _ClassVar[int]
+    values: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, values: _Optional[_Iterable[str]] = ...) -> None: ...
 
-class EffectiveLimitsProfile(_message.Message):
-    __slots__ = ("maximum_control_message_bytes", "maximum_payload_chunk_bytes", "maximum_inline_response_bytes", "maximum_concurrent_queries", "query_orphan_replay_seconds", "profile_digest")
-    MAXIMUM_CONTROL_MESSAGE_BYTES_FIELD_NUMBER: _ClassVar[int]
-    MAXIMUM_PAYLOAD_CHUNK_BYTES_FIELD_NUMBER: _ClassVar[int]
-    MAXIMUM_INLINE_RESPONSE_BYTES_FIELD_NUMBER: _ClassVar[int]
-    MAXIMUM_CONCURRENT_QUERIES_FIELD_NUMBER: _ClassVar[int]
-    QUERY_ORPHAN_REPLAY_SECONDS_FIELD_NUMBER: _ClassVar[int]
-    PROFILE_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    maximum_control_message_bytes: int
-    maximum_payload_chunk_bytes: int
-    maximum_inline_response_bytes: int
-    maximum_concurrent_queries: int
-    query_orphan_replay_seconds: int
-    profile_digest: str
-    def __init__(self, maximum_control_message_bytes: _Optional[int] = ..., maximum_payload_chunk_bytes: _Optional[int] = ..., maximum_inline_response_bytes: _Optional[int] = ..., maximum_concurrent_queries: _Optional[int] = ..., query_orphan_replay_seconds: _Optional[int] = ..., profile_digest: _Optional[str] = ...) -> None: ...
+class IntegerAnswerCollection(_message.Message):
+    __slots__ = ("values",)
+    VALUES_FIELD_NUMBER: _ClassVar[int]
+    values: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, values: _Optional[_Iterable[int]] = ...) -> None: ...
 
-class ReadinessSummary(_message.Message):
-    __slots__ = ("readiness", "reason_code", "active_snapshot_id", "supported_language_codes", "supported_query_forms", "capability_codes")
-    READINESS_FIELD_NUMBER: _ClassVar[int]
-    REASON_CODE_FIELD_NUMBER: _ClassVar[int]
-    ACTIVE_SNAPSHOT_ID_FIELD_NUMBER: _ClassVar[int]
-    SUPPORTED_LANGUAGE_CODES_FIELD_NUMBER: _ClassVar[int]
-    SUPPORTED_QUERY_FORMS_FIELD_NUMBER: _ClassVar[int]
-    CAPABILITY_CODES_FIELD_NUMBER: _ClassVar[int]
-    readiness: WorkspaceReadiness
-    reason_code: str
-    active_snapshot_id: str
-    supported_language_codes: _containers.RepeatedScalarFieldContainer[int]
-    supported_query_forms: _containers.RepeatedScalarFieldContainer[str]
-    capability_codes: _containers.RepeatedScalarFieldContainer[int]
-    def __init__(self, readiness: _Optional[_Union[WorkspaceReadiness, str]] = ..., reason_code: _Optional[str] = ..., active_snapshot_id: _Optional[str] = ..., supported_language_codes: _Optional[_Iterable[int]] = ..., supported_query_forms: _Optional[_Iterable[str]] = ..., capability_codes: _Optional[_Iterable[int]] = ...) -> None: ...
+class BooleanAnswerCollection(_message.Message):
+    __slots__ = ("values",)
+    VALUES_FIELD_NUMBER: _ClassVar[int]
+    values: _containers.RepeatedScalarFieldContainer[bool]
+    def __init__(self, values: _Optional[_Iterable[bool]] = ...) -> None: ...
 
-class HandshakeResponse(_message.Message):
-    __slots__ = ("daemon_instance_id", "daemon_version", "rust_build", "negotiated_rpc_version", "negotiated_semantic_query_version", "negotiated_feature_bits", "negotiated_compression", "installed_bundles", "active_schema_fingerprints", "effective_limits", "authorized_workspaces", "server_time_unix_ms", "readiness")
-    DAEMON_INSTANCE_ID_FIELD_NUMBER: _ClassVar[int]
-    DAEMON_VERSION_FIELD_NUMBER: _ClassVar[int]
-    RUST_BUILD_FIELD_NUMBER: _ClassVar[int]
-    NEGOTIATED_RPC_VERSION_FIELD_NUMBER: _ClassVar[int]
-    NEGOTIATED_SEMANTIC_QUERY_VERSION_FIELD_NUMBER: _ClassVar[int]
-    NEGOTIATED_FEATURE_BITS_FIELD_NUMBER: _ClassVar[int]
-    NEGOTIATED_COMPRESSION_FIELD_NUMBER: _ClassVar[int]
-    INSTALLED_BUNDLES_FIELD_NUMBER: _ClassVar[int]
-    ACTIVE_SCHEMA_FINGERPRINTS_FIELD_NUMBER: _ClassVar[int]
-    EFFECTIVE_LIMITS_FIELD_NUMBER: _ClassVar[int]
-    AUTHORIZED_WORKSPACES_FIELD_NUMBER: _ClassVar[int]
-    SERVER_TIME_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
-    READINESS_FIELD_NUMBER: _ClassVar[int]
-    daemon_instance_id: str
-    daemon_version: str
-    rust_build: str
-    negotiated_rpc_version: str
-    negotiated_semantic_query_version: str
-    negotiated_feature_bits: int
-    negotiated_compression: PayloadCompression
-    installed_bundles: _containers.RepeatedCompositeFieldContainer[BundleIdentity]
-    active_schema_fingerprints: _containers.RepeatedCompositeFieldContainer[SchemaFingerprint]
-    effective_limits: EffectiveLimitsProfile
-    authorized_workspaces: _containers.RepeatedCompositeFieldContainer[WorkspaceClaim]
-    server_time_unix_ms: int
-    readiness: ReadinessSummary
-    def __init__(self, daemon_instance_id: _Optional[str] = ..., daemon_version: _Optional[str] = ..., rust_build: _Optional[str] = ..., negotiated_rpc_version: _Optional[str] = ..., negotiated_semantic_query_version: _Optional[str] = ..., negotiated_feature_bits: _Optional[int] = ..., negotiated_compression: _Optional[_Union[PayloadCompression, str]] = ..., installed_bundles: _Optional[_Iterable[_Union[BundleIdentity, _Mapping]]] = ..., active_schema_fingerprints: _Optional[_Iterable[_Union[SchemaFingerprint, _Mapping]]] = ..., effective_limits: _Optional[_Union[EffectiveLimitsProfile, _Mapping]] = ..., authorized_workspaces: _Optional[_Iterable[_Union[WorkspaceClaim, _Mapping]]] = ..., server_time_unix_ms: _Optional[int] = ..., readiness: _Optional[_Union[ReadinessSummary, _Mapping]] = ...) -> None: ...
+class ChoiceAnswerCollection(_message.Message):
+    __slots__ = ("choice_ids",)
+    CHOICE_IDS_FIELD_NUMBER: _ClassVar[int]
+    choice_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, choice_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
-class StatusRequest(_message.Message):
-    __slots__ = ("agent_instance_id", "workspace_id", "include_diagnostics")
-    AGENT_INSTANCE_ID_FIELD_NUMBER: _ClassVar[int]
-    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
-    INCLUDE_DIAGNOSTICS_FIELD_NUMBER: _ClassVar[int]
-    agent_instance_id: str
-    workspace_id: str
-    include_diagnostics: bool
-    def __init__(self, agent_instance_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., include_diagnostics: _Optional[bool] = ...) -> None: ...
+class InputAnswer(_message.Message):
+    __slots__ = ("semantic_field_id", "string_value", "integer_value", "boolean_value", "choice_id", "string_collection", "integer_collection", "boolean_collection", "choice_collection")
+    SEMANTIC_FIELD_ID_FIELD_NUMBER: _ClassVar[int]
+    STRING_VALUE_FIELD_NUMBER: _ClassVar[int]
+    INTEGER_VALUE_FIELD_NUMBER: _ClassVar[int]
+    BOOLEAN_VALUE_FIELD_NUMBER: _ClassVar[int]
+    CHOICE_ID_FIELD_NUMBER: _ClassVar[int]
+    STRING_COLLECTION_FIELD_NUMBER: _ClassVar[int]
+    INTEGER_COLLECTION_FIELD_NUMBER: _ClassVar[int]
+    BOOLEAN_COLLECTION_FIELD_NUMBER: _ClassVar[int]
+    CHOICE_COLLECTION_FIELD_NUMBER: _ClassVar[int]
+    semantic_field_id: str
+    string_value: str
+    integer_value: int
+    boolean_value: bool
+    choice_id: str
+    string_collection: StringAnswerCollection
+    integer_collection: IntegerAnswerCollection
+    boolean_collection: BooleanAnswerCollection
+    choice_collection: ChoiceAnswerCollection
+    def __init__(self, semantic_field_id: _Optional[str] = ..., string_value: _Optional[str] = ..., integer_value: _Optional[int] = ..., boolean_value: _Optional[bool] = ..., choice_id: _Optional[str] = ..., string_collection: _Optional[_Union[StringAnswerCollection, _Mapping]] = ..., integer_collection: _Optional[_Union[IntegerAnswerCollection, _Mapping]] = ..., boolean_collection: _Optional[_Union[BooleanAnswerCollection, _Mapping]] = ..., choice_collection: _Optional[_Union[ChoiceAnswerCollection, _Mapping]] = ...) -> None: ...
 
-class StatusResponse(_message.Message):
-    __slots__ = ("workspace_id", "readiness", "canonical_public_status_json", "status_checksum", "observed_at_unix_ms")
-    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
-    READINESS_FIELD_NUMBER: _ClassVar[int]
-    CANONICAL_PUBLIC_STATUS_JSON_FIELD_NUMBER: _ClassVar[int]
-    STATUS_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    OBSERVED_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
-    workspace_id: str
-    readiness: WorkspaceReadiness
-    canonical_public_status_json: bytes
-    status_checksum: str
-    observed_at_unix_ms: int
-    def __init__(self, workspace_id: _Optional[str] = ..., readiness: _Optional[_Union[WorkspaceReadiness, str]] = ..., canonical_public_status_json: _Optional[bytes] = ..., status_checksum: _Optional[str] = ..., observed_at_unix_ms: _Optional[int] = ...) -> None: ...
+class ValidationIssue(_message.Message):
+    __slots__ = ("code", "semantic_field_id", "presentation_key", "retryable")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SEMANTIC_FIELD_ID_FIELD_NUMBER: _ClassVar[int]
+    PRESENTATION_KEY_FIELD_NUMBER: _ClassVar[int]
+    RETRYABLE_FIELD_NUMBER: _ClassVar[int]
+    code: SafeErrorCode
+    semantic_field_id: str
+    presentation_key: str
+    retryable: bool
+    def __init__(self, code: _Optional[_Union[SafeErrorCode, str]] = ..., semantic_field_id: _Optional[str] = ..., presentation_key: _Optional[str] = ..., retryable: _Optional[bool] = ...) -> None: ...
+
+class QueryPreparation(_message.Message):
+    __slots__ = ("canonical_normalized_request_json", "semantic_request_id", "input_requirements", "errors", "warnings", "cost_class", "estimated_result_bytes", "estimated_result_pages")
+    CANONICAL_NORMALIZED_REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
+    SEMANTIC_REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    INPUT_REQUIREMENTS_FIELD_NUMBER: _ClassVar[int]
+    ERRORS_FIELD_NUMBER: _ClassVar[int]
+    WARNINGS_FIELD_NUMBER: _ClassVar[int]
+    COST_CLASS_FIELD_NUMBER: _ClassVar[int]
+    ESTIMATED_RESULT_BYTES_FIELD_NUMBER: _ClassVar[int]
+    ESTIMATED_RESULT_PAGES_FIELD_NUMBER: _ClassVar[int]
+    canonical_normalized_request_json: bytes
+    semantic_request_id: str
+    input_requirements: _containers.RepeatedCompositeFieldContainer[InputRequirement]
+    errors: _containers.RepeatedCompositeFieldContainer[ValidationIssue]
+    warnings: _containers.RepeatedCompositeFieldContainer[ValidationIssue]
+    cost_class: str
+    estimated_result_bytes: int
+    estimated_result_pages: int
+    def __init__(self, canonical_normalized_request_json: _Optional[bytes] = ..., semantic_request_id: _Optional[str] = ..., input_requirements: _Optional[_Iterable[_Union[InputRequirement, _Mapping]]] = ..., errors: _Optional[_Iterable[_Union[ValidationIssue, _Mapping]]] = ..., warnings: _Optional[_Iterable[_Union[ValidationIssue, _Mapping]]] = ..., cost_class: _Optional[str] = ..., estimated_result_bytes: _Optional[int] = ..., estimated_result_pages: _Optional[int] = ...) -> None: ...
 
 class ValidateQueryRequest(_message.Message):
-    __slots__ = ("agent_instance_id", "workspace_id", "semantic_query_version", "canonical_request_json", "request_checksum", "freshness_policy", "host_capability_profile_digest")
-    AGENT_INSTANCE_ID_FIELD_NUMBER: _ClassVar[int]
-    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
-    SEMANTIC_QUERY_VERSION_FIELD_NUMBER: _ClassVar[int]
-    CANONICAL_REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
-    REQUEST_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    FRESHNESS_POLICY_FIELD_NUMBER: _ClassVar[int]
-    HOST_CAPABILITY_PROFILE_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    agent_instance_id: str
-    workspace_id: str
-    semantic_query_version: str
-    canonical_request_json: bytes
-    request_checksum: str
-    freshness_policy: FreshnessPolicy
-    host_capability_profile_digest: str
-    def __init__(self, agent_instance_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., semantic_query_version: _Optional[str] = ..., canonical_request_json: _Optional[bytes] = ..., request_checksum: _Optional[str] = ..., freshness_policy: _Optional[_Union[FreshnessPolicy, str]] = ..., host_capability_profile_digest: _Optional[str] = ...) -> None: ...
+    __slots__ = ("context", "query")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    QUERY_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
+    query: QuerySubmission
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., query: _Optional[_Union[QuerySubmission, _Mapping]] = ...) -> None: ...
 
 class ValidateQueryResponse(_message.Message):
-    __slots__ = ("valid", "canonical_normalized_request_json", "normalized_request_checksum", "effective_semantic_request_id", "provisional_snapshot_checks", "canonical_error_records_json", "cost_class")
-    VALID_FIELD_NUMBER: _ClassVar[int]
-    CANONICAL_NORMALIZED_REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
-    NORMALIZED_REQUEST_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    EFFECTIVE_SEMANTIC_REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
-    PROVISIONAL_SNAPSHOT_CHECKS_FIELD_NUMBER: _ClassVar[int]
-    CANONICAL_ERROR_RECORDS_JSON_FIELD_NUMBER: _ClassVar[int]
-    COST_CLASS_FIELD_NUMBER: _ClassVar[int]
-    valid: bool
-    canonical_normalized_request_json: bytes
-    normalized_request_checksum: str
-    effective_semantic_request_id: str
-    provisional_snapshot_checks: _containers.RepeatedScalarFieldContainer[str]
-    canonical_error_records_json: _containers.RepeatedScalarFieldContainer[bytes]
-    cost_class: str
-    def __init__(self, valid: _Optional[bool] = ..., canonical_normalized_request_json: _Optional[bytes] = ..., normalized_request_checksum: _Optional[str] = ..., effective_semantic_request_id: _Optional[str] = ..., provisional_snapshot_checks: _Optional[_Iterable[str]] = ..., canonical_error_records_json: _Optional[_Iterable[bytes]] = ..., cost_class: _Optional[str] = ...) -> None: ...
+    __slots__ = ("authority", "preparation")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    PREPARATION_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
+    preparation: QueryPreparation
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., preparation: _Optional[_Union[QueryPreparation, _Mapping]] = ...) -> None: ...
+
+class InitialQueryStart(_message.Message):
+    __slots__ = ("query",)
+    QUERY_FIELD_NUMBER: _ClassVar[int]
+    query: QuerySubmission
+    def __init__(self, query: _Optional[_Union[QuerySubmission, _Mapping]] = ...) -> None: ...
+
+class QueryChallengeContinuation(_message.Message):
+    __slots__ = ("daemon_continuation", "challenge_id", "round", "answers")
+    DAEMON_CONTINUATION_FIELD_NUMBER: _ClassVar[int]
+    CHALLENGE_ID_FIELD_NUMBER: _ClassVar[int]
+    ROUND_FIELD_NUMBER: _ClassVar[int]
+    ANSWERS_FIELD_NUMBER: _ClassVar[int]
+    daemon_continuation: bytes
+    challenge_id: str
+    round: int
+    answers: _containers.RepeatedCompositeFieldContainer[InputAnswer]
+    def __init__(self, daemon_continuation: _Optional[bytes] = ..., challenge_id: _Optional[str] = ..., round: _Optional[int] = ..., answers: _Optional[_Iterable[_Union[InputAnswer, _Mapping]]] = ...) -> None: ...
 
 class StartQueryRequest(_message.Message):
-    __slots__ = ("agent_instance_id", "workspace_id", "mcp_call_id", "rpc_attempt_id", "semantic_request_id", "semantic_query_version", "canonical_request_json", "request_checksum", "freshness_policy", "delivery_preference", "host_capability_profile_digest", "deadline_unix_ms", "idempotency_key", "payload_compression")
-    AGENT_INSTANCE_ID_FIELD_NUMBER: _ClassVar[int]
-    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
-    MCP_CALL_ID_FIELD_NUMBER: _ClassVar[int]
-    RPC_ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("context", "initial", "continuation")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    INITIAL_FIELD_NUMBER: _ClassVar[int]
+    CONTINUATION_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
+    initial: InitialQueryStart
+    continuation: QueryChallengeContinuation
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., initial: _Optional[_Union[InitialQueryStart, _Mapping]] = ..., continuation: _Optional[_Union[QueryChallengeContinuation, _Mapping]] = ...) -> None: ...
+
+class AcceptedQuery(_message.Message):
+    __slots__ = ("authority", "daemon_query_id", "semantic_request_id", "operation_fingerprint", "accepted_at_unix_ms", "observation_expires_at_unix_ms", "state", "idempotent_replay")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    DAEMON_QUERY_ID_FIELD_NUMBER: _ClassVar[int]
     SEMANTIC_REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
-    SEMANTIC_QUERY_VERSION_FIELD_NUMBER: _ClassVar[int]
-    CANONICAL_REQUEST_JSON_FIELD_NUMBER: _ClassVar[int]
-    REQUEST_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    FRESHNESS_POLICY_FIELD_NUMBER: _ClassVar[int]
-    DELIVERY_PREFERENCE_FIELD_NUMBER: _ClassVar[int]
-    HOST_CAPABILITY_PROFILE_DIGEST_FIELD_NUMBER: _ClassVar[int]
-    DEADLINE_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
-    IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
-    PAYLOAD_COMPRESSION_FIELD_NUMBER: _ClassVar[int]
-    agent_instance_id: str
-    workspace_id: str
-    mcp_call_id: str
-    rpc_attempt_id: str
+    OPERATION_FINGERPRINT_FIELD_NUMBER: _ClassVar[int]
+    ACCEPTED_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    OBSERVATION_EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENT_REPLAY_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
+    daemon_query_id: str
     semantic_request_id: str
-    semantic_query_version: str
-    canonical_request_json: bytes
-    request_checksum: str
-    freshness_policy: FreshnessPolicy
-    delivery_preference: DeliveryPreference
-    host_capability_profile_digest: str
-    deadline_unix_ms: int
-    idempotency_key: str
-    payload_compression: PayloadCompression
-    def __init__(self, agent_instance_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., mcp_call_id: _Optional[str] = ..., rpc_attempt_id: _Optional[str] = ..., semantic_request_id: _Optional[str] = ..., semantic_query_version: _Optional[str] = ..., canonical_request_json: _Optional[bytes] = ..., request_checksum: _Optional[str] = ..., freshness_policy: _Optional[_Union[FreshnessPolicy, str]] = ..., delivery_preference: _Optional[_Union[DeliveryPreference, str]] = ..., host_capability_profile_digest: _Optional[str] = ..., deadline_unix_ms: _Optional[int] = ..., idempotency_key: _Optional[str] = ..., payload_compression: _Optional[_Union[PayloadCompression, str]] = ...) -> None: ...
+    operation_fingerprint: str
+    accepted_at_unix_ms: int
+    observation_expires_at_unix_ms: int
+    state: QueryExecutionState
+    idempotent_replay: bool
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., daemon_query_id: _Optional[str] = ..., semantic_request_id: _Optional[str] = ..., operation_fingerprint: _Optional[str] = ..., accepted_at_unix_ms: _Optional[int] = ..., observation_expires_at_unix_ms: _Optional[int] = ..., state: _Optional[_Union[QueryExecutionState, str]] = ..., idempotent_replay: _Optional[bool] = ...) -> None: ...
+
+class InputChallenge(_message.Message):
+    __slots__ = ("authority", "semantic_request_id", "challenge_id", "round", "remaining_rounds", "issued_at_unix_ms", "expires_at_unix_ms", "maximum_answer_bytes", "explanation_code", "requirements", "daemon_continuation")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    SEMANTIC_REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    CHALLENGE_ID_FIELD_NUMBER: _ClassVar[int]
+    ROUND_FIELD_NUMBER: _ClassVar[int]
+    REMAINING_ROUNDS_FIELD_NUMBER: _ClassVar[int]
+    ISSUED_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_ANSWER_BYTES_FIELD_NUMBER: _ClassVar[int]
+    EXPLANATION_CODE_FIELD_NUMBER: _ClassVar[int]
+    REQUIREMENTS_FIELD_NUMBER: _ClassVar[int]
+    DAEMON_CONTINUATION_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
+    semantic_request_id: str
+    challenge_id: str
+    round: int
+    remaining_rounds: int
+    issued_at_unix_ms: int
+    expires_at_unix_ms: int
+    maximum_answer_bytes: int
+    explanation_code: ChallengeExplanationCode
+    requirements: _containers.RepeatedCompositeFieldContainer[InputRequirement]
+    daemon_continuation: bytes
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., semantic_request_id: _Optional[str] = ..., challenge_id: _Optional[str] = ..., round: _Optional[int] = ..., remaining_rounds: _Optional[int] = ..., issued_at_unix_ms: _Optional[int] = ..., expires_at_unix_ms: _Optional[int] = ..., maximum_answer_bytes: _Optional[int] = ..., explanation_code: _Optional[_Union[ChallengeExplanationCode, str]] = ..., requirements: _Optional[_Iterable[_Union[InputRequirement, _Mapping]]] = ..., daemon_continuation: _Optional[bytes] = ...) -> None: ...
+
+class ValidationRejection(_message.Message):
+    __slots__ = ("authority", "semantic_request_id", "issues", "error")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    SEMANTIC_REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    ISSUES_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
+    semantic_request_id: str
+    issues: _containers.RepeatedCompositeFieldContainer[ValidationIssue]
+    error: SafeErrorMetadata
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., semantic_request_id: _Optional[str] = ..., issues: _Optional[_Iterable[_Union[ValidationIssue, _Mapping]]] = ..., error: _Optional[_Union[SafeErrorMetadata, _Mapping]] = ...) -> None: ...
 
 class StartQueryResponse(_message.Message):
-    __slots__ = ("daemon_query_id", "resume_token", "accepted_at_unix_ms", "query_execution_state", "queue_class", "queue_position", "negotiated_request_version", "negotiated_response_version", "effective_semantic_request_id", "cancel_token")
-    DAEMON_QUERY_ID_FIELD_NUMBER: _ClassVar[int]
-    RESUME_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    ACCEPTED_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
-    QUERY_EXECUTION_STATE_FIELD_NUMBER: _ClassVar[int]
-    QUEUE_CLASS_FIELD_NUMBER: _ClassVar[int]
-    QUEUE_POSITION_FIELD_NUMBER: _ClassVar[int]
-    NEGOTIATED_REQUEST_VERSION_FIELD_NUMBER: _ClassVar[int]
-    NEGOTIATED_RESPONSE_VERSION_FIELD_NUMBER: _ClassVar[int]
-    EFFECTIVE_SEMANTIC_REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
-    CANCEL_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    daemon_query_id: str
-    resume_token: bytes
-    accepted_at_unix_ms: int
-    query_execution_state: QueryExecutionState
-    queue_class: str
-    queue_position: int
-    negotiated_request_version: str
-    negotiated_response_version: str
-    effective_semantic_request_id: str
-    cancel_token: bytes
-    def __init__(self, daemon_query_id: _Optional[str] = ..., resume_token: _Optional[bytes] = ..., accepted_at_unix_ms: _Optional[int] = ..., query_execution_state: _Optional[_Union[QueryExecutionState, str]] = ..., queue_class: _Optional[str] = ..., queue_position: _Optional[int] = ..., negotiated_request_version: _Optional[str] = ..., negotiated_response_version: _Optional[str] = ..., effective_semantic_request_id: _Optional[str] = ..., cancel_token: _Optional[bytes] = ...) -> None: ...
+    __slots__ = ("accepted", "input_challenge", "validation_rejection")
+    ACCEPTED_FIELD_NUMBER: _ClassVar[int]
+    INPUT_CHALLENGE_FIELD_NUMBER: _ClassVar[int]
+    VALIDATION_REJECTION_FIELD_NUMBER: _ClassVar[int]
+    accepted: AcceptedQuery
+    input_challenge: InputChallenge
+    validation_rejection: ValidationRejection
+    def __init__(self, accepted: _Optional[_Union[AcceptedQuery, _Mapping]] = ..., input_challenge: _Optional[_Union[InputChallenge, _Mapping]] = ..., validation_rejection: _Optional[_Union[ValidationRejection, _Mapping]] = ...) -> None: ...
 
-class StreamQueryRequest(_message.Message):
-    __slots__ = ("daemon_query_id", "resume_token", "after_sequence")
+class WatchQueryRequest(_message.Message):
+    __slots__ = ("context", "daemon_query_id", "cursor")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
     DAEMON_QUERY_ID_FIELD_NUMBER: _ClassVar[int]
-    RESUME_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    AFTER_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
     daemon_query_id: str
-    resume_token: bytes
-    after_sequence: int
-    def __init__(self, daemon_query_id: _Optional[str] = ..., resume_token: _Optional[bytes] = ..., after_sequence: _Optional[int] = ...) -> None: ...
-
-class AttachQueryRequest(_message.Message):
-    __slots__ = ("daemon_query_id", "resume_token", "after_sequence", "after_event_checksum", "agent_instance_id", "workspace_id")
-    DAEMON_QUERY_ID_FIELD_NUMBER: _ClassVar[int]
-    RESUME_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    AFTER_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
-    AFTER_EVENT_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    AGENT_INSTANCE_ID_FIELD_NUMBER: _ClassVar[int]
-    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
-    daemon_query_id: str
-    resume_token: bytes
-    after_sequence: int
-    after_event_checksum: str
-    agent_instance_id: str
-    workspace_id: str
-    def __init__(self, daemon_query_id: _Optional[str] = ..., resume_token: _Optional[bytes] = ..., after_sequence: _Optional[int] = ..., after_event_checksum: _Optional[str] = ..., agent_instance_id: _Optional[str] = ..., workspace_id: _Optional[str] = ...) -> None: ...
+    cursor: bytes
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., daemon_query_id: _Optional[str] = ..., cursor: _Optional[bytes] = ...) -> None: ...
 
 class QueryEventHeader(_message.Message):
-    __slots__ = ("daemon_query_id", "sequence", "snapshot_id", "event_at_unix_ms", "event_checksum")
+    __slots__ = ("authority", "daemon_query_id", "sequence", "emitted_at_unix_ms", "cursor")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
     DAEMON_QUERY_ID_FIELD_NUMBER: _ClassVar[int]
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
-    SNAPSHOT_ID_FIELD_NUMBER: _ClassVar[int]
-    EVENT_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
-    EVENT_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
+    EMITTED_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
     daemon_query_id: str
     sequence: int
-    snapshot_id: str
-    event_at_unix_ms: int
-    event_checksum: str
-    def __init__(self, daemon_query_id: _Optional[str] = ..., sequence: _Optional[int] = ..., snapshot_id: _Optional[str] = ..., event_at_unix_ms: _Optional[int] = ..., event_checksum: _Optional[str] = ...) -> None: ...
+    emitted_at_unix_ms: int
+    cursor: bytes
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., daemon_query_id: _Optional[str] = ..., sequence: _Optional[int] = ..., emitted_at_unix_ms: _Optional[int] = ..., cursor: _Optional[bytes] = ...) -> None: ...
 
 class SnapshotPinnedEvent(_message.Message):
-    __slots__ = ("header", "canonical_public_snapshot_metadata_json", "metadata_checksum")
+    __slots__ = ("header", "epoch_id", "source_generation", "activation_head", "lifecycle_watermark")
     HEADER_FIELD_NUMBER: _ClassVar[int]
-    CANONICAL_PUBLIC_SNAPSHOT_METADATA_JSON_FIELD_NUMBER: _ClassVar[int]
-    METADATA_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    ACTIVATION_HEAD_FIELD_NUMBER: _ClassVar[int]
+    LIFECYCLE_WATERMARK_FIELD_NUMBER: _ClassVar[int]
     header: QueryEventHeader
-    canonical_public_snapshot_metadata_json: bytes
-    metadata_checksum: str
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., canonical_public_snapshot_metadata_json: _Optional[bytes] = ..., metadata_checksum: _Optional[str] = ...) -> None: ...
+    epoch_id: str
+    source_generation: int
+    activation_head: int
+    lifecycle_watermark: int
+    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., epoch_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., activation_head: _Optional[int] = ..., lifecycle_watermark: _Optional[int] = ...) -> None: ...
 
 class ProgressEvent(_message.Message):
-    __slots__ = ("header", "phase", "completed_units", "total_units", "message")
+    __slots__ = ("header", "stage", "completed", "total")
     HEADER_FIELD_NUMBER: _ClassVar[int]
-    PHASE_FIELD_NUMBER: _ClassVar[int]
-    COMPLETED_UNITS_FIELD_NUMBER: _ClassVar[int]
-    TOTAL_UNITS_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    STAGE_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_FIELD_NUMBER: _ClassVar[int]
     header: QueryEventHeader
-    phase: str
-    completed_units: int
-    total_units: int
-    message: str
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., phase: _Optional[str] = ..., completed_units: _Optional[int] = ..., total_units: _Optional[int] = ..., message: _Optional[str] = ...) -> None: ...
+    stage: ProgressStage
+    completed: int
+    total: int
+    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., stage: _Optional[_Union[ProgressStage, str]] = ..., completed: _Optional[int] = ..., total: _Optional[int] = ...) -> None: ...
 
-class ResponseChunkEvent(_message.Message):
-    __slots__ = ("header", "offset", "uncompressed_length", "payload", "payload_checksum", "encoding", "final_chunk")
-    HEADER_FIELD_NUMBER: _ClassVar[int]
-    OFFSET_FIELD_NUMBER: _ClassVar[int]
-    UNCOMPRESSED_LENGTH_FIELD_NUMBER: _ClassVar[int]
-    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
-    PAYLOAD_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    ENCODING_FIELD_NUMBER: _ClassVar[int]
-    FINAL_CHUNK_FIELD_NUMBER: _ClassVar[int]
-    header: QueryEventHeader
-    offset: int
-    uncompressed_length: int
-    payload: bytes
-    payload_checksum: str
-    encoding: PayloadCompression
-    final_chunk: bool
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., offset: _Optional[int] = ..., uncompressed_length: _Optional[int] = ..., payload: _Optional[bytes] = ..., payload_checksum: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., final_chunk: _Optional[bool] = ...) -> None: ...
+class ResourceDescriptor(_message.Message):
+    __slots__ = ("kind", "public_handle", "package_id", "page_ordinal", "media_type", "byte_length", "content_checksum", "expires_at_unix_ms", "authority")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    PUBLIC_HANDLE_FIELD_NUMBER: _ClassVar[int]
+    PACKAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    PAGE_ORDINAL_FIELD_NUMBER: _ClassVar[int]
+    MEDIA_TYPE_FIELD_NUMBER: _ClassVar[int]
+    BYTE_LENGTH_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
+    EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    kind: ResourceKind
+    public_handle: str
+    package_id: str
+    page_ordinal: int
+    media_type: str
+    byte_length: int
+    content_checksum: str
+    expires_at_unix_ms: int
+    authority: AuthorityGeneration
+    def __init__(self, kind: _Optional[_Union[ResourceKind, str]] = ..., public_handle: _Optional[str] = ..., package_id: _Optional[str] = ..., page_ordinal: _Optional[int] = ..., media_type: _Optional[str] = ..., byte_length: _Optional[int] = ..., content_checksum: _Optional[str] = ..., expires_at_unix_ms: _Optional[int] = ..., authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ...) -> None: ...
 
-class ArtifactReadyEvent(_message.Message):
-    __slots__ = ("header", "artifact_id", "artifact_checksum", "content_type", "encoding", "lease_expires_at_unix_ms", "lease_token", "canonical_result_descriptor_json", "result_descriptor_checksum", "result_contract_version", "arrow_release")
+class ResultReadyEvent(_message.Message):
+    __slots__ = ("header", "package_id", "manifest", "total_rows", "total_pages", "total_bytes", "pages")
     HEADER_FIELD_NUMBER: _ClassVar[int]
-    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
-    ARTIFACT_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    CONTENT_TYPE_FIELD_NUMBER: _ClassVar[int]
-    ENCODING_FIELD_NUMBER: _ClassVar[int]
-    LEASE_EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
-    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    CANONICAL_RESULT_DESCRIPTOR_JSON_FIELD_NUMBER: _ClassVar[int]
-    RESULT_DESCRIPTOR_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    RESULT_CONTRACT_VERSION_FIELD_NUMBER: _ClassVar[int]
-    ARROW_RELEASE_FIELD_NUMBER: _ClassVar[int]
+    PACKAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    MANIFEST_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_ROWS_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_PAGES_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_BYTES_FIELD_NUMBER: _ClassVar[int]
+    PAGES_FIELD_NUMBER: _ClassVar[int]
     header: QueryEventHeader
-    artifact_id: str
-    artifact_checksum: str
-    content_type: str
-    encoding: PayloadCompression
-    lease_expires_at_unix_ms: int
-    lease_token: str
-    canonical_result_descriptor_json: bytes
-    result_descriptor_checksum: str
-    result_contract_version: str
-    arrow_release: str
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., artifact_id: _Optional[str] = ..., artifact_checksum: _Optional[str] = ..., content_type: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., lease_expires_at_unix_ms: _Optional[int] = ..., lease_token: _Optional[str] = ..., canonical_result_descriptor_json: _Optional[bytes] = ..., result_descriptor_checksum: _Optional[str] = ..., result_contract_version: _Optional[str] = ..., arrow_release: _Optional[str] = ...) -> None: ...
+    package_id: str
+    manifest: ResourceDescriptor
+    total_rows: int
+    total_pages: int
+    total_bytes: int
+    pages: _containers.RepeatedCompositeFieldContainer[ResourceDescriptor]
+    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., package_id: _Optional[str] = ..., manifest: _Optional[_Union[ResourceDescriptor, _Mapping]] = ..., total_rows: _Optional[int] = ..., total_pages: _Optional[int] = ..., total_bytes: _Optional[int] = ..., pages: _Optional[_Iterable[_Union[ResourceDescriptor, _Mapping]]] = ...) -> None: ...
 
 class TerminalEvent(_message.Message):
-    __slots__ = ("header", "execution_state", "availability_state", "freshness_state", "limit_state", "dependency_state", "canonical_response_checksum", "canonical_error_record_json", "artifact_id", "result_row_count", "result_byte_count", "cleanup_state", "semantic_execution_state", "completeness_state", "truncated", "query_statuses", "notices")
+    __slots__ = ("header", "state", "error")
     HEADER_FIELD_NUMBER: _ClassVar[int]
-    EXECUTION_STATE_FIELD_NUMBER: _ClassVar[int]
-    AVAILABILITY_STATE_FIELD_NUMBER: _ClassVar[int]
-    FRESHNESS_STATE_FIELD_NUMBER: _ClassVar[int]
-    LIMIT_STATE_FIELD_NUMBER: _ClassVar[int]
-    DEPENDENCY_STATE_FIELD_NUMBER: _ClassVar[int]
-    CANONICAL_RESPONSE_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    CANONICAL_ERROR_RECORD_JSON_FIELD_NUMBER: _ClassVar[int]
-    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
-    RESULT_ROW_COUNT_FIELD_NUMBER: _ClassVar[int]
-    RESULT_BYTE_COUNT_FIELD_NUMBER: _ClassVar[int]
-    CLEANUP_STATE_FIELD_NUMBER: _ClassVar[int]
-    SEMANTIC_EXECUTION_STATE_FIELD_NUMBER: _ClassVar[int]
-    COMPLETENESS_STATE_FIELD_NUMBER: _ClassVar[int]
-    TRUNCATED_FIELD_NUMBER: _ClassVar[int]
-    QUERY_STATUSES_FIELD_NUMBER: _ClassVar[int]
-    NOTICES_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
     header: QueryEventHeader
-    execution_state: QueryExecutionState
-    availability_state: str
-    freshness_state: str
-    limit_state: str
-    dependency_state: str
-    canonical_response_checksum: str
-    canonical_error_record_json: bytes
-    artifact_id: str
-    result_row_count: int
-    result_byte_count: int
-    cleanup_state: str
-    semantic_execution_state: str
-    completeness_state: str
-    truncated: bool
-    query_statuses: _containers.RepeatedCompositeFieldContainer[QueryStatusSummary]
-    notices: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., execution_state: _Optional[_Union[QueryExecutionState, str]] = ..., availability_state: _Optional[str] = ..., freshness_state: _Optional[str] = ..., limit_state: _Optional[str] = ..., dependency_state: _Optional[str] = ..., canonical_response_checksum: _Optional[str] = ..., canonical_error_record_json: _Optional[bytes] = ..., artifact_id: _Optional[str] = ..., result_row_count: _Optional[int] = ..., result_byte_count: _Optional[int] = ..., cleanup_state: _Optional[str] = ..., semantic_execution_state: _Optional[str] = ..., completeness_state: _Optional[str] = ..., truncated: _Optional[bool] = ..., query_statuses: _Optional[_Iterable[_Union[QueryStatusSummary, _Mapping]]] = ..., notices: _Optional[_Iterable[str]] = ...) -> None: ...
-
-class QueryStatusSummary(_message.Message):
-    __slots__ = ("query_id", "execution_state", "canonical_error_record_json", "notices")
-    QUERY_ID_FIELD_NUMBER: _ClassVar[int]
-    EXECUTION_STATE_FIELD_NUMBER: _ClassVar[int]
-    CANONICAL_ERROR_RECORD_JSON_FIELD_NUMBER: _ClassVar[int]
-    NOTICES_FIELD_NUMBER: _ClassVar[int]
-    query_id: str
-    execution_state: str
-    canonical_error_record_json: bytes
-    notices: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, query_id: _Optional[str] = ..., execution_state: _Optional[str] = ..., canonical_error_record_json: _Optional[bytes] = ..., notices: _Optional[_Iterable[str]] = ...) -> None: ...
+    state: QueryExecutionState
+    error: SafeErrorMetadata
+    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., state: _Optional[_Union[QueryExecutionState, str]] = ..., error: _Optional[_Union[SafeErrorMetadata, _Mapping]] = ...) -> None: ...
 
 class QueryEvent(_message.Message):
-    __slots__ = ("snapshot_pinned", "progress", "response_chunk", "artifact_ready", "terminal")
+    __slots__ = ("snapshot_pinned", "progress", "result_ready", "terminal")
     SNAPSHOT_PINNED_FIELD_NUMBER: _ClassVar[int]
     PROGRESS_FIELD_NUMBER: _ClassVar[int]
-    RESPONSE_CHUNK_FIELD_NUMBER: _ClassVar[int]
-    ARTIFACT_READY_FIELD_NUMBER: _ClassVar[int]
+    RESULT_READY_FIELD_NUMBER: _ClassVar[int]
     TERMINAL_FIELD_NUMBER: _ClassVar[int]
     snapshot_pinned: SnapshotPinnedEvent
     progress: ProgressEvent
-    response_chunk: ResponseChunkEvent
-    artifact_ready: ArtifactReadyEvent
+    result_ready: ResultReadyEvent
     terminal: TerminalEvent
-    def __init__(self, snapshot_pinned: _Optional[_Union[SnapshotPinnedEvent, _Mapping]] = ..., progress: _Optional[_Union[ProgressEvent, _Mapping]] = ..., response_chunk: _Optional[_Union[ResponseChunkEvent, _Mapping]] = ..., artifact_ready: _Optional[_Union[ArtifactReadyEvent, _Mapping]] = ..., terminal: _Optional[_Union[TerminalEvent, _Mapping]] = ...) -> None: ...
+    def __init__(self, snapshot_pinned: _Optional[_Union[SnapshotPinnedEvent, _Mapping]] = ..., progress: _Optional[_Union[ProgressEvent, _Mapping]] = ..., result_ready: _Optional[_Union[ResultReadyEvent, _Mapping]] = ..., terminal: _Optional[_Union[TerminalEvent, _Mapping]] = ...) -> None: ...
 
 class CancelQueryRequest(_message.Message):
-    __slots__ = ("daemon_query_id", "cancel_token", "agent_instance_id", "workspace_id", "reason")
+    __slots__ = ("context", "daemon_query_id", "cancellation_id")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
     DAEMON_QUERY_ID_FIELD_NUMBER: _ClassVar[int]
-    CANCEL_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    AGENT_INSTANCE_ID_FIELD_NUMBER: _ClassVar[int]
-    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
-    REASON_FIELD_NUMBER: _ClassVar[int]
+    CANCELLATION_ID_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
     daemon_query_id: str
-    cancel_token: bytes
-    agent_instance_id: str
-    workspace_id: str
-    reason: str
-    def __init__(self, daemon_query_id: _Optional[str] = ..., cancel_token: _Optional[bytes] = ..., agent_instance_id: _Optional[str] = ..., workspace_id: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
+    cancellation_id: str
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., daemon_query_id: _Optional[str] = ..., cancellation_id: _Optional[str] = ...) -> None: ...
+
+class TerminalObservation(_message.Message):
+    __slots__ = ("state", "observed_at_unix_ms", "error")
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    OBSERVED_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    state: QueryExecutionState
+    observed_at_unix_ms: int
+    error: SafeErrorMetadata
+    def __init__(self, state: _Optional[_Union[QueryExecutionState, str]] = ..., observed_at_unix_ms: _Optional[int] = ..., error: _Optional[_Union[SafeErrorMetadata, _Mapping]] = ...) -> None: ...
 
 class CancelQueryResponse(_message.Message):
-    __slots__ = ("daemon_query_id", "state", "acknowledged_at_unix_ms", "terminal_state", "cleaning_up_components", "forced_termination")
-    DAEMON_QUERY_ID_FIELD_NUMBER: _ClassVar[int]
-    STATE_FIELD_NUMBER: _ClassVar[int]
-    ACKNOWLEDGED_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
-    TERMINAL_STATE_FIELD_NUMBER: _ClassVar[int]
-    CLEANING_UP_COMPONENTS_FIELD_NUMBER: _ClassVar[int]
-    FORCED_TERMINATION_FIELD_NUMBER: _ClassVar[int]
-    daemon_query_id: str
-    state: CancellationState
-    acknowledged_at_unix_ms: int
-    terminal_state: QueryExecutionState
-    cleaning_up_components: _containers.RepeatedScalarFieldContainer[str]
-    forced_termination: bool
-    def __init__(self, daemon_query_id: _Optional[str] = ..., state: _Optional[_Union[CancellationState, str]] = ..., acknowledged_at_unix_ms: _Optional[int] = ..., terminal_state: _Optional[_Union[QueryExecutionState, str]] = ..., cleaning_up_components: _Optional[_Iterable[str]] = ..., forced_termination: _Optional[bool] = ...) -> None: ...
+    __slots__ = ("authority", "cancellation_id", "acknowledgement", "terminal", "idempotent_replay")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    CANCELLATION_ID_FIELD_NUMBER: _ClassVar[int]
+    ACKNOWLEDGEMENT_FIELD_NUMBER: _ClassVar[int]
+    TERMINAL_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENT_REPLAY_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
+    cancellation_id: str
+    acknowledgement: CancellationAcknowledgement
+    terminal: TerminalObservation
+    idempotent_replay: bool
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., cancellation_id: _Optional[str] = ..., acknowledgement: _Optional[_Union[CancellationAcknowledgement, str]] = ..., terminal: _Optional[_Union[TerminalObservation, _Mapping]] = ..., idempotent_replay: _Optional[bool] = ...) -> None: ...
 
-class ReadResultRequest(_message.Message):
-    __slots__ = ("artifact_id", "offset", "maximum_bytes", "lease_token", "accepted_compression", "authorization_resource_id", "owner")
-    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+class ManifestSelector(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class PageSelector(_message.Message):
+    __slots__ = ("page_ordinal",)
+    PAGE_ORDINAL_FIELD_NUMBER: _ClassVar[int]
+    page_ordinal: int
+    def __init__(self, page_ordinal: _Optional[int] = ...) -> None: ...
+
+class ResourceSelector(_message.Message):
+    __slots__ = ("manifest", "page", "reference")
+    MANIFEST_FIELD_NUMBER: _ClassVar[int]
+    PAGE_FIELD_NUMBER: _ClassVar[int]
+    REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    manifest: ManifestSelector
+    page: PageSelector
+    reference: ReferenceReadRequest
+    def __init__(self, manifest: _Optional[_Union[ManifestSelector, _Mapping]] = ..., page: _Optional[_Union[PageSelector, _Mapping]] = ..., reference: _Optional[_Union[ReferenceReadRequest, _Mapping]] = ...) -> None: ...
+
+class ReadResourceRequest(_message.Message):
+    __slots__ = ("context", "public_handle", "selector", "offset", "maximum_bytes")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    PUBLIC_HANDLE_FIELD_NUMBER: _ClassVar[int]
+    SELECTOR_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
     MAXIMUM_BYTES_FIELD_NUMBER: _ClassVar[int]
-    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    ACCEPTED_COMPRESSION_FIELD_NUMBER: _ClassVar[int]
-    AUTHORIZATION_RESOURCE_ID_FIELD_NUMBER: _ClassVar[int]
-    OWNER_FIELD_NUMBER: _ClassVar[int]
-    artifact_id: str
+    context: RequestContext
+    public_handle: str
+    selector: ResourceSelector
     offset: int
     maximum_bytes: int
-    lease_token: str
-    accepted_compression: PayloadCompression
-    authorization_resource_id: str
-    owner: ResultOwner
-    def __init__(self, artifact_id: _Optional[str] = ..., offset: _Optional[int] = ..., maximum_bytes: _Optional[int] = ..., lease_token: _Optional[str] = ..., accepted_compression: _Optional[_Union[PayloadCompression, str]] = ..., authorization_resource_id: _Optional[str] = ..., owner: _Optional[_Union[ResultOwner, _Mapping]] = ...) -> None: ...
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., public_handle: _Optional[str] = ..., selector: _Optional[_Union[ResourceSelector, _Mapping]] = ..., offset: _Optional[int] = ..., maximum_bytes: _Optional[int] = ...) -> None: ...
 
-class ResultOwner(_message.Message):
-    __slots__ = ("workspace_id", "agent_id")
-    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
-    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    workspace_id: str
-    agent_id: str
-    def __init__(self, workspace_id: _Optional[str] = ..., agent_id: _Optional[str] = ...) -> None: ...
-
-class ResultChunk(_message.Message):
-    __slots__ = ("artifact_id", "offset", "uncompressed_length", "payload", "payload_checksum", "artifact_checksum", "content_type", "encoding", "final_chunk", "lease_expires_at_unix_ms", "authorization_resource_id", "next_offset", "total_length", "content_checksum")
-    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+class ResourceChunk(_message.Message):
+    __slots__ = ("authority", "public_handle", "offset", "content", "content_checksum", "end_of_resource")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    PUBLIC_HANDLE_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
-    UNCOMPRESSED_LENGTH_FIELD_NUMBER: _ClassVar[int]
-    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
-    PAYLOAD_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    ARTIFACT_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    CONTENT_TYPE_FIELD_NUMBER: _ClassVar[int]
-    ENCODING_FIELD_NUMBER: _ClassVar[int]
-    FINAL_CHUNK_FIELD_NUMBER: _ClassVar[int]
-    LEASE_EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
-    AUTHORIZATION_RESOURCE_ID_FIELD_NUMBER: _ClassVar[int]
-    NEXT_OFFSET_FIELD_NUMBER: _ClassVar[int]
-    TOTAL_LENGTH_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
     CONTENT_CHECKSUM_FIELD_NUMBER: _ClassVar[int]
-    artifact_id: str
+    END_OF_RESOURCE_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
+    public_handle: str
     offset: int
-    uncompressed_length: int
-    payload: bytes
-    payload_checksum: str
-    artifact_checksum: str
-    content_type: str
-    encoding: PayloadCompression
-    final_chunk: bool
-    lease_expires_at_unix_ms: int
-    authorization_resource_id: str
-    next_offset: int
-    total_length: int
+    content: bytes
     content_checksum: str
-    def __init__(self, artifact_id: _Optional[str] = ..., offset: _Optional[int] = ..., uncompressed_length: _Optional[int] = ..., payload: _Optional[bytes] = ..., payload_checksum: _Optional[str] = ..., artifact_checksum: _Optional[str] = ..., content_type: _Optional[str] = ..., encoding: _Optional[_Union[PayloadCompression, str]] = ..., final_chunk: _Optional[bool] = ..., lease_expires_at_unix_ms: _Optional[int] = ..., authorization_resource_id: _Optional[str] = ..., next_offset: _Optional[int] = ..., total_length: _Optional[int] = ..., content_checksum: _Optional[str] = ...) -> None: ...
+    end_of_resource: bool
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., public_handle: _Optional[str] = ..., offset: _Optional[int] = ..., content: _Optional[bytes] = ..., content_checksum: _Optional[str] = ..., end_of_resource: _Optional[bool] = ...) -> None: ...
 
-class ReleaseResultRequest(_message.Message):
-    __slots__ = ("artifact_id", "lease_token", "owner")
-    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
-    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
-    OWNER_FIELD_NUMBER: _ClassVar[int]
-    artifact_id: str
-    lease_token: str
-    owner: ResultOwner
-    def __init__(self, artifact_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., owner: _Optional[_Union[ResultOwner, _Mapping]] = ...) -> None: ...
+class ReleaseResourceRequest(_message.Message):
+    __slots__ = ("context", "public_handle", "release_id")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    PUBLIC_HANDLE_FIELD_NUMBER: _ClassVar[int]
+    RELEASE_ID_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
+    public_handle: str
+    release_id: str
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., public_handle: _Optional[str] = ..., release_id: _Optional[str] = ...) -> None: ...
 
-class ReleaseResultResponse(_message.Message):
-    __slots__ = ("artifact_id", "released", "remaining_lease_expires_at_unix_ms", "release_state")
-    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
-    RELEASED_FIELD_NUMBER: _ClassVar[int]
-    REMAINING_LEASE_EXPIRES_AT_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
-    RELEASE_STATE_FIELD_NUMBER: _ClassVar[int]
-    artifact_id: str
-    released: bool
-    remaining_lease_expires_at_unix_ms: int
-    release_state: str
-    def __init__(self, artifact_id: _Optional[str] = ..., released: _Optional[bool] = ..., remaining_lease_expires_at_unix_ms: _Optional[int] = ..., release_state: _Optional[str] = ...) -> None: ...
+class ReleaseResourceResponse(_message.Message):
+    __slots__ = ("authority", "release_id", "state", "idempotent_replay")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    RELEASE_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENT_REPLAY_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
+    release_id: str
+    state: ReleaseState
+    idempotent_replay: bool
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., release_id: _Optional[str] = ..., state: _Optional[_Union[ReleaseState, str]] = ..., idempotent_replay: _Optional[bool] = ...) -> None: ...

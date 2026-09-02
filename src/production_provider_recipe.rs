@@ -14,14 +14,20 @@ use arrow_schema::{FieldRef, SchemaRef};
 use thiserror::Error;
 
 use crate::fabric::epoch_runtime::FabricSchemaRole;
-use crate::fabric::production_kernel::CompiledProviderAuthority;
+use crate::fabric::production_kernel::{
+    CompiledProofAuthority, CompiledProviderAuthority, CompiledQueryAuthority,
+    CompiledTransformationAuthority,
+};
 use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
+use crate::programmatic_derived_analysis::{
+    ProgrammaticDerivedAnalysisError, ReleasedProgrammaticDerivedAnalysisOutcome,
+    admit_and_compose_released_programmatic_derived_analyses,
+};
 use crate::provider_admission::{
     DeclaredCoverageBinding, ExactProgrammaticProviderRuns, ExactProviderLaneRuns,
     ProgrammaticProviderAdmissionOutcome, ProviderAdmissionError, ProviderAdmissionPlan,
-    ProviderAuthorityClass, ProviderCoverageSource, ProviderNativeLane,
-    ProviderRelationBinding, ProviderRelationIdentity, ProviderRelationPurpose,
-    admit_provider_relations_programmatic,
+    ProviderAuthorityClass, ProviderCoverageSource, ProviderNativeLane, ProviderRelationBinding,
+    ProviderRelationIdentity, ProviderRelationPurpose, admit_provider_relations_programmatic,
 };
 use crate::provider_boundary::{
     BoundaryContractId, BoundaryOwnerId, CanonicalIdentityRole, ContractDisposition,
@@ -193,6 +199,15 @@ pub enum ProductionProviderRecipeError {
     Admission(#[from] ProviderAdmissionError),
 }
 
+/// Closed failure from the one provider-admission plus release-derived composition transaction.
+#[derive(Debug, Error)]
+pub enum ProductionProviderCompositionError {
+    #[error(transparent)]
+    Provider(#[from] ProductionProviderRecipeError),
+    #[error(transparent)]
+    Derived(#[from] ProgrammaticDerivedAnalysisError),
+}
+
 /// Compile the exact four provider plans and atomically admit the accepted provider DTOs.
 ///
 /// The candidate builder is consumed by the existing all-provider transaction. It is returned
@@ -239,6 +254,56 @@ pub(crate) fn admit_production_provider_relations(
             &rustc_plan,
             runs.rustc,
         )?,
+    )?)
+}
+
+/// Compile all four provider plans and the release-owned derived-analysis closure without letting
+/// plan values or borrowed provider bindings escape the transaction.
+///
+/// This is the production counterpart to the lower-level admission probes. The caller supplies
+/// source/provider DTOs and exact lane authority; every schema, coverage route, transformation,
+/// remainder, producer, proof, and query-family declaration comes from compiled capabilities.
+pub(crate) fn admit_and_compose_production_relations(
+    provider_authority: &CompiledProviderAuthority,
+    transformation_authority: &CompiledTransformationAuthority,
+    proof_authority: &CompiledProofAuthority,
+    query_authority: &CompiledQueryAuthority,
+    builder: ProgrammaticFabricEpochBuilder,
+    authority: ProductionProviderAuthority,
+    runs: ProductionProviderRuns<'_>,
+) -> Result<ReleasedProgrammaticDerivedAnalysisOutcome, ProductionProviderCompositionError> {
+    let tree_sitter_plan = native_syntax_plan(
+        provider_authority,
+        ProviderNativeLane::TreeSitter,
+        authority.native_syntax,
+    )?;
+    let ruff_plan = native_syntax_plan(
+        provider_authority,
+        ProviderNativeLane::Ruff,
+        authority.native_syntax,
+    )?;
+    let pyrefly_plan = pyrefly_plan(provider_authority, authority.pyrefly)?;
+    let rustc_plan = rustc_plan(
+        provider_authority,
+        authority.rustc,
+        authority.rustc_owner_units,
+    )?;
+    let exact = ExactProgrammaticProviderRuns::try_new(
+        &tree_sitter_plan,
+        &ruff_plan,
+        runs.native_syntax,
+        &pyrefly_plan,
+        runs.pyrefly,
+        &rustc_plan,
+        runs.rustc,
+    )
+    .map_err(ProductionProviderRecipeError::from)?;
+    Ok(admit_and_compose_released_programmatic_derived_analyses(
+        transformation_authority,
+        proof_authority,
+        query_authority,
+        builder,
+        exact,
     )?)
 }
 

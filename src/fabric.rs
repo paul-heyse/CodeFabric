@@ -53,11 +53,10 @@ pub mod effective_view;
 pub mod epoch_runtime;
 #[cfg(feature = "daemon")]
 pub mod explicit_unknown;
-#[cfg(feature = "daemon")]
-pub mod forward_cutover;
 pub mod graph_program;
 #[cfg(feature = "daemon")]
 pub mod production_kernel;
+pub(crate) mod production_workspace_startup;
 #[cfg(feature = "daemon")]
 pub mod programmatic_activation_admission;
 #[cfg(feature = "daemon")]
@@ -111,6 +110,9 @@ pub mod source_context;
 pub mod source_wave_command_effect;
 #[cfg(feature = "daemon")]
 pub mod streamed_result_package;
+#[cfg(feature = "daemon")]
+pub mod streamed_result_registry;
+pub(crate) mod switchable_activation_authority;
 #[cfg(feature = "daemon")]
 pub mod writer_generation_sqlite;
 #[cfg(feature = "daemon")]

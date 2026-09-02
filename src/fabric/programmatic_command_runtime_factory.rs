@@ -8,17 +8,17 @@
 //! fallback effect implementation.
 
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use thiserror::Error;
-
-use crate::forward_cutover_controller::ProductionForwardCutoverBinding;
 
 use super::activation_command_effect::ActivationCommandEffect;
 use super::activation_transaction::{
     ActivationReconciliationReceiptCache, ActivationRecoveryCoordinator,
     ActivationTransactionCoordinator, IdempotentActivationAcknowledgements,
 };
+use super::admission::FabricAdmissionRuntime;
+use super::child_session::resource_governance::EpochResourceCoordinator;
 use super::command::{EpochId, WorkspaceId};
 use super::command_effect_router::FabricCommandEffectRouter;
 use super::command_effect_router::{
@@ -36,6 +36,7 @@ use super::command_runtime_ports::{
     CommandAuthorizationPort, InterruptedCommitDiagnosticRelationPort,
     RelationalCommandSemanticContext, RelationalInterruptedCommitDiagnostics,
 };
+use super::production_kernel::WorkspaceSlot;
 use super::programmatic_activation_admission::{
     ProgrammaticActivationAdmission, ReleaseOwnedActiveWorkspaceBuilder,
 };
@@ -50,9 +51,94 @@ use super::programmatic_command_capability::{
     ProgrammaticRollbackCapabilityGap, ProgrammaticSourceWaveCapabilityGap,
 };
 use super::programmatic_delta_maintenance_command::ProgrammaticDeltaMaintenanceAdministrationPorts;
-use super::programmatic_workspace::{
-    ProgrammaticCommandRuntimeContext, ProgrammaticCommandRuntimePartsFactory,
-};
+use super::programmatic_delta_runtime::ProgrammaticDeltaRuntime;
+use super::programmatic_workspace::WorkspaceEpochQueryAuthority;
+use super::published_arrow_result::PublishedArrowResultRegistry;
+use super::relational_query_runtime::RelationalQueryRuntime;
+use super::switchable_activation_authority::SwitchableActivationAuthority;
+
+/// Exact live authorities used to construct the single daemon-owned command actor.
+///
+/// This context belongs to daemon composition rather than an activation-selected workspace. An
+/// epoch can be replaced, while the command actor and writer fence remain process authorities
+/// until joined shutdown.
+#[derive(Clone)]
+pub(crate) struct ProgrammaticCommandRuntimeContext {
+    workspace_id: WorkspaceId,
+    admission: Arc<FabricAdmissionRuntime>,
+    resources: Arc<EpochResourceCoordinator>,
+    published_results: Arc<PublishedArrowResultRegistry>,
+    query_authority: Arc<WorkspaceEpochQueryAuthority>,
+    query_runtime: Arc<RelationalQueryRuntime>,
+    delta_runtime: Arc<ProgrammaticDeltaRuntime>,
+    activation_authority: Arc<SwitchableActivationAuthority>,
+    workspace_slot: Weak<WorkspaceSlot>,
+}
+
+impl ProgrammaticCommandRuntimeContext {
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub(crate) fn new(
+        workspace_id: WorkspaceId,
+        admission: Arc<FabricAdmissionRuntime>,
+        published_results: Arc<PublishedArrowResultRegistry>,
+        query_authority: Arc<WorkspaceEpochQueryAuthority>,
+        query_runtime: Arc<RelationalQueryRuntime>,
+        delta_runtime: Arc<ProgrammaticDeltaRuntime>,
+        activation_authority: Arc<SwitchableActivationAuthority>,
+        workspace_slot: Weak<WorkspaceSlot>,
+    ) -> Self {
+        let resources = Arc::clone(query_authority.resources());
+        Self {
+            workspace_id,
+            admission,
+            resources,
+            published_results,
+            query_authority,
+            query_runtime,
+            delta_runtime,
+            activation_authority,
+            workspace_slot,
+        }
+    }
+
+    #[must_use]
+    pub const fn workspace_id(&self) -> WorkspaceId {
+        self.workspace_id
+    }
+    #[must_use]
+    pub const fn admission(&self) -> &Arc<FabricAdmissionRuntime> {
+        &self.admission
+    }
+    #[must_use]
+    pub const fn resources(&self) -> &Arc<EpochResourceCoordinator> {
+        &self.resources
+    }
+    #[must_use]
+    pub const fn published_results(&self) -> &Arc<PublishedArrowResultRegistry> {
+        &self.published_results
+    }
+    #[must_use]
+    pub const fn query_authority(&self) -> &Arc<WorkspaceEpochQueryAuthority> {
+        &self.query_authority
+    }
+    #[must_use]
+    pub const fn query_runtime(&self) -> &Arc<RelationalQueryRuntime> {
+        &self.query_runtime
+    }
+    #[must_use]
+    pub const fn delta_runtime(&self) -> &Arc<ProgrammaticDeltaRuntime> {
+        &self.delta_runtime
+    }
+    #[must_use]
+    pub const fn activation_authority(&self) -> &Arc<SwitchableActivationAuthority> {
+        &self.activation_authority
+    }
+    #[must_use]
+    pub const fn workspace_slot(&self) -> &Weak<WorkspaceSlot> {
+        &self.workspace_slot
+    }
+}
 
 /// Fail-closed errors while binding a complete command runtime to installed workspace authority.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
@@ -270,7 +356,6 @@ pub(crate) struct ExactProgrammaticCommandEffectClosure {
     activation: ProgrammaticActivationCommandEffects,
     unavailable: ProgrammaticNonActivationCommandEffects,
     delta_maintenance_administration: Option<ProgrammaticDeltaMaintenanceAdministrationPorts>,
-    forward_cutover: Option<ProductionForwardCutoverBinding>,
 }
 
 impl ExactProgrammaticCommandEffectClosure {
@@ -283,7 +368,6 @@ impl ExactProgrammaticCommandEffectClosure {
             activation,
             unavailable,
             delta_maintenance_administration: None,
-            forward_cutover: None,
         }
     }
 
@@ -301,40 +385,34 @@ impl ExactProgrammaticCommandEffectClosure {
         self
     }
 
-    /// Wrap the installed administration family with the exact forward-cutover command effect.
-    /// Non-cutover administrative actions continue to delegate to the existing effect.
-    #[must_use]
-    pub(crate) fn with_forward_cutover(mut self, binding: ProductionForwardCutoverBinding) -> Self {
-        self.forward_cutover = Some(binding);
-        self
-    }
-
-    fn build(&self, context: &ProgrammaticCommandRuntimeContext) -> Arc<FabricCommandEffectRouter> {
-        let acknowledgements = Arc::new(IdempotentActivationAcknowledgements::new(
-            context.workspace_id(),
-        ));
+    pub(crate) fn build_for_daemon(
+        &self,
+        workspace_id: WorkspaceId,
+        admission_runtime: Arc<FabricAdmissionRuntime>,
+        workspace_slot: Weak<WorkspaceSlot>,
+        activation_authority: Arc<SwitchableActivationAuthority>,
+    ) -> Arc<FabricCommandEffectRouter> {
+        let acknowledgements = Arc::new(IdempotentActivationAcknowledgements::new(workspace_id));
         // This reconstructible projection is private to the command runtime. It starts empty on
         // every restart and is never consulted while validating or selecting workspace authority.
-        let receipt_cache = Arc::new(ActivationReconciliationReceiptCache::new(
-            context.workspace_id(),
-        ));
+        let receipt_cache = Arc::new(ActivationReconciliationReceiptCache::new(workspace_id));
         let admission = Arc::new(ProgrammaticActivationAdmission::new(
-            context.workspace_id(),
-            context.admission().clone(),
-            context.workspace_slot().clone(),
+            workspace_id,
+            admission_runtime,
+            workspace_slot,
             Arc::clone(&self.activation.active_workspace_builder),
         ));
         let commit = Arc::new(ActivationTransactionCoordinator::new(
             Arc::clone(&admission),
             Arc::clone(&self.activation.proof),
-            context.activation_authority().clone(),
-            context.activation_authority().clone(),
+            activation_authority.clone(),
+            activation_authority.clone(),
             Arc::clone(&receipt_cache),
             Arc::clone(&acknowledgements),
         ));
         let recovery = Arc::new(ActivationRecoveryCoordinator::new(
             admission,
-            context.activation_authority().clone(),
+            activation_authority,
             receipt_cache,
             acknowledgements,
         ));
@@ -344,14 +422,7 @@ impl ExactProgrammaticCommandEffectClosure {
             recovery,
         ));
         let administration: Arc<dyn AdministrationCommandEffectPort> =
-            self.delta_maintenance_administration.as_ref().map_or_else(
-                || Arc::clone(&self.unavailable.administration),
-                |ports| ports.build(Arc::clone(context.delta_runtime())),
-            );
-        let administration = match &self.forward_cutover {
-            Some(binding) => binding.wrap_administration(context, administration),
-            None => administration,
-        };
+            Arc::clone(&self.unavailable.administration);
         Arc::new(FabricCommandEffectRouter::new(
             Arc::clone(&self.unavailable.source_wave),
             Arc::clone(&self.unavailable.relation_publication),
@@ -361,6 +432,15 @@ impl ExactProgrammaticCommandEffectClosure {
             Arc::clone(&self.unavailable.retention),
             administration,
         ))
+    }
+
+    fn build(&self, context: &ProgrammaticCommandRuntimeContext) -> Arc<FabricCommandEffectRouter> {
+        self.build_for_daemon(
+            context.workspace_id(),
+            context.admission().clone(),
+            context.workspace_slot().clone(),
+            context.activation_authority().clone(),
+        )
     }
 }
 
@@ -488,8 +568,8 @@ impl ExactProgrammaticCommandRuntimePartsFactory {
     }
 }
 
-impl ProgrammaticCommandRuntimePartsFactory for ExactProgrammaticCommandRuntimePartsFactory {
-    fn build(
+impl ExactProgrammaticCommandRuntimePartsFactory {
+    pub(crate) fn build(
         &self,
         context: ProgrammaticCommandRuntimeContext,
     ) -> Result<WorkspaceFabricCommandRuntimeParts, WorkspaceFabricCommandRuntimeFactoryError> {

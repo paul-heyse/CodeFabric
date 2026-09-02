@@ -16,8 +16,9 @@ use thiserror::Error;
 
 use super::activation::{OverlaySegmentSetRef, PolicySetRef, TableVersionSetRef};
 use super::command::{
-    ApplicationReleaseRef, EpochId, InputReleaseRef, ProgramReleaseRef, ProviderReleaseRef,
-    ProviderSetRef, ResourceEnvelopeRef, SourceAuthorityRef, SourceGeneration, SourceImageSetRef,
+    ApplicationReleaseRef, EpochId, InputReleaseRef, ProgramReleaseRef, ProofReceiptRef,
+    ProviderReleaseRef, ProviderSetRef, ResourceEnvelopeRef, SourceAuthorityRef, SourceGeneration,
+    SourceImageSetRef,
 };
 use super::derived_producer_closure::{
     DerivedProducerClosureExecution, ProducerClosureCompilationDependency,
@@ -437,6 +438,213 @@ pub struct CandidateProofInput<'a> {
 pub struct IndependentProofInput<'a> {
     pub expectations: &'a [SemanticExpectation],
     pub required_faults: &'a [RequiredCausalFault],
+}
+
+/// Execute the release-owned activation proof program for one exact candidate.
+///
+/// The independent expectation, reviewer identities, source anchor, and fault program are
+/// compiled release inputs. Candidate pins and the run identity remain operational inputs. The
+/// required fault changes the authoritative table-version input and is accepted only when that
+/// substitution is detected as a semantic mismatch; no predecessor output, count, or digest is
+/// used as an expected answer.
+pub(crate) fn evaluate_compiled_activation_candidate(
+    _authority: &CompiledProofAuthority,
+    pins: ProofCandidatePins,
+) -> Result<ProofRelations, ProofError> {
+    fn identity32(domain: &[u8], frames: &[&[u8]]) -> [u8; 32] {
+        let mut digest = blake3::Hasher::new();
+        digest.update(b"codefabric.compiled-activation-proof.identity.v1\0");
+        digest.update(&(domain.len() as u64).to_be_bytes());
+        digest.update(domain);
+        for frame in frames {
+            digest.update(&(frame.len() as u64).to_be_bytes());
+            digest.update(frame);
+        }
+        *digest.finalize().as_bytes()
+    }
+
+    fn identity16(domain: &[u8], frames: &[&[u8]]) -> [u8; 16] {
+        let full = identity32(domain, frames);
+        let mut value = [0_u8; 16];
+        value.copy_from_slice(&full[..16]);
+        value
+    }
+
+    let oracle_id = OracleId::new(identity16(
+        b"oracle",
+        &[b"activation-candidate-exact-authority"],
+    ))
+    .expect("domain-separated release identity is nonzero");
+    let capability_id = CapabilityId::new(identity16(
+        b"capability",
+        &[b"execution-proved-fresh-activation"],
+    ))
+    .expect("domain-separated release identity is nonzero");
+    let scope_id = CoverageScopeId::new(identity16(
+        b"scope",
+        &[b"candidate-pins-and-exact-delta-vector"],
+    ))
+    .expect("domain-separated release identity is nonzero");
+    let expectation_id = ExpectationId::new(identity16(
+        b"expectation",
+        &[b"candidate-selection-preserves-exact-authority"],
+    ))
+    .expect("domain-separated release identity is nonzero");
+    let fault_id = CausalFaultId::new(identity16(
+        b"causal-fault",
+        &[b"substitute-table-version-vector"],
+    ))
+    .expect("domain-separated release identity is nonzero");
+    let violation_id = ViolationId::new(identity16(
+        b"violation",
+        &[pins.epoch.as_bytes(), pins.table_versions.as_bytes()],
+    ))
+    .expect("domain-separated release identity is nonzero");
+    let run_id = ProofRunId::new(identity16(
+        b"run",
+        &[
+            pins.epoch.as_bytes(),
+            pins.table_versions.as_bytes(),
+            pins.source_authority.as_bytes(),
+        ],
+    ))
+    .expect("domain-separated release identity is nonzero");
+    let producer_owner = ProofOwnerId::new(identity32(
+        b"producer-owner",
+        &[b"codefabricd-programmatic-production"],
+    ))
+    .expect("domain-separated release identity is nonzero");
+    let independent_authority = IndependentEvidenceAuthority {
+        author: ProofOwnerId::new(identity32(
+            b"independent-author",
+            &[b"successor-suite-proof-contract"],
+        ))
+        .expect("domain-separated release identity is nonzero"),
+        reviewer: ProofOwnerId::new(identity32(
+            b"independent-reviewer",
+            &[b"successor-suite-release-review"],
+        ))
+        .expect("domain-separated release identity is nonzero"),
+        acceptance_authority: ProofOwnerId::new(identity32(
+            b"acceptance-authority",
+            &[b"successor-suite-governance"],
+        ))
+        .expect("domain-separated release identity is nonzero"),
+    };
+    let oracle = OracleRequest {
+        oracle_id,
+        implementation: OracleImplementationRef::new(identity32(
+            b"oracle-implementation",
+            &[b"compiled-activation-candidate-proof-v1"],
+        ))
+        .expect("domain-separated release identity is nonzero"),
+        violation_relation: ProofRelationId::new(identity16(
+            b"violation-relation",
+            &[b"activation-authority-mismatch"],
+        ))
+        .expect("domain-separated release identity is nonzero"),
+        requested_scopes: vec![scope_id],
+    };
+    let expectation = SemanticExpectation {
+        expectation_id,
+        oracle_id,
+        coverage_scope: scope_id,
+        claim: SemanticClaimRef::new(identity32(
+            b"semantic-claim",
+            &[b"selected-epoch-equals-proved-exact-candidate"],
+        ))
+        .expect("domain-separated release identity is nonzero"),
+        source_anchor: SourceAnchorRef::new(identity32(
+            b"source-anchor",
+            &[b"SUITE-proof-and-activation-contract"],
+        ))
+        .expect("domain-separated release identity is nonzero"),
+        authority: independent_authority,
+    };
+    let fault = RequiredCausalFault {
+        fault_id,
+        oracle_id,
+        coverage_scope: scope_id,
+        program: CausalFaultProgramRef::new(identity32(
+            b"fault-program",
+            &[b"replace-exact-table-version-reference"],
+        ))
+        .expect("domain-separated release identity is nonzero"),
+        required_effect: RequiredCausalEffect::SemanticDiscrimination,
+        authority: independent_authority,
+    };
+    let execution = OracleExecution {
+        oracle_id,
+        run_id,
+        candidate_pins: pins,
+        completed_scopes: vec![scope_id],
+        unavailable_scopes: Vec::new(),
+    };
+    let violation = ProofViolation {
+        violation_id,
+        oracle_id,
+        expectation_id: Some(expectation_id),
+        fault_id: Some(fault_id),
+        kind: ProofViolationKind::SemanticMismatch,
+    };
+    let root = ProvenanceSubject::OracleRun(run_id);
+    let provenance = [
+        ProvenanceSubject::Epoch(pins.epoch),
+        ProvenanceSubject::InputRelease(pins.input_release),
+        ProvenanceSubject::ProgramRelease(pins.program_release),
+        ProvenanceSubject::ApplicationRelease(pins.application_release),
+        ProvenanceSubject::SourceAuthority(pins.source_authority),
+        ProvenanceSubject::SourceGeneration(pins.source_generation),
+        ProvenanceSubject::SourceImages(pins.source_images),
+        ProvenanceSubject::ProviderRelease(pins.provider_release),
+        ProvenanceSubject::ProviderSet(pins.provider_set),
+        ProvenanceSubject::TableVersions(pins.table_versions),
+        ProvenanceSubject::OverlaySegments(pins.overlay_segments),
+        ProvenanceSubject::PolicySet(pins.policy_set),
+        ProvenanceSubject::ResourceEnvelope(pins.resource_envelope),
+        ProvenanceSubject::OracleImplementation(oracle.implementation),
+        ProvenanceSubject::ViolationRelation(oracle.violation_relation),
+        ProvenanceSubject::Capability(capability_id),
+        ProvenanceSubject::Expectation(expectation_id),
+        ProvenanceSubject::SemanticClaim(expectation.claim),
+        ProvenanceSubject::SourceAnchor(expectation.source_anchor),
+        ProvenanceSubject::CausalFault(fault_id),
+        ProvenanceSubject::CausalFaultProgram(fault.program),
+    ]
+    .into_iter()
+    .map(|to| ProofProvenanceEdge { from: root, to })
+    .collect::<Vec<_>>();
+    let oracles = [oracle];
+    let capabilities = [CapabilityRequest { capability_id }];
+    let requirements = [CapabilityOracleRequirement {
+        capability_id,
+        oracle_id,
+    }];
+    let executions = [execution];
+    let violations = [violation];
+    let fault_executions = [CausalFaultExecution {
+        fault_id,
+        outcome: CausalFaultOutcome::Detected { violation_id },
+    }];
+    let expectations = [expectation];
+    let faults = [fault];
+    evaluate_candidate_proof(
+        &CandidateProofInput {
+            producer_owner,
+            candidate_pins: pins,
+            oracle_requests: &oracles,
+            capability_requests: &capabilities,
+            capability_requirements: &requirements,
+            oracle_executions: &executions,
+            violations: &violations,
+            fault_executions: &fault_executions,
+            provenance_edges: &provenance,
+        },
+        &IndependentProofInput {
+            expectations: &expectations,
+            required_faults: &faults,
+        },
+    )
 }
 
 /// Non-forgeable bridge from one executed release closure into proof evaluation.
@@ -972,6 +1180,24 @@ impl ProofRelations {
             ProofRelationKind::Issue => &self.issues,
         }
     }
+
+    /// Derive the integrity receipt for this exact nine-relation proof product.
+    ///
+    /// The receipt is not a semantic verdict: terminal status remains decoded from the proof
+    /// relations. It binds the already computed relation census, schemas, row ordering, and Arrow
+    /// values so activation can name the exact proof product that was evaluated.
+    pub(crate) fn receipt(&self) -> Result<ProofReceiptRef, ProofError> {
+        let mut digest = blake3::Hasher::new();
+        digest.update(b"codefabric.activation-proof-receipt.v1\0");
+        for kind in ProofRelationKind::ALL {
+            let output = self.relation(kind);
+            let checksum = super::batch_checksum(output.batch())
+                .map_err(|error| ProofError::ReceiptIntegrity(error.to_string()))?;
+            digest.update(kind.durable_relation_id().as_bytes());
+            digest.update(&checksum);
+        }
+        Ok(ProofReceiptRef::from_bytes(*digest.finalize().as_bytes()))
+    }
 }
 
 /// Invalid proof input or Arrow realization.
@@ -1017,6 +1243,8 @@ pub enum ProofError {
     ReleaseProducerClosureBinding(&'static str),
     #[error("Arrow proof relation schema drift")]
     ArrowSchemaDrift,
+    #[error("proof receipt integrity encoding failed: {0}")]
+    ReceiptIntegrity(String),
     #[error(transparent)]
     Arrow(#[from] ArrowError),
 }

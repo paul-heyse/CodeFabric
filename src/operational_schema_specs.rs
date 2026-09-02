@@ -1586,7 +1586,7 @@ const OPERATIONAL_TABLE_CONTRACTS: &[OperationalTableContract] = &[
     },
     OperationalTableContract {
         name: "query_execution_terminal",
-        sqlite_ddl: "CREATE TABLE query_execution_terminal (\n  execution_id TEXT NOT NULL,\n  workspace_id BLOB NOT NULL,\n  semantic_request_id TEXT NOT NULL,\n  mcp_call_id TEXT NOT NULL,\n  terminal_phase TEXT NOT NULL,\n  failing_stage TEXT,\n  bundle_checksum TEXT NOT NULL,\n  primary_payload_uri TEXT,\n  payload_status TEXT NOT NULL,\n  fallback_envelope_bytes BLOB,\n  snapshot_id TEXT,\n  publication_id TEXT,\n  source_table_versions_bytes BLOB NOT NULL,\n  created_at INTEGER NOT NULL,\n  expires_at INTEGER NOT NULL,\n  PRIMARY KEY (execution_id)\n) STRICT;\n",
+        sqlite_ddl: "CREATE TABLE query_execution_terminal (\n  execution_id TEXT NOT NULL,\n  workspace_id BLOB NOT NULL,\n  semantic_request_id TEXT NOT NULL,\n  request_correlation_id TEXT NOT NULL,\n  terminal_phase TEXT NOT NULL,\n  failing_stage TEXT,\n  bundle_checksum TEXT NOT NULL,\n  primary_payload_uri TEXT,\n  payload_status TEXT NOT NULL,\n  fallback_envelope_bytes BLOB,\n  snapshot_id TEXT,\n  publication_id TEXT,\n  source_table_versions_bytes BLOB NOT NULL,\n  created_at INTEGER NOT NULL,\n  expires_at INTEGER NOT NULL,\n  PRIMARY KEY (execution_id)\n) STRICT;\n",
         columns: &[
             OperationalColumnContract {
                 name: "execution_id",
@@ -1610,7 +1610,7 @@ const OPERATIONAL_TABLE_CONTRACTS: &[OperationalTableContract] = &[
                 nullable: false,
             },
             OperationalColumnContract {
-                name: "mcp_call_id",
+                name: "request_correlation_id",
                 sqlite_type: OperationalSqliteType::Text,
                 logical_type: OperationalLogicalType::Utf8,
                 id_domain: None,
@@ -1700,5 +1700,4 @@ const OPERATIONAL_TABLE_CONTRACTS: &[OperationalTableContract] = &[
         }),
     },
 ];
-
 

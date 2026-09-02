@@ -1,26 +1,33 @@
-"""Strict application-owned projections of the released adapter wire contract."""
+"""Strict presentation models for the target-only daemon v2 boundary."""
 
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StringConstraints,
+    TypeAdapter,
+    model_validator,
+)
 
 from .json import JsonValue as CanonicalJsonValue
 from .json import canonicalize_value, checksum
 
 Checksum = Annotated[str, StringConstraints(pattern=r"^b3:[0-9a-f]{64}$")]
 NonNegativeInt = Annotated[int, Field(ge=0)]
+PositiveInt = Annotated[int, Field(gt=0)]
 type JsonObject = dict[str, JsonValue]
 type WireSchemaMode = Literal["validation", "serialization"]
 
 JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
-_PUBLIC_SCHEMA_BASE_URI = "https://codefabric.dev/schema/adapter/1.0"
+_PUBLIC_SCHEMA_BASE_URI = "https://codefabric.dev/schema/adapter/2.3"
 
 
 class StrictWireModel(BaseModel):
-    """Closed immutable public MCP contract."""
-
     model_config = ConfigDict(
         extra="forbid",
         strict=True,
@@ -40,297 +47,230 @@ JSON_OBJECT_ADAPTER = TypeAdapter(
 )
 
 
-class SnapshotSummary(StrictWireModel):
-    """Released SnapshotSummary wire contract."""
+class AuthorityProjection(StrictWireModel):
+    """Public, non-secret authority generations for one daemon session."""
 
-    snapshot_id: str = Field(description="Immutable snapshot identity.")
-    workspace_id: str = Field(description="Authorized workspace identity.")
-    repository_id: str | None = Field(
-        default=None, description="Repository identity when available."
-    )
-    worktree_id: str | None = Field(default=None, description="Worktree identity when available.")
-    source_generation: NonNegativeInt = Field(description="Monotonic source generation.")
-    source_inventory_digest: Checksum = Field(description="Canonical source inventory identity.")
-    durable_base_publication: str = Field(description="Durable publication identity.")
-    base_table_version_digest: Checksum = Field(description="Base table version identity.")
-    overlay_generation: NonNegativeInt = Field(description="Overlay generation.")
-    overlay_checksum: Checksum = Field(description="Overlay identity.")
-    analysis_context_set_id: str = Field(description="Analysis-context set identity.")
-    analysis_context_ids: tuple[str, ...] = Field(
-        description="Ordered analysis-context identities."
-    )
-    freshness_state: Literal["CURRENT", "POTENTIALLY_STALE", "UNAVAILABLE"] = Field(
-        description="Snapshot freshness state."
-    )
-    source_trust_state: str = Field(description="Source trust state.")
-    event_stream_health: str = Field(description="Lifecycle event-stream health.")
-    git_acceleration_status: str = Field(description="Git acceleration status.")
-    git_operation_summary: JsonObject | None = Field(
-        default=None, description="Safe Git operation summary."
-    )
-    pending_update_count: NonNegativeInt = Field(description="Pending update count.")
-    ontology_version: str = Field(description="Ontology contract version.")
-    schema_bundle_version: str = Field(description="Schema bundle version.")
-    provider_bundle_version: str = Field(description="Provider bundle version.")
-    derivation_bundle_version: str = Field(description="Derivation bundle version.")
-    query_language_version: str = Field(description="Query-language contract version.")
-    capability_summaries: tuple[JsonObject, ...] = Field(
-        description="Explicit public capability summaries."
-    )
-    diagnostic_references: tuple[str, ...] = Field(
-        description="Safe diagnostic reference identities."
-    )
+    session_id: str
+    session_generation: PositiveInt
+    daemon_generation: PositiveInt
+    supervisor_generation: PositiveInt
+    policy_generation: NonNegativeInt
+    revocation_generation: NonNegativeInt
 
 
-class QueryCounts(StrictWireModel):
-    """Released QueryCounts wire contract."""
+class SafeErrorProjection(StrictWireModel):
+    """Allowlisted daemon failure metadata without server prose."""
 
-    fact_count: NonNegativeInt = Field(description="Facts returned.")
-    result_count: NonNegativeInt = Field(description="Logical query results returned.")
-    truncated: bool = Field(description="Whether an explicit limit affected delivery.")
-
-
-class QueryStatus(StrictWireModel):
-    """Released QueryStatus wire contract."""
-
-    query_id: str = Field(description="Logical query identity.")
-    state: Literal[
-        "COMPLETE", "FAILED", "CANCELLED", "DEADLINE_EXCEEDED", "NOT_EXECUTED_DEPENDENCY"
-    ] = Field(description="Terminal query state.")
-    message: str | None = Field(default=None, description="Safe status explanation.")
-
-
-class ResultResource(StrictWireModel):
-    """Released ResultResource wire contract."""
-
-    uri: str = Field(description="Immutable result URI.")
-    manifest_uri: str = Field(description="Result manifest URI.")
-    expires_at: str = Field(description="RFC 3339 expiry timestamp.")
-    subresource_uris: tuple[str, ...] = Field(description="Bounded result subresources.")
-
-
-class InlineDelivery(StrictWireModel):
-    """Released InlineDelivery wire contract."""
-
-    mode: Literal["inline"] = Field(default="inline", description="Inline delivery discriminator.")
-    canonical_mime_type: Literal["application/json"] = Field(
-        default="application/json", description="Canonical response media type."
-    )
-    result_bytes: NonNegativeInt = Field(description="Exact canonical result size.")
-    checksum: Checksum = Field(description="Canonical result checksum.")
-    response: JsonObject = Field(description="Daemon-authoritative canonical response object.")
-
-
-class ResourceDelivery(StrictWireModel):
-    """Released ResourceDelivery wire contract."""
-
-    mode: Literal["resource"] = Field(
-        default="resource", description="Resource delivery discriminator."
-    )
-    canonical_mime_type: Literal["application/json"] = Field(
-        default="application/json", description="Canonical response media type."
-    )
-    result_bytes: NonNegativeInt = Field(description="Exact canonical result size.")
-    checksum: Checksum = Field(description="Canonical result checksum.")
-    result_resource: ResultResource = Field(description="Immutable result resource.")
-    preview: JsonObject | None = Field(default=None, description="Optional bounded preview.")
+    code: Literal[
+        "INVALID_REQUEST",
+        "VALIDATION_REJECTED",
+        "INPUT_REQUIRED",
+        "NOT_AUTHORIZED",
+        "IDEMPOTENCY_CONFLICT",
+        "CONTINUATION_EXPIRED",
+        "CONTINUATION_REPLAYED",
+        "GENERATION_MISMATCH",
+        "QUERY_NOT_FOUND",
+        "RESOURCE_NOT_FOUND",
+        "RESOURCE_EXPIRED",
+        "RANGE_NOT_SATISFIABLE",
+        "CAPACITY_UNAVAILABLE",
+        "CANCELLED",
+        "RESUME_WINDOW_EXPIRED",
+        "DAEMON_UNAVAILABLE",
+        "INTERNAL",
+    ]
+    layer: Literal[
+        "TRANSPORT",
+        "AUTHORIZATION",
+        "VALIDATION",
+        "QUERY",
+        "RESOURCE",
+        "LIFECYCLE",
+    ]
+    retryable: bool
+    retry_after_ms: NonNegativeInt | None = None
+    diagnostic_reference: Literal[
+        "",
+        "lifecycle.failed_closed",
+        "query.challenge_rejected",
+        "query.terminal",
+    ] = ""
 
 
-class PublicToolMeta(StrictWireModel):
-    """Released PublicToolMeta wire contract."""
+class PublicStatusProjection(StrictWireModel):
+    """Closed allowlist for the daemon's canonical public status document."""
 
-    contract_version: str = Field(description="Adapter public-contract version.")
-    semantic_request_id: str = Field(description="Semantic request identity.")
-    snapshot_id: str = Field(description="Pinned snapshot identity.")
-    canonical_response_digest: Checksum = Field(description="Canonical daemon response identity.")
-    daemon_rpc_version: str = Field(description="Negotiated daemon RPC version.")
-
-
-class ValidationIssue(StrictWireModel):
-    """Released ValidationIssue wire contract."""
-
-    code: str = Field(description="Stable validation code.")
-    path: tuple[str, ...] = Field(description="Safe logical path.")
-    message: str = Field(description="Safe issue explanation.")
-
-
-class ValidateQueryOutput(StrictWireModel):
-    """Released ValidateQueryOutput wire contract."""
-
-    valid: bool = Field(description="Whether the semantic request is valid.")
-    request_id: str = Field(description="Validation request identity.")
-    normalized_request: JsonObject | None = Field(
-        default=None, description="Daemon-normalized semantic request."
-    )
-    dependency_graph: JsonObject = Field(description="Resolved dependency graph.")
-    resolved_semantics: JsonObject = Field(description="Resolved semantic phrases.")
-    capability_requirements: tuple[JsonObject, ...] = Field(description="Required capabilities.")
-    resource_estimate: JsonObject = Field(description="Bounded resource estimate.")
-    errors: tuple[ValidationIssue, ...] = Field(description="Validation failures.")
-    warnings: tuple[ValidationIssue, ...] = Field(description="Validation warnings.")
-
-
-class StatusToolOutput(StrictWireModel):
-    """Released StatusToolOutput wire contract."""
-
-    ready: bool = Field(description="Adapter readiness.")
-    workspace_id: str = Field(description="Authorized workspace identity.")
-    agent_instance_id: str = Field(description="Agent instance identity.")
-    snapshot: SnapshotSummary | None = Field(
-        default=None, description="Active snapshot when available."
-    )
-    versions: JsonObject = Field(description="Explicit public component versions.")
-    supported_languages: tuple[str, ...] = Field(description="Supported source languages.")
-    supported_request_forms: tuple[str, ...] = Field(
-        description="Supported semantic request forms."
-    )
-    capability_statuses: tuple[JsonObject, ...] = Field(
-        description="Explicit public capability statuses."
-    )
-    freshness_state: Literal["CURRENT", "POTENTIALLY_STALE", "UNAVAILABLE"] = Field(
-        description="Active freshness state."
-    )
-    service_limits: JsonObject = Field(description="Safe hard service limits.")
-    notices: tuple[str, ...] = Field(description="Safe public notices.")
-
-
-class InlineReference(StrictWireModel):
-    """Released InlineReference wire contract."""
-
-    mode: Literal["inline"] = Field(default="inline", description="Inline reference discriminator.")
-    media_type: str = Field(description="Reference media type.")
-    text: str = Field(description="Packaged reference content.")
+    lifecycle: Literal["BOOTSTRAPPING", "READY", "DRAINING", "FAILED_CLOSED"]
+    lifecycle_sequence: NonNegativeInt
+    active_epoch_id: str | None = None
+    running_queries: NonNegativeInt
+    queued_queries: NonNegativeInt
+    accepted_queries: NonNegativeInt
+    reserved_result_bytes: NonNegativeInt
+    reserved_result_pages: NonNegativeInt
 
 
 class ResourceReference(StrictWireModel):
-    """Released ResourceReference wire contract."""
+    """One daemon-minted public handle expressed only through a bounded URI."""
 
-    mode: Literal["resource"] = Field(
-        default="resource", description="Resource reference discriminator."
-    )
-    uri: str = Field(description="Constrained MCP resource URI.")
-    media_type: str = Field(description="Reference media type.")
+    uri: str
+    kind: Literal["result_manifest", "result_page", "reference"]
+    media_type: str
+    package_id: str | None = None
+    page_ordinal: NonNegativeInt | None = None
+    total_bytes: NonNegativeInt
+    content_checksum: Checksum
+    expires_at_unix_ms: int
 
 
 class QueryToolInput(StrictWireModel):
-    """Released QueryToolInput wire contract."""
-
-    request: JsonObject = Field(description="Complete daemon-owned semantic request object.")
-    delivery: Literal["automatic", "inline", "resource"] = Field(
-        default="automatic", description="MCP delivery preference only."
-    )
+    request: JsonObject
+    delivery: Literal["automatic", "inline", "resource"] = "automatic"
 
 
 class ValidateToolInput(StrictWireModel):
-    """Released ValidateToolInput wire contract."""
-
-    request: JsonObject = Field(description="Complete daemon-owned semantic request object.")
+    request: JsonObject
 
 
-class StatusToolInput(StrictWireModel):
-    """Released StatusToolInput wire contract."""
-
-    pass
-
-
-class ReferenceToolInput(StrictWireModel):
-    """Released ReferenceToolInput wire contract."""
-
-    reference: Literal[
-        "agent_guide",
-        "query_specification",
-        "request_schema",
-        "response_schema",
-        "query_tool_output_schema",
-        "validate_tool_output_schema",
-        "status_tool_output_schema",
-        "reference_tool_output_schema",
-        "recipe_index",
-        "capabilities",
-    ] = Field(description="Constrained packaged reference identity.")
+class ValidationIssue(StrictWireModel):
+    code: str
+    semantic_field_id: str = ""
+    presentation_key: str = ""
+    retryable: bool = False
 
 
-type Delivery = Annotated[
-    InlineDelivery | ResourceDelivery,
-    Field(discriminator="mode"),
-]
-
-type ReferenceToolOutput = Annotated[
-    InlineReference | ResourceReference,
-    Field(discriminator="mode"),
-]
+class InputRequirementProjection(StrictWireModel):
+    semantic_field_id: str
+    input_kind: Literal[
+        "string",
+        "integer",
+        "boolean",
+        "enum",
+        "string_collection",
+        "integer_collection",
+        "boolean_collection",
+        "enum_collection",
+    ]
+    presentation_key: str
+    description_key: str | None = None
+    required: bool
+    constraints: JsonObject | None = None
+    authorized_choices: tuple[JsonObject, ...] = ()
 
 
 class QueryToolOutput(StrictWireModel):
-    """Released QueryToolOutput wire contract."""
+    """One strict object with branch invariants for both terminal start outcomes."""
 
-    semantic_request_id: str = Field(description="Semantic idempotency identity.")
-    mcp_call_id: str = Field(description="MCP invocation correlation identity.")
-    execution_state: Literal[
-        "COMPLETE", "FAILED", "CANCELLED", "DEADLINE_EXCEEDED", "NOT_EXECUTED_DEPENDENCY"
-    ] = Field(description="Execution state.")
-    availability_state: Literal["AVAILABLE", "PARTIAL", "UNAVAILABLE", "NOT_APPLICABLE"] = Field(
-        description="Availability state."
-    )
-    completeness_state: Literal[
-        "COMPLETE", "PARTIAL", "INDETERMINATE", "UNAVAILABLE", "NOT_APPLICABLE"
-    ] = Field(description="Completeness state.")
-    freshness_state: Literal["CURRENT", "POTENTIALLY_STALE", "UNAVAILABLE"] = Field(
-        description="Freshness state."
-    )
-    limit_state: Literal["NOT_APPLIED", "EXPLICIT_LIMIT_REACHED", "HARD_LIMIT_REJECTED"] = Field(
-        description="Limit state."
-    )
-    snapshot: SnapshotSummary = Field(description="Pinned public snapshot.")
-    delivery: Delivery = Field(description="Discriminated delivery result.")
-    counts: QueryCounts = Field(description="Query counts.")
-    query_statuses: tuple[QueryStatus, ...] = Field(description="Per-query terminal statuses.")
-    notices: tuple[str, ...] = Field(description="Safe public notices.")
+    outcome: Literal["accepted", "validation_rejection"]
+    daemon_query_id: str | None = None
+    semantic_request_id: str | None = None
+    execution_state: Literal["SUCCEEDED", "FAILED", "CANCELLED", "LOST"] | None = None
+    epoch_id: str | None = None
+    package_id: str | None = None
+    manifest: ResourceReference | None = None
+    pages: tuple[ResourceReference, ...] = ()
+    total_rows: NonNegativeInt = 0
+    total_pages: NonNegativeInt = 0
+    total_bytes: NonNegativeInt = 0
+    issues: tuple[ValidationIssue, ...] = ()
+    error: SafeErrorProjection | None = None
+    notices: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def closed_outcome(self) -> QueryToolOutput:
+        if self.outcome == "accepted":
+            if self.daemon_query_id is None or self.semantic_request_id is None:
+                raise ValueError("accepted query output requires both query identities")
+            if self.execution_state is None or self.issues:
+                raise ValueError("accepted query output has an invalid terminal projection")
+            if len(self.pages) != self.total_pages:
+                raise ValueError("accepted query output has incomplete page descriptors")
+            if tuple(page.page_ordinal for page in self.pages) != tuple(range(self.total_pages)):
+                raise ValueError("accepted query output page descriptors are not ordered")
+            if any(
+                page.kind != "result_page" or page.package_id != self.package_id
+                for page in self.pages
+            ):
+                raise ValueError("accepted query output page descriptors differ from the package")
+        elif (
+            self.error is None
+            or self.daemon_query_id is not None
+            or self.execution_state is not None
+            or self.manifest is not None
+            or self.pages
+        ):
+            raise ValueError("validation rejection output has an invalid terminal projection")
+        return self
+
+
+QUERY_TOOL_OUTPUT_ADAPTER = TypeAdapter(QueryToolOutput)
+
+
+class PublicToolMeta(StrictWireModel):
+    contract_version: Literal["2.3"] = "2.3"
+    semantic_request_id: str | None = None
+    daemon_query_id: str | None = None
+    challenge_id: str | None = None
+    epoch_id: str | None = None
+    package_id: str | None = None
+
+
+class ValidateQueryOutput(StrictWireModel):
+    valid: bool
+    semantic_request_id: str | None = None
+    normalized_request: JsonObject | None = None
+    input_requirements: tuple[InputRequirementProjection, ...] = ()
+    errors: tuple[ValidationIssue, ...] = ()
+    warnings: tuple[ValidationIssue, ...] = ()
+    cost_class: str
+    estimated_result_bytes: NonNegativeInt
+    estimated_result_pages: NonNegativeInt
+
+
+class StatusToolOutput(StrictWireModel):
+    authority: AuthorityProjection
+    lifecycle: Literal["BOOTSTRAPPING", "READY", "DRAINING", "FAILED_CLOSED"]
+    lifecycle_sequence: NonNegativeInt
+    active_epoch_id: str | None = None
+    running_queries: NonNegativeInt
+    queued_queries: NonNegativeInt
+    failure: SafeErrorProjection | None = None
+    public_status: PublicStatusProjection
+
+
+class ReferenceToolOutput(StrictWireModel):
+    reference_id: str
+    resource: ResourceReference
+
+
+REFERENCE_TOOL_OUTPUT_ADAPTER = TypeAdapter(ReferenceToolOutput)
 
 
 class WireSchemaName(StrEnum):
-    """Released adapter schema identities used by the RPC compatibility handshake."""
-
-    DELIVERY = "Delivery"
-    INLINE_DELIVERY = "InlineDelivery"
-    INLINE_REFERENCE = "InlineReference"
-    JSON_OBJECT = "JsonObject"
+    AUTHORITY_PROJECTION = "AuthorityProjection"
+    INPUT_REQUIREMENT_PROJECTION = "InputRequirementProjection"
     PUBLIC_TOOL_META = "PublicToolMeta"
-    QUERY_COUNTS = "QueryCounts"
-    QUERY_STATUS = "QueryStatus"
     QUERY_TOOL_INPUT = "QueryToolInput"
     QUERY_TOOL_OUTPUT = "QueryToolOutput"
-    REFERENCE_TOOL_INPUT = "ReferenceToolInput"
     REFERENCE_TOOL_OUTPUT = "ReferenceToolOutput"
-    RESOURCE_DELIVERY = "ResourceDelivery"
     RESOURCE_REFERENCE = "ResourceReference"
-    RESULT_RESOURCE = "ResultResource"
-    SNAPSHOT_SUMMARY = "SnapshotSummary"
-    STATUS_TOOL_INPUT = "StatusToolInput"
+    SAFE_ERROR_PROJECTION = "SafeErrorProjection"
     STATUS_TOOL_OUTPUT = "StatusToolOutput"
     VALIDATE_QUERY_OUTPUT = "ValidateQueryOutput"
     VALIDATE_TOOL_INPUT = "ValidateToolInput"
     VALIDATION_ISSUE = "ValidationIssue"
 
 
-REFERENCE_TOOL_OUTPUT_ADAPTER = TypeAdapter(ReferenceToolOutput)
 _WIRE_SCHEMA_ADAPTERS: dict[WireSchemaName, TypeAdapter[Any]] = {
-    WireSchemaName.DELIVERY: TypeAdapter(Delivery),
-    WireSchemaName.INLINE_DELIVERY: TypeAdapter(InlineDelivery),
-    WireSchemaName.INLINE_REFERENCE: TypeAdapter(InlineReference),
-    WireSchemaName.JSON_OBJECT: JSON_OBJECT_ADAPTER,
+    WireSchemaName.AUTHORITY_PROJECTION: TypeAdapter(AuthorityProjection),
+    WireSchemaName.INPUT_REQUIREMENT_PROJECTION: TypeAdapter(InputRequirementProjection),
     WireSchemaName.PUBLIC_TOOL_META: TypeAdapter(PublicToolMeta),
-    WireSchemaName.QUERY_COUNTS: TypeAdapter(QueryCounts),
-    WireSchemaName.QUERY_STATUS: TypeAdapter(QueryStatus),
     WireSchemaName.QUERY_TOOL_INPUT: TypeAdapter(QueryToolInput),
-    WireSchemaName.QUERY_TOOL_OUTPUT: TypeAdapter(QueryToolOutput),
-    WireSchemaName.REFERENCE_TOOL_INPUT: TypeAdapter(ReferenceToolInput),
+    WireSchemaName.QUERY_TOOL_OUTPUT: QUERY_TOOL_OUTPUT_ADAPTER,
     WireSchemaName.REFERENCE_TOOL_OUTPUT: REFERENCE_TOOL_OUTPUT_ADAPTER,
-    WireSchemaName.RESOURCE_DELIVERY: TypeAdapter(ResourceDelivery),
     WireSchemaName.RESOURCE_REFERENCE: TypeAdapter(ResourceReference),
-    WireSchemaName.RESULT_RESOURCE: TypeAdapter(ResultResource),
-    WireSchemaName.SNAPSHOT_SUMMARY: TypeAdapter(SnapshotSummary),
-    WireSchemaName.STATUS_TOOL_INPUT: TypeAdapter(StatusToolInput),
+    WireSchemaName.SAFE_ERROR_PROJECTION: TypeAdapter(SafeErrorProjection),
     WireSchemaName.STATUS_TOOL_OUTPUT: TypeAdapter(StatusToolOutput),
     WireSchemaName.VALIDATE_QUERY_OUTPUT: TypeAdapter(ValidateQueryOutput),
     WireSchemaName.VALIDATE_TOOL_INPUT: TypeAdapter(ValidateToolInput),
@@ -346,8 +286,6 @@ def _schema_slug(name: WireSchemaName) -> str:
 
 
 def wire_schema(name: WireSchemaName, mode: WireSchemaMode) -> dict[str, Any]:
-    """Derive one released JSON Schema directly from its executable Pydantic type."""
-
     schema = _WIRE_SCHEMA_ADAPTERS[name].json_schema(mode=mode)
     schema["$id"] = f"{_PUBLIC_SCHEMA_BASE_URI}/{_schema_slug(name)}.{mode}.schema.json"
     schema["$schema"] = JSON_SCHEMA_DIALECT
@@ -358,8 +296,6 @@ def wire_schema(name: WireSchemaName, mode: WireSchemaMode) -> dict[str, Any]:
 def wire_schema_fingerprints(
     mode: WireSchemaMode,
 ) -> tuple[tuple[WireSchemaName, str], ...]:
-    """Derive deterministic handshake digests without packaged schema caches."""
-
     return tuple(
         (
             name,
@@ -370,28 +306,25 @@ def wire_schema_fingerprints(
 
 
 __all__ = [
-    "SnapshotSummary",
-    "QueryCounts",
-    "QueryStatus",
-    "ResultResource",
-    "InlineDelivery",
-    "ResourceDelivery",
-    "QueryToolOutput",
-    "PublicToolMeta",
-    "ValidationIssue",
-    "ValidateQueryOutput",
-    "StatusToolOutput",
-    "InlineReference",
-    "ResourceReference",
-    "QueryToolInput",
-    "ValidateToolInput",
-    "StatusToolInput",
-    "ReferenceToolInput",
-    "Delivery",
-    "ReferenceToolOutput",
+    "AuthorityProjection",
+    "InputRequirementProjection",
     "JSON_OBJECT_ADAPTER",
     "JSON_SCHEMA_DIALECT",
+    "JsonObject",
+    "PublicToolMeta",
+    "PublicStatusProjection",
+    "QUERY_TOOL_OUTPUT_ADAPTER",
+    "QueryToolInput",
+    "QueryToolOutput",
     "REFERENCE_TOOL_OUTPUT_ADAPTER",
+    "ReferenceToolOutput",
+    "ResourceReference",
+    "SafeErrorProjection",
+    "StatusToolOutput",
+    "StrictWireModel",
+    "ValidateQueryOutput",
+    "ValidateToolInput",
+    "ValidationIssue",
     "WireSchemaMode",
     "WireSchemaName",
     "wire_schema",

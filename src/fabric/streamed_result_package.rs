@@ -1,10 +1,11 @@
 //! Manifest-last, object-store-backed Arrow result packages.
 //!
 //! DataFusion output is consumed as a stream. Each page is a fresh Arrow IPC stream that can be
-//! decoded independently, is published with create-only object-store semantics, and is bounded
-//! before the next page is accepted. The canonical manifest is the final object published; its
-//! presence is therefore the only sealed-package signal. No complete semantic result is retained
-//! as process-local bytes.
+//! decoded independently and bounded before the next page is accepted. Encoded pages are staged
+//! within the declared package byte bound so their exact object set can be journaled before the
+//! first create-only object-store write. The canonical manifest is the final object published; its
+//! presence is therefore the only sealed-package signal. No decoded semantic result is retained
+//! as process-local rows.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -35,6 +36,29 @@ use super::command::EpochId;
 
 /// Current immutable package contract.
 pub const STREAMED_RESULT_PACKAGE_FORMAT: &str = "codefabric.streamed-result-package.v1";
+
+/// Exact manifest-last object set recorded durably before the first object write.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PendingResultObjectSet {
+    pub manifest_object_path: String,
+    pub page_object_paths: Vec<String>,
+    pub epoch_id: String,
+    pub query_execution: String,
+}
+
+/// Durable coordinator port used to close every pre-ResultReady crash window.
+#[async_trait]
+pub trait ResultPublicationIntentRecorder: fmt::Debug + Send + Sync {
+    async fn record_publication_intent(
+        &self,
+        intent: PendingResultObjectSet,
+    ) -> Result<(), ResultPublicationIntentError>;
+}
+
+#[derive(Clone, Copy, Debug, Error)]
+#[error("durable result-publication intent was rejected")]
+pub struct ResultPublicationIntentError;
 
 /// Bounds that cover every page-local and package-wide allocation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -320,14 +344,28 @@ impl SealedStreamedResultPackage {
 
     /// Delete a sealed package only after its owning retention policy has made it unreachable.
     pub async fn delete_objects(self) -> Result<(), StreamedResultPackageError> {
-        for page in &self.manifest.pages {
-            self.sink
-                .delete(&ObjectPath::from(page.object_path.clone()))
-                .await?;
-        }
-        self.sink.delete(&self.manifest_path).await?;
-        Ok(())
+        let pages = self
+            .manifest
+            .pages
+            .iter()
+            .map(|page| ObjectPath::from(page.object_path.clone()))
+            .collect::<Vec<_>>();
+        delete_exact_object_set(self.sink.as_ref(), &pages, &self.manifest_path).await
     }
+}
+
+async fn delete_exact_object_set(
+    sink: &dyn ResultObjectSink,
+    page_paths: &[ObjectPath],
+    manifest_path: &ObjectPath,
+) -> Result<(), StreamedResultPackageError> {
+    for path in page_paths.iter().chain(std::iter::once(manifest_path)) {
+        match sink.delete(path).await {
+            Ok(()) | Err(object_store::Error::NotFound { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 /// Stateless manifest-last page sealer.
@@ -343,6 +381,17 @@ impl StreamedResultPackageBuilder {
         Self { sink, limits }
     }
 
+    /// Idempotently delete one already-validated private object set, keeping the manifest last.
+    /// This is the crash-recovery counterpart to manifest-last publication: a durable cleanup
+    /// locator can finish deletion without reconstructing process-local package state.
+    pub async fn delete_retained_object_set(
+        &self,
+        page_paths: &[ObjectPath],
+        manifest_path: &ObjectPath,
+    ) -> Result<(), StreamedResultPackageError> {
+        delete_exact_object_set(self.sink.as_ref(), page_paths, manifest_path).await
+    }
+
     /// Consume DataFusion streams and publish their manifest last.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     pub async fn seal(
@@ -354,6 +403,7 @@ impl StreamedResultPackageBuilder {
         lease: ResultResourceLease,
         cancellation: &Cancellation,
         deadline: Instant,
+        publication_intent: &dyn ResultPublicationIntentRecorder,
     ) -> Result<SealedStreamedResultPackage, StreamedResultPackageError> {
         validate_pins(epoch_id, query_execution)?;
         if relations.is_empty() || relations.len() > self.limits.max_relations.get() {
@@ -385,6 +435,7 @@ impl StreamedResultPackageBuilder {
         let mut created = Vec::<ObjectPath>::new();
         let sealed = async {
             let mut pages = Vec::new();
+            let mut prepared_pages = Vec::new();
             let mut relation_entries = Vec::with_capacity(relations.len());
             let mut total_rows = 0_u64;
             let mut total_bytes = 0_u64;
@@ -424,19 +475,17 @@ impl StreamedResultPackageBuilder {
                     )?;
                     for (page_batch, encoded) in slices {
                         check_cancel_deadline(cancellation, deadline)?;
-                        let page = self
-                            .publish_page(
-                                epoch_id,
-                                query_execution,
-                                &relation.relation_id,
-                                &relation.schema,
-                                u64::try_from(pages.len())
-                                    .map_err(|_| StreamedResultPackageError::CounterOverflow)?,
-                                &page_batch,
-                                encoded,
-                                &mut created,
-                            )
-                            .await?;
+                        let (page, object_path, encoded) = self.prepare_page(
+                            epoch_id,
+                            query_execution,
+                            &relation.relation_id,
+                            &relation.schema,
+                            u64::try_from(pages.len())
+                                .map_err(|_| StreamedResultPackageError::CounterOverflow)?,
+                            &page_batch,
+                            encoded,
+                        )?;
+                        prepared_pages.push((object_path, encoded));
                         relation_rows = relation_rows
                             .checked_add(page.row_count)
                             .ok_or(StreamedResultPackageError::CounterOverflow)?;
@@ -468,19 +517,17 @@ impl StreamedResultPackageBuilder {
                 if !saw_batch {
                     let empty = RecordBatch::new_empty(Arc::clone(&relation.schema));
                     let encoded = encode_page(&relation.schema, std::slice::from_ref(&empty))?;
-                    let page = self
-                        .publish_page(
-                            epoch_id,
-                            query_execution,
-                            &relation.relation_id,
-                            &relation.schema,
-                            u64::try_from(pages.len())
-                                .map_err(|_| StreamedResultPackageError::CounterOverflow)?,
-                            &empty,
-                            encoded,
-                            &mut created,
-                        )
-                        .await?;
+                    let (page, object_path, encoded) = self.prepare_page(
+                        epoch_id,
+                        query_execution,
+                        &relation.relation_id,
+                        &relation.schema,
+                        u64::try_from(pages.len())
+                            .map_err(|_| StreamedResultPackageError::CounterOverflow)?,
+                        &empty,
+                        encoded,
+                    )?;
+                    prepared_pages.push((object_path, encoded));
                     total_bytes = total_bytes
                         .checked_add(page.byte_length)
                         .ok_or(StreamedResultPackageError::CounterOverflow)?;
@@ -531,13 +578,30 @@ impl StreamedResultPackageBuilder {
                     limit: self.limits.max_manifest_bytes.get(),
                 });
             }
-            check_cancel_deadline(cancellation, deadline)?;
-            self.sink
-                .create(&manifest_path, manifest_bytes.clone())
+            publication_intent
+                .record_publication_intent(PendingResultObjectSet {
+                    manifest_object_path: manifest_path.to_string(),
+                    page_object_paths: manifest
+                        .pages
+                        .iter()
+                        .map(|page| page.object_path.clone())
+                        .collect(),
+                    epoch_id: manifest.epoch_id.clone(),
+                    query_execution: manifest.query_execution.clone(),
+                })
                 .await?;
             let manifest_checksum = digest(&manifest_bytes);
             let manifest_byte_length = u64::try_from(manifest_bytes.len())
                 .map_err(|_| StreamedResultPackageError::CounterOverflow)?;
+            for (object_path, encoded) in prepared_pages {
+                check_cancel_deadline(cancellation, deadline)?;
+                self.sink.create(&object_path, encoded).await?;
+                created.push(object_path);
+            }
+            check_cancel_deadline(cancellation, deadline)?;
+            self.sink
+                .create(&manifest_path, manifest_bytes.clone())
+                .await?;
             Ok(SealedStreamedResultPackage {
                 epoch_id,
                 query_execution,
@@ -560,7 +624,7 @@ impl StreamedResultPackageBuilder {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn publish_page(
+    fn prepare_page(
         &self,
         epoch_id: EpochId,
         query_execution: QueryExecutionPin,
@@ -569,8 +633,7 @@ impl StreamedResultPackageBuilder {
         page_ordinal: u64,
         batch: &RecordBatch,
         encoded: Vec<u8>,
-        created: &mut Vec<ObjectPath>,
-    ) -> Result<ResultPageManifestEntry, StreamedResultPackageError> {
+    ) -> Result<(ResultPageManifestEntry, ObjectPath, Vec<u8>), StreamedResultPackageError> {
         if encoded.len() > self.limits.max_page_bytes.get() {
             return Err(StreamedResultPackageError::PageByteLimit {
                 observed: encoded.len(),
@@ -586,8 +649,6 @@ impl StreamedResultPackageBuilder {
             hex(epoch_id.as_bytes()),
             hex(query_execution.as_bytes())
         ));
-        self.sink.create(&object_path, encoded.clone()).await?;
-        created.push(object_path.clone());
         let entry = ResultPageManifestEntry {
             relation_id: relation_id.as_str().to_owned(),
             page_ordinal,
@@ -601,7 +662,7 @@ impl StreamedResultPackageBuilder {
             content_checksum: hex(&content_checksum),
         };
         validate_page(&entry, &encoded)?;
-        Ok(entry)
+        Ok((entry, object_path, encoded))
     }
 
     /// Reopen one exact manifest and prove every page before returning serving authority.
@@ -1011,6 +1072,8 @@ pub enum StreamedResultPackageError {
     Cancelled,
     #[error("streamed result deadline elapsed")]
     DeadlineExceeded,
+    #[error(transparent)]
+    PublicationIntent(#[from] ResultPublicationIntentError),
     #[error("streamed result counter overflow")]
     CounterOverflow,
     #[error("streamed result Arrow failure: {0}")]
@@ -1040,6 +1103,19 @@ mod tests {
     use crate::fabric::command::LeaseId;
 
     #[derive(Debug)]
+    struct AcceptPublicationIntent;
+
+    #[async_trait]
+    impl ResultPublicationIntentRecorder for AcceptPublicationIntent {
+        async fn record_publication_intent(
+            &self,
+            _intent: PendingResultObjectSet,
+        ) -> Result<(), ResultPublicationIntentError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
     struct RecordingSink {
         store: Arc<InMemory>,
         created: Mutex<Vec<String>>,
@@ -1066,6 +1142,27 @@ mod tests {
                 .await
                 .expect("in-memory list")
                 .len()
+        }
+    }
+
+    #[derive(Debug)]
+    struct AssertIntentBeforeWrite {
+        sink: Arc<RecordingSink>,
+        intents: Mutex<Vec<PendingResultObjectSet>>,
+    }
+
+    #[async_trait]
+    impl ResultPublicationIntentRecorder for AssertIntentBeforeWrite {
+        async fn record_publication_intent(
+            &self,
+            intent: PendingResultObjectSet,
+        ) -> Result<(), ResultPublicationIntentError> {
+            assert!(
+                self.sink.created_paths().is_empty(),
+                "publication intent must commit before the first object write"
+            );
+            self.intents.lock().expect("intent lock").push(intent);
+            Ok(())
         }
     }
 
@@ -1170,6 +1267,25 @@ mod tests {
         batch_rows: usize,
         cancellation: &Cancellation,
     ) -> Result<SealedStreamedResultPackage, StreamedResultPackageError> {
+        seal_fixture_with_intent(
+            sink,
+            max_page_rows,
+            values,
+            batch_rows,
+            cancellation,
+            &AcceptPublicationIntent,
+        )
+        .await
+    }
+
+    async fn seal_fixture_with_intent(
+        sink: Arc<dyn ResultObjectSink>,
+        max_page_rows: usize,
+        values: &[i64],
+        batch_rows: usize,
+        cancellation: &Cancellation,
+        publication_intent: &dyn ResultPublicationIntentRecorder,
+    ) -> Result<SealedStreamedResultPackage, StreamedResultPackageError> {
         let (epoch, query, lease) = pins();
         StreamedResultPackageBuilder::new(sink, limits(max_page_rows))
             .seal(
@@ -1180,8 +1296,45 @@ mod tests {
                 lease,
                 cancellation,
                 Instant::now() + Duration::from_secs(5),
+                publication_intent,
             )
             .await
+    }
+
+    #[tokio::test]
+    async fn wp45_int_exact_publication_intent_precedes_every_object_write() {
+        let sink = Arc::new(RecordingSink::new(None));
+        let recorder = AssertIntentBeforeWrite {
+            sink: Arc::clone(&sink),
+            intents: Mutex::new(Vec::new()),
+        };
+        let sealed = seal_fixture_with_intent(
+            Arc::clone(&sink) as Arc<dyn ResultObjectSink>,
+            2,
+            &[1, 2, 3, 4, 5],
+            3,
+            &Cancellation::default(),
+            &recorder,
+        )
+        .await
+        .expect("seal after durable intent");
+        let intents = recorder.intents.lock().expect("intent lock");
+        assert_eq!(intents.len(), 1);
+        assert_eq!(
+            intents[0].manifest_object_path,
+            sealed.manifest_path().to_string()
+        );
+        assert_eq!(
+            intents[0].page_object_paths,
+            sealed
+                .manifest()
+                .pages
+                .iter()
+                .map(|page| page.object_path.clone())
+                .collect::<Vec<_>>()
+        );
+        let created = sink.created_paths();
+        assert_eq!(created.last(), Some(&intents[0].manifest_object_path));
     }
 
     #[tokio::test]
@@ -1284,6 +1437,7 @@ mod tests {
                     lease,
                     &Cancellation::default(),
                     Instant::now() + Duration::from_secs(5),
+                    &AcceptPublicationIntent,
                 )
                 .await;
         assert!(matches!(
@@ -1296,15 +1450,21 @@ mod tests {
     async fn wp36_ops_cancellation_cleans_unsealed_objects_and_terminal_reopens() {
         let cancellation = Cancellation::with_check_interval(1);
         let sink = Arc::new(RecordingSink::new(Some(cancellation.clone())));
-        let result = seal_fixture(
+        let recorder = AssertIntentBeforeWrite {
+            sink: Arc::clone(&sink),
+            intents: Mutex::new(Vec::new()),
+        };
+        let result = seal_fixture_with_intent(
             Arc::clone(&sink) as Arc<dyn ResultObjectSink>,
             1,
             &[1, 2, 3],
             3,
             &cancellation,
+            &recorder,
         )
         .await;
         assert!(matches!(result, Err(StreamedResultPackageError::Cancelled)));
+        assert_eq!(recorder.intents.lock().expect("intent lock").len(), 1);
         assert_eq!(sink.object_count().await, 0);
 
         let stable_sink = Arc::new(RecordingSink::new(None));

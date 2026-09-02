@@ -5,7 +5,9 @@
 //! architectural contracts. Runtime state is not static. Every provider is
 //! bound to one candidate [`SessionState`], one exact [`ExactDeltaPin`], and one
 //! provider/transformation binding. Appends use the shared zero-retry Delta
-//! writer and reads use only the already loaded exact snapshot.
+//! writer and ordinary reads use only the already loaded exact snapshot. An
+//! uncertain append is reconciled read-only against its one legal successor
+//! version before a new exact provider is constructed from that evidence.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -54,14 +56,17 @@ use super::command::{
 };
 use super::command_actor::CommandPortError;
 use super::command_runtime_ports::CommandActivationChainPort;
+use super::delta_commit_reconciliation::{
+    UncertainDeltaCommitOutcome, UncertainDeltaCommitRequest, reconcile_uncertain_delta_commit,
+};
 use super::delta_exact::{
     ExactDeltaPin, ExactDeltaProviderError, ExactDeltaStatisticsInspection, ValidatedDeltaSnapshot,
     provider_read_from_validated_snapshot,
 };
 use super::delta_write::{
-    ApplicationTransactionMarker, ControlledDeltaWriteMode, ControlledDeltaWriteOutcome,
-    ControlledDeltaWriteSpec, SessionBoundLogicalPlan, readback_exact_delta_commit,
-    write_exact_delta_plan,
+    ApplicationTransactionMarker, ControlledDeltaWriteAssuranceFault, ControlledDeltaWriteMode,
+    ControlledDeltaWriteOutcome, ControlledDeltaWriteSpec, SessionBoundLogicalPlan,
+    readback_exact_delta_commit, write_exact_delta_plan,
 };
 use super::epoch_runtime::{FABRIC_CATALOG, FabricSchemaRole};
 use super::production_kernel::SelectedEpochRecord;
@@ -940,6 +945,7 @@ pub struct ActivationControlDeltaProvider {
     codec: ActivationControlRowCodec,
     provider: Arc<dyn TableProvider>,
     statistics: ExactDeltaStatisticsInspection,
+    assurance_fault: Option<ControlledDeltaWriteAssuranceFault>,
 }
 
 impl fmt::Debug for ActivationControlDeltaProvider {
@@ -990,7 +996,19 @@ impl ActivationControlDeltaProvider {
             codec,
             provider,
             statistics,
+            assurance_fault: None,
         })
+    }
+
+    /// Attach one bounded assurance interruption to the next append attempted by this exact
+    /// provider. Historical reconstruction and reconciliation providers are always fault-free.
+    #[must_use]
+    pub(crate) const fn with_assurance_fault(
+        mut self,
+        fault: ControlledDeltaWriteAssuranceFault,
+    ) -> Self {
+        self.assurance_fault = Some(fault);
+        self
     }
 
     #[must_use]
@@ -1047,13 +1065,16 @@ impl ActivationControlDeltaProvider {
         let input =
             SessionBoundLogicalPlan::try_from_dataframe(Arc::clone(&self.session), dataframe)
                 .map_err(|error| ActivationControlError::PlanBinding(error.to_string()))?;
-        let spec = ControlledDeltaWriteSpec::new(
+        let mut spec = ControlledDeltaWriteSpec::new(
             self.control_relation.table().clone(),
             row.operation_id,
             row.execution_fence.generation,
             ApplicationTransactionMarker::from_transaction_ref(row.commit.transaction),
             ControlledDeltaWriteMode::Append,
         );
+        if let Some(fault) = self.assurance_fault {
+            spec = spec.with_assurance_fault(fault);
+        }
         Ok(write_exact_delta_plan(&self.table, &spec, input).await)
     }
 
@@ -1220,15 +1241,70 @@ impl ActivationControlDeltaProvider {
         request: &ActivationOperationMarkerRequest,
     ) -> Result<(ActivationControlReadback, ActivationReconciliationFact), ActivationControlError>
     {
-        let marker = ApplicationTransactionMarker::from_transaction_ref(request.transaction);
-        let marker_version = self
-            .table
-            .snapshot()
-            .map_err(|error| ActivationControlError::Delta(error.to_string()))?
-            .transaction_version(self.table.log_store().as_ref(), marker.application_id())
-            .await
-            .map_err(|error| ActivationControlError::Delta(error.to_string()))?;
-        let readback = self
+        require_same_contract_binding(
+            request.control_relation.binding(),
+            self.control_relation.binding(),
+        )?;
+        let write = ControlledDeltaWriteSpec::new(
+            request.control_relation.table().clone(),
+            request.operation_id,
+            request.execution_fence.generation,
+            ApplicationTransactionMarker::from_transaction_ref(request.transaction),
+            ControlledDeltaWriteMode::Append,
+        );
+        let uncertain = UncertainDeltaCommitRequest::try_new(
+            write,
+            request.control_relation.binding().session_id(),
+        )
+        .map_err(|error| {
+            ActivationControlError::UncertainCommitReconciliation(error.to_string())
+        })?;
+
+        let (provider, marker_version) =
+            match reconcile_uncertain_delta_commit(&self.table, &uncertain).await {
+                UncertainDeltaCommitOutcome::Committed(committed) => {
+                    let marker_version = committed.marker_evidence().marker().application_version();
+                    let committed_pin = committed.committed().clone();
+                    let committed = Self::try_from_loaded_table(
+                        Arc::clone(&self.session),
+                        committed_pin,
+                        committed.into_table(),
+                    )
+                    .await?;
+                    (committed, Some(marker_version))
+                }
+                UncertainDeltaCommitOutcome::NotCommitted(evidence) => {
+                    if evidence.predecessor() != request.control_relation.table()
+                        || evidence.marker() != uncertain.write().marker()
+                    {
+                        return Err(ActivationControlError::UncertainCommitReconciliation(
+                            "exact non-commit evidence differs from the activation request"
+                                .to_owned(),
+                        ));
+                    }
+                    let predecessor = DeltaTableBuilder::from_url(
+                        request.control_relation.table().canonical_root().clone(),
+                    )
+                    .map_err(|error| ActivationControlError::Delta(error.to_string()))?
+                    .with_version(request.control_relation.table().version())
+                    .load()
+                    .await
+                    .map_err(|error| ActivationControlError::Delta(error.to_string()))?;
+                    let predecessor = Self::try_from_loaded_table(
+                        Arc::clone(&self.session),
+                        request.control_relation.table().clone(),
+                        predecessor,
+                    )
+                    .await?;
+                    (predecessor, None)
+                }
+                UncertainDeltaCommitOutcome::Ambiguous(ambiguity) => {
+                    return Err(ActivationControlError::UncertainCommitReconciliation(
+                        format!("{ambiguity:?}"),
+                    ));
+                }
+            };
+        let readback = provider
             .read_workspace(request.workspace_id, request.active_recovery_fence)
             .await?;
         let fact = ActivationReconciliationFact::try_new(request, &readback, marker_version)?;
@@ -1554,6 +1630,7 @@ fn append_unknown(
     stage: ActivationDiagnosticStage,
     detail: impl Into<Arc<str>>,
 ) -> ActivationAppendOutcome {
+    let detail = detail.into();
     ActivationAppendOutcome::Unknown {
         reason,
         diagnostic: activation_diagnostic_ref(
@@ -2603,6 +2680,12 @@ impl ActivationStorageProvider {
                 let expression = physical_col(input.field(index).name(), &input)?;
                 let expression = if input.field(index).data_type() == field.data_type() {
                     expression
+                } else if matches!(
+                    (input.field(index).data_type(), field.data_type()),
+                    (DataType::BinaryView, DataType::FixedSizeBinary(_))
+                ) {
+                    let binary = cast(expression, &input, DataType::Binary)?;
+                    cast(binary, &input, field.data_type().clone())?
                 } else {
                     cast(expression, &input, field.data_type().clone())?
                 };
@@ -2718,11 +2801,7 @@ fn validate_raw_storage_schema(
         )));
     }
     for (ordinal, (expected, actual)) in expected.fields().iter().zip(actual.fields()).enumerate() {
-        if expected.name() != actual.name()
-            || expected.data_type() != actual.data_type()
-            || expected.is_nullable() != actual.is_nullable()
-            || (!actual.metadata().is_empty() && actual.metadata() != expected.metadata())
-        {
+        if !crate::schema_contract::delta_provider_field_compatible(expected, actual) {
             return Err(ActivationControlError::StorageSchemaMismatch(format!(
                 "field {ordinal} differs: expected={expected:?}, actual={actual:?}"
             )));
@@ -3182,6 +3261,8 @@ pub enum ActivationControlError {
     ReconciliationHorizonMismatch,
     #[error("reconciliation provider/schema binding differs from the request binding")]
     ContractBindingMismatch,
+    #[error("uncertain activation-control commit reconciliation failed: {0}")]
+    UncertainCommitReconciliation(String),
     #[error("Delta transaction marker and activation-control rows disagree")]
     MarkerRowDisagreement,
     #[error("Delta transaction marker version differs: expected {expected}, observed {observed}")]
@@ -3520,7 +3601,7 @@ mod tests {
     }
 
     #[test]
-    fn reversible_table_version_components_cannot_be_substituted_for_their_digest() {
+    fn wp44_neg_latest_version_component_substitution_cannot_replace_the_exact_vector() {
         let session = SessionStateBuilder::new().with_default_features().build();
         let predecessor = control(7, &session);
         assert!(matches!(
@@ -3547,7 +3628,7 @@ mod tests {
     }
 
     #[test]
-    fn codec_rejects_schema_binding_and_row_digest_substitution() {
+    fn wp44_neg_hash_and_schema_binding_substitution_cannot_prove_a_control_row() {
         let session = SessionStateBuilder::new().with_default_features().build();
         let persisted =
             PersistedActivationControlRow::try_new(row(1), table_versions(1), control(7, &session))
@@ -3772,6 +3853,25 @@ mod tests {
         semantic.pins.table_versions = versions.reference();
         let recovery_fence = fence(90, 8);
         let request_control = provider.control_relation().clone();
+        let request = super::super::activation_transaction::ActivationOperationMarkerRequest {
+            workspace_id: semantic.workspace_id,
+            operation_id: semantic.operation_id,
+            event_id: semantic.event_id,
+            expected_head: semantic.predecessor_epoch,
+            execution_fence: semantic.execution_fence,
+            active_recovery_fence: recovery_fence,
+            transaction: semantic.commit.transaction,
+            operation_selection: semantic.commit.operation_selection,
+            control_relation: request_control.clone(),
+        };
+        let absent = provider.read_operation_marker(request.clone()).await;
+        assert!(matches!(
+            absent,
+            ActivationOperationMarkerOutcome::ProvedNotSelected {
+                ref unchanged_chain,
+                ..
+            } if unchanged_chain.current_head() == ExpectedHead::Empty
+        ));
         let contract = append_contract(semantic, Arc::clone(&versions), request_control.clone());
         let outcome = provider.append_and_readback(contract).await;
         let (event, chain) = match outcome {
@@ -3786,6 +3886,18 @@ mod tests {
         };
         assert_eq!(event.event_id(), semantic.event_id);
         assert_eq!(chain.head_event(), Some(&event));
+        let reconciled_from_predecessor = provider.read_operation_marker(request.clone()).await;
+        assert!(matches!(
+            reconciled_from_predecessor,
+            ActivationOperationMarkerOutcome::Selected {
+                ref selection,
+                ref chain_after_readback,
+                acknowledgement: ActivationAcknowledgementMarker::Absent,
+                ..
+            } if selection.event() == event
+                && selection.table_versions().as_ref() == versions.as_ref()
+                && chain_after_readback.head_event() == Some(&event)
+        ));
 
         let committed_pin = ExactDeltaPin::new(&root, 1).unwrap();
         let committed_table = DeltaTableBuilder::from_url(root.clone())
@@ -4031,17 +4143,6 @@ mod tests {
             AuthorityRevalidationOutcome::Stale(_)
         ));
 
-        let request = super::super::activation_transaction::ActivationOperationMarkerRequest {
-            workspace_id: semantic.workspace_id,
-            operation_id: semantic.operation_id,
-            event_id: semantic.event_id,
-            expected_head: semantic.predecessor_epoch,
-            execution_fence: semantic.execution_fence,
-            active_recovery_fence: recovery_fence,
-            transaction: semantic.commit.transaction,
-            operation_selection: semantic.commit.operation_selection,
-            control_relation: request_control,
-        };
         let evidence = committed.reconcile_operation(&request).await.unwrap();
         assert_eq!(
             evidence.disposition(),

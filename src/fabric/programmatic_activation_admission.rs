@@ -213,9 +213,23 @@ impl ProgrammaticActivationAdmission {
                 .ok_or(AdmissionError::SuccessorQueryAuthorityUnavailable(
                     selection.epoch_id(),
                 ))?;
-        slot.swap(Arc::clone(&workspace)).map_err(|_| {
-            AdmissionError::SuccessorQueryAuthorityInstallFailed(selection.epoch_id())
-        })?;
+        match slot.lease() {
+            Ok(_) => {
+                slot.swap(Arc::clone(&workspace)).map_err(|_| {
+                    AdmissionError::SuccessorQueryAuthorityInstallFailed(selection.epoch_id())
+                })?;
+            }
+            Err(ActiveWorkspaceError::NotInstalled(_)) => {
+                slot.install_initial(Arc::clone(&workspace)).map_err(|_| {
+                    AdmissionError::SuccessorQueryAuthorityInstallFailed(selection.epoch_id())
+                })?;
+            }
+            Err(_) => {
+                return Err(AdmissionError::SuccessorQueryAuthorityInstallFailed(
+                    selection.epoch_id(),
+                ));
+            }
+        }
         let mut pending = self
             .pending
             .lock()
@@ -226,6 +240,34 @@ impl ProgrammaticActivationAdmission {
             workspace,
         });
         Ok(())
+    }
+}
+
+/// Reopen the exact recovered admission authority represented by the installed workspace.
+///
+/// Genesis recovery can rebuild a workspace around the same process-local admission runtime that
+/// the command actor already moved to `Swapped`. Clean restart instead installs a distinct
+/// successor runtime which remains `Recovering` while the retired predecessor is `Swapped`.
+/// Keeping the two transitions explicit prevents either posture from being accepted by the
+/// other's reopen primitive.
+pub(crate) fn reopen_reconciled_recovery_admissions(
+    predecessor: &Arc<FabricAdmissionRuntime>,
+    successor: &Arc<FabricAdmissionRuntime>,
+    event: ActivationEvent,
+    chain_after_readback: &ActivationChain,
+    candidate: &Arc<ProgrammaticFabricEpoch>,
+    active_recovery_fence: WriterFence,
+) -> Result<(), AdmissionError> {
+    if Arc::ptr_eq(successor, predecessor) {
+        successor.reopen_recovered_selection(event, chain_after_readback, active_recovery_fence)
+    } else {
+        successor.install_reconciled_selected_head(
+            event,
+            chain_after_readback,
+            Arc::clone(candidate),
+            active_recovery_fence,
+        )?;
+        predecessor.finish_recovered_predecessor(event, chain_after_readback, active_recovery_fence)
     }
 }
 
@@ -286,18 +328,23 @@ impl ActivationAdmissionPort for ProgrammaticActivationAdmission {
             ));
         }
         let selection = installed.workspace.selection();
-        installed
-            .workspace
-            .runtime()
-            .admission()
-            .install_reconciled_selected_head(
+        let successor = installed.workspace.runtime().admission();
+        if Arc::ptr_eq(successor, &self.admission) {
+            successor.reopen_recovered_selection(
+                selection.event(),
+                &installed.chain,
+                selection.control_horizon().active_recovery_fence(),
+            )?;
+        } else {
+            successor.install_reconciled_selected_head(
                 selection.event(),
                 &installed.chain,
                 Arc::clone(installed.workspace.runtime().epoch()),
                 selection.control_horizon().active_recovery_fence(),
             )?;
-        self.admission
-            .finish_predecessor_handoff(barrier, selection.epoch_id())?;
+            self.admission
+                .finish_predecessor_handoff(barrier, selection.epoch_id())?;
+        }
         *self
             .pending
             .lock()
@@ -398,20 +445,14 @@ impl ActivationRecoveryAdmissionPort for ProgrammaticActivationAdmission {
             return Err(AdmissionError::RecoveryPublishedSelectionMismatch);
         }
         let successor = workspace.workspace().runtime().admission();
-        successor.install_reconciled_selected_head(
+        reopen_reconciled_recovery_admissions(
+            &self.admission,
+            successor,
             event,
             chain_after_readback,
-            Arc::clone(workspace.workspace().runtime().epoch()),
+            workspace.workspace().runtime().epoch(),
             active_recovery_fence,
-        )?;
-        if !Arc::ptr_eq(successor, &self.admission) {
-            self.admission.finish_recovered_predecessor(
-                event,
-                chain_after_readback,
-                active_recovery_fence,
-            )?;
-        }
-        Ok(())
+        )
     }
 
     async fn recover_proved_no_selection(

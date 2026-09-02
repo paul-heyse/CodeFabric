@@ -31,8 +31,6 @@ pub mod daemon;
 ))]
 pub mod error;
 #[cfg(feature = "daemon")]
-pub mod forward_cutover_controller;
-#[cfg(feature = "daemon")]
 pub mod freshness;
 #[cfg(any(
     feature = "canonical-json",
@@ -62,6 +60,10 @@ pub mod inventory;
 #[cfg(feature = "data-fabric")]
 pub mod operational_store;
 #[cfg(feature = "daemon")]
+pub mod owned_unix_socket;
+#[cfg(feature = "daemon")]
+pub mod process_runtime;
+#[cfg(feature = "daemon")]
 pub mod production_provider_recipe;
 #[cfg(feature = "daemon")]
 pub mod production_query_recipe;
@@ -87,6 +89,8 @@ pub mod pyrefly_service;
 pub mod python_context;
 #[cfg(feature = "daemon")]
 pub mod python_derived_analysis;
+#[cfg(feature = "daemon")]
+pub mod query_backend;
 #[cfg(feature = "daemon")]
 pub mod query_service;
 /// Application-owned released categorical and lifecycle wire types.
@@ -118,6 +122,9 @@ pub mod relational_program;
 pub mod relational_semantic_query;
 #[cfg(feature = "rpc")]
 pub mod rpc;
+#[cfg(all(feature = "daemon", feature = "compatibility-probes"))]
+#[doc(hidden)]
+pub mod rpc_interop_test_support;
 #[cfg(feature = "fact-generation")]
 pub mod ruff_adapter;
 #[cfg(feature = "daemon")]
@@ -136,6 +143,8 @@ pub mod schema_registry;
 pub mod secure_path;
 #[cfg(feature = "daemon")]
 pub mod security;
+#[cfg(feature = "daemon")]
+pub mod session_authority;
 #[cfg(any(
     feature = "canonical-json",
     feature = "daemon",
@@ -146,6 +155,8 @@ pub mod security;
 pub mod snapshot;
 #[cfg(feature = "daemon")]
 pub mod source_image;
+#[cfg(feature = "daemon")]
+pub mod supervisor;
 #[cfg(feature = "data-fabric")]
 pub mod workspace_registry;
 

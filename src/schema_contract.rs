@@ -24,10 +24,59 @@ use futures::Stream;
 
 /// Arrow schema metadata key carrying the session-owned relation identity.
 pub const RELATION_ID_METADATA_KEY: &str = "codefabric.relation_id";
+/// Arrow schema metadata key carrying the relation's application semantic role.
+///
+/// A table name is physical placement, not meaning. Query/catalog composition uses this role to
+/// discover eligible epoch relations without maintaining a second relation-name registry.
+pub const RELATION_SEMANTIC_ROLE_METADATA_KEY: &str = "codefabric.semantic_relation_role";
 /// Arrow field metadata key carrying the session-owned field identity.
 pub const FIELD_ID_METADATA_KEY: &str = "codefabric.field_id";
 /// Arrow field metadata key carrying the field's semantic role.
 pub const SEMANTIC_ROLE_METADATA_KEY: &str = "codefabric.semantic_role";
+
+/// Derive the exact Delta/Parquet storage representation for one logical Arrow type.
+///
+/// Delta's protocol type system does not carry every Arrow logical type. This mapping is the
+/// application-owned, reversible storage policy used by relation publication and exact-version
+/// restoration; it is not inferred from whichever Arrow type a provider happens to expose.
+pub(crate) fn delta_storage_data_type(logical: &DataType) -> DataType {
+    match logical {
+        DataType::FixedSizeBinary(_) => DataType::Binary,
+        DataType::UInt8 => DataType::Int16,
+        DataType::UInt16 => DataType::Int32,
+        DataType::UInt32 => DataType::Int64,
+        DataType::UInt64 => DataType::Decimal128(20, 0),
+        DataType::Float16 => DataType::Float32,
+        DataType::List(field) => DataType::List(Arc::new(delta_storage_field(field))),
+        DataType::LargeList(field) => DataType::LargeList(Arc::new(delta_storage_field(field))),
+        DataType::ListView(field) => DataType::List(Arc::new(delta_storage_field(field))),
+        DataType::LargeListView(field) => DataType::LargeList(Arc::new(delta_storage_field(field))),
+        DataType::FixedSizeList(field, size) => {
+            DataType::FixedSizeList(Arc::new(delta_storage_field(field)), *size)
+        }
+        DataType::Struct(fields) => DataType::Struct(
+            fields
+                .iter()
+                .map(|field| Arc::new(delta_storage_field(field)))
+                .collect::<Vec<_>>()
+                .into(),
+        ),
+        DataType::Map(field, sorted) => {
+            DataType::Map(Arc::new(delta_storage_field(field)), *sorted)
+        }
+        other => other.clone(),
+    }
+}
+
+/// Preserve field identity, nullability, and metadata while applying the storage type policy.
+pub(crate) fn delta_storage_field(logical: &Field) -> Field {
+    Field::new(
+        logical.name(),
+        delta_storage_data_type(logical.data_type()),
+        logical.is_nullable(),
+    )
+    .with_metadata(logical.metadata().clone())
+}
 
 /// Return a domain-separated fingerprint of the RFC 8785 canonical Arrow schema bytes.
 ///
@@ -838,6 +887,37 @@ impl SchemaContract {
     /// substitute an Arrow table name.
     pub fn relation_id(&self, role: SchemaRole) -> Result<&str, SchemaContractError> {
         Ok(self.identity_index(role)?.relation_id.as_ref())
+    }
+
+    /// Resolve the application semantic role declared by the selected live schema.
+    ///
+    /// Physical catalog/schema/table names are deliberately not interpreted as semantic roles.
+    /// `None` means that this relation is not a query-semantic source; an empty declaration is a
+    /// malformed contract rather than an absent capability.
+    pub fn relation_semantic_role(
+        &self,
+        role: SchemaRole,
+    ) -> Result<Option<&str>, SchemaContractError> {
+        let schema = match role {
+            SchemaRole::Logical => self.logical_schema.as_ref(),
+            SchemaRole::Storage => self.storage_schema.as_ref(),
+        };
+        schema
+            .metadata()
+            .get(RELATION_SEMANTIC_ROLE_METADATA_KEY)
+            .map(String::as_str)
+            .map(|value| {
+                if value.trim().is_empty() {
+                    Err(SchemaContractError::EmptyIdentityMetadata {
+                        role,
+                        key: RELATION_SEMANTIC_ROLE_METADATA_KEY,
+                        path: "$".to_owned(),
+                    })
+                } else {
+                    Ok(value)
+                }
+            })
+            .transpose()
     }
 
     /// Resolve a stable field ID to its exact index within the selected schema role.
@@ -1783,6 +1863,49 @@ fn field_extension_metadata_equal(expected: &Field, actual: &Field) -> bool {
         && extension_value(expected, EXTENSION_TYPE_METADATA_KEY)
             == extension_value(actual, EXTENSION_TYPE_METADATA_KEY)
         && data_type_extension_metadata_equal(expected.data_type(), actual.data_type())
+}
+
+/// Compare an application-owned Delta storage field with delta-rs/DataFusion's scan field.
+///
+/// Arrow's view arrays are an execution representation of the same logical string/binary values;
+/// delta-rs may select them when constructing a provider.  Field identity, nullability, nested
+/// structure, and every metadata entry that the provider retains remain exact.  This deliberately
+/// does not make unrelated Arrow types interchangeable.
+pub(crate) fn delta_provider_field_compatible(expected: &Field, actual: &Field) -> bool {
+    expected.name() == actual.name()
+        && expected.is_nullable() == actual.is_nullable()
+        && (actual.metadata().is_empty() || actual.metadata() == expected.metadata())
+        && delta_provider_data_type_compatible(expected.data_type(), actual.data_type())
+}
+
+fn delta_provider_data_type_compatible(expected: &DataType, actual: &DataType) -> bool {
+    if expected == actual {
+        return true;
+    }
+    match (expected, actual) {
+        (DataType::Utf8, DataType::Utf8View) | (DataType::Binary, DataType::BinaryView) => true,
+        (DataType::List(expected), DataType::List(actual))
+        | (DataType::LargeList(expected), DataType::LargeList(actual))
+        | (DataType::ListView(expected), DataType::ListView(actual))
+        | (DataType::LargeListView(expected), DataType::LargeListView(actual)) => {
+            delta_provider_field_compatible(expected, actual)
+        }
+        (
+            DataType::FixedSizeList(expected, expected_size),
+            DataType::FixedSizeList(actual, actual_size),
+        ) => expected_size == actual_size && delta_provider_field_compatible(expected, actual),
+        (DataType::Struct(expected), DataType::Struct(actual)) => {
+            expected.len() == actual.len()
+                && expected
+                    .iter()
+                    .zip(actual.iter())
+                    .all(|(expected, actual)| delta_provider_field_compatible(expected, actual))
+        }
+        (DataType::Map(expected, expected_sorted), DataType::Map(actual, actual_sorted)) => {
+            expected_sorted == actual_sorted && delta_provider_field_compatible(expected, actual)
+        }
+        _ => false,
+    }
 }
 
 fn data_type_extension_metadata_equal(expected: &DataType, actual: &DataType) -> bool {

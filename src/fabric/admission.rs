@@ -120,6 +120,26 @@ impl FabricAdmissionRuntime {
         self.workspace_id
     }
 
+    /// Construct the only lawful process-local admission posture for an exact empty durable
+    /// activation head.
+    ///
+    /// The runtime begins open because there is no predecessor epoch whose queries could cross a
+    /// genesis swap. The first activation still closes this gate before authority revalidation
+    /// and does not reopen it until exact Delta readback and atomic workspace installation have
+    /// completed.
+    #[must_use]
+    pub(crate) fn fresh_genesis(workspace_id: WorkspaceId) -> Self {
+        Self {
+            workspace_id,
+            runtime_instance: NEXT_RUNTIME_INSTANCE.fetch_add(1, Ordering::Relaxed),
+            state: Mutex::new(AdmissionState {
+                phase: AdmissionPhase::Open,
+                admission_generation: 1,
+                next_barrier_id: 1,
+            }),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn is_open_for_test(&self) -> Result<bool, AdmissionError> {
         Ok(self.lock_state()?.phase == AdmissionPhase::Open)
@@ -838,6 +858,7 @@ mod tests {
         WriterGeneration,
     };
     use crate::fabric::epoch_runtime::FabricEpochRuntimeConfig;
+    use crate::fabric::programmatic_activation_admission::reopen_reconciled_recovery_admissions;
     use crate::fabric::programmatic_epoch::{
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
@@ -1086,6 +1107,102 @@ mod tests {
             .unwrap();
         assert_eq!(
             runtime.admit_selected(selected_epoch).unwrap().epoch_id(),
+            selected
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_reopens_the_same_swapped_admission_runtime() {
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let selected = EpochId::from_bytes(id16(20));
+        let selected_epoch = epoch(selected).await;
+        let command = command(1, workspace, ExpectedHead::Empty, selected, 1);
+        let event = activation_event(1, &command, None, 1, selected);
+        let chain = ActivationChain::derive(workspace, [event]).unwrap();
+        let admission = Arc::new(
+            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&chain).unwrap(),
+        );
+        let active_recovery_fence = WriterFence {
+            lease_id: LeaseId::from_bytes(id16(44)),
+            generation: WriterGeneration::new(2).unwrap(),
+        };
+
+        admission
+            .recover_selected_epoch(
+                ExpectedHead::Empty,
+                command.writer_fence,
+                active_recovery_fence,
+                event,
+                &chain,
+                false,
+            )
+            .unwrap();
+        reopen_reconciled_recovery_admissions(
+            &admission,
+            &admission,
+            event,
+            &chain,
+            &selected_epoch,
+            active_recovery_fence,
+        )
+        .unwrap();
+
+        assert!(admission.is_open_for_test().unwrap());
+        assert_eq!(
+            admission.admit_selected(selected_epoch).unwrap().epoch_id(),
+            selected
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_installs_a_distinct_successor_and_finishes_the_predecessor() {
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let selected = EpochId::from_bytes(id16(20));
+        let selected_epoch = epoch(selected).await;
+        let command = command(1, workspace, ExpectedHead::Empty, selected, 1);
+        let event = activation_event(1, &command, None, 1, selected);
+        let chain = ActivationChain::derive(workspace, [event]).unwrap();
+        let predecessor = Arc::new(
+            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&chain).unwrap(),
+        );
+        let successor = Arc::new(
+            FabricAdmissionRuntime::recover_unmaterialized_for_reconciliation(&chain).unwrap(),
+        );
+        let active_recovery_fence = WriterFence {
+            lease_id: LeaseId::from_bytes(id16(44)),
+            generation: WriterGeneration::new(2).unwrap(),
+        };
+
+        predecessor
+            .recover_selected_epoch(
+                ExpectedHead::Empty,
+                command.writer_fence,
+                active_recovery_fence,
+                event,
+                &chain,
+                false,
+            )
+            .unwrap();
+        reopen_reconciled_recovery_admissions(
+            &predecessor,
+            &successor,
+            event,
+            &chain,
+            &selected_epoch,
+            active_recovery_fence,
+        )
+        .unwrap();
+
+        assert!(!predecessor.is_open_for_test().unwrap());
+        assert_eq!(
+            predecessor
+                .admit_selected(Arc::clone(&selected_epoch))
+                .unwrap_err(),
+            AdmissionError::AdmissionClosed
+        );
+        assert!(successor.is_open_for_test().unwrap());
+        assert_eq!(
+            successor.admit_selected(selected_epoch).unwrap().epoch_id(),
             selected
         );
     }

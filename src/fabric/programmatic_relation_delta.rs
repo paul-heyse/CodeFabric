@@ -40,7 +40,7 @@ use super::programmatic_schema::{
 use super::provider::SchemaContractStorageProvider;
 use crate::schema_contract::{
     ColumnMappingMode, DeletionVectorBehavior, FieldIndexMapping, SchemaCompatibility,
-    SchemaContract, SchemaContractError, SchemaContractOptions,
+    SchemaContract, SchemaContractError, SchemaContractOptions, delta_storage_field,
 };
 
 const DESCRIPTOR_PREFIX: &str = "codefabric-exact-relation-v1:";
@@ -198,16 +198,20 @@ impl RelationSnapshotSpec {
         relation_id: ProgrammaticRelationId,
         binding: &SealedRelationBinding,
     ) -> Result<Self, ProgrammaticRelationDeltaError> {
+        let contract = Arc::new(delta_snapshot_contract(
+            &binding.table_reference,
+            &binding.contract,
+        )?);
         let descriptor = StoredRelationDescriptor::from_contract(
             &relation_id,
             &binding.table_reference,
-            &binding.contract,
+            &contract,
         )?;
         let descriptor_json = canonical_descriptor(&descriptor)?;
         Ok(Self {
             relation_id,
             table_reference: binding.table_reference.clone(),
-            contract: Arc::clone(&binding.contract),
+            contract,
             descriptor,
             descriptor_json: Arc::from(descriptor_json),
         })
@@ -232,6 +236,37 @@ impl RelationSnapshotSpec {
             descriptor_json: Arc::from(descriptor_json),
         })
     }
+}
+
+fn delta_snapshot_contract(
+    table_reference: &TableReference,
+    source: &SchemaContract,
+) -> Result<SchemaContract, SchemaContractError> {
+    let logical = Arc::clone(source.logical_schema());
+    let storage = Arc::new(Schema::new_with_metadata(
+        logical
+            .fields()
+            .iter()
+            .map(|field| Arc::new(delta_storage_field(field)))
+            .collect::<Vec<_>>(),
+        logical.metadata().clone(),
+    ));
+    let mappings = (0..logical.fields().len())
+        .map(|index| FieldIndexMapping::direct(index, index))
+        .collect();
+    SchemaContract::try_new_with_options(
+        source.source_schema_identity(),
+        table_reference.clone(),
+        logical,
+        storage,
+        mappings,
+        SchemaContractOptions::new(
+            source.constraints().as_ref().clone(),
+            source.compatibility(),
+            source.column_mapping_mode(),
+            source.deletion_vector_behavior(),
+        ),
+    )
 }
 
 impl StoredRelationDescriptor {
@@ -834,7 +869,9 @@ pub enum ProgrammaticRelationDeltaError {
         relation_id: ProgrammaticRelationId,
         storage_index: usize,
     },
-    #[error("relation {relation_id:?} storage write plan differs from its exact contract")]
+    #[error(
+        "relation {relation_id:?} storage write plan differs from its exact contract: expected={expected:?}, actual={actual:?}"
+    )]
     StoragePlanSchema {
         relation_id: ProgrammaticRelationId,
         expected: SchemaRef,

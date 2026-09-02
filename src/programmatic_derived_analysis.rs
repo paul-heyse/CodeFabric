@@ -2608,6 +2608,7 @@ pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
     let query_requirements = released_query_family_requirements(query_authority)?;
     let closure_catalog = released_producer_closure_catalog(
         proof_authority,
+        derived.provider_reports(),
         derived.observation(),
         query_requirements,
     )?;
@@ -2627,12 +2628,45 @@ pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
 
 fn released_producer_closure_catalog(
     proof_authority: &CompiledProofAuthority,
+    provider_reports: &ExactProgrammaticProviderReports,
     observation: &DerivedAnalysisCompositionObservation,
     query_requirements: Vec<(Arc<str>, Arc<str>)>,
 ) -> Result<ReleaseProducerClosureCatalog, ProgrammaticDerivedAnalysisError> {
     let mut accepted = BTreeSet::new();
-    let mut runtime_producers = Vec::with_capacity(observation.producers.len());
+    let mut runtime_producers = Vec::with_capacity(observation.producers.len() + 1);
     let mut unsupported_remainders = Vec::with_capacity(observation.remainders.len());
+
+    // Provider relations are legitimate factual producers in their own right. They previously
+    // disappeared from the closure census because it considered application-derived outputs
+    // only, forcing the query layer to invent a synthetic semantic family. Carry the exact
+    // admitted Ruff binding relation as a producer when (and only when) its boundary report says
+    // the relation is available and complete. The query recipe can then depend on the real
+    // provider fact family and its sealed SchemaContract.
+    let (provider_authorities, _) = provider_relation_authorities(provider_reports)?;
+    let binding_relation = ProgrammaticRelationId::new(NativeSyntaxRelation::RuffBinding.as_str());
+    if let Some(provider) = provider_authorities.get(&binding_relation)
+        && provider.available
+        && provider.observation.completeness == DerivedInputCompleteness::Complete
+    {
+        let family_id: Arc<str> = Arc::from(binding_relation.as_str());
+        let authority_pin = release_pin(provider.observation.authority_identity);
+        accepted.insert(Arc::clone(&family_id));
+        runtime_producers.push(ReleaseRuntimeProducerRow {
+            family_id,
+            producer_id: Arc::from(format!("provider:{}", binding_relation.as_str())),
+            algorithm_release: Arc::from("ruff-semantic-binding-provider-contract.v1"),
+            precision_id: Arc::from("provider-declared-complete"),
+            input_pin: Arc::clone(&authority_pin),
+            invalidation_pin: Arc::clone(&authority_pin),
+            materialization_pin: Arc::clone(&authority_pin),
+            requested_unit_count: 1,
+            completed_unit_count: 1,
+            remainder_unit_count: 0,
+            unknown_unit_count: 0,
+            completeness_proof_pin: Arc::clone(&authority_pin),
+            proof_pin: authority_pin,
+        });
+    }
     for producer in &observation.producers {
         let family_id: Arc<str> = Arc::from(producer.family_id.as_str());
         accepted.insert(Arc::clone(&family_id));

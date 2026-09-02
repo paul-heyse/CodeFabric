@@ -12,10 +12,18 @@ from tooling.proto.generate import (
     BASELINE,
     CENSUS_DESTINATION,
     COMPILER_SOURCES,
+    CPGD_V2_HISTORY_CENSUS,
+    CPGD_V2_HISTORY_DESCRIPTOR,
     EXACT_PYTHON_PACKAGES,
+    HISTORY_INDEX_DESTINATION,
+    UNRELEASED_PACKAGES,
     assert_compatible,
+    assert_declared_descriptor_identities,
     assert_descriptor_profile,
     assert_exact_python_versions,
+    descriptor_set,
+    normalized_census,
+    validate_history,
 )
 
 
@@ -24,10 +32,15 @@ def baseline() -> dict[str, object]:
     return json.loads(BASELINE.read_bytes())
 
 
+@pytest.fixture
+def current_census() -> dict[str, object]:
+    return json.loads(CENSUS_DESTINATION.read_bytes())
+
+
 def project_file(census: dict[str, object]) -> dict[str, object]:
     files = census["files"]
     assert isinstance(files, list)
-    return next(file for file in files if file["package"] == "codefabric.cpgd.v1")
+    return next(file for file in files if file["package"] == "codefabric.cpgd.v2")
 
 
 def message(census: dict[str, object], name: str) -> dict[str, object]:
@@ -40,6 +53,43 @@ def test_reviewed_baseline_is_self_compatible(baseline: dict[str, object]) -> No
     assert_compatible(baseline, deepcopy(baseline))
 
 
+def test_unreleased_v2_is_history_not_compatibility_authority(
+    baseline: dict[str, object], current_census: dict[str, object]
+) -> None:
+    baseline_packages = {file["package"] for file in baseline["files"]}
+    assert not baseline_packages.intersection(UNRELEASED_PACKAGES)
+    assert {file["package"] for file in current_census["files"]}.intersection(
+        UNRELEASED_PACKAGES
+    ) == {"codefabric.cpgd.v2"}
+
+    validate_history()
+    index = json.loads(HISTORY_INDEX_DESTINATION.read_bytes())
+    entry = index["entries"][0]
+    assert entry["status"] == "unreleased-displaced-non-live"
+    assert entry["live_runtime"] is False
+    assert entry["compatibility_baseline"] is False
+    historical = descriptor_set(CPGD_V2_HISTORY_DESCRIPTOR)
+    assert normalized_census(historical) == json.loads(
+        CPGD_V2_HISTORY_CENSUS.read_bytes()
+    )
+    current = descriptor_set(CENSUS_DESTINATION.parent / "production-descriptor.pb")
+    historical_cpg = next(
+        file for file in historical.file if file.package == "codefabric.cpgd.v2"
+    )
+    current_cpg = next(
+        file for file in current.file if file.package == "codefabric.cpgd.v2"
+    )
+    assert historical_cpg.SerializeToString(
+        deterministic=True
+    ) != current_cpg.SerializeToString(deterministic=True)
+
+
+def test_v2_declared_identity_is_the_exact_descriptor_projection() -> None:
+    assert_declared_descriptor_identities(
+        CENSUS_DESTINATION.parent / "production-descriptor.pb"
+    )
+
+
 def test_descriptor_census_covers_every_released_source() -> None:
     census = json.loads(CENSUS_DESTINATION.read_bytes())
     names = {file["name"] for file in census["files"]}
@@ -48,34 +98,37 @@ def test_descriptor_census_covers_every_released_source() -> None:
     assert expected <= names
 
 
-def test_descriptor_census_covers_four_production_packages() -> None:
+def test_descriptor_census_covers_four_production_packages_and_well_known_dependency() -> (
+    None
+):
     census = json.loads(CENSUS_DESTINATION.read_bytes())
     packages = {file["package"] for file in census["files"]}
     assert packages == {
-        "codefabric.cpgd.v1",
+        "codefabric.cpgd.v2",
         "codefabric.provider.v1",
         "codefabric.pyrefly.v1",
         "codefabric.rustc.v1",
+        "google.protobuf",
     }
     cpg = next(
-        file for file in census["files"] if file["package"] == "codefabric.cpgd.v1"
+        file for file in census["files"] if file["package"] == "codefabric.cpgd.v2"
     )
     service = next(
         item
         for item in cpg["services"]
-        if item["full_name"] == "codefabric.cpgd.v1.CpgQueryService"
+        if item["full_name"] == "codefabric.cpgd.v2.CpgQueryService"
     )
     assert [method["name"] for method in service["methods"]] == sorted(
         [
-            "AttachQuery",
             "CancelQuery",
+            "GetReference",
             "GetStatus",
             "Handshake",
-            "ReadResult",
-            "ReleaseResult",
+            "ReadResource",
+            "ReleaseResource",
             "StartQuery",
-            "StreamQuery",
             "ValidateQuery",
+            "WatchQuery",
         ]
     )
 
@@ -93,10 +146,11 @@ def test_descriptor_census_covers_four_production_packages() -> None:
     ],
 )
 def test_incompatible_descriptor_changes_fail(
-    baseline: dict[str, object], mutation: str
+    current_census: dict[str, object], mutation: str
 ) -> None:
-    current = deepcopy(baseline)
-    envelope = message(current, "codefabric.cpgd.v1.StartQueryRequest")
+    baseline = deepcopy(current_census)
+    current = deepcopy(current_census)
+    envelope = message(current, "codefabric.cpgd.v2.StartQueryRequest")
     fields = envelope["fields"]
     assert isinstance(fields, list)
     if mutation == "field_number_reuse":
@@ -104,17 +158,11 @@ def test_incompatible_descriptor_changes_fail(
     elif mutation == "removal_without_reservation":
         del fields[0]
     elif mutation == "presence_drift":
-        semantic_request_id = next(
-            field for field in fields if field["name"] == "semantic_request_id"
-        )
-        semantic_request_id["proto3_optional"] = False
-        semantic_request_id["has_presence"] = False
-        semantic_request_id["oneof"] = None
+        initial = next(field for field in fields if field["name"] == "initial")
+        initial["has_presence"] = False
     elif mutation == "oneof_drift":
-        semantic_request_id = next(
-            field for field in fields if field["name"] == "semantic_request_id"
-        )
-        semantic_request_id["oneof"] = None
+        initial = next(field for field in fields if field["name"] == "initial")
+        initial["oneof"] = None
     elif mutation == "cardinality_drift":
         project_file(current)["services"][0]["methods"][0]["client_streaming"] = True
     elif mutation == "enum_number_drift":
@@ -127,10 +175,11 @@ def test_incompatible_descriptor_changes_fail(
 
 
 def test_removed_field_requires_both_name_and_number_reservation(
-    baseline: dict[str, object],
+    current_census: dict[str, object],
 ) -> None:
+    baseline = deepcopy(current_census)
     current = deepcopy(baseline)
-    envelope = message(current, "codefabric.cpgd.v1.StartQueryRequest")
+    envelope = message(current, "codefabric.cpgd.v2.StartQueryRequest")
     fields = envelope["fields"]
     assert isinstance(fields, list)
     payload = fields.pop(0)

@@ -5,7 +5,7 @@ use std::io::{Read as _, Seek as _, SeekFrom};
 use std::os::fd::OwnedFd;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::unix::fs::MetadataExt as _;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, fstat, open, openat, statat};
@@ -291,6 +291,145 @@ pub fn read_control_artifact(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>,
     let second = read_bounded(&mut file, capacity)?;
     let after = stable_metadata(&file)?;
     if before != middle || middle != after || first != second {
+        return Err(StableReadError::ChangedDuringRead);
+    }
+    Ok(first)
+}
+
+/// Read one private administrative authority from the exact no-follow descriptor opened relative
+/// to its verified parent directory.
+///
+/// The parent and file must be owned by the effective user, inaccessible to group/other, on the
+/// same device, and unchanged through the bounded duplicate read. The final directory-entry
+/// identity must still name the opened inode, so a rename/replacement race fails closed.
+///
+/// # Errors
+///
+/// Returns an authorization, byte-limit, I/O, or concurrent-replacement failure.
+pub fn read_private_control_artifact(
+    path: &Path,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, StableReadError> {
+    read_private_control_artifact_with(path, maximum_bytes, || {})
+}
+
+/// Open an absolute directory by walking every component with `O_NOFOLLOW`, then repeat the walk
+/// and require the same terminal device/inode. Callers retain the returned descriptor and perform
+/// all authoritative descendant operations relative to it.
+pub(crate) fn open_absolute_directory_nofollow(path: &Path) -> Result<OwnedFd, StableReadError> {
+    let first = open_absolute_directory_once(path)?;
+    let first_stat = fstat(&first).map_err(|_| SecurePathError::OperatingSystem)?;
+    let second = open_absolute_directory_once(path)?;
+    let second_stat = fstat(&second).map_err(|_| SecurePathError::OperatingSystem)?;
+    if first_stat.st_dev != second_stat.st_dev
+        || first_stat.st_ino != second_stat.st_ino
+        || !FileType::from_raw_mode(first_stat.st_mode).is_dir()
+        || !FileType::from_raw_mode(second_stat.st_mode).is_dir()
+    {
+        return Err(StableReadError::ChangedDuringRead);
+    }
+    Ok(second)
+}
+
+fn open_absolute_directory_once(path: &Path) -> Result<OwnedFd, StableReadError> {
+    if !path.is_absolute() {
+        return Err(SecurePathError::SourceAccessDenied.into());
+    }
+    let mut directory = open(
+        "/",
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::DIRECTORY,
+        Mode::empty(),
+    )
+    .map_err(|_| SecurePathError::SourceAccessDenied)?;
+    for component in path.components() {
+        let Component::Normal(name) = component else {
+            if matches!(component, Component::RootDir) {
+                continue;
+            }
+            return Err(SecurePathError::SourceAccessDenied.into());
+        };
+        let next = openat(
+            &directory,
+            name,
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::DIRECTORY,
+            Mode::empty(),
+        )
+        .map_err(|_| SecurePathError::SourceAccessDenied)?;
+        let stat = fstat(&next).map_err(|_| SecurePathError::OperatingSystem)?;
+        if !FileType::from_raw_mode(stat.st_mode).is_dir() {
+            return Err(SecurePathError::SourceAccessDenied.into());
+        }
+        directory = next;
+    }
+    Ok(directory)
+}
+
+fn read_private_control_artifact_with(
+    path: &Path,
+    maximum_bytes: u64,
+    after_open: impl FnOnce(),
+) -> Result<Vec<u8>, StableReadError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or(SecurePathError::SourceAccessDenied)?;
+    let name = path
+        .file_name()
+        .filter(|name| !name.as_bytes().is_empty())
+        .ok_or(SecurePathError::SourceAccessDenied)?;
+    let owner = rustix::process::geteuid().as_raw();
+    let directory = open_absolute_directory_nofollow(parent)?;
+    let directory_stat = fstat(&directory).map_err(|_| SecurePathError::OperatingSystem)?;
+    if !FileType::from_raw_mode(directory_stat.st_mode).is_dir()
+        || directory_stat.st_uid != owner
+        || directory_stat.st_mode & 0o077 != 0
+    {
+        return Err(SecurePathError::SourceAccessDenied.into());
+    }
+    let descriptor = openat(
+        &directory,
+        name,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|_| SecurePathError::SourceAccessDenied)?;
+    let opened = fstat(&descriptor).map_err(|_| SecurePathError::OperatingSystem)?;
+    if !FileType::from_raw_mode(opened.st_mode).is_file()
+        || opened.st_uid != owner
+        || opened.st_mode & 0o077 != 0
+        || opened.st_dev != directory_stat.st_dev
+        || u64::try_from(opened.st_size).unwrap_or(u64::MAX) > maximum_bytes
+    {
+        return Err(SecurePathError::SourceAccessDenied.into());
+    }
+    after_open();
+    let mut file = std::fs::File::from(descriptor);
+    let before = stable_metadata(&file)?;
+    if before.size > maximum_bytes {
+        return Err(StableReadError::SizeLimitExceeded {
+            observed: before.size,
+            limit: maximum_bytes,
+        });
+    }
+    let capacity =
+        usize::try_from(before.size).map_err(|_| StableReadError::SizeLimitExceeded {
+            observed: before.size,
+            limit: maximum_bytes,
+        })?;
+    let first = read_bounded(&mut file, capacity)?;
+    let middle = stable_metadata(&file)?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| SecurePathError::OperatingSystem)?;
+    let second = read_bounded(&mut file, capacity)?;
+    let after = stable_metadata(&file)?;
+    let current = statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW)
+        .map_err(|_| StableReadError::ChangedDuringRead)?;
+    if before != middle
+        || middle != after
+        || first != second
+        || current.st_dev != opened.st_dev
+        || current.st_ino != opened.st_ino
+    {
         return Err(StableReadError::ChangedDuringRead);
     }
     Ok(first)
@@ -931,6 +1070,54 @@ mod tests {
         symlink(&candidate, &link).unwrap();
         assert!(matches!(
             read_control_artifact(&link, 1_024),
+            Err(StableReadError::Secure(SecurePathError::SourceAccessDenied))
+        ));
+    }
+
+    #[test]
+    fn wp44_neg_private_control_authority_rejects_symlink_and_opened_inode_replacement() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().unwrap();
+        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let candidate = directory.path().join("policy.json");
+        fs::write(&candidate, br#"{"revision":1}"#).unwrap();
+        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            read_private_control_artifact(&candidate, 1_024).unwrap(),
+            br#"{"revision":1}"#
+        );
+
+        let replacement = directory.path().join("replacement.json");
+        fs::write(&replacement, br#"{"revision":2}"#).unwrap();
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(matches!(
+            read_private_control_artifact_with(&candidate, 1_024, || {
+                fs::rename(&replacement, &candidate).unwrap();
+            }),
+            Err(StableReadError::ChangedDuringRead)
+        ));
+
+        let link = directory.path().join("policy-link.json");
+        symlink(&candidate, &link).unwrap();
+        assert!(matches!(
+            read_private_control_artifact(&link, 1_024),
+            Err(StableReadError::Secure(SecurePathError::SourceAccessDenied))
+        ));
+
+        let ancestor = directory.path().join("authority-root");
+        let private = ancestor.join("private");
+        fs::create_dir(&ancestor).unwrap();
+        fs::create_dir(&private).unwrap();
+        fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        let nested = private.join("policy.json");
+        fs::write(&nested, br#"{"revision":3}"#).unwrap();
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o600)).unwrap();
+        let ancestor_link = directory.path().join("authority-alias");
+        symlink(&ancestor, &ancestor_link).unwrap();
+        assert!(matches!(
+            read_private_control_artifact(&ancestor_link.join("private/policy.json"), 1_024),
             Err(StableReadError::Secure(SecurePathError::SourceAccessDenied))
         ));
     }

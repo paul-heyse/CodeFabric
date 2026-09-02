@@ -3853,10 +3853,10 @@ exit 0
     fn real_supervisor_terminates_group_at_bounded_stdout_prefix() {
         let harness = harness_with_cargo(
             RustCompilationTrustMode::TrustedLocal,
-            br#"#!/bin/sh
+            br"#!/bin/sh
 printf 0123456789abcdef
 sleep 30
-"#,
+",
         );
         let mut constrained = limits();
         constrained.stdout_bytes = 8;

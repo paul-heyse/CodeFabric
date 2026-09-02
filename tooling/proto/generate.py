@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,12 @@ RUST_OUTPUT_ROOT = ROOT / "src" / "generated"
 DESCRIPTOR_DESTINATION = ROOT / "tooling" / "proto" / "production-descriptor.pb"
 CENSUS_DESTINATION = ROOT / "tooling" / "proto" / "descriptor-census.json"
 IDENTITY_DESTINATION = ROOT / "tooling" / "proto" / "toolchain-identity.json"
+HISTORY_ROOT = ROOT / "tooling" / "proto" / "history"
+HISTORY_INDEX_DESTINATION = HISTORY_ROOT / "index.json"
+CPGD_V2_HISTORY_ID = "cpgd-v2-pre-fastmcp4"
+CPGD_V2_HISTORY_DESCRIPTOR = HISTORY_ROOT / f"{CPGD_V2_HISTORY_ID}-descriptor.pb"
+CPGD_V2_HISTORY_CENSUS = HISTORY_ROOT / f"{CPGD_V2_HISTORY_ID}-census.json"
+UNRELEASED_PACKAGES = frozenset({"codefabric.cpgd.v2"})
 EXACT_PYTHON_PACKAGES = {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
@@ -143,6 +150,25 @@ def released_schema_identities() -> tuple[str, ...]:
             )
         identities.append(matches[0])
     return tuple(identities)
+
+
+def assert_declared_descriptor_identities(descriptor: Path) -> None:
+    """Verify descriptor-projected source identities before generating bindings."""
+
+    descriptor_identity = f"b3:{blake3(descriptor.read_bytes()).hexdigest()}"
+    for relative, path in COMPILER_SOURCES:
+        source = path.read_text(encoding="utf-8")
+        projection = re.findall(r"(?m)^//\s*digest_projection:\s*([^\s]+)\s*$", source)
+        if projection != ["proto-descriptor-v2"]:
+            continue
+        declared = re.findall(
+            r"(?m)^//\s*canonical_digest:\s*(b3:[0-9a-f]{64})\s*$", source
+        )
+        if declared != [descriptor_identity]:
+            raise RuntimeError(
+                f"descriptor identity drift for {relative}: "
+                f"expected {descriptor_identity}, got {declared}"
+            )
 
 
 def generated_header(comment: str) -> bytes:
@@ -425,6 +451,130 @@ def normalized_census(descriptors: descriptor_pb2.FileDescriptorSet) -> dict[str
     return {"schema": 1, "files": sorted(files, key=lambda item: item["name"])}
 
 
+def compatibility_projection(census: dict[str, Any]) -> dict[str, Any]:
+    """Exclude explicitly unshipped packages from the released compatibility baseline."""
+
+    projected = deepcopy(census)
+    projected["files"] = [
+        file
+        for file in projected["files"]
+        if file["package"] not in UNRELEASED_PACKAGES
+    ]
+    return projected
+
+
+def descriptor_package_closure(
+    descriptors: descriptor_pb2.FileDescriptorSet, package: str
+) -> descriptor_pb2.FileDescriptorSet:
+    """Project one package and its imports into immutable historical descriptor IR."""
+
+    by_name = {file.name: file for file in descriptors.file}
+    roots = [file for file in descriptors.file if file.package == package]
+    if len(roots) != 1:
+        raise RuntimeError(f"expected one descriptor for {package}, got {len(roots)}")
+    selected: set[str] = set()
+    pending = [roots[0].name]
+    while pending:
+        name = pending.pop()
+        if name in selected:
+            continue
+        file = by_name.get(name)
+        if file is None:
+            raise RuntimeError(f"historical descriptor dependency is missing: {name}")
+        selected.add(name)
+        pending.extend(file.dependency)
+    return descriptor_pb2.FileDescriptorSet(
+        file=[file for file in descriptors.file if file.name in selected]
+    )
+
+
+def _write_immutable(path: Path, content: bytes) -> None:
+    if path.exists():
+        if path.read_bytes() != content:
+            raise RuntimeError(f"immutable Proto history drift: {path}")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
+def snapshot_unreleased_history(descriptor: Path) -> None:
+    """Issue the displaced, unshipped cpgd.v2 candidate as non-live evidence."""
+
+    descriptors = descriptor_set(descriptor)
+    historical = descriptor_package_closure(descriptors, "codefabric.cpgd.v2")
+    descriptor_bytes = historical.SerializeToString(deterministic=True)
+    historical_census = normalized_census(historical)
+    census_bytes = encoded_json(historical_census)
+    cpg_source = next(
+        path
+        for relative, path in COMPILER_SOURCES
+        if relative.as_posix() == "contracts/rpc/cpg_query_service.proto"
+    )
+    index = {
+        "schema": 1,
+        "entries": [
+            {
+                "history_id": CPGD_V2_HISTORY_ID,
+                "package": "codefabric.cpgd.v2",
+                "status": "unreleased-displaced-non-live",
+                "live_runtime": False,
+                "compatibility_baseline": False,
+                "source_path_at_issuance": "contracts/rpc/cpg_query_service.proto",
+                "source_sha256": hashlib.sha256(cpg_source.read_bytes()).hexdigest(),
+                "source_blake3": blake3(cpg_source.read_bytes()).hexdigest(),
+                "descriptor_path": CPGD_V2_HISTORY_DESCRIPTOR.relative_to(
+                    ROOT
+                ).as_posix(),
+                "descriptor_sha256": hashlib.sha256(descriptor_bytes).hexdigest(),
+                "census_path": CPGD_V2_HISTORY_CENSUS.relative_to(ROOT).as_posix(),
+                "census_sha256": hashlib.sha256(census_bytes).hexdigest(),
+            }
+        ],
+    }
+    _write_immutable(CPGD_V2_HISTORY_DESCRIPTOR, descriptor_bytes)
+    _write_immutable(CPGD_V2_HISTORY_CENSUS, census_bytes)
+    _write_immutable(HISTORY_INDEX_DESTINATION, encoded_json(index))
+
+
+def validate_history() -> None:
+    """Fail closed if the non-live cpgd.v2 issuance evidence is altered or promoted."""
+
+    if not HISTORY_INDEX_DESTINATION.is_file():
+        raise RuntimeError("missing unreleased cpgd.v2 history index")
+    index = json.loads(HISTORY_INDEX_DESTINATION.read_bytes())
+    if index.get("schema") != 1 or len(index.get("entries", [])) != 1:
+        raise RuntimeError("invalid unreleased cpgd.v2 history index")
+    entry = index["entries"][0]
+    expected_policy = {
+        "history_id": CPGD_V2_HISTORY_ID,
+        "package": "codefabric.cpgd.v2",
+        "status": "unreleased-displaced-non-live",
+        "live_runtime": False,
+        "compatibility_baseline": False,
+    }
+    if any(entry.get(key) != value for key, value in expected_policy.items()):
+        raise RuntimeError("unreleased cpgd.v2 history policy drift")
+    descriptor_path = ROOT / entry["descriptor_path"]
+    census_path = ROOT / entry["census_path"]
+    if (
+        hashlib.sha256(descriptor_path.read_bytes()).hexdigest()
+        != entry["descriptor_sha256"]
+    ):
+        raise RuntimeError("unreleased cpgd.v2 historical descriptor drift")
+    if hashlib.sha256(census_path.read_bytes()).hexdigest() != entry["census_sha256"]:
+        raise RuntimeError("unreleased cpgd.v2 historical census drift")
+    historical = descriptor_set(descriptor_path)
+    if normalized_census(historical) != json.loads(census_path.read_bytes()):
+        raise RuntimeError(
+            "unreleased cpgd.v2 historical census is not descriptor-derived"
+        )
+    packages = {file.package for file in historical.file}
+    if "codefabric.cpgd.v2" not in packages or any(
+        package.startswith("codefabric.cpgd.v3") for package in packages
+    ):
+        raise RuntimeError("unreleased cpgd.v2 history has invalid package authority")
+
+
 def encoded_json(value: Any) -> bytes:
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
 
@@ -596,6 +746,7 @@ def generate_into(root: Path) -> tuple[dict[str, Path], dict[str, Any]]:
     python_output.mkdir(parents=True)
 
     invoke_compiler(python_output, descriptor)
+    assert_declared_descriptor_identities(descriptor)
     descriptors = descriptor_set(descriptor)
     assert_descriptor_profile(descriptors)
     census = normalized_census(descriptors)
@@ -730,6 +881,15 @@ def compatibility_baseline() -> dict[str, Any]:
         )
     value = json.loads(BASELINE.read_bytes())
     _normalize_option_views(value)
+    forbidden = {
+        file["package"]
+        for file in value["files"]
+        if file["package"] in UNRELEASED_PACKAGES
+    }
+    if forbidden:
+        raise RuntimeError(
+            f"unreleased packages entered the compatibility baseline: {sorted(forbidden)}"
+        )
     return value
 
 
@@ -750,7 +910,14 @@ def _normalize_option_views(value: Any) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "mode", choices=("write", "check", "repro-check", "accept-baseline")
+        "mode",
+        choices=(
+            "write",
+            "check",
+            "repro-check",
+            "accept-baseline",
+            "snapshot-unreleased-history",
+        ),
     )
     arguments = parser.parse_args()
 
@@ -759,9 +926,16 @@ def main() -> int:
         versions = assert_exact_python_versions()
         first_identity = identity(first_files, versions)
 
+        if arguments.mode == "snapshot-unreleased-history":
+            snapshot_unreleased_history(first_files["descriptor"])
+            print(first_identity["generated_sha256"])
+            return 0
+
+        validate_history()
+
         if arguments.mode == "accept-baseline":
             write_outputs(first_files, first_identity)
-            BASELINE.write_bytes(encoded_json(first_census))
+            BASELINE.write_bytes(encoded_json(compatibility_projection(first_census)))
             print(first_identity["generated_sha256"])
             return 0
 

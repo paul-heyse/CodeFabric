@@ -15,7 +15,7 @@ use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::{ScanArgs, ScanResult, Session, TableProvider};
 use datafusion::common::tree_node::{Transformed, TreeNode};
-use datafusion::common::{Constraints, DataFusionError, ScalarValue, Statistics};
+use datafusion::common::{ColumnStatistics, Constraints, DataFusionError, ScalarValue, Statistics};
 use datafusion::logical_expr::statistics::StatisticsRequest;
 use datafusion::logical_expr::{Expr, LogicalPlan, TableProviderFilterPushDown, TableType};
 use datafusion::physical_expr::expressions::{cast, col as physical_col};
@@ -25,6 +25,7 @@ use datafusion::prelude::SessionContext;
 
 use crate::schema_contract::{
     SchemaCompatibility, SchemaContract, SchemaContractError, SchemaPhase, SchemaRole,
+    delta_storage_data_type,
 };
 
 /// Exact-provider read request admitted by the internal DataFusion adapter.
@@ -147,7 +148,7 @@ pub enum ProviderContractError {
     #[error("the native provider storage schema differs from the contract: {detail}")]
     StorageSchemaDrift { detail: String },
     #[error(
-        "storage restoration supports only direct, name-preserving fields and equal types or fixed-size-binary-to-binary casts; field {field_name:?} maps {logical_type:?} to {storage_type:?}"
+        "storage restoration requires a direct, name-preserving field and the compiled Delta storage type; field {field_name:?} maps {logical_type:?} to {storage_type:?}"
     )]
     UnsupportedStorageRestoration {
         field_name: String,
@@ -205,13 +206,7 @@ impl SchemaContractStorageProvider {
             let storage = contract.storage_schema().field(projection);
             let direct = filter == projection && statistics == projection;
             let supported_type = logical.data_type() == storage.data_type()
-                || matches!(
-                    (logical.data_type(), storage.data_type()),
-                    (
-                        arrow_schema::DataType::FixedSizeBinary(_),
-                        arrow_schema::DataType::Binary
-                    )
-                );
+                || delta_storage_data_type(logical.data_type()) == *storage.data_type();
             if !direct || logical.name() != storage.name() || !supported_type {
                 return Err(ProviderContractError::UnsupportedStorageRestoration {
                     field_name: logical.name().to_owned(),
@@ -237,13 +232,43 @@ impl SchemaContractStorageProvider {
         )
     }
 
-    fn storage_filter(filter: &Expr) -> datafusion::common::Result<Expr> {
+    fn storage_literal(&self, literal: &ScalarValue) -> datafusion::common::Result<ScalarValue> {
+        let logical_type = literal.data_type();
+        let mut storage_type = None;
+        for binding in self
+            .contract
+            .casts()
+            .iter()
+            .filter(|binding| binding.logical_data_type() == &logical_type)
+        {
+            match &storage_type {
+                Some(observed) if observed != binding.storage_data_type() => {
+                    return Err(DataFusionError::Plan(format!(
+                        "logical literal type {logical_type} has multiple storage representations"
+                    )));
+                }
+                Some(_) => {}
+                None => storage_type = Some(binding.storage_data_type().clone()),
+            }
+        }
+        let Some(storage_type) = storage_type else {
+            return Ok(literal.clone());
+        };
+        literal.cast_to(&storage_type)
+    }
+
+    fn storage_filter(&self, filter: &Expr) -> datafusion::common::Result<Expr> {
         filter
             .clone()
             .transform_down(|expression| match expression {
-                Expr::Literal(ScalarValue::FixedSizeBinary(_, value), metadata) => Ok(
-                    Transformed::yes(Expr::Literal(ScalarValue::Binary(value), metadata)),
-                ),
+                Expr::Literal(value, metadata) => {
+                    let storage = self.storage_literal(&value)?;
+                    if storage == value {
+                        Ok(Transformed::no(Expr::Literal(value, metadata)))
+                    } else {
+                        Ok(Transformed::yes(Expr::Literal(storage, metadata)))
+                    }
+                }
                 expression => Ok(Transformed::no(expression)),
             })
             .map(|value| value.data)
@@ -290,6 +315,15 @@ impl SchemaContractStorageProvider {
                 let expression = physical_col(input.field(index).name(), &input)?;
                 let expression = if input.field(index).data_type() == field.data_type() {
                     expression
+                } else if matches!(
+                    (input.field(index).data_type(), field.data_type()),
+                    (
+                        arrow_schema::DataType::BinaryView,
+                        arrow_schema::DataType::FixedSizeBinary(_)
+                    )
+                ) {
+                    let binary = cast(expression, &input, arrow_schema::DataType::Binary)?;
+                    cast(binary, &input, field.data_type().clone())?
                 } else {
                     cast(expression, &input, field.data_type().clone())?
                 };
@@ -334,7 +368,7 @@ impl TableProvider for SchemaContractStorageProvider {
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         let storage_filters = filters
             .iter()
-            .map(Self::storage_filter)
+            .map(|filter| self.storage_filter(filter))
             .collect::<datafusion::common::Result<Vec<_>>>()?;
         let logical_projection = projection.cloned().unwrap_or_else(|| {
             (0..self.contract.logical_schema().fields().len()).collect::<Vec<_>>()
@@ -360,7 +394,7 @@ impl TableProvider for SchemaContractStorageProvider {
             .map(|filters| {
                 filters
                     .iter()
-                    .map(Self::storage_filter)
+                    .map(|filter| self.storage_filter(filter))
                     .collect::<datafusion::common::Result<Vec<_>>>()
             })
             .transpose()?;
@@ -389,7 +423,7 @@ impl TableProvider for SchemaContractStorageProvider {
     ) -> datafusion::common::Result<Vec<TableProviderFilterPushDown>> {
         let storage_filters = filters
             .iter()
-            .map(|filter| Self::storage_filter(filter))
+            .map(|filter| self.storage_filter(filter))
             .collect::<datafusion::common::Result<Vec<_>>>()?;
         self.inner
             .supports_filters_pushdown(&storage_filters.iter().collect::<Vec<_>>())
@@ -403,13 +437,22 @@ impl TableProvider for SchemaContractStorageProvider {
             .contract
             .map_statistics_indices(&logical_indices)
             .expect("validated schema-contract statistics mappings remain total");
-        let Some(column_statistics) = storage_indices
+        let Some(mut column_statistics) = storage_indices
             .iter()
             .map(|index| statistics.column_statistics.get(*index).cloned())
             .collect::<Option<Vec<_>>>()
         else {
             return Some(Statistics::new_unknown(self.contract.logical_schema()));
         };
+        for (logical_index, column) in column_statistics.iter_mut().enumerate() {
+            let binding = &self.contract.casts()[logical_index];
+            if binding.logical_data_type() != binding.storage_data_type() {
+                // Delta statistics describe storage values. Until min/max/sum are restored under
+                // the same checked cast contract, exposing them as logical statistics would let
+                // the optimizer compare values of the wrong type.
+                *column = ColumnStatistics::new_unknown();
+            }
+        }
         Some(Statistics {
             num_rows: statistics.num_rows,
             total_byte_size: statistics.total_byte_size,
@@ -432,11 +475,7 @@ fn validate_native_storage_schema(
         });
     }
     for (ordinal, (expected, actual)) in expected.fields().iter().zip(actual.fields()).enumerate() {
-        if expected.name() != actual.name()
-            || expected.data_type() != actual.data_type()
-            || expected.is_nullable() != actual.is_nullable()
-            || (!actual.metadata().is_empty() && actual.metadata() != expected.metadata())
-        {
+        if !crate::schema_contract::delta_provider_field_compatible(expected, actual) {
             return Err(ProviderContractError::StorageSchemaDrift {
                 detail: format!(
                     "field {ordinal} differs: expected={expected:?}, actual={actual:?}"

@@ -42,8 +42,9 @@ use super::command::EpochId;
 use super::id16_array;
 use super::{ResultChecksumError, result_checksum_v2};
 use crate::schema_contract::{
-    FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY, SEMANTIC_ROLE_METADATA_KEY,
-    SchemaContract, SchemaContractError, SchemaRole,
+    FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY,
+    RELATION_SEMANTIC_ROLE_METADATA_KEY, SEMANTIC_ROLE_METADATA_KEY, SchemaContract,
+    SchemaContractError, SchemaRole,
 };
 
 /// Stable identity of a relation installed in the candidate catalog.
@@ -3012,6 +3013,7 @@ pub(crate) fn observation_view_identity_boundary(
 
 fn remove_inherited_identity_metadata(metadata: &mut HashMap<String, String>) {
     metadata.remove(RELATION_ID_METADATA_KEY);
+    metadata.remove(RELATION_SEMANTIC_ROLE_METADATA_KEY);
     metadata.remove(FIELD_ID_METADATA_KEY);
     metadata.remove(SEMANTIC_ROLE_METADATA_KEY);
 }
@@ -4267,6 +4269,36 @@ mod tests {
     use datafusion::prelude::col;
 
     use super::*;
+
+    #[test]
+    fn transformation_identity_scrub_removes_inherited_relation_semantic_role() {
+        let mut metadata = HashMap::from([
+            (
+                RELATION_ID_METADATA_KEY.to_owned(),
+                "provider.ruff.binding".to_owned(),
+            ),
+            (
+                RELATION_SEMANTIC_ROLE_METADATA_KEY.to_owned(),
+                "semantic.entity-source".to_owned(),
+            ),
+            (
+                FIELD_ID_METADATA_KEY.to_owned(),
+                "provider.ruff.binding.binding_id".to_owned(),
+            ),
+            (
+                SEMANTIC_ROLE_METADATA_KEY.to_owned(),
+                "semantic.entity.identity".to_owned(),
+            ),
+            ("provider.release".to_owned(), "retained".to_owned()),
+        ]);
+
+        remove_inherited_identity_metadata(&mut metadata);
+
+        assert_eq!(
+            metadata,
+            HashMap::from([("provider.release".to_owned(), "retained".to_owned())])
+        );
+    }
 
     #[derive(Debug)]
     struct FilterProjection {

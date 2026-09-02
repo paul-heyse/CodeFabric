@@ -13,7 +13,11 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 JUSTFILE = ROOT / "justfile"
 MANIFEST = ROOT / "tooling/ci/gate-filter-census.json"
-RECIPE = re.compile(r"^([a-zA-Z0-9_-]+)(?:\s+[^:]*)?:\s*$")
+# A Just declaration can carry parameters before the colon and dependencies
+# after it.  Commands are indented, so anchoring the recipe name at column zero
+# keeps dependency-bearing declarations from being mistaken for the preceding
+# recipe while excluding command bodies.
+RECIPE = re.compile(r"^([a-zA-Z0-9_-]+)(?:\s+[^:]*)?:(?:\s+.*)?$")
 
 
 class GateFilterCensusError(ValueError):

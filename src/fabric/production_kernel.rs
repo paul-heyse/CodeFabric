@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use thiserror::Error;
+use tokio::sync::{OwnedRwLockReadGuard, RwLock as AsyncRwLock};
 
 use super::activation::{ActivationEvent, ActivationEventId, TableVersionSet};
 use super::activation_control_delta::{ActivationControlHorizon, ExactSelectedActivation};
@@ -31,11 +32,13 @@ use super::programmatic_query_backend::{
 use super::programmatic_schema::ProgrammaticRelationId;
 use super::programmatic_workspace::ProgrammaticWorkspaceRuntime;
 use super::proof::{
-    ProofError, ProofTerminalStatus, ReleaseProducerClosureProofInput,
-    ReleaseProducerClosureProofResult, evaluate_release_producer_closure,
+    ProofCandidatePins, ProofError, ProofRelations, ProofTerminalStatus,
+    ReleaseProducerClosureProofInput, ReleaseProducerClosureProofResult,
+    evaluate_release_producer_closure,
 };
 use crate::production_provider_recipe::{
-    ProductionProviderAuthority, ProductionProviderRecipeError, ProductionProviderRuns,
+    ProductionProviderAuthority, ProductionProviderCompositionError, ProductionProviderRecipeError,
+    ProductionProviderRuns, admit_and_compose_production_relations,
     admit_production_provider_relations,
 };
 use crate::production_query_recipe::{
@@ -215,6 +218,25 @@ impl CompiledSemanticRelease {
         )
     }
 
+    /// Execute the complete production provider and release-derived composition transaction.
+    pub(crate) fn admit_and_compose_production_relations(
+        &self,
+        builder: ProgrammaticFabricEpochBuilder,
+        authority: ProductionProviderAuthority,
+        runs: ProductionProviderRuns<'_>,
+    ) -> Result<ReleasedProgrammaticDerivedAnalysisOutcome, ProductionProviderCompositionError>
+    {
+        admit_and_compose_production_relations(
+            self.provider_authority(),
+            self.transformation_authority(),
+            self.proof_authority(),
+            self.query_authority(),
+            builder,
+            authority,
+            runs,
+        )
+    }
+
     /// Compile the eight released query programs against one exact sealed epoch and executed
     /// producer closure.
     ///
@@ -293,6 +315,18 @@ impl CompiledSemanticRelease {
         Ok(ProvedDerivedProducerClosure { execution, proof })
     }
 
+    /// Evaluate the release-owned activation proof program over exact candidate pins.
+    ///
+    /// Expected values, causal-fault program, ownership, and provenance requirements are compiled
+    /// under the non-forgeable proof capability. Operational code supplies only the candidate's
+    /// exact typed pins.
+    pub(crate) fn prove_activation_candidate(
+        &self,
+        pins: ProofCandidatePins,
+    ) -> Result<ProofRelations, ProofError> {
+        super::proof::evaluate_compiled_activation_candidate(self.proof_authority(), pins)
+    }
+
     /// Compose the exact ingress, authorization, and snapshot ports for one compiled query recipe.
     ///
     /// The recipe is a non-forgeable output of [`Self::compile_semantic_query_recipe`]. The caller
@@ -325,6 +359,7 @@ impl CompiledSemanticRelease {
             Arc::new(ingress),
             Arc::new(scope),
             Arc::new(ExactProgrammaticSnapshotProjection::new()),
+            Arc::clone(recipe.program_result_bindings()),
         )?)
     }
 }
@@ -535,6 +570,21 @@ impl LifecycleProjection {
 pub struct LifecycleAuthority {
     projection: ArcSwap<LifecycleProjection>,
     transition: Mutex<()>,
+    semantic_admission: Arc<AsyncRwLock<()>>,
+}
+
+/// Send-safe permit that prevents lifecycle closure during one atomic query acceptance.
+#[derive(Debug)]
+pub(crate) struct SemanticAdmissionPermit {
+    _guard: OwnedRwLockReadGuard<()>,
+    sequence: u64,
+}
+
+impl SemanticAdmissionPermit {
+    #[must_use]
+    pub(crate) const fn sequence(&self) -> u64 {
+        self.sequence
+    }
 }
 
 impl fmt::Debug for LifecycleAuthority {
@@ -562,6 +612,7 @@ impl LifecycleAuthority {
                 failure_code: None,
             }),
             transition: Mutex::new(()),
+            semantic_admission: Arc::new(AsyncRwLock::new(())),
         }
     }
 
@@ -569,6 +620,23 @@ impl LifecycleAuthority {
     #[must_use]
     pub fn observe(&self) -> Arc<LifecycleProjection> {
         self.projection.load_full()
+    }
+
+    /// Acquire the exact Ready generation for one coordinator acceptance.
+    pub(crate) fn try_semantic_admission(
+        &self,
+    ) -> Result<SemanticAdmissionPermit, ProductionLifecycleError> {
+        let guard = Arc::clone(&self.semantic_admission)
+            .try_read_owned()
+            .map_err(|_| ProductionLifecycleError::SemanticAdmissionClosed)?;
+        let projection = self.projection.load_full();
+        if !projection.semantic_admission_open() {
+            return Err(ProductionLifecycleError::SemanticAdmissionClosed);
+        }
+        Ok(SemanticAdmissionPermit {
+            _guard: guard,
+            sequence: projection.sequence(),
+        })
     }
 
     /// Advance exactly one legal edge from the caller's observed phase.
@@ -596,6 +664,15 @@ impl LifecycleAuthority {
         if !expected.allows(next) {
             return Err(ProductionLifecycleError::IllegalTransition { expected, next });
         }
+        let _admission_closure = if current.semantic_admission_open() && next != current.phase {
+            Some(
+                self.semantic_admission
+                    .try_write()
+                    .map_err(|_| ProductionLifecycleError::SemanticAdmissionActive)?,
+            )
+        } else {
+            None
+        };
         let projection = Arc::new(LifecycleProjection {
             phase: next,
             sequence: current
@@ -625,6 +702,15 @@ impl LifecycleAuthority {
         if code.is_empty() {
             return Err(ProductionLifecycleError::EmptyFailureCode);
         }
+        let _admission_closure = if current.semantic_admission_open() {
+            Some(
+                self.semantic_admission
+                    .try_write()
+                    .map_err(|_| ProductionLifecycleError::SemanticAdmissionActive)?,
+            )
+        } else {
+            None
+        };
         let projection = Arc::new(LifecycleProjection {
             phase: ProductionLifecyclePhase::FailedClosed,
             sequence: current
@@ -652,6 +738,15 @@ impl LifecycleAuthority {
         if current.phase == ProductionLifecyclePhase::Draining {
             return Ok(current);
         }
+        let _admission_closure = if current.semantic_admission_open() {
+            Some(
+                self.semantic_admission
+                    .try_write()
+                    .map_err(|_| ProductionLifecycleError::SemanticAdmissionActive)?,
+            )
+        } else {
+            None
+        };
         let projection = Arc::new(LifecycleProjection {
             phase: ProductionLifecyclePhase::Draining,
             sequence: current
@@ -760,6 +855,10 @@ pub struct ActiveWorkspace {
     #[cfg(test)]
     runtime: Option<Arc<ProgrammaticWorkspaceRuntime>>,
     selection: SelectedEpochRecord,
+    #[cfg(not(test))]
+    query_ports: Arc<ProgrammaticSemanticQueryPorts>,
+    #[cfg(test)]
+    query_ports: Option<Arc<ProgrammaticSemanticQueryPorts>>,
 }
 
 impl fmt::Debug for ActiveWorkspace {
@@ -782,6 +881,7 @@ impl ActiveWorkspace {
     pub fn try_new(
         selection: SelectedEpochRecord,
         runtime: Arc<ProgrammaticWorkspaceRuntime>,
+        query_ports: Arc<ProgrammaticSemanticQueryPorts>,
     ) -> Result<Self, ActiveWorkspaceError> {
         let authority = runtime.query_authority();
         if runtime.workspace_id() != selection.workspace_id()
@@ -799,6 +899,10 @@ impl ActiveWorkspace {
             #[cfg(test)]
             runtime: Some(runtime),
             selection,
+            #[cfg(not(test))]
+            query_ports,
+            #[cfg(test)]
+            query_ports: Some(query_ports),
         })
     }
 
@@ -807,6 +911,7 @@ impl ActiveWorkspace {
         Self {
             runtime: None,
             selection,
+            query_ports: None,
         }
     }
 
@@ -827,6 +932,21 @@ impl ActiveWorkspace {
     #[must_use]
     pub const fn selection(&self) -> &SelectedEpochRecord {
         &self.selection
+    }
+
+    /// Exact release-owned query ports installed atomically with this active workspace.
+    #[must_use]
+    pub fn query_ports(&self) -> &Arc<ProgrammaticSemanticQueryPorts> {
+        #[cfg(not(test))]
+        {
+            &self.query_ports
+        }
+        #[cfg(test)]
+        {
+            self.query_ports
+                .as_ref()
+                .expect("selection-only ActiveWorkspace probe has no query ports")
+        }
     }
 }
 
@@ -1065,6 +1185,10 @@ pub enum ProductionLifecycleError {
     SequenceExhausted,
     #[error("lifecycle is already stopped")]
     AlreadyStopped,
+    #[error("semantic admission is closed")]
+    SemanticAdmissionClosed,
+    #[error("semantic admission is active")]
+    SemanticAdmissionActive,
     #[error("failed-closed lifecycle code is empty")]
     EmptyFailureCode,
     #[error("stale lifecycle phase: expected {expected:?}, observed {observed:?}")]
@@ -1159,6 +1283,53 @@ mod tests {
         assert_eq!(
             lifecycle.finish_stopped().unwrap().phase(),
             ProductionLifecyclePhase::Stopped
+        );
+    }
+
+    #[test]
+    fn wp45_ready_admission_linearizes_acceptance_before_drain() {
+        let lifecycle = LifecycleAuthority::new();
+        for (expected, next) in [
+            (
+                ProductionLifecyclePhase::Configured,
+                ProductionLifecyclePhase::DaemonLeased,
+            ),
+            (
+                ProductionLifecyclePhase::DaemonLeased,
+                ProductionLifecyclePhase::WriterFenced,
+            ),
+            (
+                ProductionLifecyclePhase::WriterFenced,
+                ProductionLifecyclePhase::EndpointsBoundBootstrapping,
+            ),
+            (
+                ProductionLifecyclePhase::EndpointsBoundBootstrapping,
+                ProductionLifecyclePhase::SoleTargetAuthorityObserved,
+            ),
+            (
+                ProductionLifecyclePhase::SoleTargetAuthorityObserved,
+                ProductionLifecyclePhase::SoleTargetAuthorityCommitted,
+            ),
+            (
+                ProductionLifecyclePhase::SoleTargetAuthorityCommitted,
+                ProductionLifecyclePhase::Ready,
+            ),
+        ] {
+            lifecycle.advance(expected, next).unwrap();
+        }
+
+        let admission = lifecycle.try_semantic_admission().unwrap();
+        assert_eq!(admission.sequence(), lifecycle.observe().sequence());
+        assert_eq!(
+            lifecycle.begin_draining().unwrap_err(),
+            ProductionLifecycleError::SemanticAdmissionActive
+        );
+        assert_eq!(lifecycle.observe().phase(), ProductionLifecyclePhase::Ready);
+
+        drop(admission);
+        assert_eq!(
+            lifecycle.begin_draining().unwrap().phase(),
+            ProductionLifecyclePhase::Draining
         );
     }
 

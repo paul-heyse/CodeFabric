@@ -1,761 +1,985 @@
-"""Production MCP protocol tests against the generated asynchronous gRPC stubs."""
+"""FastMCP 4 presentation-cell behavior over an application-owned daemon port."""
 
 from __future__ import annotations
 
 import asyncio
 import base64
-import json
-import secrets
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
-import grpc
+import fastmcp
 import pytest
 from fastmcp import Client
-from jsonschema import Draft202012Validator
-from mcp.types import BlobResourceContents, TextResourceContents
-
-from codefabric_cpg_mcp.contracts.json import JsonValue, canonicalize_value, checksum
-from codefabric_cpg_mcp.contracts.rpc_features import CpgdFeature
-from codefabric_cpg_mcp.contracts.wire_models import WireSchemaName, wire_schema
-from codefabric_cpg_mcp.daemon.arrow_resources import (
-    ARROW_RELEASE,
-    ARROW_RESULT_RESOURCE_FORMAT,
-    ARROW_STREAM_MEDIA_TYPE,
-    PUBLISHED_RESULT_FORMAT,
-    framed_content_checksum,
+from fastmcp.exceptions import ToolError
+from mcp import MCPError
+from mcp.types import (
+    BlobResourceContents,
+    ElicitResult,
+    InputRequiredResult,
+    ResourceTemplateReference,
 )
-from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2 as query_pb
-from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2_grpc as query_grpc
-from codefabric_cpg_mcp.server import mcp
-from codefabric_cpg_mcp.settings import process_settings
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from pydantic import SecretStr
+
+import codefabric_cpg_mcp.server as server_module
+from codefabric_cpg_mcp.contracts.json import canonicalize_value, checksum
+from codefabric_cpg_mcp.daemon import (
+    AcceptedQuery,
+    AuthorityGeneration,
+    CancellationResult,
+    ChallengeAnswer,
+    DaemonProtocolError,
+    DaemonQueryResult,
+    DaemonStatus,
+    InputChallenge,
+    InputRequirement,
+    PublicDaemonStatus,
+    QueryPreparation,
+    ReferenceCompletion,
+    ReferenceCompletionCandidate,
+    ReferenceDocument,
+    ReleaseResult,
+    ResourceHandle,
+    ResourceReadLimits,
+    StringChallengeConstraints,
+)
+from codefabric_cpg_mcp.server import (
+    MODERN_PROTOCOL_VERSION,
+    REFERENCE_RESOURCE_TEMPLATE,
+    RESULT_RESOURCE_TEMPLATE,
+    create_server,
+)
+from codefabric_cpg_mcp.settings import Settings
 
 
-def _snapshot() -> dict[str, Any]:
-    return {
-        "snapshot_id": "snapshot:00000000000000000000000000000000",
-        "workspace_id": "workspace-main",
-        "repository_id": None,
-        "worktree_id": None,
-        "source_generation": 1,
-        "source_inventory_digest": "b3:" + "1" * 64,
-        "durable_base_publication": "publication:00000000000000000000000000000000",
-        "base_table_version_digest": "b3:" + "2" * 64,
-        "overlay_generation": 0,
-        "overlay_checksum": "b3:" + "3" * 64,
-        "analysis_context_set_id": "context-set:00000000000000000000000000000000",
-        "analysis_context_ids": ["context:source"],
-        "freshness_state": "UNAVAILABLE",
-        "source_trust_state": "CURRENT_BYTES_VERIFIED",
-        "event_stream_health": "HEALTHY",
-        "git_acceleration_status": "NOT_REQUIRED",
-        "git_operation_summary": None,
-        "pending_update_count": 0,
-        "ontology_version": "1.3",
-        "schema_bundle_version": "1.0",
-        "provider_bundle_version": "1.0",
-        "derivation_bundle_version": "1.0",
-        "query_language_version": "1.3",
-        "capability_summaries": [],
-        "diagnostic_references": [],
-    }
+def _settings() -> Settings:
+    return Settings(
+        format="codefabric.adapter-launch.v1",
+        query_socket=Path("/tmp/codefabric-test-query.sock"),
+        launch_grant_hex=SecretStr("ab" * 32),
+        adapter_program=Path("/usr/bin/python3"),
+        adapter_arguments=("-m", "codefabric_cpg_mcp"),
+        daemon_generation=7,
+        supervisor_generation=11,
+        session_expires_at_unix_ms=int(time.time() * 1000) + 120_000,
+        maximum_request_state_ttl_seconds=1,
+        query_timeout_seconds=5.0,
+        readiness_timeout_seconds=1.0,
+        maximum_resource_chunk_bytes=64 * 1024,
+    )
 
 
-class ProductionStubDaemon:
-    """Deterministic protocol peer implemented through the generated service base."""
+def _authority() -> AuthorityGeneration:
+    return AuthorityGeneration(
+        session_id="session:one",
+        session_generation=1,
+        daemon_generation=7,
+        supervisor_generation=11,
+        policy_generation=13,
+        revocation_generation=17,
+    )
 
-    def __init__(self) -> None:
-        self.semantic_execution_state = "NOT_EXECUTED_DEPENDENCY"
-        self.availability_state = "NOT_APPLICABLE"
-        self.completeness_state = "NOT_APPLICABLE"
-        self.freshness_state = "UNAVAILABLE"
-        self.limit_state = "HARD_LIMIT_REJECTED"
-        self.query_status_state = "NOT_EXECUTED_DEPENDENCY"
-        self.truncated = True
-        self.notices = ["daemon-authored notice"]
-        self.fail_terminal = False
-        self.revoked = False
-        self.validation_errors: list[bytes] = []
-        self.read_result_calls = 0
-        self.release_result_calls = 0
-        self.start_requests: list[Any] = []
-        self.payload = self._payload()
-        self.arrow_mode = False
-        self.arrow_released = False
-        self.arrow_descriptor = b""
-        self.arrow_descriptor_checksum = ""
-        self.arrow_manifest = b""
-        self.arrow_relation = b""
-        self.arrow_resources: dict[str, tuple[bytes, str, str]] = {}
 
-    def _payload(self) -> bytes:
-        return canonicalize_value(
-            {
-                "availability_state": self.availability_state,
-                "completeness_state": self.completeness_state,
-                "execution_state": self.semantic_execution_state,
-                "freshness_state": self.freshness_state,
-                "limit_state": self.limit_state,
-                "query_results": [{"query_id": "q-dependency"}],
-                "snapshot": _snapshot(),
-            }
+class FakeDaemonPort:
+    """Independent typed presentation double; no generated protobuf crosses this seam."""
+
+    def __init__(
+        self,
+        *,
+        challenge: bool = False,
+        block_watch: bool = False,
+        failed_reads: frozenset[str] = frozenset(),
+        status_error: Exception | None = None,
+    ) -> None:
+        self.settings = _settings()
+        self.authority = _authority()
+        self.challenge = challenge
+        self.challenge_issued = False
+        self.block_watch = block_watch
+        self.watch_started = asyncio.Event()
+        self.watch_timeouts: list[float | None] = []
+        self.connect_calls = 0
+        self.close_calls = 0
+        self.status_calls = 0
+        self.reference_calls = 0
+        self.completion_calls = 0
+        self.validation_calls = 0
+        self.start_calls: list[tuple[str, dict[str, Any]]] = []
+        self.continue_calls: list[tuple[str, tuple[ChallengeAnswer, ...]]] = []
+        self.read_calls: list[tuple[str, object, int, int, str]] = []
+        self.cancel_calls: list[tuple[str, str, str]] = []
+        self.release_calls: list[tuple[str, str, str]] = []
+        self.manifest = canonicalize_value({"format": "codefabric.result-manifest.v2"})
+        self.pages = (
+            canonicalize_value({"page": 0, "rows": ["a"]}),
+            canonicalize_value({"page": 1, "rows": ["b"]}),
+        )
+        self.failed_reads = failed_reads
+        self.status_error = status_error
+        self.reference_content = canonicalize_value({"kind": "guide", "version": "2.3.0"})
+
+    def current_settings(self) -> Settings:
+        return self.settings
+
+    def current_resource_limits(self) -> ResourceReadLimits:
+        return ResourceReadLimits(
+            maximum_chunk_bytes=self.settings.maximum_resource_chunk_bytes,
+            maximum_resource_bytes=16 * 1024 * 1024,
         )
 
-    def configure_arrow_result(self) -> None:
-        """Switch this generated-stub peer to the Arrow-native result branch."""
+    async def connect(self, *, correlation_id: str = "adapter-connect") -> None:
+        assert correlation_id == "adapter-connect"
+        self.connect_calls += 1
 
-        def digest(seed: int) -> str:
-            return f"b3:{seed:02x}" + f"{seed:02x}" * 31
+    async def close(self) -> None:
+        self.close_calls += 1
 
-        self.arrow_mode = True
-        self.arrow_released = False
-        self.semantic_execution_state = "COMPLETE"
-        self.availability_state = "AVAILABLE"
-        self.completeness_state = "COMPLETE"
-        self.freshness_state = "CURRENT"
-        self.limit_state = "NOT_APPLIED"
-        self.query_status_state = "COMPLETE"
-        self.truncated = False
-        self.arrow_relation = b"ARROW-IPC-STREAM\x00\xffdaemon-owned-columnar-bytes"
-        relation_checksum = framed_content_checksum(b"arrow-ipc-stream.v1", self.arrow_relation)
-        manifest: JsonValue = {
-            "format": ARROW_RESULT_RESOURCE_FORMAT,
-            "arrow_release": ARROW_RELEASE,
-            "package_id": digest(3),
-            "epoch_id": "14" * 16,
-            "query_execution": digest(4),
-            "completion_state": "complete",
-            "complete": True,
-            "truncated": False,
-            "unknown": False,
-            "relation_count": 1,
-            "total_rows": 3,
-            "total_batches": 1,
-            "total_schema_bytes": 42,
-            "total_ipc_bytes": len(self.arrow_relation),
-            "subresources": [
-                {
-                    "relation_id": "public.people",
-                    "resource_id": digest(7),
-                    "media_type": ARROW_STREAM_MEDIA_TYPE,
-                    "schema_checksum": digest(8),
-                    "schema_byte_length": 42,
-                    "content_checksum": relation_checksum,
-                    "row_count": 3,
-                    "batch_count": 1,
-                    "byte_length": len(self.arrow_relation),
-                    "completion_state": "complete",
-                    "requested_units": 3,
-                    "completed_units": 3,
-                    "remainder_units": 0,
-                    "complete": True,
-                    "truncated": False,
-                    "unknown": False,
-                }
-            ],
-        }
-        self.arrow_manifest = canonicalize_value(manifest)
-        manifest_checksum = framed_content_checksum(b"result-manifest.v1", self.arrow_manifest)
-        descriptor: JsonValue = {
-            "format": PUBLISHED_RESULT_FORMAT,
-            "artifact_id": digest(1),
-            "package_id": digest(2),
-            "content_package_id": digest(3),
-            "owner": {"workspace_id": "01" * 16, "agent_id": "02" * 16},
-            "epoch_id": "14" * 16,
-            "query_execution": digest(4),
-            "source_manifest_checksum": manifest_checksum,
-            "source_manifest_byte_length": len(self.arrow_manifest),
-            "completion": "complete",
-            "total_rows": 3,
-            "total_batches": 1,
-            "total_schema_bytes": 42,
-            "total_ipc_bytes": len(self.arrow_relation),
-            "lease_expires_at_unix_ms": int((time.time() + 60) * 1000),
-            "manifest": {
-                "authorization_resource_id": digest(5),
-                "content_resource_id": digest(6),
-                "media_type": "application/json",
-                "content_checksum": manifest_checksum,
-                "byte_length": len(self.arrow_manifest),
-            },
-            "relations": [
-                {
-                    "relation_id": "public.people",
-                    "authorization_resource_id": digest(9),
-                    "content_resource_id": digest(7),
-                    "media_type": ARROW_STREAM_MEDIA_TYPE,
-                    "schema_checksum": digest(8),
-                    "schema_byte_length": 42,
-                    "content_checksum": relation_checksum,
-                    "row_count": 3,
-                    "batch_count": 1,
-                    "byte_length": len(self.arrow_relation),
-                    "coverage": {
-                        "state": "complete",
-                        "requested_units": 3,
-                        "completed_units": 3,
-                        "remainder_units": 0,
-                        "unknown_cause": None,
-                    },
-                }
-            ],
-        }
-        self.arrow_descriptor = canonicalize_value(descriptor)
-        self.arrow_descriptor_checksum = checksum(self.arrow_descriptor)
-        self.arrow_resources = {
-            digest(5): (self.arrow_manifest, manifest_checksum, "application/json"),
-            digest(9): (self.arrow_relation, relation_checksum, ARROW_STREAM_MEDIA_TYPE),
-        }
-
-    @staticmethod
-    def _event_header(sequence: int) -> Any:
-        query_id = "query:test"
-        return query_pb.QueryEventHeader(
-            daemon_query_id=query_id,
-            sequence=sequence,
-            event_checksum=checksum(f"{query_id}:{sequence}".encode()),
-            event_at_unix_ms=int(time.time() * 1000),
-        )
-
-    async def Handshake(self, request: Any, _context: Any) -> Any:  # noqa: N802
-        assert request.required_feature_bits == int(CpgdFeature.REQUIRED)
-        assert request.host_capabilities.profile_digest
-        return query_pb.HandshakeResponse(
-            daemon_instance_id="daemon:test",
-            daemon_version="0.1.0",
-            rust_build="test",
-            negotiated_rpc_version="1.0",
-            negotiated_semantic_query_version="1.3",
-            negotiated_feature_bits=request.required_feature_bits,
-            negotiated_compression=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
-            effective_limits=query_pb.EffectiveLimitsProfile(
-                maximum_control_message_bytes=4 * 1024 * 1024,
-                maximum_payload_chunk_bytes=1024 * 1024,
-                maximum_inline_response_bytes=1024 * 1024,
-                maximum_concurrent_queries=4,
-                query_orphan_replay_seconds=60,
-                profile_digest="b3:" + "4" * 64,
-            ),
-            readiness=query_pb.ReadinessSummary(
-                readiness=query_pb.WORKSPACE_READINESS_READY,
-                active_snapshot_id=_snapshot()["snapshot_id"],
-                supported_language_codes=[10, 20],
-                supported_query_forms=["find code entities"],
+    async def status(self, *, correlation_id: str) -> DaemonStatus:
+        assert correlation_id
+        self.status_calls += 1
+        if self.status_error is not None:
+            raise self.status_error
+        return DaemonStatus(
+            authority=self.authority,
+            lifecycle="READY",
+            lifecycle_sequence=3,
+            active_epoch_id="epoch:one",
+            running_queries=0,
+            queued_queries=0,
+            public_status=PublicDaemonStatus(
+                lifecycle="READY",
+                lifecycle_sequence=3,
+                active_epoch_id="epoch:one",
+                running_queries=0,
+                queued_queries=0,
+                accepted_queries=1,
+                reserved_result_bytes=1024,
+                reserved_result_pages=1,
             ),
         )
 
-    async def GetStatus(self, request: Any, _context: Any) -> Any:  # noqa: N802
-        status = canonicalize_value(
-            {
-                "agent_instance_id": request.agent_instance_id,
-                "capability_statuses": [],
-                "freshness_state": "UNAVAILABLE",
-                "notices": ["daemon-status-notice"],
-                "ready": True,
-                "service_limits": {
-                    "maximum_concurrent_queries": 4,
-                    "maximum_control_message_bytes": 4 * 1024 * 1024,
-                    "maximum_payload_chunk_bytes": 1024 * 1024,
-                },
-                "snapshot": _snapshot(),
-                "supported_languages": ["python", "rust"],
-                "supported_request_forms": ["find code entities"],
-                "versions": {"daemon": "0.1.0", "rpc": "1.0", "semantic_query": "1.3"},
-                "workspace_id": request.workspace_id,
-            }
-        )
-        return query_pb.StatusResponse(
-            workspace_id=request.workspace_id,
-            readiness=query_pb.WORKSPACE_READINESS_READY,
-            canonical_public_status_json=status,
-            status_checksum=checksum(status),
-            observed_at_unix_ms=int(time.time() * 1000),
-        )
-
-    async def ValidateQuery(self, request: Any, _context: Any) -> Any:  # noqa: N802
-        return query_pb.ValidateQueryResponse(
-            valid=not self.validation_errors,
-            canonical_normalized_request_json=request.canonical_request_json,
-            normalized_request_checksum=request.request_checksum,
-            effective_semantic_request_id="semantic:test",
-            provisional_snapshot_checks=["workspace-authorized"],
-            canonical_error_records_json=self.validation_errors,
-            cost_class="bounded-test",
+    async def reference(
+        self,
+        kind: str,
+        version_value: str | None,
+        *,
+        correlation_id: str,
+    ) -> ReferenceDocument:
+        assert kind in {
+            "capability",
+            "guide",
+            "recipe",
+            "request_schema",
+            "response_schema",
+            "snapshot",
+        }
+        assert correlation_id
+        self.reference_calls += 1
+        return ReferenceDocument(
+            authority=self.authority,
+            reference_id=f"reference:{self.reference_calls}",
+            resource=ResourceHandle(
+                kind="reference",
+                public_handle=f"public:reference:{self.reference_calls}",
+                media_type="application/json",
+                byte_length=len(self.reference_content),
+                content_checksum=checksum(self.reference_content),
+                expires_at_unix_ms=4_000_000_000_000,
+                authority=self.authority,
+            ),
         )
 
-    async def StartQuery(self, request: Any, _context: Any) -> Any:  # noqa: N802
-        self.start_requests.append(request)
-        return query_pb.StartQueryResponse(
-            daemon_query_id="query:test",
-            resume_token=b"resume-token",
+    async def complete_reference(
+        self,
+        *,
+        variable: str,
+        prefix: str,
+        kind: str | None,
+        selector: str | None,
+        maximum_candidates: int,
+        correlation_id: str,
+    ) -> ReferenceCompletion:
+        assert variable in {"kind", "released_version"}
+        assert selector is None
+        assert maximum_candidates == 100
+        assert correlation_id
+        self.completion_calls += 1
+        candidate = "request_schema" if variable == "kind" else "2.3.0"
+        assert candidate.startswith(prefix.replace("-", "_"))
+        return ReferenceCompletion(
+            authority=self.authority,
+            candidates=(
+                ReferenceCompletionCandidate(
+                    value=candidate,
+                    presentation_key=f"reference.{candidate}",
+                ),
+            ),
+            total=1,
+            has_more=False,
+        )
+
+    async def validate(self, value: object, *, correlation_id: str) -> QueryPreparation:
+        assert correlation_id
+        self.validation_calls += 1
+        request = value.request  # type: ignore[attr-defined]
+        return QueryPreparation(
+            authority=self.authority,
+            valid=True,
+            semantic_request_id="semantic:validated",
+            normalized_request=request,
+            cost_class="bounded",
+            estimated_result_bytes=1024,
+            estimated_result_pages=1,
+        )
+
+    def _accepted(self) -> AcceptedQuery:
+        return AcceptedQuery(
+            authority=self.authority,
+            daemon_query_id="query:one",
+            semantic_request_id="semantic:one",
+            operation_fingerprint="operation:one",
             accepted_at_unix_ms=int(time.time() * 1000),
-            query_execution_state=query_pb.QUERY_EXECUTION_STATE_ACCEPTED,
-            queue_class="interactive",
-            negotiated_request_version="1.3",
-            negotiated_response_version="1.3",
-            effective_semantic_request_id="semantic:test",
-            cancel_token=b"cancel-token",
+            observation_expires_at_unix_ms=4_000_000_000_000,
+            state="QUEUED",
+            idempotent_replay=False,
         )
 
-    async def StreamQuery(self, _request: Any, _context: Any) -> AsyncIterator[Any]:  # noqa: N802
-        if self.fail_terminal:
-            record = canonicalize_value(
-                {
-                    "code": 410,
-                    "detail": "dependency unavailable",
-                    "name": "FAILED_DEPENDENCY",
-                    "path": ["queries", "q-dependency"],
-                    "phase": "EXECUTION",
-                }
+    async def start_query(
+        self,
+        value: object,
+        *,
+        correlation_id: str,
+        **identity: Any,
+    ) -> AcceptedQuery | InputChallenge:
+        self.start_calls.append((correlation_id, identity))
+        if self.challenge and not self.challenge_issued:
+            self.challenge_issued = True
+            now_ms = int(time.time() * 1000)
+            return InputChallenge(
+                authority=self.authority,
+                semantic_request_id="semantic:guard",
+                challenge_id="challenge:one",
+                round=1,
+                remaining_rounds=1,
+                issued_at_unix_ms=now_ms,
+                expires_at_unix_ms=now_ms + 60_000,
+                maximum_answer_bytes=4096,
+                explanation_code="required_input_missing",
+                requirements=(
+                    InputRequirement(
+                        semantic_field_id="traversal_direction",
+                        input_kind="string",
+                        presentation_key="query.traversal_direction",
+                        description_key="query.traversal_direction.description",
+                        required=True,
+                        constraints=StringChallengeConstraints(
+                            minimum_length=1,
+                            maximum_length=16,
+                            format="identifier",
+                        ),
+                    ),
+                ),
+                daemon_continuation=b"daemon-continuation-one",
             )
-            yield query_pb.QueryEvent(
-                terminal=query_pb.TerminalEvent(
-                    header=self._event_header(1),
-                    execution_state=query_pb.QUERY_EXECUTION_STATE_FAILED,
-                    canonical_error_record_json=record,
-                    cleanup_state="COMPLETE",
-                    semantic_execution_state="FAILED",
-                    completeness_state="UNAVAILABLE",
+        return self._accepted()
+
+    async def continue_query(
+        self,
+        challenge: InputChallenge,
+        answers: tuple[ChallengeAnswer, ...],
+        *,
+        correlation_id: str,
+    ) -> AcceptedQuery:
+        assert challenge.challenge_id == "challenge:one"
+        self.continue_calls.append((correlation_id, answers))
+        return self._accepted()
+
+    async def watch_query(
+        self,
+        accepted: AcceptedQuery,
+        *,
+        correlation_id: str,
+        progress: Any = None,
+        timeout_seconds: float | None = None,
+    ) -> DaemonQueryResult:
+        assert accepted.daemon_query_id == "query:one"
+        assert correlation_id
+        assert timeout_seconds == self.settings.query_timeout_seconds
+        self.watch_timeouts.append(timeout_seconds)
+        self.watch_started.set()
+        if self.block_watch:
+            await asyncio.Event().wait()
+        if progress is not None:
+            await progress(1, 1, "complete")
+        return DaemonQueryResult(
+            authority=self.authority,
+            semantic_request_id="semantic:one",
+            daemon_query_id="query:one",
+            execution_state="SUCCEEDED",
+            epoch_id="epoch:one",
+            package_id="package:one",
+            manifest=ResourceHandle(
+                kind="result_manifest",
+                public_handle="public:manifest:one",
+                package_id="package:one",
+                media_type="application/json",
+                byte_length=len(self.manifest),
+                content_checksum=checksum(self.manifest),
+                expires_at_unix_ms=4_000_000_000_000,
+                authority=self.authority,
+            ),
+            pages=tuple(
+                ResourceHandle(
+                    kind="result_page",
+                    public_handle=f"public:page:{ordinal}",
+                    package_id="package:one",
+                    page_ordinal=ordinal,
+                    media_type="application/vnd.apache.arrow.stream",
+                    byte_length=len(content),
+                    content_checksum=checksum(content),
+                    expires_at_unix_ms=4_000_000_000_000,
+                    authority=self.authority,
                 )
-            )
-            return
-
-        self.payload = self._payload()
-        snapshot = canonicalize_value(_snapshot())
-        artifact_checksum = (
-            self.arrow_descriptor_checksum if self.arrow_mode else checksum(self.payload)
-        )
-        artifact_id = "b3:" + "01" * 32 if self.arrow_mode else "artifact:test"
-        lease_expiry = (
-            json.loads(self.arrow_descriptor)["lease_expires_at_unix_ms"]
-            if self.arrow_mode
-            else int((time.time() + 60) * 1000)
-        )
-        yield query_pb.QueryEvent(
-            snapshot_pinned=query_pb.SnapshotPinnedEvent(
-                header=self._event_header(1),
-                canonical_public_snapshot_metadata_json=snapshot,
-                metadata_checksum=checksum(snapshot),
-            )
-        )
-        yield query_pb.QueryEvent(
-            artifact_ready=query_pb.ArtifactReadyEvent(
-                header=self._event_header(2),
-                artifact_id=artifact_id,
-                artifact_checksum=artifact_checksum,
-                content_type=(
-                    "application/vnd.codefabric.arrow-result-package+json"
-                    if self.arrow_mode
-                    else "application/json"
-                ),
-                encoding=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
-                lease_expires_at_unix_ms=lease_expiry,
-                lease_token=("ab" * 32 if self.arrow_mode else "lease-token"),
-                canonical_result_descriptor_json=(
-                    self.arrow_descriptor if self.arrow_mode else b""
-                ),
-                result_descriptor_checksum=(
-                    self.arrow_descriptor_checksum if self.arrow_mode else ""
-                ),
-                result_contract_version=(PUBLISHED_RESULT_FORMAT if self.arrow_mode else ""),
-                arrow_release=(ARROW_RELEASE if self.arrow_mode else ""),
-            )
-        )
-        yield query_pb.QueryEvent(
-            terminal=query_pb.TerminalEvent(
-                header=self._event_header(3),
-                execution_state=query_pb.QUERY_EXECUTION_STATE_SUCCEEDED,
-                availability_state=self.availability_state,
-                freshness_state=self.freshness_state,
-                limit_state=self.limit_state,
-                dependency_state="FAILED_DEPENDENCY",
-                canonical_response_checksum=artifact_checksum,
-                artifact_id=artifact_id,
-                result_row_count=3 if self.arrow_mode else 0,
-                result_byte_count=(
-                    len(self.arrow_relation) if self.arrow_mode else len(self.payload)
-                ),
-                cleanup_state="RETAINED_BY_LEASE",
-                semantic_execution_state=self.semantic_execution_state,
-                completeness_state=self.completeness_state,
-                truncated=self.truncated,
-                query_statuses=[
-                    query_pb.QueryStatusSummary(
-                        query_id="q-dependency",
-                        execution_state=self.query_status_state,
-                        notices=["query-status-notice"],
-                    )
-                ],
-                notices=self.notices,
-            )
+                for ordinal, content in enumerate(self.pages)
+            ),
+            total_rows=2,
+            total_pages=len(self.pages),
+            total_bytes=len(self.manifest) + sum(map(len, self.pages)),
+            notices=(),
         )
 
-    async def AttachQuery(self, request: Any, context: Any) -> AsyncIterator[Any]:  # noqa: N802
-        del request
-        await context.abort(grpc.StatusCode.UNIMPLEMENTED, "attach unused by adapter test")
-        if False:  # pragma: no cover - marks this generated RPC as a stream implementation.
-            yield query_pb.QueryEvent()
+    async def read_resource(
+        self,
+        public_handle: str,
+        selector: object,
+        *,
+        offset: int,
+        maximum_bytes: int,
+        correlation_id: str,
+    ) -> bytes:
+        self.read_calls.append((public_handle, selector, offset, maximum_bytes, correlation_id))
+        assert offset == 0
+        assert maximum_bytes == self.settings.maximum_resource_chunk_bytes
+        if public_handle in self.failed_reads:
+            raise DaemonProtocolError("injected incomplete read")
+        if public_handle.startswith("public:reference"):
+            return self.reference_content
+        if public_handle.startswith("public:page:"):
+            return self.pages[int(public_handle.rsplit(":", 1)[1])]
+        return self.manifest
 
-    async def CancelQuery(self, request: Any, _context: Any) -> Any:  # noqa: N802
-        return query_pb.CancelQueryResponse(
-            daemon_query_id=request.daemon_query_id,
-            state=query_pb.CANCELLATION_STATE_CANCELLED,
-            acknowledged_at_unix_ms=int(time.time() * 1000),
+    async def cancel_query(
+        self,
+        daemon_query_id: str,
+        *,
+        cancellation_id: str,
+        correlation_id: str,
+        timeout_seconds: float = 2.0,
+    ) -> CancellationResult:
+        assert timeout_seconds == self.settings.cancellation_cleanup_timeout_seconds
+        self.cancel_calls.append((daemon_query_id, cancellation_id, correlation_id))
+        return CancellationResult(
+            authority=self.authority,
+            cancellation_id=cancellation_id,
+            acknowledgement="accepted",
+            idempotent_replay=False,
         )
 
-    async def ReadResult(self, request: Any, context: Any) -> AsyncIterator[Any]:  # noqa: N802
-        self.read_result_calls += 1
-        if self.revoked:
-            await context.abort(grpc.StatusCode.NOT_FOUND, "lease revoked")
-        if request.authorization_resource_id:
-            if (
-                request.artifact_id != "b3:" + "01" * 32
-                or request.lease_token != "ab" * 32
-                or request.owner.workspace_id != "01" * 16
-                or request.owner.agent_id != "02" * 16
-                or request.authorization_resource_id not in self.arrow_resources
-                or self.arrow_released
-            ):
-                await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Arrow access differs")
-            resource, content_checksum, content_type = self.arrow_resources[
-                request.authorization_resource_id
-            ]
-            payload = resource[request.offset : request.offset + request.maximum_bytes]
-            next_offset = request.offset + len(payload)
-            yield query_pb.ResultChunk(
-                artifact_id=request.artifact_id,
-                offset=request.offset,
-                uncompressed_length=len(payload),
-                payload=payload,
-                payload_checksum=checksum(payload),
-                artifact_checksum=self.arrow_descriptor_checksum,
-                content_type=content_type,
-                encoding=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
-                final_chunk=next_offset == len(resource),
-                lease_expires_at_unix_ms=int((time.time() + 60) * 1000),
-                authorization_resource_id=request.authorization_resource_id,
-                next_offset=next_offset,
-                total_length=len(resource),
-                content_checksum=content_checksum,
-            )
-            return
-        payload = self.payload[request.offset : request.offset + request.maximum_bytes]
-        yield query_pb.ResultChunk(
-            artifact_id=request.artifact_id,
-            offset=request.offset,
-            uncompressed_length=len(payload),
-            payload=payload,
-            payload_checksum=checksum(payload),
-            artifact_checksum=checksum(self.payload),
-            content_type="application/json",
-            encoding=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
-            final_chunk=request.offset + len(payload) == len(self.payload),
-            lease_expires_at_unix_ms=int((time.time() + 60) * 1000),
-            next_offset=request.offset + len(payload),
-            total_length=len(self.payload),
-            content_checksum=checksum(self.payload),
+    async def release_resource(
+        self,
+        public_handle: str,
+        *,
+        release_id: str,
+        correlation_id: str,
+        timeout_seconds: float = 2.0,
+    ) -> ReleaseResult:
+        assert timeout_seconds == self.settings.cancellation_cleanup_timeout_seconds
+        self.release_calls.append((public_handle, release_id, correlation_id))
+        return ReleaseResult(
+            authority=self.authority,
+            release_id=release_id,
+            state="released",
+            idempotent_replay=False,
         )
-
-    async def ReleaseResult(self, request: Any, _context: Any) -> Any:  # noqa: N802
-        self.release_result_calls += 1
-        if request.HasField("owner"):
-            state = "already_released" if self.arrow_released else "released"
-            self.arrow_released = True
-            return query_pb.ReleaseResultResponse(
-                artifact_id=request.artifact_id,
-                released=True,
-                release_state=state,
-            )
-        return query_pb.ReleaseResultResponse(
-            artifact_id=request.artifact_id,
-            released=True,
-            release_state="released",
-        )
-
-
-class ReconnectingProductionStubDaemon(ProductionStubDaemon):
-    """Drop one live stream and require re-handshake plus cursor-bound attachment."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.handshake_calls = 0
-        self.attach_requests: list[Any] = []
-
-    async def Handshake(self, request: Any, _context: Any) -> Any:  # noqa: N802
-        self.handshake_calls += 1
-        return await super().Handshake(request, _context)
-
-    async def StreamQuery(self, _request: Any, _context: Any) -> AsyncIterator[Any]:  # noqa: N802
-        async for event in super().StreamQuery(_request, _context):
-            yield event
-            await _context.abort(grpc.StatusCode.UNAVAILABLE, "injected transport loss")
-
-    async def AttachQuery(self, request: Any, context: Any) -> AsyncIterator[Any]:  # noqa: N802
-        self.attach_requests.append(request)
-        async for event in super().StreamQuery(request, context):
-            variant = event.WhichOneof("event")
-            assert variant is not None
-            if getattr(event, variant).header.sequence > request.after_sequence:
-                yield event
-
-
-def _environment(monkeypatch: pytest.MonkeyPatch, target: str) -> None:
-    monkeypatch.setenv("CODEFABRIC_CPG_DAEMON_TARGET", target)
-    monkeypatch.setenv("CODEFABRIC_WORKSPACE_ID", "workspace-main")
-    monkeypatch.setenv("CODEFABRIC_AGENT_INSTANCE_ID", "pytest-primary")
-    monkeypatch.setenv("CODEFABRIC_CPG_CAPABILITY_TOKEN", "test-secret")
-    process_settings.cache_clear()
 
 
 @asynccontextmanager
-async def _production_client(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    daemon: ProductionStubDaemon | None = None,
-) -> AsyncIterator[tuple[Client[Any], ProductionStubDaemon]]:
-    del tmp_path
-    daemon = daemon or ProductionStubDaemon()
-    server = grpc.aio.server()
-    query_grpc.add_CpgQueryServiceServicer_to_server(daemon, server)
-    socket_path = Path("/tmp") / f"codefabric-wp68-{secrets.token_hex(6)}.sock"
-    target = f"unix://{socket_path}"
-    assert server.add_insecure_port(target) == 1
-    await server.start()
-    _environment(monkeypatch, target)
-    try:
-        async with Client(mcp) as client:
-            yield client, daemon
-    finally:
-        await server.stop(grace=None)
-        socket_path.unlink(missing_ok=True)
+async def _client(
+    port: FakeDaemonPort,
+    *,
+    elicitation_handler: Any = None,
+) -> AsyncIterator[Client[Any]]:
+    server = create_server(_settings(), lambda _settings: port)
+    async with Client(
+        server,
+        mode=MODERN_PROTOCOL_VERSION,
+        elicitation_handler=elicitation_handler,
+        cache=False,
+    ) as client:
+        yield client
 
 
-def test_wp68_behavioral_acceptance(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_fastmcp_registers_exact_modern_target_surface() -> None:
+    port = FakeDaemonPort()
+
     async def exercise() -> None:
-        async with _production_client(tmp_path, monkeypatch) as (client, daemon):
-            query = await client.call_tool(
+        server = create_server(_settings(), lambda _settings: port)
+        assert server._extensions == {}  # application extension registry, not discovery
+        async with Client(server, mode="auto", cache=False) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            assert set(tools) == {
                 "query_code_graph",
-                {"request": {"semantic_request_id": "semantic:test"}, "delivery": "inline"},
-            )
-            assert query.structured_content is not None
-            assert query.structured_content["execution_state"] == "NOT_EXECUTED_DEPENDENCY"
-            assert query.structured_content["availability_state"] == "NOT_APPLICABLE"
-            assert query.structured_content["completeness_state"] == "NOT_APPLICABLE"
-            assert query.structured_content["freshness_state"] == "UNAVAILABLE"
-            assert query.structured_content["limit_state"] == "HARD_LIMIT_REJECTED"
-            assert query.structured_content["counts"]["truncated"] is True
-            assert query.structured_content["query_statuses"] == [
-                {"query_id": "q-dependency", "state": "NOT_EXECUTED_DEPENDENCY"}
-            ]
-            assert query.structured_content["notices"] == daemon.notices
-            assert (
-                daemon.start_requests[0].freshness_policy == query_pb.FRESHNESS_POLICY_UNSPECIFIED
-            )
-            assert daemon.start_requests[0].semantic_request_id == ""
-
-            validation_record = canonicalize_value(
-                {
-                    "code": 400,
-                    "detail": "unsupported request form",
-                    "name": "INVALID_REQUEST_SCHEMA",
-                    "path": ["queries", "0", "form"],
-                }
-            )
-            daemon.validation_errors = [validation_record]
-            validated = await client.call_tool(
                 "validate_code_graph_query",
-                {"request": {"semantic_request_id": "semantic:test"}},
-            )
-            assert validated.structured_content is not None
-            assert validated.structured_content["errors"] == [
-                {
-                    "code": "INVALID_REQUEST_SCHEMA",
-                    "message": "unsupported request form",
-                    "path": ["queries", "0", "form"],
-                }
-            ]
-
-            daemon.fail_terminal = True
-            failed = await client.call_tool(
-                "query_code_graph",
-                {"request": {"semantic_request_id": "semantic:failed"}},
-                raise_on_error=False,
-            )
-            assert failed.is_error is True
-            rendered_error = "\n".join(
-                block.text for block in failed.content if hasattr(block, "text")
-            )
-            assert '"name":"FAILED_DEPENDENCY"' in rendered_error
-            assert '"path":["queries","q-dependency"]' in rendered_error
-
-    asyncio.run(exercise())
-
-
-def test_wp68_structural_acceptance(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def exercise() -> None:
-        async with _production_client(tmp_path, monkeypatch) as (client, _daemon):
-            listed = await client.list_tools()
-            assert {tool.name for tool in listed} == {
-                "get_code_graph_reference",
                 "get_code_graph_status",
-                "query_code_graph",
-                "validate_code_graph_query",
+                "get_code_graph_reference",
             }
-
-            query_tool = next(tool for tool in listed if tool.name == "query_code_graph")
-            query = await client.call_tool(
-                "query_code_graph",
-                {"request": {"semantic_request_id": "semantic:test"}, "delivery": "inline"},
-            )
-            assert query.structured_content is not None
-            Draft202012Validator(
-                wire_schema(WireSchemaName.QUERY_TOOL_INPUT, "serialization")
-            ).validate({"request": {"semantic_request_id": "semantic:test"}, "delivery": "inline"})
-            Draft202012Validator(
-                wire_schema(WireSchemaName.QUERY_TOOL_OUTPUT, "serialization")
-            ).validate(query.structured_content)
-            Draft202012Validator.check_schema(query_tool.inputSchema)
-            assert query_tool.outputSchema is not None
-            Draft202012Validator(query_tool.outputSchema).validate(query.structured_content)
-
+            assert set(tools["query_code_graph"].input_schema["properties"]) == {
+                "request",
+                "delivery",
+            }
+            assert set(tools["validate_code_graph_query"].input_schema["properties"]) == {"request"}
+            assert tools["get_code_graph_status"].input_schema["properties"] == {}
+            assert set(tools["get_code_graph_reference"].input_schema["properties"]) == {
+                "kind",
+                "version",
+            }
             templates = await client.list_resource_templates()
-            assert {str(template.uriTemplate) for template in templates} == {
-                "codefabric-result://{workspace_id}/{artifact_id}/manifest/{resource_id}",
-                "codefabric-result://{workspace_id}/{artifact_id}/relation/{relation_id}/{resource_id}",
-                "cpg://reference/{reference}/{version}",
-                "cpg://result/{artifact_id}",
+            assert {(template.name, str(template.uri_template)) for template in templates} == {
+                ("codefabric-result", RESULT_RESOURCE_TEMPLATE),
+                ("codefabric-reference", REFERENCE_RESOURCE_TEMPLATE),
             }
+            assert await client.list_resources() == []
+            assert await client.list_prompts() == []
+            discovery = client.session.discover_result
+            assert discovery is not None
+            assert discovery.capabilities.extensions == {"io.modelcontextprotocol/ui": {}}
+            assert discovery.capabilities.tasks is None
+            assert discovery.capabilities.completions is not None
+            assert fastmcp.settings.telemetry_mode == "propagation_only"
+            assert fastmcp.settings.mcp_camelcase_compat is False
+            assert fastmcp.settings.telemetry_mode == "propagation_only"
 
     asyncio.run(exercise())
 
 
-def test_wp68_negative_zero_state(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_legacy_initialize_is_rejected_before_business_dispatch() -> None:
+    port = FakeDaemonPort()
+
     async def exercise() -> None:
-        async with _production_client(tmp_path, monkeypatch) as (client, daemon):
-            query = await client.call_tool(
+        server = create_server(_settings(), lambda _settings: port)
+        with pytest.raises(MCPError, match="Unsupported protocol era"):
+            async with Client(server, mode="legacy", cache=False):
+                pytest.fail("legacy server must not become usable")
+        assert port.start_calls == []
+        assert port.validation_calls == 0
+        assert port.status_calls == 0
+        assert port.reference_calls == 0
+
+    asyncio.run(exercise())
+
+
+def test_atomic_query_publishes_scoped_resources_and_releases_out_of_order_reads() -> None:
+    port = FakeDaemonPort()
+
+    async def exercise() -> None:
+        async with _client(port) as client:
+            result = await client.call_tool(
                 "query_code_graph",
-                {"request": {"semantic_request_id": "semantic:test"}, "delivery": "resource"},
+                {
+                    "request": {
+                        "semantic_request_id": "semantic:one",
+                        "queries": [{"query_id": "q"}],
+                    },
+                    "delivery": "resource",
+                },
             )
-            assert query.structured_content is not None
-            assert query.structured_content["delivery"]["mode"] == "resource"
-            assert daemon.read_result_calls == 0
-
-            daemon.revoked = True
-            with pytest.raises(Exception, match="lease revoked|resource|NOT_FOUND|result lease"):
-                await client.read_resource("cpg://result/artifact:test")
-            assert daemon.read_result_calls == 1
+            assert result.structured_content is not None
+            output = result.structured_content
+            assert output["outcome"] == "accepted"
+            assert output["daemon_query_id"] == "query:one"
+            assert "mcp_call_id" not in output
+            assert "rpc_attempt_id" not in output
+            assert [page["page_ordinal"] for page in output["pages"]] == [0, 1]
+            assert await client.read_resource(output["pages"][1]["uri"])
+            assert await client.read_resource(output["manifest"]["uri"])
+        assert len(port.start_calls) == 1
+        assert port.validation_calls == 0
+        assert [call[0] for call in port.read_calls] == [
+            "public:page:1",
+            "public:manifest:one",
+        ]
+        assert [call[0] for call in port.release_calls] == [
+            "public:page:1",
+            "public:manifest:one",
+        ]
+        assert [call[1] for call in port.release_calls] == [
+            "release:public:page:1",
+            "release:public:manifest:one",
+        ]
+        assert [call[4] for call in port.read_calls] == [call[2] for call in port.release_calls]
+        assert all("public:page:0" not in call for call in port.release_calls)
 
     asyncio.run(exercise())
 
 
-def test_wp15_arrow_descriptor_resources_and_release_cross_real_generated_grpc(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_incomplete_resource_read_never_releases_its_handle() -> None:
+    port = FakeDaemonPort(failed_reads=frozenset({"public:page:0"}))
+
     async def exercise() -> None:
-        async with _production_client(tmp_path, monkeypatch) as (client, daemon):
-            daemon.configure_arrow_result()
-            query = await client.call_tool(
+        async with _client(port) as client:
+            result = await client.call_tool(
                 "query_code_graph",
-                {"request": {"semantic_request_id": "semantic:arrow"}, "delivery": "inline"},
+                {
+                    "request": {
+                        "semantic_request_id": "semantic:one",
+                        "queries": [{"query_id": "q"}],
+                    },
+                    "delivery": "resource",
+                },
             )
-            assert query.structured_content is not None
-            delivery = query.structured_content["delivery"]
-            assert delivery["mode"] == "resource"
-            manifest_uri = delivery["result_resource"]["manifest_uri"]
-            relation_uri = delivery["result_resource"]["subresource_uris"][0]
-            assert "ab" * 32 not in manifest_uri + relation_uri
-
-            manifest_resources = await client.read_resource(manifest_uri)
-            assert len(manifest_resources) == 1
-            assert isinstance(manifest_resources[0], TextResourceContents)
-            assert json.loads(manifest_resources[0].text)["format"] == (
-                ARROW_RESULT_RESOURCE_FORMAT
-            )
-            relation_resources = await client.read_resource(relation_uri)
-            assert len(relation_resources) == 1
-            assert isinstance(relation_resources[0], BlobResourceContents)
-            assert base64.b64decode(relation_resources[0].blob) == daemon.arrow_relation
-            assert daemon.read_result_calls == 2
-            assert daemon.release_result_calls == 1
-            assert daemon.arrow_released is True
+            assert result.structured_content is not None
+            with pytest.raises(MCPError, match="DAEMON_PROTOCOL_ERROR"):
+                await client.read_resource(result.structured_content["pages"][0]["uri"])
+        assert [call[0] for call in port.read_calls] == ["public:page:0"]
+        assert port.release_calls == []
 
     asyncio.run(exercise())
 
 
-def test_wp68_operational_acceptance(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def exercise() -> None:
-        async with _production_client(tmp_path, monkeypatch) as (client, _daemon):
-            assert client.initialize_result is not None
-            assert client.initialize_result.serverInfo.name == "CodeFabric Present-State CPG"
-            assert await client.ping()
+def test_guard_roundtrip_reenters_with_new_leg_correlation_and_daemon_state() -> None:
+    port = FakeDaemonPort(challenge=True)
 
+    async def answer(message: str, response_type: Any, params: Any, context: Any) -> dict[str, str]:
+        del response_type, params, context
+        assert message == "query.traversal_direction.description"
+        return {"value": "outgoing"}
+
+    async def exercise() -> None:
+        async with _client(port, elicitation_handler=answer) as client:
+            result = await client.call_tool(
+                "query_code_graph",
+                {
+                    "request": {
+                        "semantic_request_id": "semantic:guard",
+                        "queries": [{"query_id": "q"}],
+                    }
+                },
+            )
+            assert result.structured_content is not None
+            assert result.structured_content["outcome"] == "accepted"
+        assert len(port.start_calls) == 1
+        assert port.start_calls[0][1] == {}
+        assert len(port.continue_calls) == 1
+        assert port.start_calls[0][0] != port.continue_calls[0][0]
+        assert port.continue_calls[0][1][0].semantic_field_id == "traversal_direction"
+        assert port.continue_calls[0][1][0].value == "outgoing"  # type: ignore[union-attr]
+
+    asyncio.run(exercise())
+
+
+def test_tampered_guard_state_fails_before_daemon_continuation() -> None:
+    port = FakeDaemonPort(challenge=True)
+
+    async def exercise() -> None:
+        arguments = {
+            "request": {"semantic_request_id": "semantic:guard", "queries": [{"query_id": "q"}]}
+        }
+        async with _client(port) as client:
+            first = await client.session.call_tool(
+                "query_code_graph", arguments, allow_input_required=True
+            )
+            assert isinstance(first, InputRequiredResult)
+            assert first.request_state is not None
+            assert first.request_state.startswith("v1.")
+            tampered = first.request_state[:-1] + ("A" if first.request_state[-1] != "A" else "B")
+            with pytest.raises(MCPError, match="Invalid or expired requestState"):
+                await client.session.call_tool(
+                    "query_code_graph",
+                    arguments,
+                    input_responses={
+                        "traversal_direction": ElicitResult(
+                            action="accept", content={"value": "outgoing"}
+                        )
+                    },
+                    request_state=tampered,
+                    allow_input_required=True,
+                )
+        assert port.continue_calls == []
+
+    asyncio.run(exercise())
+
+
+def test_valid_guard_state_is_bound_to_the_original_tool_arguments() -> None:
+    port = FakeDaemonPort(challenge=True)
+
+    async def exercise() -> None:
+        arguments = {
+            "request": {"semantic_request_id": "semantic:guard", "queries": [{"query_id": "q"}]}
+        }
+        async with _client(port) as client:
+            first = await client.session.call_tool(
+                "query_code_graph", arguments, allow_input_required=True
+            )
+            assert isinstance(first, InputRequiredResult)
+            assert first.request_state is not None
+            altered_arguments = {
+                "request": {
+                    "semantic_request_id": "semantic:guard",
+                    "queries": [{"query_id": "altered"}],
+                }
+            }
+            with pytest.raises(MCPError, match="Invalid or expired requestState"):
+                await client.session.call_tool(
+                    "query_code_graph",
+                    altered_arguments,
+                    input_responses={
+                        "traversal_direction": ElicitResult(
+                            action="accept", content={"value": "outgoing"}
+                        )
+                    },
+                    request_state=first.request_state,
+                    allow_input_required=True,
+                )
+        assert port.continue_calls == []
+
+    asyncio.run(exercise())
+
+
+def test_status_reference_resource_and_completion_delegate_to_daemon() -> None:
+    port = FakeDaemonPort()
+
+    async def exercise() -> None:
+        async with _client(port) as client:
             status = await client.call_tool("get_code_graph_status", {})
             assert status.structured_content is not None
-            assert status.structured_content["versions"] == {
-                "adapter": "1.3",
-                "daemon": "0.1.0",
-                "rpc": "1.0",
-                "semantic_query": "1.3",
-            }
-            assert status.structured_content["notices"] == ["daemon-status-notice"]
-
-            reference = await client.call_tool(
-                "get_code_graph_reference", {"reference": "capabilities"}
+            assert status.structured_content["lifecycle"] == "READY"
+            validation = await client.call_tool(
+                "validate_code_graph_query",
+                {"request": {"semantic_request_id": "semantic:validated", "queries": []}},
             )
-            assert reference.structured_content == {
-                "media_type": "application/json",
-                "mode": "resource",
-                "uri": "cpg://reference/capabilities/1.3",
-            }
-            resources = await client.read_resource("cpg://reference/capabilities/1.3")
-            assert len(resources) == 1
-            assert isinstance(resources[0], TextResourceContents)
-            assert json.loads(resources[0].text) == {
-                "authority": "daemon-observed workspace status",
-                "status_resource": "cpg://status/{workspace_id}",
-                "status_tool": "get_code_graph_status",
-            }
+            assert validation.structured_content is not None
+            assert validation.structured_content["estimated_result_pages"] == 1
+            reference = await client.call_tool("get_code_graph_reference", {"kind": "guide"})
+            assert reference.structured_content is not None
+            uri = reference.structured_content["resource"]["uri"]
+            assert uri.startswith("cpg://reference/")
+            assert await client.read_resource(uri)
+            completion = await client.complete(
+                ResourceTemplateReference(uri=REFERENCE_RESOURCE_TEMPLATE),
+                {"name": "kind", "value": "req"},
+            )
+            assert completion.values == ["request-schema"]
+            assert completion.total == 1
+            assert completion.has_more is False
+        assert port.status_calls == 1
+        assert port.validation_calls == 1
+        assert port.reference_calls == 1
+        assert port.completion_calls == 1
+        assert len(port.read_calls) == 1
+        assert port.release_calls == [
+            (
+                "public:reference:1",
+                "release:public:reference:1",
+                port.read_calls[0][4],
+            )
+        ]
 
     asyncio.run(exercise())
 
 
-def test_transport_loss_rehandshakes_and_attaches_exact_cursor(
-    tmp_path: Path,
+def test_host_cancellation_uses_daemon_query_identity_and_reraises() -> None:
+    port = FakeDaemonPort(block_watch=True)
+
+    async def exercise() -> None:
+        async with _client(port) as client:
+            call = asyncio.create_task(
+                client.call_tool(
+                    "query_code_graph",
+                    {
+                        "request": {
+                            "semantic_request_id": "semantic:one",
+                            "queries": [{"query_id": "q"}],
+                        }
+                    },
+                )
+            )
+            await asyncio.wait_for(port.watch_started.wait(), timeout=2)
+            call.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await call
+        assert len(port.cancel_calls) == 1
+        query_id, cancellation_id, correlation_id = port.cancel_calls[0]
+        assert query_id == "query:one"
+        assert cancellation_id == "cancel:query:one"
+        assert correlation_id
+
+    asyncio.run(exercise())
+
+
+def test_replacement_generation_supplies_live_timeouts_and_resource_bounds() -> None:
+    port = FakeDaemonPort()
+    initial = _settings()
+    port.settings = initial.model_copy(
+        update={
+            "query_timeout_seconds": 1.25,
+            "cancellation_cleanup_timeout_seconds": 0.75,
+            "maximum_resource_chunk_bytes": 16 * 1024,
+        }
+    )
+
+    async def exercise() -> None:
+        server = create_server(initial, lambda _settings: port)
+        async with Client(server, mode=MODERN_PROTOCOL_VERSION, cache=False) as client:
+            result = await client.call_tool(
+                "query_code_graph",
+                {
+                    "request": {
+                        "semantic_request_id": "semantic:replacement",
+                        "queries": [{"query_id": "q"}],
+                    },
+                    "delivery": "resource",
+                },
+            )
+            assert result.structured_content is not None
+            await client.read_resource(result.structured_content["manifest"]["uri"])
+
+    asyncio.run(exercise())
+    assert port.watch_timeouts == [1.25]
+    assert port.read_calls[0][3] == 16 * 1024
+
+
+def test_resource_unit_may_span_multiple_negotiated_chunks() -> None:
+    port = FakeDaemonPort()
+    port.settings = port.settings.model_copy(update={"maximum_resource_chunk_bytes": 16 * 1024})
+    port.manifest = b"m" * (32 * 1024)
+
+    async def exercise() -> None:
+        async with _client(port) as client:
+            result = await client.call_tool(
+                "query_code_graph",
+                {
+                    "request": {
+                        "semantic_request_id": "semantic:multi-chunk",
+                        "queries": [{"query_id": "q"}],
+                    },
+                    "delivery": "resource",
+                },
+            )
+            assert result.structured_content is not None
+            manifest = result.structured_content["manifest"]
+            assert manifest["total_bytes"] == 32 * 1024
+            content = await client.read_resource(manifest["uri"])
+            assert isinstance(content[0], BlobResourceContents)
+            assert base64.b64decode(content[0].blob, validate=True) == port.manifest
+
+    asyncio.run(exercise())
+    assert port.read_calls[0][3] == 16 * 1024
+
+
+def test_replacement_generation_invalidates_a_sealed_old_generation_guard() -> None:
+    port = FakeDaemonPort(challenge=True)
+
+    async def exercise() -> None:
+        arguments = {
+            "request": {"semantic_request_id": "semantic:guard", "queries": [{"query_id": "q"}]}
+        }
+        async with _client(port) as client:
+            first = await client.session.call_tool(
+                "query_code_graph", arguments, allow_input_required=True
+            )
+            assert isinstance(first, InputRequiredResult)
+            assert first.request_state is not None
+            port.settings = port.settings.model_copy(update={"daemon_generation": 8})
+            rejected = await client.session.call_tool(
+                "query_code_graph",
+                arguments,
+                input_responses={
+                    "traversal_direction": ElicitResult(
+                        action="accept", content={"value": "outgoing"}
+                    )
+                },
+                request_state=first.request_state,
+                allow_input_required=True,
+            )
+            assert not isinstance(rejected, InputRequiredResult)
+            assert rejected.is_error
+            assert "INVALID_REQUEST_STATE" in str(rejected.content)
+
+    asyncio.run(exercise())
+    assert port.continue_calls == []
+
+
+def test_allowlisted_spans_exclude_handles_payload_answers_and_exception_prose(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        server_module,
+        "_TRACER",
+        provider.get_tracer("codefabric.fastmcp.presentation.test"),
+    )
+    port = FakeDaemonPort(challenge=True)
+
+    async def answer(message: str, response_type: Any, params: Any, context: Any) -> dict[str, str]:
+        del message, response_type, params, context
+        return {"value": "outgoing-private-answer"}
+
     async def exercise() -> None:
-        daemon = ReconnectingProductionStubDaemon()
-        async with _production_client(tmp_path, monkeypatch, daemon) as (client, _daemon):
-            query = await client.call_tool(
+        async with _client(port, elicitation_handler=answer) as client:
+            result = await client.call_tool(
                 "query_code_graph",
-                {"request": {"semantic_request_id": "semantic:test"}, "delivery": "inline"},
+                {
+                    "request": {
+                        "semantic_request_id": "semantic:telemetry",
+                        "queries": [{"query_id": "q", "private_path": "/private/source/secret.py"}],
+                    },
+                    "delivery": "resource",
+                },
             )
-            assert query.structured_content is not None
-            assert query.structured_content["execution_state"] == "NOT_EXECUTED_DEPENDENCY"
-            assert daemon.handshake_calls == 2
-            assert len(daemon.attach_requests) == 1
-            attached = daemon.attach_requests[0]
-            assert attached.daemon_query_id == "query:test"
-            assert attached.agent_instance_id == "pytest-primary"
-            assert attached.workspace_id == "workspace-main"
-            assert attached.after_sequence == 1
-            assert attached.after_event_checksum == checksum(b"query:test:1")
+            assert result.structured_content is not None
+            await client.read_resource(result.structured_content["manifest"]["uri"])
 
     asyncio.run(exercise())
+    spans = exporter.get_finished_spans()
+    assert spans
+    span_attributes = [span.attributes or {} for span in spans]
+    allowed_attributes = {
+        "codefabric.challenge.id",
+        "codefabric.daemon.generation",
+        "codefabric.mcp.operation",
+        "codefabric.mcp.protocol_era",
+        "codefabric.mcp.request_id",
+        "codefabric.query.id",
+        "codefabric.semantic_request.id",
+    }
+    assert all(span.name == "codefabric.mcp.request" for span in spans)
+    assert all(set(attributes) <= allowed_attributes for attributes in span_attributes)
+    assert all(not span.events for span in spans)
+    assert any(
+        attributes.get("codefabric.challenge.id") == "challenge:one"
+        for attributes in span_attributes
+    )
+    assert any(
+        attributes.get("codefabric.query.id") == "query:one" for attributes in span_attributes
+    )
+    rendered = repr(
+        [
+            (dict(attributes), span.events)
+            for attributes, span in zip(span_attributes, spans, strict=True)
+        ]
+    )
+    for forbidden in (
+        "public:manifest:one",
+        "cpg://result/",
+        "/private/source/secret.py",
+        "outgoing-private-answer",
+        "daemon-continuation-one",
+    ):
+        assert forbidden not in rendered
+    provider.shutdown()
+
+
+def test_unknown_method_is_collapsed_before_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        server_module,
+        "_TRACER",
+        provider.get_tracer("codefabric.fastmcp.presentation.unknown-method-test"),
+    )
+    middleware = server_module.AllowlistedTelemetryMiddleware(_settings)
+    context = SimpleNamespace(
+        method="token//private/path",
+        fastmcp_context=SimpleNamespace(
+            request_id="request:one",
+            request_context=SimpleNamespace(protocol_version=MODERN_PROTOCOL_VERSION),
+        ),
+    )
+
+    async def call_next(context: Any) -> str:
+        del context
+        return "ok"
+
+    assert asyncio.run(middleware.on_request(cast(Any, context), cast(Any, call_next))) == "ok"
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    attributes = spans[0].attributes or {}
+    assert attributes["codefabric.mcp.operation"] == "unsupported"
+    assert "token//private/path" not in repr(attributes)
+    provider.shutdown()
+
+
+def test_hostile_request_id_is_not_used_for_spans_or_daemon_correlation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        server_module,
+        "_TRACER",
+        provider.get_tracer("codefabric.fastmcp.presentation.hostile-request-id-test"),
+    )
+    hostile = "secret-token /private/source.py"
+    context = SimpleNamespace(
+        method="tools/list",
+        fastmcp_context=SimpleNamespace(
+            request_id=hostile,
+            request_context=SimpleNamespace(protocol_version=MODERN_PROTOCOL_VERSION),
+        ),
+    )
+    correlation = server_module.CorrelationMiddleware()
+    telemetry = server_module.AllowlistedTelemetryMiddleware(_settings)
+    observed: list[str] = []
+
+    async def terminal(context: Any) -> str:
+        del context
+        observed.append(server_module._correlation_id())
+        return "ok"
+
+    async def with_telemetry(context: Any) -> str:
+        return await telemetry.on_request(cast(Any, context), cast(Any, terminal))
+
+    async def exercise() -> str:
+        return await correlation.on_request(cast(Any, context), cast(Any, with_telemetry))
+
+    assert asyncio.run(exercise()) == "ok"
+    assert observed == ["unavailable"]
+    assert server_module._correlation_id(cast(Any, SimpleNamespace(request_id=hostile))) == (
+        "unavailable"
+    )
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    attributes = spans[0].attributes or {}
+    assert attributes["codefabric.mcp.request_id"] == "unavailable"
+    assert hostile not in repr(attributes)
+    provider.shutdown()
+
+
+def test_unexpected_daemon_failure_is_safe_on_wire_and_stderr(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    port = FakeDaemonPort(
+        status_error=RuntimeError("secret-token /private/status/path"),
+    )
+
+    async def exercise() -> None:
+        async with _client(port) as client:
+            with pytest.raises(ToolError, match="INTERNAL"):
+                await client.call_tool("get_code_graph_status", {})
+
+    asyncio.run(exercise())
+    captured = capsys.readouterr()
+    assert "secret-token" not in captured.err
+    assert "/private/status/path" not in captured.err

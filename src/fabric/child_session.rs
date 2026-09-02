@@ -40,7 +40,7 @@ use url::Url;
 
 use crate::relational_program::{
     CompilationObservations, ProgramBindings, RelationInput, RelationalProgram,
-    RelationalProgramCompiler, RelationalProgramError,
+    RelationalProgramCompiler, RelationalProgramError, SupplementalProgramRelationBinding,
 };
 use crate::schema_contract::SchemaContract;
 
@@ -451,6 +451,19 @@ impl ChildObjectStoreGrant {
             return Err(ChildSessionError::InvalidRegistryAuthority("object-store"));
         }
         Ok(Self { origin, store })
+    }
+
+    /// Retain the exact local-filesystem store capability already installed in the sealed epoch.
+    ///
+    /// This constructor is intentionally crate-private: operational callers cannot manufacture a
+    /// hostless grant. The child still receives only application-owned programs and exact table
+    /// providers from the same epoch, so the local registry capability cannot introduce a new
+    /// scan path or caller-selected object location.
+    pub(crate) fn from_exact_epoch_local_filesystem(store: Arc<dyn ObjectStore>) -> Self {
+        Self {
+            origin: ObjectStoreUrl::local_filesystem(),
+            store,
+        }
     }
 
     #[must_use]
@@ -1681,20 +1694,75 @@ impl AuthorizedChildSession {
         program: &RelationalProgram,
         request_inputs: &RequestOwnedRelationCollection,
     ) -> Result<ChildProgramStream, ChildSessionError> {
-        if request_inputs.is_empty() {
+        self.execute_relational_program_stream_with_query_local_bindings(
+            program,
+            Some(request_inputs),
+            None,
+        )
+        .await
+    }
+
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn execute_relational_program_stream_with_program_result(
+        &self,
+        program: &RelationalProgram,
+        program_result: &SupplementalProgramRelationBinding,
+    ) -> Result<ChildProgramStream, ChildSessionError> {
+        self.execute_relational_program_stream_with_query_local_bindings(
+            program,
+            None,
+            Some(program_result),
+        )
+        .await
+    }
+
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn execute_relational_program_stream_with_request_inputs_and_program_result(
+        &self,
+        program: &RelationalProgram,
+        request_inputs: &RequestOwnedRelationCollection,
+        program_result: &SupplementalProgramRelationBinding,
+    ) -> Result<ChildProgramStream, ChildSessionError> {
+        self.execute_relational_program_stream_with_query_local_bindings(
+            program,
+            Some(request_inputs),
+            Some(program_result),
+        )
+        .await
+    }
+
+    #[cfg(feature = "daemon")]
+    async fn execute_relational_program_stream_with_query_local_bindings(
+        &self,
+        program: &RelationalProgram,
+        request_inputs: Option<&RequestOwnedRelationCollection>,
+        program_result: Option<&SupplementalProgramRelationBinding>,
+    ) -> Result<ChildProgramStream, ChildSessionError> {
+        if request_inputs.is_none_or(RequestOwnedRelationCollection::is_empty)
+            && program_result.is_none()
+        {
             return self.execute_relational_program_stream(program).await;
         }
 
+        let mut supplemental = Vec::new();
+        if let Some(program_result) = program_result {
+            supplemental.push(program_result.clone());
+        }
+        if let Some(request_inputs) = request_inputs {
+            supplemental.extend(request_inputs.supplemental_program_bindings()?);
+        }
         let query_bindings = self
             .program_bindings
-            .with_supplemental_relations(request_inputs.supplemental_program_bindings()?)?;
+            .with_supplemental_relations(supplemental)?;
         let bindings =
             RelationalProgramCompiler::bind_catalog_inputs_with_bindings(&query_bindings, program)?;
         let context = self.context();
         let mut inputs = Vec::with_capacity(bindings.len());
         let mut consumed_request_relations = BTreeSet::new();
         for binding in bindings {
-            if let Some(request_input) = request_inputs.get(&binding.relation_id) {
+            if let Some(request_input) =
+                request_inputs.and_then(|inputs| inputs.get(&binding.relation_id))
+            {
                 if request_input.table_reference() != &binding.table_reference {
                     return Err(ChildSessionError::ProgramBindingDrift {
                         relation: binding.relation_id.as_str().to_owned(),
@@ -1732,14 +1800,16 @@ impl AuthorizedChildSession {
             });
         }
 
-        if consumed_request_relations.len() != request_inputs.len() {
-            let unused = request_inputs
-                .iter()
-                .find(|input| !consumed_request_relations.contains(input.relation_id()))
-                .expect("different request relation counts imply one unused relation");
-            return Err(ChildSessionError::UnusedRequestOwnedRelation(
-                unused.relation_id().as_str().to_owned(),
-            ));
+        if let Some(request_inputs) = request_inputs {
+            if consumed_request_relations.len() != request_inputs.len() {
+                let unused = request_inputs
+                    .iter()
+                    .find(|input| !consumed_request_relations.contains(input.relation_id()))
+                    .expect("different request relation counts imply one unused relation");
+                return Err(ChildSessionError::UnusedRequestOwnedRelation(
+                    unused.relation_id().as_str().to_owned(),
+                ));
+            }
         }
 
         let compiled =
@@ -1760,7 +1830,9 @@ impl AuthorizedChildSession {
             expected_schema,
             compiled.observations,
         );
-        self.validate_request_owned_plan_authority(&query_local_plan, request_inputs)?;
+        if let Some(request_inputs) = request_inputs {
+            self.validate_request_owned_plan_authority(&query_local_plan, request_inputs)?;
+        }
 
         // Physical planning and execution are intentionally fresh. `query_local_plan` is a local
         // digest/validation carrier and is never looked up in or inserted into the epoch cache.
@@ -1797,6 +1869,35 @@ impl AuthorizedChildSession {
     ) -> Result<ChildProgramResult, ChildSessionError> {
         let streamed = self
             .execute_relational_program_stream_with_request_inputs(program, request_inputs)
+            .await?;
+        self.materialize_program_stream(streamed).await
+    }
+
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn execute_relational_program_with_program_result(
+        &self,
+        program: &RelationalProgram,
+        program_result: &SupplementalProgramRelationBinding,
+    ) -> Result<ChildProgramResult, ChildSessionError> {
+        let streamed = self
+            .execute_relational_program_stream_with_program_result(program, program_result)
+            .await?;
+        self.materialize_program_stream(streamed).await
+    }
+
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn execute_relational_program_with_request_inputs_and_program_result(
+        &self,
+        program: &RelationalProgram,
+        request_inputs: &RequestOwnedRelationCollection,
+        program_result: &SupplementalProgramRelationBinding,
+    ) -> Result<ChildProgramResult, ChildSessionError> {
+        let streamed = self
+            .execute_relational_program_stream_with_request_inputs_and_program_result(
+                program,
+                request_inputs,
+                program_result,
+            )
             .await?;
         self.materialize_program_stream(streamed).await
     }

@@ -1,27 +1,33 @@
 //! Production construction of the released semantic-query program catalogs.
 //!
 //! This module is an application-owned composition boundary.  The compiled release privately
-//! constructs the complete eight-form program and scope set, checks every epoch-owned relation
-//! and field against the exact sealed [`ProgrammaticFabricEpoch`], and emits the two catalogs
-//! consumed by the programmatic query ports.  Callers may vary only source, policy, and resource
-//! inputs; they cannot supply a serialized semantic manifest, program, scope, catalog, or release
-//! pin.  Pins emitted here use explicit typed framing. Semantic validity comes from exact
-//! relation/field checks and executed producer-closure proof, never from a digest alone.
+//! constructs only programs whose semantic relation roles are present in the exact sealed
+//! [`ProgrammaticFabricEpoch`] and whose producer families are proved complete. It checks every
+//! epoch-owned relation and field before emitting the two catalogs consumed by the programmatic
+//! query ports. Callers may vary only source, policy, and resource inputs; they cannot supply a
+//! serialized semantic manifest, program, scope, catalog, or release pin. Pins emitted here use
+//! explicit typed framing. Semantic validity comes from exact relation/field checks and executed
+//! producer-closure proof, never from a digest alone.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use arrow_array::{Array, RecordBatch, StringArray, UInt64Array};
+use arrow_schema::{Field, Schema};
+use datafusion::common::TableReference;
 
 use crate::fabric::derived_producer_closure::{
     DerivedProducerClosureExecution, FamilyClosureFields, ProducerClosureCompilationDependency,
 };
 use crate::fabric::production_kernel::CompiledQueryAuthority;
 use crate::fabric::programmatic_epoch::ProgrammaticFabricEpoch;
+use crate::fabric::programmatic_ingress_port::ProgrammaticFormIngressField;
 use crate::fabric::programmatic_schema::ProgrammaticRelationId;
 use crate::fabric::programmatic_workspace::programmatic_fabric_epoch_authority_pin;
+use crate::provider_native_syntax::NativeSyntaxRelation;
 use crate::relational_program::{
-    AggregateOperator, FieldId, JoinKind, RelationId, ScalarOperator, UnionKind,
+    AggregateOperator, FieldId, JoinKind, RelationId, ScalarOperator,
+    SupplementalProgramRelationBinding, UnionKind,
 };
 use crate::relational_semantic_query::{
     EpochBoundConsumerComposition, EpochBoundConsumerSlotBindingRow,
@@ -31,15 +37,15 @@ use crate::relational_semantic_query::{
     EpochBoundExecutionScopeRow, EpochBoundExecutionSelectionRow, EpochBoundProgramBindingRow,
     EpochBoundRequestInputBindingRow, EpochBoundRequestInputField, EpochBoundReturnBindingRow,
     EpochBoundScopeBindingRow, EpochBoundSelectionBindingRow, EpochBoundSelectionFold,
-    EpochBoundSemanticExecutionCatalog, EpochBoundSemanticIngressCatalog,
-    EpochBoundSemanticIngressLimits, ProducerClosureProof, ProducerFamilyClosureRow,
-    ProducerFamilyDisposition, ProgramRelationSchemaRow, ProgramRelationalOperator,
-    ReleasedSemanticForm, RuntimeProducerProof, SemanticClauseValue, SemanticQueryAuthority,
-    SemanticQueryClass, SemanticValueKind, UnsupportedFamilyRemainder,
-    epoch_bound_semantic_ingress_limits_pin,
+    EpochBoundSelectionValueResolution, EpochBoundSemanticExecutionCatalog,
+    EpochBoundSemanticIngressCatalog, EpochBoundSemanticIngressLimits, ProducerClosureProof,
+    ProducerFamilyClosureRow, ProducerFamilyDisposition, ProgramProjectionField,
+    ProgramRelationSchemaRow, ProgramRelationalOperator, ReleasedSemanticForm,
+    RuntimeProducerProof, SemanticClauseValue, SemanticQueryAuthority, SemanticQueryClass,
+    SemanticValueKind, UnsupportedFamilyRemainder, epoch_bound_semantic_ingress_limits_pin,
 };
 use crate::schema_contract::SchemaRole;
-use crate::semantic_query_contract::COMPILED_V2_0_SCOPE_DEFINITIONS;
+use crate::semantic_query_contract::{COMPILED_V2_0_SCOPE_DEFINITIONS, ResultRole};
 
 const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
     "codefabric.semantic-query.release.v2.2.0:datafusion=55.0.0:arrow=59.2.0";
@@ -86,6 +92,7 @@ struct ProductionSelectionDefinition {
     input_field_id: FieldId,
     scalar_operator: ScalarOperator,
     fold: EpochBoundSelectionFold,
+    resolutions: Vec<EpochBoundSelectionValueResolution>,
 }
 
 /// One exact return value and its programmatic realization.
@@ -193,6 +200,7 @@ pub struct ProductionSemanticQueryRecipe {
     ingress_catalog: Arc<EpochBoundSemanticIngressCatalog>,
     execution_catalog: Arc<EpochBoundSemanticExecutionCatalog>,
     producer_closure: Arc<ProducerClosureProof>,
+    program_result_bindings: Arc<BTreeMap<RelationId, SupplementalProgramRelationBinding>>,
 }
 
 impl ProductionSemanticQueryRecipe {
@@ -205,7 +213,7 @@ impl ProductionSemanticQueryRecipe {
     ///
     /// # Errors
     ///
-    /// Rejects incomplete released-form coverage, relation/field drift, invalid operator graphs,
+    /// Rejects duplicate installed forms, relation/field drift, invalid operator graphs,
     /// incomplete ingress realization, or any producer-closure violation.
     pub(crate) fn try_from_executed_closure(
         compiled_release: &CompiledQueryAuthority,
@@ -231,7 +239,7 @@ impl ProductionSemanticQueryRecipe {
         validate_pin("source", input.source_pin)?;
         validate_pin("policy", input.policy_pin)?;
         validate_identity("factual semantic class", RELEASE_FACTUAL_SEMANTIC_CLASS_ID)?;
-        let forms = compiled_released_form_programs()?;
+        let forms = compiled_released_form_programs(epoch, &producer_closure)?;
         let scopes = compiled_release_scopes();
         let program_release_pin = compiled_release_identity_pin(&forms, &scopes);
         validate_pin("program release", program_release_pin)?;
@@ -243,6 +251,8 @@ impl ProductionSemanticQueryRecipe {
             validate_program(epoch, definition, input.limits)?;
             program_pins.insert(*form, program_identity_pin(definition));
         }
+        let program_result_bindings =
+            compiled_program_result_bindings(epoch, &forms, &program_pins)?;
         validate_required_closure(&forms, &producer_closure)?;
 
         let program_catalog_pin = catalog_identity_pin(
@@ -399,6 +409,7 @@ impl ProductionSemanticQueryRecipe {
             ingress_catalog: Arc::new(ingress),
             execution_catalog: Arc::new(execution),
             producer_closure: Arc::new(producer_closure),
+            program_result_bindings: Arc::new(program_result_bindings),
         })
     }
 
@@ -417,6 +428,16 @@ impl ProductionSemanticQueryRecipe {
         &self.producer_closure
     }
 
+    /// Exact transient result schemas compiled from the selected epoch fields and released
+    /// program projection lineage. These extend query-local compiler bindings only; they are not
+    /// registered as epoch tables or durable relations.
+    #[must_use]
+    pub const fn program_result_bindings(
+        &self,
+    ) -> &Arc<BTreeMap<RelationId, SupplementalProgramRelationBinding>> {
+        &self.program_result_bindings
+    }
+
     #[must_use]
     pub fn into_parts(
         self,
@@ -433,23 +454,41 @@ impl ProductionSemanticQueryRecipe {
     }
 }
 
-#[derive(Clone, Copy)]
-struct ReleasedEpochFormSpec {
-    program_binding_id: &'static str,
-    output_role_id: &'static str,
-    relation_id: &'static str,
-    field_id: &'static str,
-    selection_id: &'static str,
-    required_fact_family: &'static str,
+const SEMANTIC_ENTITY_SOURCE_ROLE: &str = "semantic.entity-source";
+const SEMANTIC_ENTITY_ID_ROLE: &str = "semantic.entity.identity";
+const SEMANTIC_ENTITY_KIND_ROLE: &str = "semantic.entity.kind";
+const SEMANTIC_ENTITY_NAME_ROLE: &str = "semantic.entity.name";
+
+struct EpochSemanticRelation {
+    relation_id: RelationId,
+    fields: Vec<FieldId>,
+    entity_id: FieldId,
+    entity_kind: FieldId,
+    entity_name: FieldId,
 }
 
-fn compiled_released_form_programs()
--> Result<BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>, ProductionQueryRecipeError>
+fn compiled_released_form_programs(
+    epoch: &ProgrammaticFabricEpoch,
+    closure: &ProducerClosureProof,
+) -> Result<BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>, ProductionQueryRecipeError>
 {
-    let programs = ReleasedSemanticForm::ALL
-        .into_iter()
-        .map(compiled_released_form_program)
-        .collect::<Result<Vec<_>, _>>()?;
+    let binding_family = NativeSyntaxRelation::RuffBinding.as_str();
+    let binding_available = closure.families.iter().any(|row| {
+        row.family_id.as_ref() == binding_family
+            && matches!(
+                &row.disposition,
+                ProducerFamilyDisposition::RuntimeProducer(_)
+            )
+    });
+    let programs = if binding_available {
+        epoch_semantic_relation(epoch, SEMANTIC_ENTITY_SOURCE_ROLE)?
+            .map(compiled_find_entities_program)
+            .transpose()?
+            .into_iter()
+            .collect()
+    } else {
+        Vec::new()
+    };
     validate_form_coverage(programs)
 }
 
@@ -461,329 +500,386 @@ fn compiled_released_form_programs()
 pub(crate) fn released_query_family_requirements(
     _authority: &CompiledQueryAuthority,
 ) -> Result<Vec<(Arc<str>, Arc<str>)>, ProductionQueryRecipeError> {
-    Ok(compiled_released_form_programs()?
-        .into_values()
-        .flat_map(|program| {
-            let query_family = program.program_binding_id;
-            program
-                .required_fact_families
-                .into_iter()
-                .map(move |family| (Arc::clone(&query_family), family))
+    const REQUIREMENTS: [(ReleasedSemanticForm, &str); 8] = [
+        (
+            ReleasedSemanticForm::FindCodeEntities,
+            "provider.ruff.binding",
+        ),
+        (
+            ReleasedSemanticForm::RetrieveFactsAboutCode,
+            "fact-family.semantic-fact",
+        ),
+        (
+            ReleasedSemanticForm::FollowCodeRelationships,
+            "fact-family.semantic-relationship",
+        ),
+        (
+            ReleasedSemanticForm::FindConnectingFactPaths,
+            "fact-family.semantic-path",
+        ),
+        (
+            ReleasedSemanticForm::MatchCodeFactPattern,
+            "fact-family.semantic-pattern",
+        ),
+        (
+            ReleasedSemanticForm::CombineResultSets,
+            "fact-family.result-set",
+        ),
+        (
+            ReleasedSemanticForm::SummarizeObjectiveFacts,
+            "fact-family.objective-summary",
+        ),
+        (
+            ReleasedSemanticForm::RetrieveSourceAndSyntaxContext,
+            "fact-family.source-context",
+        ),
+    ];
+    Ok(REQUIREMENTS
+        .into_iter()
+        .map(|(form, family)| {
+            (
+                Arc::from(released_program_binding_id(form)),
+                Arc::from(family),
+            )
         })
         .collect())
 }
 
-fn compiled_released_form_program(
-    form: ReleasedSemanticForm,
-) -> Result<ProductionSemanticFormProgram, ProductionQueryRecipeError> {
+const fn released_program_binding_id(form: ReleasedSemanticForm) -> &'static str {
     match form {
-        ReleasedSemanticForm::FindCodeEntities => compiled_epoch_filter_program(
-            form,
-            ReleasedEpochFormSpec {
-                program_binding_id: "program.semantic-query.find-code-entities.v2",
-                output_role_id: "result.semantic-entities",
-                relation_id: "public.semantic_entity",
-                field_id: "public.semantic_entity.record_id",
-                selection_id: "looking_for",
-                required_fact_family: "fact-family.semantic-entity",
-            },
-        ),
-        ReleasedSemanticForm::RetrieveFactsAboutCode => compiled_epoch_filter_program(
-            form,
-            ReleasedEpochFormSpec {
-                program_binding_id: "program.semantic-query.retrieve-facts-about-code.v2",
-                output_role_id: "result.semantic-facts",
-                relation_id: "public.semantic_fact",
-                field_id: "public.semantic_fact.record_id",
-                selection_id: "about",
-                required_fact_family: "fact-family.semantic-fact",
-            },
-        ),
-        ReleasedSemanticForm::FollowCodeRelationships => compiled_epoch_filter_program(
-            form,
-            ReleasedEpochFormSpec {
-                program_binding_id: "program.semantic-query.follow-code-relationships.v2",
-                output_role_id: "result.semantic-relationships",
-                relation_id: "public.semantic_relationship",
-                field_id: "public.semantic_relationship.record_id",
-                selection_id: "starting_from",
-                required_fact_family: "fact-family.semantic-relationship",
-            },
-        ),
-        ReleasedSemanticForm::FindConnectingFactPaths => compiled_epoch_filter_program(
-            form,
-            ReleasedEpochFormSpec {
-                program_binding_id: "program.semantic-query.find-connecting-fact-paths.v2",
-                output_role_id: "result.semantic-fact-paths",
-                relation_id: "public.semantic_fact_path",
-                field_id: "public.semantic_fact_path.record_id",
-                selection_id: "from",
-                required_fact_family: "fact-family.semantic-path",
-            },
-        ),
-        ReleasedSemanticForm::MatchCodeFactPattern => compiled_epoch_filter_program(
-            form,
-            ReleasedEpochFormSpec {
-                program_binding_id: "program.semantic-query.match-code-fact-pattern.v2",
-                output_role_id: "result.semantic-pattern-matches",
-                relation_id: "public.semantic_pattern_match",
-                field_id: "public.semantic_pattern_match.record_id",
-                selection_id: "pattern",
-                required_fact_family: "fact-family.semantic-pattern",
-            },
-        ),
-        ReleasedSemanticForm::CombineResultSets => compiled_combine_result_sets_program(),
-        ReleasedSemanticForm::SummarizeObjectiveFacts => {
-            compiled_summarize_objective_facts_program()
+        ReleasedSemanticForm::FindCodeEntities => "program.semantic-query.find-code-entities.v2",
+        ReleasedSemanticForm::RetrieveFactsAboutCode => {
+            "program.semantic-query.retrieve-facts-about-code.v2"
         }
-        ReleasedSemanticForm::RetrieveSourceAndSyntaxContext => compiled_epoch_filter_program(
-            form,
-            ReleasedEpochFormSpec {
-                program_binding_id: "program.semantic-query.retrieve-source-syntax-context.v2",
-                output_role_id: "result.source-syntax-contexts",
-                relation_id: "public.source_syntax_context",
-                field_id: "public.source_syntax_context.record_id",
-                selection_id: "about",
-                required_fact_family: "fact-family.source-context",
-            },
-        ),
+        ReleasedSemanticForm::FollowCodeRelationships => {
+            "program.semantic-query.follow-code-relationships.v2"
+        }
+        ReleasedSemanticForm::FindConnectingFactPaths => {
+            "program.semantic-query.find-connecting-fact-paths.v2"
+        }
+        ReleasedSemanticForm::MatchCodeFactPattern => {
+            "program.semantic-query.match-code-fact-pattern.v2"
+        }
+        ReleasedSemanticForm::CombineResultSets => "program.semantic-query.combine-result-sets.v2",
+        ReleasedSemanticForm::SummarizeObjectiveFacts => {
+            "program.semantic-query.summarize-objective-facts.v2"
+        }
+        ReleasedSemanticForm::RetrieveSourceAndSyntaxContext => {
+            "program.semantic-query.retrieve-source-syntax-context.v2"
+        }
     }
 }
 
-fn compiled_epoch_filter_program(
-    form: ReleasedSemanticForm,
-    spec: ReleasedEpochFormSpec,
+fn epoch_semantic_relation(
+    epoch: &ProgrammaticFabricEpoch,
+    semantic_role: &str,
+) -> Result<Option<EpochSemanticRelation>, ProductionQueryRecipeError> {
+    let mut matched = Vec::new();
+    for relation_id in epoch.relation_ids() {
+        let sealed = epoch
+            .relation(relation_id)
+            .expect("enumerated epoch relation remains bound");
+        if sealed
+            .contract
+            .relation_semantic_role(SchemaRole::Logical)
+            .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                detail: error.to_string(),
+            })?
+            != Some(semantic_role)
+        {
+            continue;
+        }
+        let contract_relation =
+            sealed
+                .contract
+                .relation_id(SchemaRole::Logical)
+                .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                    detail: error.to_string(),
+                })?;
+        if contract_relation != relation_id.as_str() {
+            return Err(ProductionQueryRecipeError::InvalidCompiledRelease {
+                detail: format!(
+                    "epoch relation {} carries contract relation {}",
+                    relation_id.as_str(),
+                    contract_relation
+                ),
+            });
+        }
+        let fields = (0..sealed.contract.logical_schema().fields().len())
+            .map(|index| {
+                sealed
+                    .contract
+                    .field_id_at(SchemaRole::Logical, index)
+                    .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                        detail: error.to_string(),
+                    })
+                    .and_then(release_field_id)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let semantic_field = |role: &str| {
+            sealed
+                .contract
+                .unique_field_index_for_semantic_role(SchemaRole::Logical, role)
+                .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                    detail: error.to_string(),
+                })
+                .and_then(|index| {
+                    sealed
+                        .contract
+                        .field_id_at(SchemaRole::Logical, index)
+                        .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                            detail: error.to_string(),
+                        })
+                })
+                .and_then(release_field_id)
+        };
+        matched.push(EpochSemanticRelation {
+            relation_id: release_relation_id(contract_relation)?,
+            fields,
+            entity_id: semantic_field(SEMANTIC_ENTITY_ID_ROLE)?,
+            entity_kind: semantic_field(SEMANTIC_ENTITY_KIND_ROLE)?,
+            entity_name: semantic_field(SEMANTIC_ENTITY_NAME_ROLE)?,
+        });
+    }
+    match matched.as_slice() {
+        [] => Ok(None),
+        [_] => Ok(matched.pop()),
+        _ => Err(ProductionQueryRecipeError::InvalidCompiledRelease {
+            detail: format!("semantic relation role {semantic_role:?} is ambiguous"),
+        }),
+    }
+}
+
+fn compiled_find_entities_program(
+    source: EpochSemanticRelation,
 ) -> Result<ProductionSemanticFormProgram, ProductionQueryRecipeError> {
-    let relation_id = release_relation_id(spec.relation_id)?;
-    let field_id = release_field_id(spec.field_id)?;
-    let input_node_id: Arc<str> = Arc::from(format!("{}.input", spec.program_binding_id));
-    let filter_node_id: Arc<str> = Arc::from(format!("{}.filter", spec.program_binding_id));
+    let program_binding_id = released_program_binding_id(ReleasedSemanticForm::FindCodeEntities);
+    let output_relation = release_relation_id("query.result.semantic-entities")?;
+    let output_id = release_field_id("query.result.semantic-entities.entity-id")?;
+    let output_kind = release_field_id("query.result.semantic-entities.entity-kind")?;
+    let output_name = release_field_id("query.result.semantic-entities.entity-name")?;
+    let output_fields = vec![output_id.clone(), output_kind.clone(), output_name.clone()];
+    let input_node_id: Arc<str> = Arc::from(format!("{program_binding_id}.input"));
+    let filter_node_id: Arc<str> = Arc::from(format!("{program_binding_id}.filter"));
+    let project_node_id: Arc<str> = Arc::from(format!("{program_binding_id}.project"));
+    let limit_node_id: Arc<str> = Arc::from(format!("{program_binding_id}.limit"));
     Ok(ProductionSemanticFormProgram {
-        form,
-        program_binding_id: Arc::from(spec.program_binding_id),
-        output_role_id: Arc::from(spec.output_role_id),
-        root_node_id: Arc::clone(&filter_node_id),
-        output_relation_id: relation_id.clone(),
-        output_fields: vec![field_id.clone()],
-        relations: vec![ProductionRelationDefinition {
-            relation_id: relation_id.clone(),
-            fields: vec![field_id.clone()],
-            authority: ProductionRelationAuthority::Epoch,
-        }],
+        form: ReleasedSemanticForm::FindCodeEntities,
+        program_binding_id: Arc::from(program_binding_id),
+        output_role_id: Arc::from(ResultRole::Entities.released_id()),
+        root_node_id: Arc::clone(&limit_node_id),
+        output_relation_id: output_relation.clone(),
+        output_fields: output_fields.clone(),
+        relations: vec![
+            ProductionRelationDefinition {
+                relation_id: source.relation_id.clone(),
+                fields: source.fields.clone(),
+                authority: ProductionRelationAuthority::Epoch,
+            },
+            ProductionRelationDefinition {
+                relation_id: output_relation,
+                fields: output_fields.clone(),
+                authority: ProductionRelationAuthority::ProgramResult,
+            },
+        ],
         operators: vec![
             ProductionOperatorDefinition {
                 node_id: Arc::clone(&input_node_id),
                 ordinal: 0,
                 input_node_ids: Vec::new(),
-                operator: ProgramRelationalOperator::Input { relation_id },
-                output_fields: vec![field_id.clone()],
+                operator: ProgramRelationalOperator::Input {
+                    relation_id: source.relation_id.clone(),
+                },
+                output_fields: source.fields.clone(),
             },
             ProductionOperatorDefinition {
                 node_id: Arc::clone(&filter_node_id),
                 ordinal: 1,
                 input_node_ids: vec![input_node_id],
                 operator: ProgramRelationalOperator::Filter,
-                output_fields: vec![field_id.clone()],
+                output_fields: source.fields,
+            },
+            ProductionOperatorDefinition {
+                node_id: Arc::clone(&project_node_id),
+                ordinal: 2,
+                input_node_ids: vec![Arc::clone(&filter_node_id)],
+                operator: ProgramRelationalOperator::Projection {
+                    fields: vec![
+                        ProgramProjectionField {
+                            input_field_id: source.entity_id,
+                            output_field_id: output_id,
+                        },
+                        ProgramProjectionField {
+                            input_field_id: source.entity_kind.clone(),
+                            output_field_id: output_kind,
+                        },
+                        ProgramProjectionField {
+                            input_field_id: source.entity_name,
+                            output_field_id: output_name,
+                        },
+                    ],
+                },
+                output_fields: output_fields.clone(),
+            },
+            ProductionOperatorDefinition {
+                node_id: Arc::clone(&limit_node_id),
+                ordinal: 3,
+                input_node_ids: vec![project_node_id],
+                operator: ProgramRelationalOperator::Limit { skip: 0 },
+                output_fields,
             },
         ],
         selections: vec![ProductionSelectionDefinition {
-            selection_id: Arc::from(spec.selection_id),
+            selection_id: Arc::from(
+                ProgrammaticFormIngressField::LookingFor
+                    .compiled_v2_0_selection_id()
+                    .expect("looking-for is a released selection field"),
+            ),
             value_kind: SemanticValueKind::Text,
-            minimum_values: 0,
+            minimum_values: 1,
             maximum_values: RELEASE_SELECTION_MAXIMUM_VALUES,
             operator_node_id: Arc::clone(&filter_node_id),
-            input_field_id: field_id.clone(),
+            input_field_id: source.entity_kind,
             scalar_operator: ScalarOperator::Equal,
             fold: EpochBoundSelectionFold::Any,
+            resolutions: [
+                ("Python function declarations", "function"),
+                ("function declarations", "function"),
+                ("function", "function"),
+            ]
+            .into_iter()
+            .map(|(request, execution)| EpochBoundSelectionValueResolution {
+                request_value: SemanticClauseValue::Text(Arc::from(request)),
+                execution_value: SemanticClauseValue::Text(Arc::from(execution)),
+            })
+            .collect(),
         }],
-        returns: vec![identity_return(filter_node_id, field_id)],
+        returns: Vec::new(),
         request_inputs: Vec::new(),
         consumer_slots: Vec::new(),
-        required_fact_families: vec![Arc::from(spec.required_fact_family)],
+        required_fact_families: vec![Arc::from(NativeSyntaxRelation::RuffBinding.as_str())],
     })
 }
 
-fn compiled_combine_result_sets_program()
--> Result<ProductionSemanticFormProgram, ProductionQueryRecipeError> {
-    let left_relation = release_relation_id("input.semantic-query.combine.left")?;
-    let right_relation = release_relation_id("input.semantic-query.combine.right")?;
-    let output_relation = release_relation_id("program.semantic-query.combine.output")?;
-    let field_id = release_field_id("query-local.semantic-result.record_id")?;
-    let left_node: Arc<str> = Arc::from("program.semantic-query.combine-result-sets.v2.left");
-    let right_node: Arc<str> = Arc::from("program.semantic-query.combine-result-sets.v2.right");
-    let root_node: Arc<str> = Arc::from("program.semantic-query.combine-result-sets.v2.union");
-    Ok(ProductionSemanticFormProgram {
-        form: ReleasedSemanticForm::CombineResultSets,
-        program_binding_id: Arc::from("program.semantic-query.combine-result-sets.v2"),
-        output_role_id: Arc::from("result.combined-semantic-results"),
-        root_node_id: Arc::clone(&root_node),
-        output_relation_id: output_relation.clone(),
-        output_fields: vec![field_id.clone()],
-        relations: vec![
-            ProductionRelationDefinition {
-                relation_id: left_relation.clone(),
-                fields: vec![field_id.clone()],
-                authority: ProductionRelationAuthority::QueryLocal,
-            },
-            ProductionRelationDefinition {
-                relation_id: right_relation.clone(),
-                fields: vec![field_id.clone()],
-                authority: ProductionRelationAuthority::QueryLocal,
-            },
-            ProductionRelationDefinition {
-                relation_id: output_relation,
-                fields: vec![field_id.clone()],
-                authority: ProductionRelationAuthority::ProgramResult,
-            },
-        ],
-        operators: vec![
-            ProductionOperatorDefinition {
-                node_id: Arc::clone(&left_node),
-                ordinal: 0,
-                input_node_ids: Vec::new(),
-                operator: ProgramRelationalOperator::Input {
-                    relation_id: left_relation.clone(),
-                },
-                output_fields: vec![field_id.clone()],
-            },
-            ProductionOperatorDefinition {
-                node_id: Arc::clone(&right_node),
-                ordinal: 1,
-                input_node_ids: Vec::new(),
-                operator: ProgramRelationalOperator::Input {
-                    relation_id: right_relation.clone(),
-                },
-                output_fields: vec![field_id.clone()],
-            },
-            ProductionOperatorDefinition {
-                node_id: Arc::clone(&root_node),
-                ordinal: 2,
-                input_node_ids: vec![left_node, right_node],
-                operator: ProgramRelationalOperator::Union {
-                    kind: UnionKind::Distinct,
-                },
-                output_fields: vec![field_id.clone()],
-            },
-        ],
-        selections: Vec::new(),
-        returns: vec![identity_return(root_node, field_id)],
-        request_inputs: Vec::new(),
-        consumer_slots: vec![
-            ProductionConsumerSlotDefinition {
-                consumer_slot_id: Arc::from("input.left-results"),
-                consumer_role_id: Arc::from("result.semantic-records"),
-                input_relation_id: left_relation,
-                minimum_edges: 0,
-                maximum_edges: 64,
-                composition: EpochBoundConsumerComposition::Single,
-            },
-            ProductionConsumerSlotDefinition {
-                consumer_slot_id: Arc::from("input.right-results"),
-                consumer_role_id: Arc::from("result.semantic-records"),
-                input_relation_id: right_relation,
-                minimum_edges: 0,
-                maximum_edges: 64,
-                composition: EpochBoundConsumerComposition::Union(UnionKind::Distinct),
-            },
-        ],
-        required_fact_families: vec![Arc::from("fact-family.result-set")],
-    })
-}
-
-fn compiled_summarize_objective_facts_program()
--> Result<ProductionSemanticFormProgram, ProductionQueryRecipeError> {
-    let input_relation = release_relation_id("input.semantic-query.objective-summary")?;
-    let output_relation = release_relation_id("program.semantic-query.objective-summary")?;
-    let input_field = release_field_id("query-local.objective-summary.record_id")?;
-    let output_field = release_field_id("program.objective-summary.count")?;
-    let input_node: Arc<str> =
-        Arc::from("program.semantic-query.summarize-objective-facts.v2.input");
-    let root_node: Arc<str> =
-        Arc::from("program.semantic-query.summarize-objective-facts.v2.aggregate");
-    Ok(ProductionSemanticFormProgram {
-        form: ReleasedSemanticForm::SummarizeObjectiveFacts,
-        program_binding_id: Arc::from("program.semantic-query.summarize-objective-facts.v2"),
-        output_role_id: Arc::from("result.objective-fact-summary"),
-        root_node_id: Arc::clone(&root_node),
-        output_relation_id: output_relation.clone(),
-        output_fields: vec![output_field.clone()],
-        relations: vec![
-            ProductionRelationDefinition {
-                relation_id: input_relation.clone(),
-                fields: vec![input_field.clone()],
-                authority: ProductionRelationAuthority::QueryLocal,
-            },
-            ProductionRelationDefinition {
-                relation_id: output_relation,
-                fields: vec![output_field.clone()],
-                authority: ProductionRelationAuthority::ProgramResult,
-            },
-        ],
-        operators: vec![
-            ProductionOperatorDefinition {
-                node_id: Arc::clone(&input_node),
-                ordinal: 0,
-                input_node_ids: Vec::new(),
-                operator: ProgramRelationalOperator::Input {
-                    relation_id: input_relation.clone(),
-                },
-                output_fields: vec![input_field.clone()],
-            },
-            ProductionOperatorDefinition {
-                node_id: Arc::clone(&root_node),
-                ordinal: 1,
-                input_node_ids: vec![input_node],
-                operator: ProgramRelationalOperator::Aggregate {
-                    group_by: Vec::new(),
-                    aggregates: vec![crate::relational_semantic_query::ProgramAggregateField {
-                        input_field_id: input_field.clone(),
-                        output_field_id: output_field.clone(),
-                        aggregate_operator: AggregateOperator::Count,
-                    }],
-                },
-                output_fields: vec![output_field.clone()],
-            },
-        ],
-        selections: Vec::new(),
-        returns: vec![ProductionReturnDefinition {
-            return_id: Arc::from("include"),
-            value_kind: SemanticValueKind::Text,
-            minimum_values: 0,
-            maximum_values: 1,
-            realizations: vec![ProductionReturnRealization {
-                value: SemanticClauseValue::Text(Arc::from("count")),
-                realization_node_id: root_node,
-                realization_field_ids: vec![output_field],
-            }],
-        }],
-        request_inputs: vec![ProductionRequestInputDefinition {
-            input_id: Arc::from("facts"),
-            relation_id: input_relation,
-            fields: vec![EpochBoundRequestInputField {
-                field_id: input_field,
-                value_kind: SemanticValueKind::Text,
-                required: true,
-            }],
-            minimum_rows: 0,
-            maximum_rows: 10_000,
-        }],
-        consumer_slots: Vec::new(),
-        required_fact_families: vec![Arc::from("fact-family.objective-summary")],
-    })
-}
-
-fn identity_return(realization_node_id: Arc<str>, field_id: FieldId) -> ProductionReturnDefinition {
-    ProductionReturnDefinition {
-        return_id: Arc::from("include"),
-        value_kind: SemanticValueKind::Text,
-        minimum_values: 0,
-        maximum_values: 1,
-        realizations: vec![ProductionReturnRealization {
-            value: SemanticClauseValue::Text(Arc::from("canonical-id")),
-            realization_node_id,
-            realization_field_ids: vec![field_id],
-        }],
+fn compiled_program_result_bindings(
+    epoch: &ProgrammaticFabricEpoch,
+    programs: &BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>,
+    program_pins: &BTreeMap<ReleasedSemanticForm, [u8; 32]>,
+) -> Result<BTreeMap<RelationId, SupplementalProgramRelationBinding>, ProductionQueryRecipeError> {
+    let mut epoch_fields = BTreeMap::<FieldId, Arc<Field>>::new();
+    for relation_id in epoch.relation_ids() {
+        let sealed = epoch
+            .relation(relation_id)
+            .expect("enumerated epoch relation remains bound");
+        for (ordinal, field) in sealed.contract.logical_schema().fields().iter().enumerate() {
+            let field_id = sealed
+                .contract
+                .field_id_at(SchemaRole::Logical, ordinal)
+                .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                    detail: error.to_string(),
+                })
+                .and_then(release_field_id)?;
+            if epoch_fields
+                .insert(field_id.clone(), Arc::clone(field))
+                .is_some()
+            {
+                return Err(ProductionQueryRecipeError::InvalidCompiledRelease {
+                    detail: format!("epoch field {} is bound more than once", field_id.as_str()),
+                });
+            }
+        }
     }
+
+    let mut bindings = BTreeMap::new();
+    for (form, program) in programs {
+        let mut projection_sources = BTreeMap::<FieldId, FieldId>::new();
+        for operator in &program.operators {
+            if let ProgramRelationalOperator::Projection { fields } = &operator.operator {
+                for projection in fields {
+                    if projection_sources
+                        .insert(
+                            projection.output_field_id.clone(),
+                            projection.input_field_id.clone(),
+                        )
+                        .is_some()
+                    {
+                        return invalid(program, "program-result projection field is repeated");
+                    }
+                }
+            }
+        }
+        let result = program
+            .relations
+            .iter()
+            .find(|relation| {
+                relation.authority == ProductionRelationAuthority::ProgramResult
+                    && relation.relation_id == program.output_relation_id
+            })
+            .ok_or_else(|| ProductionQueryRecipeError::InvalidProgram {
+                program: program.program_binding_id.to_string(),
+                detail: "program-result relation is absent".to_owned(),
+            })?;
+        let fields = result
+            .fields
+            .iter()
+            .map(|output_id| {
+                let source_id = projection_sources.get(output_id).ok_or_else(|| {
+                    ProductionQueryRecipeError::InvalidProgram {
+                        program: program.program_binding_id.to_string(),
+                        detail: format!(
+                            "program-result field {} has no plan-derived projection lineage",
+                            output_id.as_str()
+                        ),
+                    }
+                })?;
+                let source = epoch_fields.get(source_id).ok_or_else(|| {
+                    ProductionQueryRecipeError::InvalidProgram {
+                        program: program.program_binding_id.to_string(),
+                        detail: format!(
+                            "program-result field {} derives from unresolved epoch field {}",
+                            output_id.as_str(),
+                            source_id.as_str()
+                        ),
+                    }
+                })?;
+                Ok(Arc::new(
+                    Field::new(
+                        source.name(),
+                        source.data_type().clone(),
+                        source.is_nullable(),
+                    )
+                    .with_metadata(source.metadata().clone()),
+                ))
+            })
+            .collect::<Result<Vec<_>, ProductionQueryRecipeError>>()?;
+        let authority_pin =
+            *program_pins
+                .get(form)
+                .ok_or_else(|| ProductionQueryRecipeError::InvalidProgram {
+                    program: program.program_binding_id.to_string(),
+                    detail: "program-result schema has no execution-program authority".to_owned(),
+                })?;
+        let binding = SupplementalProgramRelationBinding::try_new(
+            result.relation_id.clone(),
+            TableReference::full("codefabric", "query_result", result.relation_id.as_str()),
+            Arc::new(Schema::new(fields)),
+            result.fields.clone(),
+            authority_pin,
+        )
+        .map_err(|error| ProductionQueryRecipeError::InvalidProgram {
+            program: program.program_binding_id.to_string(),
+            detail: error.to_string(),
+        })?;
+        if bindings
+            .insert(result.relation_id.clone(), binding)
+            .is_some()
+        {
+            return Err(ProductionQueryRecipeError::RelationSchemaConflict(
+                result.relation_id.as_str().to_owned(),
+            ));
+        }
+    }
+    Ok(bindings)
 }
 
 fn compiled_release_scopes() -> Vec<ProductionScopeDefinition> {
@@ -873,15 +969,6 @@ fn validate_form_coverage(
                 "duplicate form".to_owned(),
             ));
         }
-    }
-    let expected = ReleasedSemanticForm::ALL
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    let actual = indexed.keys().copied().collect::<BTreeSet<_>>();
-    if actual != expected {
-        return Err(ProductionQueryRecipeError::ReleasedFormCoverage(format!(
-            "expected {expected:?}, observed {actual:?}"
-        )));
     }
     Ok(indexed)
 }
@@ -1209,6 +1296,7 @@ fn append_selections(
             value_kind: selection.value_kind,
             minimum_values: selection.minimum_values,
             maximum_values: selection.maximum_values,
+            resolutions: selection.resolutions.clone(),
         });
         execution.selections.push(EpochBoundExecutionSelectionRow {
             program_binding_id: Arc::clone(&definition.program_binding_id),
@@ -2042,6 +2130,15 @@ fn encode_selection(value: &ProductionSelectionDefinition) -> CanonicalIdentityF
     frame.text(6, value.input_field_id.as_str());
     frame.u64(7, scalar_operator_code(value.scalar_operator));
     frame.u64(8, selection_fold_code(value.fold));
+    frame.frames(
+        9,
+        value.resolutions.iter().map(|resolution| {
+            let mut resolution_frame = CanonicalIdentityFrame::default();
+            resolution_frame.nested(1, encode_clause_value(&resolution.request_value));
+            resolution_frame.nested(2, encode_clause_value(&resolution.execution_value));
+            resolution_frame
+        }),
+    );
     frame
 }
 
@@ -2267,9 +2364,7 @@ const fn selection_fold_code(value: EpochBoundSelectionFold) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use arrow_array::{ArrayRef, Int64Array, StringArray, UInt64Array};
+    use arrow_array::{StringArray, UInt64Array};
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::common::TableReference;
     use datafusion::datasource::MemTable;
@@ -2281,9 +2376,7 @@ mod tests {
     use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
     use crate::fabric::programmatic_schema::ProviderInput;
-    use crate::schema_contract::{
-        FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY, SchemaContract,
-    };
+    use crate::schema_contract::{FieldIndexMapping, SchemaContract};
 
     fn relation(value: impl Into<String>) -> RelationId {
         RelationId::new(value).expect("valid test relation")
@@ -2299,74 +2392,40 @@ mod tests {
             FabricEpochRuntimeConfig::default(),
         )
         .expect("epoch builder");
-        let epoch_relations = compiled_released_form_programs()
-            .expect("compiled programs")
-            .into_values()
-            .flat_map(|program| program.relations)
-            .filter(|relation| relation.authority == ProductionRelationAuthority::Epoch)
-            .map(|relation| (relation.relation_id, relation.fields))
-            .collect::<BTreeMap<_, _>>();
-        for (index, (relation_id, field_ids)) in epoch_relations.into_iter().enumerate() {
-            let schema = Arc::new(
-                Schema::new(
-                    field_ids
-                        .iter()
-                        .enumerate()
-                        .map(|(field_index, field_id)| {
-                            Field::new(format!("field_{field_index}"), DataType::Int64, false)
-                                .with_metadata(HashMap::from([(
-                                    FIELD_ID_METADATA_KEY.to_owned(),
-                                    field_id.as_str().to_owned(),
-                                )]))
-                        })
-                        .collect::<Vec<_>>(),
-                )
-                .with_metadata(HashMap::from([(
-                    RELATION_ID_METADATA_KEY.to_owned(),
-                    relation_id.as_str().to_owned(),
-                )])),
-            );
-            let batch = RecordBatch::try_new(
+        let relation = NativeSyntaxRelation::RuffBinding;
+        let schema = relation.schema();
+        let provider = Arc::new(
+            MemTable::try_new(
                 Arc::clone(&schema),
-                field_ids
-                    .iter()
-                    .map(|_| {
-                        Arc::new(Int64Array::from(vec![
-                            i64::try_from(index).expect("small test index"),
-                        ])) as ArrayRef
-                    })
+                vec![vec![RecordBatch::new_empty(Arc::clone(&schema))]],
+            )
+            .expect("provider"),
+        );
+        let table_reference = TableReference::full(
+            FABRIC_CATALOG,
+            FabricSchemaRole::Fact.as_str(),
+            "production_query_ruff_binding",
+        );
+        let contract = Arc::new(
+            SchemaContract::try_new(
+                "test:production-query:ruff-binding",
+                table_reference.clone(),
+                Arc::clone(&schema),
+                Arc::clone(&schema),
+                (0..schema.fields().len())
+                    .map(|index| FieldIndexMapping::direct(index, index))
                     .collect(),
             )
-            .expect("batch");
-            let provider = Arc::new(
-                MemTable::try_new(Arc::clone(&schema), vec![vec![batch]]).expect("provider"),
-            );
-            let table_reference = TableReference::full(
-                FABRIC_CATALOG,
-                FabricSchemaRole::Fact.as_str(),
-                format!("production_query_{index}"),
-            );
-            let contract = Arc::new(
-                SchemaContract::try_new(
-                    format!("test:production-query:{index}"),
-                    table_reference.clone(),
-                    Arc::clone(&schema),
-                    schema,
-                    (0..field_ids.len())
-                        .map(|field_index| FieldIndexMapping::direct(field_index, field_index))
-                        .collect(),
-                )
-                .expect("schema contract"),
-            );
-            builder
-                .register_provider(ProviderInput::new(
-                    ProgrammaticRelationId::new(relation_id.as_str()),
-                    table_reference,
-                    contract,
-                    provider,
-                ))
-                .expect("provider registration");
-        }
+            .expect("schema contract"),
+        );
+        builder
+            .register_provider(ProviderInput::new(
+                ProgrammaticRelationId::new(relation.as_str()),
+                table_reference,
+                contract,
+                provider,
+            ))
+            .expect("provider registration");
         builder.seal_for_test().await.expect("sealed epoch")
     }
 
@@ -2410,36 +2469,27 @@ mod tests {
     }
 
     fn closure() -> ProducerClosureProof {
-        let families = compiled_released_form_programs()
-            .expect("compiled programs")
-            .into_values()
-            .flat_map(|program| program.required_fact_families)
-            .collect::<BTreeSet<_>>();
         ProducerClosureProof {
             proof_pin: [0x14; 32],
             application_authority_id: Arc::from("authority.application"),
-            families: families
-                .into_iter()
-                .enumerate()
-                .map(|(index, family_id)| ProducerFamilyClosureRow {
-                    family_id,
-                    disposition: ProducerFamilyDisposition::RuntimeProducer(RuntimeProducerProof {
-                        producer_id: Arc::from(format!("producer.release.{index}")),
-                        authority_id: Arc::from("authority.application"),
-                        algorithm_release: Arc::from("algorithm.release.v2"),
-                        precision_id: Arc::from("precision.exact"),
-                        input_pin: [0x21; 32],
-                        invalidation_pin: [0x22; 32],
-                        materialization_pin: [0x23; 32],
-                        requested_units: 1,
-                        completed_units: 1,
-                        remainder_units: 0,
-                        unknown_units: 0,
-                        completeness_proof_pin: [0x24; 32],
-                        producer_proof_pin: [0x25; 32],
-                    }),
-                })
-                .collect(),
+            families: vec![ProducerFamilyClosureRow {
+                family_id: Arc::from(NativeSyntaxRelation::RuffBinding.as_str()),
+                disposition: ProducerFamilyDisposition::RuntimeProducer(RuntimeProducerProof {
+                    producer_id: Arc::from("producer.ruff.binding"),
+                    authority_id: Arc::from("authority.application"),
+                    algorithm_release: Arc::from("algorithm.release.v2"),
+                    precision_id: Arc::from("precision.exact"),
+                    input_pin: [0x21; 32],
+                    invalidation_pin: [0x22; 32],
+                    materialization_pin: [0x23; 32],
+                    requested_units: 1,
+                    completed_units: 1,
+                    remainder_units: 0,
+                    unknown_units: 0,
+                    completeness_proof_pin: [0x24; 32],
+                    producer_proof_pin: [0x25; 32],
+                }),
+            }],
         }
     }
 
@@ -2452,22 +2502,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compiled_release_builds_all_eight_epoch_checked_programs() {
+    async fn compiled_release_installs_only_epoch_proved_programs() {
         let epoch = epoch().await;
         let recipe =
-            assemble(&epoch, input([0x11; 32], [0x12; 32], limits())).expect("all eight programs");
+            assemble(&epoch, input([0x11; 32], [0x12; 32], limits())).expect("proved program");
+        assert_eq!(recipe.ingress_catalog().program_bindings.len(), 1);
+        assert_eq!(recipe.execution_catalog().programs.len(), 1);
         assert_eq!(
-            recipe.ingress_catalog().program_bindings.len(),
-            ReleasedSemanticForm::ALL.len()
-        );
-        assert_eq!(
-            recipe.execution_catalog().programs.len(),
-            ReleasedSemanticForm::ALL.len()
+            recipe.ingress_catalog().program_bindings[0].compatibility_form,
+            ReleasedSemanticForm::FindCodeEntities
         );
 
         use crate::relational_semantic_query::{
-            EpochBoundBlockBindingRow, EpochBoundScopeRow, EpochBoundSemanticIngress,
-            compile_epoch_bound_semantic_request, validate_epoch_bound_semantic_ingress,
+            EpochBoundBlockBindingRow, EpochBoundScopeRow, EpochBoundSelectionRow,
+            EpochBoundSemanticIngress, compile_epoch_bound_semantic_request,
+            validate_epoch_bound_semantic_ingress,
         };
         let catalog = recipe.ingress_catalog();
         let limits = limits();
@@ -2488,8 +2537,9 @@ mod tests {
             .iter()
             .map(|block| Arc::clone(&block.query_id))
             .collect();
+        let query_id = Arc::clone(&blocks[0].query_id);
         let request = EpochBoundSemanticIngress {
-            semantic_request_id: Arc::from("request.production.all-eight"),
+            semantic_request_id: Arc::from("request.production.proved-forms"),
             request_content_pin: [0x31; 32],
             fabric_epoch_pin: catalog.fabric_epoch_pin,
             program_catalog_pin: catalog.program_catalog_pin,
@@ -2499,7 +2549,16 @@ mod tests {
             limits_pin: catalog.limits_pin,
             limits,
             blocks,
-            selections: Vec::new(),
+            selections: vec![EpochBoundSelectionRow {
+                query_id,
+                selection_id: Arc::from(
+                    ProgrammaticFormIngressField::LookingFor
+                        .compiled_v2_0_selection_id()
+                        .expect("looking-for selection"),
+                ),
+                ordinal: 0,
+                value: SemanticClauseValue::Text(Arc::from("function")),
+            }],
             returns: Vec::new(),
             scopes: [
                 ("scope.workspace-id", "workspace:test"),
@@ -2525,11 +2584,8 @@ mod tests {
             recipe.execution_catalog(),
             recipe.producer_closure(),
         )
-        .expect("recipe execution catalog compiles all forms");
-        assert_eq!(
-            compiled.compiled().blocks().len(),
-            ReleasedSemanticForm::ALL.len()
-        );
+        .expect("recipe execution catalog compiles the proved form");
+        assert_eq!(compiled.compiled().blocks().len(), 1);
     }
 
     #[tokio::test]
@@ -2544,7 +2600,9 @@ mod tests {
                 &recipe,
                 limits(),
                 policy_pin,
-                BTreeSet::from([ProgrammaticRelationId::new("public.semantic_entity")]),
+                BTreeSet::from([ProgrammaticRelationId::new(
+                    NativeSyntaxRelation::RuffBinding.as_str(),
+                )]),
                 1_000,
             )
             .expect("recipe and release-owned ports share one v2 scope authority");
@@ -2628,7 +2686,7 @@ mod tests {
     #[tokio::test]
     async fn compiled_operand_and_epoch_schema_mutations_fail_closed() {
         let epoch = epoch().await;
-        let forms = compiled_released_form_programs().expect("compiled programs");
+        let forms = compiled_released_form_programs(&epoch, &closure()).expect("compiled programs");
         let original = forms
             .get(&ReleasedSemanticForm::FindCodeEntities)
             .expect("entity program");

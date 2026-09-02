@@ -826,6 +826,36 @@ pub enum ResultRole {
     SourceContexts,
 }
 
+impl ResultRole {
+    /// Released result roles in stable presentation order.
+    pub const ALL: [Self; 7] = [
+        Self::Entities,
+        Self::Facts,
+        Self::Paths,
+        Self::PatternBindings,
+        Self::Groups,
+        Self::Summary,
+        Self::SourceContexts,
+    ];
+
+    /// Exact application-owned semantic role identity for the released result selection.
+    ///
+    /// This identity is shared by ingress program selection and prior-result handoffs. Keeping it
+    /// on the typed wire role prevents those consumers from maintaining parallel string maps.
+    #[must_use]
+    pub const fn released_id(self) -> &'static str {
+        match self {
+            Self::Entities => "role.entities",
+            Self::Facts => "role.facts",
+            Self::Paths => "role.paths",
+            Self::PatternBindings => "role.pattern-bindings",
+            Self::Groups => "role.groups",
+            Self::Summary => "role.summary",
+            Self::SourceContexts => "role.source-contexts",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PriorResultReference {
@@ -1310,6 +1340,30 @@ mod tests {
                 "summarize objective facts",
                 "retrieve source and syntax context",
             ]
+        );
+    }
+
+    #[test]
+    fn released_result_role_identities_are_closed_and_unique() {
+        assert_eq!(
+            ResultRole::ALL.map(ResultRole::released_id),
+            [
+                "role.entities",
+                "role.facts",
+                "role.paths",
+                "role.pattern-bindings",
+                "role.groups",
+                "role.summary",
+                "role.source-contexts",
+            ]
+        );
+        assert_eq!(
+            ResultRole::ALL
+                .into_iter()
+                .map(ResultRole::released_id)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            ResultRole::ALL.len()
         );
     }
 }

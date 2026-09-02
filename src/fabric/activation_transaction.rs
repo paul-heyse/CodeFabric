@@ -2416,7 +2416,7 @@ mod tests {
     struct MockAdmission {
         fault: Fault,
         log: CallLog,
-        closed: AtomicBool,
+        closed: Arc<AtomicBool>,
         yield_after_close: bool,
     }
 
@@ -2506,6 +2506,7 @@ mod tests {
         fault: Fault,
         log: CallLog,
         unchanged_chain: ActivationChain,
+        closed: Arc<AtomicBool>,
     }
 
     #[async_trait]
@@ -2514,6 +2515,10 @@ mod tests {
             &self,
             contract: ActivationAppendContract,
         ) -> ActivationAppendOutcome {
+            assert!(
+                self.closed.load(Ordering::SeqCst),
+                "durable append and readback must run behind the closed admission barrier"
+            );
             record(&self.log, "append");
             match self.fault {
                 Fault::AppendUnknown => ActivationAppendOutcome::Unknown {
@@ -2641,11 +2646,12 @@ mod tests {
     ) -> TestCoordinator {
         let unchanged_chain = ActivationChain::derive(request.command.ownership.workspace_id, [])
             .expect("empty bootstrap chain is valid");
+        let closed = Arc::new(AtomicBool::new(false));
         ActivationTransactionCoordinator::new(
             Arc::new(MockAdmission {
                 fault,
                 log: Arc::clone(&log),
-                closed: AtomicBool::new(false),
+                closed: Arc::clone(&closed),
                 yield_after_close,
             }),
             Arc::new(MockProof {
@@ -2664,6 +2670,7 @@ mod tests {
                 fault,
                 log: Arc::clone(&log),
                 unchanged_chain,
+                closed,
             }),
             Arc::new(MockCache {
                 fault,
@@ -2674,7 +2681,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exact_success_obeys_the_required_boundary_order() {
+    async fn wp44_int_exact_success_closes_before_readback_and_reopens_before_acknowledgement() {
         let candidate = candidate(EpochId::from_bytes(id16(40))).await;
         let request = request(candidate);
         let log = Arc::new(Mutex::new(Vec::new()));
@@ -2781,6 +2788,136 @@ mod tests {
             assert_eq!(actual_stage, expected_stage, "fault {fault:?}");
             assert_eq!(log.lock().unwrap().len(), expected_calls, "fault {fault:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn wp44_ops_append_and_acknowledgement_ambiguity_require_exact_reconciliation() {
+        let candidate = candidate(EpochId::from_bytes(id16(0x61))).await;
+
+        let append_request = request(Arc::clone(&candidate));
+        let append_log = Arc::new(Mutex::new(Vec::new()));
+        let append_outcome = coordinator(
+            Fault::AppendUnknown,
+            &append_request,
+            Arc::clone(&append_log),
+            false,
+        )
+        .activate(append_request)
+        .await;
+        assert!(matches!(
+            append_outcome,
+            ActivationTransactionOutcome::ReconciliationNeeded(ActivationReconciliationTicket {
+                stage: ActivationTransactionStage::DurableAppendReadback,
+                reason: ActivationReconciliationReason::AppendUnknown {
+                    reason: ActivationAppendUnknownReason::CommitOutcomeUnknown,
+                    ..
+                },
+                durable_selection: DurableSelectionKnowledge::Unknown,
+                admission_posture: ActivationAdmissionPosture::Closed,
+                ..
+            })
+        ));
+        assert_eq!(
+            *append_log.lock().unwrap(),
+            ["proof", "close", "authority", "append"]
+        );
+
+        let acknowledgement_request = request(candidate);
+        let event_id = acknowledgement_request.event_id;
+        let acknowledgement_log = Arc::new(Mutex::new(Vec::new()));
+        let acknowledgement_outcome = coordinator(
+            Fault::Acknowledge,
+            &acknowledgement_request,
+            Arc::clone(&acknowledgement_log),
+            false,
+        )
+        .activate(acknowledgement_request)
+        .await;
+        assert!(matches!(
+            acknowledgement_outcome,
+            ActivationTransactionOutcome::ReconciliationNeeded(
+                ActivationReconciliationTicket {
+                    stage: ActivationTransactionStage::Acknowledgement,
+                    reason: ActivationReconciliationReason::AcknowledgementUnknown(_),
+                    durable_selection: DurableSelectionKnowledge::ReadBack {
+                        event_id: observed,
+                    },
+                    admission_posture: ActivationAdmissionPosture::Reopened,
+                    ..
+                }
+            ) if observed == event_id
+        ));
+        assert_eq!(
+            *acknowledgement_log.lock().unwrap(),
+            [
+                "proof",
+                "close",
+                "authority",
+                "append",
+                "publish",
+                "cache",
+                "reopen",
+                "acknowledge",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn wp44_neg_seed_head_and_proof_receipt_substitution_fail_closed() {
+        let candidate = candidate(EpochId::from_bytes(id16(0x62))).await;
+        let valid = request(Arc::clone(&candidate));
+
+        let mut seeded_command = *valid.command();
+        seeded_command.expected_head = ExpectedHead::Epoch(EpochId::from_bytes(id16(0xee)));
+        let seeded_attempt = ActivationAttempt::for_test(
+            seeded_command,
+            valid.attempt().attempt(),
+            valid.attempt().execution_owner(),
+        );
+        let seeded_request = ActivationTransactionRequest::try_new(
+            seeded_attempt,
+            Arc::clone(&candidate),
+            valid.pins(),
+            valid.event_id,
+            valid.compatibility,
+            valid.retention,
+            valid.operation_selection(),
+            valid.transaction(),
+            valid.control_relation().clone(),
+        )
+        .expect("a claimed predecessor remains subject to durable authority revalidation");
+        let log = Arc::new(Mutex::new(Vec::new()));
+        assert!(matches!(
+            coordinator(Fault::None, &seeded_request, Arc::clone(&log), false)
+                .activate(seeded_request)
+                .await,
+            ActivationTransactionOutcome::ReconciliationNeeded(ActivationReconciliationTicket {
+                stage: ActivationTransactionStage::AuthorityRevalidation,
+                reason: ActivationReconciliationReason::AuthorityStale,
+                durable_selection: DurableSelectionKnowledge::NotAttempted,
+                admission_posture: ActivationAdmissionPosture::Closed,
+                ..
+            })
+        ));
+        assert_eq!(*log.lock().unwrap(), ["proof", "close", "authority"]);
+
+        let mut substituted_pins = valid.pins();
+        substituted_pins.proof_receipt = ProofReceiptRef::from_bytes(id32(0xef));
+        assert_eq!(
+            ActivationTransactionRequest::try_new(
+                valid.attempt(),
+                candidate,
+                substituted_pins,
+                valid.event_id,
+                valid.compatibility,
+                valid.retention,
+                valid.operation_selection(),
+                valid.transaction(),
+                valid.control_relation().clone(),
+            )
+            .unwrap_err(),
+            ActivationTransactionRequestError::ProofReceiptMismatch
+        );
     }
 
     #[tokio::test]

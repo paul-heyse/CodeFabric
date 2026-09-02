@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 pub struct QueryExecutionContext {
     pub execution_id: String,
     pub semantic_request_id: String,
-    pub mcp_call_id: String,
+    pub request_correlation_id: String,
 }
 
 /// Availability of one phase artifact in an execution that may terminate early.

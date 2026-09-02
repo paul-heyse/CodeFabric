@@ -26,6 +26,7 @@ use crate::ruff_adapter::{
     RuffChildRole, RuffCommentPlacement, RuffDiagnosticKind, RuffDirectiveKind, RuffSnapshot,
     RuffTokenClass, RuffTokenSpelling,
 };
+use crate::schema_contract::{RELATION_SEMANTIC_ROLE_METADATA_KEY, SEMANTIC_ROLE_METADATA_KEY};
 #[cfg(feature = "daemon")]
 use crate::source_image::{SourceImage, SourceLanguage};
 use crate::tree_sitter_adapter::{
@@ -1886,10 +1887,16 @@ fn native_relation_schema(relation: NativeSyntaxRelation) -> SchemaRef {
                 "codefabric.field_id".to_owned(),
                 format!("{}.{}", relation.as_str(), field.name()),
             );
+            if let Some(semantic_role) = native_field_semantic_role(relation, field.name()) {
+                metadata.insert(
+                    SEMANTIC_ROLE_METADATA_KEY.to_owned(),
+                    semantic_role.to_owned(),
+                );
+            }
             field.with_metadata(metadata)
         })
         .collect::<Vec<_>>();
-    let metadata = HashMap::from([
+    let mut metadata = HashMap::from([
         (
             "codefabric.relation_id".to_owned(),
             relation.as_str().to_owned(),
@@ -1914,7 +1921,45 @@ fn native_relation_schema(relation: NativeSyntaxRelation) -> SchemaRef {
             "typed-arrow-fields-only".to_owned(),
         ),
     ]);
+    if let Some(semantic_role) = native_relation_semantic_role(relation) {
+        metadata.insert(
+            RELATION_SEMANTIC_ROLE_METADATA_KEY.to_owned(),
+            semantic_role.to_owned(),
+        );
+    }
     Arc::new(Schema::new_with_metadata(fields, metadata))
+}
+
+/// Query semantics carried by the exact provider contract, not inferred from table/column names.
+const fn native_relation_semantic_role(relation: NativeSyntaxRelation) -> Option<&'static str> {
+    match relation {
+        NativeSyntaxRelation::RuffBinding => Some("semantic.entity-source"),
+        _ => None,
+    }
+}
+
+fn native_field_semantic_role(
+    relation: NativeSyntaxRelation,
+    field_name: &str,
+) -> Option<&'static str> {
+    match (relation, field_name) {
+        (NativeSyntaxRelation::RuffBinding, "binding_id") => Some("semantic.entity.identity"),
+        (NativeSyntaxRelation::RuffBinding, "binding_kind") => Some("semantic.entity.kind"),
+        (NativeSyntaxRelation::RuffBinding, "target_form") => {
+            Some("semantic.entity.declaration-form")
+        }
+        (NativeSyntaxRelation::RuffBinding, "name") => Some("semantic.entity.name"),
+        (NativeSyntaxRelation::RuffBinding, "analysis_context_id") => {
+            Some("semantic.provenance.analysis-context")
+        }
+        (NativeSyntaxRelation::RuffBinding, "file_id") => Some("semantic.provenance.source-file"),
+        (NativeSyntaxRelation::RuffBinding, "source_generation") => {
+            Some("semantic.provenance.source-generation")
+        }
+        (NativeSyntaxRelation::RuffBinding, "start_byte") => Some("semantic.source.start-byte"),
+        (NativeSyntaxRelation::RuffBinding, "end_byte") => Some("semantic.source.end-byte"),
+        _ => None,
+    }
 }
 
 fn batch(

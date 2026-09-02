@@ -1,858 +1,1944 @@
-"""Typed asynchronous client for the private CodeFabric daemon protocol."""
+"""One eager grpc.aio v2 session over the supervisor-selected Unix socket."""
 
 from __future__ import annotations
 
 import asyncio
-import platform
-import secrets
-import time
-from contextlib import suppress
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Iterable
 from importlib.metadata import version
-from typing import Any, Never, cast
+from typing import Annotated, Literal, Protocol, assert_never, cast
 
 import grpc
+from google.protobuf.duration_pb2 import Duration
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from ..contracts.json import canonicalize_json, canonicalize_value, checksum
-from ..contracts.rpc_features import CpgdFeature
 from ..contracts.wire_models import (
     JSON_OBJECT_ADAPTER,
     JsonObject,
     QueryToolInput,
     ValidateToolInput,
-    wire_schema_fingerprints,
 )
-from ..settings import Settings
-from .arrow_resources import (
-    ARROW_RELEASE,
-    PUBLISHED_RESULT_FORMAT,
-    ArrowResourceAccessError,
-    ArrowResourceChunk,
-    ArrowResourceExpiredError,
-    ArrowResourceLimitError,
-    ArrowResourcePresenter,
-    ArrowResourceReleasedError,
-    ArrowResultAccess,
-    ArrowResultPackageDescriptor,
-    ArrowResultReleaseReceipt,
-    validate_package_descriptor_json,
-)
+from ..settings import Settings, next_settings
 from .channel import create_local_channel
 from .generated import cpg_query_service_pb2 as query_pb
 from .generated import cpg_query_service_pb2_grpc as query_grpc
 
-RPC_VERSION = "1.0"
-SEMANTIC_QUERY_VERSION = "1.3"
+SESSION_METADATA_KEY = "codefabric-session-bin"
+SEMANTIC_PROFILE = "codefabric.semantic-query.v2"
+RPC_MINOR = 0
+
+type ProgressStage = Literal["executing"]
+ProgressCallback = Callable[[int, int | None, ProgressStage], Awaitable[None]]
+NonEmptyString = Annotated[str, StringConstraints(min_length=1, max_length=512)]
+NonNegativeInt = Annotated[int, Field(ge=0)]
+PositiveInt = Annotated[int, Field(gt=0)]
 
 
-def host_capability_profile_digest(maximum_frame_bytes: int) -> str:
-    """Derive the governed digest from every typed host-capability field."""
-
-    return checksum(
-        canonicalize_value(
-            {
-                "compression_algorithms": ["identity"],
-                "delivery_modes": ["automatic", "inline", "resource"],
-                "maximum_frame_bytes": maximum_frame_bytes,
-                "supports_resource_links": True,
-                "supports_trace_context": True,
-            }
-        )
+def _safe_contract_key(value: str, maximum_length: int = 128) -> bool:
+    return (
+        0 < len(value) <= maximum_length
+        and value.isascii()
+        and all(character.isalnum() or character in "._-:" for character in value)
     )
 
 
+class _PortModel(BaseModel):
+    """Strict immutable DTO exported by the application-owned daemon port."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        frozen=True,
+        validate_default=True,
+        hide_input_in_errors=True,
+        allow_inf_nan=False,
+    )
+
+
+type SafeErrorCode = Literal[
+    "INVALID_REQUEST",
+    "VALIDATION_REJECTED",
+    "INPUT_REQUIRED",
+    "NOT_AUTHORIZED",
+    "IDEMPOTENCY_CONFLICT",
+    "CONTINUATION_EXPIRED",
+    "CONTINUATION_REPLAYED",
+    "GENERATION_MISMATCH",
+    "QUERY_NOT_FOUND",
+    "RESOURCE_NOT_FOUND",
+    "RESOURCE_EXPIRED",
+    "RANGE_NOT_SATISFIABLE",
+    "CAPACITY_UNAVAILABLE",
+    "CANCELLED",
+    "RESUME_WINDOW_EXPIRED",
+    "DAEMON_UNAVAILABLE",
+    "INTERNAL",
+]
+type SafeErrorLayer = Literal[
+    "TRANSPORT",
+    "AUTHORIZATION",
+    "VALIDATION",
+    "QUERY",
+    "RESOURCE",
+    "LIFECYCLE",
+]
+type QueryState = Literal[
+    "ACCEPTED",
+    "QUEUED",
+    "RUNNING",
+    "SUCCEEDED",
+    "FAILED",
+    "CANCELLED",
+    "LOST",
+]
+type ReferenceKind = Literal[
+    "capability",
+    "guide",
+    "recipe",
+    "request_schema",
+    "response_schema",
+    "snapshot",
+]
+type DiagnosticReference = Literal[
+    "",
+    "lifecycle.failed_closed",
+    "query.challenge_rejected",
+    "query.terminal",
+]
+
+_SAFE_ERROR_CODE_ADAPTER = TypeAdapter(SafeErrorCode)
+_SAFE_ERROR_LAYER_ADAPTER = TypeAdapter(SafeErrorLayer)
+_QUERY_STATE_ADAPTER = TypeAdapter(QueryState)
+_REFERENCE_KIND_ADAPTER = TypeAdapter(ReferenceKind)
+_PROGRESS_STAGE_ADAPTER = TypeAdapter(ProgressStage)
+_DIAGNOSTIC_REFERENCE_ADAPTER = TypeAdapter(DiagnosticReference)
+
+
+class AuthorityGeneration(_PortModel):
+    session_id: NonEmptyString
+    session_generation: PositiveInt
+    daemon_generation: PositiveInt
+    supervisor_generation: PositiveInt
+    policy_generation: NonNegativeInt
+    revocation_generation: NonNegativeInt
+
+
+class SafeError(_PortModel):
+    code: SafeErrorCode
+    layer: SafeErrorLayer
+    retryable: bool
+    retry_after_ms: NonNegativeInt | None = None
+    diagnostic_reference: DiagnosticReference = ""
+    correlation_id: str = ""
+
+
 class DaemonProtocolError(RuntimeError):
-    """The daemon returned an internally inconsistent accepted-protocol result."""
+    """The daemon violated a typed v2 transport or presentation invariant."""
 
 
-class DaemonProjectionError(DaemonProtocolError):
-    """A daemon result attempted to cross the released projection boundary."""
+class DaemonRpcError(RuntimeError):
+    """Stable typed daemon failure without server prose or secret material."""
 
-    def __init__(self, reason: str, forbidden_fields: tuple[str, ...]) -> None:
-        self.reason = reason
-        self.forbidden_fields = forbidden_fields
-        super().__init__(reason)
-
-
-class DaemonQueryError(DaemonProtocolError):
-    """One daemon-authored canonical public error record."""
-
-    def __init__(self, canonical_record: bytes) -> None:
-        canonical = canonicalize_json(canonical_record)
-        if canonical != canonical_record:
-            raise DaemonProtocolError("daemon error record is not canonical JSON")
-        self.canonical_bytes = canonical
-        self.record = cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(canonical, strict=True))
-        super().__init__(canonical.decode("utf-8"))
+    def __init__(self, status: grpc.StatusCode, error: SafeError) -> None:
+        self.status = status
+        self.error = error
+        super().__init__(f"{status.name}:{error.code}")
 
 
-_FORBIDDEN_RELEASED_RESPONSE_FIELDS = frozenset({"internal_table", "physical_plan"})
+class AuthorizedStringChoice(_PortModel):
+    kind: Literal["string"] = "string"
+    choice_id: NonEmptyString
+    presentation_key: NonEmptyString
+    value: str
 
 
-def validate_inline_daemon_response(
-    payload: bytes,
-    artifact_checksum: str,
-    terminal: Any,
-) -> JsonObject:
-    """Validate the exact daemon-owned inline response before public presentation.
+class AuthorizedIntegerChoice(_PortModel):
+    kind: Literal["integer"] = "integer"
+    choice_id: NonEmptyString
+    presentation_key: NonEmptyString
+    value: int
 
-    The adapter remains a pass-through: this function neither constructs nor repairs semantic
-    response content. It verifies canonical bytes, their content address, the independently
-    streamed terminal states, and the absence of private physical authority before returning the
-    decoded object unchanged.
-    """
 
-    canonical_payload = canonicalize_json(payload)
-    if canonical_payload != payload:
-        raise DaemonProtocolError("result artifact is not canonical JSON")
-    payload_checksum = checksum(payload)
-    if (
-        payload_checksum != artifact_checksum
-        or terminal.canonical_response_checksum != artifact_checksum
-    ):
-        raise DaemonProtocolError("terminal and inline result identities differ")
-    response = cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(payload, strict=True))
-    expected_states = {
-        "execution_state": terminal.semantic_execution_state,
-        "availability_state": terminal.availability_state,
-        "completeness_state": terminal.completeness_state,
-        "freshness_state": terminal.freshness_state,
-        "limit_state": terminal.limit_state,
-    }
-    if any(response.get(name) != value for name, value in expected_states.items()):
-        raise DaemonProtocolError("terminal states differ from the canonical response")
+class AuthorizedBooleanChoice(_PortModel):
+    kind: Literal["boolean"] = "boolean"
+    choice_id: NonEmptyString
+    presentation_key: NonEmptyString
+    value: bool
 
-    def forbidden_fields(value: Any) -> set[str]:
-        if isinstance(value, dict):
-            fields = set(_FORBIDDEN_RELEASED_RESPONSE_FIELDS.intersection(value))
-            for nested in value.values():
-                fields.update(forbidden_fields(nested))
-            return fields
-        if isinstance(value, list):
-            fields: set[str] = set()
-            for nested in value:
-                fields.update(forbidden_fields(nested))
-            return fields
-        return set()
 
-    forbidden = tuple(sorted(forbidden_fields(response)))
-    if forbidden:
-        raise DaemonProjectionError(
-            "released projection contains a forbidden physical-name field",
-            forbidden,
+type AuthorizedChoice = Annotated[
+    AuthorizedStringChoice | AuthorizedIntegerChoice | AuthorizedBooleanChoice,
+    Field(discriminator="kind"),
+]
+
+
+class StringChallengeConstraints(_PortModel):
+    kind: Literal["string"] = "string"
+    minimum_length: NonNegativeInt | None = None
+    maximum_length: NonNegativeInt | None = None
+    format: Literal["plain", "identifier", "release_version"]
+
+    @model_validator(mode="after")
+    def ordered_bounds(self) -> StringChallengeConstraints:
+        if (
+            self.minimum_length is not None
+            and self.maximum_length is not None
+            and self.minimum_length > self.maximum_length
+        ):
+            raise ValueError("string challenge bounds are reversed")
+        return self
+
+
+class IntegerChallengeConstraints(_PortModel):
+    kind: Literal["integer"] = "integer"
+    minimum: int | None = None
+    maximum: int | None = None
+
+    @model_validator(mode="after")
+    def ordered_bounds(self) -> IntegerChallengeConstraints:
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            raise ValueError("integer challenge bounds are reversed")
+        return self
+
+
+class EnumChallengeConstraints(_PortModel):
+    kind: Literal["enum"] = "enum"
+    minimum_selections: NonNegativeInt
+    maximum_selections: NonNegativeInt
+
+    @model_validator(mode="after")
+    def closed_single_selection(self) -> EnumChallengeConstraints:
+        if self.minimum_selections > self.maximum_selections or self.maximum_selections != 1:
+            raise ValueError("enum challenge must be a bounded single selection")
+        return self
+
+
+class CollectionChallengeConstraints(_PortModel):
+    kind: Literal["collection"] = "collection"
+    item_kind: Literal["string", "integer", "boolean", "enum"]
+    minimum_items: NonNegativeInt
+    maximum_items: NonNegativeInt
+    unique_items: bool
+
+    @model_validator(mode="after")
+    def ordered_bounded_items(self) -> CollectionChallengeConstraints:
+        if self.minimum_items > self.maximum_items or self.maximum_items > 256:
+            raise ValueError("collection challenge bounds are invalid")
+        return self
+
+
+type ChallengeConstraints = Annotated[
+    StringChallengeConstraints
+    | IntegerChallengeConstraints
+    | EnumChallengeConstraints
+    | CollectionChallengeConstraints,
+    Field(discriminator="kind"),
+]
+
+
+type ChallengeInputKind = Literal[
+    "string",
+    "integer",
+    "boolean",
+    "enum",
+    "string_collection",
+    "integer_collection",
+    "boolean_collection",
+    "enum_collection",
+]
+
+
+class InputRequirement(_PortModel):
+    semantic_field_id: NonEmptyString
+    input_kind: ChallengeInputKind
+    presentation_key: NonEmptyString
+    description_key: str | None = None
+    required: bool
+    constraints: ChallengeConstraints | None = None
+    authorized_choices: tuple[AuthorizedChoice, ...] = ()
+
+    @model_validator(mode="after")
+    def closed_requirement(self) -> InputRequirement:
+        keys = (self.semantic_field_id, self.presentation_key)
+        if not all(_safe_contract_key(value) for value in keys) or (
+            self.description_key is not None and not _safe_contract_key(self.description_key)
+        ):
+            raise ValueError("challenge requirement keys are not safe contract identifiers")
+
+        constraint_matches = (
+            (
+                self.input_kind == "string"
+                and isinstance(self.constraints, StringChallengeConstraints)
+            )
+            or (
+                self.input_kind == "integer"
+                and isinstance(self.constraints, IntegerChallengeConstraints)
+            )
+            or (self.input_kind == "boolean" and self.constraints is None)
+            or (
+                self.input_kind == "enum" and isinstance(self.constraints, EnumChallengeConstraints)
+            )
+            or (
+                self.input_kind.endswith("_collection")
+                and isinstance(self.constraints, CollectionChallengeConstraints)
+                and self.constraints.item_kind == self.input_kind.removesuffix("_collection")
+            )
         )
-    return response
+        choices_required = self.input_kind in {"enum", "enum_collection"}
+        if not constraint_matches or choices_required != bool(self.authorized_choices):
+            raise ValueError("challenge input kind, constraints, and choices disagree")
+
+        choice_ids: set[str] = set()
+        for choice in self.authorized_choices:
+            if (
+                not _safe_contract_key(choice.choice_id)
+                or not _safe_contract_key(choice.presentation_key)
+                or choice.choice_id in choice_ids
+            ):
+                raise ValueError("challenge choices have unsafe or duplicate identifiers")
+            choice_ids.add(choice.choice_id)
+        return self
 
 
-@dataclass(frozen=True, slots=True)
-class DaemonQueryResult:
-    """Verified canonical result bytes and terminal daemon metadata."""
+class StringInputAnswer(_PortModel):
+    kind: Literal["string"] = "string"
+    semantic_field_id: NonEmptyString
+    value: str
 
-    semantic_request_id: str
-    daemon_query_id: str
-    canonical_bytes: bytes
-    response: JsonObject | None
-    snapshot: JsonObject
-    checksum: str
-    artifact_id: str
-    lease_expires_at_unix_ms: int
-    result_row_count: int
-    result_byte_count: int
-    execution_state: str
-    freshness_state: str
-    availability_state: str
-    completeness_state: str
-    limit_state: str
-    truncated: bool
-    query_statuses: tuple[JsonObject, ...]
+
+class IntegerInputAnswer(_PortModel):
+    kind: Literal["integer"] = "integer"
+    semantic_field_id: NonEmptyString
+    value: int
+
+
+class BooleanInputAnswer(_PortModel):
+    kind: Literal["boolean"] = "boolean"
+    semantic_field_id: NonEmptyString
+    value: bool
+
+
+class ChoiceInputAnswer(_PortModel):
+    kind: Literal["choice"] = "choice"
+    semantic_field_id: NonEmptyString
+    choice_id: NonEmptyString
+
+
+class StringCollectionInputAnswer(_PortModel):
+    kind: Literal["string_collection"] = "string_collection"
+    semantic_field_id: NonEmptyString
+    values: tuple[str, ...]
+
+
+class IntegerCollectionInputAnswer(_PortModel):
+    kind: Literal["integer_collection"] = "integer_collection"
+    semantic_field_id: NonEmptyString
+    values: tuple[int, ...]
+
+
+class BooleanCollectionInputAnswer(_PortModel):
+    kind: Literal["boolean_collection"] = "boolean_collection"
+    semantic_field_id: NonEmptyString
+    values: tuple[bool, ...]
+
+
+class ChoiceCollectionInputAnswer(_PortModel):
+    kind: Literal["choice_collection"] = "choice_collection"
+    semantic_field_id: NonEmptyString
+    choice_ids: tuple[NonEmptyString, ...]
+
+
+type ChallengeAnswer = Annotated[
+    StringInputAnswer
+    | IntegerInputAnswer
+    | BooleanInputAnswer
+    | ChoiceInputAnswer
+    | StringCollectionInputAnswer
+    | IntegerCollectionInputAnswer
+    | BooleanCollectionInputAnswer
+    | ChoiceCollectionInputAnswer,
+    Field(discriminator="kind"),
+]
+
+
+class ValidationIssue(_PortModel):
+    code: SafeErrorCode
+    semantic_field_id: str = ""
+    presentation_key: str = ""
+    retryable: bool
+
+
+class QueryPreparation(_PortModel):
+    authority: AuthorityGeneration
+    valid: bool
+    semantic_request_id: str | None = None
+    normalized_request: JsonObject | None = None
+    input_requirements: tuple[InputRequirement, ...] = ()
+    errors: tuple[ValidationIssue, ...] = ()
+    warnings: tuple[ValidationIssue, ...] = ()
+    cost_class: str
+    estimated_result_bytes: NonNegativeInt
+    estimated_result_pages: NonNegativeInt
+
+
+class AcceptedQuery(_PortModel):
+    outcome: Literal["accepted"] = "accepted"
+    authority: AuthorityGeneration
+    daemon_query_id: NonEmptyString
+    semantic_request_id: NonEmptyString
+    operation_fingerprint: NonEmptyString
+    accepted_at_unix_ms: int
+    observation_expires_at_unix_ms: int
+    state: QueryState
+    idempotent_replay: bool
+
+
+class InputChallenge(_PortModel):
+    outcome: Literal["input_challenge"] = "input_challenge"
+    authority: AuthorityGeneration
+    semantic_request_id: NonEmptyString
+    challenge_id: NonEmptyString
+    round: PositiveInt
+    remaining_rounds: NonNegativeInt
+    issued_at_unix_ms: int
+    expires_at_unix_ms: int
+    maximum_answer_bytes: PositiveInt
+    explanation_code: Literal[
+        "required_input_missing",
+        "reference_ambiguous",
+        "bounded_selection_required",
+    ]
+    requirements: tuple[InputRequirement, ...]
+    daemon_continuation: bytes = Field(repr=False, min_length=1)
+
+    @model_validator(mode="after")
+    def closed_challenge(self) -> InputChallenge:
+        field_ids = [requirement.semantic_field_id for requirement in self.requirements]
+        if not field_ids or len(field_ids) != len(set(field_ids)):
+            raise ValueError("challenge requirements are empty or duplicate a semantic field")
+        if self.issued_at_unix_ms >= self.expires_at_unix_ms:
+            raise ValueError("challenge validity interval is empty or reversed")
+        return self
+
+
+class ValidationRejection(_PortModel):
+    outcome: Literal["validation_rejection"] = "validation_rejection"
+    authority: AuthorityGeneration
+    semantic_request_id: str | None = None
+    issues: tuple[ValidationIssue, ...]
+    error: SafeError
+
+
+type StartQueryOutcome = Annotated[
+    AcceptedQuery | InputChallenge | ValidationRejection,
+    Field(discriminator="outcome"),
+]
+
+
+class ResourceHandle(_PortModel):
+    kind: Literal["result_manifest", "result_page", "reference"]
+    public_handle: NonEmptyString
+    package_id: str | None = None
+    page_ordinal: NonNegativeInt | None = None
+    media_type: NonEmptyString
+    byte_length: NonNegativeInt
+    content_checksum: str
+    expires_at_unix_ms: int
+    authority: AuthorityGeneration
+
+
+class ResourceReadLimits(_PortModel):
+    """Negotiated per-chunk and total-unit bounds for presentation reads."""
+
+    maximum_chunk_bytes: PositiveInt
+    maximum_resource_bytes: PositiveInt
+
+
+class ManifestSelector(_PortModel):
+    kind: Literal["manifest"] = "manifest"
+
+
+class PageSelector(_PortModel):
+    kind: Literal["page"] = "page"
+    page_ordinal: NonNegativeInt
+
+
+class ReferenceSelector(_PortModel):
+    kind: Literal["reference"] = "reference"
+    reference_kind: ReferenceKind
+    version: str | None = None
+
+
+type ResourceSelector = Annotated[
+    ManifestSelector | PageSelector | ReferenceSelector,
+    Field(discriminator="kind"),
+]
+
+
+class ReferenceDocument(_PortModel):
+    authority: AuthorityGeneration
+    reference_id: NonEmptyString
+    resource: ResourceHandle
+
+
+class ReferenceCompletionCandidate(_PortModel):
+    value: NonEmptyString
+    presentation_key: NonEmptyString
+
+
+class ReferenceCompletion(_PortModel):
+    authority: AuthorityGeneration
+    candidates: tuple[ReferenceCompletionCandidate, ...]
+    total: NonNegativeInt
+    has_more: bool
+
+
+class PublicDaemonStatus(_PortModel):
+    """Closed status document accepted from the daemon's canonical JSON projection."""
+
+    lifecycle: Literal["BOOTSTRAPPING", "READY", "DRAINING", "FAILED_CLOSED"]
+    lifecycle_sequence: NonNegativeInt
+    active_epoch_id: str | None = None
+    running_queries: NonNegativeInt
+    queued_queries: NonNegativeInt
+    accepted_queries: NonNegativeInt
+    reserved_result_bytes: NonNegativeInt
+    reserved_result_pages: NonNegativeInt
+
+
+class DaemonStatus(_PortModel):
+    authority: AuthorityGeneration
+    lifecycle: Literal["BOOTSTRAPPING", "READY", "DRAINING", "FAILED_CLOSED"]
+    lifecycle_sequence: NonNegativeInt
+    failure: SafeError | None = None
+    active_epoch_id: str | None = None
+    running_queries: NonNegativeInt
+    queued_queries: NonNegativeInt
+    public_status: PublicDaemonStatus
+
+
+class DaemonQueryResult(_PortModel):
+    authority: AuthorityGeneration
+    semantic_request_id: NonEmptyString
+    daemon_query_id: NonEmptyString
+    execution_state: QueryState
+    epoch_id: str | None
+    package_id: str | None
+    manifest: ResourceHandle | None
+    pages: tuple[ResourceHandle, ...]
+    total_rows: NonNegativeInt
+    total_pages: NonNegativeInt
+    total_bytes: NonNegativeInt
+    error: SafeError | None = None
     notices: tuple[str, ...]
-    arrow_descriptor: ArrowResultPackageDescriptor | None = None
 
 
-@dataclass(slots=True)
-class _ArrowLeaseEntry:
-    descriptor: ArrowResultPackageDescriptor
-    access: ArrowResultAccess
-    consumed_resource_ids: set[str]
+class CancellationResult(_PortModel):
+    authority: AuthorityGeneration
+    cancellation_id: NonEmptyString
+    acknowledgement: Literal["accepted", "replayed", "already_terminal", "query_not_found"]
+    terminal_state: QueryState | None = None
+    terminal_error: SafeError | None = None
+    idempotent_replay: bool
+
+
+class ReleaseResult(_PortModel):
+    authority: AuthorityGeneration
+    release_id: NonEmptyString
+    state: Literal["released", "already_released", "not_found"]
+    idempotent_replay: bool
+
+
+class DaemonPort(Protocol):
+    def current_settings(self) -> Settings: ...
+
+    def current_resource_limits(self) -> ResourceReadLimits: ...
+
+    async def connect(self, *, correlation_id: str = "adapter-connect") -> None: ...
+
+    async def status(self, *, correlation_id: str) -> DaemonStatus: ...
+
+    async def reference(
+        self,
+        kind: ReferenceKind,
+        version_value: str | None,
+        *,
+        correlation_id: str,
+    ) -> ReferenceDocument: ...
+
+    async def complete_reference(
+        self,
+        *,
+        variable: Literal["kind", "released_version"],
+        prefix: str,
+        kind: ReferenceKind | None,
+        selector: str | None,
+        maximum_candidates: int,
+        correlation_id: str,
+    ) -> ReferenceCompletion: ...
+
+    async def validate(
+        self, value: ValidateToolInput, *, correlation_id: str
+    ) -> QueryPreparation: ...
+
+    async def start_query(
+        self,
+        value: QueryToolInput,
+        *,
+        correlation_id: str,
+    ) -> StartQueryOutcome: ...
+
+    async def continue_query(
+        self,
+        challenge: InputChallenge,
+        answers: tuple[ChallengeAnswer, ...],
+        *,
+        correlation_id: str,
+    ) -> StartQueryOutcome: ...
+
+    async def watch_query(
+        self,
+        accepted: AcceptedQuery,
+        *,
+        correlation_id: str,
+        progress: ProgressCallback | None = None,
+        timeout_seconds: float | None = None,
+    ) -> DaemonQueryResult: ...
+
+    async def read_resource(
+        self,
+        public_handle: str,
+        selector: ResourceSelector,
+        *,
+        offset: int,
+        maximum_bytes: int,
+        correlation_id: str,
+    ) -> bytes: ...
+
+    async def cancel_query(
+        self,
+        daemon_query_id: str,
+        *,
+        cancellation_id: str,
+        correlation_id: str,
+        timeout_seconds: float = 2.0,
+    ) -> CancellationResult: ...
+
+    async def release_resource(
+        self,
+        public_handle: str,
+        *,
+        release_id: str,
+        correlation_id: str,
+        timeout_seconds: float = 2.0,
+    ) -> ReleaseResult: ...
+
+    async def close(self) -> None: ...
+
+
+def _safe_error(message: query_pb.SafeErrorMetadata) -> SafeError:
+    try:
+        code = _SAFE_ERROR_CODE_ADAPTER.validate_python(
+            _enum_name(query_pb.SafeErrorCode.Name, message.code, "SAFE_ERROR_CODE_").upper(),
+            strict=True,
+        )
+        layer = _SAFE_ERROR_LAYER_ADAPTER.validate_python(
+            _enum_name(query_pb.SafeErrorLayer.Name, message.layer, "SAFE_ERROR_LAYER_").upper(),
+            strict=True,
+        )
+        diagnostic_reference: DiagnosticReference = ""
+        if message.HasField("diagnostic_reference"):
+            diagnostic_name = _enum_name(
+                query_pb.SafeDiagnosticReference.Name,
+                message.diagnostic_reference,
+                "SAFE_DIAGNOSTIC_REFERENCE_",
+            )
+            diagnostic_reference = _DIAGNOSTIC_REFERENCE_ADAPTER.validate_python(
+                {
+                    "LIFECYCLE_FAILED_CLOSED": "lifecycle.failed_closed",
+                    "QUERY_CHALLENGE_REJECTED": "query.challenge_rejected",
+                    "QUERY_TERMINAL": "query.terminal",
+                }.get(diagnostic_name),
+                strict=True,
+            )
+        return SafeError(
+            code=code,
+            layer=layer,
+            retryable=message.retryable,
+            retry_after_ms=message.retry_after_ms if message.HasField("retry_after_ms") else None,
+            diagnostic_reference=diagnostic_reference,
+            correlation_id=message.correlation_id,
+        )
+    except (ValueError, DaemonProtocolError) as error:
+        raise DaemonProtocolError("daemon returned unknown safe error metadata") from error
+
+
+def _local_transport_error(status: grpc.StatusCode) -> SafeError:
+    code = _SAFE_ERROR_CODE_ADAPTER.validate_python(
+        {
+            grpc.StatusCode.INVALID_ARGUMENT: "INVALID_REQUEST",
+            grpc.StatusCode.UNAUTHENTICATED: "NOT_AUTHORIZED",
+            grpc.StatusCode.PERMISSION_DENIED: "NOT_AUTHORIZED",
+            grpc.StatusCode.RESOURCE_EXHAUSTED: "CAPACITY_UNAVAILABLE",
+            grpc.StatusCode.CANCELLED: "CANCELLED",
+            grpc.StatusCode.DEADLINE_EXCEEDED: "DAEMON_UNAVAILABLE",
+            grpc.StatusCode.UNAVAILABLE: "DAEMON_UNAVAILABLE",
+        }.get(status, "INTERNAL"),
+        strict=True,
+    )
+    return SafeError(
+        code=code,
+        layer="TRANSPORT",
+        retryable=status
+        in {
+            grpc.StatusCode.RESOURCE_EXHAUSTED,
+            grpc.StatusCode.DEADLINE_EXCEEDED,
+            grpc.StatusCode.UNAVAILABLE,
+        },
+    )
+
+
+def _deadline_exceeded_error() -> DaemonRpcError:
+    return DaemonRpcError(
+        grpc.StatusCode.DEADLINE_EXCEEDED,
+        _local_transport_error(grpc.StatusCode.DEADLINE_EXCEEDED),
+    )
+
+
+def _typed_rpc_error(error: grpc.aio.AioRpcError) -> DaemonRpcError:
+    for key, value in error.trailing_metadata() or ():
+        if key != "codefabric-safe-error-bin":
+            continue
+        if not isinstance(value, bytes):
+            raise DaemonProtocolError("daemon safe error metadata is not binary")
+        try:
+            metadata = query_pb.SafeErrorMetadata.FromString(value)
+        except ValueError as decode_error:
+            raise DaemonProtocolError("daemon safe error metadata is malformed") from decode_error
+        return DaemonRpcError(error.code(), _safe_error(metadata))
+    return DaemonRpcError(error.code(), _local_transport_error(error.code()))
+
+
+def _enum_name(name: Callable[[int], str], value: int, prefix: str) -> str:
+    try:
+        member = name(value)
+    except ValueError as error:
+        raise DaemonProtocolError("daemon returned an unknown enum value") from error
+    if not member.startswith(prefix) or member == f"{prefix}UNSPECIFIED":
+        raise DaemonProtocolError("daemon returned an unspecified enum value")
+    return member.removeprefix(prefix).lower()
+
+
+def _lifecycle_name(value: int) -> str:
+    return _enum_name(query_pb.LifecycleState.Name, value, "LIFECYCLE_STATE_").upper()
+
+
+def _execution_name(value: int) -> QueryState:
+    state = _enum_name(query_pb.QueryExecutionState.Name, value, "QUERY_EXECUTION_STATE_").upper()
+    return _QUERY_STATE_ADAPTER.validate_python(state, strict=True)
+
+
+def _duration(seconds: float) -> Duration:
+    if seconds <= 0:
+        raise ValueError("remaining RPC budget must be positive")
+    total_nanos = int(seconds * 1_000_000_000)
+    whole, nanos = divmod(total_nanos, 1_000_000_000)
+    return Duration(seconds=whole, nanos=nanos)
+
+
+def _decode_authority(message: query_pb.AuthorityGeneration) -> AuthorityGeneration:
+    return AuthorityGeneration(
+        session_id=message.session_id,
+        session_generation=message.session_generation,
+        daemon_generation=message.daemon_generation,
+        supervisor_generation=message.supervisor_generation,
+        policy_generation=message.policy_generation,
+        revocation_generation=message.revocation_generation,
+    )
+
+
+def _reference_kind_value(kind: ReferenceKind) -> query_pb.ReferenceKind:
+    return cast(
+        query_pb.ReferenceKind,
+        {
+            "capability": query_pb.REFERENCE_KIND_CAPABILITY,
+            "guide": query_pb.REFERENCE_KIND_GUIDE,
+            "recipe": query_pb.REFERENCE_KIND_RECIPE,
+            "request_schema": query_pb.REFERENCE_KIND_REQUEST_SCHEMA,
+            "response_schema": query_pb.REFERENCE_KIND_RESPONSE_SCHEMA,
+            "snapshot": query_pb.REFERENCE_KIND_SNAPSHOT,
+        }[kind],
+    )
+
+
+def _choice(message: query_pb.AuthorizedChoice) -> AuthorizedChoice:
+    selected = message.WhichOneof("value")
+    if selected == "string_value":
+        return AuthorizedStringChoice(
+            choice_id=message.choice_id,
+            presentation_key=message.presentation_key,
+            value=message.string_value,
+        )
+    if selected == "integer_value":
+        return AuthorizedIntegerChoice(
+            choice_id=message.choice_id,
+            presentation_key=message.presentation_key,
+            value=message.integer_value,
+        )
+    if selected == "boolean_value":
+        return AuthorizedBooleanChoice(
+            choice_id=message.choice_id,
+            presentation_key=message.presentation_key,
+            value=message.boolean_value,
+        )
+    raise DaemonProtocolError("authorized challenge choice omitted its typed value")
+
+
+def _constraints(message: query_pb.ChallengeConstraints) -> ChallengeConstraints | None:
+    selected = message.WhichOneof("constraint")
+    if selected is None:
+        return None
+    if selected == "string_constraints":
+        value = message.string_constraints
+        string_format = _enum_name(
+            query_pb.ChallengeStringFormat.Name,
+            value.format,
+            "CHALLENGE_STRING_FORMAT_",
+        )
+        if string_format not in {"plain", "identifier", "release_version"}:
+            raise DaemonProtocolError("challenge string format is not allowlisted")
+        return StringChallengeConstraints(
+            minimum_length=(value.minimum_length if value.HasField("minimum_length") else None),
+            maximum_length=(value.maximum_length if value.HasField("maximum_length") else None),
+            format=cast(Literal["plain", "identifier", "release_version"], string_format),
+        )
+    if selected == "integer_constraints":
+        value = message.integer_constraints
+        return IntegerChallengeConstraints(
+            minimum=value.minimum if value.HasField("minimum") else None,
+            maximum=value.maximum if value.HasField("maximum") else None,
+        )
+    if selected == "enum_constraints":
+        value = message.enum_constraints
+        return EnumChallengeConstraints(
+            minimum_selections=value.minimum_selections,
+            maximum_selections=value.maximum_selections,
+        )
+    if selected == "collection_constraints":
+        value = message.collection_constraints
+        item_kind = _enum_name(
+            query_pb.ChallengeCollectionItemKind.Name,
+            value.item_kind,
+            "CHALLENGE_COLLECTION_ITEM_KIND_",
+        )
+        if item_kind not in {"string", "integer", "boolean", "enum"}:
+            raise DaemonProtocolError("challenge collection item kind is not allowlisted")
+        return CollectionChallengeConstraints(
+            item_kind=cast(Literal["string", "integer", "boolean", "enum"], item_kind),
+            minimum_items=value.minimum_items,
+            maximum_items=value.maximum_items,
+            unique_items=value.unique_items,
+        )
+    raise DaemonProtocolError("challenge constraint selected an unknown variant")
+
+
+def _requirement(message: query_pb.InputRequirement) -> InputRequirement:
+    input_kind = _enum_name(
+        query_pb.ChallengeInputKind.Name,
+        message.input_kind,
+        "CHALLENGE_INPUT_KIND_",
+    )
+    allowed = {
+        "string",
+        "integer",
+        "boolean",
+        "enum",
+        "string_collection",
+        "integer_collection",
+        "boolean_collection",
+        "enum_collection",
+    }
+    if input_kind not in allowed:
+        raise DaemonProtocolError("challenge input kind is not allowlisted")
+    return InputRequirement(
+        semantic_field_id=message.semantic_field_id,
+        input_kind=cast(ChallengeInputKind, input_kind),
+        presentation_key=message.presentation_key,
+        description_key=(message.description_key if message.HasField("description_key") else None),
+        required=message.required,
+        constraints=_constraints(message.constraints) if message.HasField("constraints") else None,
+        authorized_choices=tuple(_choice(choice) for choice in message.authorized_choices),
+    )
+
+
+def _requirements(messages: Iterable[query_pb.InputRequirement]) -> tuple[InputRequirement, ...]:
+    try:
+        requirements = tuple(_requirement(item) for item in messages)
+    except ValidationError:
+        raise DaemonProtocolError("challenge requirement contract is malformed") from None
+    field_ids = [requirement.semantic_field_id for requirement in requirements]
+    if len(field_ids) != len(set(field_ids)):
+        raise DaemonProtocolError("challenge requirement contract is malformed")
+    return requirements
+
+
+def _validation_issue(message: query_pb.ValidationIssue) -> ValidationIssue:
+    code = _SAFE_ERROR_CODE_ADAPTER.validate_python(
+        _enum_name(query_pb.SafeErrorCode.Name, message.code, "SAFE_ERROR_CODE_").upper(),
+        strict=True,
+    )
+    return ValidationIssue(
+        code=code,
+        semantic_field_id=message.semantic_field_id,
+        presentation_key=message.presentation_key,
+        retryable=message.retryable,
+    )
+
+
+def _answer(message: ChallengeAnswer) -> query_pb.InputAnswer:
+    answer = query_pb.InputAnswer(semantic_field_id=message.semantic_field_id)
+    if isinstance(message, StringInputAnswer):
+        answer.string_value = message.value
+    elif isinstance(message, IntegerInputAnswer):
+        answer.integer_value = message.value
+    elif isinstance(message, BooleanInputAnswer):
+        answer.boolean_value = message.value
+    elif isinstance(message, ChoiceInputAnswer):
+        answer.choice_id = message.choice_id
+    elif isinstance(message, StringCollectionInputAnswer):
+        answer.string_collection.values.extend(message.values)
+    elif isinstance(message, IntegerCollectionInputAnswer):
+        answer.integer_collection.values.extend(message.values)
+    elif isinstance(message, BooleanCollectionInputAnswer):
+        answer.boolean_collection.values.extend(message.values)
+    elif isinstance(message, ChoiceCollectionInputAnswer):
+        answer.choice_collection.choice_ids.extend(message.choice_ids)
+    return answer
+
+
+def _resource_selector(selector: ResourceSelector) -> query_pb.ResourceSelector:
+    if isinstance(selector, ManifestSelector):
+        return query_pb.ResourceSelector(manifest=query_pb.ManifestSelector())
+    if isinstance(selector, PageSelector):
+        return query_pb.ResourceSelector(
+            page=query_pb.PageSelector(page_ordinal=selector.page_ordinal)
+        )
+    if isinstance(selector, ReferenceSelector):
+        read = query_pb.ReferenceReadRequest(kind=_reference_kind_value(selector.reference_kind))
+        if selector.version is not None:
+            read.version = selector.version
+        return query_pb.ResourceSelector(reference=read)
+    assert_never(selector)
+
+
+def _progress_stage(value: int) -> ProgressStage:
+    try:
+        return _PROGRESS_STAGE_ADAPTER.validate_python(
+            _enum_name(query_pb.ProgressStage.Name, value, "PROGRESS_STAGE_"),
+            strict=True,
+        )
+    except (ValueError, DaemonProtocolError) as error:
+        raise DaemonProtocolError("daemon returned an unknown public progress stage") from error
+
+
+def _resource_descriptor_identity(
+    descriptor: query_pb.ResourceDescriptor,
+) -> tuple[object, ...]:
+    """Return stable retained-content identity, excluding reissued public authority."""
+
+    return (
+        _enum_name(query_pb.ResourceKind.Name, descriptor.kind, "RESOURCE_KIND_"),
+        descriptor.package_id if descriptor.HasField("package_id") else None,
+        descriptor.page_ordinal if descriptor.HasField("page_ordinal") else None,
+        descriptor.media_type,
+        descriptor.byte_length,
+        descriptor.content_checksum,
+    )
+
+
+def _safe_error_identity(error: SafeError | None) -> tuple[object, ...] | None:
+    if error is None:
+        return None
+    return (
+        error.code,
+        error.layer,
+        error.retryable,
+        error.retry_after_ms,
+        error.diagnostic_reference,
+        error.correlation_id,
+    )
+
+
+def _query_event_identity(event: query_pb.QueryEvent) -> tuple[object, ...]:
+    """Project one event to content identity independent of session/cursor/handle reissue."""
+
+    kind = event.WhichOneof("event")
+    if kind == "snapshot_pinned":
+        value = event.snapshot_pinned
+        return (
+            kind,
+            value.epoch_id,
+            value.source_generation,
+            value.activation_head,
+            value.lifecycle_watermark,
+        )
+    if kind == "progress":
+        value = event.progress
+        return (
+            kind,
+            _progress_stage(value.stage),
+            value.completed,
+            value.total if value.HasField("total") else None,
+        )
+    if kind == "result_ready":
+        value = event.result_ready
+        if not value.HasField("manifest"):
+            raise DaemonProtocolError("result-ready event omitted its manifest resource")
+        return (
+            kind,
+            value.package_id,
+            _resource_descriptor_identity(value.manifest),
+            tuple(_resource_descriptor_identity(page) for page in value.pages),
+            value.total_rows,
+            value.total_pages,
+            value.total_bytes,
+        )
+    if kind == "terminal":
+        value = event.terminal
+        error = _safe_error(value.error) if value.HasField("error") else None
+        return (kind, _execution_name(value.state), _safe_error_identity(error))
+    raise DaemonProtocolError("query event omitted its closed variant")
 
 
 class CpgDaemonClient:
-    """One process-lifetime gRPC channel and its negotiated daemon contract."""
+    """Lifespan-owned channel and typed daemon-port session."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.channel: grpc.aio.Channel = create_local_channel(settings.daemon_target)
         self.stub = query_grpc.CpgQueryServiceStub(self.channel)
-        self.host_profile_digest = host_capability_profile_digest(settings.max_request_bytes)
-        self.handshake_response: Any | None = None
+        self.handshake_response: query_pb.HandshakeResponse | None = None
+        self._authority: AuthorityGeneration | None = None
+        self._session_token = b""
         self._connect_lock = asyncio.Lock()
-        self._reconnect_lock = asyncio.Lock()
-        # Capability material cached only so a later resource read can ask the
-        # daemon. Presence here never proves that the daemon still recognizes a lease.
-        self._lease_cache: dict[str, tuple[str, str, int, int]] = {}
-        self._arrow_leases: dict[str, _ArrowLeaseEntry] = {}
 
-    async def connect(self) -> None:
-        """Perform the mandatory version/capability handshake exactly once."""
+    def current_settings(self) -> Settings:
+        """Return the immutable authority record for the current daemon generation."""
+
+        return self.settings
+
+    def current_resource_limits(self) -> ResourceReadLimits:
+        """Project the live handshake's distinct chunk and resource-unit bounds."""
+
+        limits = self._handshake().effective_limits
+        return ResourceReadLimits(
+            maximum_chunk_bytes=min(
+                self.settings.maximum_resource_chunk_bytes,
+                limits.maximum_resource_chunk_bytes,
+            ),
+            maximum_resource_bytes=limits.maximum_result_bytes,
+        )
+
+    async def connect(
+        self,
+        *,
+        correlation_id: str = "adapter-connect",
+        timeout_seconds: float | None = None,
+    ) -> None:
+        """Wait for transport readiness and consume exactly one registered launch grant."""
 
         if self.handshake_response is not None:
             return
-        async with self._connect_lock:
-            if self.handshake_response is not None:
-                return
-            await self._connect()
-
-    async def _connect(self) -> None:
-        """Perform the handshake while the caller holds the connection lock."""
-
-        request = query_pb.HandshakeRequest(
-            adapter_instance_id=self.settings.agent_instance_id,
-            adapter_version=version("codefabric-cpg-mcp"),
-            fastmcp_version=version("fastmcp"),
-            pydantic_version=version("pydantic"),
-            python_version=platform.python_version(),
-            rpc_versions=query_pb.VersionRange(minimum=RPC_VERSION, maximum=RPC_VERSION),
-            semantic_query_versions=query_pb.VersionRange(
-                minimum=SEMANTIC_QUERY_VERSION,
-                maximum=SEMANTIC_QUERY_VERSION,
-            ),
-            schema_fingerprints=[
-                query_pb.SchemaFingerprint(schema_id=name.value, version="1.3", digest=digest)
-                for name, digest in wire_schema_fingerprints("serialization")
-            ],
-            required_feature_bits=int(CpgdFeature.REQUIRED),
-            optional_feature_bits=int(CpgdFeature.SUPPORTED & ~CpgdFeature.REQUIRED),
-            desired_workspace_ids=[self.settings.workspace_id],
-            host_capabilities=query_pb.HostCapabilityProfile(
-                delivery_modes=[
-                    query_pb.DELIVERY_PREFERENCE_INLINE,
-                    query_pb.DELIVERY_PREFERENCE_RESOURCE,
-                    query_pb.DELIVERY_PREFERENCE_AUTO,
-                ],
-                compression_algorithms=[query_pb.PAYLOAD_COMPRESSION_IDENTITY],
-                supports_resource_links=True,
-                supports_trace_context=True,
-                maximum_frame_bytes=self.settings.max_request_bytes,
-                profile_digest=self.host_profile_digest,
-            ),
-            credential_proof=query_pb.CredentialProof(
-                credential_id=self.settings.agent_instance_id,
-                capability_token=self.settings.capability_token.get_secret_value().encode(),
-            ),
-            agent_instance_id=self.settings.agent_instance_id,
+        timeout = min(
+            self.settings.readiness_timeout_seconds,
+            timeout_seconds
+            if timeout_seconds is not None
+            else self.settings.readiness_timeout_seconds,
         )
-        response = await self.stub.Handshake(request, timeout=self.settings.query_timeout_seconds)
+        if timeout <= 0:
+            raise _deadline_exceeded_error()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        try:
+            async with asyncio.timeout_at(deadline):
+                async with self._connect_lock:
+                    if self.handshake_response is not None:
+                        return
+                    await self.channel.channel_ready()
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        raise _deadline_exceeded_error()
+                    response = await self.stub.Handshake(
+                        query_pb.HandshakeRequest(
+                            launch_grant=self.settings.launch_grant.get_secret_value(),
+                            adapter_version=version("codefabric-cpg-mcp"),
+                            minimum_minor=RPC_MINOR,
+                            maximum_minor=RPC_MINOR,
+                            required_feature_bits=0,
+                            optional_feature_bits=0,
+                            desired_semantic_profiles=[SEMANTIC_PROFILE],
+                            maximum_resource_chunk_bytes=(
+                                self.settings.maximum_resource_chunk_bytes
+                            ),
+                            remaining_budget=_duration(remaining),
+                            correlation_id=correlation_id,
+                        ),
+                        timeout=remaining,
+                    )
+        except TimeoutError:
+            raise _deadline_exceeded_error() from None
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
         if (
-            response.negotiated_rpc_version != RPC_VERSION
-            or response.negotiated_semantic_query_version != SEMANTIC_QUERY_VERSION
-            or response.negotiated_compression != query_pb.PAYLOAD_COMPRESSION_IDENTITY
-            or response.negotiated_feature_bits & int(CpgdFeature.REQUIRED)
-            != int(CpgdFeature.REQUIRED)
+            len(response.session_token) != 32
+            or not response.HasField("authority")
+            or response.selected_minor != RPC_MINOR
+            or response.selected_semantic_profile != SEMANTIC_PROFILE
+            or not response.HasField("effective_limits")
+            or not response.HasField("reserved_control")
         ):
-            raise DaemonProtocolError("daemon negotiated an unsupported protocol profile")
+            raise DaemonProtocolError("handshake response differs from launch authority")
+        authority = _decode_authority(response.authority)
+        if (
+            authority.daemon_generation != self.settings.daemon_generation
+            or authority.supervisor_generation != self.settings.supervisor_generation
+            or response.session_expires_at_unix_ms != self.settings.session_expires_at_unix_ms
+            or response.effective_limits.maximum_resource_chunk_bytes
+            > self.settings.maximum_resource_chunk_bytes
+            or response.effective_limits.maximum_resource_chunk_bytes == 0
+            or response.effective_limits.maximum_result_bytes
+            < response.effective_limits.maximum_resource_chunk_bytes
+            or response.reserved_control.reserved_capacity <= 0
+            or set(response.reserved_control.operations)
+            != {
+                query_pb.RESERVED_CONTROL_OPERATION_HANDSHAKE,
+                query_pb.RESERVED_CONTROL_OPERATION_GET_STATUS,
+                query_pb.RESERVED_CONTROL_OPERATION_CANCEL_QUERY,
+                query_pb.RESERVED_CONTROL_OPERATION_RELEASE_RESOURCE,
+            }
+        ):
+            raise DaemonProtocolError("handshake authority or control reservation differs")
+        self._session_token = bytes(response.session_token)
+        self._authority = authority
         self.handshake_response = response
 
-    async def _reconnect(self, failed_channel: grpc.aio.Channel) -> None:
-        """Recreate one failed UDS channel and renegotiate the bound session once."""
+    def _metadata(self) -> tuple[tuple[str, bytes], ...]:
+        if len(self._session_token) != 32:
+            raise DaemonProtocolError("daemon session is unavailable")
+        return ((SESSION_METADATA_KEY, self._session_token),)
 
-        async with self._reconnect_lock:
-            if self.channel is not failed_channel and self.handshake_response is not None:
-                return
-            await self.channel.close()
-            self.channel = create_local_channel(self.settings.daemon_target)
-            self.stub = query_grpc.CpgQueryServiceStub(self.channel)
-            self.handshake_response = None
-            await self.connect()
+    def _handshake(self) -> query_pb.HandshakeResponse:
+        response = self.handshake_response
+        if response is None:
+            raise DaemonProtocolError("daemon session is unavailable")
+        return response
 
-    @staticmethod
-    def _validated_query_event_header(
-        event: Any,
-        daemon_query_id: str,
-        previous_sequence: int,
-    ) -> tuple[str, int, str]:
-        """Validate the monotonic, query-bound event cursor before presentation."""
+    def _context(self, correlation_id: str, timeout_seconds: float) -> query_pb.RequestContext:
+        if self._authority is None:
+            raise DaemonProtocolError("daemon session is unavailable")
+        if not correlation_id:
+            raise ValueError("correlation ID must be non-empty")
+        timeout = min(timeout_seconds, self.settings.query_timeout_seconds)
+        return query_pb.RequestContext(
+            correlation_id=correlation_id,
+            remaining_budget=_duration(timeout),
+        )
 
-        variant = event.WhichOneof("event")
-        if variant is None:
-            raise DaemonProtocolError("query event variant is absent")
-        payload = getattr(event, variant)
-        if not payload.HasField("header"):
-            raise DaemonProtocolError("query event header is absent")
-        header = payload.header
-        expected_sequence = previous_sequence + 1
-        expected_checksum = checksum(f"{daemon_query_id}:{expected_sequence}".encode())
+    def _assert_authority(self, message: query_pb.AuthorityGeneration) -> AuthorityGeneration:
+        current = self._authority
+        if current is None:
+            raise DaemonProtocolError("daemon session is unavailable")
+        received = _decode_authority(message)
         if (
-            header.daemon_query_id != daemon_query_id
-            or header.sequence != expected_sequence
-            or header.event_checksum != expected_checksum
+            received.session_id != current.session_id
+            or received.session_generation != current.session_generation
+            or received.daemon_generation != current.daemon_generation
+            or received.supervisor_generation != current.supervisor_generation
+            or received.policy_generation < current.policy_generation
+            or received.revocation_generation < current.revocation_generation
         ):
-            raise DaemonProtocolError("query event identity, sequence, or checksum differs")
-        return variant, header.sequence, header.event_checksum
+            raise DaemonProtocolError("daemon response authority differs from the active session")
+        self._authority = received
+        return received
 
-    async def close(self) -> None:
-        """Release the process-lifetime channel."""
-
+    async def _reconnect(self, *, correlation_id: str, timeout_seconds: float) -> bool:
+        previous = self._authority
+        if previous is None:
+            raise DaemonProtocolError("daemon session is unavailable")
+        if timeout_seconds <= 0:
+            raise _deadline_exceeded_error()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
         try:
-            for artifact_id, entry in tuple(self._arrow_leases.items()):
-                try:
-                    await self.release(access=entry.access)
-                except grpc.RpcError, DaemonProtocolError:
-                    pass
-                finally:
-                    self._arrow_leases.pop(artifact_id, None)
-            for artifact_id, (lease_token, _checksum, _expires_at, _byte_count) in tuple(
-                self._lease_cache.items()
-            ):
-                try:
-                    await self.stub.ReleaseResult(
-                        query_pb.ReleaseResultRequest(
-                            artifact_id=artifact_id,
-                            lease_token=lease_token,
-                        ),
-                        timeout=self.settings.query_timeout_seconds,
-                    )
-                except grpc.RpcError:
-                    # Daemon expiry/restart already revokes the lease. Channel cleanup
-                    # must not be skipped because one best-effort release raced it.
-                    pass
-                finally:
-                    self._lease_cache.pop(artifact_id, None)
-        finally:
-            await self.channel.close()
-
-    async def cancel(self, daemon_query_id: str, handle_token: bytes, reason: str) -> None:
-        """Request cancellation for one accepted query handle."""
-
-        response = await self.stub.CancelQuery(
-            query_pb.CancelQueryRequest(
-                daemon_query_id=daemon_query_id,
-                cancel_token=handle_token,
-                agent_instance_id=self.settings.agent_instance_id,
-                workspace_id=self.settings.workspace_id,
-                reason=reason[:256],
-            ),
-            timeout=self.settings.query_timeout_seconds,
-        )
-        if response.state not in {
-            query_pb.CANCELLATION_STATE_CANCELLED,
-            query_pb.CANCELLATION_STATE_CANCELLATION_REQUESTED,
-            query_pb.CANCELLATION_STATE_ALREADY_TERMINAL,
-        }:
-            raise DaemonProtocolError("daemon did not acknowledge query cancellation")
-
-    def canonical_request(self, request: JsonObject) -> bytes:
-        """Validate the bounded JSON domain and return RFC 8785 request bytes."""
-
-        value = JSON_OBJECT_ADAPTER.validate_python(request, strict=True)
-        canonical = canonicalize_value(value)
-        if len(canonical) > self.settings.max_request_bytes:
-            raise ValueError("semantic request exceeds the configured byte limit")
-        return canonical
-
-    async def validate(self, tool_input: ValidateToolInput) -> tuple[Any, JsonObject]:
-        """Validate one canonical semantic request without executing it."""
-
-        canonical = self.canonical_request(tool_input.request)
-        response = await self.stub.ValidateQuery(
-            query_pb.ValidateQueryRequest(
-                agent_instance_id=self.settings.agent_instance_id,
-                workspace_id=self.settings.workspace_id,
-                semantic_query_version=SEMANTIC_QUERY_VERSION,
-                canonical_request_json=canonical,
-                request_checksum=checksum(canonical),
-                freshness_policy=query_pb.FRESHNESS_POLICY_UNSPECIFIED,
-                host_capability_profile_digest=self.host_profile_digest,
-            ),
-            timeout=self.settings.query_timeout_seconds,
-        )
-        normalized_bytes = canonicalize_json(response.canonical_normalized_request_json)
+            async with asyncio.timeout_at(deadline):
+                replacement = await asyncio.to_thread(
+                    next_settings,
+                    timeout_seconds=deadline - loop.time(),
+                )
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise _deadline_exceeded_error()
+                await self.channel.close(grace=min(1.0, remaining))
+                self.settings = replacement
+                self.channel = create_local_channel(replacement.daemon_target)
+                self.stub = query_grpc.CpgQueryServiceStub(self.channel)
+                self.handshake_response = None
+                self._authority = None
+                self._session_token = b""
+                await self.connect(
+                    correlation_id=correlation_id,
+                    timeout_seconds=deadline - loop.time(),
+                )
+        except TimeoutError:
+            raise _deadline_exceeded_error() from None
+        current = self._authority
+        if current is None:
+            raise DaemonProtocolError("replacement daemon session is unavailable")
+        daemon_changed = current.daemon_generation != previous.daemon_generation
         if (
-            normalized_bytes != response.canonical_normalized_request_json
-            or checksum(normalized_bytes) != response.normalized_request_checksum
-        ):
-            raise DaemonProtocolError("normalized request identity differs")
-        normalized = cast(
-            JsonObject, JSON_OBJECT_ADAPTER.validate_json(normalized_bytes, strict=True)
-        )
-        return response, normalized
-
-    async def status(self) -> tuple[Any, JsonObject]:
-        """Return the verified public status view."""
-
-        response = await self.stub.GetStatus(
-            query_pb.StatusRequest(
-                agent_instance_id=self.settings.agent_instance_id,
-                workspace_id=self.settings.workspace_id,
-                include_diagnostics=False,
-            ),
-            timeout=self.settings.query_timeout_seconds,
-        )
-        canonical = canonicalize_json(response.canonical_public_status_json)
-        if (
-            canonical != response.canonical_public_status_json
-            or checksum(canonical) != response.status_checksum
-        ):
-            raise DaemonProtocolError("daemon status identity differs")
-        return response, cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(canonical, strict=True))
-
-    async def execute(self, tool_input: QueryToolInput) -> DaemonQueryResult:
-        """Execute, stream, verify, read, and release one immutable result artifact."""
-
-        canonical = self.canonical_request(tool_input.request)
-        request_digest = checksum(canonical)
-        started = await self.stub.StartQuery(
-            query_pb.StartQueryRequest(
-                agent_instance_id=self.settings.agent_instance_id,
-                workspace_id=self.settings.workspace_id,
-                mcp_call_id=f"mcp:{secrets.token_hex(16)}",
-                rpc_attempt_id=f"rpc:{secrets.token_hex(16)}",
-                semantic_query_version=SEMANTIC_QUERY_VERSION,
-                canonical_request_json=canonical,
-                request_checksum=request_digest,
-                freshness_policy=query_pb.FRESHNESS_POLICY_UNSPECIFIED,
-                delivery_preference={
-                    "inline": query_pb.DELIVERY_PREFERENCE_INLINE,
-                    "resource": query_pb.DELIVERY_PREFERENCE_RESOURCE,
-                    "automatic": query_pb.DELIVERY_PREFERENCE_AUTO,
-                }[tool_input.delivery],
-                host_capability_profile_digest=self.host_profile_digest,
-                deadline_unix_ms=int((time.time() + self.settings.query_timeout_seconds) * 1000),
-                idempotency_key=f"{self.settings.agent_instance_id}:{request_digest}",
-                payload_compression=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
-            ),
-            timeout=self.settings.query_timeout_seconds,
-        )
-        artifact: Any | None = None
-        terminal: Any | None = None
-        snapshot: JsonObject | None = None
-        last_sequence = 0
-        last_event_checksum: str | None = None
-        reconnect_attempted = False
-        try:
-            events: Any = self.stub.StreamQuery(
-                query_pb.StreamQueryRequest(
-                    daemon_query_id=started.daemon_query_id,
-                    resume_token=started.resume_token,
-                    after_sequence=0,
-                ),
-                timeout=self.settings.query_timeout_seconds,
-            )
-            while True:
-                try:
-                    async for event in events:
-                        variant, last_sequence, last_event_checksum = (
-                            self._validated_query_event_header(
-                                event,
-                                started.daemon_query_id,
-                                last_sequence,
-                            )
-                        )
-                        if variant == "snapshot_pinned":
-                            snapshot_bytes = canonicalize_json(
-                                event.snapshot_pinned.canonical_public_snapshot_metadata_json
-                            )
-                            if (
-                                snapshot_bytes
-                                != event.snapshot_pinned.canonical_public_snapshot_metadata_json
-                                or checksum(snapshot_bytes)
-                                != event.snapshot_pinned.metadata_checksum
-                            ):
-                                raise DaemonProtocolError("snapshot metadata identity differs")
-                            snapshot = cast(
-                                JsonObject,
-                                JSON_OBJECT_ADAPTER.validate_json(snapshot_bytes, strict=True),
-                            )
-                        elif variant == "artifact_ready":
-                            artifact = event.artifact_ready
-                        elif variant == "terminal":
-                            terminal = event.terminal
-                    break
-                except grpc.aio.AioRpcError as error:
-                    if reconnect_attempted or error.code() != grpc.StatusCode.UNAVAILABLE:
-                        raise
-                    failed_channel = self.channel
-                    await self._reconnect(failed_channel)
-                    reconnect_attempted = True
-                    events = self.stub.AttachQuery(
-                        query_pb.AttachQueryRequest(
-                            daemon_query_id=started.daemon_query_id,
-                            resume_token=started.resume_token,
-                            after_sequence=last_sequence,
-                            after_event_checksum=last_event_checksum,
-                            agent_instance_id=self.settings.agent_instance_id,
-                            workspace_id=self.settings.workspace_id,
-                        ),
-                        timeout=self.settings.query_timeout_seconds,
-                    )
-        except BaseException:
-            cancellation = asyncio.create_task(
-                self.cancel(started.daemon_query_id, started.cancel_token, "adapter interrupted")
-            )
-            with suppress(BaseException):
-                await asyncio.shield(cancellation)
-            raise
-        if (
-            terminal is not None
-            and terminal.execution_state != query_pb.QUERY_EXECUTION_STATE_SUCCEEDED
-        ):
-            if terminal.canonical_error_record_json:
-                raise DaemonQueryError(terminal.canonical_error_record_json)
-            raise DaemonProtocolError("daemon query terminated without a public error record")
-        if artifact is None or terminal is None or snapshot is None:
-            raise DaemonProtocolError(
-                "query stream ended without snapshot, artifact, and terminal events"
-            )
-
-        if not terminal.semantic_execution_state or not terminal.completeness_state:
-            raise DaemonProtocolError("terminal event omitted semantic response states")
-        arrow_descriptor: ArrowResultPackageDescriptor | None = None
-        arrow_access: ArrowResultAccess | None = None
-        if artifact.canonical_result_descriptor_json:
-            descriptor_bytes = bytes(artifact.canonical_result_descriptor_json)
-            if (
-                artifact.content_type != "application/vnd.codefabric.arrow-result-package+json"
-                or artifact.encoding != query_pb.PAYLOAD_COMPRESSION_IDENTITY
-                or artifact.result_contract_version != PUBLISHED_RESULT_FORMAT
-                or artifact.arrow_release != ARROW_RELEASE
-                or checksum(descriptor_bytes) != artifact.result_descriptor_checksum
-                or artifact.artifact_checksum != artifact.result_descriptor_checksum
-            ):
-                raise DaemonProtocolError("Arrow result compatibility metadata differs")
-            arrow_descriptor = validate_package_descriptor_json(descriptor_bytes)
-            if (
-                arrow_descriptor.artifact_id != artifact.artifact_id
-                or arrow_descriptor.lease_expires_at_unix_ms != artifact.lease_expires_at_unix_ms
-                or arrow_descriptor.total_rows != terminal.result_row_count
-                or arrow_descriptor.total_ipc_bytes != terminal.result_byte_count
-            ):
-                raise DaemonProtocolError("Arrow result descriptor differs from terminal metadata")
-            arrow_access = ArrowResultAccess(
-                artifact_id=arrow_descriptor.artifact_id,
-                owner=arrow_descriptor.owner,
-                lease_token=artifact.lease_token,
-            )
-        elif artifact.result_descriptor_checksum:
-            raise DaemonProtocolError("Arrow result descriptor bytes are absent")
-        query_statuses = tuple(
-            cast(
-                JsonObject,
-                {
-                    "query_id": status.query_id,
-                    "state": status.execution_state,
-                    "message": self._query_status_message(status.canonical_error_record_json),
-                },
-            )
-            for status in terminal.query_statuses
-        )
-        use_resource = (
-            arrow_descriptor is not None
-            or tool_input.delivery == "resource"
+            current.daemon_generation < previous.daemon_generation
+            or current.supervisor_generation < previous.supervisor_generation
+            or current.policy_generation < previous.policy_generation
+            or current.revocation_generation < previous.revocation_generation
             or (
-                tool_input.delivery == "automatic"
-                and terminal.result_byte_count > self.settings.inline_result_bytes
-            )
-        )
-        if use_resource:
-            if arrow_descriptor is not None and arrow_access is not None:
-                self._arrow_leases[artifact.artifact_id] = _ArrowLeaseEntry(
-                    descriptor=arrow_descriptor,
-                    access=arrow_access,
-                    consumed_resource_ids=set(),
+                not daemon_changed
+                and (
+                    current.supervisor_generation != previous.supervisor_generation
+                    or current.session_generation <= previous.session_generation
                 )
-            else:
-                self._lease_cache[artifact.artifact_id] = (
-                    artifact.lease_token,
-                    artifact.artifact_checksum,
-                    artifact.lease_expires_at_unix_ms,
-                    terminal.result_byte_count,
-                )
-            return DaemonQueryResult(
-                semantic_request_id=started.effective_semantic_request_id,
-                daemon_query_id=started.daemon_query_id,
-                canonical_bytes=b"",
-                response=None,
-                snapshot=snapshot,
-                checksum=artifact.artifact_checksum,
-                artifact_id=artifact.artifact_id,
-                lease_expires_at_unix_ms=artifact.lease_expires_at_unix_ms,
-                result_row_count=terminal.result_row_count,
-                result_byte_count=terminal.result_byte_count,
-                execution_state=terminal.semantic_execution_state,
-                freshness_state=terminal.freshness_state,
-                availability_state=terminal.availability_state,
-                completeness_state=terminal.completeness_state,
-                limit_state=terminal.limit_state,
-                truncated=terminal.truncated,
-                query_statuses=query_statuses,
-                notices=tuple(terminal.notices),
-                arrow_descriptor=arrow_descriptor,
             )
+            or (
+                current.session_id == previous.session_id
+                and current.session_generation == previous.session_generation
+            )
+        ):
+            raise DaemonProtocolError("replacement daemon authority did not advance")
+        return daemon_changed
 
-        payload = await self._read_and_release(
-            artifact.artifact_id,
-            artifact.lease_token,
-            artifact.artifact_checksum,
-            terminal.result_byte_count,
+    async def status(self, *, correlation_id: str) -> DaemonStatus:
+        await self.connect(correlation_id=correlation_id)
+        timeout = self.settings.query_timeout_seconds
+        try:
+            response = await self.stub.GetStatus(
+                query_pb.GetStatusRequest(
+                    context=self._context(correlation_id, timeout),
+                    include_diagnostics=False,
+                ),
+                metadata=self._metadata(),
+                timeout=timeout,
+            )
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
+        canonical = canonicalize_json(response.canonical_public_status_json)
+        if canonical != response.canonical_public_status_json:
+            raise DaemonProtocolError("daemon status JSON is not canonical")
+        try:
+            value = PublicDaemonStatus.model_validate_json(canonical, strict=True)
+        except ValueError as error:
+            raise DaemonProtocolError(
+                "daemon status projection is not closed and public"
+            ) from error
+        lifecycle = _lifecycle_name(response.lifecycle)
+        active_epoch_id = response.active_epoch_id if response.HasField("active_epoch_id") else None
+        if (
+            value.lifecycle != lifecycle
+            or value.lifecycle_sequence != response.lifecycle_sequence
+            or value.active_epoch_id != active_epoch_id
+            or value.running_queries != response.running_queries
+            or value.queued_queries != response.queued_queries
+        ):
+            raise DaemonProtocolError("status lifecycle projections differ")
+        return DaemonStatus(
+            authority=self._assert_authority(response.authority),
+            lifecycle=cast(
+                Literal["BOOTSTRAPPING", "READY", "DRAINING", "FAILED_CLOSED"], lifecycle
+            ),
+            lifecycle_sequence=response.lifecycle_sequence,
+            failure=_safe_error(response.failure) if response.HasField("failure") else None,
+            active_epoch_id=active_epoch_id,
+            running_queries=response.running_queries,
+            queued_queries=response.queued_queries,
+            public_status=value,
         )
-        response = validate_inline_daemon_response(payload, artifact.artifact_checksum, terminal)
-        return DaemonQueryResult(
-            semantic_request_id=started.effective_semantic_request_id,
-            daemon_query_id=started.daemon_query_id,
-            canonical_bytes=payload,
-            response=response,
-            snapshot=snapshot,
-            checksum=artifact.artifact_checksum,
-            artifact_id=artifact.artifact_id,
-            lease_expires_at_unix_ms=artifact.lease_expires_at_unix_ms,
-            result_row_count=terminal.result_row_count,
-            result_byte_count=terminal.result_byte_count,
-            execution_state=terminal.semantic_execution_state,
-            freshness_state=terminal.freshness_state,
-            availability_state=terminal.availability_state,
-            completeness_state=terminal.completeness_state,
-            limit_state=terminal.limit_state,
-            truncated=terminal.truncated,
-            query_statuses=query_statuses,
-            notices=tuple(terminal.notices),
+
+    async def reference(
+        self,
+        kind: ReferenceKind,
+        version_value: str | None,
+        *,
+        correlation_id: str,
+    ) -> ReferenceDocument:
+        await self.connect(correlation_id=correlation_id)
+        kind = _REFERENCE_KIND_ADAPTER.validate_python(kind, strict=True)
+        timeout = self.settings.query_timeout_seconds
+        read = query_pb.ReferenceReadRequest(kind=_reference_kind_value(kind))
+        if version_value is not None:
+            read.version = version_value
+        try:
+            response = await self.stub.GetReference(
+                query_pb.GetReferenceRequest(
+                    context=self._context(correlation_id, timeout),
+                    read=read,
+                ),
+                metadata=self._metadata(),
+                timeout=timeout,
+            )
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
+        if response.WhichOneof("result") != "reference":
+            raise DaemonProtocolError("reference read returned a different closed result")
+        document = response.reference
+        authority = self._assert_authority(response.authority)
+        if not document.HasField("resource"):
+            raise DaemonProtocolError("reference document omitted its public resource handle")
+        resource = self._resource_handle(document.resource)
+        if resource.kind != "reference" or resource.authority != authority:
+            raise DaemonProtocolError("reference resource authority or kind differs")
+        return ReferenceDocument(
+            authority=authority,
+            reference_id=document.reference_id,
+            resource=resource,
         )
 
-    @staticmethod
-    def _query_status_message(canonical_error_record: bytes) -> str | None:
-        if not canonical_error_record:
-            return None
-        record = DaemonQueryError(canonical_error_record).record
-        for field in ("safe_message", "detail"):
-            value = record.get(field)
-            if isinstance(value, str):
-                return value
-        return None
-
-    async def read_chunk(
+    async def complete_reference(
         self,
         *,
-        access: ArrowResultAccess,
-        authorization_resource_id: str,
+        variable: Literal["kind", "released_version"],
+        prefix: str,
+        kind: ReferenceKind | None,
+        selector: str | None,
+        maximum_candidates: int,
+        correlation_id: str,
+    ) -> ReferenceCompletion:
+        await self.connect(correlation_id=correlation_id)
+        maximum = min(
+            maximum_candidates,
+            self._handshake().effective_limits.maximum_reference_completion_candidates,
+        )
+        if maximum <= 0:
+            raise ValueError("completion candidate cap must be positive")
+        request = query_pb.ReferenceCompletionRequest(
+            variable={
+                "kind": query_pb.REFERENCE_TEMPLATE_VARIABLE_KIND,
+                "released_version": query_pb.REFERENCE_TEMPLATE_VARIABLE_RELEASED_VERSION,
+            }[variable],
+            prefix=prefix,
+            maximum_candidates=maximum,
+        )
+        if kind is not None:
+            request.kind = _reference_kind_value(
+                _REFERENCE_KIND_ADAPTER.validate_python(kind, strict=True)
+            )
+        if selector is not None:
+            request.selector = selector
+        timeout = self.settings.query_timeout_seconds
+        try:
+            response = await self.stub.GetReference(
+                query_pb.GetReferenceRequest(
+                    context=self._context(correlation_id, timeout),
+                    completion=request,
+                ),
+                metadata=self._metadata(),
+                timeout=timeout,
+            )
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
+        if response.WhichOneof("result") != "completion":
+            raise DaemonProtocolError("reference completion returned a different closed result")
+        completion = response.completion
+        if len(completion.candidates) > maximum or completion.total < len(completion.candidates):
+            raise DaemonProtocolError("reference completion exceeded its declared bounds")
+        return ReferenceCompletion(
+            authority=self._assert_authority(response.authority),
+            candidates=tuple(
+                ReferenceCompletionCandidate(
+                    value=candidate.value,
+                    presentation_key=candidate.presentation_key,
+                )
+                for candidate in completion.candidates
+            ),
+            total=completion.total,
+            has_more=completion.has_more,
+        )
+
+    async def validate(self, value: ValidateToolInput, *, correlation_id: str) -> QueryPreparation:
+        await self.connect(correlation_id=correlation_id)
+        request_bytes = canonicalize_value(value.request)
+        limits = self._handshake().effective_limits
+        timeout = self.settings.query_timeout_seconds
+        try:
+            response = await self.stub.ValidateQuery(
+                query_pb.ValidateQueryRequest(
+                    context=self._context(correlation_id, timeout),
+                    query=query_pb.QuerySubmission(
+                        canonical_request_json=request_bytes,
+                        request_checksum=checksum(request_bytes),
+                        semantic_profile=SEMANTIC_PROFILE,
+                        result_limits=query_pb.ResultLimits(
+                            maximum_result_bytes=limits.maximum_result_bytes,
+                            maximum_result_pages=limits.maximum_result_pages,
+                        ),
+                    ),
+                ),
+                metadata=self._metadata(),
+                timeout=timeout,
+            )
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
+        normalized: JsonObject | None = None
+        preparation = response.preparation
+        if preparation.canonical_normalized_request_json:
+            canonical = canonicalize_json(preparation.canonical_normalized_request_json)
+            if canonical != preparation.canonical_normalized_request_json:
+                raise DaemonProtocolError("normalized query is not canonical JSON")
+            normalized = cast(JsonObject, JSON_OBJECT_ADAPTER.validate_json(canonical, strict=True))
+        errors = tuple(_validation_issue(issue) for issue in preparation.errors)
+        requirements = _requirements(preparation.input_requirements)
+        return QueryPreparation(
+            authority=self._assert_authority(response.authority),
+            valid=not errors and not requirements,
+            semantic_request_id=preparation.semantic_request_id or None,
+            normalized_request=normalized,
+            input_requirements=requirements,
+            errors=errors,
+            warnings=tuple(_validation_issue(issue) for issue in preparation.warnings),
+            cost_class=preparation.cost_class,
+            estimated_result_bytes=preparation.estimated_result_bytes,
+            estimated_result_pages=preparation.estimated_result_pages,
+        )
+
+    def _query_submission(self, value: QueryToolInput) -> query_pb.QuerySubmission:
+        canonical_request = canonicalize_value(value.request)
+        limits = self._handshake().effective_limits
+        return query_pb.QuerySubmission(
+            canonical_request_json=canonical_request,
+            request_checksum=checksum(canonical_request),
+            semantic_profile=SEMANTIC_PROFILE,
+            result_limits=query_pb.ResultLimits(
+                maximum_result_bytes=limits.maximum_result_bytes,
+                maximum_result_pages=limits.maximum_result_pages,
+            ),
+        )
+
+    def _start_outcome(self, response: query_pb.StartQueryResponse) -> StartQueryOutcome:
+        selected = response.WhichOneof("outcome")
+        if selected == "accepted":
+            value = response.accepted
+            return AcceptedQuery(
+                authority=self._assert_authority(value.authority),
+                daemon_query_id=value.daemon_query_id,
+                semantic_request_id=value.semantic_request_id,
+                operation_fingerprint=value.operation_fingerprint,
+                accepted_at_unix_ms=value.accepted_at_unix_ms,
+                observation_expires_at_unix_ms=value.observation_expires_at_unix_ms,
+                state=_execution_name(value.state),
+                idempotent_replay=value.idempotent_replay,
+            )
+        if selected == "input_challenge":
+            value = response.input_challenge
+            explanation = _enum_name(
+                query_pb.ChallengeExplanationCode.Name,
+                value.explanation_code,
+                "CHALLENGE_EXPLANATION_CODE_",
+            )
+            if explanation not in {
+                "required_input_missing",
+                "reference_ambiguous",
+                "bounded_selection_required",
+            }:
+                raise DaemonProtocolError("challenge explanation is not allowlisted")
+            limits = self._handshake().effective_limits
+            if (
+                not value.requirements
+                or len(value.requirements) > limits.maximum_challenge_fields
+                or value.round > limits.maximum_challenge_rounds
+                or value.remaining_rounds > limits.maximum_challenge_rounds
+                or value.round + value.remaining_rounds != limits.maximum_challenge_rounds
+                or value.maximum_answer_bytes > limits.maximum_control_message_bytes
+                or value.expires_at_unix_ms > self._handshake().session_expires_at_unix_ms
+                or any(
+                    len(requirement.authorized_choices) > limits.maximum_choices_per_field
+                    for requirement in value.requirements
+                )
+            ):
+                raise DaemonProtocolError("challenge exceeds negotiated bounds")
+            try:
+                return InputChallenge(
+                    authority=self._assert_authority(value.authority),
+                    semantic_request_id=value.semantic_request_id,
+                    challenge_id=value.challenge_id,
+                    round=value.round,
+                    remaining_rounds=value.remaining_rounds,
+                    issued_at_unix_ms=value.issued_at_unix_ms,
+                    expires_at_unix_ms=value.expires_at_unix_ms,
+                    maximum_answer_bytes=value.maximum_answer_bytes,
+                    explanation_code=cast(
+                        Literal[
+                            "required_input_missing",
+                            "reference_ambiguous",
+                            "bounded_selection_required",
+                        ],
+                        explanation,
+                    ),
+                    requirements=_requirements(value.requirements),
+                    daemon_continuation=bytes(value.daemon_continuation),
+                )
+            except ValidationError:
+                raise DaemonProtocolError("challenge requirement contract is malformed") from None
+        if selected == "validation_rejection":
+            value = response.validation_rejection
+            return ValidationRejection(
+                authority=self._assert_authority(value.authority),
+                semantic_request_id=(
+                    value.semantic_request_id if value.HasField("semantic_request_id") else None
+                ),
+                issues=tuple(_validation_issue(issue) for issue in value.issues),
+                error=_safe_error(value.error),
+            )
+        raise DaemonProtocolError("start query omitted its closed outcome")
+
+    async def start_query(
+        self,
+        value: QueryToolInput,
+        *,
+        correlation_id: str,
+    ) -> StartQueryOutcome:
+        await self.connect(correlation_id=correlation_id)
+        timeout = self.settings.query_timeout_seconds
+        try:
+            response = await self.stub.StartQuery(
+                query_pb.StartQueryRequest(
+                    context=self._context(correlation_id, timeout),
+                    initial=query_pb.InitialQueryStart(
+                        query=self._query_submission(value),
+                    ),
+                ),
+                metadata=self._metadata(),
+                timeout=timeout,
+            )
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
+        return self._start_outcome(response)
+
+    async def continue_query(
+        self,
+        challenge: InputChallenge,
+        answers: tuple[ChallengeAnswer, ...],
+        *,
+        correlation_id: str,
+    ) -> StartQueryOutcome:
+        await self.connect(correlation_id=correlation_id)
+        current = self._authority
+        if current is None or challenge.authority != current:
+            raise DaemonProtocolError("challenge authority differs from the active session")
+        answer_ids = [answer.semantic_field_id for answer in answers]
+        requirement_ids = {item.semantic_field_id for item in challenge.requirements}
+        required_ids = {item.semantic_field_id for item in challenge.requirements if item.required}
+        if (
+            len(answer_ids) != len(set(answer_ids))
+            or not set(answer_ids).issubset(requirement_ids)
+            or not required_ids.issubset(answer_ids)
+        ):
+            raise ValueError("challenge answers do not match the typed requirements")
+        continuation = query_pb.QueryChallengeContinuation(
+            daemon_continuation=challenge.daemon_continuation,
+            challenge_id=challenge.challenge_id,
+            round=challenge.round,
+            answers=[_answer(answer) for answer in answers],
+        )
+        if continuation.ByteSize() > challenge.maximum_answer_bytes:
+            raise ValueError("challenge answer exceeds the daemon-declared byte bound")
+        timeout = self.settings.query_timeout_seconds
+        try:
+            response = await self.stub.StartQuery(
+                query_pb.StartQueryRequest(
+                    context=self._context(correlation_id, timeout),
+                    continuation=continuation,
+                ),
+                metadata=self._metadata(),
+                timeout=timeout,
+            )
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
+        return self._start_outcome(response)
+
+    def _resource_handle(self, descriptor: query_pb.ResourceDescriptor) -> ResourceHandle:
+        kind = _enum_name(query_pb.ResourceKind.Name, descriptor.kind, "RESOURCE_KIND_")
+        if kind not in {"result_manifest", "result_page", "reference"}:
+            raise DaemonProtocolError("resource handle kind is not allowlisted")
+        return ResourceHandle(
+            kind=cast(Literal["result_manifest", "result_page", "reference"], kind),
+            public_handle=descriptor.public_handle,
+            package_id=descriptor.package_id if descriptor.HasField("package_id") else None,
+            page_ordinal=(descriptor.page_ordinal if descriptor.HasField("page_ordinal") else None),
+            media_type=descriptor.media_type,
+            byte_length=descriptor.byte_length,
+            content_checksum=descriptor.content_checksum,
+            expires_at_unix_ms=descriptor.expires_at_unix_ms,
+            authority=self._assert_authority(descriptor.authority),
+        )
+
+    async def watch_query(
+        self,
+        accepted: AcceptedQuery,
+        *,
+        correlation_id: str,
+        progress: ProgressCallback | None = None,
+        timeout_seconds: float | None = None,
+    ) -> DaemonQueryResult:
+        timeout = min(
+            timeout_seconds if timeout_seconds is not None else self.settings.query_timeout_seconds,
+            self.settings.query_timeout_seconds,
+        )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        await self.connect(
+            correlation_id=correlation_id,
+            timeout_seconds=deadline - loop.time(),
+        )
+        current = self._authority
+        if current is None or accepted.authority != current:
+            raise DaemonProtocolError("accepted query authority differs from the active session")
+        cursor: bytes | None = None
+        epoch_id: str | None = None
+        result_ready: query_pb.ResultReadyEvent | None = None
+        terminal: query_pb.TerminalEvent | None = None
+        last_sequence = 0
+        observed_events: dict[int, tuple[object, ...]] = {}
+        result_predecessor: tuple[bytes | None, int] | None = None
+        reconnects = 0
+        while terminal is None:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise _deadline_exceeded_error()
+            try:
+                request = query_pb.WatchQueryRequest(
+                    context=self._context(correlation_id, remaining),
+                    daemon_query_id=accepted.daemon_query_id,
+                )
+                if cursor is not None:
+                    request.cursor = cursor
+                stream = self.stub.WatchQuery(
+                    request,
+                    metadata=self._metadata(),
+                    timeout=remaining,
+                )
+                async for event in stream:
+                    kind = event.WhichOneof("event")
+                    if kind == "snapshot_pinned":
+                        payload = event.snapshot_pinned
+                    elif kind == "progress":
+                        payload = event.progress
+                    elif kind == "result_ready":
+                        payload = event.result_ready
+                    elif kind == "terminal":
+                        payload = event.terminal
+                    else:
+                        raise DaemonProtocolError("query event omitted its closed variant")
+                    if not payload.HasField("header"):
+                        raise DaemonProtocolError("query event omitted its bound header")
+                    header = payload.header
+                    if header.daemon_query_id != accepted.daemon_query_id:
+                        raise DaemonProtocolError("query event identity differs")
+                    if header.sequence != last_sequence + 1 or not header.cursor:
+                        raise DaemonProtocolError("query event cursor or sequence is invalid")
+                    identity = _query_event_identity(event)
+                    previous_identity = observed_events.get(header.sequence)
+                    if previous_identity is not None and previous_identity != identity:
+                        raise DaemonProtocolError("replayed query event content changed")
+                    replayed = previous_identity is not None
+                    self._assert_authority(header.authority)
+                    predecessor = (cursor, last_sequence)
+                    observed_events[header.sequence] = identity
+                    last_sequence = header.sequence
+                    cursor = bytes(header.cursor)
+                    if kind == "snapshot_pinned":
+                        epoch_id = payload.epoch_id
+                    elif kind == "progress":
+                        if progress is not None and not replayed:
+                            total = payload.total if payload.HasField("total") else None
+                            try:
+                                async with asyncio.timeout_at(deadline):
+                                    await progress(
+                                        payload.completed,
+                                        total,
+                                        _progress_stage(payload.stage),
+                                    )
+                            except TimeoutError:
+                                raise _deadline_exceeded_error() from None
+                    elif kind == "result_ready":
+                        result_predecessor = predecessor
+                        result_ready = query_pb.ResultReadyEvent()
+                        result_ready.CopyFrom(payload)
+                    elif kind == "terminal":
+                        terminal = query_pb.TerminalEvent()
+                        terminal.CopyFrom(payload)
+                        break
+                if terminal is None:
+                    raise DaemonProtocolError("watch ended before a terminal event")
+            except grpc.aio.AioRpcError as error:
+                if error.code() is not grpc.StatusCode.UNAVAILABLE or reconnects >= 1:
+                    raise _typed_rpc_error(error) from None
+                reconnects += 1
+                daemon_changed = await self._reconnect(
+                    correlation_id=correlation_id,
+                    timeout_seconds=deadline - loop.time(),
+                )
+                if daemon_changed:
+                    cursor = None
+                    last_sequence = 0
+                    epoch_id = None
+                    result_ready = None
+                    result_predecessor = None
+                elif result_ready is not None:
+                    if result_predecessor is None:
+                        raise DaemonProtocolError(
+                            "result-ready event omitted its replay predecessor"
+                        ) from None
+                    cursor, last_sequence = result_predecessor
+                    result_ready = None
+                    result_predecessor = None
+
+        state = _execution_name(terminal.state)
+        manifest: ResourceHandle | None = None
+        page_resources: tuple[ResourceHandle, ...] = ()
+        package_id: str | None = None
+        rows = pages = bytes_count = 0
+        if result_ready is not None:
+            if not result_ready.HasField("manifest"):
+                raise DaemonProtocolError("result-ready event omitted its manifest resource")
+            package_id = result_ready.package_id
+            manifest = self._resource_handle(result_ready.manifest)
+            if manifest.kind != "result_manifest" or manifest.package_id != package_id:
+                raise DaemonProtocolError("result manifest identity differs from its package")
+            page_resources = tuple(self._resource_handle(item) for item in result_ready.pages)
+            if (
+                len(page_resources) != result_ready.total_pages
+                or [item.page_ordinal for item in page_resources]
+                != list(range(result_ready.total_pages))
+                or len({item.public_handle for item in page_resources}) != len(page_resources)
+                or manifest.public_handle in {item.public_handle for item in page_resources}
+                or any(
+                    item.kind != "result_page" or item.package_id != package_id
+                    for item in page_resources
+                )
+            ):
+                raise DaemonProtocolError("result page descriptors differ from their package")
+            rows = result_ready.total_rows
+            pages = result_ready.total_pages
+            bytes_count = result_ready.total_bytes
+        terminal_error = _safe_error(terminal.error) if terminal.HasField("error") else None
+        authority = self._assert_authority(terminal.header.authority)
+        return DaemonQueryResult(
+            authority=authority,
+            semantic_request_id=accepted.semantic_request_id,
+            daemon_query_id=accepted.daemon_query_id,
+            execution_state=state,
+            epoch_id=epoch_id,
+            package_id=package_id,
+            manifest=manifest,
+            pages=page_resources,
+            total_rows=rows,
+            total_pages=pages,
+            total_bytes=bytes_count,
+            error=terminal_error,
+            notices=((terminal_error.code,) if terminal_error is not None else ()),
+        )
+
+    async def read_resource(
+        self,
+        public_handle: str,
+        selector: ResourceSelector,
+        *,
         offset: int,
         maximum_bytes: int,
-    ) -> ArrowResourceChunk:
-        """Translate one strict presenter read into the owner-bound gRPC branch."""
-
-        try:
-            stream = self.stub.ReadResult(
-                query_pb.ReadResultRequest(
-                    artifact_id=access.artifact_id,
-                    offset=offset,
-                    maximum_bytes=maximum_bytes,
-                    lease_token=access.lease_token,
-                    accepted_compression=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
-                    authorization_resource_id=authorization_resource_id,
-                    owner=query_pb.ResultOwner(
-                        workspace_id=access.owner.workspace_id,
-                        agent_id=access.owner.agent_id,
-                    ),
-                ),
-                timeout=self.settings.query_timeout_seconds,
-            )
-            chunks = [chunk async for chunk in stream]
-        except grpc.RpcError as error:
-            self._raise_arrow_rpc_error(error)
-        if len(chunks) != 1:
-            raise DaemonProtocolError("Arrow resource read did not return exactly one range")
-        chunk = chunks[0]
-        if (
-            chunk.artifact_id != access.artifact_id
-            or chunk.authorization_resource_id != authorization_resource_id
-            or chunk.encoding != query_pb.PAYLOAD_COMPRESSION_IDENTITY
-            or chunk.uncompressed_length != len(chunk.payload)
-            or checksum(chunk.payload) != chunk.payload_checksum
-        ):
-            raise DaemonProtocolError("Arrow resource transport metadata differs")
-        return ArrowResourceChunk(
-            authorization_resource_id=chunk.authorization_resource_id,
-            offset=chunk.offset,
-            next_offset=chunk.next_offset,
-            total_length=chunk.total_length,
-            content_checksum=chunk.content_checksum,
-            payload=chunk.payload,
-            complete=chunk.final_chunk,
-        )
-
-    async def release(self, *, access: ArrowResultAccess) -> ArrowResultReleaseReceipt:
-        """Release an Arrow artifact while preserving daemon tombstone semantics."""
-
-        try:
-            response = await self.stub.ReleaseResult(
-                query_pb.ReleaseResultRequest(
-                    artifact_id=access.artifact_id,
-                    lease_token=access.lease_token,
-                    owner=query_pb.ResultOwner(
-                        workspace_id=access.owner.workspace_id,
-                        agent_id=access.owner.agent_id,
-                    ),
-                ),
-                timeout=self.settings.query_timeout_seconds,
-            )
-        except grpc.RpcError as error:
-            self._raise_arrow_rpc_error(error)
-        if response.artifact_id != access.artifact_id or response.release_state not in {
-            "released",
-            "already_released",
-        }:
-            raise DaemonProtocolError("Arrow release receipt differs from the request")
-        return ArrowResultReleaseReceipt(
-            artifact_id=response.artifact_id,
-            state=response.release_state,
-        )
-
-    async def read_arrow_resource(self, artifact_id: str, authorization_resource_id: str) -> bytes:
-        """Read one descriptor-authorized resource and release after complete consumption."""
-
-        entry = self._arrow_leases.get(artifact_id)
-        if entry is None:
-            raise DaemonProtocolError("Arrow result is absent, expired, or already released")
-        handshake = self.handshake_response
-        if handshake is None:
-            raise DaemonProtocolError("daemon handshake is absent")
-        maximum_chunk_bytes = min(
-            self.settings.inline_result_bytes,
-            int(handshake.effective_limits.maximum_payload_chunk_bytes),
-        )
-        presenter = ArrowResourcePresenter(
-            self,
-            max_chunk_bytes=maximum_chunk_bytes,
-            max_manifest_bytes=self.settings.max_request_bytes,
-            max_relation_bytes=64 * 1024 * 1024,
-        )
-        payload = await presenter.read_subresource(
-            entry.descriptor,
-            entry.access,
-            authorization_resource_id=authorization_resource_id,
-            observed_at_unix_ms=int(time.time() * 1000),
-        )
-        entry.consumed_resource_ids.add(authorization_resource_id)
-        all_resource_ids = {
-            entry.descriptor.manifest.authorization_resource_id,
-            *(relation.authorization_resource_id for relation in entry.descriptor.relations),
-        }
-        if entry.consumed_resource_ids == all_resource_ids:
-            await presenter.release(
-                entry.descriptor,
-                entry.access,
-                observed_at_unix_ms=int(time.time() * 1000),
-            )
-            self._arrow_leases.pop(artifact_id, None)
-        return payload
-
-    def arrow_result_descriptor(self, artifact_id: str) -> ArrowResultPackageDescriptor:
-        """Return the already validated control descriptor for URI routing only."""
-
-        entry = self._arrow_leases.get(artifact_id)
-        if entry is None:
-            raise DaemonProtocolError("Arrow result is absent, expired, or already released")
-        return entry.descriptor
-
-    @staticmethod
-    def _raise_arrow_rpc_error(error: grpc.RpcError) -> Never:
-        code = error.code()
-        detail = (error.details() or "").upper()
-        if code == grpc.StatusCode.PERMISSION_DENIED:
-            raise ArrowResourceAccessError("daemon rejected the Arrow result owner or token")
-        if code == grpc.StatusCode.NOT_FOUND:
-            raise ArrowResourceAccessError("daemon rejected the Arrow resource handle")
-        if code == grpc.StatusCode.RESOURCE_EXHAUSTED:
-            raise ArrowResourceLimitError("daemon rejected the Arrow resource bound")
-        if code == grpc.StatusCode.FAILED_PRECONDITION and "EXPIRED" in detail:
-            raise ArrowResourceExpiredError("Arrow result lease expired")
-        if code == grpc.StatusCode.FAILED_PRECONDITION and "RELEASED" in detail:
-            raise ArrowResourceReleasedError("Arrow result is a released tombstone")
-        raise DaemonProtocolError("daemon rejected the Arrow result operation")
-
-    async def _read_and_release(
-        self,
-        artifact_id: str,
-        lease_token: str,
-        artifact_checksum: str,
-        result_byte_count: int,
+        correlation_id: str,
     ) -> bytes:
-        """Read, verify, and release one immutable daemon artifact."""
-
-        chunks: list[bytes] = []
-        offset = 0
-        maximum_bytes = self.settings.inline_result_bytes
-        maximum_round_trips = max(1, (result_byte_count + maximum_bytes - 1) // maximum_bytes + 1)
-        maximum_chunks = maximum_round_trips
-        chunk_count = 0
-        for _attempt in range(maximum_round_trips):
-            stream = self.stub.ReadResult(
-                query_pb.ReadResultRequest(
-                    artifact_id=artifact_id,
-                    offset=offset,
-                    maximum_bytes=maximum_bytes,
-                    lease_token=lease_token,
-                    accepted_compression=query_pb.PAYLOAD_COMPRESSION_IDENTITY,
-                ),
-                timeout=self.settings.query_timeout_seconds,
-            )
-            final = False
-            prior_offset = offset
-            async for chunk in stream:
-                chunk_count += 1
-                if chunk_count > maximum_chunks:
-                    raise DaemonProtocolError("result read exceeded its bounded chunk contract")
-                if chunk.offset != offset or checksum(chunk.payload) != chunk.payload_checksum:
-                    raise DaemonProtocolError("result chunk offset or checksum differs")
-                if not chunk.payload and not chunk.final_chunk:
-                    raise DaemonProtocolError("result stream made no forward progress")
-                chunks.append(chunk.payload)
-                offset += len(chunk.payload)
-                final = chunk.final_chunk
-            if final:
-                break
-            if offset == prior_offset:
-                raise DaemonProtocolError("result read made no forward progress")
-        else:
-            raise DaemonProtocolError("result read exceeded its bounded retry contract")
-        payload = b"".join(chunks)
-        if checksum(payload) != artifact_checksum or len(payload) != result_byte_count:
-            raise DaemonProtocolError("assembled artifact identity differs")
-        released = await self.stub.ReleaseResult(
-            query_pb.ReleaseResultRequest(
-                artifact_id=artifact_id,
-                lease_token=lease_token,
-            ),
-            timeout=self.settings.query_timeout_seconds,
+        await self.connect(correlation_id=correlation_id)
+        if not public_handle or offset != 0 or maximum_bytes <= 0:
+            raise ValueError("invalid bounded resource request")
+        maximum = min(
+            maximum_bytes,
+            self._handshake().effective_limits.maximum_resource_chunk_bytes,
         )
-        if not released.released:
-            raise DaemonProtocolError("result artifact lease was not released")
-        self._lease_cache.pop(artifact_id, None)
-        return payload
-
-    async def read_resource(self, artifact_id: str) -> bytes:
-        """Resolve one process-owned result resource exactly once."""
-
-        lease = self._lease_cache.get(artifact_id)
-        if lease is None:
-            raise DaemonProtocolError("result resource is absent or already released")
-        lease_token, artifact_checksum, _expires_at, result_byte_count = lease
+        expected_offset = offset
+        result = bytearray()
+        ended = False
+        resource_checksum: str | None = None
+        total_bound = self._handshake().effective_limits.maximum_result_bytes
+        timeout = self.settings.query_timeout_seconds
         try:
-            payload = await self._read_and_release(
-                artifact_id,
-                lease_token,
-                artifact_checksum,
-                result_byte_count=result_byte_count,
+            stream = self.stub.ReadResource(
+                query_pb.ReadResourceRequest(
+                    context=self._context(correlation_id, timeout),
+                    public_handle=public_handle,
+                    selector=_resource_selector(selector),
+                    offset=offset,
+                    maximum_bytes=maximum,
+                ),
+                metadata=self._metadata(),
+                timeout=timeout,
             )
-        except grpc.RpcError as error:
-            self._lease_cache.pop(artifact_id, None)
-            raise DaemonProtocolError("daemon rejected or revoked the result lease") from error
-        canonical_payload = canonicalize_json(payload)
-        if canonical_payload != payload:
-            raise DaemonProtocolError("result resource is not canonical JSON")
-        return payload
+            async for chunk in stream:
+                if (
+                    ended
+                    or chunk.public_handle != public_handle
+                    or chunk.offset != expected_offset
+                    or len(chunk.content) > maximum
+                    or len(result) + len(chunk.content) > total_bound
+                    or (
+                        resource_checksum is not None
+                        and chunk.content_checksum != resource_checksum
+                    )
+                ):
+                    raise DaemonProtocolError("resource chunk framing differs")
+                resource_checksum = chunk.content_checksum
+                self._assert_authority(chunk.authority)
+                result.extend(chunk.content)
+                expected_offset += len(chunk.content)
+                ended = chunk.end_of_resource
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
+        if not ended or resource_checksum is None or checksum(bytes(result)) != resource_checksum:
+            raise DaemonProtocolError("resource stream ended without a terminal bound")
+        return bytes(result)
+
+    async def cancel_query(
+        self,
+        daemon_query_id: str,
+        *,
+        cancellation_id: str,
+        correlation_id: str,
+        timeout_seconds: float = 2.0,
+    ) -> CancellationResult:
+        await self.connect(correlation_id=correlation_id)
+        if not daemon_query_id or not cancellation_id:
+            raise ValueError("cancel identity must be non-empty")
+        timeout = min(timeout_seconds, self.settings.query_timeout_seconds)
+        try:
+            response = await self.stub.CancelQuery(
+                query_pb.CancelQueryRequest(
+                    context=self._context(correlation_id, timeout),
+                    daemon_query_id=daemon_query_id,
+                    cancellation_id=cancellation_id,
+                ),
+                metadata=self._metadata(),
+                timeout=timeout,
+            )
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
+        if response.cancellation_id != cancellation_id:
+            raise DaemonProtocolError("cancel acknowledgement identity differs")
+        acknowledgement = _enum_name(
+            query_pb.CancellationAcknowledgement.Name,
+            response.acknowledgement,
+            "CANCELLATION_ACKNOWLEDGEMENT_",
+        )
+        if acknowledgement not in {
+            "accepted",
+            "replayed",
+            "already_terminal",
+            "query_not_found",
+        }:
+            raise DaemonProtocolError("cancel acknowledgement is not allowlisted")
+        terminal = response.terminal if response.HasField("terminal") else None
+        return CancellationResult(
+            authority=self._assert_authority(response.authority),
+            cancellation_id=response.cancellation_id,
+            acknowledgement=cast(
+                Literal["accepted", "replayed", "already_terminal", "query_not_found"],
+                acknowledgement,
+            ),
+            terminal_state=(_execution_name(terminal.state) if terminal is not None else None),
+            terminal_error=(
+                _safe_error(terminal.error)
+                if terminal is not None and terminal.HasField("error")
+                else None
+            ),
+            idempotent_replay=response.idempotent_replay,
+        )
+
+    async def release_resource(
+        self,
+        public_handle: str,
+        *,
+        release_id: str,
+        correlation_id: str,
+        timeout_seconds: float = 2.0,
+    ) -> ReleaseResult:
+        await self.connect(correlation_id=correlation_id)
+        if not public_handle or not release_id:
+            raise ValueError("release identity must be non-empty")
+        timeout = min(timeout_seconds, self.settings.query_timeout_seconds)
+        try:
+            response = await self.stub.ReleaseResource(
+                query_pb.ReleaseResourceRequest(
+                    context=self._context(correlation_id, timeout),
+                    public_handle=public_handle,
+                    release_id=release_id,
+                ),
+                metadata=self._metadata(),
+                timeout=timeout,
+            )
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
+        if response.release_id != release_id:
+            raise DaemonProtocolError("release acknowledgement identity differs")
+        state = _enum_name(query_pb.ReleaseState.Name, response.state, "RELEASE_STATE_")
+        if state not in {"released", "already_released", "not_found"}:
+            raise DaemonProtocolError("release acknowledgement is not allowlisted")
+        return ReleaseResult(
+            authority=self._assert_authority(response.authority),
+            release_id=response.release_id,
+            state=cast(Literal["released", "already_released", "not_found"], state),
+            idempotent_replay=response.idempotent_replay,
+        )
+
+    async def close(self) -> None:
+        """Close the lifespan channel; resources are released explicitly by public handle."""
+
+        await self.channel.close(grace=1.0)
 
 
 __all__ = [
+    "AcceptedQuery",
+    "AuthorityGeneration",
+    "BooleanCollectionInputAnswer",
+    "BooleanInputAnswer",
+    "CancellationResult",
+    "ChallengeAnswer",
+    "ChoiceCollectionInputAnswer",
+    "ChoiceInputAnswer",
     "CpgDaemonClient",
+    "DaemonPort",
     "DaemonProtocolError",
-    "DaemonQueryError",
     "DaemonQueryResult",
+    "DaemonRpcError",
+    "DaemonStatus",
+    "InputChallenge",
+    "InputRequirement",
+    "IntegerCollectionInputAnswer",
+    "IntegerInputAnswer",
+    "ManifestSelector",
+    "PageSelector",
+    "QueryPreparation",
+    "ReferenceCompletion",
+    "ReferenceDocument",
+    "ReferenceSelector",
+    "ReleaseResult",
+    "ResourceHandle",
+    "ResourceSelector",
+    "SafeError",
+    "StartQueryOutcome",
+    "StringCollectionInputAnswer",
+    "StringInputAnswer",
+    "ValidationRejection",
 ]

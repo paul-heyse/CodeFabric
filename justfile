@@ -15,6 +15,12 @@
 
 set shell := ["./scripts/repo-shell.sh"]
 
+# FastMCP 4 is exercised only in its modern snake-case mode. Export this at the
+# command boundary so every adapter lint, type, test, inspection, STDIO, wheel,
+# and release recipe fails instead of inheriting the deprecated compatibility
+# bridge from a caller environment.
+export FASTMCP_MCP_CAMELCASE_COMPAT := "false"
+
 # Variadic recipes forward their arguments with "$@" rather than {{ args }}.
 # Without this, just re-expands the interpolated string and a quoted argument
 # containing a space is silently re-split -- so `just spec-outline <path>
@@ -371,24 +377,25 @@ query-retention-cancellation-restart-check:
 [group('test')]
 production-composition-contract-integrity-check:
     cargo nextest run --locked --lib -E 'test(/(semantic_catalog_authority_rejects_pin_and_program_drift|request_owned_limits_identity_is_complete_and_stable|workspace_public_identity_is_strictly_canonical|port_bundle_requires_application_and_every_component_identity)/)' --no-tests=fail
-    cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|lifecycle_rejects_skips_stale_writers_and_false_ready|empty_workspace_slot_never_falls_back|production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|lifecycle_rejects_skips_stale_writers_and_false_ready|empty_workspace_slot_never_falls_back)/)' --no-tests=fail
 
 [doc("Exercise the real typed-input daemon composition and causal query/activation vertical")]
 [group('test')]
 programmatic-production-composition-check:
-    cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|lifecycle_authority_is_the_only_semantic_admission_gate)/)' --no-tests=fail
-    cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(lifecycle_authority_is_the_only_semantic_admission_gate)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation)' --no-tests=fail
 
 [doc("Reject default, bootstrap, empty, and arbitrary-label production authority")]
 [group('test')]
 daemon-bootstrap-route-denial-check:
-    cargo nextest run --locked --lib -E 'test(/(production_factory_rejects_empty_workspace_without_endpoint_or_lease_leaks|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|lifecycle_rejects_skips_stale_writers_and_false_ready|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(production_partial_multi_workspace_fencing_releases_every_earlier_owner|lifecycle_rejects_skips_stale_writers_and_false_ready|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp37_neg_codefabricd_rejects_direct_start_without_supervisor_control)' --no-tests=fail
 
 [doc("Prove bounded cancellation, shutdown, restart, and durable runtime reconstruction")]
 [group('test')]
 programmatic-runtime-lifecycle-check:
-    cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
-    cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(production_partial_multi_workspace_fencing_releases_every_earlier_owner|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp44_ops_real_supervisor_restarts_daemon_and_joins_owned_endpoints)' --no-tests=fail
 
 [doc("Prove released lifecycle identity, Protobuf descriptors, UDS peer policy, deadlines, and frame limits")]
 [group('test')]
@@ -400,8 +407,7 @@ public-lifecycle-wire-contract-integrity-check:
 [doc("Exercise the target production binary lifecycle without predecessor serving composition")]
 [group('test')]
 lifecycle-production-vertical-check:
-    cargo nextest run --locked --lib -E 'test(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)' --no-tests=fail
-    cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(/(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation|wp44_ops_real_supervisor_restarts_daemon_and_joins_owned_endpoints|wp37_neg_codefabricd_rejects_direct_start_without_supervisor_control)/)' --no-tests=fail
 
 [doc("Keep FastMCP UDS-only and presentation-only while proving real generated-gRPC Arrow delivery")]
 [group('test')]
@@ -496,8 +502,8 @@ bootstrap-model-decommission-integrity-check:
 [group('test')]
 compiled-release-consumer-cutover-check:
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/wp30_authority_zero_state.py
-    cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)/)' --no-tests=fail
-    cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(compiled_release_has_one_unsubstitutable_suite_identity)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation)' --no-tests=fail
 
 [doc("Reject every live legacy path, symbol, feature, target, package, recipe, and selector")]
 [group('test')]
@@ -510,8 +516,8 @@ bootstrap-ontology-authority-zero-state-check:
 [group('test')]
 programmatic-model-free-restart-check:
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/wp30_authority_zero_state.py
-    cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
-    cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp44_ops_real_supervisor_restarts_daemon_and_joins_owned_endpoints)' --no-tests=fail
 
 [doc("Validate the plan-derived schema, transformation, native-rung, and observation contract matrix")]
 [group('test')]
@@ -611,6 +617,119 @@ fastmcp4-expectation-drift-check:
 supervisor-launch-contract-check:
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_supervisor_launch_contract_v4.py
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/supervisor_launch_contract_v4.py
+
+[doc("Compile-probe typed launch settings, authenticated control, private sockets, and replacement-safe cleanup")]
+[group('test')]
+supervisor-launch-platform-check:
+    cargo nextest run --locked --lib -E 'test(/wp44_(int|beh|neg|ops)_/)' --no-tests=fail
+
+[doc("Prove strict startup, policy, and binary-to-library process contracts")]
+[group('test')]
+fastmcp4-startup-contract-integrity-check:
+    cargo nextest run --locked --lib -E 'test(wp44_int_)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(/(wp44_int_thin_binaries_delegate_to_strict_library_settings|wp44_beh_real_project_venv_launch_preserves_distribution_authority)/)' --no-tests=fail
+
+[doc("Reach Ready from no activation head only through exact durable command readback")]
+[group('test')]
+fresh-activation-ready-reconciliation-check:
+    cargo nextest run --locked --test integration -E 'test(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation)' --no-tests=fail
+
+[doc("Reject direct daemon start, unsafe endpoints, claim expansion, and unauthenticated control")]
+[group('test')]
+supervisor-startup-boundary-rejection-check:
+    cargo nextest run --locked --lib -E 'test(wp44_neg_)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp37_neg_codefabricd_rejects_direct_start_without_supervisor_control)' --no-tests=fail
+
+[doc("Restart the real daemon and prove drain, join, and exact endpoint cleanup")]
+[group('test')]
+supervisor-restart-join-operations-check:
+    cargo nextest run --locked --lib -E 'test(wp44_ops_)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(/(wp44_ops_real_supervisor_restarts_daemon_and_joins_owned_endpoints|wp44_ops_real_signal_orders_drain_before_shutdown_and_joins_owned_endpoints|wp44_ops_real_pre_ready_child_failure_keeps_admission_closed_and_cleans_endpoints|wp44_ops_real_durable_append_acknowledgement_loss_reconciles_exact_readback|wp44_ops_real_launch_capacity_recovers_pending_failure_and_abrupt_exit)/)' --no-tests=fail
+
+# Every WP45 packet oracle crosses the generated Rust and Python clients through
+# the real Tonic service over a private UDS. Direct service/unit tests below are
+# deliberately supplemental to this shared interoperability boundary.
+_wp45-generated-client-uds-interop:
+    cargo nextest run --locked --test integration -E 'test(/wp45_rust_tonic_uds_accepts_generated_(rust|python)_client/)' --run-ignored all --no-tests=fail
+
+[doc("Validate the atomic v2 source, descriptor, generated clients, and pure preparation boundary")]
+[group('test')]
+fastmcp4-daemon-wire-contract-check: proto-check proto-repro-check _wp45-generated-client-uds-interop
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_proto.py -k 'v2_atomic_start_and_event_contracts_are_closed or atomic_start_oneofs_replace_previous_variants or independent_atomic_start_wire_fixtures_decode_exact_outcomes'
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_daemon_client.py -k 'rejects_additive_status_and_unsafe_diagnostic_reference or rejects_unallowlisted_progress_stage'
+
+[doc("Prove one atomic start outcome across bounded multi-round guarded input")]
+[group('test')]
+fastmcp4-atomic-start-check: _wp45-generated-client-uds-interop
+    cargo nextest run --locked --lib -E 'test(/(wp45_explicit_validation_is_pure_and_creates_no_start_authority|wp45_start_replay_precedes_changed_catalog_preparation|wp45_atomic_task_slot_reservation_rejects_concurrent_overacceptance|wp36_int_full_operation_idempotency_cursor_and_journal_bindings_are_exact)/)' --no-tests=fail
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_proto.py -k 'v2_atomic_start_and_event_contracts_are_closed or atomic_start_oneofs_replace_previous_variants or independent_atomic_start_wire_fixtures_decode_exact_outcomes'
+
+[doc("Reauthorize daemon-minted public resource handles and reference projections on every use")]
+[group('test')]
+fastmcp4-resource-authority-check: _wp45-generated-client-uds-interop
+    cargo nextest run --locked --lib -E 'test(/streamed_result_registry::tests::(reference_handle_reauthorizes_every_binding_and_releases_without_query|reference_registry_capacity_is_strict_and_publish_preserves_live_tombstones|wp45_resource_scoped_manifest_pages_release_only_after_last_handle|wp45_restart_reissues_fresh_handles_from_the_durable_package_locator|wp45_restart_cleanup_uses_only_pre_result_ready_object_intent_and_retries|wp45_expiry_reclaims_handles_and_retries_failed_object_cleanup)/)' --no-tests=fail
+
+[doc("Prove cancellation, restart reissue, expiry cleanup, and reserved control capacity")]
+[group('test')]
+fastmcp4-daemon-security-recovery-check: _wp45-generated-client-uds-interop
+    cargo nextest run --locked --lib -E 'test(/wp45_(int_exact_publication_intent_precedes_every_object_write|cancel_is_idempotent_for_queued_running_and_terminal_work|neg_policy_revocation_and_session_sharing_bind_authorization_and_cursor|ops_restart_after_cancellation_side_effect_before_ack_reports_replay|neg_durable_cancellation_identity_ledger_is_strictly_bounded|restart_after_publication_intent_recovers_every_pre_result_ready_kill_point|restart_after_result_ready_before_terminal_preserves_exact_cleanup_locator|restart_retains_locator_and_release_denies_reissue_durably|restart_reissues_fresh_handles_from_the_durable_package_locator|restart_cleanup_uses_only_pre_result_ready_object_intent_and_retries|expiry_stages_durable_cleanup_before_deleting_the_query_tombstone|expiry_reclaims_handles_and_retries_failed_object_cleanup|lazy_service_retention_reclaims_coordinator_authority|ready_admission_linearizes_acceptance_before_drain|reserved_control_keeps_cancel_and_release_admissible|relative_budget_is_consumed_across_the_operation_lifetime|queued_execution_deadline_releases_reservations|watch_iteration_deadline_releases_admission|read_iteration_deadline_releases_admission|challenge_expiry_remains_typed_after_unrelated_prune|challenge_expiry_and_replay_are_distinct_typed_outcomes|guard_invalid_answer_closes_and_replays_stable_rejection|challenge_output_is_bounded_after_typed_projection|beh_private_journal_events_do_not_create_public_sequence_gaps|safe_metadata_and_keys_are_typed_and_control_character_free)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(missing_or_mismatched_identity_is_rejected_before_handler_dispatch)' --no-tests=fail
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_daemon_client.py::test_watch_reconnects_with_fresh_session_without_resubmitting_start codefabric-cpg-mcp/tests/test_daemon_client.py::test_watch_reconnect_rejects_changed_replayed_result_without_resubmitting_start codefabric-cpg-mcp/tests/test_daemon_client.py::test_watch_reconnect_settings_renewal_obeys_one_lifetime_budget_without_resubmitting_start
+
+[doc("Round-trip all bounded guarded-input outcomes through generated v2 clients")]
+[group('test')]
+fastmcp4-guard-roundtrip-check: _wp45-generated-client-uds-interop
+    cargo nextest run --locked --lib -E 'test(/wp45_(guard_three_round_ledger_replays_each_truthful_outcome|guard_invalid_answer_closes_and_replays_stable_rejection|challenge_expiry_and_replay_are_distinct_typed_outcomes|challenge_output_is_bounded_after_typed_projection|programmatic_guard_carries_live_catalog_execution_value)/)' --no-tests=fail
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_proto.py::test_challenge_contract_is_typed_bounded_and_contains_no_opaque_json codefabric-cpg-mcp/tests/test_daemon_client.py::test_daemon_port_maps_closed_v2_contract_without_python_authority
+
+[doc("Project only authorized bounded completion values and hide denied existence")]
+[group('test')]
+fastmcp4-completion-authorization-check: _wp45-generated-client-uds-interop
+    cargo nextest run --locked --lib -E 'test(/(wp45_live_reference_completion_caps_total_and_filters_the_shared_relation|wp45_reference_denials_do_not_disclose_selector_existence|reference_workspace_scope_requires_exactly_one_authorized_workspace|streamed_result_registry::tests::reference_)/)' --no-tests=fail
+
+[doc("Pin the exact FastMCP 4 stack, public imports, and bridge-off dependency contract")]
+[group('adapter')]
+fastmcp4-dependency-contract-check: adapter-lint
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python -c 'import os,tomllib; from importlib.metadata import version; from pathlib import Path; expected=["blake3==1.0.9","fastmcp==4.0.0","grpcio==1.83.0","mcp==2.1.1","opentelemetry-api==1.44.0","protobuf==7.36.0","pydantic==2.13.4","rfc8785==0.1.4"]; actual=tomllib.loads(Path("codefabric-cpg-mcp/pyproject.toml").read_text())["project"]["dependencies"]; assert actual == expected, actual; assert (version("fastmcp"),version("mcp"),version("pydantic"),version("grpcio"),version("protobuf"),version("opentelemetry-api")) == ("4.0.0","2.1.1","2.13.4","1.83.0","7.36.0","1.44.0"); assert os.environ["FASTMCP_MCP_CAMELCASE_COMPAT"] == "false"'
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_adapter_contracts.py codefabric-cpg-mcp/tests/test_settings.py codefabric-cpg-mcp/tests/test_proto.py
+
+[doc("Serve only protocol 2026-07-28 and reject every legacy era before daemon dispatch")]
+[group('adapter')]
+fastmcp4-modern-protocol-check:
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_server.py -k 'legacy_initialize_is_rejected_before_business_dispatch or guard_roundtrip_reenters_with_new_leg_correlation_and_daemon_state or atomic_query_publishes_scoped_resources_and_releases_out_of_order_reads or status_reference_resource_and_completion_delegate_to_daemon or replacement_generation_supplies_live_timeouts_and_resource_bounds or resource_unit_may_span_multiple_negotiated_chunks or allowlisted_spans_exclude_handles_payload_answers_and_exception_prose or unexpected_daemon_failure_is_safe_on_wire_and_stderr or valid_guard_state_is_bound_to_the_original_tool_arguments or hostile_request_id_is_not_used_for_spans_or_daemon_correlation'
+    just adapter-stdio-test
+
+[doc("Prove the adapter retains no semantic, session, task, cache, Arrow, or resource authority")]
+[group('adapter')]
+fastmcp4-adapter-authority-zero-state-check:
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_daemon_client.py codefabric-cpg-mcp/tests/test_server.py -k 'source_has_no_displaced_authority or maps_closed_v2_contract_without_python_authority or tampered_guard_state_fails_before_daemon_continuation or incomplete_resource_read_never_releases_its_handle or host_cancellation_uses_daemon_query_identity_and_reraises or rejects_additive_status_and_unsafe_diagnostic_reference or rejects_unallowlisted_progress_stage or allowlisted_spans_exclude_handles_payload_answers_and_exception_prose or unexpected_daemon_failure_is_safe_on_wire_and_stderr or rejects_malformed_input_requirements or valid_guard_state_is_bound_to_the_original_tool_arguments or hostile_request_id_is_not_used_for_spans_or_daemon_correlation'
+    @if rg -n -g '*.py' 'fastmcp_slim|fastmcp\.tasks|pydantic_settings|pyarrow|polars|ResourceLease|_resource_leases|mcp_call_id|rpc_attempt_id' codefabric-cpg-mcp/src; then echo 'retired adapter authority/import surface remains live' >&2; exit 1; fi
+
+[doc("Inspect the exact installed FastMCP tool, resource, completion, prompt, task, and extension surface")]
+[group('adapter')]
+fastmcp4-public-surface-check: adapter-wheel-test
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_server.py::test_fastmcp_registers_exact_modern_target_surface codefabric-cpg-mcp/tests/test_adapter_contracts.py::test_reference_projects_only_a_public_daemon_resource codefabric-cpg-mcp/tests/test_server.py::test_status_reference_resource_and_completion_delegate_to_daemon
+    just adapter-stdio-test
+
+[doc("Observe the fixed modern FastMCP contract through a freshly installed wheel and real supervisor topology")]
+[group('test')]
+fastmcp4-contract-observation-check:
+    cargo nextest run --locked --test integration -E 'test(wp47_int_real_installed_wheel_modern_contract_observation)' --no-tests=fail
+
+[doc("Execute guarded query, resource, reference, and completion behavior through installed FastMCP 4")]
+[group('test')]
+fastmcp4-stdio-vertical-check:
+    cargo nextest run --locked --test integration -E 'test(wp47_beh_real_installed_wheel_guard_query_resource_and_completion)' --no-tests=fail
+
+[doc("Reject legacy framing, cross-agent handles, and secret projection in the installed topology")]
+[group('test')]
+fastmcp4-security-negative-check:
+    cargo nextest run --locked --test integration -E 'test(wp47_neg_real_agent_scope_legacy_framing_and_secret_denial)' --no-tests=fail
+
+[doc("Prove cancellation, restart reconnection, and two-agent isolation through installed FastMCP 4")]
+[group('test')]
+fastmcp4-cancellation-recovery-check:
+    cargo nextest run --locked --test integration -E 'test(wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation)' --no-tests=fail
 
 [doc("Validate frozen WP33 claim, fixture, dependency, and review identities")]
 [group('test')]
@@ -981,6 +1100,7 @@ plan-dependency-check *args:
 [doc("Validate committed name-coupled nextest selectors and zero-selection failure semantics")]
 [group('gate')]
 gate-filter-census:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_gate_filter_census.py
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python scripts/gate_filter_census.py check
 
 [doc("Execute exactly four substantive acceptance oracles for one implementation packet")]

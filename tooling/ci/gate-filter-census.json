@@ -92,27 +92,31 @@
     },
     {
       "recipe": "production-composition-contract-integrity-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|lifecycle_rejects_skips_stale_writers_and_false_ready|empty_workspace_slot_never_falls_back|production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|lifecycle_rejects_skips_stale_writers_and_false_ready|empty_workspace_slot_never_falls_back)/)' --no-tests=fail"
     },
     {
       "recipe": "programmatic-production-composition-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|lifecycle_authority_is_the_only_semantic_admission_gate)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(lifecycle_authority_is_the_only_semantic_admission_gate)' --no-tests=fail"
     },
     {
       "recipe": "programmatic-production-composition-check",
-      "command": "cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail"
+      "command": "cargo nextest run --locked --test integration -E 'test(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation)' --no-tests=fail"
     },
     {
       "recipe": "daemon-bootstrap-route-denial-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(production_factory_rejects_empty_workspace_without_endpoint_or_lease_leaks|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|lifecycle_rejects_skips_stale_writers_and_false_ready|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(production_partial_multi_workspace_fencing_releases_every_earlier_owner|lifecycle_rejects_skips_stale_writers_and_false_ready|arbitrary_epoch_labels_cannot_authorize_a_sealed_epoch)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "daemon-bootstrap-route-denial-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(wp37_neg_codefabricd_rejects_direct_start_without_supervisor_control)' --no-tests=fail"
     },
     {
       "recipe": "programmatic-runtime-lifecycle-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|production_startup_faults_before_endpoint_exposure_and_releases_owners|production_admin_bind_failure_joins_socket_writer_slot_and_daemon_owners|production_partial_multi_workspace_fencing_releases_every_earlier_owner|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(/(production_partial_multi_workspace_fencing_releases_every_earlier_owner|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail"
     },
     {
       "recipe": "programmatic-runtime-lifecycle-check",
-      "command": "cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail"
+      "command": "cargo nextest run --locked --test integration -E 'test(wp44_ops_real_supervisor_restarts_daemon_and_joins_owned_endpoints)' --no-tests=fail"
     },
     {
       "recipe": "public-lifecycle-wire-contract-integrity-check",
@@ -124,11 +128,7 @@
     },
     {
       "recipe": "lifecycle-production-vertical-check",
-      "command": "cargo nextest run --locked --lib -E 'test(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)' --no-tests=fail"
-    },
-    {
-      "recipe": "lifecycle-production-vertical-check",
-      "command": "cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail"
+      "command": "cargo nextest run --locked --test integration -E 'test(/(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation|wp44_ops_real_supervisor_restarts_daemon_and_joins_owned_endpoints|wp37_neg_codefabricd_rejects_direct_start_without_supervisor_control)/)' --no-tests=fail"
     },
     {
       "recipe": "resource-cancellation-recovery-check",
@@ -156,19 +156,19 @@
     },
     {
       "recipe": "compiled-release-consumer-cutover-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(compiled_release_has_one_unsubstitutable_suite_identity)' --no-tests=fail"
     },
     {
       "recipe": "compiled-release-consumer-cutover-check",
-      "command": "cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail"
+      "command": "cargo nextest run --locked --test integration -E 'test(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation)' --no-tests=fail"
     },
     {
       "recipe": "programmatic-model-free-restart-check",
-      "command": "cargo nextest run --locked --lib -E 'test(/(production_binary_kernel_runs_honest_writer_fenced_bootstrap_and_restarts|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail"
+      "command": "cargo nextest run --locked --lib -E 'test(sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)' --no-tests=fail"
     },
     {
       "recipe": "programmatic-model-free-restart-check",
-      "command": "cargo nextest run --locked --test integration -E 'test(wp29_production_binary_bootstraps_without_legacy_admin_or_false_ready)' --no-tests=fail"
+      "command": "cargo nextest run --locked --test integration -E 'test(wp44_ops_real_supervisor_restarts_daemon_and_joins_owned_endpoints)' --no-tests=fail"
     },
     {
       "recipe": "datafusion-contract-matrix-integrity-check",
@@ -205,6 +205,82 @@
     {
       "recipe": "candidate-free-recovery-check",
       "command": "cargo nextest run --locked --lib -E 'test(/wp32_ops_/)' --no-tests=fail"
+    },
+    {
+      "recipe": "supervisor-launch-platform-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/wp44_(int|beh|neg|ops)_/)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-startup-contract-integrity-check",
+      "command": "cargo nextest run --locked --lib -E 'test(wp44_int_)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-startup-contract-integrity-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(/(wp44_int_thin_binaries_delegate_to_strict_library_settings|wp44_beh_real_project_venv_launch_preserves_distribution_authority)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "fresh-activation-ready-reconciliation-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation)' --no-tests=fail"
+    },
+    {
+      "recipe": "supervisor-startup-boundary-rejection-check",
+      "command": "cargo nextest run --locked --lib -E 'test(wp44_neg_)' --no-tests=fail"
+    },
+    {
+      "recipe": "supervisor-startup-boundary-rejection-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(wp37_neg_codefabricd_rejects_direct_start_without_supervisor_control)' --no-tests=fail"
+    },
+    {
+      "recipe": "supervisor-restart-join-operations-check",
+      "command": "cargo nextest run --locked --lib -E 'test(wp44_ops_)' --no-tests=fail"
+    },
+    {
+      "recipe": "supervisor-restart-join-operations-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(/(wp44_ops_real_supervisor_restarts_daemon_and_joins_owned_endpoints|wp44_ops_real_signal_orders_drain_before_shutdown_and_joins_owned_endpoints|wp44_ops_real_pre_ready_child_failure_keeps_admission_closed_and_cleans_endpoints|wp44_ops_real_durable_append_acknowledgement_loss_reconciles_exact_readback|wp44_ops_real_launch_capacity_recovers_pending_failure_and_abrupt_exit)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "_wp45-generated-client-uds-interop",
+      "command": "cargo nextest run --locked --test integration -E 'test(/wp45_rust_tonic_uds_accepts_generated_(rust|python)_client/)' --run-ignored all --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-atomic-start-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(wp45_explicit_validation_is_pure_and_creates_no_start_authority|wp45_start_replay_precedes_changed_catalog_preparation|wp45_atomic_task_slot_reservation_rejects_concurrent_overacceptance|wp36_int_full_operation_idempotency_cursor_and_journal_bindings_are_exact)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-resource-authority-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/streamed_result_registry::tests::(reference_handle_reauthorizes_every_binding_and_releases_without_query|reference_registry_capacity_is_strict_and_publish_preserves_live_tombstones|wp45_resource_scoped_manifest_pages_release_only_after_last_handle|wp45_restart_reissues_fresh_handles_from_the_durable_package_locator|wp45_restart_cleanup_uses_only_pre_result_ready_object_intent_and_retries|wp45_expiry_reclaims_handles_and_retries_failed_object_cleanup)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-daemon-security-recovery-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/wp45_(int_exact_publication_intent_precedes_every_object_write|cancel_is_idempotent_for_queued_running_and_terminal_work|neg_policy_revocation_and_session_sharing_bind_authorization_and_cursor|ops_restart_after_cancellation_side_effect_before_ack_reports_replay|neg_durable_cancellation_identity_ledger_is_strictly_bounded|restart_after_publication_intent_recovers_every_pre_result_ready_kill_point|restart_after_result_ready_before_terminal_preserves_exact_cleanup_locator|restart_retains_locator_and_release_denies_reissue_durably|restart_reissues_fresh_handles_from_the_durable_package_locator|restart_cleanup_uses_only_pre_result_ready_object_intent_and_retries|expiry_stages_durable_cleanup_before_deleting_the_query_tombstone|expiry_reclaims_handles_and_retries_failed_object_cleanup|lazy_service_retention_reclaims_coordinator_authority|ready_admission_linearizes_acceptance_before_drain|reserved_control_keeps_cancel_and_release_admissible|relative_budget_is_consumed_across_the_operation_lifetime|queued_execution_deadline_releases_reservations|watch_iteration_deadline_releases_admission|read_iteration_deadline_releases_admission|challenge_expiry_remains_typed_after_unrelated_prune|challenge_expiry_and_replay_are_distinct_typed_outcomes|guard_invalid_answer_closes_and_replays_stable_rejection|challenge_output_is_bounded_after_typed_projection|beh_private_journal_events_do_not_create_public_sequence_gaps|safe_metadata_and_keys_are_typed_and_control_character_free)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-daemon-security-recovery-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(missing_or_mismatched_identity_is_rejected_before_handler_dispatch)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-guard-roundtrip-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/wp45_(guard_three_round_ledger_replays_each_truthful_outcome|guard_invalid_answer_closes_and_replays_stable_rejection|challenge_expiry_and_replay_are_distinct_typed_outcomes|challenge_output_is_bounded_after_typed_projection|programmatic_guard_carries_live_catalog_execution_value)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-completion-authorization-check",
+      "command": "cargo nextest run --locked --lib -E 'test(/(wp45_live_reference_completion_caps_total_and_filters_the_shared_relation|wp45_reference_denials_do_not_disclose_selector_existence|reference_workspace_scope_requires_exactly_one_authorized_workspace|streamed_result_registry::tests::reference_)/)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-contract-observation-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(wp47_int_real_installed_wheel_modern_contract_observation)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-stdio-vertical-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(wp47_beh_real_installed_wheel_guard_query_resource_and_completion)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-security-negative-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(wp47_neg_real_agent_scope_legacy_framing_and_secret_denial)' --no-tests=fail"
+    },
+    {
+      "recipe": "fastmcp4-cancellation-recovery-check",
+      "command": "cargo nextest run --locked --test integration -E 'test(wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation)' --no-tests=fail"
     },
     {
       "recipe": "wp38-claim-018-production-check",

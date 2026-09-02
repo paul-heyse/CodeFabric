@@ -16,7 +16,7 @@ use arrow_schema::SchemaRef;
 use crate::cancellation::Cancellation;
 use crate::relational_program::{
     CompilationDependency, CompilationObservations, RelationId, RelationalProgram,
-    RelationalProgramCompiler, RelationalProgramError,
+    RelationalProgramCompiler, RelationalProgramError, SupplementalProgramRelationBinding,
 };
 
 use super::admission::{AdmissionError, FabricAdmissionRuntime, FabricQueryLease};
@@ -41,8 +41,8 @@ use super::published_arrow_result::{
 };
 use super::request_owned_relation::RequestOwnedRelationCollection;
 use super::streamed_result_package::{
-    ResultProvenance, SealedStreamedResultPackage, StreamedRelationInput,
-    StreamedResultPackageBuilder, StreamedResultPackageError,
+    ResultProvenance, ResultPublicationIntentRecorder, SealedStreamedResultPackage,
+    StreamedRelationInput, StreamedResultPackageBuilder, StreamedResultPackageError,
 };
 
 /// Exact table and resource authorization inputs used to derive one reduced child session.
@@ -217,6 +217,7 @@ pub struct SelectedQueryOutput {
     relation_id: RelationId,
     program: RelationalProgram,
     coverage: Option<ResultCoverage>,
+    program_result_binding: Option<SupplementalProgramRelationBinding>,
 }
 
 impl SelectedQueryOutput {
@@ -230,7 +231,18 @@ impl SelectedQueryOutput {
             relation_id,
             program,
             coverage,
+            program_result_binding: None,
         }
+    }
+
+    /// Bind the exact application-owned transient result schema selected with this program.
+    #[must_use]
+    pub fn with_program_result_binding(
+        mut self,
+        binding: SupplementalProgramRelationBinding,
+    ) -> Self {
+        self.program_result_binding = Some(binding);
+        self
     }
 
     #[must_use]
@@ -472,6 +484,11 @@ impl StreamedRelationalQueryPublication {
     }
 
     #[must_use]
+    pub const fn lease_token_ref(&self) -> &OpaqueResultLeaseToken {
+        &self.lease_token
+    }
+
+    #[must_use]
     pub const fn package(&self) -> &SealedStreamedResultPackage {
         &self.package
     }
@@ -663,9 +680,16 @@ impl RelationalQueryRuntime {
                             output.relation_id.as_str().to_owned(),
                         )
                     })?;
+                    let query_bindings = if let Some(binding) = &output.program_result_binding {
+                        epoch
+                            .program_bindings()
+                            .with_supplemental_relations([binding.clone()])?
+                    } else {
+                        epoch.program_bindings().as_ref().clone()
+                    };
                     let session_relation =
                         RelationalProgramCompiler::resolve_output_relation_with_bindings(
-                            epoch.program_bindings(),
+                            &query_bindings,
                             &output.program,
                         )?;
                     if session_relation != output.relation_id {
@@ -674,17 +698,37 @@ impl RelationalQueryRuntime {
                             session_bound: session_relation.as_str().to_owned(),
                         });
                     }
-                    let result =
-                        if let Some(request_inputs) = request_inputs.get(&output.relation_id) {
+                    let result = match (
+                        request_inputs.get(&output.relation_id),
+                        output.program_result_binding.as_ref(),
+                    ) {
+                        (Some(request_inputs), Some(program_result)) => {
+                            child
+                                .execute_relational_program_with_request_inputs_and_program_result(
+                                    &output.program,
+                                    request_inputs.as_ref(),
+                                    program_result,
+                                )
+                                .await?
+                        }
+                        (Some(request_inputs), None) => {
                             child
                                 .execute_relational_program_with_request_inputs(
                                     &output.program,
                                     request_inputs.as_ref(),
                                 )
                                 .await?
-                        } else {
-                            child.execute_relational_program(&output.program).await?
-                        };
+                        }
+                        (None, Some(program_result)) => {
+                            child
+                                .execute_relational_program_with_program_result(
+                                    &output.program,
+                                    program_result,
+                                )
+                                .await?
+                        }
+                        (None, None) => child.execute_relational_program(&output.program).await?,
+                    };
                     let row_count = u64::try_from(result.row_count())
                         .map_err(|_| RelationalQueryRuntimeError::ResultCountOverflow)?;
                     let batch_count = u64::try_from(result.batches().len())
@@ -752,6 +796,7 @@ impl RelationalQueryRuntime {
         resources: Arc<EpochResourceCoordinator>,
         transaction: RelationalQueryTransaction,
         package_builder: &StreamedResultPackageBuilder,
+        publication_intent: Arc<dyn ResultPublicationIntentRecorder>,
     ) -> Result<StreamedRelationalQueryPublication, RelationalQueryRuntimeError> {
         if transaction.owner.workspace_id() != self.workspace_id {
             return Err(RelationalQueryRuntimeError::WorkspaceNotAuthorized);
@@ -814,9 +859,16 @@ impl RelationalQueryRuntime {
                             output.relation_id.as_str().to_owned(),
                         )
                     })?;
+                    let query_bindings = if let Some(binding) = &output.program_result_binding {
+                        epoch
+                            .program_bindings()
+                            .with_supplemental_relations([binding.clone()])?
+                    } else {
+                        epoch.program_bindings().as_ref().clone()
+                    };
                     let session_relation =
                         RelationalProgramCompiler::resolve_output_relation_with_bindings(
-                            epoch.program_bindings(),
+                            &query_bindings,
                             &output.program,
                         )?;
                     if session_relation != output.relation_id {
@@ -825,19 +877,41 @@ impl RelationalQueryRuntime {
                             session_bound: session_relation.as_str().to_owned(),
                         });
                     }
-                    let streamed =
-                        if let Some(request_inputs) = request_inputs.get(&output.relation_id) {
+                    let streamed = match (
+                        request_inputs.get(&output.relation_id),
+                        output.program_result_binding.as_ref(),
+                    ) {
+                        (Some(request_inputs), Some(program_result)) => {
+                            child
+                                .execute_relational_program_stream_with_request_inputs_and_program_result(
+                                    &output.program,
+                                    request_inputs.as_ref(),
+                                    program_result,
+                                )
+                                .await?
+                        }
+                        (Some(request_inputs), None) => {
                             child
                                 .execute_relational_program_stream_with_request_inputs(
                                     &output.program,
                                     request_inputs.as_ref(),
                                 )
                                 .await?
-                        } else {
+                        }
+                        (None, Some(program_result)) => {
+                            child
+                                .execute_relational_program_stream_with_program_result(
+                                    &output.program,
+                                    program_result,
+                                )
+                                .await?
+                        }
+                        (None, None) => {
                             child
                                 .execute_relational_program_stream(&output.program)
                                 .await?
-                        };
+                        }
+                    };
                     let schema = Arc::clone(streamed.schema());
                     let compilation = streamed.observations().clone();
                     let provenance = compilation_provenance(&compilation);
@@ -864,6 +938,7 @@ impl RelationalQueryRuntime {
                         result_lease,
                         &seal_cancellation,
                         deadline,
+                        publication_intent.as_ref(),
                     )
                     .await?;
                 let manifest_relations = package

@@ -88,6 +88,8 @@ pub enum FabricCommandRuntimeShutdownError {
     Actor(#[from] FabricCommandActorError),
     #[error("command actor join failed: {0}")]
     Join(#[from] tokio::task::JoinError),
+    #[error(transparent)]
+    WriterLease(#[from] WorkspaceWriterLeaseError),
 }
 
 /// Failures while reopening new-command admission after startup or an unknown outcome.
@@ -378,6 +380,38 @@ impl FabricCommandRuntime {
             config.lease_id,
             generation_store.as_ref(),
         )?;
+        Self::start_with_held_authority(config, generation_store, writer_lease, semantics, effects)
+    }
+
+    /// Start one actor using the writer lease already acquired by the phase-typed daemon
+    /// startup owner.
+    ///
+    /// This is the production composition route: the daemon acquires the singleton workspace
+    /// fence before it opens semantic state, then transfers that same non-cloneable guard into
+    /// the sole command runtime. No second generation is allocated and no overlapping lock is
+    /// attempted while genesis or exact selected-epoch recovery is being composed.
+    ///
+    /// # Errors
+    ///
+    /// Rejects workspace/path/fence drift, an unavailable Tokio runtime, or command-journal
+    /// construction failure before the actor is spawned.
+    pub fn start_with_held_authority(
+        config: FabricCommandRuntimeConfig,
+        generation_store: Arc<SqliteWriterGenerationStore>,
+        writer_lease: WorkspaceWriterLease,
+        semantics: Arc<dyn CommandSemanticContextPort>,
+        effects: Arc<dyn FabricCommandEffectPort>,
+    ) -> Result<Self, FabricCommandRuntimeStartError> {
+        tokio::runtime::Handle::try_current()
+            .map_err(|_| FabricCommandRuntimeStartError::TokioRuntimeUnavailable)?;
+        if writer_lease.workspace_id() != config.workspace_id
+            || generation_store.database_path() != config.writer_generation_database
+        {
+            return Err(FabricCommandRuntimeStartError::WriterLease(
+                WorkspaceWriterLeaseError::StaleFence,
+            ));
+        }
+        writer_lease.validate(generation_store.as_ref())?;
         let fence = writer_lease.fence();
         let record_store = Arc::new(SqliteCommandRecordStore::open(
             &config.command_record_database,
@@ -646,7 +680,9 @@ impl FabricCommandRuntime {
         if let Some(task) = self.actor_task.take() {
             task.await?;
         }
-        self.writer_lease.take();
+        if let Some(lease) = self.writer_lease.take() {
+            lease.release()?;
+        }
         Ok(())
     }
 

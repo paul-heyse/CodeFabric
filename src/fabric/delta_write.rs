@@ -202,6 +202,17 @@ pub enum ControlledDeltaWriteMode {
     ReplaceAll,
 }
 
+/// Assurance-only interruption point for proving recovery from an uncertain durable append.
+///
+/// The fault is applied only after delta-rs returned the exact successor table and that table's
+/// identity matched predecessor + 1, but before CodeFabric reads the commit entry. It therefore
+/// cannot fabricate a commit and cannot authorize success; it only forces the ordinary command
+/// reconciliation path to recover the transaction marker and exact committed snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ControlledDeltaWriteAssuranceFault {
+    DurableAppendAcknowledgementLostBeforeReadback,
+}
+
 impl ControlledDeltaWriteMode {
     const fn save_mode(self) -> SaveMode {
         match self {
@@ -291,6 +302,7 @@ pub struct ControlledDeltaWriteSpec {
     mode: ControlledDeltaWriteMode,
     layout: ControlledDeltaWriteLayout,
     commit_metadata: BTreeMap<String, Value>,
+    assurance_fault: Option<ControlledDeltaWriteAssuranceFault>,
 }
 
 impl ControlledDeltaWriteSpec {
@@ -311,7 +323,18 @@ impl ControlledDeltaWriteSpec {
             mode,
             layout: ControlledDeltaWriteLayout::default(),
             commit_metadata: BTreeMap::new(),
+            assurance_fault: None,
         }
+    }
+
+    /// Inject one bounded post-append/pre-readback assurance fault.
+    #[must_use]
+    pub(crate) const fn with_assurance_fault(
+        mut self,
+        fault: ControlledDeltaWriteAssuranceFault,
+    ) -> Self {
+        self.assurance_fault = Some(fault);
+        self
     }
 
     /// Select an explicit measured physical layout without changing the
@@ -844,6 +867,17 @@ pub async fn write_exact_delta_plan(
                 spec.predecessor.canonical_root(),
                 expected_version
             ),
+            None,
+        );
+    }
+
+    if spec.assurance_fault
+        == Some(ControlledDeltaWriteAssuranceFault::DurableAppendAcknowledgementLostBeforeReadback)
+    {
+        return unknown(
+            spec,
+            ControlledDeltaWriteUnknownStage::ReadCommitHistory,
+            "assurance fault interrupted the durable append acknowledgement before exact commit readback",
             None,
         );
     }

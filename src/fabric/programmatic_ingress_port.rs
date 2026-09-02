@@ -10,6 +10,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::contracts::jcs::canonicalize_slice;
+use crate::query_backend::{
+    ResolvedSemanticExecutionRequest, SemanticAuthorizedChoice, SemanticInputAnswer,
+    SemanticInputConstraints, SemanticInputKind, SemanticInputRequirement, SemanticInputValue,
+};
 use crate::relational_program::FieldId;
 use crate::relational_semantic_query::{
     EpochBoundBlockBindingRow, EpochBoundConsumerSlotBindingRow, EpochBoundDependencyRow,
@@ -87,6 +91,58 @@ pub enum ProgrammaticFormIngressField {
     ReturnWhenExceeded,
 }
 
+impl ProgrammaticFormIngressField {
+    /// Exact compiled v2.0 selection identity for fields projected as selection rows.
+    ///
+    /// `None` identifies fields owned by a different ingress relation family. The exhaustive
+    /// match makes adding a new wire field require an explicit selection disposition.
+    #[must_use]
+    pub const fn compiled_v2_0_selection_id(self) -> Option<&'static str> {
+        match self {
+            Self::Label => Some("selection.label"),
+            Self::LookingFor => Some("selection.looking-for"),
+            Self::Where => Some("selection.where"),
+            Self::Facts => Some("selection.facts"),
+            Self::At => Some("selection.at"),
+            Self::Relationship => Some("selection.relationship"),
+            Self::Direction => Some("selection.direction"),
+            Self::Distance => Some("selection.distance"),
+            Self::StopWhen => Some("selection.stop-when"),
+            Self::Through => Some("selection.through"),
+            Self::PathPolicy => Some("selection.path-policy"),
+            Self::MaximumLength => Some("selection.maximum-length"),
+            Self::Combination => Some("selection.combination"),
+            Self::Identity => Some("selection.identity"),
+            Self::PreserveOrigin => Some("selection.preserve-origin"),
+            Self::Summaries => Some("selection.summaries"),
+            Self::GroupBy => Some("selection.group-by"),
+            Self::IncludeSupport => Some("selection.include-support"),
+            Self::Context => Some("selection.context"),
+            Self::TextHandling => Some("selection.text-handling"),
+            Self::Within
+            | Self::About
+            | Self::StartingFrom
+            | Self::EndingAt
+            | Self::PatternBindings
+            | Self::PatternRelationships
+            | Self::Inputs
+            | Self::Input
+            | Self::ForInputs
+            | Self::ReturnInclude
+            | Self::ReturnExclude
+            | Self::ReturnResultShape
+            | Self::ReturnGroupBy
+            | Self::ReturnOrderBy
+            | Self::ReturnDeduplicateBy
+            | Self::ReturnSupportingFacts
+            | Self::ReturnIncludeQueryResult
+            | Self::ReturnMaximumResults
+            | Self::ReturnPer
+            | Self::ReturnWhenExceeded => None,
+        }
+    }
+}
+
 const COMMON_FIELDS: [ProgrammaticFormIngressField; 12] = [
     ProgrammaticFormIngressField::Label,
     ProgrammaticFormIngressField::ReturnInclude,
@@ -152,10 +208,8 @@ pub enum ProgrammaticFormIngressTarget {
     References(ProgrammaticReferenceInputMapping),
     PatternBindings(ProgrammaticPatternBindingInputMapping),
     PatternRelationships(ProgrammaticPatternRelationshipInputMapping),
-    /// The effective released limit is bound both to the block and to this return relation.
-    ExplicitResultLimit {
-        return_id: Arc<str>,
-    },
+    /// The effective released limit is block metadata, not a semantic return row.
+    ExplicitResultLimit,
 }
 
 /// One explicit source-field to normalized-relation mapping.
@@ -301,7 +355,7 @@ impl ApplicationOwnedSemanticIngressPort {
                 return Err(rejected("semantic result-role identities are ambiguous"));
             }
         }
-        let expected_roles = all_result_roles().into_iter().collect::<BTreeSet<_>>();
+        let expected_roles = ResultRole::ALL.into_iter().collect::<BTreeSet<_>>();
         if role_map.keys().copied().collect::<BTreeSet<_>>() != expected_roles {
             return Err(rejected("semantic result-role mapping is incomplete"));
         }
@@ -382,6 +436,20 @@ impl ApplicationOwnedSemanticIngressPort {
         request: &ParsedSemanticRequest,
         catalog: &EpochBoundSemanticIngressCatalog,
     ) -> Result<EpochBoundSemanticIngress, ProgrammaticQueryPortError> {
+        match self.prepare_against_catalog(request, &[], catalog)? {
+            IngressPreparation::Ready(ingress) => Ok(ingress),
+            IngressPreparation::InputRequired(_) => Err(rejected(
+                "semantic selection value requires guarded input in the admitted epoch",
+            )),
+        }
+    }
+
+    fn prepare_against_catalog(
+        &self,
+        request: &ParsedSemanticRequest,
+        answers: &[SemanticInputAnswer],
+        catalog: &EpochBoundSemanticIngressCatalog,
+    ) -> Result<IngressPreparation, ProgrammaticQueryPortError> {
         self.validate_request_shape(request)?;
         let expected_limits_pin = epoch_bound_semantic_ingress_limits_pin(self.limits);
         if expected_limits_pin != catalog.limits_pin {
@@ -390,7 +458,7 @@ impl ApplicationOwnedSemanticIngressPort {
             ));
         }
 
-        let mut projection = IngressProjection::default();
+        let mut projection = IngressProjection::try_for_catalog(catalog, answers)?;
         self.project_globals(&request.request, &mut projection)?;
         let mut blocks = Vec::with_capacity(request.request.queries.len());
 
@@ -399,6 +467,7 @@ impl ApplicationOwnedSemanticIngressPort {
             let output_role_id = self.role_id(clause.output_role())?;
             let binding = select_program_binding(catalog, form, output_role_id)?;
             let query_id: Arc<str> = Arc::from(clause.query_id());
+            projection.bind_query_program(&query_id, &binding.program_binding_id)?;
             blocks.push(EpochBoundBlockBindingRow {
                 query_id: Arc::clone(&query_id),
                 compatibility_form: form,
@@ -416,6 +485,10 @@ impl ApplicationOwnedSemanticIngressPort {
             self.project_clause(clause, fields, binding, catalog, &mut projection)?;
         }
 
+        projection.validate_answer_consumption()?;
+        if !projection.requirements.is_empty() {
+            return Ok(IngressPreparation::InputRequired(projection.requirements));
+        }
         let dependency_order = dependency_order(&blocks, &projection.dependencies)?;
         let ingress = EpochBoundSemanticIngress {
             semantic_request_id: Arc::from(request.request.semantic_request_id.as_str()),
@@ -438,7 +511,7 @@ impl ApplicationOwnedSemanticIngressPort {
         validate_epoch_bound_semantic_ingress(ingress.clone(), catalog).map_err(|error| {
             rejected(format!("epoch-bound semantic ingress is invalid: {error}"))
         })?;
-        Ok(ingress)
+        Ok(IngressPreparation::Ready(ingress))
     }
 
     fn role_id(&self, role: ResultRole) -> Result<&Arc<str>, ProgrammaticQueryPortError> {
@@ -1032,7 +1105,6 @@ impl ApplicationOwnedSemanticIngressPort {
             &mut consumed,
             query_id,
             return_spec(clause),
-            clause.maximum_results(),
             projection,
         )?;
         if consumed != fields.keys().copied().collect::<BTreeSet<_>>() {
@@ -1172,6 +1244,30 @@ impl ApplicationOwnedSemanticIngressPort {
         }
         Ok(())
     }
+
+    fn validate_workspace_binding(
+        &self,
+        request: &ParsedSemanticRequest,
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+    ) -> Result<(), ProgrammaticQueryPortError> {
+        if workspace.workspace_id() != authority.workspace_id() {
+            return Err(rejected(
+                "workspace runtime and epoch query authority identities differ",
+            ));
+        }
+        let public_workspace_id = workspace.public_workspace_id().map_err(|error| {
+            rejected(format!(
+                "workspace public identity cannot be encoded: {error}"
+            ))
+        })?;
+        if request.request.workspace_id != public_workspace_id {
+            return Err(rejected(
+                "request workspace identity does not match the admitted workspace",
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn compiled_v2_0_arc(value: impl Into<String>) -> Arc<str> {
@@ -1186,22 +1282,11 @@ fn compiled_v2_0_field(value: impl Into<String>) -> FieldId {
 }
 
 fn compiled_v2_0_roles() -> Vec<ProgrammaticResultRoleMapping> {
-    all_result_roles()
+    ResultRole::ALL
         .into_iter()
         .map(|role| ProgrammaticResultRoleMapping {
             role,
-            role_id: compiled_v2_0_arc(format!(
-                "role.{}",
-                match role {
-                    ResultRole::Entities => "entities",
-                    ResultRole::Facts => "facts",
-                    ResultRole::Paths => "paths",
-                    ResultRole::PatternBindings => "pattern-bindings",
-                    ResultRole::Groups => "groups",
-                    ResultRole::Summary => "summary",
-                    ResultRole::SourceContexts => "source-contexts",
-                }
-            )),
+            role_id: compiled_v2_0_arc(role.released_id()),
         })
         .collect()
 }
@@ -1218,12 +1303,14 @@ fn compiled_v2_0_globals() -> Vec<ProgrammaticGlobalIngressMapping> {
 
 fn compiled_v2_0_selection(
     field: ProgrammaticFormIngressField,
-    slug: &str,
 ) -> ProgrammaticFormIngressMappingRow {
+    let selection_id = field
+        .compiled_v2_0_selection_id()
+        .expect("compiled v2.0 selection field has a typed identity");
     ProgrammaticFormIngressMappingRow {
         field,
         target: ProgrammaticFormIngressTarget::Selection {
-            selection_id: compiled_v2_0_arc(format!("selection.{slug}")),
+            selection_id: compiled_v2_0_arc(selection_id),
         },
     }
 }
@@ -1263,7 +1350,7 @@ fn compiled_v2_0_form(
     use ProgrammaticFormIngressField as Field;
 
     let mut fields = vec![
-        compiled_v2_0_selection(Field::Label, "label"),
+        compiled_v2_0_selection(Field::Label),
         compiled_v2_0_return(Field::ReturnInclude, "include"),
         compiled_v2_0_return(Field::ReturnExclude, "exclude"),
         compiled_v2_0_return(Field::ReturnResultShape, "result-shape"),
@@ -1274,9 +1361,7 @@ fn compiled_v2_0_form(
         compiled_v2_0_return(Field::ReturnIncludeQueryResult, "include-query-result"),
         ProgrammaticFormIngressMappingRow {
             field: Field::ReturnMaximumResults,
-            target: ProgrammaticFormIngressTarget::ExplicitResultLimit {
-                return_id: compiled_v2_0_arc("return.maximum-results"),
-            },
+            target: ProgrammaticFormIngressTarget::ExplicitResultLimit,
         },
         compiled_v2_0_return(Field::ReturnPer, "per"),
         compiled_v2_0_return(Field::ReturnWhenExceeded, "when-exceeded"),
@@ -1293,29 +1378,29 @@ fn compiled_v2_0_forms() -> Vec<ProgrammaticFormIngressMapping> {
         compiled_v2_0_form(
             ReleasedSemanticForm::FindCodeEntities,
             vec![
-                compiled_v2_0_selection(Field::LookingFor, "looking-for"),
+                compiled_v2_0_selection(Field::LookingFor),
                 compiled_v2_0_reference(Field::Within, "within"),
-                compiled_v2_0_selection(Field::Where, "where"),
+                compiled_v2_0_selection(Field::Where),
             ],
         ),
         compiled_v2_0_form(
             ReleasedSemanticForm::RetrieveFactsAboutCode,
             vec![
                 compiled_v2_0_reference(Field::About, "about"),
-                compiled_v2_0_selection(Field::Facts, "facts"),
-                compiled_v2_0_selection(Field::At, "at"),
-                compiled_v2_0_selection(Field::Where, "where"),
+                compiled_v2_0_selection(Field::Facts),
+                compiled_v2_0_selection(Field::At),
+                compiled_v2_0_selection(Field::Where),
             ],
         ),
         compiled_v2_0_form(
             ReleasedSemanticForm::FollowCodeRelationships,
             vec![
                 compiled_v2_0_reference(Field::StartingFrom, "starting-from"),
-                compiled_v2_0_selection(Field::Relationship, "relationship"),
-                compiled_v2_0_selection(Field::Direction, "direction"),
-                compiled_v2_0_selection(Field::Distance, "distance"),
-                compiled_v2_0_selection(Field::StopWhen, "stop-when"),
-                compiled_v2_0_selection(Field::Where, "where"),
+                compiled_v2_0_selection(Field::Relationship),
+                compiled_v2_0_selection(Field::Direction),
+                compiled_v2_0_selection(Field::Distance),
+                compiled_v2_0_selection(Field::StopWhen),
+                compiled_v2_0_selection(Field::Where),
             ],
         ),
         compiled_v2_0_form(
@@ -1323,11 +1408,11 @@ fn compiled_v2_0_forms() -> Vec<ProgrammaticFormIngressMapping> {
             vec![
                 compiled_v2_0_reference(Field::StartingFrom, "starting-from"),
                 compiled_v2_0_reference(Field::EndingAt, "ending-at"),
-                compiled_v2_0_selection(Field::Through, "through"),
-                compiled_v2_0_selection(Field::PathPolicy, "path-policy"),
-                compiled_v2_0_selection(Field::Direction, "direction"),
-                compiled_v2_0_selection(Field::MaximumLength, "maximum-length"),
-                compiled_v2_0_selection(Field::Where, "where"),
+                compiled_v2_0_selection(Field::Through),
+                compiled_v2_0_selection(Field::PathPolicy),
+                compiled_v2_0_selection(Field::Direction),
+                compiled_v2_0_selection(Field::MaximumLength),
+                compiled_v2_0_selection(Field::Where),
             ],
         ),
         compiled_v2_0_form(
@@ -1379,35 +1464,35 @@ fn compiled_v2_0_forms() -> Vec<ProgrammaticFormIngressMapping> {
                         },
                     ),
                 },
-                compiled_v2_0_selection(Field::Where, "where"),
+                compiled_v2_0_selection(Field::Where),
             ],
         ),
         compiled_v2_0_form(
             ReleasedSemanticForm::CombineResultSets,
             vec![
                 compiled_v2_0_reference(Field::Inputs, "inputs"),
-                compiled_v2_0_selection(Field::Combination, "combination"),
-                compiled_v2_0_selection(Field::Identity, "identity"),
-                compiled_v2_0_selection(Field::PreserveOrigin, "preserve-origin"),
+                compiled_v2_0_selection(Field::Combination),
+                compiled_v2_0_selection(Field::Identity),
+                compiled_v2_0_selection(Field::PreserveOrigin),
             ],
         ),
         compiled_v2_0_form(
             ReleasedSemanticForm::SummarizeObjectiveFacts,
             vec![
                 compiled_v2_0_reference(Field::Input, "input"),
-                compiled_v2_0_selection(Field::Summaries, "summaries"),
-                compiled_v2_0_selection(Field::GroupBy, "group-by"),
-                compiled_v2_0_selection(Field::IncludeSupport, "include-support"),
-                compiled_v2_0_selection(Field::Where, "where"),
+                compiled_v2_0_selection(Field::Summaries),
+                compiled_v2_0_selection(Field::GroupBy),
+                compiled_v2_0_selection(Field::IncludeSupport),
+                compiled_v2_0_selection(Field::Where),
             ],
         ),
         compiled_v2_0_form(
             ReleasedSemanticForm::RetrieveSourceAndSyntaxContext,
             vec![
                 compiled_v2_0_reference(Field::ForInputs, "for-inputs"),
-                compiled_v2_0_selection(Field::Context, "context"),
-                compiled_v2_0_selection(Field::TextHandling, "text-handling"),
-                compiled_v2_0_selection(Field::Where, "where"),
+                compiled_v2_0_selection(Field::Context),
+                compiled_v2_0_selection(Field::TextHandling),
+                compiled_v2_0_selection(Field::Where),
             ],
         ),
     ]
@@ -1431,23 +1516,48 @@ impl ProgrammaticSemanticIngressPort for ApplicationOwnedSemanticIngressPort {
         workspace: &ProgrammaticWorkspaceRuntime,
         authority: &WorkspaceEpochQueryAuthority,
     ) -> Result<EpochBoundSemanticIngress, ProgrammaticQueryPortError> {
-        if workspace.workspace_id() != authority.workspace_id() {
-            return Err(rejected(
-                "workspace runtime and epoch query authority identities differ",
-            ));
-        }
-        let public_workspace_id = workspace.public_workspace_id().map_err(|error| {
-            rejected(format!(
-                "workspace public identity cannot be encoded: {error}"
-            ))
-        })?;
-        if request.request.workspace_id != public_workspace_id {
-            return Err(rejected(
-                "request workspace identity does not match the admitted workspace",
-            ));
-        }
+        self.validate_workspace_binding(request, workspace, authority)?;
         self.project_against_catalog(request, authority.ingress_catalog())
     }
+
+    fn prepare_input_requirements(
+        &self,
+        request: &ParsedSemanticRequest,
+        answers: &[SemanticInputAnswer],
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+    ) -> Result<Vec<SemanticInputRequirement>, ProgrammaticQueryPortError> {
+        self.validate_workspace_binding(request, workspace, authority)?;
+        match self.prepare_against_catalog(request, answers, authority.ingress_catalog())? {
+            IngressPreparation::Ready(_) => Ok(Vec::new()),
+            IngressPreparation::InputRequired(requirements) => Ok(requirements),
+        }
+    }
+
+    fn project_resolved(
+        &self,
+        request: &ResolvedSemanticExecutionRequest,
+        workspace: &ProgrammaticWorkspaceRuntime,
+        authority: &WorkspaceEpochQueryAuthority,
+    ) -> Result<EpochBoundSemanticIngress, ProgrammaticQueryPortError> {
+        self.validate_workspace_binding(request.parsed(), workspace, authority)?;
+        match self.prepare_against_catalog(
+            request.parsed(),
+            request.answers(),
+            authority.ingress_catalog(),
+        )? {
+            IngressPreparation::Ready(ingress) => Ok(ingress),
+            IngressPreparation::InputRequired(_) => Err(rejected(
+                "resolved operation still requires guarded semantic input",
+            )),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum IngressPreparation {
+    InputRequired(Vec<SemanticInputRequirement>),
+    Ready(EpochBoundSemanticIngress),
 }
 
 #[derive(Default)]
@@ -1462,9 +1572,91 @@ struct IngressProjection {
     scope_ordinals: BTreeMap<Arc<str>, u32>,
     input_ordinals: BTreeMap<(Arc<str>, Arc<str>), u32>,
     dependency_ordinals: BTreeMap<(Arc<str>, Arc<str>), u32>,
+    query_programs: BTreeMap<Arc<str>, Arc<str>>,
+    selection_resolution_required: BTreeSet<(Arc<str>, Arc<str>)>,
+    selection_resolutions: BTreeMap<(Arc<str>, Arc<str>, SemanticClauseValue), SemanticClauseValue>,
+    answers: BTreeMap<String, SemanticInputValue>,
+    consumed_answers: BTreeSet<String>,
+    requirements: Vec<SemanticInputRequirement>,
 }
 
 impl IngressProjection {
+    fn try_for_catalog(
+        catalog: &EpochBoundSemanticIngressCatalog,
+        answers: &[SemanticInputAnswer],
+    ) -> Result<Self, ProgrammaticQueryPortError> {
+        let mut projection = Self::default();
+        for answer in answers {
+            if projection
+                .answers
+                .insert(answer.semantic_field_id.clone(), answer.value.clone())
+                .is_some()
+            {
+                return Err(rejected("guarded input field is duplicated"));
+            }
+        }
+        for binding in &catalog.selections {
+            let binding_key = (
+                Arc::clone(&binding.program_binding_id),
+                Arc::clone(&binding.selection_id),
+            );
+            if !binding.resolutions.is_empty() {
+                projection
+                    .selection_resolution_required
+                    .insert(binding_key.clone());
+            }
+            for resolution in &binding.resolutions {
+                let key = (
+                    Arc::clone(&binding_key.0),
+                    Arc::clone(&binding_key.1),
+                    resolution.request_value.clone(),
+                );
+                if projection
+                    .selection_resolutions
+                    .insert(key, resolution.execution_value.clone())
+                    .is_some()
+                {
+                    return Err(rejected(format!(
+                        "program {} selection {} has duplicate value resolution",
+                        binding.program_binding_id, binding.selection_id
+                    )));
+                }
+            }
+        }
+        Ok(projection)
+    }
+
+    fn validate_answer_consumption(&self) -> Result<(), ProgrammaticQueryPortError> {
+        if self.answers.len() != self.consumed_answers.len()
+            || self
+                .answers
+                .keys()
+                .any(|field| !self.consumed_answers.contains(field))
+        {
+            return Err(rejected(
+                "guarded input does not name an unresolved installed selection",
+            ));
+        }
+        Ok(())
+    }
+
+    fn bind_query_program(
+        &mut self,
+        query_id: &Arc<str>,
+        program_binding_id: &Arc<str>,
+    ) -> Result<(), ProgrammaticQueryPortError> {
+        if self
+            .query_programs
+            .insert(Arc::clone(query_id), Arc::clone(program_binding_id))
+            .is_some()
+        {
+            return Err(rejected(format!(
+                "query {query_id} was bound to a program more than once"
+            )));
+        }
+        Ok(())
+    }
+
     fn push_selection(
         &mut self,
         query_id: &str,
@@ -1472,8 +1664,98 @@ impl IngressProjection {
         value: SemanticClauseValue,
     ) -> Result<(), ProgrammaticQueryPortError> {
         let query_id: Arc<str> = Arc::from(query_id);
+        let program_binding_id = self.query_programs.get(query_id.as_ref()).ok_or_else(|| {
+            rejected(format!(
+                "query {query_id} has no selected program for semantic resolution"
+            ))
+        })?;
         let key = (Arc::clone(&query_id), Arc::clone(selection_id));
         let ordinal = next_ordinal(&mut self.selection_ordinals, key)?;
+        let binding_key = (Arc::clone(program_binding_id), Arc::clone(selection_id));
+        let value = if self.selection_resolution_required.contains(&binding_key) {
+            if let Some(execution_value) = self.selection_resolutions.get(&(
+                Arc::clone(program_binding_id),
+                Arc::clone(selection_id),
+                value.clone(),
+            )) {
+                execution_value.clone()
+            } else {
+                let field_id = guarded_selection_field_id(
+                    &query_id,
+                    program_binding_id,
+                    selection_id,
+                    ordinal,
+                );
+                let candidates = self
+                    .selection_resolutions
+                    .iter()
+                    .filter(|((program, selection, _), _)| {
+                        program == program_binding_id && selection == selection_id
+                    })
+                    .map(|((_, _, request_value), execution_value)| {
+                        let choice_id = guarded_selection_choice_id(
+                            program_binding_id,
+                            selection_id,
+                            request_value,
+                        );
+                        Ok((
+                            SemanticAuthorizedChoice {
+                                choice_id: choice_id.clone(),
+                                presentation_key: choice_id,
+                                value: semantic_input_value(request_value)?,
+                            },
+                            execution_value.clone(),
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, ProgrammaticQueryPortError>>()?;
+                if candidates.is_empty() {
+                    return Err(rejected(format!(
+                        "selection {selection_id} has no admitted resolution candidates"
+                    )));
+                }
+                match self.answers.get(&field_id) {
+                    Some(SemanticInputValue::Choice(choice_id)) => {
+                        let execution_value = candidates
+                            .iter()
+                            .find_map(|(choice, execution)| {
+                                (choice.choice_id == *choice_id).then(|| execution.clone())
+                            })
+                            .ok_or_else(|| {
+                                rejected("guarded input choice is outside the installed catalog")
+                            })?;
+                        self.consumed_answers.insert(field_id);
+                        execution_value
+                    }
+                    Some(_) => {
+                        return Err(rejected(
+                            "guarded selection input is not an authorized enum choice",
+                        ));
+                    }
+                    None => {
+                        self.requirements.push(SemanticInputRequirement {
+                            semantic_field_id: field_id,
+                            input_kind: SemanticInputKind::Enum,
+                            presentation_key: "input.selection-resolution".to_owned(),
+                            description_key: Some(
+                                "input.selection-resolution.description".to_owned(),
+                            ),
+                            required: true,
+                            constraints: Some(SemanticInputConstraints::Enum {
+                                minimum_selections: 1,
+                                maximum_selections: 1,
+                            }),
+                            authorized_choices: candidates
+                                .into_iter()
+                                .map(|(choice, _)| choice)
+                                .collect(),
+                        });
+                        return Ok(());
+                    }
+                }
+            }
+        } else {
+            value
+        };
         self.selections.push(EpochBoundSelectionRow {
             query_id,
             selection_id: Arc::clone(selection_id),
@@ -1567,6 +1849,97 @@ impl IngressProjection {
     }
 }
 
+fn guarded_selection_field_id(
+    query_id: &str,
+    program_binding_id: &str,
+    selection_id: &str,
+    ordinal: u32,
+) -> String {
+    let digest = guarded_selection_digest(
+        b"field",
+        &[
+            query_id.as_bytes(),
+            program_binding_id.as_bytes(),
+            selection_id.as_bytes(),
+            &ordinal.to_be_bytes(),
+        ],
+    );
+    format!("field:{}", hex_bytes(digest.as_bytes()))
+}
+
+fn guarded_selection_choice_id(
+    program_binding_id: &str,
+    selection_id: &str,
+    value: &SemanticClauseValue,
+) -> String {
+    let encoded = semantic_clause_bytes(value);
+    let digest = guarded_selection_digest(
+        b"choice",
+        &[
+            program_binding_id.as_bytes(),
+            selection_id.as_bytes(),
+            &encoded,
+        ],
+    );
+    format!("choice:{}", hex_bytes(digest.as_bytes()))
+}
+
+fn guarded_selection_digest(domain: &[u8], values: &[&[u8]]) -> blake3::Hash {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"codefabric.semantic-guard.selection.v1\0");
+    hasher.update(&(domain.len() as u64).to_be_bytes());
+    hasher.update(domain);
+    for value in values {
+        hasher.update(&(value.len() as u64).to_be_bytes());
+        hasher.update(value);
+    }
+    hasher.finalize()
+}
+
+fn semantic_clause_bytes(value: &SemanticClauseValue) -> Vec<u8> {
+    match value {
+        SemanticClauseValue::Boolean(value) => vec![0, u8::from(*value)],
+        SemanticClauseValue::Int64(value) => {
+            let mut encoded = vec![1];
+            encoded.extend_from_slice(&value.to_be_bytes());
+            encoded
+        }
+        SemanticClauseValue::UInt64(value) => {
+            let mut encoded = vec![2];
+            encoded.extend_from_slice(&value.to_be_bytes());
+            encoded
+        }
+        SemanticClauseValue::Text(value) => {
+            let mut encoded = vec![3];
+            encoded.extend_from_slice(value.as_bytes());
+            encoded
+        }
+    }
+}
+
+fn semantic_input_value(
+    value: &SemanticClauseValue,
+) -> Result<SemanticInputValue, ProgrammaticQueryPortError> {
+    match value {
+        SemanticClauseValue::Boolean(value) => Ok(SemanticInputValue::Boolean(*value)),
+        SemanticClauseValue::Int64(value) => Ok(SemanticInputValue::Integer(*value)),
+        SemanticClauseValue::UInt64(value) => i64::try_from(*value)
+            .map(SemanticInputValue::Integer)
+            .map_err(|_| rejected("guarded selection integer exceeds the transport range")),
+        SemanticClauseValue::Text(value) => Ok(SemanticInputValue::String(value.to_string())),
+    }
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
 fn next_ordinal<K: Ord>(
     ordinals: &mut BTreeMap<K, u32>,
     key: K,
@@ -1577,18 +1950,6 @@ fn next_ordinal<K: Ord>(
         .checked_add(1)
         .ok_or_else(|| rejected("semantic relation ordinal overflow"))?;
     Ok(ordinal)
-}
-
-fn all_result_roles() -> [ResultRole; 7] {
-    [
-        ResultRole::Entities,
-        ResultRole::Facts,
-        ResultRole::Paths,
-        ResultRole::PatternBindings,
-        ResultRole::Groups,
-        ResultRole::Summary,
-        ResultRole::SourceContexts,
-    ]
 }
 
 fn expected_fields(form: ReleasedSemanticForm) -> BTreeSet<ProgrammaticFormIngressField> {
@@ -1682,7 +2043,7 @@ fn validate_target(
         ProgrammaticFormIngressTarget::References(_) => "references",
         ProgrammaticFormIngressTarget::PatternBindings(_) => "pattern bindings",
         ProgrammaticFormIngressTarget::PatternRelationships(_) => "pattern relationships",
-        ProgrammaticFormIngressTarget::ExplicitResultLimit { .. } => "explicit result limit",
+        ProgrammaticFormIngressTarget::ExplicitResultLimit => "explicit result limit",
     };
     if expected_kind != observed_kind {
         return Err(rejected(format!(
@@ -1694,10 +2055,10 @@ fn validate_target(
         ProgrammaticFormIngressTarget::Selection { selection_id } => {
             insert_target_id(target_ids, "selection", selection_id)?;
         }
-        ProgrammaticFormIngressTarget::Return { return_id }
-        | ProgrammaticFormIngressTarget::ExplicitResultLimit { return_id } => {
+        ProgrammaticFormIngressTarget::Return { return_id } => {
             insert_target_id(target_ids, "return", return_id)?;
         }
+        ProgrammaticFormIngressTarget::ExplicitResultLimit => {}
         ProgrammaticFormIngressTarget::References(mapping) => {
             validate_reference_mapping(mapping, target_ids)?;
         }
@@ -1957,13 +2318,11 @@ fn project_return_texts(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn project_return_spec(
     fields: &BTreeMap<ProgrammaticFormIngressField, ProgrammaticFormIngressTarget>,
     consumed: &mut BTreeSet<ProgrammaticFormIngressField>,
     query_id: &str,
     spec: Option<&ReturnSpec>,
-    effective_maximum_results: usize,
     projection: &mut IngressProjection,
 ) -> Result<(), ProgrammaticQueryPortError> {
     project_return_texts(
@@ -2045,7 +2404,7 @@ fn project_return_spec(
             .collect(),
         projection,
     )?;
-    let ProgrammaticFormIngressTarget::ExplicitResultLimit { return_id } = consume_target(
+    let ProgrammaticFormIngressTarget::ExplicitResultLimit = consume_target(
         fields,
         consumed,
         ProgrammaticFormIngressField::ReturnMaximumResults,
@@ -2055,14 +2414,6 @@ fn project_return_spec(
             ProgrammaticFormIngressField::ReturnMaximumResults,
         ));
     };
-    projection.push_return(
-        query_id,
-        return_id,
-        SemanticClauseValue::UInt64(to_u64(
-            effective_maximum_results,
-            "effective maximum results",
-        )?),
-    )?;
     project_return(
         fields,
         consumed,
@@ -2480,8 +2831,8 @@ mod tests {
     use crate::relational_program::RelationId;
     use crate::relational_semantic_query::{
         EpochBoundRequestInputBindingRow, EpochBoundRequestInputField, EpochBoundReturnBindingRow,
-        EpochBoundScopeBindingRow, EpochBoundSelectionBindingRow, SemanticRequestLimits,
-        SemanticValueKind,
+        EpochBoundScopeBindingRow, EpochBoundSelectionBindingRow,
+        EpochBoundSelectionValueResolution, SemanticRequestLimits, SemanticValueKind,
     };
     use crate::semantic_query_contract::parse_request;
 
@@ -2510,25 +2861,13 @@ mod tests {
     }
 
     fn roles() -> Vec<ProgrammaticResultRoleMapping> {
-        all_result_roles()
+        ResultRole::ALL
             .into_iter()
             .map(|role| ProgrammaticResultRoleMapping {
                 role,
-                role_id: arc(format!("role.{}", role_slug(role))),
+                role_id: arc(role.released_id()),
             })
             .collect()
-    }
-
-    fn role_slug(role: ResultRole) -> &'static str {
-        match role {
-            ResultRole::Entities => "entities",
-            ResultRole::Facts => "facts",
-            ResultRole::Paths => "paths",
-            ResultRole::PatternBindings => "pattern-bindings",
-            ResultRole::Groups => "groups",
-            ResultRole::Summary => "summary",
-            ResultRole::SourceContexts => "source-contexts",
-        }
     }
 
     fn globals() -> Vec<ProgrammaticGlobalIngressMapping> {
@@ -2551,14 +2890,13 @@ mod tests {
         })
     }
 
-    fn selection(
-        field: ProgrammaticFormIngressField,
-        slug: &str,
-    ) -> ProgrammaticFormIngressMappingRow {
+    fn selection(field: ProgrammaticFormIngressField) -> ProgrammaticFormIngressMappingRow {
         ProgrammaticFormIngressMappingRow {
             field,
             target: ProgrammaticFormIngressTarget::Selection {
-                selection_id: arc(format!("selection.{slug}")),
+                selection_id: arc(field
+                    .compiled_v2_0_selection_id()
+                    .expect("test selection field has a typed identity")),
             },
         }
     }
@@ -2576,7 +2914,7 @@ mod tests {
     fn common_rows() -> Vec<ProgrammaticFormIngressMappingRow> {
         use ProgrammaticFormIngressField as Field;
         vec![
-            selection(Field::Label, "label"),
+            selection(Field::Label),
             return_row(Field::ReturnInclude, "include"),
             return_row(Field::ReturnExclude, "exclude"),
             return_row(Field::ReturnResultShape, "result-shape"),
@@ -2587,9 +2925,7 @@ mod tests {
             return_row(Field::ReturnIncludeQueryResult, "include-query-result"),
             ProgrammaticFormIngressMappingRow {
                 field: Field::ReturnMaximumResults,
-                target: ProgrammaticFormIngressTarget::ExplicitResultLimit {
-                    return_id: arc("return.maximum-results"),
-                },
+                target: ProgrammaticFormIngressTarget::ExplicitResultLimit,
             },
             return_row(Field::ReturnPer, "per"),
             return_row(Field::ReturnWhenExceeded, "when-exceeded"),
@@ -2624,29 +2960,29 @@ mod tests {
             form_mapping(
                 ReleasedSemanticForm::FindCodeEntities,
                 vec![
-                    selection(Field::LookingFor, "looking-for"),
+                    selection(Field::LookingFor),
                     references(Field::Within, "within"),
-                    selection(Field::Where, "where"),
+                    selection(Field::Where),
                 ],
             ),
             form_mapping(
                 ReleasedSemanticForm::RetrieveFactsAboutCode,
                 vec![
                     references(Field::About, "about"),
-                    selection(Field::Facts, "facts"),
-                    selection(Field::At, "at"),
-                    selection(Field::Where, "where"),
+                    selection(Field::Facts),
+                    selection(Field::At),
+                    selection(Field::Where),
                 ],
             ),
             form_mapping(
                 ReleasedSemanticForm::FollowCodeRelationships,
                 vec![
                     references(Field::StartingFrom, "starting-from"),
-                    selection(Field::Relationship, "relationship"),
-                    selection(Field::Direction, "direction"),
-                    selection(Field::Distance, "distance"),
-                    selection(Field::StopWhen, "stop-when"),
-                    selection(Field::Where, "where"),
+                    selection(Field::Relationship),
+                    selection(Field::Direction),
+                    selection(Field::Distance),
+                    selection(Field::StopWhen),
+                    selection(Field::Where),
                 ],
             ),
             form_mapping(
@@ -2654,11 +2990,11 @@ mod tests {
                 vec![
                     references(Field::StartingFrom, "starting-from"),
                     references(Field::EndingAt, "ending-at"),
-                    selection(Field::Through, "through"),
-                    selection(Field::PathPolicy, "path-policy"),
-                    selection(Field::Direction, "direction"),
-                    selection(Field::MaximumLength, "maximum-length"),
-                    selection(Field::Where, "where"),
+                    selection(Field::Through),
+                    selection(Field::PathPolicy),
+                    selection(Field::Direction),
+                    selection(Field::MaximumLength),
+                    selection(Field::Where),
                 ],
             ),
             form_mapping(
@@ -2698,35 +3034,35 @@ mod tests {
                             },
                         ),
                     },
-                    selection(Field::Where, "where"),
+                    selection(Field::Where),
                 ],
             ),
             form_mapping(
                 ReleasedSemanticForm::CombineResultSets,
                 vec![
                     references(Field::Inputs, "inputs"),
-                    selection(Field::Combination, "combination"),
-                    selection(Field::Identity, "identity"),
-                    selection(Field::PreserveOrigin, "preserve-origin"),
+                    selection(Field::Combination),
+                    selection(Field::Identity),
+                    selection(Field::PreserveOrigin),
                 ],
             ),
             form_mapping(
                 ReleasedSemanticForm::SummarizeObjectiveFacts,
                 vec![
                     references(Field::Input, "input"),
-                    selection(Field::Summaries, "summaries"),
-                    selection(Field::GroupBy, "group-by"),
-                    selection(Field::IncludeSupport, "include-support"),
-                    selection(Field::Where, "where"),
+                    selection(Field::Summaries),
+                    selection(Field::GroupBy),
+                    selection(Field::IncludeSupport),
+                    selection(Field::Where),
                 ],
             ),
             form_mapping(
                 ReleasedSemanticForm::RetrieveSourceAndSyntaxContext,
                 vec![
                     references(Field::ForInputs, "for-inputs"),
-                    selection(Field::Context, "context"),
-                    selection(Field::TextHandling, "text-handling"),
-                    selection(Field::Where, "where"),
+                    selection(Field::Context),
+                    selection(Field::TextHandling),
+                    selection(Field::Where),
                 ],
             ),
         ]
@@ -2842,6 +3178,7 @@ mod tests {
                             value_kind: value_kind(*field),
                             minimum_values: 0,
                             maximum_values: 64,
+                            resolutions: Vec::new(),
                         });
                     }
                     ProgrammaticFormIngressTarget::Return { return_id } => {
@@ -2853,15 +3190,7 @@ mod tests {
                             maximum_values: 64,
                         });
                     }
-                    ProgrammaticFormIngressTarget::ExplicitResultLimit { return_id } => {
-                        returns.push(EpochBoundReturnBindingRow {
-                            program_binding_id: Arc::clone(&program_binding_id),
-                            return_id: Arc::clone(return_id),
-                            value_kind: SemanticValueKind::UInt64,
-                            minimum_values: 1,
-                            maximum_values: 1,
-                        });
-                    }
+                    ProgrammaticFormIngressTarget::ExplicitResultLimit => {}
                     ProgrammaticFormIngressTarget::References(mapping) => {
                         add_reference_catalog(
                             &program_binding_id,
@@ -3079,6 +3408,13 @@ mod tests {
     fn all_eight_forms_project_exact_rows_pins_repetitions_and_dependencies() {
         let port = port();
         let catalog = catalog(&port);
+        assert!(
+            catalog
+                .returns
+                .iter()
+                .all(|row| row.return_id.as_ref() != "return.maximum-results"),
+            "the result limit is block metadata and has no catalog return binding"
+        );
         let request = eight_form_request();
         port.validate_request(&request).expect("preflight");
         let ingress = port
@@ -3093,6 +3429,13 @@ mod tests {
             );
             assert_eq!(block.explicit_result_limit, Some(5));
         }
+        assert!(
+            ingress
+                .returns
+                .iter()
+                .all(|row| row.return_id.as_ref() != "return.maximum-results"),
+            "the result limit must not be duplicated as a semantic return row"
+        );
         assert_eq!(
             ingress.request_content_pin,
             canonical_request_content_pin(&request.canonical_bytes)
@@ -3177,6 +3520,135 @@ mod tests {
                 .map(AsRef::as_ref)
                 .collect::<Vec<&str>>(),
             vec!["q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8"]
+        );
+    }
+
+    #[test]
+    fn wp45_programmatic_guard_carries_live_catalog_execution_value() {
+        let port = port();
+        let mut catalog = catalog(&port);
+        let selection_id = ProgrammaticFormIngressField::LookingFor
+            .compiled_v2_0_selection_id()
+            .expect("looking-for selection");
+        let binding = catalog
+            .selections
+            .iter_mut()
+            .find(|binding| {
+                binding.program_binding_id.as_ref() == "installed.program.0"
+                    && binding.selection_id.as_ref() == selection_id
+            })
+            .expect("find-entities looking-for binding");
+        binding.resolutions = vec![EpochBoundSelectionValueResolution {
+            request_value: SemanticClauseValue::Text(Arc::from("functions")),
+            execution_value: SemanticClauseValue::Text(Arc::from("function")),
+        }];
+
+        let request = eight_form_request();
+        let ingress = port
+            .project_against_catalog(&request, &catalog)
+            .expect("catalog-owned resolution");
+        let executable = ingress
+            .selections
+            .iter()
+            .find(|row| row.query_id.as_ref() == "q1" && row.selection_id.as_ref() == selection_id)
+            .expect("projected executable selection");
+        assert_eq!(
+            executable.value,
+            SemanticClauseValue::Text(Arc::from("function"))
+        );
+
+        catalog
+            .selections
+            .iter_mut()
+            .find(|candidate| {
+                candidate.program_binding_id.as_ref() == "installed.program.0"
+                    && candidate.selection_id.as_ref() == selection_id
+            })
+            .expect("find-entities looking-for binding")
+            .resolutions[0]
+            .request_value = SemanticClauseValue::Text(Arc::from("classes"));
+        let IngressPreparation::InputRequired(requirements) = port
+            .prepare_against_catalog(&request, &[], &catalog)
+            .expect("unavailable phrase becomes typed guarded input")
+        else {
+            panic!("unavailable phrase must not reach execution");
+        };
+        assert_eq!(requirements.len(), 1);
+        let requirement = &requirements[0];
+        assert_eq!(requirement.input_kind, SemanticInputKind::Enum);
+        assert_eq!(requirement.authorized_choices.len(), 1);
+        assert_eq!(
+            requirement.authorized_choices[0].value,
+            SemanticInputValue::String("classes".to_owned()),
+            "the candidate must come only from the installed request_value row"
+        );
+        let answer = SemanticInputAnswer {
+            semantic_field_id: requirement.semantic_field_id.clone(),
+            value: SemanticInputValue::Choice(requirement.authorized_choices[0].choice_id.clone()),
+        };
+        let IngressPreparation::Ready(resolved) = port
+            .prepare_against_catalog(&request, std::slice::from_ref(&answer), &catalog)
+            .expect("catalog-owned answer resolves the request")
+        else {
+            panic!("authorized answer must produce executable ingress");
+        };
+        let executable = resolved
+            .selections
+            .iter()
+            .find(|row| row.query_id.as_ref() == "q1" && row.selection_id.as_ref() == selection_id)
+            .expect("resolved executable selection");
+        assert_eq!(
+            executable.value,
+            SemanticClauseValue::Text(Arc::from("function")),
+            "the accepted answer must carry the catalog execution_value into execution ingress"
+        );
+
+        let forged = SemanticInputAnswer {
+            semantic_field_id: answer.semantic_field_id.clone(),
+            value: SemanticInputValue::Choice("choice:forged".to_owned()),
+        };
+        assert!(
+            port.prepare_against_catalog(&request, &[forged], &catalog)
+                .expect_err("forged choice must fail closed")
+                .to_string()
+                .contains("outside the installed catalog")
+        );
+
+        catalog
+            .selections
+            .iter_mut()
+            .find(|candidate| {
+                candidate.program_binding_id.as_ref() == "installed.program.0"
+                    && candidate.selection_id.as_ref() == selection_id
+            })
+            .expect("find-entities looking-for binding")
+            .resolutions[0]
+            .request_value = SemanticClauseValue::Text(Arc::from("traits"));
+        assert!(
+            port.prepare_against_catalog(&request, &[answer], &catalog)
+                .expect_err("answer must be revalidated against the live catalog")
+                .to_string()
+                .contains("outside the installed catalog")
+        );
+    }
+
+    #[test]
+    fn compiled_selection_mappings_use_the_typed_field_identity() {
+        for mapping in compiled_v2_0_forms() {
+            for row in mapping.fields {
+                if let ProgrammaticFormIngressTarget::Selection { selection_id } = row.target {
+                    assert_eq!(
+                        Some(selection_id.as_ref()),
+                        row.field.compiled_v2_0_selection_id(),
+                        "selection mapping for {:?} bypassed its typed identity",
+                        row.field
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            ProgrammaticFormIngressField::ReturnMaximumResults.compiled_v2_0_selection_id(),
+            None
         );
     }
 
