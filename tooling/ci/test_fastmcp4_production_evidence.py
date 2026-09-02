@@ -50,7 +50,9 @@ from tooling.ci.fastmcp4_production_evidence import (
     _claim_payload,
     _clean_payload,
     _expected_input_paths,
+    _fault_candidate,
     _fault_payload,
+    _immutable_source_bindings,
     _limitations_payload,
     _load_jsonl,
     _local_actual_observation,
@@ -282,7 +284,7 @@ def _rechain(entries: list[dict[str, Any]]) -> None:
 def _candidate(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     for path in (
-        *_expected_input_paths(TEST_RELEASE_PATH),
+        *_expected_input_paths(ROOT, TEST_RELEASE_PATH),
         RUNNER_PATH,
         RUNNER_TEST_PATH,
     ):
@@ -494,7 +496,7 @@ def test_beh_fabricated_actual_value_is_rejected(tmp_path: Path) -> None:
     assert failure.value.code == "RFV5_EVIDENCE_OBSERVATION_MISMATCH"
 
 
-def test_beh_local_executable_sources_match_the_active_r2_release() -> None:
+def test_beh_local_executable_sources_match_the_active_release() -> None:
     bundle = load_bundle(ROOT, ACTIVE_RELEASE_PATH)
     assert bundle.spec.release_id == ACTIVE_RELEASE_ID
     expectations = {str(row["claim_id"]): row for row in bundle.expectations}
@@ -515,6 +517,51 @@ def test_beh_local_executable_sources_match_the_active_r2_release() -> None:
         assert comparison["mismatch_paths"] == sorted(
             fixtures[claim_id]["expected_mismatch_paths"]
         )
+
+
+def test_beh_active_release_immutable_source_classes_are_copied_and_bound() -> None:
+    bindings = _immutable_source_bindings(ROOT, ACTIVE_RELEASE_PATH)
+    source_paths = {path for path, _digest in bindings}
+    bound_paths = _expected_input_paths(ROOT, ACTIVE_RELEASE_PATH)
+    assert source_paths <= bound_paths
+    assert any(path.parts[:2] == ("contracts", "rpc") for path in source_paths)
+    assert any(path.parts[:2] == ("docs", "library_ref") for path in source_paths)
+
+    candidate, temporary = _fault_candidate(ROOT, "RFV5-FM4-016", ACTIVE_RELEASE_PATH)
+    try:
+        assert all((candidate / path).is_file() for path in source_paths)
+        verified = sum(
+            hashlib.sha256((candidate / path).read_bytes()).hexdigest() == digest
+            for path, digest in bindings
+        )
+        assert verified == len(bindings) - 1
+    finally:
+        temporary.cleanup()
+
+
+@pytest.mark.parametrize(
+    "declared_paths",
+    (("/absolute/source.md",), ("../escaped.md",), ("source.md", "source.md")),
+    ids=("absolute", "parent-traversal", "duplicate"),
+)
+def test_beh_immutable_source_path_closure_rejects_unsafe_or_duplicate_paths(
+    tmp_path: Path, declared_paths: tuple[str, ...]
+) -> None:
+    release_path = Path("contracts/acceptance/test-release")
+    release = tmp_path / release_path
+    release.mkdir(parents=True)
+    rows = "".join(
+        f"  - path: {json.dumps(path)}\n    sha256: {'0' * 64}\n"
+        for path in declared_paths
+    )
+    (release / "issuance.yaml").write_text(
+        "immutable_source_inputs:\n" + rows,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProductionEvidenceError) as failure:
+        _immutable_source_bindings(tmp_path, release_path, verify_hashes=False)
+    assert failure.value.code == "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID"
 
 
 @pytest.mark.parametrize("mutation", ["omitted", "extra"])

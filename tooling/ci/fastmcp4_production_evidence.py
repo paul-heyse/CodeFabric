@@ -38,7 +38,6 @@ import tomllib
 import yaml
 
 from tooling.ci.fastmcp4_successor_expectations import (
-    ALLOWED_DESIGN_PATHS,
     EXPECTED_FILES,
     RELEASE_ID,
     RELEASE_PATH,
@@ -156,13 +155,7 @@ EXPECTED_ENTRY_KINDS = (
     "limitations_recorded",
     "review_accepted",
 )
-EXPECTED_INPUT_PATHS = {
-    RELEASE_PATH / "issuance.yaml",
-    RELEASE_PATH / "expectations.yaml",
-    RELEASE_PATH / "causal-fixtures.yaml",
-    RELEASE_PATH / "negative-fixtures.yaml",
-    RELEASE_PATH / "independent-review.yaml",
-    RELEASE_PATH / "performance-method.yaml",
+BASE_INPUT_PATHS = {
     PLAN_PATH,
     Path("Cargo.toml"),
     Path("Cargo.lock"),
@@ -177,21 +170,8 @@ EXPECTED_INPUT_PATHS = {
     REAL_OBSERVER_MODULE_PATH,
     REAL_OBSERVER_REGISTRATION_PATH,
     REAL_COMPONENT_PROBE_PATH,
-    *(Path(path) for path in ALLOWED_DESIGN_PATHS),
 }
 RELEASE_FILENAMES = tuple(sorted(EXPECTED_FILES))
-NON_RELEASE_INPUT_PATHS = EXPECTED_INPUT_PATHS - {
-    RELEASE_PATH / name for name in RELEASE_FILENAMES
-}
-
-
-def _expected_input_paths(release_path: Path) -> set[Path]:
-    _require(
-        not release_path.is_absolute() and ".." not in release_path.parts,
-        "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
-        "expectation release path must be repository-relative",
-    )
-    return NON_RELEASE_INPUT_PATHS | {release_path / name for name in RELEASE_FILENAMES}
 
 
 @dataclass(frozen=True)
@@ -1135,6 +1115,91 @@ def _snapshot_text(root: Path, path: Path, *, candidate: str | None) -> str:
         ) from error
 
 
+def _immutable_source_bindings(
+    root: Path,
+    release_path: Path,
+    *,
+    candidate: str | None = None,
+    verify_hashes: bool = True,
+) -> tuple[tuple[Path, str], ...]:
+    """Read and verify immutable source bindings from the selected release snapshot."""
+
+    _require(
+        not release_path.is_absolute()
+        and ".." not in release_path.parts
+        and release_path != Path("."),
+        "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+        "expectation release path must be repository-relative",
+    )
+    try:
+        value = yaml.safe_load(
+            _snapshot_text(
+                root,
+                release_path / "issuance.yaml",
+                candidate=candidate,
+            )
+        )
+    except yaml.YAMLError as error:
+        raise ProductionEvidenceError(
+            "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+            f"expectation issuance is not valid YAML: {error}",
+        ) from error
+    issuance = _mapping(value, "expectation issuance")
+    rows = _rows(issuance.get("immutable_source_inputs"), "immutable sources")
+    bindings: list[tuple[Path, str]] = []
+    observed: set[Path] = set()
+    for number, row in enumerate(rows):
+        path = Path(str(row.get("path", "")))
+        digest = str(row.get("sha256", ""))
+        _require(
+            set(row) == {"path", "sha256"}
+            and path != Path(".")
+            and not path.is_absolute()
+            and ".." not in path.parts
+            and path not in observed
+            and SHA256.fullmatch(digest) is not None,
+            "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+            f"immutable source binding {number} is invalid",
+        )
+        if verify_hashes:
+            try:
+                source_bytes = _snapshot_bytes(root, path, candidate=candidate)
+            except OSError as error:
+                raise ProductionEvidenceError(
+                    "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+                    f"immutable source input is absent: {path}",
+                ) from error
+            _require(
+                _bytes_sha256(source_bytes) == digest,
+                "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+                f"immutable source input hash differs: {path}",
+            )
+        observed.add(path)
+        bindings.append((path, digest))
+    _require(
+        bool(bindings),
+        "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+        "expectation release declares no immutable source inputs",
+    )
+    return tuple(bindings)
+
+
+def _expected_input_paths(
+    root: Path, release_path: Path, *, candidate: str | None = None
+) -> set[Path]:
+    source_paths = {
+        path
+        for path, _digest in _immutable_source_bindings(
+            root, release_path, candidate=candidate
+        )
+    }
+    return (
+        BASE_INPUT_PATHS
+        | source_paths
+        | {release_path / name for name in RELEASE_FILENAMES}
+    )
+
+
 def _recipe_closure(
     catalog: Mapping[str, Mapping[str, Any]], roots: Sequence[str]
 ) -> tuple[str, ...]:
@@ -1361,7 +1426,9 @@ def _input_bindings(
             "path": str(path),
             "sha256": _bytes_sha256(_snapshot_bytes(root, path, candidate=candidate)),
         }
-        for path in sorted(_expected_input_paths(release_path), key=str)
+        for path in sorted(
+            _expected_input_paths(root, release_path, candidate=candidate), key=str
+        )
     ]
 
 
@@ -2822,10 +2889,12 @@ def _observe_claim_016(root: Path, release_path: Path) -> Mapping[str, Any]:
         "issuance",
     )
     actual_files = sorted(path.name for path in release.iterdir() if path.is_file())
-    sources = _rows(issuance["immutable_source_inputs"], "immutable sources")
+    source_bindings = _immutable_source_bindings(
+        root, release_path, verify_hashes=False
+    )
     bundle = load_bundle(root, release_path)
     source_verified = sum(
-        _file_sha256(root / str(row["path"])) == row["sha256"] for row in sources
+        _file_sha256(root / path) == digest for path, digest in source_bindings
     )
     artifact_verified = sum(
         (release / name).is_file() and _file_sha256(release / name) == digest
@@ -2881,6 +2950,7 @@ def _fault_candidate(root: Path, claim_id: str, release_path: Path) -> tuple[Pat
         Path("codefabric-cpg-mcp/.python-version"),
         Path("codefabric-cpg-mcp/src"),
     )
+    immutable_source_paths: tuple[Path, ...] = ()
     if claim_id == "RFV5-FM4-001":
         paths = (*common, Path("docs/authoritative_design"))
     elif claim_id == "RFV5-FM4-013":
@@ -2895,11 +2965,14 @@ def _fault_candidate(root: Path, claim_id: str, release_path: Path) -> tuple[Pat
     elif claim_id == "RFV5-FM4-015":
         paths = (release_path / "performance-method.yaml",)
     elif claim_id == "RFV5-FM4-016":
+        immutable_source_paths = tuple(
+            path for path, _digest in _immutable_source_bindings(root, release_path)
+        )
         paths = (
             release_path,
             EXPECTATION_VALIDATOR_PATH,
             RUNNER_PATH,
-            *(Path(path) for path in ALLOWED_DESIGN_PATHS),
+            *immutable_source_paths,
         )
     else:
         temporary.cleanup()
@@ -2990,7 +3063,7 @@ def old_prompt_two(): ...
         path.write_text(yaml.safe_dump(mutable, sort_keys=False), encoding="utf-8")
     elif claim_id == "RFV5-FM4-016":
         release = candidate / release_path
-        source = candidate / next(iter(sorted(ALLOWED_DESIGN_PATHS)))
+        source = candidate / min(immutable_source_paths)
         source.write_text(
             source.read_text(encoding="utf-8") + "\nwp48 fault\n", encoding="utf-8"
         )
@@ -3291,7 +3364,7 @@ def _snapshot_release_identity(
 ) -> str:
     """Read the selected release identity from the same snapshot as its bindings."""
 
-    _expected_input_paths(release_path)
+    _expected_input_paths(root, release_path, candidate=candidate)
     try:
         value = yaml.safe_load(
             _snapshot_text(
@@ -3340,7 +3413,9 @@ def _bound_expectation_bundle(
 
         with tempfile.TemporaryDirectory(prefix="wp48-candidate-release-") as temporary:
             snapshot_root = Path(temporary)
-            for relative in sorted(_expected_input_paths(release_path), key=str):
+            for relative in sorted(
+                _expected_input_paths(root, release_path, candidate=commit), key=str
+            ):
                 destination = snapshot_root / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(_git_blob(root, commit, relative))
@@ -3541,7 +3616,6 @@ def _validate_opened(
     commit = str(payload["candidate_commit"])
     tree = str(payload["candidate_tree"])
     release_path = Path(str(payload["expectation_release_path"]))
-    _expected_input_paths(release_path)
     _require(
         HEX40.fullmatch(commit) is not None and HEX40.fullmatch(tree) is not None,
         "RFV5_EVIDENCE_CANDIDATE_INVALID",
@@ -3605,7 +3679,7 @@ def _validate_opened(
             f"bound input drifted: {path}",
         )
     _require(
-        observed_paths == _expected_input_paths(release_path),
+        observed_paths == _expected_input_paths(root, release_path, candidate=snapshot),
         "RFV5_EVIDENCE_INPUT_CLOSURE",
         "bound input path closure differs",
     )
@@ -4240,9 +4314,14 @@ def _run(command: str, root: Path, *, check_git: bool = True) -> Mapping[str, ob
         f"unknown selector {command}",
     )
     selected = validate_transaction(root, check_git=check_git)
+    opened = _mapping(
+        _load_jsonl(root / TRANSACTION_PATH)[0]["payload"],
+        "transaction-open payload",
+    )
+    integrity_count = len(_rows(opened["input_bindings"], "input_bindings"))
     oracle, criterion = COMMANDS[command]
     category_count = {
-        "integrity": len(EXPECTED_INPUT_PATHS),
+        "integrity": integrity_count,
         "behavior": selected,
         "causal-faults": len(FAULT_RUN_IDS),
         "clean-reconstruction": sum(spec.selected_count for spec in CLEAN_RUN_SPECS),
