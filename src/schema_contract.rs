@@ -24,15 +24,12 @@ use futures::Stream;
 
 /// Arrow schema metadata key carrying the session-owned relation identity.
 pub const RELATION_ID_METADATA_KEY: &str = "codefabric.relation_id";
-/// Arrow schema metadata key carrying the relation's application semantic role.
-///
-/// A table name is physical placement, not meaning. Query/catalog composition uses this role to
-/// discover eligible epoch relations without maintaining a second relation-name registry.
-pub const RELATION_SEMANTIC_ROLE_METADATA_KEY: &str = "codefabric.semantic_relation_role";
+/// Shared Arrow metadata keys for application-owned relation and field semantic roles.
+pub use crate::provider_contracts::{
+    RELATION_SEMANTIC_ROLE_METADATA_KEY, SEMANTIC_ROLE_METADATA_KEY,
+};
 /// Arrow field metadata key carrying the session-owned field identity.
 pub const FIELD_ID_METADATA_KEY: &str = "codefabric.field_id";
-/// Arrow field metadata key carrying the field's semantic role.
-pub const SEMANTIC_ROLE_METADATA_KEY: &str = "codefabric.semantic_role";
 
 /// Derive the exact Delta/Parquet storage representation for one logical Arrow type.
 ///

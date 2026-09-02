@@ -67,7 +67,6 @@ data-fabric = [
     "dep:url",
 ]
 fact-generation = [
-    "contract-models",
     "provider-contracts",
     "dep:blake3",
     "dep:petgraph",

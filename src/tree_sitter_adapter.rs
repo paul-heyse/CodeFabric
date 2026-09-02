@@ -15,13 +15,13 @@ use tree_sitter::{
     StreamingIterator as _, Tree,
 };
 
-use crate::cancellation::Cancellation;
-use crate::fabric::production_kernel::CompiledProviderAuthority;
-use crate::production_provider_recipe::{CompiledProviderExecutionProfile, CompiledProviderLane};
+use crate::provider_contracts::{
+    CancellationProbe, ProviderJob, ProviderLane, ProviderTrustPosture,
+};
 use crate::provider_raw_kinds::{
     ProviderGrammarInventory, ProviderGrammarKind, ProviderRawKindDisposition,
-    TREE_SITTER_PYTHON_GRAMMAR, TREE_SITTER_RECOVERY_QUERY, TREE_SITTER_RUST_GRAMMAR,
-    tree_sitter_raw_kind_entry,
+    ProviderRawKindEntry, TREE_SITTER_PYTHON_GRAMMAR, TREE_SITTER_RECOVERY_QUERY,
+    TREE_SITTER_RUST_GRAMMAR, tree_sitter_normalization,
 };
 use crate::provider_types::{ProviderBoundaryError, ProviderBoundaryMap, ProviderText};
 
@@ -199,20 +199,57 @@ struct TreeSitterLimits {
 }
 
 impl TreeSitterLimits {
-    const fn from_profile(profile: CompiledProviderExecutionProfile) -> Self {
-        Self {
-            max_input_bytes: profile.max_input_bytes,
-            max_work_units: profile.max_work_units,
-            max_wall_millis: profile.max_wall_millis,
-            max_visited_nodes: profile.max_visited_nodes,
-            max_traversal_depth: profile.max_traversal_depth,
-            max_output_records: profile.max_output_records,
-            max_output_bytes: profile.max_output_bytes,
-            max_diagnostics: profile.max_diagnostics,
-            max_retained_tree_revisions: profile.max_retained_tree_revisions,
-            cancellation_check_interval: profile.cancellation_check_interval,
-        }
+    fn from_job(job: &ProviderJob) -> Result<Self, TreeSitterAdapterError> {
+        validate_tree_sitter_job(job)?;
+        let ceilings = job.ceilings();
+        let remaining = job.remaining().ok_or(TreeSitterAdapterError::Deadline)?;
+        let remaining_millis = u64::try_from(remaining.as_millis()).unwrap_or(u64::MAX);
+        Ok(Self {
+            max_input_bytes: ceilings.max_input_bytes(),
+            max_work_units: ceilings.max_work_units(),
+            max_wall_millis: ceilings.max_wall_millis().min(remaining_millis),
+            max_visited_nodes: ceilings.max_visited_nodes(),
+            max_traversal_depth: ceilings.max_traversal_depth(),
+            max_output_records: ceilings.max_rows(),
+            max_output_bytes: ceilings.max_bytes(),
+            max_diagnostics: u16::try_from(ceilings.max_diagnostics()).unwrap_or(u16::MAX),
+            max_retained_tree_revisions: ceilings.max_retained_revisions(),
+            cancellation_check_interval: u32::try_from(ceilings.cancellation_poll_work_units())
+                .unwrap_or(u32::MAX),
+        })
     }
+}
+
+fn validate_tree_sitter_job(job: &ProviderJob) -> Result<(), TreeSitterAdapterError> {
+    if job.lane() != ProviderLane::TreeSitter
+        || job.trust() != ProviderTrustPosture::InProcessConstrained
+        || job.protocol().as_str() != "in-process-arrow@1"
+        || job.requests().is_empty()
+    {
+        return Err(TreeSitterAdapterError::ProviderVersionMismatch(
+            "job is not an exact in-process Tree-sitter invocation".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn tree_sitter_raw_kind_entry(
+    language: &Language,
+    inventory: &ProviderGrammarInventory,
+    raw_kind_id: u16,
+) -> Option<ProviderRawKindEntry> {
+    let raw_name = language.node_kind_for_id(raw_kind_id)?.to_owned();
+    let (disposition, normalized_kind_code) =
+        tree_sitter_normalization(inventory.grammar, &raw_name);
+    Some(ProviderRawKindEntry {
+        raw_kind_id,
+        raw_name,
+        named: language.node_kind_is_named(raw_kind_id),
+        visible: language.node_kind_is_visible(raw_kind_id),
+        supertype: language.node_kind_is_supertype(raw_kind_id),
+        disposition,
+        normalized_kind_code,
+    })
 }
 
 struct RetainedRevision {
@@ -286,7 +323,6 @@ pub struct TreeSitterAdapter {
     query: Query,
     query_cursor: QueryCursor,
     inventory: &'static ProviderGrammarInventory,
-    limits: TreeSitterLimits,
     retained: VecDeque<RetainedRevision>,
     metrics: TreeSitterAdapterMetrics,
 }
@@ -300,10 +336,7 @@ impl TreeSitterAdapter {
     /// Returns a version mismatch for any ABI, node, field, source metadata, or
     /// fingerprint drift, and `InvalidQuery` if the governed recovery query no
     /// longer compiles for the exact grammar.
-    pub(crate) fn new(
-        compiled_authority: &CompiledProviderAuthority,
-        language_choice: TreeSitterLanguage,
-    ) -> Result<Self, TreeSitterAdapterError> {
+    pub(crate) fn new(language_choice: TreeSitterLanguage) -> Result<Self, TreeSitterAdapterError> {
         let (language, node_types, inventory) = language_choice.runtime();
         validate_runtime_inventory(&language, node_types, inventory)?;
         let mut parser = Parser::new();
@@ -312,25 +345,13 @@ impl TreeSitterAdapter {
             .map_err(|error| TreeSitterAdapterError::ProviderVersionMismatch(error.to_string()))?;
         let query = Query::new(&language, TREE_SITTER_RECOVERY_QUERY)
             .map_err(|error| TreeSitterAdapterError::InvalidQuery(error.to_string()))?;
-        let profile = compiled_authority.execution_profile(CompiledProviderLane::TreeSitter);
-        if profile.provider_id != "tree-sitter"
-            || profile.placement != "IN_PROCESS"
-            || profile.resource_profile_id != "in-process-syntax-standard"
-            || profile.max_parser_workers == 0
-            || profile.max_retained_tree_revisions == 0
-        {
-            return Err(TreeSitterAdapterError::ProviderVersionMismatch(
-                "Tree-sitter resource profile is not runnable".into(),
-            ));
-        }
         Ok(Self {
             parser,
             language,
             query,
             query_cursor: QueryCursor::new(),
             inventory,
-            limits: TreeSitterLimits::from_profile(profile),
-            retained: VecDeque::with_capacity(usize::from(profile.max_retained_tree_revisions)),
+            retained: VecDeque::new(),
             metrics: TreeSitterAdapterMetrics::default(),
         })
     }
@@ -344,11 +365,11 @@ impl TreeSitterAdapter {
     /// the active revision.
     pub fn parse_full(
         &mut self,
+        job: &ProviderJob,
         revision: u64,
         text: ProviderText,
-        cancellation: &Cancellation,
     ) -> Result<TreeSitterSnapshot, TreeSitterAdapterError> {
-        self.parse_candidate(revision, text, None, cancellation)
+        self.parse_candidate(job, revision, text, None)
     }
 
     /// Apply one exact edit to the active tree, parse incrementally, surface
@@ -360,10 +381,10 @@ impl TreeSitterAdapter {
     /// whose unchanged prefix/suffix do not match the active source.
     pub fn parse_incremental(
         &mut self,
+        job: &ProviderJob,
         revision: u64,
         text: ProviderText,
         edit: TreeSitterEdit,
-        cancellation: &Cancellation,
     ) -> Result<TreeSitterSnapshot, TreeSitterAdapterError> {
         let prior = self
             .retained
@@ -382,7 +403,7 @@ impl TreeSitterAdapter {
             old_end_position: point_at(&prior.text.text, edit.old_end_byte)?,
             new_end_position: point_at(&text.text, edit.new_end_byte)?,
         });
-        self.parse_candidate(revision, text, Some(&edited_tree), cancellation)
+        self.parse_candidate(job, revision, text, Some(&edited_tree))
     }
 
     /// Last atomically committed complete revision.
@@ -415,11 +436,13 @@ impl TreeSitterAdapter {
     #[allow(clippy::too_many_lines)] // One candidate transaction keeps partial parser output from escaping.
     fn parse_candidate(
         &mut self,
+        job: &ProviderJob,
         revision: u64,
         text: ProviderText,
         edited_old_tree: Option<&Tree>,
-        cancellation: &Cancellation,
     ) -> Result<TreeSitterSnapshot, TreeSitterAdapterError> {
+        let limits = TreeSitterLimits::from_job(job)?;
+        let cancellation = job.cancellation();
         if self
             .retained
             .back()
@@ -427,7 +450,7 @@ impl TreeSitterAdapter {
         {
             return self.reject(TreeSitterAdapterError::StaleRevision);
         }
-        if u64::try_from(text.text.len()).unwrap_or(u64::MAX) > self.limits.max_input_bytes {
+        if u64::try_from(text.text.len()).unwrap_or(u64::MAX) > limits.max_input_bytes {
             return self.reject(TreeSitterAdapterError::InputLimit);
         }
         let boundaries = match ProviderBoundaryMap::new(&text) {
@@ -443,8 +466,10 @@ impl TreeSitterAdapter {
         let mut work_units = 0_u64;
         let mut abort_reason = None;
         let check_interval = cancellation
-            .check_interval()
-            .min(self.limits.cancellation_check_interval)
+            .max_work_units_between_polls()
+            .try_into()
+            .unwrap_or(u32::MAX)
+            .min(limits.cancellation_check_interval)
             .max(1);
         let mut callbacks = 0_u32;
         let bytes = text.text.as_bytes();
@@ -454,8 +479,8 @@ impl TreeSitterAdapter {
                 callbacks = callbacks.saturating_add(1);
                 let reason = progress_abort_reason(
                     work_units,
-                    self.limits.max_work_units,
-                    deadline_exceeded(started.elapsed(), self.limits.max_wall_millis),
+                    limits.max_work_units,
+                    deadline_exceeded(started.elapsed(), limits.max_wall_millis),
                     callbacks,
                     check_interval,
                     cancellation.is_cancelled(),
@@ -513,7 +538,7 @@ impl TreeSitterAdapter {
             &self.language,
             self.inventory,
             &boundaries,
-            self.limits,
+            limits,
             cancellation,
             started,
             work_units,
@@ -529,7 +554,7 @@ impl TreeSitterAdapter {
             &tree,
             &text.text,
             &recovery_nodes,
-            self.limits,
+            limits,
             cancellation,
             started,
             &mut metrics.work_units,
@@ -559,7 +584,7 @@ impl TreeSitterAdapter {
         });
         while exceeds_limit(
             u64::try_from(self.retained.len()).unwrap_or(u64::MAX),
-            u64::from(self.limits.max_retained_tree_revisions),
+            u64::from(limits.max_retained_tree_revisions),
         ) {
             self.retained.pop_front();
         }
@@ -646,7 +671,7 @@ fn walk_tree(
     inventory: &ProviderGrammarInventory,
     boundaries: &ProviderBoundaryMap,
     limits: TreeSitterLimits,
-    cancellation: &Cancellation,
+    cancellation: &CancellationProbe,
     started: Instant,
     initial_work_units: u64,
 ) -> Result<
@@ -685,7 +710,7 @@ fn walk_tree(
         }
         if cancellation_due(
             metrics.visited_nodes,
-            u64::from(cancellation.check_interval()),
+            u64::try_from(cancellation.max_work_units_between_polls()).unwrap_or(u64::MAX),
             cancellation.is_cancelled(),
         ) {
             return Err(TreeSitterAdapterError::Cancelled);
@@ -795,7 +820,7 @@ fn run_recovery_query(
     text: &str,
     expected: &BTreeSet<RecoveryNode>,
     limits: TreeSitterLimits,
-    cancellation: &Cancellation,
+    cancellation: &CancellationProbe,
     started: Instant,
     work_units: &mut u64,
 ) -> Result<(), TreeSitterAdapterError> {
@@ -810,7 +835,9 @@ fn run_recovery_query(
     let mut iteration_work_units = 0_u64;
     let mut callbacks = 0_u32;
     let check_interval = cancellation
-        .check_interval()
+        .max_work_units_between_polls()
+        .try_into()
+        .unwrap_or(u32::MAX)
         .min(limits.cancellation_check_interval)
         .max(1);
     let mut found = BTreeSet::new();
@@ -920,14 +947,21 @@ fn point_at(text: &str, byte: usize) -> Result<Point, TreeSitterAdapterError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::fabric::production_kernel::CompiledSemanticRelease;
+mod job_tests {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
-    fn current_release_adapter(language: TreeSitterLanguage) -> TreeSitterAdapter {
-        let release = CompiledSemanticRelease::current();
-        TreeSitterAdapter::new(release.provider_authority(), language).unwrap()
-    }
+    use arrow_schema::{DataType, Field, Schema};
+
+    use super::*;
+    use crate::provider_contracts::{
+        CancellationHandle, CancellationProbe, ContextIdentity, ProviderBuildIdentity,
+        ProviderContextBinding, ProviderFamilyIdentity, ProviderFamilyRequest, ProviderIdentity,
+        ProviderJobSpec, ProviderPolicyIdentity, ProviderProgramIdentity, ProviderProtocolIdentity,
+        ProviderRelationIdentity, ProviderResourceCeilingSpec, ProviderResourceCeilings,
+        ProviderRunBinding, ProviderRunIdentity, ProviderRunProvenance, ProviderSchemaIdentity,
+        ProviderScopeIdentity, ProviderSourceBinding, SourceIdentity, SuiteIdentity,
+    };
 
     fn provider_text(text: &str) -> ProviderText {
         ProviderText {
@@ -941,562 +975,141 @@ mod tests {
         }
     }
 
-    fn latin1_provider_text() -> ProviderText {
-        ProviderText {
-            text: Arc::from("# coding: latin-1\nname = 'é'\n"),
-            original_byte_offsets: Arc::from(
-                (0_u64..="# coding: latin-1\nname = 'é'\n".chars().count() as u64)
-                    .collect::<Vec<_>>(),
-            ),
+    fn limits() -> ProviderResourceCeilingSpec {
+        ProviderResourceCeilingSpec {
+            max_relations: 8,
+            max_batches_per_relation: 8,
+            max_input_bytes: 1 << 20,
+            max_rows: 100_000,
+            max_bytes: 1 << 24,
+            max_diagnostics: 1_000,
+            max_work_units: 1_000_000,
+            max_wall_millis: 30_000,
+            max_visited_nodes: 100_000,
+            max_traversal_depth: 256,
+            max_workers: 1,
+            max_retained_revisions: 2,
+            cancellation_poll_work_units: 1,
+            cancellation_ack_millis: 2_000,
         }
     }
 
-    fn fixture() -> serde_json::Value {
-        serde_json::from_str(include_str!(
-            "../contracts/fixtures/tree-sitter/adapter-cases-v1.json"
-        ))
-        .unwrap()
+    fn job(spec: ProviderResourceCeilingSpec) -> (CancellationHandle, ProviderJob) {
+        job_for_lane(spec, ProviderLane::TreeSitter)
     }
 
-    fn fixture_language(value: &serde_json::Value) -> TreeSitterLanguage {
-        match value.as_str().unwrap() {
-            "python" => TreeSitterLanguage::Python,
-            "rust" => TreeSitterLanguage::Rust,
-            other => panic!("unknown fixture language {other}"),
-        }
-    }
-
-    fn fact_stream_digest(facts: &[RawSyntaxFact]) -> String {
-        fn frame_bytes(hasher: &mut crate::integrity::IntegrityHasher, value: &[u8]) {
-            hasher.update(&u64::try_from(value.len()).unwrap().to_le_bytes());
-            hasher.update(value);
-        }
-
-        let mut hasher = crate::integrity::IntegrityHasher::for_domain(
-            crate::integrity::IntegrityDomain::TreeSitterRawSyntaxFacts,
-        );
-        hasher.update(&u64::try_from(facts.len()).unwrap().to_le_bytes());
-        for fact in facts {
-            hasher.update(&fact.id.0.to_le_bytes());
-            hasher.update(&fact.raw_kind_id.to_le_bytes());
-            frame_bytes(&mut hasher, fact.raw_kind.as_bytes());
-            hasher.update(&fact.normalized_kind.0.to_le_bytes());
-            hasher.update(&[match fact.disposition {
-                ProviderRawKindDisposition::Normalize => 0,
-                ProviderRawKindDisposition::Ignore => 1,
-                ProviderRawKindDisposition::Unsupported => 2,
-            }]);
-            hasher.update(&fact.start_byte.to_le_bytes());
-            hasher.update(&fact.end_byte.to_le_bytes());
-            hasher.update(&[u8::from(fact.named)
-                | (u8::from(fact.extra) << 1)
-                | (u8::from(fact.error) << 2)
-                | (u8::from(fact.missing) << 3)]);
-            match fact.parent {
-                Some(parent) => {
-                    hasher.update(&[1]);
-                    hasher.update(&parent.0.to_le_bytes());
-                }
-                None => {
-                    hasher.update(&[0]);
-                }
-            }
-            match &fact.field_name {
-                Some(field_name) => {
-                    hasher.update(&[1]);
-                    frame_bytes(&mut hasher, field_name.as_bytes());
-                }
-                None => {
-                    hasher.update(&[0]);
-                }
-            }
-            hasher.update(&fact.ordinal.to_le_bytes());
-            hasher.update(&fact.depth.to_le_bytes());
-        }
-        crate::integrity::frame_digest(hasher.finalize())
-    }
-
-    #[test]
-    fn wp30_behavioral_acceptance() {
-        for case in fixture()["cases"].as_array().unwrap() {
-            let language = fixture_language(&case["language"]);
-            let mut adapter = current_release_adapter(language);
-            let inventory = *adapter.inventory();
-            let snapshot = adapter
-                .parse_full(
+    fn job_for_lane(
+        spec: ProviderResourceCeilingSpec,
+        lane: ProviderLane,
+    ) -> (CancellationHandle, ProviderJob) {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        let (owner, cancellation) =
+            CancellationProbe::pair(spec.cancellation_poll_work_units).unwrap();
+        let job = ProviderJob::try_new(ProviderJobSpec {
+            suite: SuiteIdentity::try_new("codefabric-relational-data-fabric@2.3.0").unwrap(),
+            provider: ProviderIdentity::try_new("tree-sitter-python").unwrap(),
+            protocol: ProviderProtocolIdentity::try_new("in-process-arrow@1").unwrap(),
+            source: ProviderSourceBinding::try_new(
+                SourceIdentity::try_new("source-1").unwrap(),
+                [1; 16],
+                1,
+                [2; 32],
+            )
+            .unwrap(),
+            context: ProviderContextBinding::try_new(
+                ContextIdentity::try_new("context-1").unwrap(),
+                [3; 32],
+                [4; 32],
+            )
+            .unwrap(),
+            run: ProviderRunBinding::try_new(
+                ProviderRunIdentity::try_new("tree-run-1").unwrap(),
+                [5; 16],
+            )
+            .unwrap(),
+            lane,
+            trust: ProviderTrustPosture::InProcessConstrained,
+            requests: vec![
+                ProviderFamilyRequest::try_new(
+                    ProviderFamilyIdentity::try_new("tree-sitter.cst").unwrap(),
+                    ProviderRelationIdentity::try_new("provider.tree_sitter.cst_node").unwrap(),
+                    ProviderSchemaIdentity::try_new("tree-sitter.cst.schema").unwrap(),
+                    schema,
+                    ProviderScopeIdentity::try_new("source-1").unwrap(),
                     1,
-                    provider_text(case["source"].as_str().unwrap()),
-                    &Cancellation::default(),
                 )
-                .unwrap();
-            assert_eq!(
-                fact_stream_digest(&snapshot.facts),
-                case["expected_fact_digest"].as_str().unwrap(),
-                "{} exact fact projection drifted",
-                case["case_id"].as_str().unwrap()
-            );
-            assert!(!snapshot.facts.is_empty());
-            assert!(snapshot.facts.iter().all(|fact| {
-                tree_sitter_raw_kind_entry(&adapter.language, &inventory, fact.raw_kind_id)
-                    .is_some_and(|entry| {
-                        entry.raw_name == fact.raw_kind
-                            && entry.normalized_kind_code == fact.normalized_kind.0
-                            && entry.disposition == fact.disposition
-                    })
-            }));
-            assert_eq!(
-                snapshot.facts.iter().any(|fact| fact.error || fact.missing),
-                case["expected_recovery"].as_bool().unwrap()
-            );
-            if let Some(expected_count) = case["expected_fact_count"].as_u64() {
-                assert_eq!(u64::try_from(snapshot.facts.len()).unwrap(), expected_count);
-                assert!(snapshot.facts.iter().any(|fact| !fact.named));
-            }
-            if let Some(expected_root) = case.get("expected_root") {
-                let root = snapshot.facts.first().unwrap();
-                assert_eq!(
-                    u64::from(root.raw_kind_id),
-                    expected_root["raw_kind_id"].as_u64().unwrap()
-                );
-                assert_eq!(root.raw_kind, expected_root["raw_kind"].as_str().unwrap());
-                assert_eq!(
-                    root.start_byte,
-                    expected_root["start_byte"].as_u64().unwrap()
-                );
-                assert_eq!(root.end_byte, expected_root["end_byte"].as_u64().unwrap());
-            }
-            if let Some(required) = case["required_raw_kinds"].as_array() {
-                for raw_kind in required {
-                    assert!(
-                        snapshot
-                            .facts
-                            .iter()
-                            .any(|fact| fact.raw_kind == raw_kind.as_str().unwrap())
-                    );
-                }
-            }
-        }
+                .unwrap(),
+            ],
+            ceilings: ProviderResourceCeilings::try_new(spec).unwrap(),
+            deadline: Instant::now() + Duration::from_secs(30),
+            cancellation,
+            provenance: ProviderRunProvenance::new(
+                ProviderBuildIdentity::try_new("tree-sitter=0.26.12").unwrap(),
+                ProviderPolicyIdentity::try_new("policy.v2.3").unwrap(),
+                ProviderProgramIdentity::try_new("provider-program.v2.3").unwrap(),
+            ),
+        })
+        .unwrap();
+        (owner, job)
     }
 
     #[test]
-    fn wp30_structural_acceptance() {
-        for edit_case in fixture()["edits"].as_array().unwrap() {
-            let language = fixture_language(&edit_case["language"]);
-            let old = edit_case["old_source"].as_str().unwrap();
-            let new = edit_case["new_source"].as_str().unwrap();
-            let old_fragment = edit_case["old_fragment"].as_str().unwrap();
-            let new_fragment = edit_case["new_fragment"].as_str().unwrap();
-            let start = old.rfind(old_fragment).unwrap();
-            assert_eq!(start, new.rfind(new_fragment).unwrap());
-            let mut incremental = current_release_adapter(language);
-            incremental
-                .parse_full(1, provider_text(old), &Cancellation::default())
-                .unwrap();
-            let incrementally_parsed = incremental
-                .parse_incremental(
-                    2,
-                    provider_text(new),
-                    TreeSitterEdit {
-                        start_byte: start,
-                        old_end_byte: start + old_fragment.len(),
-                        new_end_byte: start + new_fragment.len(),
-                    },
-                    &Cancellation::default(),
-                )
-                .unwrap();
-            let fully_parsed = current_release_adapter(language)
-                .parse_full(2, provider_text(new), &Cancellation::default())
-                .unwrap();
-            assert_eq!(incrementally_parsed.facts, fully_parsed.facts);
-            assert!(!incrementally_parsed.changed_ranges.is_empty());
-            assert!(
-                incrementally_parsed
-                    .facts
-                    .iter()
-                    .all(|fact| fact.start_byte <= fact.end_byte)
-            );
-        }
-
-        let latin1 = current_release_adapter(TreeSitterLanguage::Python)
-            .parse_full(1, latin1_provider_text(), &Cancellation::default())
+    fn tree_sitter_job_drives_exact_parse_and_bounded_revisions() {
+        let mut adapter = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
+        let (_, first_job) = job(limits());
+        let first = adapter
+            .parse_full(&first_job, 1, provider_text("value = 1\n"))
             .unwrap();
-        assert_eq!(latin1.facts.first().unwrap().end_byte, 29);
-        assert!(latin1.facts.iter().all(|fact| fact.end_byte <= 29));
-    }
+        assert!(!first.facts.is_empty());
 
-    #[test]
-    #[allow(clippy::too_many_lines)] // One negative oracle isolates every independent boundary predicate.
-    fn wp30_negative_zero_state() {
-        let (language, node_types, expected) = TreeSitterLanguage::Python.runtime();
-        assert!(validate_runtime_inventory(&language, node_types, expected).is_ok());
-        for id in (0..language.node_kind_count())
-            .map(|id| u16::try_from(id).unwrap())
-            .chain([u16::MAX - 1, u16::MAX])
-        {
-            let observed = tree_sitter_raw_kind_entry(&language, expected, id).unwrap();
-            assert_eq!(observed.raw_kind_id, id);
-            assert_eq!(
-                language.node_kind_for_id(id),
-                Some(observed.raw_name.as_str())
-            );
-            assert_eq!(language.node_kind_is_named(id), observed.named);
-            assert_eq!(language.node_kind_is_visible(id), observed.visible);
-            assert_eq!(language.node_kind_is_supertype(id), observed.supertype);
-        }
-        for id in 1..=language.field_count() {
-            let id = u16::try_from(id).unwrap();
-            let name = language.field_name_for_id(id).unwrap();
-            assert!(
-                language
-                    .field_id_for_name(name)
-                    .is_some_and(|observed| observed.get() == id)
-            );
-        }
-
-        let mut drifted = *expected;
-        drifted.grammar_abi = drifted.grammar_abi.saturating_add(1);
-        assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
-        drifted = *expected;
-        drifted.catalog_id = "tree-sitter-python-drift";
-        assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
-        drifted = *expected;
-        drifted.provider_version = "tree-sitter=drift";
-        assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
-        drifted = *expected;
-        drifted.runtime_inventory_fingerprint = "b3:drift";
-        assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
-        drifted = *expected;
-        drifted.grammar = ProviderGrammarKind::Rust;
-        assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
-        drifted = *expected;
-        drifted.node_types_digest = "b3:catalog-drift";
-        assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
-        drifted = *expected;
-        drifted.recovery_query_digest = "b3:recovery-query-drift";
-        assert!(validate_runtime_inventory(&language, node_types, &drifted).is_err());
-
-        let bad_lengths = ProviderText {
-            text: Arc::from("é"),
-            original_byte_offsets: Arc::from([0]),
-        };
-        assert!(matches!(
-            ProviderBoundaryMap::new(&bad_lengths),
-            Err(ProviderBoundaryError::InvalidMap(_))
-        ));
-        let bad_order = ProviderText {
-            text: Arc::from("ab"),
-            original_byte_offsets: Arc::from([0, 2, 1]),
-        };
-        assert!(matches!(
-            ProviderBoundaryMap::new(&bad_order),
-            Err(ProviderBoundaryError::InvalidMap(_))
-        ));
-        let unicode = ProviderBoundaryMap::new(&provider_text("é")).unwrap();
-        assert_eq!(unicode.original(0), Ok(0));
-        assert_eq!(unicode.original(2), Ok(2));
-        assert_eq!(
-            unicode.original(1),
-            Err(ProviderBoundaryError::InvalidOffset(1))
-        );
-
-        let valid_edit = TreeSitterEdit {
-            start_byte: 1,
-            old_end_byte: 2,
-            new_end_byte: 2,
-        };
-        assert!(edit_geometry_valid(3, 3, valid_edit));
-        for invalid in [
-            TreeSitterEdit {
-                start_byte: 2,
-                old_end_byte: 1,
-                new_end_byte: 2,
-            },
-            TreeSitterEdit {
-                start_byte: 2,
-                old_end_byte: 2,
-                new_end_byte: 1,
-            },
-            TreeSitterEdit {
-                start_byte: 1,
-                old_end_byte: 4,
-                new_end_byte: 2,
-            },
-            TreeSitterEdit {
-                start_byte: 1,
-                old_end_byte: 2,
-                new_end_byte: 4,
-            },
-        ] {
-            assert!(!edit_geometry_valid(3, 3, invalid));
-        }
-        assert!(edit_boundaries_valid("abc", "aXc", valid_edit));
-        for (old, new, edit) in [
-            (
-                "éa",
-                "abc",
-                TreeSitterEdit {
-                    start_byte: 1,
-                    old_end_byte: 2,
-                    new_end_byte: 2,
-                },
-            ),
-            (
-                "aé",
-                "abc",
-                TreeSitterEdit {
-                    start_byte: 0,
-                    old_end_byte: 2,
-                    new_end_byte: 2,
-                },
-            ),
-            (
-                "abc",
-                "éa",
-                TreeSitterEdit {
-                    start_byte: 1,
-                    old_end_byte: 2,
-                    new_end_byte: 2,
-                },
-            ),
-            (
-                "abc",
-                "aé",
-                TreeSitterEdit {
-                    start_byte: 0,
-                    old_end_byte: 2,
-                    new_end_byte: 2,
-                },
-            ),
-        ] {
-            assert!(!edit_boundaries_valid(old, new, edit));
-        }
-        assert!(edit_unchanged_regions_match("abc", "aXc", valid_edit));
-        assert!(!edit_unchanged_regions_match(
-            "abc",
-            "xbc",
-            TreeSitterEdit {
-                start_byte: 1,
-                old_end_byte: 1,
-                new_end_byte: 1,
-            }
-        ));
-        assert!(!edit_unchanged_regions_match(
-            "abc",
-            "ab!",
-            TreeSitterEdit {
-                start_byte: 1,
-                old_end_byte: 1,
-                new_end_byte: 1,
-            }
-        ));
-        assert!(validate_edit("abc", "aXc", valid_edit).is_ok());
-        assert!(validate_edit("abc", "xbc", valid_edit).is_err());
-
-        assert_eq!(point_at("ab\ncde", 0), Ok(Point { row: 0, column: 0 }));
-        assert_eq!(point_at("ab\ncde", 2), Ok(Point { row: 0, column: 2 }));
-        assert_eq!(point_at("ab\ncde", 3), Ok(Point { row: 1, column: 0 }));
-        assert_eq!(point_at("ab\ncde", 5), Ok(Point { row: 1, column: 2 }));
-        assert!(point_at("é", 1).is_err());
-
-        let mut parser = Parser::new();
-        parser.set_language(&language).unwrap();
-        let tree = parser.parse("def broken(:\n", None).unwrap();
-        let query = Query::new(&language, TREE_SITTER_RECOVERY_QUERY).unwrap();
-        let mut cursor = QueryCursor::new();
-        let release = CompiledSemanticRelease::current();
-        let limits = TreeSitterLimits::from_profile(
-            release
-                .provider_authority()
-                .execution_profile(CompiledProviderLane::TreeSitter),
-        );
-        let mut work_units = 0;
-        assert!(matches!(
-            run_recovery_query(
-                &mut cursor,
-                &query,
-                &tree,
-                "def broken(:\n",
-                &BTreeSet::new(),
-                limits,
-                &Cancellation::default(),
-                Instant::now(),
-                &mut work_units,
-            ),
-            Err(TreeSitterAdapterError::ProviderVersionMismatch(_))
-        ));
-        let mut query_limited = limits;
-        query_limited.max_work_units = 0;
-        work_units = 0;
-        assert_eq!(
-            run_recovery_query(
-                &mut cursor,
-                &query,
-                &tree,
-                "def broken(:\n",
-                &BTreeSet::new(),
-                query_limited,
-                &Cancellation::default(),
-                Instant::now(),
-                &mut work_units,
-            ),
-            Err(TreeSitterAdapterError::WorkLimit)
-        );
-
-        let malformed = String::from_utf8_lossy(&[b'f', b'n', b' ', 0xff, b'(']).into_owned();
-        for language in [TreeSitterLanguage::Python, TreeSitterLanguage::Rust] {
-            let result = std::panic::catch_unwind(|| {
-                current_release_adapter(language).parse_full(
-                    1,
-                    provider_text(&malformed),
-                    &Cancellation::default(),
-                )
-            });
-            assert!(result.is_ok());
-            assert!(result.unwrap().is_ok());
-        }
-        let mut adapter = current_release_adapter(TreeSitterLanguage::Rust);
-        adapter
-            .parse_full(1, provider_text("fn main() {}\n"), &Cancellation::default())
-            .unwrap();
-        let active = adapter.active_snapshot().unwrap().clone();
-        assert!(matches!(
-            adapter.parse_incremental(
+        let (_, second_job) = job(limits());
+        let second = adapter
+            .parse_incremental(
+                &second_job,
                 2,
-                provider_text("fn changed() {}\n"),
+                provider_text("value = 2\n"),
                 TreeSitterEdit {
-                    start_byte: 3,
-                    old_end_byte: 6,
-                    new_end_byte: 10,
+                    start_byte: 8,
+                    old_end_byte: 9,
+                    new_end_byte: 9,
                 },
-                &Cancellation::default(),
-            ),
-            Err(TreeSitterAdapterError::InvalidEdit(_))
-        ));
-        assert_eq!(adapter.active_snapshot(), Some(&active));
+            )
+            .unwrap();
+        assert_eq!(second.revision, 2);
+        assert!(adapter.metrics().retained_revisions <= 2);
     }
 
     #[test]
-    #[allow(clippy::too_many_lines)] // One oracle proves every profile boundary preserves atomic publication.
-    fn wp30_operational_acceptance() {
-        assert!(!exceeds_limit(10, 10));
-        assert!(exceeds_limit(11, 10));
-        assert!(!deadline_exceeded(Duration::from_millis(10), 10));
-        assert!(deadline_exceeded(Duration::from_millis(11), 10));
-        assert!(!cancellation_due(1, 2, true));
-        assert!(cancellation_due(2, 2, true));
-        assert!(!cancellation_due(2, 2, false));
-        assert!(runtime_node_matches("node", true, "node", true));
-        assert!(!runtime_node_matches("other", true, "node", true));
-        assert!(!runtime_node_matches("node", false, "node", true));
-        assert_eq!(progress_abort_reason(10, 10, false, 1, 2, false), None);
+    fn tree_sitter_job_limits_and_cancellation_are_causal() {
+        let mut adapter = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
+        let (owner, cancelled_job) = job(limits());
+        owner.cancel();
         assert_eq!(
-            progress_abort_reason(11, 10, false, 1, 2, false),
-            Some(AbortReason::Work)
-        );
-        assert_eq!(
-            progress_abort_reason(10, 10, true, 1, 2, false),
-            Some(AbortReason::Deadline)
-        );
-        assert_eq!(progress_abort_reason(10, 10, false, 1, 2, true), None);
-        assert_eq!(
-            progress_abort_reason(10, 10, false, 2, 2, true),
-            Some(AbortReason::Cancelled)
-        );
-
-        let mut adapter = current_release_adapter(TreeSitterLanguage::Python);
-        let complete = adapter
-            .parse_full(1, provider_text("value = 1\n"), &Cancellation::default())
-            .unwrap();
-        let cancellation = Cancellation::with_check_interval(1);
-        cancellation.cancel();
-        let cancelled_source = "value = 2\n".repeat(10_000);
-        assert_eq!(
-            adapter.parse_full(2, provider_text(&cancelled_source), &cancellation),
+            adapter.parse_full(&cancelled_job, 1, provider_text("value = 1\n")),
             Err(TreeSitterAdapterError::Cancelled)
         );
-        assert_eq!(adapter.active_snapshot(), Some(&complete));
-        assert_eq!(adapter.metrics().completed_runs, 1);
-        assert_eq!(adapter.metrics().cancelled_runs, 1);
 
-        let deep = format!("{}value{}\n", "(".repeat(300), ")".repeat(300));
+        let mut tiny = limits();
+        tiny.max_input_bytes = 1;
+        let (_, tiny_job) = job(tiny);
         assert_eq!(
-            adapter.parse_full(3, provider_text(&deep), &Cancellation::default()),
-            Err(TreeSitterAdapterError::DepthLimit)
-        );
-        assert_eq!(adapter.active_snapshot(), Some(&complete));
-
-        let standard_limits = adapter.limits;
-        let exact_input = "x = 1\n";
-        let mut exact_input_adapter = current_release_adapter(TreeSitterLanguage::Python);
-        exact_input_adapter.limits.max_input_bytes = u64::try_from(exact_input.len()).unwrap();
-        assert!(
-            exact_input_adapter
-                .parse_full(1, provider_text(exact_input), &Cancellation::default())
-                .is_ok()
-        );
-        let mut over_input_adapter = current_release_adapter(TreeSitterLanguage::Python);
-        over_input_adapter.limits.max_input_bytes =
-            u64::try_from(exact_input.len().saturating_sub(1)).unwrap();
-        assert_eq!(
-            over_input_adapter.parse_full(1, provider_text(exact_input), &Cancellation::default()),
+            adapter.parse_full(&tiny_job, 1, provider_text("value = 1\n")),
             Err(TreeSitterAdapterError::InputLimit)
         );
-        adapter.limits.max_input_bytes = 1;
-        assert_eq!(
-            adapter.parse_full(4, provider_text("value = 4\n"), &Cancellation::default()),
-            Err(TreeSitterAdapterError::InputLimit)
-        );
-        adapter.limits = standard_limits;
-        adapter.limits.max_work_units = 0;
-        assert_eq!(
-            adapter.parse_full(4, provider_text("value = 4\n"), &Cancellation::default()),
-            Err(TreeSitterAdapterError::WorkLimit)
-        );
-        adapter.limits = standard_limits;
-        adapter.limits.max_visited_nodes = 1;
-        assert_eq!(
-            adapter.parse_full(4, provider_text("value = 4\n"), &Cancellation::default()),
-            Err(TreeSitterAdapterError::NodeLimit)
-        );
-        adapter.limits = standard_limits;
-        adapter.limits.max_output_records = 1;
-        assert_eq!(
-            adapter.parse_full(4, provider_text("value = 4\n"), &Cancellation::default()),
-            Err(TreeSitterAdapterError::OutputRecordLimit)
-        );
-        adapter.limits = standard_limits;
-        adapter.limits.max_output_bytes = 1;
-        assert_eq!(
-            adapter.parse_full(4, provider_text("value = 4\n"), &Cancellation::default()),
-            Err(TreeSitterAdapterError::OutputByteLimit)
-        );
-        adapter.limits = standard_limits;
-        adapter.limits.max_diagnostics = 0;
-        assert_eq!(
-            adapter.parse_full(4, provider_text("def broken(:\n"), &Cancellation::default()),
-            Err(TreeSitterAdapterError::DiagnosticLimit)
-        );
-        adapter.limits = standard_limits;
-        assert_eq!(adapter.active_snapshot(), Some(&complete));
+    }
 
-        adapter
-            .parse_full(4, provider_text("value = 4\n"), &Cancellation::default())
-            .unwrap();
-        let measured_source = "value = 5\n".repeat(10_000);
-        adapter
-            .parse_full(5, provider_text(&measured_source), &Cancellation::default())
-            .unwrap();
-        assert_eq!(adapter.metrics().retained_revisions, 2);
-        let metrics = adapter.metrics().last_run.unwrap();
-        assert!(metrics.visited_nodes > 0);
-        assert!(metrics.parse_work_units > 0);
-        assert_eq!(
-            metrics.work_units,
-            metrics
-                .parse_work_units
-                .saturating_add(metrics.visited_nodes)
-                .saturating_add(metrics.query_work_units)
-        );
-        assert!(metrics.parse_duration > Duration::ZERO);
+    #[test]
+    fn tree_sitter_job_rejects_wrong_lane_before_library_execution() {
+        let (_, wrong) = job_for_lane(limits(), ProviderLane::Ruff);
+        assert!(matches!(
+            TreeSitterAdapter::new(TreeSitterLanguage::Python)
+                .unwrap()
+                .parse_full(&wrong, 1, provider_text("value = 1\n")),
+            Err(TreeSitterAdapterError::ProviderVersionMismatch(_))
+        ));
     }
 }

@@ -871,9 +871,21 @@ provider-relation-descriptor-contract-check:
 [doc("Prove exact typed provider-native Arrow rows, decoded values, gaps, and incremental semantics")]
 [group('test')]
 exact-provider-batch-check:
-    cargo nextest run --locked --lib -E 'test(/wp34_beh_/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(wp34_beh_|tree_sitter_ruff_arrow_job_semantics)/)' --no-tests=fail
+    cargo test --locked --no-default-features --features fact-generation --test integration isolated_fact_generation_executes_provider_jobs_to_arrow
     cd pyrefly-sidecar && cargo test --locked wp34_beh_
     cd rustc-extractor && cargo test --locked wp34_beh_
+
+[doc("Prove bounded Tree-sitter state, Ruff reparse truth, cancellation, and clean-equivalent incremental output")]
+[group('test')]
+inprocess-provider-lifecycle-check:
+    cargo nextest run --locked --no-default-features --features fact-generation --lib -E 'test(/(tree_sitter_job_drives_exact_parse_and_bounded_revisions|tree_sitter_job_limits_and_cancellation_are_causal|ruff_job_drives_owned_snapshot_and_honest_whole_file_reparse|ruff_job_limits_cancellation_and_lane_are_causal|inprocess_provider_incremental_lifecycle)/)' --no-tests=fail
+
+[doc("Reject provider-native, fabric, state, release, daemon, and transport types outside their owning adapter boundaries")]
+[group('gate')]
+provider-type-boundary-check:
+    ast-grep test --filter '^(fact-generation-inward-boundary-only|tree-sitter-boundary-only|ruff-boundary-only)$'
+    ast-grep scan --filter '^(fact-generation-inward-boundary-only|tree-sitter-boundary-only|ruff-boundary-only)$' src
 
 [doc("Reject descriptor gaps, empty success, opaque payloads, schema shortcuts, and provider-local canonical identity")]
 [group('test')]
@@ -891,7 +903,7 @@ relation-ipc-provider-operations-check:
 [doc("Reject incomplete, opaque, corrupt, parallel, or trust-bypassing provider admission")]
 [group('test')]
 provider-admission-exclusivity-check:
-    cargo nextest run --locked --lib -E 'test(/(duplicate_and_out_of_order_sequences_fail_closed|truncation_and_corruption_are_distinct_typed_failures|missing_trailer_and_terminal_are_not_complete|opaque_schema_carriers_are_rejected_before_any_provider_bytes|raw_json_cannot_masquerade_as_semantic_row_payload|exact_programmatic_admission_rejects_missing_pyrefly_coverage_relation|changed_source_or_rustc_receipt_binding_invalidates_workspace_authority|later_provider_failure_drops_the_partially_registered_builder|typed_relation_ingress_rejects_unknown_and_opaque_referenced_payloads|orchestrated_trusted_local_bypass_is_rejected_before_spawn|orchestrated_missing_terminal_returns_no_semantic_output|orchestrated_context_mismatch_never_invokes_supervisor|pyrefly_stale_generation_rejection_falsification)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(duplicate_and_out_of_order_sequences_fail_closed|truncation_and_corruption_are_distinct_typed_failures|missing_trailer_and_terminal_are_not_complete|opaque_schema_carriers_are_rejected_before_any_provider_bytes|raw_json_cannot_masquerade_as_semantic_row_payload|exact_programmatic_admission_rejects_missing_pyrefly_coverage_relation|changed_source_or_rustc_receipt_binding_invalidates_workspace_authority|later_provider_failure_drops_the_partially_registered_builder|typed_relation_ingress_rejects_unknown_and_opaque_referenced_payloads|orchestrated_trusted_local_bypass_is_rejected_before_spawn|orchestrated_missing_terminal_returns_no_semantic_output|orchestrated_context_mismatch_never_invokes_supervisor|pyrefly_stale_generation_rejection_falsification|inprocess_provider_admission_faults)/)' --no-tests=fail
     just remaining-legacy-zero-state-check
 
 [doc("Exercise provider coverage, remainder, flow-control, cancellation, containment, and resource bounds")]

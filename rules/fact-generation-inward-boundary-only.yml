@@ -1,0 +1,15 @@
+id: fact-generation-inward-boundary-only
+language: Rust
+severity: error
+message: fact generation may depend only on application contracts, Arrow, and provider adapters.
+note: Keep fabric, storage, repository, runtime, release, generated transport, and daemon authority outside this feature slice.
+files:
+  - src/tree_sitter_adapter.rs
+  - src/ruff_adapter.rs
+  - src/provider_native_syntax.rs
+  - src/provider_raw_kinds.rs
+  - src/provider_types.rs
+rule:
+  all:
+    - kind: use_declaration
+    - regex: "(datafusion|deltalake|gix|rusqlite|tonic|prost|tokio|object_store|crate::(daemon|fabric|git_state|operational_store|process_runtime|production_provider_recipe|provider_admission|provider_boundary|provider_sandbox|rpc|semantic_release|supervisor|workspace_registry))"

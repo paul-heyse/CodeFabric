@@ -2850,17 +2850,13 @@ fn relation_row_count(relation: Option<&ObservedProviderRelation>) -> usize {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::path::Path;
-
     use arrow_array::ArrayRef;
     use arrow_array::builder::FixedSizeBinaryBuilder;
     use arrow_ipc::writer::StreamWriter;
     use arrow_schema::{DataType, Field, Schema};
 
     use super::*;
-    use crate::cancellation::Cancellation;
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig, FabricSchemaRole};
-    use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::fabric::proof::{
         OracleId, OracleImplementationRef, ProofRunId, ProofTerminalStatus,
         test_relations_with_oracle,
@@ -2872,11 +2868,7 @@ pub(crate) mod tests {
         ProviderLocalIdentityRole, ProviderOracleId, ProviderRevision, RetentionPolicy,
         UnavailableBehavior, UpstreamApiSymbol,
     };
-    use crate::provider_native_syntax::{
-        ExactPythonSyntaxRunner, ProviderNativeSourceImage, PythonModuleInput, PythonSyntaxRunPins,
-        SyntaxProviderRunPin,
-    };
-    use crate::provider_types::ProviderText;
+    use crate::provider_native_syntax::job_tests::run_fixture;
     use crate::pyrefly_service::AcceptedPyreflyRelation;
     use crate::relation_ipc::{SchemaFingerprint, TerminalStatus};
     use crate::rpc::generated::codefabric::provider::v1::ProviderRunState;
@@ -3142,51 +3134,7 @@ pub(crate) mod tests {
     }
 
     fn exact_native_syntax_run(marker: u8, source_text: &str) -> ProviderNativeSyntaxRun {
-        let bytes = Arc::<[u8]>::from(source_text.as_bytes());
-        let source = ProviderNativeSourceImage::new(
-            [marker; 16],
-            7,
-            Arc::clone(&bytes),
-            crate::integrity::digest_bytes(&bytes),
-            ProviderText {
-                text: Arc::from(source_text),
-                original_byte_offsets: Arc::from(
-                    source_text
-                        .char_indices()
-                        .map(|(offset, _)| u64::try_from(offset).unwrap())
-                        .chain(std::iter::once(u64::try_from(source_text.len()).unwrap()))
-                        .collect::<Vec<_>>(),
-                ),
-            },
-        )
-        .unwrap();
-        let module_name = format!("fixture.module_{marker}");
-        let module_path = format!("fixture/module_{marker}.py");
-        let release = CompiledSemanticRelease::current();
-        ExactPythonSyntaxRunner::new(release.provider_authority())
-            .unwrap()
-            .run_full(
-                1,
-                &source,
-                PythonSyntaxRunPins {
-                    tree_sitter: SyntaxProviderRunPin {
-                        provider_run_id: [marker; 16],
-                        analysis_context_id: [202; 32],
-                        semantic_environment_id: [203; 32],
-                    },
-                    ruff: SyntaxProviderRunPin {
-                        provider_run_id: [marker.wrapping_add(64); 16],
-                        analysis_context_id: [202; 32],
-                        semantic_environment_id: [203; 32],
-                    },
-                },
-                PythonModuleInput {
-                    module_name: &module_name,
-                    module_path: Path::new(&module_path),
-                },
-                &Cancellation::default(),
-            )
-            .unwrap()
+        run_fixture(source_text, 7, marker)
     }
 
     fn fixed_value(width: i32, value: &[u8]) -> ArrayRef {

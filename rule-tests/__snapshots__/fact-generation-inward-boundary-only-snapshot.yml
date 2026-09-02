@@ -1,0 +1,23 @@
+id: fact-generation-inward-boundary-only
+snapshots:
+  ? |
+    use crate::fabric::production_kernel::CompiledSemanticRelease;
+  : labels:
+    - source: use crate::fabric::production_kernel::CompiledSemanticRelease;
+      style: primary
+      start: 0
+      end: 62
+  ? |
+    use crate::rpc::generated::codefabric::rustc::v1::CompilationBegin;
+  : labels:
+    - source: use crate::rpc::generated::codefabric::rustc::v1::CompilationBegin;
+      style: primary
+      start: 0
+      end: 67
+  ? |
+    use datafusion::prelude::SessionContext;
+  : labels:
+    - source: use datafusion::prelude::SessionContext;
+      style: primary
+      start: 0
+      end: 40

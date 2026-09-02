@@ -13,6 +13,7 @@ use std::os::unix::ffi::OsStringExt as _;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use datafusion::execution::SessionStateBuilder;
@@ -100,14 +101,21 @@ use crate::inventory::{InclusionState, InventoryLimits, InventoryWalker};
 use crate::operational_store::OperationalStore;
 use crate::production_provider_recipe::{
     ExactProviderLaneAuthority, ProductionProviderAuthority, ProductionProviderRuns,
+    current_v23_provider_program_definition,
 };
 use crate::provider_admission::{ExactProviderLaneRuns, ProviderLaneGap};
+use crate::provider_contracts::{
+    CancellationProbe, ContextIdentity, ProviderContextBinding, ProviderContractError,
+    ProviderLane, ProviderResourceCeilingSpec, ProviderResourceCeilings, ProviderRunBinding,
+    ProviderRunIdentity, ProviderScopeIdentity, ProviderSourceBinding, SourceIdentity,
+};
 use crate::provider_native_syntax::{
-    ExactPythonSyntaxRunner, ProviderNativeSourceImage, ProviderNativeSyntaxRun, PythonModuleInput,
-    PythonSyntaxRunPins, SyntaxProviderRunPin,
+    ExactPythonSyntaxRunner, InProcessProviderJobs, ProviderNativeSourceImage,
+    ProviderNativeSyntaxRun, PythonModuleInput,
 };
 use crate::relation_ipc::{ContextPin, SourcePin};
 use crate::secure_path::{PlatformPath, open_workspace_root};
+use crate::semantic_release::{ProviderJobInput, compile_current_v23_release};
 use crate::source_image::{
     CaptureOutcome, CaptureRequest, SourceBlobHolderKind, SourceCapturePolicy, SourceImageStore,
     SourceLanguage, advance_source_generation, current_source_generation,
@@ -408,6 +416,25 @@ struct FreshCandidate {
     source_images: SourceImageSetRef,
 }
 
+fn inprocess_operational_ceilings() -> Result<ProviderResourceCeilings, ProviderContractError> {
+    ProviderResourceCeilings::try_new(ProviderResourceCeilingSpec {
+        max_relations: 64,
+        max_batches_per_relation: 64,
+        max_input_bytes: 16_777_216,
+        max_rows: 2_000_000,
+        max_bytes: 268_435_456,
+        max_diagnostics: 10_000,
+        max_work_units: 10_000_000,
+        max_wall_millis: 30_000,
+        max_visited_nodes: 2_000_000,
+        max_traversal_depth: 256,
+        max_workers: 4,
+        max_retained_revisions: 2,
+        cancellation_poll_work_units: 1_024,
+        cancellation_ack_millis: 2_000,
+    })
+}
+
 async fn build_fresh_candidate(
     state_root: &Path,
     operational_database: &Path,
@@ -509,8 +536,13 @@ async fn build_fresh_candidate(
     let builder =
         ProgrammaticFabricEpochBuilder::try_new(epoch_id, FabricEpochRuntimeConfig::default())
             .map_err(|error| step("epoch-builder", error))?;
-    let mut runner = ExactPythonSyntaxRunner::new(release.provider_authority())
-        .map_err(|error| step("native-provider-open", error))?;
+    let provider_release = compile_current_v23_release(
+        current_v23_provider_program_definition()
+            .map_err(|error| step("provider-release-definition", error))?,
+    )
+    .map_err(|error| step("provider-release-compile", error))?;
+    let mut runner =
+        ExactPythonSyntaxRunner::new().map_err(|error| step("native-provider-open", error))?;
     let mut native_runs = Vec::with_capacity(sources.len());
     for (index, (source, module_path)) in sources.iter().zip(&module_paths).enumerate() {
         let revision =
@@ -523,32 +555,125 @@ async fn build_fresh_candidate(
             b"codefabric.ruff-provider-run.v1\0",
             &[&source.file_id, &revision.to_be_bytes()],
         );
+        let source_binding = ProviderSourceBinding::try_new(
+            SourceIdentity::try_new(format!(
+                "codefabric.source.{}.{}",
+                lower_hex(&source.file_id),
+                source.source_generation
+            ))
+            .map_err(|error| step("provider-source-identity", error))?,
+            source.file_id,
+            source.source_generation,
+            source.content_digest,
+        )
+        .map_err(|error| step("provider-source-binding", error))?;
+        let context_binding = ProviderContextBinding::try_new(
+            ContextIdentity::try_new(format!(
+                "codefabric.context.{}",
+                lower_hex(&analysis_context)
+            ))
+            .map_err(|error| step("provider-context-identity", error))?,
+            analysis_context,
+            semantic_environment,
+        )
+        .map_err(|error| step("provider-context-binding", error))?;
+        let scope = ProviderScopeIdentity::try_new(format!(
+            "codefabric.source-scope.{}",
+            lower_hex(&source.file_id)
+        ))
+        .map_err(|error| step("provider-scope", error))?;
+        let (_tree_cancel_owner, tree_cancellation) = CancellationProbe::pair(1_024)
+            .map_err(|error| step("tree-sitter-cancellation", error))?;
+        let (_ruff_cancel_owner, ruff_cancellation) =
+            CancellationProbe::pair(1_024).map_err(|error| step("ruff-cancellation", error))?;
+        let operational_ceilings = inprocess_operational_ceilings()
+            .map_err(|error| step("in-process-provider-ceilings", error))?;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let tree_prepared = provider_release
+            .providers()
+            .prepare_job(
+                provider_release.policy(),
+                ProviderJobInput {
+                    lane: ProviderLane::TreeSitter,
+                    source: source_binding.clone(),
+                    context: context_binding.clone(),
+                    run: ProviderRunBinding::try_new(
+                        ProviderRunIdentity::try_new(format!(
+                            "codefabric.tree-sitter-run.{}",
+                            lower_hex(&tree_run)
+                        ))
+                        .map_err(|error| step("tree-sitter-run-identity", error))?,
+                        tree_run,
+                    )
+                    .map_err(|error| step("tree-sitter-run-binding", error))?,
+                    scope: scope.clone(),
+                    requested_families: provider_release
+                        .providers()
+                        .families(ProviderLane::TreeSitter)
+                        .map_err(|error| step("tree-sitter-family-program", error))?
+                        .into_iter()
+                        .map(|family| (family, 1))
+                        .collect(),
+                    operational_ceilings,
+                    deadline,
+                    cancellation: tree_cancellation,
+                },
+            )
+            .map_err(|error| step("tree-sitter-job", error))?;
+        let ruff_prepared = provider_release
+            .providers()
+            .prepare_job(
+                provider_release.policy(),
+                ProviderJobInput {
+                    lane: ProviderLane::Ruff,
+                    source: source_binding,
+                    context: context_binding,
+                    run: ProviderRunBinding::try_new(
+                        ProviderRunIdentity::try_new(format!(
+                            "codefabric.ruff-run.{}",
+                            lower_hex(&ruff_run)
+                        ))
+                        .map_err(|error| step("ruff-run-identity", error))?,
+                        ruff_run,
+                    )
+                    .map_err(|error| step("ruff-run-binding", error))?,
+                    scope,
+                    requested_families: provider_release
+                        .providers()
+                        .families(ProviderLane::Ruff)
+                        .map_err(|error| step("ruff-family-program", error))?
+                        .into_iter()
+                        .map(|family| (family, 1))
+                        .collect(),
+                    operational_ceilings,
+                    deadline,
+                    cancellation: ruff_cancellation,
+                },
+            )
+            .map_err(|error| step("ruff-job", error))?;
+        let jobs = InProcessProviderJobs::try_new(tree_prepared.job(), ruff_prepared.job())
+            .map_err(|error| step("in-process-provider-jobs", error))?;
         let module_name = format!("codefabric_source_{}", lower_hex(&source.file_id));
-        native_runs.push(
-            runner
-                .run_full(
-                    revision,
-                    source,
-                    PythonSyntaxRunPins {
-                        tree_sitter: SyntaxProviderRunPin {
-                            provider_run_id: tree_run,
-                            analysis_context_id: analysis_context,
-                            semantic_environment_id: semantic_environment,
-                        },
-                        ruff: SyntaxProviderRunPin {
-                            provider_run_id: ruff_run,
-                            analysis_context_id: analysis_context,
-                            semantic_environment_id: semantic_environment,
-                        },
-                    },
-                    PythonModuleInput {
-                        module_name: &module_name,
-                        module_path,
-                    },
-                    &Cancellation::default(),
-                )
-                .map_err(|error| step("native-provider-run", error))?,
-        );
+        let run = runner
+            .run_full(
+                jobs,
+                revision,
+                source,
+                PythonModuleInput {
+                    module_name: &module_name,
+                    module_path,
+                },
+            )
+            .map_err(|error| step("native-provider-run", error))?;
+        provider_release
+            .providers()
+            .admit(tree_prepared, run.tree_sitter_result().clone())
+            .map_err(|error| step("tree-sitter-admission", error))?;
+        provider_release
+            .providers()
+            .admit(ruff_prepared, run.ruff_result().clone())
+            .map_err(|error| step("ruff-admission", error))?;
+        native_runs.push(run);
     }
     let native_pin = native_source_pin(&native_runs, &sources);
     let requested_native = u64::try_from(native_runs.len()).unwrap_or(u64::MAX).max(1);

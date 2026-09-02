@@ -111,3 +111,55 @@ def test_release_compiler_state_dependency_fault_is_rejected() -> None:
     )
     with pytest.raises(FeatureArchitectureError, match="forbidden=.*rusqlite"):
         _validate_metadata(metadata, "release-compiler")
+
+
+def _fact_generation_metadata() -> dict[str, Any]:
+    metadata = _metadata()
+    root = metadata["resolve"]["nodes"][0]
+    root["features"].append("fact-generation")
+    packages = (
+        "blake3",
+        "petgraph",
+        "rayon",
+        "ruff_python_ast",
+        "ruff_python_index",
+        "ruff_python_parser",
+        "ruff_python_semantic",
+        "ruff_python_trivia",
+        "ruff_source_file",
+        "ruff_text_size",
+        "tree-sitter",
+        "tree-sitter-python",
+        "tree-sitter-rust",
+    )
+    for name in packages:
+        identifier = f"package:{name}"
+        metadata["packages"].append({"id": identifier, "name": name})
+        metadata["resolve"]["nodes"].append(
+            {"id": identifier, "features": [], "deps": []}
+        )
+        root["deps"].append({"pkg": identifier, "dep_kinds": [{"kind": None}]})
+    return metadata
+
+
+def test_fact_generation_isolated_graph_is_accepted() -> None:
+    contract = CONTRACTS["fact-generation"]
+    _validate_manifest(
+        {"features": {"fact-generation": sorted(contract.manifest_items)}},
+        "fact-generation",
+    )
+    report = _validate_metadata(_fact_generation_metadata(), "fact-generation")
+    assert report["scope"] == "fact-generation"
+
+
+def test_fact_generation_fabric_dependency_fault_is_rejected() -> None:
+    metadata = _fact_generation_metadata()
+    metadata["packages"].append({"id": "query", "name": "datafusion"})
+    metadata["resolve"]["nodes"].append(
+        {"id": "query", "features": [], "deps": []}
+    )
+    metadata["resolve"]["nodes"][0]["deps"].append(
+        {"pkg": "query", "dep_kinds": [{"kind": None}]}
+    )
+    with pytest.raises(FeatureArchitectureError, match="forbidden=.*datafusion"):
+        _validate_metadata(metadata, "fact-generation")

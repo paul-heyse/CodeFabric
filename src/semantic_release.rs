@@ -7,19 +7,19 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use arrow_schema::SchemaRef;
 use thiserror::Error;
 
 use crate::provider_contracts::{
-    AdmittedProviderResult, CancellationProbe, ContextIdentity, ProviderBuildIdentity,
+    AdmittedProviderResult, CancellationProbe, ProviderBuildIdentity, ProviderContextBinding,
     ProviderContractError, ProviderFamilyIdentity, ProviderFamilyRequest, ProviderIdentity,
     ProviderJob, ProviderJobSpec, ProviderLane, ProviderPolicyIdentity, ProviderProgramIdentity,
-    ProviderProtocolIdentity, ProviderRelationIdentity, ProviderResourceCeilings,
-    ProviderRunIdentity, ProviderRunProvenance, ProviderRunResult, ProviderSchemaIdentity,
-    ProviderScopeIdentity, ProviderTrustPosture, SourceIdentity, SuiteIdentity,
-    admit_provider_result,
+    ProviderProtocolIdentity, ProviderRelationIdentity, ProviderResourceCeilingSpec,
+    ProviderResourceCeilings, ProviderRunBinding, ProviderRunProvenance, ProviderRunResult,
+    ProviderSchemaIdentity, ProviderScopeIdentity, ProviderSourceBinding, ProviderTrustPosture,
+    SuiteIdentity, admit_provider_result,
 };
 
 const CURRENT_SUITE: &str = "codefabric-relational-data-fabric@2.3.0";
@@ -529,9 +529,9 @@ struct CompiledProviderLaneProgram {
 #[derive(Clone, Debug)]
 pub struct ProviderJobInput {
     pub lane: ProviderLane,
-    pub source: SourceIdentity,
-    pub context: ContextIdentity,
-    pub run: ProviderRunIdentity,
+    pub source: ProviderSourceBinding,
+    pub context: ProviderContextBinding,
+    pub run: ProviderRunBinding,
     pub scope: ProviderScopeIdentity,
     pub requested_families: Vec<(ProviderFamilyIdentity, u64)>,
     pub operational_ceilings: ProviderResourceCeilings,
@@ -594,6 +594,13 @@ impl CompiledProviderProgram {
             self.policy_identity.clone(),
             self.identity.clone(),
         );
+        let now = Instant::now();
+        let policy_deadline = now
+            .checked_add(Duration::from_millis(ceilings.max_wall_millis()))
+            .ok_or(ProviderContractError::InvalidResourceCeiling)?;
+        let cancellation = input
+            .cancellation
+            .restricted_to(ceilings.cancellation_poll_work_units())?;
         let job = ProviderJob::try_new(ProviderJobSpec {
             suite: self.suite.clone(),
             provider: lane.provider.clone(),
@@ -605,8 +612,8 @@ impl CompiledProviderProgram {
             trust: lane.trust,
             requests,
             ceilings,
-            deadline: input.deadline,
-            cancellation: input.cancellation,
+            deadline: input.deadline.min(policy_deadline),
+            cancellation,
             provenance,
         })?;
         Ok(PreparedProviderJob {
@@ -640,6 +647,25 @@ impl CompiledProviderProgram {
     #[must_use]
     pub fn relation_count(&self) -> usize {
         self.lanes.values().map(|lane| lane.families.len()).sum()
+    }
+
+    /// Return the exact released family inventory for one lane in deterministic identity order.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a lane not compiled into this release.
+    pub fn families(
+        &self,
+        lane: ProviderLane,
+    ) -> Result<Vec<ProviderFamilyIdentity>, SemanticReleaseError> {
+        Ok(self
+            .lanes
+            .get(&lane)
+            .ok_or(SemanticReleaseError::UnknownProviderLane)?
+            .families
+            .keys()
+            .cloned()
+            .collect())
     }
 }
 
@@ -812,17 +838,7 @@ impl CompiledPolicyProgram {
             .provider_ceilings
             .get(&lane)
             .ok_or(SemanticReleaseError::UnknownProviderLane)?;
-        Ok(ProviderResourceCeilings::try_new(
-            compiled.max_relations().min(operational.max_relations()),
-            compiled
-                .max_batches_per_relation()
-                .min(operational.max_batches_per_relation()),
-            compiled.max_rows().min(operational.max_rows()),
-            compiled.max_bytes().min(operational.max_bytes()),
-            compiled
-                .max_diagnostics()
-                .min(operational.max_diagnostics()),
-        )?)
+        Ok(compiled.intersect(operational)?)
     }
 }
 
@@ -1312,27 +1328,47 @@ pub(crate) fn compile_current_v23_release(
         })
         .collect::<Result<Vec<_>, SemanticReleaseError>>()?;
 
-    let syntax_ceiling = ProviderResourceCeilings::try_new(
-        MAX_PROVIDER_FAMILIES,
-        65_536,
-        2_000_000,
-        268_435_456,
-        10_000,
-    )?;
-    let semantic_ceiling = ProviderResourceCeilings::try_new(
-        MAX_PROVIDER_FAMILIES,
-        65_536,
-        4_000_000,
-        536_870_912,
-        20_000,
-    )?;
+    let syntax_ceiling = ProviderResourceCeilings::try_new(ProviderResourceCeilingSpec {
+        max_relations: MAX_PROVIDER_FAMILIES,
+        max_batches_per_relation: 65_536,
+        max_input_bytes: 16_777_216,
+        max_rows: 2_000_000,
+        max_bytes: 268_435_456,
+        max_diagnostics: 10_000,
+        max_work_units: 10_000_000,
+        max_wall_millis: 30_000,
+        max_visited_nodes: 2_000_000,
+        max_traversal_depth: 256,
+        max_workers: 4,
+        max_retained_revisions: 2,
+        cancellation_poll_work_units: 1_024,
+        cancellation_ack_millis: 2_000,
+    })?;
+    let semantic_ceiling = |cancellation_ack_millis| {
+        ProviderResourceCeilings::try_new(ProviderResourceCeilingSpec {
+            max_relations: MAX_PROVIDER_FAMILIES,
+            max_batches_per_relation: 65_536,
+            max_input_bytes: 67_108_864,
+            max_rows: 4_000_000,
+            max_bytes: 536_870_912,
+            max_diagnostics: 20_000,
+            max_work_units: 20_000_000,
+            max_wall_millis: 120_000,
+            max_visited_nodes: 4_000_000,
+            max_traversal_depth: 512,
+            max_workers: 2,
+            max_retained_revisions: 1,
+            cancellation_poll_work_units: 1_024,
+            cancellation_ack_millis,
+        })
+    };
     let policy = PolicyProgramDefinition::try_new(
         PolicyProgramIdentity::try_new("codefabric.policy-program.v2.3")?,
         vec![
             LanePolicyDefinition::new(ProviderLane::TreeSitter, syntax_ceiling),
             LanePolicyDefinition::new(ProviderLane::Ruff, syntax_ceiling),
-            LanePolicyDefinition::new(ProviderLane::Pyrefly, semantic_ceiling),
-            LanePolicyDefinition::new(ProviderLane::Rustc, semantic_ceiling),
+            LanePolicyDefinition::new(ProviderLane::Pyrefly, semantic_ceiling(2_000)?),
+            LanePolicyDefinition::new(ProviderLane::Rustc, semantic_ceiling(10_000)?),
         ],
         1_000_000,
     )?;
@@ -1431,8 +1467,9 @@ mod tests {
 
     use super::*;
     use crate::provider_contracts::{
-        ProviderCoverage, ProviderCoverageState, ProviderRunResultSpec, ProviderTerminalStatus,
-        ProviderTrustOutcome,
+        ContextIdentity, ProviderContextBinding, ProviderCoverage, ProviderCoverageState,
+        ProviderRunBinding, ProviderRunIdentity, ProviderRunResultSpec, ProviderSourceBinding,
+        ProviderTerminalStatus, ProviderTrustOutcome, SourceIdentity,
     };
 
     fn schema() -> SchemaRef {
@@ -1441,6 +1478,50 @@ mod tests {
             DataType::Int64,
             false,
         )]))
+    }
+
+    fn ceilings(max_relations: usize, max_rows: u64) -> ProviderResourceCeilings {
+        ProviderResourceCeilings::try_new(ProviderResourceCeilingSpec {
+            max_relations,
+            max_batches_per_relation: 16,
+            max_input_bytes: 1 << 20,
+            max_rows,
+            max_bytes: 1 << 30,
+            max_diagnostics: 1_000,
+            max_work_units: 1_000_000,
+            max_wall_millis: 30_000,
+            max_visited_nodes: 1_000_000,
+            max_traversal_depth: 256,
+            max_workers: 4,
+            max_retained_revisions: 2,
+            cancellation_poll_work_units: 64,
+            cancellation_ack_millis: 2_000,
+        })
+        .unwrap()
+    }
+
+    fn source_binding() -> ProviderSourceBinding {
+        ProviderSourceBinding::try_new(
+            SourceIdentity::try_new("source-1").unwrap(),
+            [1; 16],
+            1,
+            [2; 32],
+        )
+        .unwrap()
+    }
+
+    fn context_binding() -> ProviderContextBinding {
+        ProviderContextBinding::try_new(
+            ContextIdentity::try_new("context-1").unwrap(),
+            [3; 32],
+            [4; 32],
+        )
+        .unwrap()
+    }
+
+    fn run_binding() -> ProviderRunBinding {
+        ProviderRunBinding::try_new(ProviderRunIdentity::try_new("run-1").unwrap(), [5; 16])
+            .unwrap()
     }
 
     fn provider_lane(lane: ProviderLane, name: &str) -> ProviderLaneProgramDefinition {
@@ -1529,8 +1610,7 @@ mod tests {
             normalized_relations[0].clone(),
             CausalEffect::ChangeQuery,
         )];
-        let ceilings =
-            ProviderResourceCeilings::try_new(64, 16, 1_000_000, 1 << 30, 1_000).unwrap();
+        let ceilings = ceilings(64, 1_000_000);
         CurrentSemanticReleaseDefinition::new(CurrentSemanticReleaseDefinitionParts {
             suite: current_suite_identity().unwrap(),
             providers: ProviderProgramDefinition::try_new(
@@ -1659,16 +1739,15 @@ mod tests {
                 release.policy(),
                 ProviderJobInput {
                     lane: ProviderLane::TreeSitter,
-                    source: SourceIdentity::try_new("source-1").unwrap(),
-                    context: ContextIdentity::try_new("context-1").unwrap(),
-                    run: ProviderRunIdentity::try_new("run-1").unwrap(),
+                    source: source_binding(),
+                    context: context_binding(),
+                    run: run_binding(),
                     scope: ProviderScopeIdentity::try_new("workspace").unwrap(),
                     requested_families: vec![(
                         ProviderFamilyIdentity::try_new("tree-sitter.family").unwrap(),
                         2,
                     )],
-                    operational_ceilings: ProviderResourceCeilings::try_new(2, 2, 10, 65_536, 2)
-                        .unwrap(),
+                    operational_ceilings: ceilings(2, 10),
                     deadline: Instant::now() + Duration::from_secs(5),
                     cancellation,
                 },
@@ -1757,16 +1836,15 @@ mod tests {
                 release.policy(),
                 ProviderJobInput {
                     lane: ProviderLane::TreeSitter,
-                    source: SourceIdentity::try_new("source-1").unwrap(),
-                    context: ContextIdentity::try_new("context-1").unwrap(),
-                    run: ProviderRunIdentity::try_new("run-1").unwrap(),
+                    source: source_binding(),
+                    context: context_binding(),
+                    run: run_binding(),
                     scope: ProviderScopeIdentity::try_new("workspace").unwrap(),
                     requested_families: vec![(
                         ProviderFamilyIdentity::try_new("tree-sitter.family").unwrap(),
                         2,
                     )],
-                    operational_ceilings: ProviderResourceCeilings::try_new(2, 2, 10, 65_536, 2)
-                        .unwrap(),
+                    operational_ceilings: ceilings(2, 10),
                     deadline: Instant::now() + Duration::from_secs(5),
                     cancellation,
                 },
@@ -1790,9 +1868,9 @@ mod tests {
             suite: current_suite_identity().unwrap(),
             provider: ProviderIdentity::try_new("tree-sitter").unwrap(),
             protocol: ProviderProtocolIdentity::try_new("tree-sitter.protocol.v1").unwrap(),
-            source: SourceIdentity::try_new("source-1").unwrap(),
-            context: ContextIdentity::try_new("context-1").unwrap(),
-            run: ProviderRunIdentity::try_new("run-1").unwrap(),
+            source: source_binding(),
+            context: context_binding(),
+            run: run_binding(),
             provenance: ProviderRunProvenance::new(
                 ProviderBuildIdentity::try_new("tree-sitter.build.v1").unwrap(),
                 ProviderPolicyIdentity::try_new("codefabric.policy-program.v2.3").unwrap(),

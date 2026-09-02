@@ -1,12 +1,7 @@
 //! Application-owned provider identity and raw-kind normalization policy.
 //!
-//! Tree-sitter's [`tree_sitter::Language`] is the raw kind and field catalog. Ruff's closed
-//! enums are the raw catalog for its exact-pinned release train. This module intentionally keeps
-//! only release identity and the small application policy that classifies provider-native kinds;
-//! it does not mirror either provider's complete inventory.
-
-use ruff_python_ast::{NodeKind, token::TokenKind};
-use tree_sitter::Language;
+//! Provider adapters privately observe their native catalogs. This module contains only
+//! application-owned release identity, inventory observations, and normalization vocabulary.
 
 /// Application disposition for a provider-native kind.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -102,48 +97,7 @@ pub const RUFF_PYTHON_FRONTEND: RuffPythonInventory = RuffPythonInventory {
     runtime_inventory_fingerprint: "b3:22a84ab2f2d25a2e94ceb9639458bc3a8178461d5047152aade06f4d63ebf65d",
 };
 
-/// Observe one Tree-sitter kind from the loaded grammar and attach explicit application policy.
-#[must_use]
-pub fn tree_sitter_raw_kind_entry(
-    language: &Language,
-    inventory: &ProviderGrammarInventory,
-    raw_kind_id: u16,
-) -> Option<ProviderRawKindEntry> {
-    let raw_name = language.node_kind_for_id(raw_kind_id)?.to_owned();
-    let (disposition, normalized_kind_code) =
-        tree_sitter_normalization(inventory.grammar, &raw_name);
-    Some(ProviderRawKindEntry {
-        raw_kind_id,
-        raw_name,
-        named: language.node_kind_is_named(raw_kind_id),
-        visible: language.node_kind_is_visible(raw_kind_id),
-        supertype: language.node_kind_is_supertype(raw_kind_id),
-        disposition,
-        normalized_kind_code,
-    })
-}
-
-/// Observe one Ruff AST kind from the exact provider enum.
-#[must_use]
-pub fn ruff_python_node_kind_entry(kind: NodeKind) -> RuffNodeKindEntry {
-    RuffNodeKindEntry {
-        raw_kind_id: kind as u16,
-        raw_name: format!("{kind:?}"),
-        disposition: ProviderRawKindDisposition::Normalize,
-        normalized_kind_code: ruff_python_normalized_kind_code(kind),
-    }
-}
-
-/// Observe one Ruff token kind from the exact provider enum.
-#[must_use]
-pub fn ruff_python_token_kind_entry(kind: TokenKind) -> RuffTokenKindEntry {
-    RuffTokenKindEntry {
-        raw_kind_id: kind as u16,
-        raw_name: format!("{kind:?}"),
-    }
-}
-
-fn tree_sitter_normalization(
+pub(crate) fn tree_sitter_normalization(
     grammar: ProviderGrammarKind,
     raw_name: &str,
 ) -> (ProviderRawKindDisposition, u16) {
@@ -180,56 +134,5 @@ fn tree_sitter_normalization(
             "await_expression" => (Normalize, 220),
             _ => (Unsupported, 10),
         },
-    }
-}
-
-#[allow(clippy::too_many_lines)] // Exhaustiveness is the deliberate Ruff upgrade sentinel.
-const fn ruff_python_normalized_kind_code(kind: NodeKind) -> u16 {
-    use NodeKind::*;
-
-    match kind {
-        ModModule | ModExpression => 90,
-        StmtFunctionDef | StmtClassDef | StmtTypeAlias => 50,
-        StmtReturn => 200,
-        StmtDelete | StmtWith | StmtTry | StmtAssert | StmtGlobal | StmtNonlocal | StmtExpr
-        | StmtPass | StmtBreak | StmtContinue | StmtIpyEscapeCommand => 20,
-        StmtAssign | StmtAugAssign | StmtAnnAssign => 170,
-        StmtFor | StmtWhile | Comprehension => 190,
-        StmtIf | StmtMatch | ExprIf | MatchCase => 180,
-        StmtRaise => 230,
-        StmtImport | StmtImportFrom | Alias => 240,
-        ExprBoolOp | ExprNamed | ExprBinOp | ExprUnaryOp | ExprCompare => 110,
-        ExprLambda | ExprDict | ExprSet | ExprListComp | ExprSetComp | ExprDictComp
-        | ExprGenerator | ExprStarred | ExprName | ExprList | ExprTuple | ExprSlice
-        | ExprIpyEscapeCommand => 30,
-        ExprAwait => 220,
-        ExprYield | ExprYieldFrom => 210,
-        ExprCall => 160,
-        ExprFString | ExprTString | ExprStringLiteral | ExprBytesLiteral | ExprNumberLiteral
-        | ExprBooleanLiteral | ExprNoneLiteral | ExprEllipsisLiteral | FString | TString
-        | StringLiteral | BytesLiteral => 100,
-        ExprAttribute => 120,
-        ExprSubscript => 140,
-        ExceptHandlerExceptHandler
-        | InterpolatedElement
-        | InterpolatedStringLiteralElement
-        | InterpolatedStringFormatSpec
-        | WithItem
-        | Decorator
-        | ElifElseClause
-        | Identifier => 10,
-        PatternMatchValue
-        | PatternMatchSingleton
-        | PatternMatchSequence
-        | PatternMatchMapping
-        | PatternMatchClass
-        | PatternMatchStar
-        | PatternMatchAs
-        | PatternMatchOr
-        | PatternArguments
-        | PatternKeyword => 40,
-        TypeParamTypeVar | TypeParamTypeVarTuple | TypeParamParamSpec | TypeParams => 60,
-        Arguments | Keyword => 80,
-        Parameters | Parameter | ParameterWithDefault => 70,
     }
 }

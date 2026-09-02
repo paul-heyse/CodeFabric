@@ -24,6 +24,19 @@ const MAX_ROWS: u64 = 1_000_000_000;
 const MAX_BYTES: u64 = 1 << 40;
 const MAX_DIAGNOSTICS: usize = 65_536;
 const MAX_WORK_UNITS_BETWEEN_POLLS: usize = 4_096;
+const MAX_INPUT_BYTES: u64 = 1 << 34;
+const MAX_WORK_UNITS: u64 = 1_000_000_000;
+const MAX_WALL_MILLIS: u64 = 3_600_000;
+const MAX_VISITED_NODES: u64 = 1_000_000_000;
+const MAX_TRAVERSAL_DEPTH: u16 = 16_384;
+const MAX_WORKERS: u16 = 4_096;
+const MAX_RETAINED_REVISIONS: u16 = 4_096;
+const MAX_CANCELLATION_ACK_MILLIS: u64 = 60_000;
+
+/// Arrow metadata key for a relation's application-owned semantic role.
+pub const RELATION_SEMANTIC_ROLE_METADATA_KEY: &str = "codefabric.semantic_relation_role";
+/// Arrow metadata key for a field's application-owned semantic role.
+pub const SEMANTIC_ROLE_METADATA_KEY: &str = "codefabric.semantic_role";
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct BoundedIdentity(Arc<str>);
@@ -91,6 +104,145 @@ categorical_identity!(RustOwnerIdentity, "Rust owner identity");
 categorical_identity!(CanonicalEntityIdentity, "canonical entity identity");
 categorical_identity!(DiagnosticCode, "diagnostic code");
 
+/// Exact immutable source pins carried by a provider job.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderSourceBinding {
+    identity: SourceIdentity,
+    file_id: [u8; 16],
+    generation: u64,
+    content_digest: [u8; 32],
+}
+
+impl ProviderSourceBinding {
+    /// Construct a source binding whose binary pins can be repeated in Arrow rows.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero file or content identities.
+    pub fn try_new(
+        identity: SourceIdentity,
+        file_id: [u8; 16],
+        generation: u64,
+        content_digest: [u8; 32],
+    ) -> Result<Self, ProviderContractError> {
+        require_nonzero_bytes(&file_id)?;
+        require_nonzero_bytes(&content_digest)?;
+        Ok(Self {
+            identity,
+            file_id,
+            generation,
+            content_digest,
+        })
+    }
+
+    #[must_use]
+    pub const fn identity(&self) -> &SourceIdentity {
+        &self.identity
+    }
+
+    #[must_use]
+    pub const fn file_id(&self) -> [u8; 16] {
+        self.file_id
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[must_use]
+    pub const fn content_digest(&self) -> [u8; 32] {
+        self.content_digest
+    }
+}
+
+/// Exact analysis and semantic-environment pins carried by a provider job.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderContextBinding {
+    identity: ContextIdentity,
+    analysis_context_id: [u8; 32],
+    semantic_environment_id: [u8; 32],
+}
+
+impl ProviderContextBinding {
+    /// Construct a context binding whose binary pins can be repeated in Arrow rows.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero analysis-context or semantic-environment identities.
+    pub fn try_new(
+        identity: ContextIdentity,
+        analysis_context_id: [u8; 32],
+        semantic_environment_id: [u8; 32],
+    ) -> Result<Self, ProviderContractError> {
+        require_nonzero_bytes(&analysis_context_id)?;
+        require_nonzero_bytes(&semantic_environment_id)?;
+        Ok(Self {
+            identity,
+            analysis_context_id,
+            semantic_environment_id,
+        })
+    }
+
+    #[must_use]
+    pub const fn identity(&self) -> &ContextIdentity {
+        &self.identity
+    }
+
+    #[must_use]
+    pub const fn analysis_context_id(&self) -> [u8; 32] {
+        self.analysis_context_id
+    }
+
+    #[must_use]
+    pub const fn semantic_environment_id(&self) -> [u8; 32] {
+        self.semantic_environment_id
+    }
+}
+
+/// Exact run identity and binary row pin carried by a provider job.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderRunBinding {
+    identity: ProviderRunIdentity,
+    provider_run_id: [u8; 16],
+}
+
+impl ProviderRunBinding {
+    /// Construct a run binding.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a zero binary run identity.
+    pub fn try_new(
+        identity: ProviderRunIdentity,
+        provider_run_id: [u8; 16],
+    ) -> Result<Self, ProviderContractError> {
+        require_nonzero_bytes(&provider_run_id)?;
+        Ok(Self {
+            identity,
+            provider_run_id,
+        })
+    }
+
+    #[must_use]
+    pub const fn identity(&self) -> &ProviderRunIdentity {
+        &self.identity
+    }
+
+    #[must_use]
+    pub const fn provider_run_id(&self) -> [u8; 16] {
+        self.provider_run_id
+    }
+}
+
+fn require_nonzero_bytes(bytes: &[u8]) -> Result<(), ProviderContractError> {
+    if bytes.iter().all(|byte| *byte == 0) {
+        Err(ProviderContractError::ZeroInvocationPin)
+    } else {
+        Ok(())
+    }
+}
+
 /// Exact provider lane selected by a release-prepared job.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ProviderLane {
@@ -117,9 +269,37 @@ pub enum ProviderTrustPosture {
 pub struct ProviderResourceCeilings {
     relations: NonZeroUsize,
     batches_per_relation: NonZeroUsize,
+    input_bytes: NonZeroU64,
     rows: NonZeroU64,
     bytes: NonZeroU64,
     diagnostics: NonZeroUsize,
+    work_units: NonZeroU64,
+    wall_millis: NonZeroU64,
+    visited_nodes: NonZeroU64,
+    traversal_depth: u16,
+    workers: u16,
+    retained_revisions: u16,
+    cancellation_poll_work_units: NonZeroUsize,
+    cancellation_ack_millis: NonZeroU64,
+}
+
+/// Arguments for one complete provider resource envelope.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderResourceCeilingSpec {
+    pub max_relations: usize,
+    pub max_batches_per_relation: usize,
+    pub max_input_bytes: u64,
+    pub max_rows: u64,
+    pub max_bytes: u64,
+    pub max_diagnostics: usize,
+    pub max_work_units: u64,
+    pub max_wall_millis: u64,
+    pub max_visited_nodes: u64,
+    pub max_traversal_depth: u16,
+    pub max_workers: u16,
+    pub max_retained_revisions: u16,
+    pub cancellation_poll_work_units: usize,
+    pub cancellation_ack_millis: u64,
 }
 
 impl ProviderResourceCeilings {
@@ -128,33 +308,87 @@ impl ProviderResourceCeilings {
     /// # Errors
     ///
     /// Rejects zero values and values wider than the application hard limits.
-    pub fn try_new(
-        max_relations: usize,
-        max_batches_per_relation: usize,
-        max_rows: u64,
-        max_bytes: u64,
-        max_diagnostics: usize,
-    ) -> Result<Self, ProviderContractError> {
+    pub fn try_new(spec: ProviderResourceCeilingSpec) -> Result<Self, ProviderContractError> {
         let value = Self {
-            relations: NonZeroUsize::new(max_relations)
+            relations: NonZeroUsize::new(spec.max_relations)
                 .ok_or(ProviderContractError::InvalidResourceCeiling)?,
-            batches_per_relation: NonZeroUsize::new(max_batches_per_relation)
+            batches_per_relation: NonZeroUsize::new(spec.max_batches_per_relation)
                 .ok_or(ProviderContractError::InvalidResourceCeiling)?,
-            rows: NonZeroU64::new(max_rows).ok_or(ProviderContractError::InvalidResourceCeiling)?,
-            bytes: NonZeroU64::new(max_bytes)
+            input_bytes: NonZeroU64::new(spec.max_input_bytes)
                 .ok_or(ProviderContractError::InvalidResourceCeiling)?,
-            diagnostics: NonZeroUsize::new(max_diagnostics)
+            rows: NonZeroU64::new(spec.max_rows)
+                .ok_or(ProviderContractError::InvalidResourceCeiling)?,
+            bytes: NonZeroU64::new(spec.max_bytes)
+                .ok_or(ProviderContractError::InvalidResourceCeiling)?,
+            diagnostics: NonZeroUsize::new(spec.max_diagnostics)
+                .ok_or(ProviderContractError::InvalidResourceCeiling)?,
+            work_units: NonZeroU64::new(spec.max_work_units)
+                .ok_or(ProviderContractError::InvalidResourceCeiling)?,
+            wall_millis: NonZeroU64::new(spec.max_wall_millis)
+                .ok_or(ProviderContractError::InvalidResourceCeiling)?,
+            visited_nodes: NonZeroU64::new(spec.max_visited_nodes)
+                .ok_or(ProviderContractError::InvalidResourceCeiling)?,
+            traversal_depth: spec.max_traversal_depth,
+            workers: spec.max_workers,
+            retained_revisions: spec.max_retained_revisions,
+            cancellation_poll_work_units: NonZeroUsize::new(spec.cancellation_poll_work_units)
+                .ok_or(ProviderContractError::InvalidResourceCeiling)?,
+            cancellation_ack_millis: NonZeroU64::new(spec.cancellation_ack_millis)
                 .ok_or(ProviderContractError::InvalidResourceCeiling)?,
         };
         if value.relations.get() > MAX_RELATIONS
             || value.batches_per_relation.get() > MAX_BATCHES_PER_RELATION
+            || value.input_bytes.get() > MAX_INPUT_BYTES
             || value.rows.get() > MAX_ROWS
             || value.bytes.get() > MAX_BYTES
             || value.diagnostics.get() > MAX_DIAGNOSTICS
+            || value.work_units.get() > MAX_WORK_UNITS
+            || value.wall_millis.get() > MAX_WALL_MILLIS
+            || value.visited_nodes.get() > MAX_VISITED_NODES
+            || value.traversal_depth == 0
+            || value.traversal_depth > MAX_TRAVERSAL_DEPTH
+            || value.workers == 0
+            || value.workers > MAX_WORKERS
+            || value.retained_revisions == 0
+            || value.retained_revisions > MAX_RETAINED_REVISIONS
+            || value.cancellation_poll_work_units.get() > MAX_WORK_UNITS_BETWEEN_POLLS
+            || value.cancellation_ack_millis.get() > MAX_CANCELLATION_ACK_MILLIS
         {
             return Err(ProviderContractError::InvalidResourceCeiling);
         }
         Ok(value)
+    }
+
+    /// Intersect compiled and operational envelopes without widening either one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if the resulting envelope violates an application hard bound.
+    pub fn intersect(self, other: Self) -> Result<Self, ProviderContractError> {
+        Self::try_new(ProviderResourceCeilingSpec {
+            max_relations: self.max_relations().min(other.max_relations()),
+            max_batches_per_relation: self
+                .max_batches_per_relation()
+                .min(other.max_batches_per_relation()),
+            max_input_bytes: self.max_input_bytes().min(other.max_input_bytes()),
+            max_rows: self.max_rows().min(other.max_rows()),
+            max_bytes: self.max_bytes().min(other.max_bytes()),
+            max_diagnostics: self.max_diagnostics().min(other.max_diagnostics()),
+            max_work_units: self.max_work_units().min(other.max_work_units()),
+            max_wall_millis: self.max_wall_millis().min(other.max_wall_millis()),
+            max_visited_nodes: self.max_visited_nodes().min(other.max_visited_nodes()),
+            max_traversal_depth: self.max_traversal_depth().min(other.max_traversal_depth()),
+            max_workers: self.max_workers().min(other.max_workers()),
+            max_retained_revisions: self
+                .max_retained_revisions()
+                .min(other.max_retained_revisions()),
+            cancellation_poll_work_units: self
+                .cancellation_poll_work_units()
+                .min(other.cancellation_poll_work_units()),
+            cancellation_ack_millis: self
+                .cancellation_ack_millis()
+                .min(other.cancellation_ack_millis()),
+        })
     }
 
     #[must_use]
@@ -165,6 +399,11 @@ impl ProviderResourceCeilings {
     #[must_use]
     pub const fn max_batches_per_relation(self) -> usize {
         self.batches_per_relation.get()
+    }
+
+    #[must_use]
+    pub const fn max_input_bytes(self) -> u64 {
+        self.input_bytes.get()
     }
 
     #[must_use]
@@ -180,6 +419,46 @@ impl ProviderResourceCeilings {
     #[must_use]
     pub const fn max_diagnostics(self) -> usize {
         self.diagnostics.get()
+    }
+
+    #[must_use]
+    pub const fn max_work_units(self) -> u64 {
+        self.work_units.get()
+    }
+
+    #[must_use]
+    pub const fn max_wall_millis(self) -> u64 {
+        self.wall_millis.get()
+    }
+
+    #[must_use]
+    pub const fn max_visited_nodes(self) -> u64 {
+        self.visited_nodes.get()
+    }
+
+    #[must_use]
+    pub const fn max_traversal_depth(self) -> u16 {
+        self.traversal_depth
+    }
+
+    #[must_use]
+    pub const fn max_workers(self) -> u16 {
+        self.workers
+    }
+
+    #[must_use]
+    pub const fn max_retained_revisions(self) -> u16 {
+        self.retained_revisions
+    }
+
+    #[must_use]
+    pub const fn cancellation_poll_work_units(self) -> usize {
+        self.cancellation_poll_work_units.get()
+    }
+
+    #[must_use]
+    pub const fn cancellation_ack_millis(self) -> u64 {
+        self.cancellation_ack_millis.get()
     }
 }
 
@@ -230,6 +509,15 @@ impl CancellationProbe {
     #[must_use]
     pub const fn max_work_units_between_polls(&self) -> usize {
         self.max_work_units_between_polls.get()
+    }
+
+    pub(crate) fn restricted_to(&self, maximum: usize) -> Result<Self, ProviderContractError> {
+        let interval = self.max_work_units_between_polls().min(maximum);
+        Ok(Self {
+            cancelled: Arc::clone(&self.cancelled),
+            max_work_units_between_polls: NonZeroUsize::new(interval)
+                .ok_or(ProviderContractError::InvalidCancellationProbe)?,
+        })
     }
 }
 
@@ -332,9 +620,9 @@ pub struct ProviderJob {
     suite: SuiteIdentity,
     provider: ProviderIdentity,
     protocol: ProviderProtocolIdentity,
-    source: SourceIdentity,
-    context: ContextIdentity,
-    run: ProviderRunIdentity,
+    source: ProviderSourceBinding,
+    context: ProviderContextBinding,
+    run: ProviderRunBinding,
     lane: ProviderLane,
     trust: ProviderTrustPosture,
     requests: Vec<ProviderFamilyRequest>,
@@ -350,9 +638,9 @@ pub struct ProviderJobSpec {
     pub suite: SuiteIdentity,
     pub provider: ProviderIdentity,
     pub protocol: ProviderProtocolIdentity,
-    pub source: SourceIdentity,
-    pub context: ContextIdentity,
-    pub run: ProviderRunIdentity,
+    pub source: ProviderSourceBinding,
+    pub context: ProviderContextBinding,
+    pub run: ProviderRunBinding,
     pub lane: ProviderLane,
     pub trust: ProviderTrustPosture,
     pub requests: Vec<ProviderFamilyRequest>,
@@ -412,6 +700,36 @@ impl ProviderJob {
     }
 
     #[must_use]
+    pub const fn suite(&self) -> &SuiteIdentity {
+        &self.suite
+    }
+
+    #[must_use]
+    pub const fn provider(&self) -> &ProviderIdentity {
+        &self.provider
+    }
+
+    #[must_use]
+    pub const fn protocol(&self) -> &ProviderProtocolIdentity {
+        &self.protocol
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> &ProviderSourceBinding {
+        &self.source
+    }
+
+    #[must_use]
+    pub const fn context(&self) -> &ProviderContextBinding {
+        &self.context
+    }
+
+    #[must_use]
+    pub const fn run(&self) -> &ProviderRunBinding {
+        &self.run
+    }
+
+    #[must_use]
     pub fn requests(&self) -> &[ProviderFamilyRequest] {
         &self.requests
     }
@@ -424,6 +742,11 @@ impl ProviderJob {
     #[must_use]
     pub const fn trust(&self) -> ProviderTrustPosture {
         self.trust
+    }
+
+    #[must_use]
+    pub const fn ceilings(&self) -> ProviderResourceCeilings {
+        self.ceilings
     }
 
     #[must_use]
@@ -494,6 +817,16 @@ impl ProviderCoverage {
     #[must_use]
     pub const fn new(family: ProviderFamilyIdentity, state: ProviderCoverageState) -> Self {
         Self { family, state }
+    }
+
+    #[must_use]
+    pub const fn family(&self) -> &ProviderFamilyIdentity {
+        &self.family
+    }
+
+    #[must_use]
+    pub const fn state(&self) -> &ProviderCoverageState {
+        &self.state
     }
 }
 
@@ -598,6 +931,26 @@ impl ProviderRelationOutput {
         })
     }
 
+    #[must_use]
+    pub const fn relation(&self) -> &ProviderRelationIdentity {
+        &self.relation
+    }
+
+    #[must_use]
+    pub const fn schema_identity(&self) -> &ProviderSchemaIdentity {
+        &self.schema_identity
+    }
+
+    #[must_use]
+    pub const fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    #[must_use]
+    pub fn batches(&self) -> &[RecordBatch] {
+        &self.batches
+    }
+
     fn rows(&self) -> u64 {
         self.batches
             .iter()
@@ -661,9 +1014,9 @@ pub struct ProviderRunResult {
     suite: SuiteIdentity,
     provider: ProviderIdentity,
     protocol: ProviderProtocolIdentity,
-    source: SourceIdentity,
-    context: ContextIdentity,
-    run: ProviderRunIdentity,
+    source: ProviderSourceBinding,
+    context: ProviderContextBinding,
+    run: ProviderRunBinding,
     provenance: ProviderRunProvenance,
     relations: Vec<ProviderRelationOutput>,
     coverage: Vec<ProviderCoverage>,
@@ -680,9 +1033,9 @@ pub struct ProviderRunResultSpec {
     pub suite: SuiteIdentity,
     pub provider: ProviderIdentity,
     pub protocol: ProviderProtocolIdentity,
-    pub source: SourceIdentity,
-    pub context: ContextIdentity,
-    pub run: ProviderRunIdentity,
+    pub source: ProviderSourceBinding,
+    pub context: ProviderContextBinding,
+    pub run: ProviderRunBinding,
     pub provenance: ProviderRunProvenance,
     pub relations: Vec<ProviderRelationOutput>,
     pub coverage: Vec<ProviderCoverage>,
@@ -692,7 +1045,47 @@ pub struct ProviderRunResultSpec {
     pub terminal: ProviderTerminalStatus,
 }
 
+/// Provider-authored evidence whose categorical and binary invocation pins are copied from a job.
+#[derive(Clone, Debug)]
+pub struct ProviderRunEvidenceSpec {
+    pub relations: Vec<ProviderRelationOutput>,
+    pub coverage: Vec<ProviderCoverage>,
+    pub gaps: Vec<ProviderGap>,
+    pub diagnostics: Vec<ProviderDiagnostic>,
+    pub trust: ProviderTrustOutcome,
+    pub terminal: ProviderTerminalStatus,
+}
+
 impl ProviderRunResult {
+    /// Construct provider evidence bound to the exact immutable job invocation.
+    ///
+    /// This does not grant admission authority; release-owned admission still joins every
+    /// requested family, schema, coverage value, trust outcome, and resource ceiling.
+    ///
+    /// # Errors
+    ///
+    /// Rejects internally incoherent provider evidence.
+    pub fn try_from_job(
+        job: &ProviderJob,
+        evidence: ProviderRunEvidenceSpec,
+    ) -> Result<Self, ProviderContractError> {
+        Self::try_new(ProviderRunResultSpec {
+            suite: job.suite.clone(),
+            provider: job.provider.clone(),
+            protocol: job.protocol.clone(),
+            source: job.source.clone(),
+            context: job.context.clone(),
+            run: job.run.clone(),
+            provenance: job.provenance.clone(),
+            relations: evidence.relations,
+            coverage: evidence.coverage,
+            gaps: evidence.gaps,
+            diagnostics: evidence.diagnostics,
+            trust: evidence.trust,
+            terminal: evidence.terminal,
+        })
+    }
+
     /// Validate internal result coherence without granting admission authority.
     ///
     /// # Errors
@@ -888,7 +1281,7 @@ impl AdmittedProviderResult {
         ProviderContractObservation {
             suite: self.job.suite.clone(),
             provider: self.job.provider.clone(),
-            run: self.job.run.clone(),
+            run: self.job.run.identity.clone(),
             lane: self.job.lane,
             requested_families: self.job.requests.len(),
             emitted_relations: self.result.relations.len(),
@@ -1107,6 +1500,8 @@ impl RustcCompilationControl {
 pub enum ProviderContractError {
     #[error("invalid {kind}")]
     InvalidIdentity { kind: &'static str },
+    #[error("provider invocation carries an all-zero binary pin")]
+    ZeroInvocationPin,
     #[error("provider resource ceiling is zero or wider than the application hard limit")]
     InvalidResourceCeiling,
     #[error("cancellation polling interval is zero or application-unbounded")]
@@ -1200,6 +1595,50 @@ mod tests {
         )
     }
 
+    fn source_binding() -> ProviderSourceBinding {
+        ProviderSourceBinding::try_new(
+            identity("source-generation-7", SourceIdentity::try_new),
+            [7; 16],
+            7,
+            [17; 32],
+        )
+        .unwrap()
+    }
+
+    fn context_binding() -> ProviderContextBinding {
+        ProviderContextBinding::try_new(
+            identity("python-context-3", ContextIdentity::try_new),
+            [3; 32],
+            [4; 32],
+        )
+        .unwrap()
+    }
+
+    fn run_binding(value: &str, pin: u8) -> ProviderRunBinding {
+        ProviderRunBinding::try_new(identity(value, ProviderRunIdentity::try_new), [pin; 16])
+            .unwrap()
+    }
+
+    fn ceilings(max_relations: usize, max_rows: u64) -> ProviderResourceCeilings {
+        ProviderResourceCeilings::try_new(ProviderResourceCeilingSpec {
+            max_relations,
+            max_batches_per_relation: 2,
+            max_input_bytes: 65_536,
+            max_rows,
+            max_bytes: 65_536,
+            max_diagnostics: 4,
+            max_work_units: 10_000,
+            max_wall_millis: 30_000,
+            max_visited_nodes: 10_000,
+            max_traversal_depth: 128,
+            max_workers: 1,
+            max_retained_revisions: 2,
+            cancellation_poll_work_units: 128,
+            cancellation_ack_millis: 2_000,
+        })
+        .unwrap()
+    }
+
     fn job() -> (CancellationHandle, ProviderJob) {
         let (handle, probe) = CancellationProbe::pair(128).unwrap();
         let job = ProviderJob::try_new(ProviderJobSpec {
@@ -1209,13 +1648,13 @@ mod tests {
             ),
             provider: identity("tree-sitter", ProviderIdentity::try_new),
             protocol: identity("in-process-arrow@1", ProviderProtocolIdentity::try_new),
-            source: identity("source-generation-7", SourceIdentity::try_new),
-            context: identity("python-context-3", ContextIdentity::try_new),
-            run: identity("run-19", ProviderRunIdentity::try_new),
+            source: source_binding(),
+            context: context_binding(),
+            run: run_binding("run-19", 19),
             lane: ProviderLane::TreeSitter,
             trust: ProviderTrustPosture::InProcessConstrained,
             requests: vec![request()],
-            ceilings: ProviderResourceCeilings::try_new(2, 2, 8, 65_536, 4).unwrap(),
+            ceilings: ceilings(2, 8),
             deadline: Instant::now() + Duration::from_secs(30),
             cancellation: probe,
             provenance: provenance(),
@@ -1259,9 +1698,9 @@ mod tests {
             ),
             provider: identity("tree-sitter", ProviderIdentity::try_new),
             protocol: identity("in-process-arrow@1", ProviderProtocolIdentity::try_new),
-            source: identity("source-generation-7", SourceIdentity::try_new),
-            context: identity("python-context-3", ContextIdentity::try_new),
-            run: identity(run, ProviderRunIdentity::try_new),
+            source: source_binding(),
+            context: context_binding(),
+            run: run_binding(run, if run == "run-19" { 19 } else { 20 }),
             provenance: provenance(),
             relations: vec![relation()],
             coverage: vec![ProviderCoverage::new(family, coverage)],
@@ -1385,9 +1824,9 @@ mod tests {
             ),
             provider: identity("tree-sitter", ProviderIdentity::try_new),
             protocol: identity("in-process-arrow@1", ProviderProtocolIdentity::try_new),
-            source: identity("source-generation-7", SourceIdentity::try_new),
-            context: identity("python-context-3", ContextIdentity::try_new),
-            run: identity("run-19", ProviderRunIdentity::try_new),
+            source: source_binding(),
+            context: context_binding(),
+            run: run_binding("run-19", 19),
             provenance: provenance(),
             relations: Vec::new(),
             coverage: vec![ProviderCoverage::new(
@@ -1422,7 +1861,23 @@ mod tests {
     #[test]
     fn hard_resource_ceiling_cannot_be_widened() {
         assert_eq!(
-            ProviderResourceCeilings::try_new(MAX_RELATIONS + 1, 1, 1, 1, 1).unwrap_err(),
+            ProviderResourceCeilings::try_new(ProviderResourceCeilingSpec {
+                max_relations: MAX_RELATIONS + 1,
+                max_batches_per_relation: 1,
+                max_input_bytes: 1,
+                max_rows: 1,
+                max_bytes: 1,
+                max_diagnostics: 1,
+                max_work_units: 1,
+                max_wall_millis: 1,
+                max_visited_nodes: 1,
+                max_traversal_depth: 1,
+                max_workers: 1,
+                max_retained_revisions: 1,
+                cancellation_poll_work_units: 1,
+                cancellation_ack_millis: 1,
+            })
+            .unwrap_err(),
             ProviderContractError::InvalidResourceCeiling
         );
     }
@@ -1483,7 +1938,7 @@ mod tests {
     #[test]
     fn provider_job_validation_fault_matrix() {
         let (_, mut bounded_job) = job();
-        bounded_job.ceilings = ProviderResourceCeilings::try_new(1, 1, 1, 65_536, 1).unwrap();
+        bounded_job.ceilings = ceilings(1, 1);
         let error = admit_provider_result(
             bounded_job,
             result(

@@ -99,7 +99,7 @@ printf '%s' "$root_shape" | jq -e '
   and (.features["data-fabric"] | index("provider-contracts")) != null
   and (.features["data-fabric"] | index("dep:petgraph")) != null
   and (.features["fact-generation"] | sort) == ([
-    "contract-models", "provider-contracts", "dep:blake3", "dep:petgraph", "dep:rayon", "dep:ruff_python_ast",
+    "provider-contracts", "dep:blake3", "dep:petgraph", "dep:rayon", "dep:ruff_python_ast",
     "dep:ruff_python_index", "dep:ruff_python_parser", "dep:ruff_python_semantic", "dep:ruff_python_trivia",
     "dep:ruff_source_file", "dep:ruff_text_size", "dep:tree-sitter",
     "dep:tree-sitter-python", "dep:tree-sitter-rust", "dep:thiserror"

@@ -331,8 +331,6 @@ pub(crate) enum ProviderRelation {
 /// Exact provider execution lane selected by the compiled semantic release.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CompiledProviderLane {
-    TreeSitter,
-    Ruff,
     Pyrefly,
     Rustc,
 }
@@ -368,40 +366,6 @@ impl CompiledProviderAuthority {
         lane: CompiledProviderLane,
     ) -> CompiledProviderExecutionProfile {
         match lane {
-            CompiledProviderLane::TreeSitter => CompiledProviderExecutionProfile {
-                provider_id: "tree-sitter",
-                placement: "IN_PROCESS",
-                resource_profile_id: "in-process-syntax-standard",
-                max_input_bytes: 16_777_216,
-                max_work_units: 10_000_000,
-                max_wall_millis: 30_000,
-                max_visited_nodes: 2_000_000,
-                max_traversal_depth: 256,
-                max_output_records: 2_000_000,
-                max_output_bytes: 268_435_456,
-                max_diagnostics: 10_000,
-                max_parser_workers: 4,
-                max_retained_tree_revisions: 2,
-                cancellation_check_interval: 1_024,
-                cancellation_ack_millis: 2_000,
-            },
-            CompiledProviderLane::Ruff => CompiledProviderExecutionProfile {
-                provider_id: "ruff-python",
-                placement: "IN_PROCESS",
-                resource_profile_id: "in-process-syntax-standard",
-                max_input_bytes: 16_777_216,
-                max_work_units: 10_000_000,
-                max_wall_millis: 30_000,
-                max_visited_nodes: 2_000_000,
-                max_traversal_depth: 256,
-                max_output_records: 2_000_000,
-                max_output_bytes: 268_435_456,
-                max_diagnostics: 10_000,
-                max_parser_workers: 4,
-                max_retained_tree_revisions: 2,
-                cancellation_check_interval: 1_024,
-                cancellation_ack_millis: 2_000,
-            },
             CompiledProviderLane::Pyrefly => CompiledProviderExecutionProfile {
                 provider_id: "pyrefly-python",
                 placement: "SIDECAR",
@@ -1552,7 +1516,9 @@ fn compiled_provider_field_role(
             "provider_local_node_id" | "parent_provider_local_node_id" => {
                 Some(SNAPSHOT_LOCAL_KEY_ROLE)
             }
-            "raw_kind_id" | "raw_kind" | "raw_kind_disposition" => Some(PROVIDER_KIND_ROLE),
+            "raw_kind_id" | "raw_kind" | "normalized_kind_code" | "raw_kind_disposition" => {
+                Some(PROVIDER_KIND_ROLE)
+            }
             "field_name" | "named" | "extra" | "error" | "missing" | "ordinal" | "depth" => {
                 Some(PROVIDER_FACT_ROLE)
             }
@@ -1695,9 +1661,12 @@ fn compiled_provider_field_role(
             "provider_local_ast_id" | "parent_provider_local_ast_id" => {
                 Some(SNAPSHOT_LOCAL_KEY_ROLE)
             }
-            "raw_kind_id" | "raw_kind" | "ast_category" | "child_role" | "raw_kind_disposition" => {
-                Some(PROVIDER_KIND_ROLE)
-            }
+            "raw_kind_id"
+            | "raw_kind"
+            | "normalized_kind_code"
+            | "ast_category"
+            | "child_role"
+            | "raw_kind_disposition" => Some(PROVIDER_KIND_ROLE),
             "start_byte" => Some(BYTE_START_ROLE),
             "end_byte" => Some(BYTE_END_ROLE),
             "line" | "column" => Some(PROVIDER_COORDINATE_ROLE),
@@ -2336,23 +2305,17 @@ fn digest_frame(hasher: &mut blake3::Hasher, bytes: &[u8]) {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::path::Path;
 
     use arrow_schema::{DataType, Field, Schema};
 
     use super::*;
-    use crate::cancellation::Cancellation;
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig};
     use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::provider_admission::{
         ProviderAdmissionUnknownCause, ProviderLaneGap, ProviderRegistrationDisposition,
     };
     use crate::provider_boundary::{ProviderBoundaryError, validate_provider_boundary_contract};
-    use crate::provider_native_syntax::{
-        ExactPythonSyntaxRunner, ProviderNativeSourceImage, PythonModuleInput, PythonSyntaxRunPins,
-        SyntaxProviderRunPin,
-    };
-    use crate::provider_types::ProviderText;
+    use crate::provider_native_syntax::job_tests::run_fixture;
 
     #[test]
     fn current_v23_release_compiles_all_exact_provider_relation_schemas() {
@@ -2368,50 +2331,7 @@ mod tests {
     }
 
     fn real_native_run() -> ProviderNativeSyntaxRun {
-        let source_text = "from pkg import value\nresult = value + 1\n";
-        let bytes = Arc::<[u8]>::from(source_text.as_bytes());
-        let source = ProviderNativeSourceImage::new(
-            [0x31; 16],
-            9,
-            Arc::clone(&bytes),
-            crate::integrity::digest_bytes(&bytes),
-            ProviderText {
-                text: Arc::from(source_text),
-                original_byte_offsets: Arc::from(
-                    source_text
-                        .char_indices()
-                        .map(|(offset, _)| u64::try_from(offset).unwrap())
-                        .chain(std::iter::once(u64::try_from(source_text.len()).unwrap()))
-                        .collect::<Vec<_>>(),
-                ),
-            },
-        )
-        .unwrap();
-        let release = CompiledSemanticRelease::current();
-        ExactPythonSyntaxRunner::new(release.provider_authority())
-            .unwrap()
-            .run_full(
-                1,
-                &source,
-                PythonSyntaxRunPins {
-                    tree_sitter: SyntaxProviderRunPin {
-                        provider_run_id: [0x41; 16],
-                        analysis_context_id: [0x51; 32],
-                        semantic_environment_id: [0x61; 32],
-                    },
-                    ruff: SyntaxProviderRunPin {
-                        provider_run_id: [0x42; 16],
-                        analysis_context_id: [0x51; 32],
-                        semantic_environment_id: [0x61; 32],
-                    },
-                },
-                PythonModuleInput {
-                    module_name: "fixture.production_provider_recipe",
-                    module_path: Path::new("fixture/production_provider_recipe.py"),
-                },
-                &Cancellation::default(),
-            )
-            .unwrap()
+        run_fixture("from pkg import value\nresult = value + 1\n", 9, 0x31)
     }
 
     fn native_source_pin() -> SourcePin {
@@ -2427,7 +2347,7 @@ mod tests {
 
     fn authority() -> ProductionProviderAuthority {
         ProductionProviderAuthority::try_new(
-            ExactProviderLaneAuthority::try_new(native_source_pin(), ContextPin([0x51; 32]), 1)
+            ExactProviderLaneAuthority::try_new(native_source_pin(), ContextPin([3; 32]), 1)
                 .unwrap(),
             ExactProviderLaneAuthority::try_new(SourcePin([0x71; 32]), ContextPin([0x72; 32]), 1)
                 .unwrap(),

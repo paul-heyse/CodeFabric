@@ -19,12 +19,12 @@ use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use thiserror::Error;
 
-use crate::cancellation::Cancellation;
-use crate::fabric::production_kernel::CompiledProviderAuthority;
-use crate::production_provider_recipe::{CompiledProviderExecutionProfile, CompiledProviderLane};
+use crate::provider_contracts::{
+    CancellationProbe, ProviderJob, ProviderLane, ProviderTrustPosture,
+};
 use crate::provider_raw_kinds::{
-    ProviderRawKindDisposition, RUFF_PYTHON_FRONTEND, RuffPythonInventory,
-    ruff_python_node_kind_entry, ruff_python_token_kind_entry,
+    ProviderRawKindDisposition, RUFF_PYTHON_FRONTEND, RuffNodeKindEntry, RuffPythonInventory,
+    RuffTokenKindEntry,
 };
 use crate::provider_types::{ProviderBoundaryError, ProviderBoundaryMap, ProviderText};
 use crate::tree_sitter_adapter::{RawSyntaxFact, SyntaxOccurrenceId, TreeSitterSnapshot};
@@ -444,18 +444,103 @@ struct RuffLimits {
 }
 
 impl RuffLimits {
-    const fn from_profile(profile: CompiledProviderExecutionProfile) -> Self {
-        Self {
-            max_input_bytes: profile.max_input_bytes,
-            max_work_units: profile.max_work_units,
-            max_wall_millis: profile.max_wall_millis,
-            max_visited_nodes: profile.max_visited_nodes,
-            max_traversal_depth: profile.max_traversal_depth,
-            max_output_records: profile.max_output_records,
-            max_output_bytes: profile.max_output_bytes,
-            max_diagnostics: profile.max_diagnostics,
-            cancellation_check_interval: profile.cancellation_check_interval,
-        }
+    fn from_job(job: &ProviderJob) -> Result<Self, RuffAdapterError> {
+        validate_ruff_job(job)?;
+        let ceilings = job.ceilings();
+        let remaining = job.remaining().ok_or(RuffAdapterError::Deadline)?;
+        let remaining_millis = u64::try_from(remaining.as_millis()).unwrap_or(u64::MAX);
+        Ok(Self {
+            max_input_bytes: ceilings.max_input_bytes(),
+            max_work_units: ceilings.max_work_units(),
+            max_wall_millis: ceilings.max_wall_millis().min(remaining_millis),
+            max_visited_nodes: ceilings.max_visited_nodes(),
+            max_traversal_depth: ceilings.max_traversal_depth(),
+            max_output_records: ceilings.max_rows(),
+            max_output_bytes: ceilings.max_bytes(),
+            max_diagnostics: u16::try_from(ceilings.max_diagnostics()).unwrap_or(u16::MAX),
+            cancellation_check_interval: u32::try_from(ceilings.cancellation_poll_work_units())
+                .unwrap_or(u32::MAX),
+        })
+    }
+}
+
+fn validate_ruff_job(job: &ProviderJob) -> Result<(), RuffAdapterError> {
+    if job.lane() != ProviderLane::Ruff
+        || job.trust() != ProviderTrustPosture::InProcessConstrained
+        || job.protocol().as_str() != "in-process-arrow@1"
+        || job.requests().is_empty()
+    {
+        return Err(RuffAdapterError::ProviderVersionMismatch(
+            "job is not an exact in-process Ruff invocation".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn ruff_python_node_kind_entry(kind: NodeKind) -> RuffNodeKindEntry {
+    RuffNodeKindEntry {
+        raw_kind_id: kind as u16,
+        raw_name: format!("{kind:?}"),
+        disposition: ProviderRawKindDisposition::Normalize,
+        normalized_kind_code: ruff_python_normalized_kind_code(kind),
+    }
+}
+
+fn ruff_python_token_kind_entry(kind: TokenKind) -> RuffTokenKindEntry {
+    RuffTokenKindEntry {
+        raw_kind_id: kind as u16,
+        raw_name: format!("{kind:?}"),
+    }
+}
+
+#[allow(clippy::too_many_lines)] // Exhaustiveness is the deliberate Ruff upgrade sentinel.
+const fn ruff_python_normalized_kind_code(kind: NodeKind) -> u16 {
+    use NodeKind::*;
+
+    match kind {
+        ModModule | ModExpression => 90,
+        StmtFunctionDef | StmtClassDef | StmtTypeAlias => 50,
+        StmtReturn => 200,
+        StmtDelete | StmtWith | StmtTry | StmtAssert | StmtGlobal | StmtNonlocal | StmtExpr
+        | StmtPass | StmtBreak | StmtContinue | StmtIpyEscapeCommand => 20,
+        StmtAssign | StmtAugAssign | StmtAnnAssign => 170,
+        StmtFor | StmtWhile | Comprehension => 190,
+        StmtIf | StmtMatch | ExprIf | MatchCase => 180,
+        StmtRaise => 230,
+        StmtImport | StmtImportFrom | Alias => 240,
+        ExprBoolOp | ExprNamed | ExprBinOp | ExprUnaryOp | ExprCompare => 110,
+        ExprLambda | ExprDict | ExprSet | ExprListComp | ExprSetComp | ExprDictComp
+        | ExprGenerator | ExprStarred | ExprName | ExprList | ExprTuple | ExprSlice
+        | ExprIpyEscapeCommand => 30,
+        ExprAwait => 220,
+        ExprYield | ExprYieldFrom => 210,
+        ExprCall => 160,
+        ExprFString | ExprTString | ExprStringLiteral | ExprBytesLiteral | ExprNumberLiteral
+        | ExprBooleanLiteral | ExprNoneLiteral | ExprEllipsisLiteral | FString | TString
+        | StringLiteral | BytesLiteral => 100,
+        ExprAttribute => 120,
+        ExprSubscript => 140,
+        ExceptHandlerExceptHandler
+        | InterpolatedElement
+        | InterpolatedStringLiteralElement
+        | InterpolatedStringFormatSpec
+        | WithItem
+        | Decorator
+        | ElifElseClause
+        | Identifier => 10,
+        PatternMatchValue
+        | PatternMatchSingleton
+        | PatternMatchSequence
+        | PatternMatchMapping
+        | PatternMatchClass
+        | PatternMatchStar
+        | PatternMatchAs
+        | PatternMatchOr
+        | PatternArguments
+        | PatternKeyword => 40,
+        TypeParamTypeVar | TypeParamTypeVarTuple | TypeParamParamSpec | TypeParams => 60,
+        Arguments | Keyword => 80,
+        Parameters | Parameter | ParameterWithDefault => 70,
     }
 }
 
@@ -472,7 +557,6 @@ struct RetainedRuffRevision {
 /// One worker-owned Ruff frontend with exactly one atomically published parse.
 pub struct RuffAdapter {
     inventory: &'static RuffPythonInventory,
-    limits: RuffLimits,
     retained: Option<RetainedRuffRevision>,
     metrics: RuffAdapterMetrics,
 }
@@ -484,23 +568,10 @@ impl RuffAdapter {
     ///
     /// Returns a version mismatch if the release identity or profile is not the exact supported
     /// Ruff frontend.
-    pub(crate) fn new(
-        compiled_authority: &CompiledProviderAuthority,
-    ) -> Result<Self, RuffAdapterError> {
+    pub(crate) fn new() -> Result<Self, RuffAdapterError> {
         validate_runtime_inventory(&RUFF_PYTHON_FRONTEND)?;
-        let profile = compiled_authority.execution_profile(CompiledProviderLane::Ruff);
-        if profile.provider_id != "ruff-python"
-            || profile.placement != "IN_PROCESS"
-            || profile.resource_profile_id != "in-process-syntax-standard"
-            || profile.max_parser_workers == 0
-        {
-            return Err(RuffAdapterError::ProviderVersionMismatch(
-                "Ruff resource profile is not runnable".into(),
-            ));
-        }
         Ok(Self {
             inventory: &RUFF_PYTHON_FRONTEND,
-            limits: RuffLimits::from_profile(profile),
             retained: None,
             metrics: RuffAdapterMetrics::default(),
         })
@@ -557,11 +628,13 @@ impl RuffAdapter {
     #[allow(clippy::too_many_lines)] // The atomic candidate pipeline keeps every retained Ruff value visibly single-build.
     pub fn parse(
         &mut self,
+        job: &ProviderJob,
         revision: u64,
         text: ProviderText,
         tree_sitter: &TreeSitterSnapshot,
-        cancellation: &Cancellation,
     ) -> Result<RuffSnapshot, RuffAdapterError> {
+        let limits = RuffLimits::from_job(job)?;
+        let cancellation = job.cancellation();
         if self
             .retained
             .as_ref()
@@ -569,7 +642,7 @@ impl RuffAdapter {
         {
             return self.reject(RuffAdapterError::StaleRevision);
         }
-        if u64::try_from(text.text.len()).unwrap_or(u64::MAX) > self.limits.max_input_bytes {
+        if u64::try_from(text.text.len()).unwrap_or(u64::MAX) > limits.max_input_bytes {
             return self.reject(RuffAdapterError::InputLimit);
         }
         let provider_image_fingerprint = text.provider_image_fingerprint();
@@ -605,7 +678,7 @@ impl RuffAdapter {
         if cancellation.is_cancelled() {
             return self.reject(RuffAdapterError::Cancelled);
         }
-        self.check_progress(started, 1, cancellation)?;
+        self.check_progress(limits, started, 1, cancellation)?;
 
         let trivia = TriviaRanges::from(parsed.tokens());
         let indexer = Indexer::from_tokens(parsed.tokens(), &text.text);
@@ -619,7 +692,7 @@ impl RuffAdapter {
             &boundary_map,
             &text.text,
             &mut work_units,
-            self.limits,
+            limits,
             started,
             cancellation,
         ) {
@@ -633,7 +706,7 @@ impl RuffAdapter {
             &boundary_map,
             &text.text,
             &evaluation_ordinals,
-            self.limits,
+            limits,
             started,
             cancellation,
             work_units,
@@ -685,7 +758,7 @@ impl RuffAdapter {
             .saturating_add(u64::try_from(continuation_line_starts.len()).unwrap_or(u64::MAX))
             .saturating_add(u64::try_from(diagnostics.len()).unwrap_or(u64::MAX))
             .saturating_add(u64::try_from(correspondences.len()).unwrap_or(u64::MAX));
-        self.check_progress(started, work_units, cancellation)?;
+        self.check_progress(limits, started, work_units, cancellation)?;
 
         let output_records = sum_lengths(&[
             1,
@@ -699,10 +772,10 @@ impl RuffAdapter {
             diagnostics.len(),
             correspondences.len(),
         ]);
-        if output_records > self.limits.max_output_records {
+        if output_records > limits.max_output_records {
             return self.reject(RuffAdapterError::OutputRecordLimit);
         }
-        if diagnostics.len() > usize::from(self.limits.max_diagnostics) {
+        if diagnostics.len() > usize::from(limits.max_diagnostics) {
             return self.reject(RuffAdapterError::DiagnosticLimit);
         }
         let output_bytes = estimate_output_bytes(
@@ -717,7 +790,7 @@ impl RuffAdapter {
             &correspondences,
             &provider_image_fingerprint,
         );
-        if output_bytes > self.limits.max_output_bytes {
+        if output_bytes > limits.max_output_bytes {
             return self.reject(RuffAdapterError::OutputByteLimit);
         }
         let run_metrics = RuffRunMetrics {
@@ -808,22 +881,22 @@ impl RuffAdapter {
 
     fn check_progress(
         &mut self,
+        limits: RuffLimits,
         started: Instant,
         work_units: u64,
-        cancellation: &Cancellation,
+        cancellation: &CancellationProbe,
     ) -> Result<(), RuffAdapterError> {
-        let effective_interval = self
-            .limits
+        let effective_interval = limits
             .cancellation_check_interval
-            .min(cancellation.check_interval())
+            .min(u32::try_from(cancellation.max_work_units_between_polls()).unwrap_or(u32::MAX))
             .max(1);
         if work_units.is_multiple_of(u64::from(effective_interval)) && cancellation.is_cancelled() {
             return self.reject(RuffAdapterError::Cancelled);
         }
-        if deadline_exceeded(started, self.limits.max_wall_millis) {
+        if deadline_exceeded(started, limits.max_wall_millis) {
             return self.reject(RuffAdapterError::Deadline);
         }
-        if work_units > self.limits.max_work_units {
+        if work_units > limits.max_work_units {
             return self.reject(RuffAdapterError::WorkLimit);
         }
         Ok(())
@@ -870,12 +943,12 @@ fn project_tokens(
     work_units: &mut u64,
     limits: RuffLimits,
     started: Instant,
-    cancellation: &Cancellation,
+    cancellation: &CancellationProbe,
 ) -> Result<Vec<RuffTokenFact>, RuffAdapterError> {
     let mut output = Vec::with_capacity(parsed.tokens().len());
     let interval = limits
         .cancellation_check_interval
-        .min(cancellation.check_interval())
+        .min(u32::try_from(cancellation.max_work_units_between_polls()).unwrap_or(u32::MAX))
         .max(1);
     for (ordinal, token) in parsed.tokens().iter().enumerate() {
         *work_units = work_units.saturating_add(1);
@@ -1071,7 +1144,7 @@ struct AstProjectionVisitor<'a> {
     evaluation_ordinals: &'a BTreeMap<NodeKey, u32>,
     limits: RuffLimits,
     started: Instant,
-    cancellation: &'a Cancellation,
+    cancellation: &'a CancellationProbe,
     stack: Vec<RuffOccurrenceId>,
     parent_nodes: Vec<AnyNodeRef<'a>>,
     child_counts: Vec<u32>,
@@ -1090,7 +1163,7 @@ impl<'a> AstProjectionVisitor<'a> {
         evaluation_ordinals: &'a BTreeMap<NodeKey, u32>,
         limits: RuffLimits,
         started: Instant,
-        cancellation: &'a Cancellation,
+        cancellation: &'a CancellationProbe,
         work_units: u64,
     ) -> Self {
         Self {
@@ -1133,7 +1206,9 @@ impl<'a> SourceOrderVisitor<'a> for AstProjectionVisitor<'a> {
         let interval = self
             .limits
             .cancellation_check_interval
-            .min(self.cancellation.check_interval())
+            .min(
+                u32::try_from(self.cancellation.max_work_units_between_polls()).unwrap_or(u32::MAX),
+            )
             .max(1);
         if self.work_units.is_multiple_of(u64::from(interval)) && self.cancellation.is_cancelled() {
             return self.fail(RuffAdapterError::Cancelled);
@@ -1816,999 +1891,188 @@ const fn elapsed_exceeds_deadline(elapsed: Duration, max_wall_millis: u64) -> bo
 }
 
 #[cfg(test)]
-mod tests {
-    use std::fmt::Write as _;
+mod job_tests {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use arrow_schema::{DataType, Field, Schema};
 
     use super::*;
-    use crate::fabric::production_kernel::CompiledSemanticRelease;
+    use crate::provider_contracts::{
+        CancellationHandle, CancellationProbe, ContextIdentity, ProviderBuildIdentity,
+        ProviderContextBinding, ProviderFamilyIdentity, ProviderFamilyRequest, ProviderIdentity,
+        ProviderJobSpec, ProviderPolicyIdentity, ProviderProgramIdentity, ProviderProtocolIdentity,
+        ProviderRelationIdentity, ProviderResourceCeilingSpec, ProviderResourceCeilings,
+        ProviderRunBinding, ProviderRunIdentity, ProviderRunProvenance, ProviderSchemaIdentity,
+        ProviderScopeIdentity, ProviderSourceBinding, SourceIdentity, SuiteIdentity,
+    };
     use crate::tree_sitter_adapter::{TreeSitterAdapter, TreeSitterLanguage};
 
-    type ConfigureBound = fn(&mut RuffLimits);
-
-    fn ruff_adapter() -> Result<RuffAdapter, RuffAdapterError> {
-        let release = CompiledSemanticRelease::current();
-        RuffAdapter::new(release.provider_authority())
-    }
-
-    fn provider_text(source: &str) -> ProviderText {
+    fn provider_text(text: &str) -> ProviderText {
         ProviderText {
-            text: Arc::from(source),
+            text: Arc::from(text),
             original_byte_offsets: Arc::from(
-                source
-                    .char_indices()
+                text.char_indices()
                     .map(|(offset, _)| u64::try_from(offset).unwrap())
-                    .chain(std::iter::once(u64::try_from(source.len()).unwrap()))
+                    .chain(std::iter::once(u64::try_from(text.len()).unwrap()))
                     .collect::<Vec<_>>(),
             ),
         }
     }
 
-    fn latin1_provider_text() -> ProviderText {
-        const SOURCE: &str = "\"\"\"café\"\"\"\nname = 1\n";
-        ProviderText {
-            text: Arc::from(SOURCE),
-            original_byte_offsets: Arc::from(
-                (0_u64..=u64::try_from(SOURCE.chars().count()).unwrap()).collect::<Vec<_>>(),
-            ),
+    fn limits() -> ProviderResourceCeilingSpec {
+        ProviderResourceCeilingSpec {
+            max_relations: 32,
+            max_batches_per_relation: 8,
+            max_input_bytes: 1 << 20,
+            max_rows: 100_000,
+            max_bytes: 1 << 24,
+            max_diagnostics: 1_000,
+            max_work_units: 1_000_000,
+            max_wall_millis: 30_000,
+            max_visited_nodes: 100_000,
+            max_traversal_depth: 256,
+            max_workers: 1,
+            max_retained_revisions: 2,
+            cancellation_poll_work_units: 1,
+            cancellation_ack_millis: 2_000,
         }
     }
 
-    fn tree_snapshot(revision: u64, source: &ProviderText) -> TreeSitterSnapshot {
-        let release = CompiledSemanticRelease::current();
-        TreeSitterAdapter::new(release.provider_authority(), TreeSitterLanguage::Python)
-            .unwrap()
-            .parse_full(revision, source.clone(), &Cancellation::default())
-            .unwrap()
-    }
-
-    fn ast_fact(
-        id: u64,
-        raw_kind: &'static str,
-        category: RuffAstCategory,
-        start_byte: u64,
-        end_byte: u64,
-        line: u32,
-    ) -> RuffAstFact {
-        RuffAstFact {
-            id: RuffOccurrenceId(id),
-            raw_kind_id: 0,
-            raw_kind: raw_kind.to_owned(),
-            category,
-            disposition: ProviderRawKindDisposition::Normalize,
-            start_byte,
-            end_byte,
-            line,
-            column: 0,
-            parent: None,
-            child_role: None,
-            child_ordinal: 0,
-            source_ordinal: u32::try_from(id).unwrap(),
-            evaluation_ordinal: None,
-            explicit_parenthesized: false,
-        }
-    }
-
-    fn parse_with_limits(
-        source: &ProviderText,
-        tree: &TreeSitterSnapshot,
-        configure: impl FnOnce(&mut RuffLimits),
-    ) -> Result<RuffSnapshot, RuffAdapterError> {
-        let mut adapter = ruff_adapter().unwrap();
-        configure(&mut adapter.limits);
-        adapter.parse(1, source.clone(), tree, &Cancellation::default())
-    }
-
-    fn has_parent_role(
-        snapshot: &RuffSnapshot,
-        parent_raw_kind: &str,
-        child_raw_kind: &str,
-        role: RuffChildRole,
-    ) -> bool {
-        snapshot.ast.iter().any(|child| {
-            child.raw_kind == child_raw_kind
-                && child.child_role == Some(role)
-                && child.parent.is_some_and(|parent_id| {
-                    snapshot
-                        .ast
-                        .iter()
-                        .any(|parent| parent.id == parent_id && parent.raw_kind == parent_raw_kind)
-                })
-        })
-    }
-
-    fn fixture() -> serde_json::Value {
-        serde_json::from_str(include_str!(
-            "../contracts/fixtures/ruff/adapter-cases-v1.json"
-        ))
-        .unwrap()
-    }
-
-    #[allow(clippy::too_many_lines)] // The KAT frames every public semantic field explicitly.
-    fn snapshot_digest(snapshot: &RuffSnapshot) -> String {
-        fn frame(hasher: &mut crate::integrity::IntegrityHasher, bytes: &[u8]) {
-            hasher.update(&u64::try_from(bytes.len()).unwrap().to_le_bytes());
-            hasher.update(bytes);
-        }
-        fn option_u64(hasher: &mut crate::integrity::IntegrityHasher, value: Option<u64>) {
-            match value {
-                Some(value) => {
-                    hasher.update(&[1]);
-                    hasher.update(&value.to_le_bytes());
-                }
-                None => {
-                    hasher.update(&[0]);
-                }
-            }
-        }
-
-        let mut hasher = crate::integrity::IntegrityHasher::for_domain(
-            crate::integrity::IntegrityDomain::RuffFrontendProjection,
-        );
-        hasher.update(&snapshot.revision.to_le_bytes());
-        frame(&mut hasher, snapshot.catalog_id.as_bytes());
-        frame(&mut hasher, snapshot.provider_version.as_bytes());
-        frame(
-            &mut hasher,
-            snapshot.runtime_inventory_fingerprint.as_bytes(),
-        );
-        frame(
-            &mut hasher,
-            snapshot.source.provider_image_fingerprint.as_bytes(),
-        );
-        hasher.update(&snapshot.source.start_byte.to_le_bytes());
-        hasher.update(&snapshot.source.end_byte.to_le_bytes());
-        hasher.update(&snapshot.source.line_count.to_le_bytes());
-        hasher.update(&u64::try_from(snapshot.tokens.len()).unwrap().to_le_bytes());
-        for fact in snapshot.tokens.iter() {
-            hasher.update(&fact.ordinal.to_le_bytes());
-            hasher.update(&fact.raw_kind_id.to_le_bytes());
-            frame(&mut hasher, fact.raw_kind.as_bytes());
-            hasher.update(&[fact.class as u8]);
-            hasher.update(&fact.start_byte.to_le_bytes());
-            hasher.update(&fact.end_byte.to_le_bytes());
-            hasher.update(&fact.line.to_le_bytes());
-            hasher.update(&fact.column.to_le_bytes());
-            match &fact.spelling {
-                Some(RuffTokenSpelling::Slice(value)) => {
-                    hasher.update(&[1]);
-                    frame(&mut hasher, value.as_bytes());
-                }
-                Some(RuffTokenSpelling::Blake3(value)) => {
-                    hasher.update(&[2]);
-                    frame(&mut hasher, value.as_bytes());
-                }
-                None => {
-                    hasher.update(&[0]);
-                }
-            }
-            option_u64(&mut hasher, fact.syntax_id.map(|id| id.0));
-        }
-        hasher.update(&u64::try_from(snapshot.ast.len()).unwrap().to_le_bytes());
-        for fact in snapshot.ast.iter() {
-            hasher.update(&fact.id.0.to_le_bytes());
-            hasher.update(&fact.raw_kind_id.to_le_bytes());
-            frame(&mut hasher, fact.raw_kind.as_bytes());
-            hasher.update(&[fact.category as u8]);
-            hasher.update(&[match fact.disposition {
-                ProviderRawKindDisposition::Normalize => 0,
-                ProviderRawKindDisposition::Ignore => 1,
-                ProviderRawKindDisposition::Unsupported => 2,
-            }]);
-            hasher.update(&fact.start_byte.to_le_bytes());
-            hasher.update(&fact.end_byte.to_le_bytes());
-            hasher.update(&fact.line.to_le_bytes());
-            hasher.update(&fact.column.to_le_bytes());
-            option_u64(&mut hasher, fact.parent.map(|id| id.0));
-            hasher.update(&[fact.child_role.map_or(u8::MAX, |role| role as u8)]);
-            hasher.update(&fact.child_ordinal.to_le_bytes());
-            hasher.update(&fact.source_ordinal.to_le_bytes());
-            option_u64(&mut hasher, fact.evaluation_ordinal.map(u64::from));
-            hasher.update(&[u8::from(fact.explicit_parenthesized)]);
-        }
-        hasher.update(
-            &u64::try_from(snapshot.comments.len())
-                .unwrap()
-                .to_le_bytes(),
-        );
-        for fact in snapshot.comments.iter() {
-            hasher.update(&fact.start_byte.to_le_bytes());
-            hasher.update(&fact.end_byte.to_le_bytes());
-            hasher.update(&[fact.placement as u8, u8::from(fact.block_member)]);
-        }
-        hasher.update(
-            &u64::try_from(snapshot.directives.len())
-                .unwrap()
-                .to_le_bytes(),
-        );
-        for fact in snapshot.directives.iter() {
-            hasher.update(&[fact.kind as u8]);
-            hasher.update(&fact.start_byte.to_le_bytes());
-            hasher.update(&fact.end_byte.to_le_bytes());
-            option_u64(&mut hasher, fact.target.map(|id| id.0));
-        }
-        hasher.update(&u64::try_from(snapshot.strings.len()).unwrap().to_le_bytes());
-        for fact in snapshot.strings.iter() {
-            hasher.update(&fact.start_byte.to_le_bytes());
-            hasher.update(&fact.end_byte.to_le_bytes());
-            hasher.update(&[u8::from(fact.multiline), u8::from(fact.interpolated)]);
-            option_u64(&mut hasher, fact.syntax_id.map(|id| id.0));
-        }
-        hasher.update(
-            &u64::try_from(snapshot.docstrings.len())
-                .unwrap()
-                .to_le_bytes(),
-        );
-        for fact in snapshot.docstrings.iter() {
-            hasher.update(&fact.start_byte.to_le_bytes());
-            hasher.update(&fact.end_byte.to_le_bytes());
-            hasher.update(&fact.owner.0.to_le_bytes());
-        }
-        hasher.update(
-            &u64::try_from(snapshot.continuation_line_starts.len())
-                .unwrap()
-                .to_le_bytes(),
-        );
-        for offset in snapshot.continuation_line_starts.iter() {
-            hasher.update(&offset.to_le_bytes());
-        }
-        hasher.update(
-            &u64::try_from(snapshot.diagnostics.len())
-                .unwrap()
-                .to_le_bytes(),
-        );
-        for fact in snapshot.diagnostics.iter() {
-            hasher.update(&[fact.kind as u8]);
-            frame(&mut hasher, fact.message.as_bytes());
-            hasher.update(&fact.start_byte.to_le_bytes());
-            hasher.update(&fact.end_byte.to_le_bytes());
-            hasher.update(
-                &u64::try_from(fact.tree_sitter_recovery_ids.len())
-                    .unwrap()
-                    .to_le_bytes(),
-            );
-            for id in fact.tree_sitter_recovery_ids.iter() {
-                hasher.update(&id.0.to_le_bytes());
-            }
-        }
-        hasher.update(
-            &u64::try_from(snapshot.correspondences.len())
-                .unwrap()
-                .to_le_bytes(),
-        );
-        for edge in snapshot.correspondences.iter() {
-            hasher.update(&edge.ruff_id.0.to_le_bytes());
-            hasher.update(&edge.tree_sitter_id.0.to_le_bytes());
-        }
-        crate::integrity::frame_digest(hasher.finalize())
-    }
-
-    const RICH_SOURCE: &str = concat!(
-        "\"\"\"module docs\"\"\"\n",
-        "# own-line block\n",
-        "# second block line\n",
-        "@decorate(flag())\n",
-        "def render(x: int = default()) -> str:\n",
-        "    \"\"\"function docs\"\"\"\n",
-        "    total = (x + 1)\n",
-        "    text = f\"value {total}\"  # noqa: F401\n",
-        "    # fmt: off\n",
-        "    legacy = total  # type: int\n",
-        "    # fmt: on\n",
-        "    if total:\n",
-        "        return text\n",
-        "    return \"\"  # type: ignore[return-value]\n",
-        "result[index()] = render(1) \\\n",
-        "    + \"!\"\n",
-    );
-
-    #[test]
-    #[allow(clippy::too_many_lines)] // One fixture oracle covers every GEN section 15 projection family together.
-    fn wp31_behavioral_acceptance() {
-        let mut projection_digests = Vec::new();
-        for case in fixture()["cases"].as_array().unwrap() {
-            let revision = case["revision"].as_u64().unwrap();
-            let text = provider_text(case["source"].as_str().unwrap());
-            let tree = tree_snapshot(revision, &text);
-            let snapshot = ruff_adapter()
-                .unwrap()
-                .parse(revision, text, &tree, &Cancellation::default())
-                .unwrap();
-            projection_digests.push((
-                case["case_id"].as_str().unwrap().to_owned(),
-                snapshot_digest(&snapshot),
-                case["expected_projection_digest"]
-                    .as_str()
-                    .unwrap()
-                    .to_owned(),
-            ));
-            assert_eq!(
-                u64::try_from(snapshot.tokens.len()).unwrap(),
-                case["expected_token_count"].as_u64().unwrap()
-            );
-            assert_eq!(
-                u64::try_from(snapshot.ast.len()).unwrap(),
-                case["expected_ast_count"].as_u64().unwrap()
-            );
-            assert_eq!(
-                !snapshot.diagnostics.is_empty(),
-                case["expected_recovery"].as_bool().unwrap()
-            );
-            if case["case_id"] == "python-pattern-and-type-parameters" {
-                assert!(
-                    snapshot
-                        .ast
-                        .iter()
-                        .any(|fact| fact.category == RuffAstCategory::Pattern)
-                );
-                assert!(
-                    snapshot
-                        .ast
-                        .iter()
-                        .any(|fact| fact.category == RuffAstCategory::TypeSyntax)
-                );
-            }
-        }
-        assert!(
-            projection_digests
-                .iter()
-                .all(|(_, actual, expected)| actual == expected),
-            "Ruff independent projection KATs drifted: {projection_digests:#?}"
-        );
-
-        let text = provider_text(RICH_SOURCE);
-        let tree = tree_snapshot(1, &text);
-        let mut adapter = ruff_adapter().unwrap();
-        let snapshot = adapter
-            .parse(1, text, &tree, &Cancellation::default())
-            .unwrap();
-
-        assert_eq!(snapshot.catalog_id, "ruff-python-0-0-7");
-        assert!(snapshot.provider_version.ends_with("python-target=3.14"));
-        assert_eq!(snapshot.source.start_byte, 0);
-        assert_eq!(
-            snapshot.source.end_byte,
-            u64::try_from(RICH_SOURCE.len()).unwrap()
-        );
-        assert!(!snapshot.tokens.is_empty());
-        assert!(!snapshot.ast.is_empty());
-        assert!(snapshot.comments.len() >= 4);
-        assert_eq!(snapshot.directives.len(), 5);
-        for kind in [
-            RuffDirectiveKind::Noqa,
-            RuffDirectiveKind::TypeIgnore,
-            RuffDirectiveKind::TypeComment,
-            RuffDirectiveKind::Formatter,
-        ] {
-            assert!(snapshot.directives.iter().any(|fact| fact.kind == kind));
-        }
-        assert_eq!(snapshot.docstrings.len(), 2);
-        assert!(snapshot.strings.iter().any(|region| region.interpolated));
-        assert_eq!(snapshot.continuation_line_starts.len(), 1);
-        assert!(snapshot.ast.iter().any(|fact| fact.explicit_parenthesized));
-        assert!(
-            snapshot
-                .tokens
-                .iter()
-                .enumerate()
-                .all(|(ordinal, fact)| fact.ordinal == u32::try_from(ordinal).unwrap())
-        );
-        assert!(snapshot.tokens.iter().any(|fact| {
-            fact.class == RuffTokenClass::Keyword
-                && matches!(&fact.spelling, Some(RuffTokenSpelling::Slice(value)) if value == "def")
-        }));
-        assert!(snapshot.tokens.iter().any(|fact| {
-            fact.class == RuffTokenClass::Literal
-                && matches!(&fact.spelling, Some(RuffTokenSpelling::Blake3(value)) if value.starts_with("b3:"))
-        }));
-        assert!(
-            snapshot.tokens.iter().any(|fact| {
-                fact.class == RuffTokenClass::Identifier && fact.syntax_id.is_some()
-            })
-        );
-        assert!(snapshot.ast.iter().any(|fact| {
-            fact.evaluation_ordinal
-                .is_some_and(|ordinal| ordinal != fact.source_ordinal)
-        }));
-        for needle in ["decorate(flag())", "default()"] {
-            let start = u64::try_from(RICH_SOURCE.find(needle).unwrap()).unwrap();
-            assert!(snapshot.ast.iter().any(|fact| {
-                fact.category == RuffAstCategory::CallExpression
-                    && fact.start_byte == start
-                    && fact.evaluation_ordinal.is_some()
-            }));
-        }
-        for role in [
-            RuffChildRole::Body,
-            RuffChildRole::Parameter,
-            RuffChildRole::Annotation,
-            RuffChildRole::Condition,
-            RuffChildRole::Target,
-            RuffChildRole::Value,
-            RuffChildRole::Callee,
-        ] {
-            assert!(
-                snapshot
-                    .ast
-                    .iter()
-                    .any(|fact| fact.child_role == Some(role))
-            );
-        }
-        assert!(
-            snapshot
-                .ast
-                .iter()
-                .any(|fact| fact.category == RuffAstCategory::CallExpression)
-        );
-        assert!(
-            !snapshot
-                .ast
-                .iter()
-                .any(|fact| fact.category == RuffAstCategory::ImportSyntax)
-        );
-        assert!(!snapshot.correspondences.is_empty());
-        assert!(snapshot.directives.iter().all(|fact| fact.target.is_some()));
-        assert!(snapshot.strings.iter().all(|fact| fact.syntax_id.is_some()));
-        assert!(snapshot.docstrings.iter().all(|fact| {
-            snapshot.ast.iter().any(|owner| {
-                owner.id == fact.owner
-                    && matches!(
-                        owner.category,
-                        RuffAstCategory::Block | RuffAstCategory::DeclarationSyntax
-                    )
-            })
-        }));
-        assert!(snapshot.diagnostics.is_empty());
-
-        let summary = adapter.active_index_summary().unwrap();
-        assert_eq!(summary.token_count, snapshot.metrics.token_count);
-        assert_eq!(summary.comment_count, summary.indexed_comment_count);
-        assert_eq!(adapter.metrics().retained_revisions, 1);
-    }
-
-    #[test]
-    fn wp31_structural_acceptance() {
-        let text = provider_text(RICH_SOURCE);
-        let tree = tree_snapshot(1, &text);
-        let snapshot = ruff_adapter()
-            .unwrap()
-            .parse(1, text, &tree, &Cancellation::default())
-            .unwrap();
-
-        assert!(snapshot.tokens.iter().all(|fact| !fact.raw_kind.is_empty()));
-        assert!(snapshot.ast.iter().all(|fact| {
-            !fact.raw_kind.is_empty()
-                && fact.disposition == ProviderRawKindDisposition::Normalize
-                && RuffAstCategory::from_registry_code(fact.category.registry_code())
-                    == Some(fact.category)
-        }));
-        assert!(snapshot.tokens.iter().any(|fact| fact.raw_kind == "Def"));
-        assert!(
-            snapshot
-                .ast
-                .iter()
-                .any(|fact| fact.raw_kind == "StmtFunctionDef")
-        );
-        assert_eq!(snapshot.ast[0].category, RuffAstCategory::Block);
-        assert!(
-            snapshot
-                .ast
-                .iter()
-                .skip(1)
-                .all(|fact| fact.parent.is_some())
-        );
-        assert!(snapshot.ast.windows(2).all(|pair| {
-            pair[0].source_ordinal < pair[1].source_ordinal
-                && pair[0].start_byte <= pair[0].end_byte
-        }));
-        let mut child_ordinals = BTreeMap::<RuffOccurrenceId, Vec<u32>>::new();
-        for (parent, child_ordinal) in snapshot
-            .ast
-            .iter()
-            .filter_map(|fact| fact.parent.map(|parent| (parent, fact.child_ordinal)))
-        {
-            child_ordinals
-                .entry(parent)
-                .or_default()
-                .push(child_ordinal);
-        }
-        assert!(child_ordinals.values().all(|ordinals| {
-            ordinals
-                .iter()
-                .copied()
-                .eq(0..u32::try_from(ordinals.len()).unwrap())
-        }));
-        assert!(snapshot.correspondences.iter().all(|edge| {
-            snapshot
-                .ast
-                .iter()
-                .find(|fact| fact.id == edge.ruff_id)
-                .is_some_and(|ruff| {
-                    tree.facts
-                        .iter()
-                        .find(|fact| fact.id == edge.tree_sitter_id)
-                        .is_some_and(|fact| {
-                            fact.named
-                                && tree_field_compatible(
-                                    ruff.child_role,
-                                    fact.field_name.as_deref(),
-                                )
-                        })
-                })
-        }));
-
-        let latin1 = latin1_provider_text();
-        let latin1_tree = tree_snapshot(1, &latin1);
-        let latin1_snapshot = ruff_adapter()
-            .unwrap()
-            .parse(1, latin1, &latin1_tree, &Cancellation::default())
-            .unwrap();
-        assert!(
-            latin1_snapshot
-                .tokens
-                .iter()
-                .all(|token| token.end_byte <= 20)
-        );
-        assert_eq!(latin1_snapshot.docstrings.len(), 1);
-        assert_eq!(
-            latin1_snapshot.docstrings[0].owner,
-            latin1_snapshot.ast[0].id
-        );
-    }
-
-    #[test]
-    #[allow(clippy::too_many_lines)] // One matrix protects every application-owned GEN 16.2 field role.
-    fn wp31_semantic_edge_acceptance() {
-        const ROLE_SOURCE: &str = concat!(
-            "async def async_roles(task):\n",
-            "    result = await task()\n",
-            "    return result\n",
-            "def roles(items, ready, condition):\n",
-            "    annotated: int = 1\n",
-            "    annotated += 2\n",
-            "    for item in items:\n",
-            "        del item\n",
-            "    while ready:\n",
-            "        assert check()\n",
-            "        ready = False\n",
-            "    choice = left if condition else right\n",
-            "    if condition:\n",
-            "        pass\n",
-            "    else:\n",
-            "        pass\n",
-            "    with manager() as handle:\n",
-            "        call(name=annotated)\n",
-            "    try:\n",
-            "        raise Error()\n",
-            "    except Error:\n",
-            "        pass\n",
-            "    yield annotated\n",
-            "    yield from items\n",
-        );
-        const DOC_SOURCE: &str = concat!(
-            "\"\"\"module docs\"\"\"\n",
-            "class Container:\n",
-            "    \"\"\"class docs\"\"\"\n",
-            "    def method(self):\n",
-            "        \"\"\"method docs\"\"\"\n",
-            "        return 1\n",
-        );
-        let text = provider_text(ROLE_SOURCE);
-        let tree = tree_snapshot(1, &text);
-        let snapshot = ruff_adapter()
-            .unwrap()
-            .parse(1, text, &tree, &Cancellation::default())
-            .unwrap();
-        for (parent, child, role) in [
-            ("StmtAugAssign", "ExprName", RuffChildRole::Target),
-            ("StmtAnnAssign", "ExprName", RuffChildRole::Target),
-            ("StmtAnnAssign", "ExprName", RuffChildRole::Annotation),
-            ("StmtAnnAssign", "ExprNumberLiteral", RuffChildRole::Value),
-            ("StmtAugAssign", "ExprNumberLiteral", RuffChildRole::Value),
-            ("StmtFor", "ExprName", RuffChildRole::Target),
-            ("StmtFor", "ExprName", RuffChildRole::Iterable),
-            ("StmtDelete", "ExprName", RuffChildRole::Target),
-            ("StmtWhile", "ExprName", RuffChildRole::Condition),
-            ("StmtAssert", "ExprCall", RuffChildRole::Condition),
-            ("ExprIf", "ExprName", RuffChildRole::Condition),
-            ("ExprAwait", "ExprCall", RuffChildRole::Value),
-            ("StmtRaise", "ExprCall", RuffChildRole::Value),
-            ("ExprYield", "ExprName", RuffChildRole::Value),
-            ("ExprYieldFrom", "ExprName", RuffChildRole::Value),
-            ("Arguments", "Keyword", RuffChildRole::KeywordArgument),
-            (
-                "StmtTry",
-                "ExceptHandlerExceptHandler",
-                RuffChildRole::Handler,
-            ),
-            ("StmtIf", "ElifElseClause", RuffChildRole::Clause),
-            ("StmtWith", "WithItem", RuffChildRole::Item),
-        ] {
-            assert!(
-                has_parent_role(&snapshot, parent, child, role),
-                "missing {parent} -> {child} role {role:?}"
-            );
-        }
-
-        assert_eq!(token_class(TokenKind::EndOfFile), RuffTokenClass::EndOfFile);
-        let mut token = RuffTokenFact {
-            ordinal: 0,
-            raw_kind_id: 0,
-            raw_kind: "Name".to_owned(),
-            class: RuffTokenClass::Identifier,
-            start_byte: 5,
-            end_byte: 6,
-            line: 1,
-            column: 0,
-            spelling: Some(RuffTokenSpelling::Slice("x".into())),
-            syntax_id: None,
+    fn job_for_lane(
+        lane: ProviderLane,
+        spec: ProviderResourceCeilingSpec,
+    ) -> (CancellationHandle, ProviderJob) {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Int64,
+            false,
+        )]));
+        let (owner, cancellation) =
+            CancellationProbe::pair(spec.cancellation_poll_work_units).unwrap();
+        let (provider, relation) = match lane {
+            ProviderLane::TreeSitter => ("tree-sitter-python", "provider.tree_sitter.cst_node"),
+            ProviderLane::Ruff => ("ruff-python", "provider.ruff.ast_node"),
+            _ => ("wrong-provider", "provider.wrong"),
         };
-        let candidates = [
-            ast_fact(1, "ExprName", RuffAstCategory::Expression, 5, 10, 1),
-            ast_fact(2, "ExprName", RuffAstCategory::Expression, 4, 7, 1),
-        ];
-        link_tokens_to_ast(std::slice::from_mut(&mut token), &candidates);
-        assert_eq!(token.syntax_id, Some(RuffOccurrenceId(2)));
-
-        let eol_candidates = [
-            ast_fact(1, "ExprName", RuffAstCategory::Expression, 1, 19, 2),
-            ast_fact(2, "ExprName", RuffAstCategory::Expression, 20, 21, 3),
-            ast_fact(3, "ExprName", RuffAstCategory::Expression, 1, 19, 3),
-            ast_fact(4, "ExprName", RuffAstCategory::Expression, 10, 19, 3),
-        ];
-        assert_eq!(
-            directive_target(&eol_candidates, CommentLinePosition::EndOfLine, 3, 20, 30),
-            Some(RuffOccurrenceId(4))
-        );
-        let own_line_candidates = [
-            ast_fact(5, "ExprName", RuffAstCategory::Expression, 21, 40, 4),
-            ast_fact(6, "ExprName", RuffAstCategory::Expression, 21, 23, 4),
-        ];
-        assert_eq!(
-            directive_target(
-                &own_line_candidates,
-                CommentLinePosition::OwnLine,
-                3,
-                10,
-                20
+        let job = ProviderJob::try_new(ProviderJobSpec {
+            suite: SuiteIdentity::try_new("codefabric-relational-data-fabric@2.3.0").unwrap(),
+            provider: ProviderIdentity::try_new(provider).unwrap(),
+            protocol: ProviderProtocolIdentity::try_new("in-process-arrow@1").unwrap(),
+            source: ProviderSourceBinding::try_new(
+                SourceIdentity::try_new("source-1").unwrap(),
+                [1; 16],
+                1,
+                [2; 32],
+            )
+            .unwrap(),
+            context: ProviderContextBinding::try_new(
+                ContextIdentity::try_new("context-1").unwrap(),
+                [3; 32],
+                [4; 32],
+            )
+            .unwrap(),
+            run: ProviderRunBinding::try_new(
+                ProviderRunIdentity::try_new(format!("{provider}.run-1")).unwrap(),
+                if lane == ProviderLane::Ruff {
+                    [6; 16]
+                } else {
+                    [5; 16]
+                },
+            )
+            .unwrap(),
+            lane,
+            trust: ProviderTrustPosture::InProcessConstrained,
+            requests: vec![
+                ProviderFamilyRequest::try_new(
+                    ProviderFamilyIdentity::try_new(format!("{provider}.family")).unwrap(),
+                    ProviderRelationIdentity::try_new(relation).unwrap(),
+                    ProviderSchemaIdentity::try_new(format!("{provider}.schema")).unwrap(),
+                    schema,
+                    ProviderScopeIdentity::try_new("source-1").unwrap(),
+                    1,
+                )
+                .unwrap(),
+            ],
+            ceilings: ProviderResourceCeilings::try_new(spec).unwrap(),
+            deadline: Instant::now() + Duration::from_secs(30),
+            cancellation,
+            provenance: ProviderRunProvenance::new(
+                ProviderBuildIdentity::try_new(format!("{provider}.build")).unwrap(),
+                ProviderPolicyIdentity::try_new("policy.v2.3").unwrap(),
+                ProviderProgramIdentity::try_new("provider-program.v2.3").unwrap(),
             ),
-            Some(RuffOccurrenceId(6))
-        );
-        assert_eq!(string_syntax_id(&own_line_candidates, 21, 22), None);
-        let string_candidates = [
-            ast_fact(7, "ExprStringLiteral", RuffAstCategory::Literal, 10, 30, 1),
-            ast_fact(8, "StringLiteral", RuffAstCategory::Literal, 10, 20, 1),
-        ];
-        assert_eq!(
-            string_syntax_id(&string_candidates, 12, 18),
-            Some(RuffOccurrenceId(8))
-        );
-
-        for (left, right, expected) in [
-            ((1, 3), (2, 4), true),
-            ((1, 2), (2, 3), false),
-            ((2, 3), (1, 2), false),
-            ((1, 3), (1, 3), true),
-            ((2, 2), (1, 3), true),
-            ((1, 3), (3, 3), true),
-            ((4, 4), (1, 3), false),
-            ((1, 3), (0, 0), false),
-            ((2, 2), (2, 2), true),
-        ] {
-            assert_eq!(
-                ranges_overlap(left.0, left.1, right.0, right.1),
-                expected,
-                "overlap drift for {left:?} and {right:?}"
-            );
-        }
-
-        let doc_text = provider_text(DOC_SOURCE);
-        let doc_tree = tree_snapshot(1, &doc_text);
-        let doc_snapshot = ruff_adapter()
-            .unwrap()
-            .parse(1, doc_text.clone(), &doc_tree, &Cancellation::default())
-            .unwrap();
-        let parsed = parse_unchecked(
-            &doc_text.text,
-            ParseOptions::from(PySourceType::Python).with_target_version(PythonVersion::PY314),
-        )
-        .try_into_module()
+        })
         .unwrap();
-        let boundary_map = ProviderBoundaryMap::new(&doc_text).unwrap();
-        let mut ast_with_decoys = doc_snapshot.ast.to_vec();
-        let class = ast_with_decoys
-            .iter()
-            .find(|fact| fact.raw_kind == "StmtClassDef")
+        (owner, job)
+    }
+
+    fn tree(text: &str, revision: u64) -> TreeSitterSnapshot {
+        let (_, job) = job_for_lane(ProviderLane::TreeSitter, limits());
+        TreeSitterAdapter::new(TreeSitterLanguage::Python)
             .unwrap()
-            .clone();
-        let mut same_start = class.clone();
-        same_start.id = RuffOccurrenceId(900);
-        same_start.end_byte = same_start.end_byte.saturating_sub(1);
-        same_start.raw_kind = "Identifier".to_owned();
-        let mut same_raw = class;
-        same_raw.id = RuffOccurrenceId(901);
-        same_raw.start_byte = same_raw.start_byte.saturating_add(1);
-        same_raw.end_byte = same_raw.end_byte.saturating_sub(1);
-        ast_with_decoys.insert(0, same_raw);
-        ast_with_decoys.insert(0, same_start);
-        let docstrings = project_docstrings(&parsed, &boundary_map, &ast_with_decoys).unwrap();
-        assert_eq!(docstrings.len(), 3);
-        assert!(docstrings.iter().all(|docstring| docstring.owner.0 < 900));
-        for owner_kind in ["ModModule", "StmtClassDef", "StmtFunctionDef"] {
-            assert!(docstrings.iter().any(|docstring| {
-                doc_snapshot
-                    .ast
-                    .iter()
-                    .any(|fact| fact.id == docstring.owner && fact.raw_kind == owner_kind)
-            }));
-        }
+            .parse_full(&job, revision, provider_text(text))
+            .unwrap()
     }
 
     #[test]
-    fn wp31_exact_limit_and_identity_acceptance() {
-        let source = provider_text("value = call(1)\n");
-        let tree = tree_snapshot(1, &source);
-        let baseline = ruff_adapter()
-            .unwrap()
-            .parse(1, source.clone(), &tree, &Cancellation::default())
+    fn ruff_job_drives_owned_snapshot_and_honest_whole_file_reparse() {
+        let mut adapter = RuffAdapter::new().unwrap();
+        let (_, first_job) = job_for_lane(ProviderLane::Ruff, limits());
+        let first_text = provider_text("value = 1\n");
+        let first = adapter
+            .parse(&first_job, 1, first_text, &tree("value = 1\n", 1))
             .unwrap();
-        let input_bytes = u64::try_from(source.text.len()).unwrap();
-        assert!(
-            parse_with_limits(&source, &tree, |limits| {
-                limits.max_input_bytes = input_bytes;
-            })
-            .is_ok()
-        );
-        assert!(
-            parse_with_limits(&source, &tree, |limits| {
-                limits.max_output_records = baseline.metrics.output_records;
-            })
-            .is_ok()
-        );
-        assert!(
-            parse_with_limits(&source, &tree, |limits| {
-                limits.max_output_bytes = baseline.metrics.output_bytes;
-            })
-            .is_ok()
-        );
-        assert!(
-            parse_with_limits(&source, &tree, |limits| {
-                limits.max_work_units = baseline.metrics.work_units;
-            })
-            .is_ok()
-        );
-        assert!(
-            parse_with_limits(&source, &tree, |limits| {
-                limits.max_diagnostics = 0;
-            })
-            .is_ok()
-        );
+        assert!(!first.tokens.is_empty());
+        assert!(!first.ast.is_empty());
 
-        for mutate in [
-            |evidence: &mut TreeSitterSnapshot| evidence.revision = 2,
-            |evidence: &mut TreeSitterSnapshot| evidence.catalog_id = "wrong-catalog",
-            |evidence: &mut TreeSitterSnapshot| {
-                evidence.provider_image_fingerprint = "b3:wrong-image".into();
-            },
-        ] {
-            let mut evidence = tree.clone();
-            mutate(&mut evidence);
-            assert_eq!(
-                ruff_adapter().unwrap().parse(
-                    1,
-                    source.clone(),
-                    &evidence,
-                    &Cancellation::default()
-                ),
-                Err(RuffAdapterError::MismatchedTreeSitterEvidence)
-            );
-        }
+        let (_, second_job) = job_for_lane(ProviderLane::Ruff, limits());
+        let second = adapter
+            .parse(
+                &second_job,
+                2,
+                provider_text("value = 2\nother = value\n"),
+                &tree("value = 2\nother = value\n", 2),
+            )
+            .unwrap();
+        assert_eq!(second.revision, 2);
+        assert_eq!(adapter.metrics().retained_revisions, 1);
+        assert!(adapter.active_index_summary().unwrap().token_count > 0);
+    }
 
-        let mut progress = ruff_adapter().unwrap();
-        progress.limits.max_work_units = 5;
+    #[test]
+    fn ruff_job_limits_cancellation_and_lane_are_causal() {
+        let text = "value = 1\n";
+        let evidence = tree(text, 1);
+        let mut adapter = RuffAdapter::new().unwrap();
+        let (owner, cancelled_job) = job_for_lane(ProviderLane::Ruff, limits());
+        owner.cancel();
         assert_eq!(
-            progress.check_progress(Instant::now(), 5, &Cancellation::default()),
-            Ok(())
-        );
-        assert_eq!(
-            progress.check_progress(Instant::now(), 6, &Cancellation::default()),
-            Err(RuffAdapterError::WorkLimit)
-        );
-        let cancellation = Cancellation::with_check_interval(2);
-        cancellation.cancel();
-        let mut interval = ruff_adapter().unwrap();
-        interval.limits.cancellation_check_interval = 2;
-        assert_eq!(
-            interval.check_progress(Instant::now(), 1, &cancellation),
-            Ok(())
-        );
-        assert_eq!(
-            interval.check_progress(Instant::now(), 2, &cancellation),
+            adapter.parse(&cancelled_job, 1, provider_text(text), &evidence),
             Err(RuffAdapterError::Cancelled)
         );
 
-        let mut rejected = ruff_adapter().unwrap();
+        let mut tiny = limits();
+        tiny.max_input_bytes = 1;
+        let (_, tiny_job) = job_for_lane(ProviderLane::Ruff, tiny);
         assert_eq!(
-            rejected.reject::<()>(RuffAdapterError::InputLimit),
+            adapter.parse(&tiny_job, 1, provider_text(text), &evidence),
             Err(RuffAdapterError::InputLimit)
         );
-        assert_eq!(rejected.metrics().rejected_runs, 1);
-        assert_eq!(rejected.metrics().cancelled_runs, 0);
-        assert_eq!(
-            rejected.reject::<()>(RuffAdapterError::Cancelled),
-            Err(RuffAdapterError::Cancelled)
-        );
-        assert_eq!(rejected.metrics().rejected_runs, 2);
-        assert_eq!(rejected.metrics().cancelled_runs, 1);
 
-        assert!(!elapsed_exceeds_deadline(Duration::from_millis(5), 5));
-        assert!(elapsed_exceeds_deadline(Duration::from_millis(6), 5));
-        assert!(!deadline_exceeded(Instant::now(), 1_000));
-        assert!(deadline_exceeded(
-            Instant::now()
-                .checked_sub(Duration::from_millis(2))
-                .unwrap(),
-            1
+        let (_, wrong_job) = job_for_lane(ProviderLane::TreeSitter, limits());
+        assert!(matches!(
+            adapter.parse(&wrong_job, 1, provider_text(text), &evidence),
+            Err(RuffAdapterError::ProviderVersionMismatch(_))
         ));
     }
 
     #[test]
-    #[allow(clippy::too_many_lines)] // One negative oracle isolates every independent publication and resource boundary.
-    fn wp31_negative_zero_state() {
-        for mutate in [
-            |inventory: &mut RuffPythonInventory| inventory.catalog_id = "wrong-catalog",
-            |inventory: &mut RuffPythonInventory| inventory.provider_version = "wrong-version",
-            |inventory: &mut RuffPythonInventory| {
-                inventory.runtime_inventory_fingerprint = "b3:drift";
-            },
-        ] {
-            let mut drifted = RUFF_PYTHON_FRONTEND;
-            mutate(&mut drifted);
-            assert!(matches!(
-                validate_runtime_inventory(&drifted),
-                Err(RuffAdapterError::ProviderVersionMismatch(_))
-            ));
-        }
-
-        let malformed = provider_text("def broken(:\n    pass\n");
-        let malformed_tree = tree_snapshot(1, &malformed);
-        let malformed_snapshot = ruff_adapter()
-            .unwrap()
-            .parse(1, malformed, &malformed_tree, &Cancellation::default())
-            .unwrap();
-        assert!(!malformed_snapshot.diagnostics.is_empty());
-        assert!(
-            malformed_tree
-                .facts
-                .iter()
-                .any(|fact| fact.error || fact.missing)
-        );
-        for diagnostic in malformed_snapshot.diagnostics.iter() {
-            assert!(diagnostic.tree_sitter_recovery_ids.iter().all(|id| {
-                malformed_tree
-                    .facts
-                    .iter()
-                    .any(|fact| fact.id == *id && (fact.error || fact.missing))
-            }));
-        }
-
-        let good = provider_text("value = 1\n");
-        let good_tree = tree_snapshot(1, &good);
-        let mut adapter = ruff_adapter().unwrap();
-        let accepted = adapter
-            .parse(1, good, &good_tree, &Cancellation::default())
-            .unwrap();
-        let replacement = provider_text("value = 2\n");
-        let replacement_tree = tree_snapshot(2, &replacement);
-        let mut wrong_image_tree = good_tree.clone();
-        wrong_image_tree.revision = 2;
-        assert_eq!(
-            adapter.parse(
-                2,
-                replacement.clone(),
-                &wrong_image_tree,
-                &Cancellation::default()
-            ),
-            Err(RuffAdapterError::MismatchedTreeSitterEvidence)
-        );
-        assert_eq!(adapter.active_snapshot(), Some(&accepted));
-        assert_eq!(
-            adapter.parse(
-                1,
-                replacement.clone(),
-                &replacement_tree,
-                &Cancellation::default()
-            ),
-            Err(RuffAdapterError::StaleRevision)
-        );
-        assert_eq!(adapter.active_snapshot(), Some(&accepted));
-
-        let cancelled = Cancellation::with_check_interval(1);
-        cancelled.cancel();
-        assert_eq!(
-            adapter.parse(2, replacement.clone(), &replacement_tree, &cancelled),
-            Err(RuffAdapterError::Cancelled)
-        );
-        assert_eq!(adapter.active_snapshot(), Some(&accepted));
-
-        let mut bounded = ruff_adapter().unwrap();
-        bounded.limits.max_output_records = 1;
-        assert_eq!(
-            bounded.parse(2, replacement, &replacement_tree, &Cancellation::default()),
-            Err(RuffAdapterError::OutputRecordLimit)
-        );
-        assert!(bounded.active_snapshot().is_none());
-
-        let bound_cases: [(ConfigureBound, RuffAdapterError); 5] = [
-            (
-                |limits| limits.max_input_bytes = 1,
-                RuffAdapterError::InputLimit,
-            ),
-            (
-                |limits| limits.max_visited_nodes = 1,
-                RuffAdapterError::NodeLimit,
-            ),
-            (
-                |limits| limits.max_traversal_depth = 1,
-                RuffAdapterError::DepthLimit,
-            ),
-            (
-                |limits| limits.max_work_units = 1,
-                RuffAdapterError::WorkLimit,
-            ),
-            (
-                |limits| limits.max_output_bytes = 1,
-                RuffAdapterError::OutputByteLimit,
-            ),
-        ];
-        for (configure, expected) in bound_cases {
-            let source = provider_text("value = call(1)\n");
-            let tree = tree_snapshot(1, &source);
-            let mut bounded = ruff_adapter().unwrap();
-            configure(&mut bounded.limits);
-            assert_eq!(
-                bounded.parse(1, source, &tree, &Cancellation::default()),
-                Err(expected)
-            );
-            assert!(bounded.active_snapshot().is_none());
-        }
-
-        let source = provider_text("def broken(:\n    pass\n");
-        let tree = tree_snapshot(1, &source);
-        let mut diagnostic_bounded = ruff_adapter().unwrap();
-        diagnostic_bounded.limits.max_diagnostics = 0;
-        assert_eq!(
-            diagnostic_bounded.parse(1, source, &tree, &Cancellation::default()),
-            Err(RuffAdapterError::DiagnosticLimit)
-        );
-    }
-
-    #[test]
-    fn wp31_operational_acceptance() {
-        let text = provider_text(RICH_SOURCE);
-        let tree = tree_snapshot(1, &text);
-        let mut adapter = ruff_adapter().unwrap();
-        let snapshot = adapter
-            .parse(1, text, &tree, &Cancellation::default())
-            .unwrap();
-        assert_eq!(adapter.metrics().completed_runs, 1);
-        assert_eq!(adapter.metrics().rejected_runs, 0);
-        assert_eq!(snapshot.metrics.visited_nodes, snapshot.ast.len() as u64);
-        assert_eq!(snapshot.metrics.token_count, snapshot.tokens.len() as u64);
-        assert!(snapshot.metrics.output_records >= snapshot.metrics.visited_nodes);
-        assert!(snapshot.metrics.output_bytes > 0);
-        assert!(snapshot.metrics.work_units >= snapshot.metrics.visited_nodes);
-
-        let mut repetitive_source = String::with_capacity(64 * 2_048);
-        for index in 0..2_048 {
-            writeln!(&mut repetitive_source, "value_{index} = call({index})").unwrap();
-        }
-        let repetitive = provider_text(&repetitive_source);
-        let tree = tree_snapshot(1, &repetitive);
-        let repetitive_snapshot = ruff_adapter()
-            .unwrap()
-            .parse(1, repetitive, &tree, &Cancellation::default())
-            .unwrap();
-        assert!(repetitive_snapshot.tokens.len() > 10_000);
-        assert!(repetitive_snapshot.ast.len() > 8_000);
+    fn ruff_native_kinds_are_projected_only_inside_the_adapter() {
+        let node = ruff_python_node_kind_entry(NodeKind::ExprCall);
+        let token = ruff_python_token_kind_entry(TokenKind::Name);
+        assert_eq!(node.raw_name, "ExprCall");
+        assert_eq!(node.normalized_kind_code, 160);
+        assert_eq!(token.raw_name, "Name");
     }
 }

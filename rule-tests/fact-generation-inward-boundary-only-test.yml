@@ -1,0 +1,16 @@
+id: fact-generation-inward-boundary-only
+valid:
+  - |
+      use arrow_array::RecordBatch;
+      use crate::provider_contracts::ProviderJob;
+      struct ResultSet {
+          job: ProviderJob,
+          batches: Vec<RecordBatch>,
+      }
+invalid:
+  - |
+      use datafusion::prelude::SessionContext;
+  - |
+      use crate::fabric::production_kernel::CompiledSemanticRelease;
+  - |
+      use crate::rpc::generated::codefabric::rustc::v1::CompilationBegin;

@@ -118,6 +118,83 @@ CONTRACTS = {
             }
         ),
     ),
+    "fact-generation": FeatureContract(
+        manifest_items=frozenset(
+            {
+                "provider-contracts",
+                "dep:blake3",
+                "dep:petgraph",
+                "dep:rayon",
+                "dep:ruff_python_ast",
+                "dep:ruff_python_index",
+                "dep:ruff_python_parser",
+                "dep:ruff_python_semantic",
+                "dep:ruff_python_trivia",
+                "dep:ruff_source_file",
+                "dep:ruff_text_size",
+                "dep:tree-sitter",
+                "dep:tree-sitter-python",
+                "dep:tree-sitter-rust",
+                "dep:thiserror",
+            }
+        ),
+        required_root_features=frozenset(
+            {
+                "canonical-json",
+                "contract-models",
+                "fact-generation",
+                "provider-contracts",
+            }
+        ),
+        forbidden_root_features=frozenset(
+            {
+                "compatibility-probes",
+                "daemon",
+                "data-fabric",
+                "local-workstation",
+                "operational-state",
+                "release-compiler",
+                "repository-input",
+                "repository-state",
+                "rpc",
+                "s3-storage",
+                "semantic-release",
+            }
+        ),
+        required_packages=frozenset(
+            {
+                "arrow-array",
+                "arrow-schema",
+                "blake3",
+                "codefabric",
+                "petgraph",
+                "rayon",
+                "ruff_python_ast",
+                "ruff_python_index",
+                "ruff_python_parser",
+                "ruff_python_semantic",
+                "ruff_python_trivia",
+                "ruff_source_file",
+                "ruff_text_size",
+                "thiserror",
+                "tree-sitter",
+                "tree-sitter-python",
+                "tree-sitter-rust",
+            }
+        ),
+        forbidden_packages=frozenset(
+            {
+                "arc-swap",
+                "datafusion",
+                "deltalake",
+                "gix",
+                "prost",
+                "rusqlite",
+                "tokio",
+                "tonic",
+            }
+        ),
+    ),
 }
 
 

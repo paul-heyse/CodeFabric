@@ -77,7 +77,7 @@ pub mod provider_boundary;
 pub mod provider_capability;
 #[cfg(feature = "provider-contracts")]
 pub mod provider_contracts;
-#[cfg(all(feature = "data-fabric", feature = "fact-generation"))]
+#[cfg(feature = "fact-generation")]
 pub mod provider_native_syntax;
 #[cfg(feature = "fact-generation")]
 pub mod provider_raw_kinds;

@@ -8,9 +8,7 @@ files:
 ignores:
   - src/ruff_adapter.rs
   - src/ruff_adapter/**/*.rs
-  - src/provider_native_syntax.rs
   - src/contracts/artifacts.rs
-  - src/provider_raw_kinds.rs
 rule:
   any:
     - all:
