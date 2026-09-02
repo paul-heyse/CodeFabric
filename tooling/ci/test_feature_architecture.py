@@ -51,7 +51,7 @@ def _metadata() -> dict[str, Any]:
     }
 
 
-def test_provider_contracts_exact_manifest_and_resolution_are_accepted() -> None:
+def test_provider_contract_feature_isolation() -> None:
     contract = CONTRACTS["provider-contracts"]
     _validate_manifest(
         {"features": {"provider-contracts": sorted(contract.manifest_items)}},

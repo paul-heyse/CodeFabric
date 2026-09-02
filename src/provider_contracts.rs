@@ -1270,7 +1270,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_owned_arrow_result_is_admitted_only_for_its_exact_job() {
+    fn provider_job_result_terminal_semantics() {
         let (_, job) = job();
         let admitted = admit_provider_result(
             job,
@@ -1477,7 +1477,7 @@ mod tests {
     }
 
     #[test]
-    fn effective_resource_and_trust_faults_fail_admission() {
+    fn provider_job_validation_fault_matrix() {
         let (_, mut bounded_job) = job();
         bounded_job.ceilings = ProviderResourceCeilings::try_new(1, 1, 1, 65_536, 1).unwrap();
         let error = admit_provider_result(
@@ -1507,7 +1507,7 @@ mod tests {
     }
 
     #[test]
-    fn rustc_control_projections_are_application_types() {
+    fn provider_contract_type_boundary_integrity() {
         let header = RustcCompilationHeader {
             run: identity("run-19", ProviderRunIdentity::try_new),
             protocol: identity("rustc-extractor@1", ProviderProtocolIdentity::try_new),
