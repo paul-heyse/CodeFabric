@@ -100,6 +100,10 @@ categorical_identity!(ProviderBuildIdentity, "provider build identity");
 categorical_identity!(ProviderPolicyIdentity, "provider policy identity");
 categorical_identity!(ProviderProgramIdentity, "provider program identity");
 categorical_identity!(RustToolchainIdentity, "Rust toolchain identity");
+categorical_identity!(
+    RustCompilationUnitIdentity,
+    "Rust compilation-unit identity"
+);
 categorical_identity!(RustOwnerIdentity, "Rust owner identity");
 categorical_identity!(CanonicalEntityIdentity, "canonical entity identity");
 categorical_identity!(DiagnosticCode, "diagnostic code");
@@ -612,6 +616,21 @@ impl ProviderRunProvenance {
             program,
         }
     }
+
+    #[must_use]
+    pub const fn provider_build(&self) -> &ProviderBuildIdentity {
+        &self.provider_build
+    }
+
+    #[must_use]
+    pub const fn policy(&self) -> &ProviderPolicyIdentity {
+        &self.policy
+    }
+
+    #[must_use]
+    pub const fn program(&self) -> &ProviderProgramIdentity {
+        &self.program
+    }
 }
 
 /// Immutable, release-prepared provider execution job.
@@ -747,6 +766,11 @@ impl ProviderJob {
     #[must_use]
     pub const fn ceilings(&self) -> ProviderResourceCeilings {
         self.ceilings
+    }
+
+    #[must_use]
+    pub const fn provenance(&self) -> &ProviderRunProvenance {
+        &self.provenance
     }
 
     #[must_use]
@@ -1391,12 +1415,13 @@ pub fn admit_provider_result(
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RustcCompilationHeader {
     pub run: ProviderRunIdentity,
+    pub compilation_unit: RustCompilationUnitIdentity,
     pub protocol: ProviderProtocolIdentity,
     pub source: SourceIdentity,
     pub context: ContextIdentity,
     pub compiler_build: ProviderBuildIdentity,
     pub toolchain: RustToolchainIdentity,
-    pub expected_owner_count: u64,
+    pub requested_capability_count: u64,
 }
 
 /// Application-owned projection of a rustc owner-begin control event.
@@ -1420,6 +1445,8 @@ pub struct RustcOwnerTerminal {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RustcCompilationTerminal {
     pub run: ProviderRunIdentity,
+    pub compilation_unit: RustCompilationUnitIdentity,
+    pub compiler_exit_status: i32,
     pub owner_count: u64,
     pub relation_count: u64,
     pub terminal: ProviderTerminalStatus,
@@ -1480,7 +1507,7 @@ impl RustcCompilationControl {
             .map(|owner| owner.header.owner.clone())
             .collect::<BTreeSet<_>>();
         if header.run != terminal.run
-            || header.expected_owner_count != owner_count
+            || header.compilation_unit != terminal.compilation_unit
             || terminal.owner_count != owner_count
             || relation_count != Some(terminal.relation_count)
             || distinct_owners.len() != owners.len()
@@ -1969,12 +1996,13 @@ mod tests {
     fn provider_contract_type_boundary_integrity() {
         let header = RustcCompilationHeader {
             run: identity("run-19", ProviderRunIdentity::try_new),
+            compilation_unit: identity("crate-a:lib", RustCompilationUnitIdentity::try_new),
             protocol: identity("rustc-extractor@1", ProviderProtocolIdentity::try_new),
             source: identity("source-generation-7", SourceIdentity::try_new),
             context: identity("rust-toolchain-context", ContextIdentity::try_new),
             compiler_build: identity("rustc-extractor-build", ProviderBuildIdentity::try_new),
             toolchain: identity("nightly-2026-08-18", RustToolchainIdentity::try_new),
-            expected_owner_count: 2,
+            requested_capability_count: 2,
         };
         assert_eq!(header.toolchain.as_str(), "nightly-2026-08-18");
 
@@ -1995,26 +2023,22 @@ mod tests {
         .unwrap();
         let terminal = RustcCompilationTerminal {
             run: header.run.clone(),
+            compilation_unit: header.compilation_unit.clone(),
+            compiler_exit_status: 0,
             owner_count: 1,
             relation_count: 1,
             terminal: ProviderTerminalStatus::Complete,
             diagnostics_count: 0,
         };
-        let mut one_owner_header = header;
-        one_owner_header.expected_owner_count = 1;
-        let control = RustcCompilationControl::try_new(
-            one_owner_header.clone(),
-            vec![owner_control],
-            terminal.clone(),
-        )
-        .unwrap();
+        let control =
+            RustcCompilationControl::try_new(header.clone(), vec![owner_control], terminal.clone())
+                .unwrap();
         assert_eq!(control.terminal.owner_count, 1);
 
         let mut wrong_terminal = terminal;
         wrong_terminal.run = ProviderRunIdentity::try_new("another-run").unwrap();
         assert_eq!(
-            RustcCompilationControl::try_new(one_owner_header, Vec::new(), wrong_terminal)
-                .unwrap_err(),
+            RustcCompilationControl::try_new(header, Vec::new(), wrong_terminal).unwrap_err(),
             ProviderContractError::RustcControlMismatch
         );
     }

@@ -1,0 +1,19 @@
+id: generated-rustc-types-transport-only
+language: Rust
+severity: error
+message: Generated rustc Protobuf control types must terminate inside the extractor transport adapter.
+note: Convert begin, end, event, and command messages to application-owned provider controls before admission.
+files:
+  - src/**/*.rs
+ignores:
+  - src/generated/**/*.rs
+  - src/rpc.rs
+  - src/rustc_service.rs
+rule:
+  any:
+    - all:
+        - kind: use_declaration
+        - regex: "crate::rpc::generated::codefabric::rustc"
+    - all:
+        - kind: type_identifier
+        - regex: "^(CompilationBegin|CompilationEnd|OwnerBegin|OwnerEnd|ExtractionEvent|OwnerRelationIpcFrame|ExtractorCommand)$"

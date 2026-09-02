@@ -860,7 +860,7 @@ feature-architecture-check scope:
 provider-ipc-contract-integrity-check:
     cargo nextest run --locked --lib -E 'test(/(round_trip_keeps_one_schema_and_dictionary_scope|registration_binds_schema_fingerprint_and_exact_arrow_universe|production_provider_schemas_interoperate_with_the_relation_stream_boundary|workspace_transaction_aggregates_all_four_exact_provider_lanes|observation_service_rejects_mismatched_launch_plan_binding_before_listen)/)' --no-tests=fail
     cd pyrefly-sidecar && cargo test --locked pyrefly_protocol_conformance
-    cd rustc-extractor && cargo test --locked wp35_structural_acceptance
+    cd rustc-extractor && cargo test --locked wp34_beh_rustc_exact_relation_schema_and_values_are_application_owned
 
 [doc("Validate exhaustive provider relation descriptors, exact schemas, and generated IPC identity")]
 [group('test')]
@@ -884,8 +884,19 @@ inprocess-provider-lifecycle-check:
 [doc("Reject provider-native, fabric, state, release, daemon, and transport types outside their owning adapter boundaries")]
 [group('gate')]
 provider-type-boundary-check:
-    ast-grep test --filter '^(fact-generation-inward-boundary-only|tree-sitter-boundary-only|ruff-boundary-only)$'
-    ast-grep scan --filter '^(fact-generation-inward-boundary-only|tree-sitter-boundary-only|ruff-boundary-only)$' src
+    ast-grep test --filter '^(fact-generation-inward-boundary-only|tree-sitter-boundary-only|ruff-boundary-only|generated-rustc-types-transport-only)$'
+    ast-grep scan --filter '^(fact-generation-inward-boundary-only|tree-sitter-boundary-only|ruff-boundary-only|generated-rustc-types-transport-only)$' src
+
+[doc("Reject generated compiler transport values outside the Rust extractor adapter")]
+[group('gate')]
+generated-type-boundary-check:
+    ast-grep test --filter '^generated-rustc-types-transport-only$'
+    ast-grep scan --filter '^generated-rustc-types-transport-only$' src
+
+[doc("Prove job-bound rustc conversion, provider results, cancellation, faults, and joined cleanup")]
+[group('test')]
+rustc-provider-lifecycle-check:
+    cargo nextest run --locked --lib -E 'test(/rustc_(generated_type_termination_integrity|provider_application_result_semantics|ipc_and_admission_faults|provider_process_lifecycle)/)' --no-tests=fail
 
 [doc("Reject descriptor gaps, empty success, opaque payloads, schema shortcuts, and provider-local canonical identity")]
 [group('test')]
@@ -903,7 +914,7 @@ relation-ipc-provider-operations-check:
 [doc("Reject incomplete, opaque, corrupt, parallel, or trust-bypassing provider admission")]
 [group('test')]
 provider-admission-exclusivity-check:
-    cargo nextest run --locked --lib -E 'test(/(duplicate_and_out_of_order_sequences_fail_closed|truncation_and_corruption_are_distinct_typed_failures|missing_trailer_and_terminal_are_not_complete|opaque_schema_carriers_are_rejected_before_any_provider_bytes|raw_json_cannot_masquerade_as_semantic_row_payload|exact_programmatic_admission_rejects_missing_pyrefly_coverage_relation|changed_source_or_rustc_receipt_binding_invalidates_workspace_authority|later_provider_failure_drops_the_partially_registered_builder|typed_relation_ingress_rejects_unknown_and_opaque_referenced_payloads|orchestrated_trusted_local_bypass_is_rejected_before_spawn|orchestrated_missing_terminal_returns_no_semantic_output|orchestrated_context_mismatch_never_invokes_supervisor|pyrefly_stale_generation_rejection_falsification|inprocess_provider_admission_faults)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(duplicate_and_out_of_order_sequences_fail_closed|truncation_and_corruption_are_distinct_typed_failures|missing_trailer_and_terminal_are_not_complete|opaque_schema_carriers_are_rejected_before_any_provider_bytes|raw_json_cannot_masquerade_as_semantic_row_payload|exact_programmatic_admission_rejects_missing_pyrefly_coverage_relation|changed_source_or_rustc_receipt_binding_invalidates_workspace_authority|later_provider_failure_drops_the_partially_registered_builder|typed_relation_ingress_rejects_unknown_and_opaque_referenced_payloads|orchestrated_trusted_local_bypass_is_rejected_before_spawn|rustc_provider_process_lifecycle|orchestrated_context_mismatch_never_invokes_supervisor|pyrefly_stale_generation_rejection_falsification|inprocess_provider_admission_faults)/)' --no-tests=fail
     just remaining-legacy-zero-state-check
 
 [doc("Exercise provider coverage, remainder, flow-control, cancellation, containment, and resource bounds")]
@@ -911,7 +922,7 @@ provider-admission-exclusivity-check:
 provider-trust-coverage-remainder-check:
     cargo nextest run --locked --lib -E 'test(/(partial_and_unknown_coverage_are_explicit_and_counted|flow_control_credit_is_bounded_and_cancellation_is_terminal|frame_count_byte_budget_and_backpressure_are_enforced_before_allocation|cancellation_is_terminal_after_ipc_end_or_coverage_trailer|invalid_source_keeps_syntax_and_materializes_semantic_remainders|absent_language_lanes_return_explicit_unknowns_without_fake_tables|policy_closure_and_all_resource_limits_are_enforced|credential_proxy_agent_and_unknown_environment_are_rejected|cancellation_is_plan_bound_and_escalates_the_complete_group|surviving_process_group_fails_without_a_false_receipt|sampled_accounting_fails_closed_before_an_untrusted_spawn|orchestrated_untrusted_accounting_failure_never_executes_host_cargo|cargo_run_tracks_and_cancels_multiple_compilation_units_independently)/)' --no-tests=fail
     cd pyrefly-sidecar && cargo test --locked relation_acknowledgements_return_only_explicitly_accepted_credit
-    cd rustc-extractor && cargo test --locked wp35_operational_acceptance
+    cd rustc-extractor && cargo test --locked wp34_ops_rustc_relation_ipc_process_round_trip_is_exact_and_repeatable
 
 [doc("Validate closed producer identities, dependencies, algorithms, inputs, and remainders")]
 [group('test')]

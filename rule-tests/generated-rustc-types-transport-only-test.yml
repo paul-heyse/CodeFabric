@@ -1,0 +1,19 @@
+id: generated-rustc-types-transport-only
+valid:
+  - |
+      struct RustcCompilationHeader {
+          compilation_unit: RustCompilationUnitIdentity,
+      }
+  - |
+      use crate::provider_contracts::RustcCompilationControl;
+      fn admit(control: RustcCompilationControl) {}
+invalid:
+  - |
+      use crate::rpc::generated::codefabric::rustc::v1::CompilationBegin;
+      struct AdmittedCompilation {
+          begin: CompilationBegin,
+      }
+  - |
+      struct ProviderState {
+          terminal: CompilationEnd,
+      }

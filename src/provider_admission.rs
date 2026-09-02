@@ -393,7 +393,14 @@ impl AcceptedProviderRelationSet {
             &run.admission.context_manifest_digest,
             "rustc context manifest",
         )?;
-        if run.begin.compilation_unit_id.trim().is_empty() {
+        if run
+            .control
+            .header
+            .compilation_unit
+            .as_str()
+            .trim()
+            .is_empty()
+        {
             return Err(ProviderAdmissionError::InvalidObservedRelation {
                 relation: "provider.rustc.compilation.v1".into(),
                 detail: "accepted compilation unit identity is empty".into(),
@@ -440,16 +447,7 @@ fn append_rustc_owner(
     owner: &AcceptedRustcOwner,
     grouped: &mut BTreeMap<ProviderRelationIdentity, (ProviderNativeLane, Vec<RecordBatch>)>,
 ) -> Result<(), ProviderAdmissionError> {
-    let owner_id = owner
-        .begin
-        .owner
-        .as_ref()
-        .map(|key| key.owner_id.as_str())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| ProviderAdmissionError::InvalidObservedRelation {
-            relation: "provider.rustc.owner".into(),
-            detail: "accepted rustc owner identity is absent".into(),
-        })?;
+    let owner_id = owner.control.header.owner.as_str();
     let mut families = BTreeSet::new();
     for accepted_relation in &owner.relations {
         let relation = accepted_relation.relation;
@@ -547,7 +545,7 @@ fn validate_rustc_common_columns(
             || owners.is_null(row)
             || source_generations.is_null(row)
             || provider_runs.value(row) != run.admission.provider_run_id
-            || compilation_units.value(row) != run.begin.compilation_unit_id
+            || compilation_units.value(row) != run.control.header.compilation_unit.as_str()
             || owners.value(row) != owner_id
             || source_generations.value(row) != run.admission.source_generation
         {
@@ -1863,10 +1861,10 @@ fn aggregate_rustc_runs(
                 partition: run.admission.provider_run_id.clone(),
             });
         }
-        if !compilation_units.insert(run.begin.compilation_unit_id.as_str()) {
+        if !compilation_units.insert(run.control.header.compilation_unit.as_str()) {
             return Err(ProviderAdmissionError::DuplicateProviderPartition {
                 lane: ProviderNativeLane::Rustc,
-                partition: run.begin.compilation_unit_id.clone(),
+                partition: run.control.header.compilation_unit.as_str().to_owned(),
             });
         }
         let relation_set = AcceptedProviderRelationSet::from_rustc(run)?;
@@ -2868,17 +2866,77 @@ pub(crate) mod tests {
         ProviderLocalIdentityRole, ProviderOracleId, ProviderRevision, RetentionPolicy,
         UnavailableBehavior, UpstreamApiSymbol,
     };
+    use crate::provider_contracts::{
+        CanonicalEntityIdentity, ContextIdentity, ProviderBuildIdentity, ProviderCoverageState,
+        ProviderProtocolIdentity, ProviderRunIdentity, ProviderTerminalStatus,
+        RustCompilationUnitIdentity, RustOwnerIdentity, RustToolchainIdentity,
+        RustcCompilationControl, RustcCompilationHeader, RustcCompilationTerminal,
+        RustcOwnerControl, RustcOwnerHeader, RustcOwnerTerminal, SourceIdentity,
+    };
     use crate::provider_native_syntax::job_tests::run_fixture;
     use crate::pyrefly_service::AcceptedPyreflyRelation;
     use crate::relation_ipc::{SchemaFingerprint, TerminalStatus};
-    use crate::rpc::generated::codefabric::provider::v1::ProviderRunState;
-    use crate::rpc::generated::codefabric::rustc::v1::{
-        CompilationBegin, CompilationEnd, CompilerOwnerKey, OwnerBegin, OwnerEnd,
-    };
     use crate::rustc_service::{
         AcceptedRustcCompilation, AcceptedRustcOwner, AcceptedRustcRelation, RustcRunAdmission,
         TrustQualifiedRustcCompilation,
     };
+
+    fn rustc_owner_control(
+        owner_id: &str,
+        relation_count: u64,
+        row_count: u64,
+    ) -> RustcOwnerControl {
+        let owner = RustOwnerIdentity::try_new(owner_id.to_owned()).unwrap();
+        RustcOwnerControl::try_new(
+            RustcOwnerHeader {
+                owner: owner.clone(),
+                canonical_owner: CanonicalEntityIdentity::try_new(owner_id.to_owned()).unwrap(),
+                expected_relation_count: relation_count,
+            },
+            RustcOwnerTerminal {
+                owner,
+                relation_count,
+                row_count,
+                coverage: ProviderCoverageState::Complete {
+                    completed_units: relation_count,
+                },
+            },
+        )
+        .unwrap()
+    }
+
+    fn rustc_compilation_control(
+        provider_run_id: &str,
+        compilation_unit_id: &str,
+        owner: RustcOwnerControl,
+        requested_capability_count: u64,
+    ) -> RustcCompilationControl {
+        let header = RustcCompilationHeader {
+            run: ProviderRunIdentity::try_new(provider_run_id.to_owned()).unwrap(),
+            compilation_unit: RustCompilationUnitIdentity::try_new(compilation_unit_id.to_owned())
+                .unwrap(),
+            protocol: ProviderProtocolIdentity::try_new("codefabric.rustc.extractor.1").unwrap(),
+            source: SourceIdentity::try_new("source:rustc-fixture").unwrap(),
+            context: ContextIdentity::try_new("context:rustc-fixture").unwrap(),
+            compiler_build: ProviderBuildIdentity::try_new("rustc-fixture-build").unwrap(),
+            toolchain: RustToolchainIdentity::try_new("nightly-2026-08-18").unwrap(),
+            requested_capability_count,
+        };
+        RustcCompilationControl::try_new(
+            header.clone(),
+            vec![owner],
+            RustcCompilationTerminal {
+                run: header.run.clone(),
+                compilation_unit: header.compilation_unit.clone(),
+                compiler_exit_status: 0,
+                owner_count: 1,
+                relation_count: header.requested_capability_count,
+                terminal: ProviderTerminalStatus::Complete,
+                diagnostics_count: 0,
+            },
+        )
+        .unwrap()
+    }
 
     fn data_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![Field::new(
@@ -3320,6 +3378,14 @@ pub(crate) mod tests {
                 (relation, batch, arrow_ipc)
             })
             .collect::<Vec<_>>();
+        let relation_count = u64::try_from(relations.len()).unwrap();
+        let owner_control = rustc_owner_control(&owner_id, relation_count, relation_count);
+        let control = rustc_compilation_control(
+            &provider_run_id,
+            &compilation_unit_id,
+            owner_control.clone(),
+            relation_count,
+        );
         let accepted = AcceptedRustcCompilation::test_only(
             RustcRunAdmission {
                 provider_run_id: provider_run_id.clone(),
@@ -3332,28 +3398,9 @@ pub(crate) mod tests {
                 source_snapshot_manifest_digest: digest(manifest_marker.wrapping_add(1)),
                 resource_profile_id: "profile:rustc-provider-admission".to_owned(),
             },
-            CompilationBegin {
-                provider_run_id: provider_run_id.clone(),
-                compilation_unit_id: compilation_unit_id.clone(),
-                ..CompilationBegin::default()
-            },
+            control,
             vec![AcceptedRustcOwner {
-                begin: OwnerBegin {
-                    provider_run_id: provider_run_id.clone(),
-                    compilation_unit_id: compilation_unit_id.clone(),
-                    sequence: 1,
-                    owner: Some(CompilerOwnerKey {
-                        owner_id: owner_id.clone(),
-                        owner_kind: "CRATE".to_owned(),
-                        file_id: format!("file:rustc:{marker}"),
-                        source_start: 0,
-                        source_end: 1,
-                    }),
-                    expected_observation_family_codes: relations
-                        .iter()
-                        .map(|(relation, _, _)| relation.family_code())
-                        .collect(),
-                },
+                control: owner_control,
                 relations: relations
                     .into_iter()
                     .enumerate()
@@ -3369,13 +3416,7 @@ pub(crate) mod tests {
                         },
                     )
                     .collect(),
-                end: OwnerEnd::default(),
             }],
-            CompilationEnd {
-                compiler_exit_status: 0,
-                terminal_state: ProviderRunState::Succeeded as i32,
-                ..CompilationEnd::default()
-            },
         );
         TrustQualifiedRustcCompilation::test_only(accepted)
     }
@@ -4058,23 +4099,13 @@ pub(crate) mod tests {
             arrow_ipc,
             batch,
         };
+        let owner_control = rustc_owner_control(&owner_id, 1, 0);
         let owner = AcceptedRustcOwner {
-            begin: OwnerBegin {
-                provider_run_id: provider_run_id.clone(),
-                compilation_unit_id: compilation_unit_id.clone(),
-                sequence: 1,
-                owner: Some(CompilerOwnerKey {
-                    owner_id: owner_id.clone(),
-                    owner_kind: "MIR_BODY".into(),
-                    file_id: "file:rustc-provider-admission".into(),
-                    source_start: 0,
-                    source_end: 0,
-                }),
-                expected_observation_family_codes: vec![relation.family_code()],
-            },
+            control: owner_control.clone(),
             relations: vec![accepted_relation],
-            end: OwnerEnd::default(),
         };
+        let control =
+            rustc_compilation_control(&provider_run_id, &compilation_unit_id, owner_control, 1);
         let accepted = AcceptedRustcCompilation::test_only(
             RustcRunAdmission {
                 provider_run_id: provider_run_id.clone(),
@@ -4087,17 +4118,8 @@ pub(crate) mod tests {
                 source_snapshot_manifest_digest: digest(42),
                 resource_profile_id: "profile:rustc-provider-admission".into(),
             },
-            CompilationBegin {
-                provider_run_id,
-                compilation_unit_id,
-                ..CompilationBegin::default()
-            },
+            control,
             vec![owner],
-            CompilationEnd {
-                compiler_exit_status: 0,
-                terminal_state: ProviderRunState::Succeeded as i32,
-                ..CompilationEnd::default()
-            },
         );
 
         let relations = AcceptedProviderRelationSet::from_rustc(&accepted).unwrap();

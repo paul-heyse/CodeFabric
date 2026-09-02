@@ -332,7 +332,6 @@ pub(crate) enum ProviderRelation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CompiledProviderLane {
     Pyrefly,
-    Rustc,
 }
 
 /// Application-owned execution bounds for one exact provider lane.
@@ -382,23 +381,6 @@ impl CompiledProviderAuthority {
                 max_retained_tree_revisions: 1,
                 cancellation_check_interval: 1_024,
                 cancellation_ack_millis: 2_000,
-            },
-            CompiledProviderLane::Rustc => CompiledProviderExecutionProfile {
-                provider_id: "rustc-mir",
-                placement: "COMPILER_GROUP",
-                resource_profile_id: "compiler-semantic-standard",
-                max_input_bytes: 67_108_864,
-                max_work_units: 20_000_000,
-                max_wall_millis: 120_000,
-                max_visited_nodes: 4_000_000,
-                max_traversal_depth: 512,
-                max_output_records: 4_000_000,
-                max_output_bytes: 536_870_912,
-                max_diagnostics: 20_000,
-                max_parser_workers: 2,
-                max_retained_tree_revisions: 1,
-                cancellation_check_interval: 1_024,
-                cancellation_ack_millis: 10_000,
             },
         }
     }

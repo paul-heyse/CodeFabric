@@ -19,8 +19,14 @@ use tonic::service::InterceptorLayer;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
-use crate::fabric::production_kernel::CompiledProviderAuthority;
-use crate::production_provider_recipe::CompiledProviderLane;
+use crate::provider_contracts::{
+    CanonicalEntityIdentity, ProviderContractError, ProviderCoverage, ProviderCoverageState,
+    ProviderGap, ProviderJob, ProviderLane, ProviderRelationOutput, ProviderRunEvidenceSpec,
+    ProviderRunResult, ProviderTerminalStatus, ProviderTrustOutcome, ProviderTrustPosture,
+    ProviderUnknownCause, RustCompilationUnitIdentity, RustOwnerIdentity, RustToolchainIdentity,
+    RustcCompilationControl, RustcCompilationHeader, RustcCompilationTerminal, RustcOwnerControl,
+    RustcOwnerHeader, RustcOwnerTerminal,
+};
 use crate::registries::RustcFeatureMask;
 use crate::rpc::generated::codefabric::provider::v1::{
     CancelAcknowledgement, CancelAcknowledgementState, ProviderRunState,
@@ -160,26 +166,34 @@ fn validate_accepted_relation(relation: &AcceptedRustcRelation) -> Result<(), St
     Ok(())
 }
 
-/// Compute the governed owner-content digest from a begin record and ordered relations.
-#[must_use]
-pub fn owner_content_digest(begin: &OwnerBegin, relations: &[AcceptedRustcRelation]) -> String {
+/// Compute the transport owner-content digest from a begin record and ordered relations.
+fn owner_content_digest(begin: &OwnerBegin, relations: &[AcceptedRustcRelation]) -> String {
     let mut fields = vec![begin.encode_to_vec()];
     fields.extend(relations.iter().map(AcceptedRustcRelation::digest_frame));
     digest_frames(b"codefabric.rustc.owner-content.v1\0", fields)
 }
 
-/// Compute the closed-owner-set digest independently of owner arrival order.
-#[must_use]
-pub fn closed_owner_set_digest(owners: &[AcceptedRustcOwner]) -> String {
+/// Transport-only owner projection retained until the compilation terminal is verified.
+#[derive(Debug)]
+struct ValidatedTransportOwner {
+    accepted: AcceptedRustcOwner,
+    owner_content_digest: String,
+}
+
+/// Compute the transport closed-owner-set digest independently of owner arrival order.
+fn closed_owner_set_digest(owners: &[ValidatedTransportOwner]) -> String {
     let mut fields = owners
         .iter()
         .map(|owner| {
             let mut bytes = owner
-                .begin
+                .accepted
+                .control
+                .header
                 .owner
-                .as_ref()
-                .map_or_else(Vec::new, |key| key.owner_id.as_bytes().to_vec());
-            bytes.extend_from_slice(owner.end.owner_content_digest.as_bytes());
+                .as_str()
+                .as_bytes()
+                .to_vec();
+            bytes.extend_from_slice(owner.owner_content_digest.as_bytes());
             bytes
         })
         .collect::<Vec<_>>();
@@ -213,9 +227,8 @@ fn canonical_event_bytes(event: &ExtractionEvent) -> Vec<u8> {
     digest_frames(b"codefabric.rustc.canonical-event.v1\0", fields).into_bytes()
 }
 
-/// Compute the stream digest with the terminal digest field cleared.
-#[must_use]
-pub fn overall_stream_digest(events: &[ExtractionEvent]) -> String {
+/// Compute the transport stream digest with the terminal digest field cleared.
+fn overall_stream_digest(events: &[ExtractionEvent]) -> String {
     let fields = events.iter().map(canonical_event_bytes).collect::<Vec<_>>();
     digest_frames(b"codefabric.rustc.observation-stream.v1\0", fields)
 }
@@ -298,18 +311,16 @@ impl AcceptedRustcRelation {
 /// One completely verified compiler owner and its application-owned Arrow relations.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AcceptedRustcOwner {
-    pub begin: OwnerBegin,
+    pub control: RustcOwnerControl,
     pub relations: Vec<AcceptedRustcRelation>,
-    pub end: OwnerEnd,
 }
 
 /// One compiler stream admitted for canonical reconciliation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AcceptedRustcCompilation {
     pub admission: RustcRunAdmission,
-    pub begin: CompilationBegin,
+    pub control: RustcCompilationControl,
     pub owners: Vec<AcceptedRustcOwner>,
-    pub end: CompilationEnd,
     trust_binding: RustCompilationProtocolBinding,
 }
 
@@ -322,6 +333,145 @@ pub struct AcceptedRustcCompilation {
 pub struct TrustQualifiedRustcCompilation {
     accepted: AcceptedRustcCompilation,
     trust_proof: RustCompilationAdmissionProof,
+}
+
+/// One complete rustc provider execution expressed through the shared provider-result contract.
+#[derive(Clone, Debug)]
+pub struct RustcProviderRunResult {
+    compilations: Vec<TrustQualifiedRustcCompilation>,
+    result: ProviderRunResult,
+}
+
+impl RustcProviderRunResult {
+    fn try_new(
+        job: &ProviderJob,
+        compilations: Vec<TrustQualifiedRustcCompilation>,
+    ) -> Result<Self, RustcProviderLifecycleError> {
+        let mut batches = BTreeMap::<String, Vec<RecordBatch>>::new();
+        for compilation in &compilations {
+            compilation.validate()?;
+            for owner in &compilation.accepted().owners {
+                for relation in &owner.relations {
+                    batches
+                        .entry(relation.relation.relation_id().to_owned())
+                        .or_default()
+                        .push(relation.batch.clone());
+                }
+            }
+        }
+
+        let mut relations = Vec::with_capacity(job.requests().len());
+        let mut coverage = Vec::with_capacity(job.requests().len());
+        for request in job.requests() {
+            let relation_batches =
+                batches.remove(request.relation().as_str()).ok_or_else(|| {
+                    RustcProviderLifecycleError::MissingRequestedRelation(
+                        request.relation().as_str().to_owned(),
+                    )
+                })?;
+            relations.push(ProviderRelationOutput::try_new(
+                request.relation().clone(),
+                request.schema_identity().clone(),
+                Arc::clone(request.schema()),
+                relation_batches,
+            )?);
+            coverage.push(ProviderCoverage::new(
+                request.family().clone(),
+                ProviderCoverageState::Complete {
+                    completed_units: request.requested_units(),
+                },
+            ));
+        }
+        if let Some(unrequested) = batches.into_keys().next() {
+            return Err(RustcProviderLifecycleError::UnrequestedRelation(
+                unrequested,
+            ));
+        }
+        let result = ProviderRunResult::try_from_job(
+            job,
+            ProviderRunEvidenceSpec {
+                relations,
+                coverage,
+                gaps: Vec::new(),
+                diagnostics: Vec::new(),
+                trust: ProviderTrustOutcome::Trusted,
+                terminal: ProviderTerminalStatus::Complete,
+            },
+        )?;
+        Ok(Self {
+            compilations,
+            result,
+        })
+    }
+
+    fn gap(
+        job: &ProviderJob,
+        cause: ProviderUnknownCause,
+        detail: &'static str,
+    ) -> Result<Self, RustcProviderLifecycleError> {
+        let coverage = job
+            .requests()
+            .iter()
+            .map(|request| {
+                ProviderCoverage::new(
+                    request.family().clone(),
+                    ProviderCoverageState::Unknown {
+                        completed_units: 0,
+                        cause,
+                    },
+                )
+            })
+            .collect();
+        let gaps = job
+            .requests()
+            .iter()
+            .map(|request| ProviderGap::try_new(request.family().clone(), cause, detail))
+            .collect::<Result<Vec<_>, _>>()?;
+        let terminal = match cause {
+            ProviderUnknownCause::MissingOutput | ProviderUnknownCause::Unsupported => {
+                ProviderTerminalStatus::Unknown
+            }
+            ProviderUnknownCause::Timeout => ProviderTerminalStatus::TimedOut,
+            ProviderUnknownCause::Cancelled => ProviderTerminalStatus::Cancelled,
+            ProviderUnknownCause::Corruption => ProviderTerminalStatus::Corrupt,
+            ProviderUnknownCause::Oversized => ProviderTerminalStatus::Oversized,
+            ProviderUnknownCause::ProviderFailure | ProviderUnknownCause::TrustLoss => {
+                ProviderTerminalStatus::Failed
+            }
+        };
+        let result = ProviderRunResult::try_from_job(
+            job,
+            ProviderRunEvidenceSpec {
+                relations: Vec::new(),
+                coverage,
+                gaps,
+                diagnostics: Vec::new(),
+                trust: ProviderTrustOutcome::Degraded {
+                    detail: Arc::from(detail),
+                },
+                terminal,
+            },
+        )?;
+        Ok(Self {
+            compilations: Vec::new(),
+            result,
+        })
+    }
+
+    #[must_use]
+    pub fn compilations(&self) -> &[TrustQualifiedRustcCompilation] {
+        &self.compilations
+    }
+
+    #[must_use]
+    pub const fn result(&self) -> &ProviderRunResult {
+        &self.result
+    }
+
+    #[must_use]
+    pub fn into_result(self) -> ProviderRunResult {
+        self.result
+    }
 }
 
 impl TrustQualifiedRustcCompilation {
@@ -364,9 +514,9 @@ impl TrustQualifiedRustcCompilation {
             &proof.provenance().sandbox_profile_digest,
             &proof.provenance().toolchain_digest,
         )?;
-        let compiler_succeeded = ProviderRunState::try_from(self.accepted.end.terminal_state)
-            .is_ok_and(|state| state == ProviderRunState::Succeeded)
-            && self.accepted.end.compiler_exit_status == 0;
+        let compiler_succeeded = self.accepted.control.terminal.terminal
+            == ProviderTerminalStatus::Complete
+            && self.accepted.control.terminal.compiler_exit_status == 0;
         let launcher_succeeded = proof.terminal().terminal_state
             == crate::rust_compilation_trust::RustCompilationTerminalState::Succeeded
             && proof.terminal().exit_code == Some(0)
@@ -430,9 +580,8 @@ impl TrustQualifiedRustcCompilation {
 impl AcceptedRustcCompilation {
     pub(crate) fn test_only(
         admission: RustcRunAdmission,
-        begin: CompilationBegin,
+        control: RustcCompilationControl,
         owners: Vec<AcceptedRustcOwner>,
-        end: CompilationEnd,
     ) -> Self {
         let trust_binding = RustCompilationProtocolBinding::test_only(
             &admission.provider_run_id,
@@ -447,9 +596,8 @@ impl AcceptedRustcCompilation {
         );
         Self {
             admission,
-            begin,
+            control,
             owners,
-            end,
             trust_binding,
         }
     }
@@ -466,6 +614,7 @@ struct ActiveRun {
 #[derive(Debug)]
 struct OpenOwner {
     begin: OwnerBegin,
+    header: RustcOwnerHeader,
     expected_families: BTreeSet<u32>,
     observed_counts: BTreeMap<u32, u64>,
     relations: Vec<AcceptedRustcRelation>,
@@ -477,11 +626,13 @@ struct OpenOwner {
 
 #[derive(Debug)]
 struct RunValidator {
+    job: ProviderJob,
     admission: RustcRunAdmission,
     policy: RustcProtocolPolicy,
     begin: CompilationBegin,
+    header: RustcCompilationHeader,
     events: Vec<ExtractionEvent>,
-    owners: Vec<AcceptedRustcOwner>,
+    owners: Vec<ValidatedTransportOwner>,
     owner_ids: BTreeSet<String>,
     open_owner: Option<OpenOwner>,
     next_sequence: u64,
@@ -490,17 +641,21 @@ struct RunValidator {
 
 impl RunValidator {
     fn new(
+        job: ProviderJob,
         admission: RustcRunAdmission,
         policy: RustcProtocolPolicy,
         begin: CompilationBegin,
         first_event: ExtractionEvent,
         trust_binding: RustCompilationProtocolBinding,
     ) -> Result<Self, Status> {
-        validate_begin(&admission, &policy, &begin)?;
+        validate_begin(&job, &admission, &policy, &begin)?;
+        let header = compilation_header(&job, &policy, &begin)?;
         Ok(Self {
+            job,
             admission,
             policy,
             begin,
+            header,
             events: vec![first_event],
             owners: Vec::new(),
             owner_ids: BTreeSet::new(),
@@ -553,6 +708,19 @@ impl RunValidator {
                 "compiler owner declares an unpinned observation family",
             ));
         }
+        if expected_families.iter().any(|family| {
+            let relation = RustcRelation::from_family_code(*family)
+                .expect("the family registry was validated above");
+            !self
+                .job
+                .requests()
+                .iter()
+                .any(|request| request.relation().as_str() == relation.relation_id())
+        }) {
+            return Err(Status::failed_precondition(
+                "compiler owner declares a relation absent from the provider job",
+            ));
+        }
         if expected_families.len() != begin.expected_observation_family_codes.len()
             || !self.owner_ids.insert(owner.owner_id.clone())
         {
@@ -560,17 +728,32 @@ impl RunValidator {
                 "compiler owner or observation family is duplicated",
             ));
         }
+        let header = RustcOwnerHeader {
+            owner: RustOwnerIdentity::try_new(owner.owner_id.clone())
+                .map_err(provider_contract_status)?,
+            canonical_owner: CanonicalEntityIdentity::try_new(owner.owner_id.clone())
+                .map_err(provider_contract_status)?,
+            expected_relation_count: u64::try_from(expected_families.len()).unwrap_or(u64::MAX),
+        };
+        let ceilings = self.job.ceilings();
         let limits = RelationIpcLimits {
             max_registered_streams: expected_families.len(),
             max_frames_per_stream: 64,
             max_payload_bytes_per_frame: crate::relation_ipc_contract::RELATION_IPC_FRAGMENT_BYTES,
-            max_payload_bytes_per_stream: usize::try_from(MAX_UNACKNOWLEDGED_BYTES)
+            max_payload_bytes_per_stream: usize::try_from(
+                MAX_UNACKNOWLEDGED_BYTES.min(ceilings.max_bytes()),
+            )
+            .unwrap_or(usize::MAX),
+            max_total_payload_bytes: usize::try_from(ceilings.max_bytes()).unwrap_or(usize::MAX),
+            initial_credit_bytes: usize::try_from(
+                MAX_UNACKNOWLEDGED_BYTES.min(ceilings.max_bytes()),
+            )
+            .unwrap_or(usize::MAX),
+            max_credit_bytes: usize::try_from(MAX_UNACKNOWLEDGED_BYTES.min(ceilings.max_bytes()))
                 .unwrap_or(usize::MAX),
-            max_total_payload_bytes: 256 * 1024 * 1024,
-            initial_credit_bytes: usize::try_from(MAX_UNACKNOWLEDGED_BYTES).unwrap_or(usize::MAX),
-            max_credit_bytes: usize::try_from(MAX_UNACKNOWLEDGED_BYTES).unwrap_or(usize::MAX),
-            max_batches_per_stream: 1,
-            max_rows_per_stream: usize::try_from(MAX_RELATION_ROWS).unwrap_or(usize::MAX),
+            max_batches_per_stream: ceilings.max_batches_per_relation().min(1),
+            max_rows_per_stream: usize::try_from(MAX_RELATION_ROWS.min(ceilings.max_rows()))
+                .unwrap_or(usize::MAX),
             max_remainders_per_stream: 64,
         };
         let mut assembler = RelationIpcAssembler::new(limits)
@@ -600,6 +783,7 @@ impl RunValidator {
         self.events.push(event);
         self.open_owner = Some(OpenOwner {
             begin,
+            header,
             expected_families,
             observed_counts: BTreeMap::new(),
             relations: Vec::new(),
@@ -833,10 +1017,27 @@ impl RunValidator {
         }
         self.next_sequence += 1;
         self.events.push(event);
-        self.owners.push(AcceptedRustcOwner {
-            begin: owner.begin,
-            relations: owner.relations,
-            end,
+        let relation_count = u64::try_from(owner.relations.len()).unwrap_or(u64::MAX);
+        let row_count = owner.relations.iter().try_fold(0_u64, |count, relation| {
+            count.checked_add(relation.row_count)
+        });
+        let terminal = RustcOwnerTerminal {
+            owner: owner.header.owner.clone(),
+            relation_count,
+            row_count: row_count
+                .ok_or_else(|| Status::resource_exhausted("rustc owner row count overflowed"))?,
+            coverage: ProviderCoverageState::Complete {
+                completed_units: relation_count,
+            },
+        };
+        let control =
+            RustcOwnerControl::try_new(owner.header, terminal).map_err(provider_contract_status)?;
+        self.owners.push(ValidatedTransportOwner {
+            accepted: AcceptedRustcOwner {
+                control,
+                relations: owner.relations,
+            },
+            owner_content_digest: end.owner_content_digest,
         });
         Ok(())
     }
@@ -882,11 +1083,78 @@ impl RunValidator {
         if end.overall_stream_digest != overall_stream_digest(&self.events) {
             return Err(Status::data_loss("overall compiler stream digest differs"));
         }
+        let terminal_status = match terminal_state {
+            ProviderRunState::Succeeded => ProviderTerminalStatus::Complete,
+            ProviderRunState::Failed => ProviderTerminalStatus::Failed,
+            ProviderRunState::Cancelled => ProviderTerminalStatus::Cancelled,
+            _ => {
+                return Err(Status::failed_precondition(
+                    "compiler stream terminal cannot be represented by the application contract",
+                ));
+            }
+        };
+        let owners = self
+            .owners
+            .into_iter()
+            .map(|owner| owner.accepted)
+            .collect::<Vec<_>>();
+        let owner_controls = owners
+            .iter()
+            .map(|owner| owner.control.clone())
+            .collect::<Vec<_>>();
+        let relation_count = owners.iter().try_fold(0_u64, |count, owner| {
+            count.checked_add(owner.control.terminal.relation_count)
+        });
+        let diagnostics_count = owners.iter().try_fold(0_u64, |count, owner| {
+            let diagnostics = owner
+                .relations
+                .iter()
+                .filter(|relation| relation.relation == RustcRelation::Diagnostic)
+                .try_fold(0_u64, |rows, relation| rows.checked_add(relation.row_count))?;
+            count.checked_add(diagnostics)
+        });
+        let row_count = owners.iter().try_fold(0_u64, |count, owner| {
+            count.checked_add(owner.control.terminal.row_count)
+        });
+        let byte_count = owners.iter().try_fold(0_u64, |count, owner| {
+            let owner_bytes = owner.relations.iter().try_fold(0_u64, |bytes, relation| {
+                bytes.checked_add(u64::try_from(relation.arrow_ipc.len()).unwrap_or(u64::MAX))
+            })?;
+            count.checked_add(owner_bytes)
+        });
+        let ceilings = self.job.ceilings();
+        if usize::try_from(relation_count.unwrap_or(u64::MAX)).unwrap_or(usize::MAX)
+            > ceilings
+                .max_relations()
+                .saturating_mul(ceilings.max_batches_per_relation())
+            || row_count.unwrap_or(u64::MAX) > ceilings.max_rows()
+            || byte_count.unwrap_or(u64::MAX) > ceilings.max_bytes()
+            || usize::try_from(diagnostics_count.unwrap_or(u64::MAX)).unwrap_or(usize::MAX)
+                > ceilings.max_diagnostics()
+        {
+            return Err(Status::resource_exhausted(
+                "rustc compilation exceeded its provider-job resource envelope",
+            ));
+        }
+        let terminal = RustcCompilationTerminal {
+            run: self.header.run.clone(),
+            compilation_unit: self.header.compilation_unit.clone(),
+            compiler_exit_status: end.compiler_exit_status,
+            owner_count: u64::try_from(owners.len()).unwrap_or(u64::MAX),
+            relation_count: relation_count.ok_or_else(|| {
+                Status::resource_exhausted("rustc compilation relation count overflowed")
+            })?,
+            terminal: terminal_status,
+            diagnostics_count: diagnostics_count.ok_or_else(|| {
+                Status::resource_exhausted("rustc compilation diagnostic count overflowed")
+            })?,
+        };
+        let control = RustcCompilationControl::try_new(self.header, owner_controls, terminal)
+            .map_err(provider_contract_status)?;
         Ok(AcceptedRustcCompilation {
             admission: self.admission,
-            begin: self.begin,
-            owners: self.owners,
-            end,
+            control,
+            owners,
             trust_binding: self.trust_binding,
         })
     }
@@ -909,7 +1177,34 @@ impl RunValidator {
     }
 }
 
+fn provider_contract_status(error: ProviderContractError) -> Status {
+    Status::invalid_argument(format!(
+        "invalid application-owned rustc control value: {error}"
+    ))
+}
+
+fn compilation_header(
+    job: &ProviderJob,
+    policy: &RustcProtocolPolicy,
+    begin: &CompilationBegin,
+) -> Result<RustcCompilationHeader, Status> {
+    Ok(RustcCompilationHeader {
+        run: job.run().identity().clone(),
+        compilation_unit: RustCompilationUnitIdentity::try_new(begin.compilation_unit_id.clone())
+            .map_err(provider_contract_status)?,
+        protocol: job.protocol().clone(),
+        source: job.source().identity().clone(),
+        context: job.context().identity().clone(),
+        compiler_build: job.provenance().provider_build().clone(),
+        toolchain: RustToolchainIdentity::try_new(policy.toolchain_identity_digest.clone())
+            .map_err(provider_contract_status)?,
+        requested_capability_count: u64::try_from(begin.requested_capability_codes.len())
+            .unwrap_or(u64::MAX),
+    })
+}
+
 fn validate_begin(
+    job: &ProviderJob,
     admission: &RustcRunAdmission,
     policy: &RustcProtocolPolicy,
     begin: &CompilationBegin,
@@ -918,7 +1213,18 @@ fn validate_begin(
         .target
         .as_ref()
         .ok_or_else(|| Status::invalid_argument("package target identity is missing"))?;
-    if begin.provider_run_id != admission.provider_run_id
+    if job.lane() != ProviderLane::Rustc
+        || job.trust() != ProviderTrustPosture::CompilerSubprocessConstrained
+        || job.provider().as_str() != "rustc-public-mir"
+        || job.protocol().as_str()
+            != format!(
+                "codefabric.rustc.extractor.{}",
+                crate::rustc_relation_schema::RUSTC_RELATION_PROTOCOL_VERSION
+            )
+        || job.run().identity().as_str() != admission.provider_run_id
+        || job.source().generation() != admission.source_generation
+        || job.context().identity().as_str() != admission.analysis_context_id
+        || begin.provider_run_id != admission.provider_run_id
         || begin.workspace_id != admission.workspace_id
         || begin.analysis_context_id != admission.analysis_context_id
         || begin.source_generation != admission.source_generation
@@ -982,6 +1288,7 @@ fn sorted_digests(values: &[String]) -> bool {
 /// Daemon service plus a bounded sink of fully verified compiler observations.
 #[derive(Clone, Debug)]
 pub struct RustcObservationService {
+    job: ProviderJob,
     policy: RustcProtocolPolicy,
     admission: RustcRunAdmission,
     trust_binding: RustCompilationProtocolBinding,
@@ -997,7 +1304,7 @@ impl RustcObservationService {
     ///
     /// Rejects incomplete identities, malformed digests, and already-expired policies.
     pub(crate) fn new(
-        compiled_authority: &CompiledProviderAuthority,
+        job: ProviderJob,
         policy: RustcProtocolPolicy,
         admission: RustcRunAdmission,
         trust_binding: RustCompilationProtocolBinding,
@@ -1013,6 +1320,34 @@ impl RustcObservationService {
             || admission.canonical_analysis_context_id == [0; 16]
         {
             return Err(Status::invalid_argument("rustc run admission is invalid"));
+        }
+        let expected_protocol = format!(
+            "codefabric.rustc.extractor.{}",
+            crate::rustc_relation_schema::RUSTC_RELATION_PROTOCOL_VERSION
+        );
+        let protocol_remaining = policy
+            .provider_deadline_unix_ms
+            .saturating_sub(now_millis())
+            .cast_unsigned();
+        let job_remaining = job
+            .remaining()
+            .ok_or_else(|| Status::deadline_exceeded("rustc provider job expired"))?;
+        if job.lane() != ProviderLane::Rustc
+            || job.trust() != ProviderTrustPosture::CompilerSubprocessConstrained
+            || job.provider().as_str() != "rustc-public-mir"
+            || job.protocol().as_str() != expected_protocol
+            || job.run().identity().as_str() != admission.provider_run_id
+            || job.source().generation() != admission.source_generation
+            || job.context().identity().as_str() != admission.analysis_context_id
+            || job.requests().len() > job.ceilings().max_relations()
+            || protocol_remaining
+                > u64::try_from(job_remaining.as_millis())
+                    .unwrap_or(u64::MAX)
+                    .saturating_add(1_000)
+        {
+            return Err(Status::failed_precondition(
+                "rustc provider job differs from protocol admission",
+            ));
         }
         trust_binding
             .validate_untrusted_protocol(
@@ -1031,19 +1366,10 @@ impl RustcObservationService {
                     "rustc launch-plan binding differs from protocol admission: {error}"
                 ))
             })?;
-        let profile = compiled_authority.execution_profile(CompiledProviderLane::Rustc);
-        if profile.provider_id != "rustc-mir"
-            || profile.placement != "COMPILER_GROUP"
-            || profile.resource_profile_id != admission.resource_profile_id
-            || profile.max_parser_workers == 0
-        {
-            return Err(Status::failed_precondition(
-                "rustc provider resource-profile binding differs",
-            ));
-        }
         let (accepted, receiver) = mpsc::channel(MAX_OUTSTANDING_FRAMES as usize);
         Ok((
             Self {
+                job,
                 policy,
                 admission,
                 trust_binding,
@@ -1217,6 +1543,7 @@ impl RustcObservationService {
         let begin = begin.clone();
         let compilation_unit_id = begin.compilation_unit_id.clone();
         let mut validator = RunValidator::new(
+            self.job.clone(),
             self.admission.clone(),
             self.policy.clone(),
             begin.clone(),
@@ -1256,7 +1583,8 @@ impl RustcObservationService {
 
         let result = async {
             while let Some(event) = self.next_event(&mut input).await? {
-                let cancelled = self.run_cancelled(&compilation_unit_id).await;
+                let cancelled = self.job.cancellation().is_cancelled()
+                    || self.run_cancelled(&compilation_unit_id).await;
                 match event.event.clone() {
                     Some(Event::OwnerBegin(begin)) => {
                         validator.accept_owner_begin(begin, event)?;
@@ -1283,8 +1611,16 @@ impl RustcObservationService {
                     }
                     Some(Event::CompilationEnd(end)) => {
                         let completed = validator.finish(end, event, cancelled)?;
-                        let terminal = ProviderRunState::try_from(completed.end.terminal_state)
-                            .unwrap_or(ProviderRunState::ProtocolError);
+                        let terminal = match completed.control.terminal.terminal {
+                            ProviderTerminalStatus::Complete => ProviderRunState::Succeeded,
+                            ProviderTerminalStatus::Cancelled => ProviderRunState::Cancelled,
+                            ProviderTerminalStatus::Failed => ProviderRunState::Failed,
+                            ProviderTerminalStatus::Partial
+                            | ProviderTerminalStatus::Unknown
+                            | ProviderTerminalStatus::TimedOut
+                            | ProviderTerminalStatus::Corrupt
+                            | ProviderTerminalStatus::Oversized => ProviderRunState::ProtocolError,
+                        };
                         if terminal == ProviderRunState::Succeeded {
                             self.accepted.send(completed).await.map_err(|_| {
                                 Status::unavailable("canonical ingest sink is closed")
@@ -1320,6 +1656,7 @@ impl RustcObservationService {
 /// this transaction compiles their exact launch plan and never accepts a preconstructed compiler
 /// response or a trusted-local fallback.
 pub struct UntrustedRustcProviderLifecycle<'a> {
+    pub provider_job: &'a ProviderJob,
     pub trust_policy: &'a RustCompilationTrustPolicy,
     pub sandbox_capabilities: &'a SandboxCapabilityMatrix,
     pub sandbox_profile: &'a GeneratedSandboxProfile,
@@ -1379,9 +1716,8 @@ impl OwnedRustcLaunchMaterial {
 /// any receipt/compiler-stream mismatch. All failures remove the private socket and return no
 /// semantic result.
 pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
-    compiled_authority: &CompiledProviderAuthority,
     lifecycle: UntrustedRustcProviderLifecycle<'_>,
-) -> Result<Vec<TrustQualifiedRustcCompilation>, RustcProviderLifecycleError> {
+) -> Result<RustcProviderRunResult, RustcProviderLifecycleError> {
     if lifecycle.trust_policy.trust_mode != RustCompilationTrustMode::UntrustedSandboxed {
         return Err(RustCompilationTrustError::UntrustedAdmissionRequired.into());
     }
@@ -1402,7 +1738,7 @@ pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
     let profile = lifecycle.sandbox_profile.clone();
     let private_paths = lifecycle.private_paths.clone();
     execute_prepared_rustc_lifecycle(
-        compiled_authority,
+        lifecycle.provider_job.clone(),
         plan,
         lifecycle.private_paths.extractor_socket_path.clone(),
         lifecycle.protocol_policy,
@@ -1429,25 +1765,52 @@ pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
 }
 
 async fn execute_prepared_rustc_lifecycle<F, Fut>(
-    compiled_authority: &CompiledProviderAuthority,
+    provider_job: ProviderJob,
     plan: RustCompilationLaunchPlan,
     socket: PathBuf,
     protocol_policy: RustcProtocolPolicy,
     run_admission: RustcRunAdmission,
     allowed_uid: u32,
     supervisor: F,
-) -> Result<Vec<TrustQualifiedRustcCompilation>, RustcProviderLifecycleError>
+) -> Result<RustcProviderRunResult, RustcProviderLifecycleError>
 where
     F: FnOnce(RustCompilationLaunchPlan, RustCompilationCancellationSignal) -> Fut,
     Fut: Future<Output = Result<RustCompilationLauncherReceipt, RustcProviderLifecycleError>>,
 {
     let binding = plan.protocol_binding()?;
-    let (service, mut accepted_receiver) =
-        RustcObservationService::new(compiled_authority, protocol_policy, run_admission, binding)
-            .map_err(RustcProviderLifecycleError::Protocol)?;
+    if provider_job.cancellation().is_cancelled() {
+        return RustcProviderRunResult::gap(
+            &provider_job,
+            crate::provider_contracts::ProviderUnknownCause::Cancelled,
+            "rustc provider job was cancelled before launch",
+        );
+    }
+    let (service, mut accepted_receiver) = RustcObservationService::new(
+        provider_job.clone(),
+        protocol_policy,
+        run_admission,
+        binding,
+    )
+    .map_err(RustcProviderLifecycleError::Protocol)?;
     let listener = bind_rustc_uds(&socket)?;
     let monitor = service.clone();
     let cancellation = service.supervisor_cancellation_signal();
+    let cancellation_probe = provider_job.cancellation().clone();
+    let cancellation_signal = cancellation.clone();
+    let (cancellation_bridge_stop, mut cancellation_bridge_stopped) = oneshot::channel();
+    let cancellation_bridge = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut cancellation_bridge_stopped => return,
+                () = tokio::time::sleep(std::time::Duration::from_millis(5)) => {
+                    if cancellation_probe.is_cancelled() {
+                        cancellation_signal.request();
+                        return;
+                    }
+                }
+            }
+        }
+    });
     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
     let server_socket = socket.clone();
     let server = tokio::spawn(async move {
@@ -1465,6 +1828,10 @@ where
     });
 
     let receipt = supervisor(plan.clone(), cancellation).await;
+    let _ = cancellation_bridge_stop.send(());
+    cancellation_bridge
+        .await
+        .map_err(RustcProviderLifecycleError::CancellationBridgeTask)?;
     let _ = shutdown_sender.send(());
     let server_result = server
         .await
@@ -1474,41 +1841,94 @@ where
     let mut accepted = collector
         .await
         .map_err(RustcProviderLifecycleError::CollectorTask)?;
-    server_result?;
-    let receipt = receipt?;
+    if server_result.is_err() {
+        return RustcProviderRunResult::gap(
+            &provider_job,
+            ProviderUnknownCause::Corruption,
+            "rustc provider transport terminated before a valid application result",
+        );
+    }
+    let receipt = match receipt {
+        Ok(receipt) => receipt,
+        Err(
+            error @ (RustcProviderLifecycleError::SupervisorTask(_)
+            | RustcProviderLifecycleError::ServerTask(_)
+            | RustcProviderLifecycleError::CollectorTask(_)
+            | RustcProviderLifecycleError::CancellationBridgeTask(_)),
+        ) => return Err(error),
+        Err(RustcProviderLifecycleError::Trust(_)) => {
+            return RustcProviderRunResult::gap(
+                &provider_job,
+                ProviderUnknownCause::TrustLoss,
+                "rustc provider launcher failed trust qualification",
+            );
+        }
+        Err(_) => {
+            return RustcProviderRunResult::gap(
+                &provider_job,
+                ProviderUnknownCause::ProviderFailure,
+                "rustc provider launcher failed before a qualified terminal",
+            );
+        }
+    };
 
     if terminal_states.is_empty() || accepted.is_empty() {
-        return Err(RustcProviderLifecycleError::MissingCompilerTerminal);
+        let cause = if provider_job.cancellation().is_cancelled()
+            || terminal_states
+                .values()
+                .any(|state| *state == ProviderRunState::Cancelled)
+        {
+            ProviderUnknownCause::Cancelled
+        } else if terminal_states
+            .values()
+            .any(|state| *state == ProviderRunState::ProtocolError)
+        {
+            ProviderUnknownCause::Corruption
+        } else {
+            ProviderUnknownCause::ProviderFailure
+        };
+        return RustcProviderRunResult::gap(
+            &provider_job,
+            cause,
+            "rustc provider produced no qualified compiler terminal",
+        );
     }
     if terminal_states.len() != accepted.len()
         || terminal_states
             .values()
             .any(|state| *state != ProviderRunState::Succeeded)
     {
-        return Err(RustcProviderLifecycleError::IncompleteCompilerTerminal);
+        return RustcProviderRunResult::gap(
+            &provider_job,
+            ProviderUnknownCause::ProviderFailure,
+            "rustc provider did not complete every compilation unit",
+        );
     }
     accepted.sort_by(|left, right| {
-        left.begin
-            .compilation_unit_id
-            .cmp(&right.begin.compilation_unit_id)
+        left.control
+            .header
+            .compilation_unit
+            .cmp(&right.control.header.compilation_unit)
     });
-    if accepted
-        .windows(2)
-        .any(|window| window[0].begin.compilation_unit_id == window[1].begin.compilation_unit_id)
-    {
+    if accepted.windows(2).any(|window| {
+        window[0].control.header.compilation_unit == window[1].control.header.compilation_unit
+    }) {
         return Err(RustcProviderLifecycleError::DuplicateCompilationUnit);
     }
     let proof = issue_rust_compilation_admission_proof(&plan, &receipt)?;
-    accepted
+    let compilations = accepted
         .into_iter()
         .map(|compilation| TrustQualifiedRustcCompilation::try_new(compilation, proof.clone()))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(Into::into)
+        .map_err(RustcProviderLifecycleError::from)?;
+    RustcProviderRunResult::try_new(&provider_job, compilations)
 }
 
 /// Closed lifecycle failures. No variant carries partially accepted semantic output.
 #[derive(Debug, thiserror::Error)]
 pub enum RustcProviderLifecycleError {
+    #[error(transparent)]
+    ProviderContract(#[from] ProviderContractError),
     #[error(transparent)]
     Trust(#[from] RustCompilationTrustError),
     #[error("rustc protocol admission failed: {0}")]
@@ -1528,12 +1948,14 @@ pub enum RustcProviderLifecycleError {
     ServerTask(tokio::task::JoinError),
     #[error("rustc observation collector task failed: {0}")]
     CollectorTask(tokio::task::JoinError),
-    #[error("rustc launcher completed without a verified compiler terminal")]
-    MissingCompilerTerminal,
-    #[error("not every observed rustc compilation unit reached one successful terminal")]
-    IncompleteCompilerTerminal,
+    #[error("rustc cancellation bridge task failed: {0}")]
+    CancellationBridgeTask(tokio::task::JoinError),
     #[error("rustc lifecycle observed a duplicate compilation-unit identity")]
     DuplicateCompilationUnit,
+    #[error("rustc lifecycle did not emit requested relation {0}")]
+    MissingRequestedRelation(String),
+    #[error("rustc lifecycle emitted unrequested relation {0}")]
+    UnrequestedRelation(String),
 }
 
 /// Serve one private compiler-observation endpoint with kernel peer-UID authentication.
@@ -1708,7 +2130,14 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
-    use crate::fabric::production_kernel::CompiledSemanticRelease;
+    use crate::provider_contracts::{
+        CancellationHandle, CancellationProbe, ContextIdentity, ProviderBuildIdentity,
+        ProviderContextBinding, ProviderFamilyIdentity, ProviderFamilyRequest, ProviderIdentity,
+        ProviderJobSpec, ProviderPolicyIdentity, ProviderProgramIdentity, ProviderProtocolIdentity,
+        ProviderRelationIdentity, ProviderResourceCeilingSpec, ProviderResourceCeilings,
+        ProviderRunBinding, ProviderRunIdentity, ProviderRunProvenance, ProviderSchemaIdentity,
+        ProviderScopeIdentity, ProviderSourceBinding, SourceIdentity, SuiteIdentity,
+    };
     use crate::provider_sandbox::{ProviderTrustProfile, SandboxProbeObservation};
     use crate::rpc::generated::codefabric::rustc::v1::rustc_extractor_client::RustcExtractorClient;
     use crate::rpc::generated::codefabric::rustc::v1::{CompilerOwnerKey, PackageTargetIdentity};
@@ -1779,6 +2208,100 @@ mod tests {
             toolchain_identity_digest: policy.toolchain_identity_digest.clone(),
         };
         (policy, admission, begin)
+    }
+
+    fn provider_job(
+        policy: &RustcProtocolPolicy,
+        admission: &RustcRunAdmission,
+        relations: &[RustcRelation],
+    ) -> ProviderJob {
+        provider_job_with_handle(policy, admission, relations).1
+    }
+
+    fn provider_job_with_handle(
+        policy: &RustcProtocolPolicy,
+        admission: &RustcRunAdmission,
+        relations: &[RustcRelation],
+    ) -> (CancellationHandle, ProviderJob) {
+        let (cancellation_handle, cancellation) = CancellationProbe::pair(64).unwrap();
+        let requests = relations
+            .iter()
+            .map(|relation| {
+                ProviderFamilyRequest::try_new(
+                    ProviderFamilyIdentity::try_new(format!(
+                        "codefabric.provider-family.v2.3.{}",
+                        relation.relation_id()
+                    ))
+                    .unwrap(),
+                    ProviderRelationIdentity::try_new(relation.relation_id()).unwrap(),
+                    ProviderSchemaIdentity::try_new(format!(
+                        "codefabric.provider-schema.v2.3.{}",
+                        relation.relation_id()
+                    ))
+                    .unwrap(),
+                    relation.schema(),
+                    ProviderScopeIdentity::try_new("workspace").unwrap(),
+                    1,
+                )
+                .unwrap()
+            })
+            .collect();
+        let job = ProviderJob::try_new(ProviderJobSpec {
+            suite: SuiteIdentity::try_new("codefabric-relational-data-fabric@2.3.0").unwrap(),
+            provider: ProviderIdentity::try_new("rustc-public-mir").unwrap(),
+            protocol: ProviderProtocolIdentity::try_new(format!(
+                "codefabric.rustc.extractor.{}",
+                crate::rustc_relation_schema::RUSTC_RELATION_PROTOCOL_VERSION
+            ))
+            .unwrap(),
+            source: ProviderSourceBinding::try_new(
+                SourceIdentity::try_new(admission.source_snapshot_manifest_digest.clone()).unwrap(),
+                [1; 16],
+                admission.source_generation,
+                [2; 32],
+            )
+            .unwrap(),
+            context: ProviderContextBinding::try_new(
+                ContextIdentity::try_new(admission.analysis_context_id.clone()).unwrap(),
+                [3; 32],
+                [4; 32],
+            )
+            .unwrap(),
+            run: ProviderRunBinding::try_new(
+                ProviderRunIdentity::try_new(admission.provider_run_id.clone()).unwrap(),
+                [5; 16],
+            )
+            .unwrap(),
+            lane: ProviderLane::Rustc,
+            trust: ProviderTrustPosture::CompilerSubprocessConstrained,
+            requests,
+            ceilings: ProviderResourceCeilings::try_new(ProviderResourceCeilingSpec {
+                max_relations: 64,
+                max_batches_per_relation: 64,
+                max_input_bytes: 64 * 1024 * 1024,
+                max_rows: 64 * MAX_RELATION_ROWS,
+                max_bytes: 512 * 1024 * 1024,
+                max_diagnostics: 1_024,
+                max_work_units: 1_000_000,
+                max_wall_millis: 120_000,
+                max_visited_nodes: 1_000_000,
+                max_traversal_depth: 1_024,
+                max_workers: 4,
+                max_retained_revisions: 1,
+                cancellation_poll_work_units: 64,
+                cancellation_ack_millis: 2_000,
+            })
+            .unwrap(),
+            deadline: std::time::Instant::now() + std::time::Duration::from_secs(120),
+            cancellation,
+            provenance: ProviderRunProvenance::new(
+                ProviderBuildIdentity::try_new(policy.extractor_build.clone()).unwrap(),
+                ProviderPolicyIdentity::try_new("policy.rustc.v2.3").unwrap(),
+                ProviderProgramIdentity::try_new("codefabric.provider-program.v2.3").unwrap(),
+            ),
+        })
+        .unwrap();
+        (cancellation_handle, job)
     }
 
     struct LifecycleHarness {
@@ -2006,10 +2529,12 @@ mod tests {
 
     fn accepted_stream() -> (RunValidator, CompilationEnd) {
         let (policy, admission, begin) = fixture();
+        let relation = RustcRelation::MirBody;
+        let job = provider_job(&policy, &admission, &[relation]);
         let first = event(Event::CompilationBegin(begin.clone()));
         let binding = trust_binding(&policy, &admission);
-        let mut validator = RunValidator::new(admission, policy, begin, first, binding).unwrap();
-        let relation = RustcRelation::MirBody;
+        let mut validator =
+            RunValidator::new(job, admission, policy, begin, first, binding).unwrap();
         let owner_begin = owner_begin(relation.family_code());
         validator
             .accept_owner_begin(
@@ -2112,6 +2637,25 @@ mod tests {
         events
     }
 
+    fn failed_event_stream() -> Vec<ExtractionEvent> {
+        let mut events = completed_event_stream();
+        let Some(ExtractionEvent {
+            event: Some(Event::CompilationEnd(mut end)),
+        }) = events.pop()
+        else {
+            panic!("fixture ends with the compiler terminal")
+        };
+        end.compiler_exit_status = 1;
+        end.terminal_state = ProviderRunState::Failed as i32;
+        end.rejection_error = Some(RejectionRuleErrorCode::CompilerFailed as i32);
+        end.overall_stream_digest = String::new();
+        let mut digest_events = events.clone();
+        digest_events.push(event(Event::CompilationEnd(end.clone())));
+        end.overall_stream_digest = overall_stream_digest(&digest_events);
+        events.push(event(Event::CompilationEnd(end)));
+        events
+    }
+
     async fn send_lifecycle_events(
         socket: PathBuf,
         policy: RustcProtocolPolicy,
@@ -2155,14 +2699,18 @@ mod tests {
         harness: &LifecycleHarness,
         events: Vec<ExtractionEvent>,
         tolerate_stream_failure: bool,
-    ) -> Result<Vec<TrustQualifiedRustcCompilation>, RustcProviderLifecycleError> {
-        let release = CompiledSemanticRelease::current();
+    ) -> Result<RustcProviderRunResult, RustcProviderLifecycleError> {
+        let provider_job = provider_job(
+            &harness.protocol_policy,
+            &harness.admission,
+            &[RustcRelation::MirBody],
+        );
         let plan = lifecycle_plan(harness);
         let socket = harness.paths.extractor_socket_path.clone();
         let policy = harness.protocol_policy.clone();
         let admission = harness.admission.clone();
         execute_prepared_rustc_lifecycle(
-            release.provider_authority(),
+            provider_job,
             plan,
             harness.paths.extractor_socket_path.clone(),
             harness.protocol_policy.clone(),
@@ -2181,7 +2729,7 @@ mod tests {
     }
 
     #[test]
-    fn wp34_beh_accepted_rustc_relation_stream_decodes_to_application_owned_batch() {
+    fn wp34_beh_rustc_generated_type_termination_integrity() {
         let (validator, mut end) = accepted_stream();
         let mut events = validator.events.clone();
         events.push(event(Event::CompilationEnd(end.clone())));
@@ -2191,15 +2739,24 @@ mod tests {
             .unwrap();
         assert_eq!(completed.owners.len(), 1);
         assert_eq!(completed.owners[0].relations.len(), 1);
+        assert_eq!(completed.control.header.run.as_str(), "run:test");
+        assert_eq!(
+            completed.control.header.compilation_unit.as_str(),
+            "unit:test"
+        );
+        assert_eq!(completed.control.terminal.owner_count, 1);
+        assert_eq!(completed.control.terminal.relation_count, 1);
     }
 
     #[test]
     fn wp34_ops_relation_payload_cancellation_is_acknowledged_and_never_reconciled() {
         let (policy, admission, begin) = fixture();
+        let relation = RustcRelation::MirBody;
+        let job = provider_job(&policy, &admission, &[relation]);
         let first = event(Event::CompilationBegin(begin.clone()));
         let binding = trust_binding(&policy, &admission);
-        let mut validator = RunValidator::new(admission, policy, begin, first, binding).unwrap();
-        let relation = RustcRelation::MirBody;
+        let mut validator =
+            RunValidator::new(job, admission, policy, begin, first, binding).unwrap();
         let owner_begin = owner_begin(relation.family_code());
         validator
             .accept_owner_begin(owner_begin.clone(), event(Event::OwnerBegin(owner_begin)))
@@ -2286,7 +2843,7 @@ mod tests {
     }
 
     #[test]
-    fn wp34_ops_rustc_failed_terminal_and_owner_digest_corruption_are_rejected() {
+    fn wp34_neg_rustc_ipc_and_admission_faults() {
         let (validator, mut end) = accepted_stream();
         end.compiler_exit_status = 1;
         assert_eq!(
@@ -2318,9 +2875,11 @@ mod tests {
     #[test]
     fn wp34_neg_typed_relation_ingress_rejects_schema_and_payload_corruption() {
         let (policy, admission, begin) = fixture();
+        let job = provider_job(&policy, &admission, &[RustcRelation::MirBody]);
         let first = event(Event::CompilationBegin(begin.clone()));
         let binding = trust_binding(&policy, &admission);
-        let mut validator = RunValidator::new(admission, policy, begin, first, binding).unwrap();
+        let mut validator =
+            RunValidator::new(job, admission, policy, begin, first, binding).unwrap();
         let unknown_begin = owner_begin(70);
         assert_eq!(
             validator
@@ -2354,14 +2913,9 @@ mod tests {
     async fn rustc_handshake_and_cancellation_share_one_admission_authority() {
         let (policy, admission, begin) = fixture();
         let binding = trust_binding(&policy, &admission);
-        let release = CompiledSemanticRelease::current();
-        let (service, _accepted) = RustcObservationService::new(
-            release.provider_authority(),
-            policy.clone(),
-            admission.clone(),
-            binding,
-        )
-        .unwrap();
+        let job = provider_job(&policy, &admission, &[RustcRelation::MirBody]);
+        let (service, _accepted) =
+            RustcObservationService::new(job, policy.clone(), admission.clone(), binding).unwrap();
         let hello = ExtractorHello {
             protocol_major: 1,
             protocol_minor: 0,
@@ -2422,13 +2976,8 @@ mod tests {
             &policy.toolchain_identity_digest,
         );
 
-        let release = CompiledSemanticRelease::current();
-        let Err(error) = RustcObservationService::new(
-            release.provider_authority(),
-            policy,
-            admission,
-            mismatched,
-        ) else {
+        let job = provider_job(&policy, &admission, &[RustcRelation::MirBody]);
+        let Err(error) = RustcObservationService::new(job, policy, admission, mismatched) else {
             panic!("a mismatched launch-plan binding must fail before the endpoint is usable");
         };
         assert_eq!(error.code(), tonic::Code::FailedPrecondition);
@@ -2438,32 +2987,37 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn orchestrated_untrusted_accounting_failure_never_executes_host_cargo() {
         let harness = lifecycle_harness();
-        let release = CompiledSemanticRelease::current();
-        let result = run_untrusted_rustc_provider_lifecycle(
-            release.provider_authority(),
-            UntrustedRustcProviderLifecycle {
-                trust_policy: &harness.trust_policy,
-                sandbox_capabilities: &harness.capabilities,
-                sandbox_profile: &harness.profile,
-                compilation_inputs: &harness.inputs,
-                private_paths: &harness.paths,
-                compilation_request: &harness.request,
-                protocol_policy: harness.protocol_policy.clone(),
-                run_admission: harness.admission.clone(),
-                allowed_uid: harness.allowed_uid,
-                launch_material: ProviderSandboxLaunchMaterial::DarwinProfile(Path::new(
-                    "/not-consumed-without-kernel-accounting",
-                )),
-            },
-        )
+        let provider_job = provider_job(
+            &harness.protocol_policy,
+            &harness.admission,
+            &[RustcRelation::MirBody],
+        );
+        let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
+            provider_job: &provider_job,
+            trust_policy: &harness.trust_policy,
+            sandbox_capabilities: &harness.capabilities,
+            sandbox_profile: &harness.profile,
+            compilation_inputs: &harness.inputs,
+            private_paths: &harness.paths,
+            compilation_request: &harness.request,
+            protocol_policy: harness.protocol_policy.clone(),
+            run_admission: harness.admission.clone(),
+            allowed_uid: harness.allowed_uid,
+            launch_material: ProviderSandboxLaunchMaterial::DarwinProfile(Path::new(
+                "/not-consumed-without-kernel-accounting",
+            )),
+        })
         .await
-        .unwrap_err();
+        .unwrap();
 
+        assert!(result.compilations().is_empty());
+        assert_eq!(result.result().terminal(), ProviderTerminalStatus::Failed);
         assert!(matches!(
-            result,
-            RustcProviderLifecycleError::Trust(
-                RustCompilationTrustError::CompleteAccountingUnavailable
-            )
+            result.result().coverage()[0].state(),
+            ProviderCoverageState::Unknown {
+                completed_units: 0,
+                cause: ProviderUnknownCause::TrustLoss,
+            }
         ));
         assert!(!harness.launch_marker.exists());
         assert!(!harness.paths.extractor_socket_path.exists());
@@ -2476,24 +3030,26 @@ mod tests {
             lifecycle_limits(),
             RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
         );
-        let release = CompiledSemanticRelease::current();
-        let result = run_untrusted_rustc_provider_lifecycle(
-            release.provider_authority(),
-            UntrustedRustcProviderLifecycle {
-                trust_policy: &trusted_local,
-                sandbox_capabilities: &harness.capabilities,
-                sandbox_profile: &harness.profile,
-                compilation_inputs: &harness.inputs,
-                private_paths: &harness.paths,
-                compilation_request: &harness.request,
-                protocol_policy: harness.protocol_policy.clone(),
-                run_admission: harness.admission.clone(),
-                allowed_uid: harness.allowed_uid,
-                launch_material: ProviderSandboxLaunchMaterial::DarwinProfile(Path::new(
-                    "/trusted-local-bypass",
-                )),
-            },
-        )
+        let provider_job = provider_job(
+            &harness.protocol_policy,
+            &harness.admission,
+            &[RustcRelation::MirBody],
+        );
+        let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
+            provider_job: &provider_job,
+            trust_policy: &trusted_local,
+            sandbox_capabilities: &harness.capabilities,
+            sandbox_profile: &harness.profile,
+            compilation_inputs: &harness.inputs,
+            private_paths: &harness.paths,
+            compilation_request: &harness.request,
+            protocol_policy: harness.protocol_policy.clone(),
+            run_admission: harness.admission.clone(),
+            allowed_uid: harness.allowed_uid,
+            launch_material: ProviderSandboxLaunchMaterial::DarwinProfile(Path::new(
+                "/trusted-local-bypass",
+            )),
+        })
         .await
         .unwrap_err();
 
@@ -2508,7 +3064,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn orchestrated_missing_terminal_returns_no_semantic_output() {
+    async fn wp34_ops_rustc_provider_process_lifecycle() {
         let harness = lifecycle_harness();
         let mut events = completed_event_stream();
         let Some(ExtractionEvent {
@@ -2520,13 +3076,87 @@ mod tests {
 
         let result = execute_test_lifecycle(&harness, events, true)
             .await
-            .unwrap_err();
-
+            .unwrap();
+        assert!(result.compilations().is_empty());
+        assert_eq!(result.result().terminal(), ProviderTerminalStatus::Corrupt);
         assert!(matches!(
-            result,
-            RustcProviderLifecycleError::MissingCompilerTerminal
+            result.result().coverage()[0].state(),
+            ProviderCoverageState::Unknown {
+                completed_units: 0,
+                cause: ProviderUnknownCause::Corruption,
+            }
         ));
         assert!(!harness.paths.extractor_socket_path.exists());
+
+        let reconstructed = execute_test_lifecycle(&harness, completed_event_stream(), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            reconstructed.result().terminal(),
+            ProviderTerminalStatus::Complete
+        );
+        assert_eq!(reconstructed.compilations().len(), 1);
+        assert!(!harness.paths.extractor_socket_path.exists());
+
+        let compile_gap = execute_test_lifecycle(&harness, failed_event_stream(), false)
+            .await
+            .unwrap();
+        assert!(compile_gap.compilations().is_empty());
+        assert_eq!(
+            compile_gap.result().terminal(),
+            ProviderTerminalStatus::Failed
+        );
+        assert!(matches!(
+            compile_gap.result().coverage()[0].state(),
+            ProviderCoverageState::Unknown {
+                completed_units: 0,
+                cause: ProviderUnknownCause::ProviderFailure,
+            }
+        ));
+        assert!(!harness.paths.extractor_socket_path.exists());
+
+        let cancellation_harness = lifecycle_harness();
+        let (cancellation_handle, provider_job) = provider_job_with_handle(
+            &cancellation_harness.protocol_policy,
+            &cancellation_harness.admission,
+            &[RustcRelation::MirBody],
+        );
+        let cancellation_trigger = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+            cancellation_handle.cancel();
+        });
+        let cancellation_observed = Arc::new(AtomicBool::new(false));
+        let supervisor_observation = Arc::clone(&cancellation_observed);
+        let cancelled = execute_prepared_rustc_lifecycle(
+            provider_job,
+            lifecycle_plan(&cancellation_harness),
+            cancellation_harness.paths.extractor_socket_path.clone(),
+            cancellation_harness.protocol_policy.clone(),
+            cancellation_harness.admission.clone(),
+            cancellation_harness.allowed_uid,
+            move |plan, cancellation| async move {
+                tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                    while !cancellation.is_requested() {
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .expect("provider-job cancellation reaches the process-group supervisor");
+                supervisor_observation.store(true, Ordering::Release);
+                RustCompilationLauncherReceipt::test_only_contained_success(&plan)
+                    .map_err(Into::into)
+            },
+        )
+        .await
+        .unwrap();
+        cancellation_trigger.await.unwrap();
+        assert!(cancellation_observed.load(Ordering::Acquire));
+        assert_eq!(
+            cancelled.result().terminal(),
+            ProviderTerminalStatus::Cancelled
+        );
+        assert!(cancelled.compilations().is_empty());
+        assert!(!cancellation_harness.paths.extractor_socket_path.exists());
     }
 
     #[tokio::test]
@@ -2536,9 +3166,13 @@ mod tests {
         mismatched.analysis_context_id = "context:changed".into();
         let invoked = Arc::new(AtomicBool::new(false));
         let observed_invocation = Arc::clone(&invoked);
-        let release = CompiledSemanticRelease::current();
+        let provider_job = provider_job(
+            &harness.protocol_policy,
+            &harness.admission,
+            &[RustcRelation::MirBody],
+        );
         let result = execute_prepared_rustc_lifecycle(
-            release.provider_authority(),
+            provider_job,
             lifecycle_plan(&harness),
             harness.paths.extractor_socket_path.clone(),
             harness.protocol_policy.clone(),
@@ -2562,7 +3196,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn orchestrated_clean_and_incremental_generations_emit_equal_arrow_semantics() {
+    async fn wp34_beh_rustc_provider_application_result_semantics() {
         let clean = lifecycle_harness();
         let clean_output = execute_test_lifecycle(&clean, completed_event_stream(), false)
             .await
@@ -2579,8 +3213,9 @@ mod tests {
         .await
         .unwrap();
 
-        let semantic_payloads = |runs: &[TrustQualifiedRustcCompilation]| {
-            runs.iter()
+        let semantic_payloads = |run: &RustcProviderRunResult| {
+            run.compilations()
+                .iter()
                 .flat_map(|run| &run.accepted().owners)
                 .flat_map(|owner| &owner.relations)
                 .map(|relation| {
@@ -2596,9 +3231,27 @@ mod tests {
             semantic_payloads(&clean_output),
             semantic_payloads(&incremental_output)
         );
-        assert_eq!(clean_output[0].accepted().admission.source_generation, 7);
         assert_eq!(
-            incremental_output[0].accepted().admission.source_generation,
+            clean_output.result().terminal(),
+            ProviderTerminalStatus::Complete
+        );
+        assert_eq!(clean_output.result().relations().len(), 1);
+        assert!(matches!(
+            clean_output.result().coverage()[0].state(),
+            ProviderCoverageState::Complete { completed_units: 1 }
+        ));
+        assert_eq!(
+            clean_output.compilations()[0]
+                .accepted()
+                .admission
+                .source_generation,
+            7
+        );
+        assert_eq!(
+            incremental_output.compilations()[0]
+                .accepted()
+                .admission
+                .source_generation,
             8
         );
     }
@@ -2608,14 +3261,9 @@ mod tests {
         let (mut policy, admission, _) = fixture();
         policy.sandbox_profile_digest = format!("sha256:{}", "ab".repeat(32));
         let binding = trust_binding(&policy, &admission);
-        let release = CompiledSemanticRelease::current();
-        let (service, _accepted) = RustcObservationService::new(
-            release.provider_authority(),
-            policy,
-            admission.clone(),
-            binding,
-        )
-        .unwrap();
+        let job = provider_job(&policy, &admission, &[RustcRelation::MirBody]);
+        let (service, _accepted) =
+            RustcObservationService::new(job, policy, admission.clone(), binding).unwrap();
         let (first_sender, mut first_commands) = mpsc::channel(2);
         let (second_sender, mut second_commands) = mpsc::channel(2);
         {

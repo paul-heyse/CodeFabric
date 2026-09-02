@@ -1,0 +1,21 @@
+id: generated-rustc-types-transport-only
+snapshots:
+  ? |
+    struct ProviderState {
+        terminal: CompilationEnd,
+    }
+  : labels:
+    - source: CompilationEnd
+      style: primary
+      start: 37
+      end: 51
+  ? |
+    use crate::rpc::generated::codefabric::rustc::v1::CompilationBegin;
+    struct AdmittedCompilation {
+        begin: CompilationBegin,
+    }
+  : labels:
+    - source: use crate::rpc::generated::codefabric::rustc::v1::CompilationBegin;
+      style: primary
+      start: 0
+      end: 67
