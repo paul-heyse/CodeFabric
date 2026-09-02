@@ -14,10 +14,13 @@ use arrow_array::{
 };
 use arrow_schema::{ArrowError, DataType, Field, FieldRef, Schema, SchemaRef};
 use async_trait::async_trait;
-use datafusion::catalog::{Session, TableProvider};
+use datafusion::catalog::{ScanArgs, ScanResult, Session, TableProvider};
+use datafusion::common::config::ConfigOptions;
 use datafusion::common::metadata::FieldMetadata;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
-use datafusion::common::{Column, DFSchema, DFSchemaRef, DataFusionError, TableReference};
+use datafusion::common::{
+    Column, Constraints, DFSchema, DFSchemaRef, DataFusionError, Statistics, TableReference,
+};
 #[cfg(test)]
 use datafusion::datasource::MemTable;
 use datafusion::datasource::{ViewTable, provider_as_source};
@@ -27,13 +30,12 @@ use datafusion::logical_expr::logical_plan::Projection;
 use datafusion::logical_expr::{
     Expr, LogicalPlan, LogicalPlanBuilder, TableProviderFilterPushDown, TableType, Volatility,
 };
-use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_expr::expressions::Column as PhysicalColumn;
-use datafusion::physical_plan::metrics::MetricValue;
+use datafusion::physical_plan::metrics::{MetricValue, MetricsSet};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{
-    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
-    SendableRecordBatchStream, execute_stream,
+    ChildStats, DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties,
+    PlanProperties, SendableRecordBatchStream, StatisticsArgs, execute_stream,
 };
 use futures::StreamExt as _;
 use thiserror::Error;
@@ -915,7 +917,8 @@ struct RegisteredRelation {
 /// identity an executable batch boundary as well.
 #[derive(Debug)]
 pub(super) struct IdentityPreservingViewTable {
-    inner: ViewTable,
+    inner: Arc<dyn TableProvider>,
+    logical_plan: LogicalPlan,
     schema: SchemaRef,
 }
 
@@ -938,10 +941,10 @@ struct SchemaIdentityExec {
 impl SchemaIdentityExec {
     fn try_new(input: Arc<dyn ExecutionPlan>, schema: SchemaRef) -> Result<Self, DataFusionError> {
         validate_schema_identity_shape(input.schema().as_ref(), schema.as_ref(), "planning")?;
-        let equivalence = input.output_ordering().cloned().map_or_else(
-            || EquivalenceProperties::new(Arc::clone(&schema)),
-            |ordering| EquivalenceProperties::new_with_orderings(Arc::clone(&schema), [ordering]),
-        );
+        let equivalence = input
+            .equivalence_properties()
+            .clone()
+            .with_new_schema(Arc::clone(&schema))?;
         let properties =
             Arc::new(PlanProperties::clone(input.properties()).with_eq_properties(equivalence));
         Ok(Self {
@@ -1009,6 +1012,20 @@ impl ExecutionPlan for SchemaIdentityExec {
         )?))
     }
 
+    fn repartitioned(
+        &self,
+        target_partitions: usize,
+        config: &ConfigOptions,
+    ) -> datafusion::common::Result<Option<Arc<dyn ExecutionPlan>>> {
+        self.input
+            .repartitioned(target_partitions, config)?
+            .map(|input| {
+                Self::try_new(input, Arc::clone(&self.schema))
+                    .map(|plan| Arc::new(plan) as Arc<dyn ExecutionPlan>)
+            })
+            .transpose()
+    }
+
     fn execute(
         &self,
         partition: usize,
@@ -1033,6 +1050,43 @@ impl ExecutionPlan for SchemaIdentityExec {
             }
         });
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
+    }
+
+    fn metrics(&self) -> Option<MetricsSet> {
+        self.input.metrics()
+    }
+
+    #[expect(
+        deprecated,
+        reason = "transparent delegation for the DataFusion 55 contract"
+    )]
+    fn partition_statistics(
+        &self,
+        partition: Option<usize>,
+    ) -> datafusion::common::Result<Arc<Statistics>> {
+        self.input.partition_statistics(partition)
+    }
+
+    fn child_stats_requests(&self, partition: Option<usize>) -> Vec<ChildStats> {
+        vec![ChildStats::At(partition)]
+    }
+
+    fn statistics_from_inputs(
+        &self,
+        input_stats: &[Arc<Statistics>],
+        _args: &StatisticsArgs,
+    ) -> datafusion::common::Result<Arc<Statistics>> {
+        let [statistics] = input_stats else {
+            return Err(DataFusionError::Internal(format!(
+                "SchemaIdentityExec requires one child statistic, received {}",
+                input_stats.len()
+            )));
+        };
+        Ok(Arc::clone(statistics))
+    }
+
+    fn supports_limit_pushdown(&self) -> bool {
+        true
     }
 }
 
@@ -1079,18 +1133,40 @@ impl IdentityPreservingViewTable {
         schema: SchemaRef,
     ) -> Result<Self, DataFusionError> {
         validate_schema_identity_shape(plan.schema().as_arrow(), schema.as_ref(), "boundary")?;
+        let logical_plan = plan.clone();
         Ok(Self {
-            inner: ViewTable::new(plan, None),
+            inner: Arc::new(ViewTable::new(plan, None)),
+            logical_plan,
             schema,
         })
     }
 
     pub(super) fn with_definition(plan: LogicalPlan, definition: Option<String>) -> Self {
         let schema = Arc::clone(plan.schema().inner());
+        let logical_plan = plan.clone();
         Self {
-            inner: ViewTable::new(plan, definition),
+            inner: Arc::new(ViewTable::new(plan, definition)),
+            logical_plan,
             schema,
         }
+    }
+
+    #[cfg(test)]
+    fn with_inner(
+        logical_plan: LogicalPlan,
+        schema: SchemaRef,
+        inner: Arc<dyn TableProvider>,
+    ) -> Result<Self, DataFusionError> {
+        validate_schema_identity_shape(
+            logical_plan.schema().as_arrow(),
+            schema.as_ref(),
+            "test boundary",
+        )?;
+        Ok(Self {
+            inner,
+            logical_plan,
+            schema,
+        })
     }
 
     fn projected_schema(
@@ -1104,7 +1180,35 @@ impl IdentityPreservingViewTable {
     }
 
     fn logical_plan(&self) -> &LogicalPlan {
-        self.inner.logical_plan()
+        &self.logical_plan
+    }
+
+    async fn plan_scan<'a>(
+        &self,
+        state: &dyn Session,
+        args: ScanArgs<'a>,
+    ) -> Result<ScanResult, DataFusionError> {
+        let projection = args.projection().map(<[usize]>::to_vec);
+        let target = self.projected_schema(projection.as_ref())?;
+
+        // A view recursively creates a physical plan. Keep the nested pass free of physical
+        // optimizer rules so the outer candidate-session pass remains the one complete pass over
+        // the whole tree. The structured request itself is forwarded without down-conversion.
+        let candidate_state = state
+            .as_any()
+            .downcast_ref::<SessionState>()
+            .ok_or_else(|| {
+                DataFusionError::Plan(
+                    "programmatic views require the candidate SessionState authority".to_owned(),
+                )
+            })?;
+        let nested_state = SessionStateBuilder::new_from_existing(candidate_state.clone())
+            .with_physical_optimizer_rules(Vec::new())
+            .build();
+        let result = self.inner.scan_with_args(&nested_state, args).await?;
+        let plan: Arc<dyn ExecutionPlan> =
+            Arc::new(SchemaIdentityExec::try_new(result.into_inner(), target)?);
+        Ok(plan.into())
     }
 }
 
@@ -1114,12 +1218,20 @@ impl TableProvider for IdentityPreservingViewTable {
         Arc::clone(&self.schema)
     }
 
+    fn constraints(&self) -> Option<&Constraints> {
+        self.inner.constraints()
+    }
+
     fn table_type(&self) -> TableType {
         TableType::View
     }
 
     fn get_table_definition(&self) -> Option<&str> {
         self.inner.get_table_definition()
+    }
+
+    fn get_column_default(&self, column: &str) -> Option<&Expr> {
+        self.inner.get_column_default(column)
     }
 
     fn supports_filters_pushdown(
@@ -1136,30 +1248,23 @@ impl TableProvider for IdentityPreservingViewTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        // `ViewTable::scan` recursively creates and fully optimizes a physical plan. The outer
-        // TableScan planner then runs the same physical optimizer over the returned subtree. In
-        // DataFusion 55 that can make `JoinSelection` see hash joins whose post-optimization
-        // dynamic filters are already attached, which is both an invalid optimizer order and a
-        // hard planning error. Plan the nested view with the exact same session authorities but
-        // no inner physical rules; the outer candidate-session pass remains the single complete
-        // physical optimization and applies every correctness/resource rule to the whole tree.
-        let candidate_state = state
-            .as_any()
-            .downcast_ref::<SessionState>()
-            .ok_or_else(|| {
-                DataFusionError::Plan(
-                    "programmatic views require the candidate SessionState authority".to_owned(),
-                )
-            })?;
-        let nested_state = SessionStateBuilder::new_from_existing(candidate_state.clone())
-            .with_physical_optimizer_rules(Vec::new())
-            .build();
-        let physical = self
-            .inner
-            .scan(&nested_state, projection, filters, limit)
-            .await?;
-        let target = self.projected_schema(projection)?;
-        Ok(Arc::new(SchemaIdentityExec::try_new(physical, target)?))
+        let args = ScanArgs::default()
+            .with_projection(projection.map(Vec::as_slice))
+            .with_filters(Some(filters))
+            .with_limit(limit);
+        Ok(self.plan_scan(state, args).await?.into_inner())
+    }
+
+    async fn scan_with_args<'a>(
+        &self,
+        state: &dyn Session,
+        args: ScanArgs<'a>,
+    ) -> Result<ScanResult, DataFusionError> {
+        self.plan_scan(state, args).await
+    }
+
+    fn statistics(&self) -> Option<Statistics> {
+        self.inner.statistics()
     }
 }
 
@@ -4258,6 +4363,7 @@ pub enum ProgrammaticSchemaError {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Mutex;
 
     use arrow_array::{
         ArrayRef, BooleanArray, FixedSizeBinaryArray, Int64Array, RecordBatch, StringArray,
@@ -4265,10 +4371,116 @@ mod tests {
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::catalog::MemorySchemaProvider;
     use datafusion::datasource::MemTable;
+    use datafusion::logical_expr::statistics::StatisticsRequest;
     use datafusion::logical_expr::{LogicalPlanBuilder, lit};
     use datafusion::prelude::col;
 
     use super::*;
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct CapturedViewScan {
+        projection: Option<Vec<usize>>,
+        filters: Option<Vec<Expr>>,
+        limit: Option<usize>,
+        statistics_requests: Vec<StatisticsRequest>,
+    }
+
+    #[derive(Debug)]
+    struct StructuredViewScanSpy {
+        view: ViewTable,
+        captured: Mutex<Vec<CapturedViewScan>>,
+        last_plan: Mutex<Option<Arc<dyn ExecutionPlan>>>,
+    }
+
+    impl StructuredViewScanSpy {
+        fn new(plan: LogicalPlan) -> Self {
+            Self {
+                view: ViewTable::new(plan, Some("structured-view-spy".to_owned())),
+                captured: Mutex::new(Vec::new()),
+                last_plan: Mutex::new(None),
+            }
+        }
+
+        fn captured(&self) -> Vec<CapturedViewScan> {
+            self.captured.lock().expect("capture lock").clone()
+        }
+
+        fn last_plan(&self) -> Arc<dyn ExecutionPlan> {
+            Arc::clone(
+                self.last_plan
+                    .lock()
+                    .expect("plan lock")
+                    .as_ref()
+                    .expect("captured physical plan"),
+            )
+        }
+    }
+
+    #[async_trait]
+    impl TableProvider for StructuredViewScanSpy {
+        fn schema(&self) -> SchemaRef {
+            self.view.schema()
+        }
+
+        fn table_type(&self) -> TableType {
+            TableType::View
+        }
+
+        fn get_table_definition(&self) -> Option<&str> {
+            self.view.get_table_definition()
+        }
+
+        fn get_logical_plan(&'_ self) -> Option<std::borrow::Cow<'_, LogicalPlan>> {
+            self.view.get_logical_plan()
+        }
+
+        fn supports_filters_pushdown(
+            &self,
+            filters: &[&Expr],
+        ) -> Result<Vec<TableProviderFilterPushDown>, DataFusionError> {
+            self.view.supports_filters_pushdown(filters)
+        }
+
+        async fn scan(
+            &self,
+            _state: &dyn Session,
+            _projection: Option<&Vec<usize>>,
+            _filters: &[Expr],
+            _limit: Option<usize>,
+        ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+            Err(DataFusionError::Internal(
+                "structured view wrapper down-converted to legacy scan".to_owned(),
+            ))
+        }
+
+        async fn scan_with_args<'a>(
+            &self,
+            state: &dyn Session,
+            args: ScanArgs<'a>,
+        ) -> Result<ScanResult, DataFusionError> {
+            self.captured
+                .lock()
+                .expect("capture lock")
+                .push(CapturedViewScan {
+                    projection: args.projection().map(<[usize]>::to_vec),
+                    filters: args.filters().map(<[Expr]>::to_vec),
+                    limit: args.limit(),
+                    statistics_requests: args.statistics_requests().to_vec(),
+                });
+            let projection = args.projection().map(<[usize]>::to_vec);
+            let plan = self
+                .view
+                .scan(
+                    state,
+                    projection.as_ref(),
+                    args.filters().unwrap_or(&[]),
+                    args.limit(),
+                )
+                .await?;
+            *self.last_plan.lock().expect("plan lock") = Some(Arc::clone(&plan));
+            Ok(plan.into())
+        }
+    }
 
     #[test]
     fn transformation_identity_scrub_removes_inherited_relation_semantic_role() {
@@ -4831,6 +5043,114 @@ mod tests {
                 .iter()
                 .all(|batch| batch.schema_ref().as_ref() == target.as_ref())
         );
+    }
+
+    #[tokio::test]
+    async fn datafusion_scan_and_property_loss_faults() {
+        let sealed = fixture(false, 2, false, None).await.unwrap();
+        let binding = sealed
+            .relation(&ProgrammaticRelationId::new("derived.active_events"))
+            .unwrap();
+        let logical_plan = binding
+            .logical_plan
+            .as_ref()
+            .expect("transformation retains its logical program")
+            .as_ref()
+            .clone();
+        let target = Arc::clone(binding.contract.logical_schema());
+        let spy = Arc::new(StructuredViewScanSpy::new(logical_plan.clone()));
+        let provider = IdentityPreservingViewTable::with_inner(
+            logical_plan,
+            Arc::clone(&target),
+            Arc::clone(&spy) as Arc<dyn TableProvider>,
+        )
+        .unwrap();
+        let projection = [0_usize];
+        let filters = [col("id").gt(lit(1_i64))];
+        let statistics_requests = [
+            StatisticsRequest::RowCount,
+            StatisticsRequest::Min(Arc::new(Column::from_name("id"))),
+            StatisticsRequest::TotalByteSize,
+        ];
+        let state = sealed.session().state();
+        let wrapped = provider
+            .scan_with_args(
+                &state,
+                ScanArgs::default()
+                    .with_projection(Some(&projection))
+                    .with_filters(Some(&filters))
+                    .with_limit(Some(1))
+                    .with_statistics_requests(&statistics_requests),
+            )
+            .await
+            .expect("lossless structured view scan")
+            .into_inner();
+
+        assert_eq!(
+            spy.captured(),
+            [CapturedViewScan {
+                projection: Some(projection.to_vec()),
+                filters: Some(filters.to_vec()),
+                limit: Some(1),
+                statistics_requests: statistics_requests.to_vec(),
+            }]
+        );
+        let child = spy.last_plan();
+        assert_eq!(wrapped.children().len(), 1);
+        assert!(Arc::ptr_eq(wrapped.children()[0], &child));
+        assert_eq!(wrapped.schema().as_ref(), target.as_ref());
+        assert_eq!(
+            format!("{:?}", wrapped.output_partitioning()),
+            format!("{:?}", child.output_partitioning()),
+            "partitioning must survive the metadata boundary"
+        );
+        assert_eq!(
+            wrapped.output_ordering(),
+            child.output_ordering(),
+            "ordering must survive the metadata boundary"
+        );
+        assert_eq!(
+            wrapped.equivalence_properties().eq_group().to_string(),
+            child.equivalence_properties().eq_group().to_string(),
+            "value equivalence classes must survive schema rebinding"
+        );
+        assert_eq!(
+            wrapped.equivalence_properties().constants(),
+            child.equivalence_properties().constants(),
+            "constant expressions must survive schema rebinding"
+        );
+        assert_eq!(
+            wrapped.metrics().is_some(),
+            child.metrics().is_some(),
+            "metrics visibility must delegate to the executable child"
+        );
+        assert!(
+            child.metrics().is_some(),
+            "control plan must expose metrics"
+        );
+        assert_eq!(wrapped.child_stats_requests(None), [ChildStats::At(None)]);
+        let child_statistics = Arc::new(Statistics::new_unknown(&child.schema()));
+        let delegated_statistics = wrapped
+            .statistics_from_inputs(
+                std::slice::from_ref(&child_statistics),
+                &StatisticsArgs::new(),
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(&delegated_statistics, &child_statistics));
+
+        let child_batches =
+            datafusion::physical_plan::collect(Arc::clone(&child), state.task_ctx())
+                .await
+                .unwrap();
+        let wrapped_batches = datafusion::physical_plan::collect(wrapped, state.task_ctx())
+            .await
+            .unwrap();
+        assert_eq!(wrapped_batches.len(), child_batches.len());
+        for (actual, expected) in wrapped_batches.iter().zip(&child_batches) {
+            assert_eq!(actual.num_rows(), expected.num_rows());
+            assert_eq!(actual.columns(), expected.columns());
+            assert_eq!(actual.schema_ref().as_ref(), target.as_ref());
+        }
     }
 
     #[test]

@@ -1560,6 +1560,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn synthetic_arrow_fabric_end_to_end() {
+        let fixture = fixture().await;
+        assert_eq!(
+            fixture
+                .relations
+                .relation(ProofRelationKind::ProofRun)
+                .batch()
+                .num_rows(),
+            1
+        );
+        let reopened = reopen_proof_relations(session(), &fixture.publication)
+            .await
+            .expect("synthetic proof Arrow relations reopen from every exact Delta pin");
+        assert_eq!(reopened.terminal(), fixture.relations.terminal());
+        assert_eq!(
+            reopened.candidate_pins(),
+            fixture.relations.candidate_pins()
+        );
+        for kind in ProofRelationKind::ALL {
+            assert_eq!(
+                reopened.relation(kind).batch(),
+                fixture.relations.relation(kind).batch(),
+                "relation {kind:?} must round-trip by decoded Arrow values"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn missing_and_wrong_version_vectors_fail_closed() {
         let fixture = fixture().await;
         let mut missing = fixture.publication.versions.clone();

@@ -2592,7 +2592,7 @@ impl ReleasedProgrammaticDerivedAnalysisOutcome {
 /// Admit the exact provider lanes and compile the release-owned application-analysis closure.
 pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
     authority: &CompiledTransformationAuthority,
-    proof_authority: &CompiledProofAuthority,
+    _proof_authority: &CompiledProofAuthority,
     query_authority: &CompiledQueryAuthority,
     builder: ProgrammaticFabricEpochBuilder,
     runs: ExactProgrammaticProviderRuns<'_>,
@@ -2607,14 +2607,12 @@ pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
     let derived = compose_programmatic_derived_analyses(authority, admitted, composition)?;
     let query_requirements = released_query_family_requirements(query_authority)?;
     let closure_catalog = released_producer_closure_catalog(
-        proof_authority,
         derived.provider_reports(),
         derived.observation(),
         query_requirements,
     )?;
     let (builder, provider_reports, observation) = derived.into_parts();
-    let builder =
-        install_release_producer_closure_catalog(proof_authority, builder, closure_catalog)?;
+    let builder = install_release_producer_closure_catalog(builder, closure_catalog)?;
     let derived = ProgrammaticDerivedAnalysisOutcome {
         builder,
         provider_reports,
@@ -2627,7 +2625,6 @@ pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
 }
 
 fn released_producer_closure_catalog(
-    proof_authority: &CompiledProofAuthority,
     provider_reports: &ExactProgrammaticProviderReports,
     observation: &DerivedAnalysisCompositionObservation,
     query_requirements: Vec<(Arc<str>, Arc<str>)>,
@@ -2741,7 +2738,6 @@ fn released_producer_closure_catalog(
         .collect::<Vec<_>>();
 
     ReleaseProducerClosureCatalog::try_new(
-        proof_authority,
         accepted
             .into_iter()
             .map(|family_id| ReleaseAcceptedFactFamilyRow { family_id })

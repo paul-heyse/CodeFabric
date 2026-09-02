@@ -34,7 +34,6 @@ use crate::relational_program::{FieldId, RelationId};
 use crate::schema_contract::SchemaRole;
 
 use super::epoch_runtime::{FABRIC_CATALOG, FabricSchemaRole};
-use super::production_kernel::CompiledProofAuthority;
 use super::programmatic_epoch::{
     ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder, ProgrammaticFabricEpochError,
 };
@@ -518,7 +517,6 @@ pub(crate) struct ReleaseProducerClosureCatalog {
 impl ReleaseProducerClosureCatalog {
     /// Validate exact-one producer-or-remainder closure before catalog registration.
     pub(crate) fn try_new(
-        _authority: &CompiledProofAuthority,
         accepted_families: Vec<ReleaseAcceptedFactFamilyRow>,
         runtime_producers: Vec<ReleaseRuntimeProducerRow>,
         query_requirements: Vec<ReleaseQueryFamilyRequirementRow>,
@@ -654,7 +652,6 @@ fn validate_catalog_text(
 /// field, schema, and provenance contracts participate in the candidate's normal fixed-point
 /// catalog observation before the closure is compiled back from the sealed session.
 pub(crate) fn install_release_producer_closure_catalog(
-    _authority: &CompiledProofAuthority,
     mut builder: ProgrammaticFabricEpochBuilder,
     catalog: ReleaseProducerClosureCatalog,
 ) -> Result<ProgrammaticFabricEpochBuilder, ReleaseProducerClosureCatalogError> {
@@ -1454,7 +1451,6 @@ impl DerivedProducerClosureExecution {
 /// Rejects a missing/renamed relation, relation-metadata drift, field identity/type/nullability
 /// drift, provider resolution failure, or native logical-plan construction failure.
 pub(crate) async fn compile_release_owned_derived_producer_closure(
-    compiled_release: &CompiledProofAuthority,
     epoch: &ProgrammaticFabricEpoch,
     bounds: ProducerClosureResourceBounds,
 ) -> Result<CompiledDerivedProducerClosure, DerivedProducerClosureError> {
@@ -1578,7 +1574,7 @@ pub(crate) async fn compile_release_owned_derived_producer_closure(
         query_family_requirement: query_input,
         unsupported_remainder: remainder_input,
     };
-    compile_derived_producer_closure(compiled_release, inputs, &bindings, bounds)
+    compile_derived_producer_closure(inputs, &bindings, bounds)
 }
 
 async fn resolve_release_input(
@@ -1857,7 +1853,6 @@ fn compiled_field_id(value: &'static str) -> Result<FieldId, DerivedProducerClos
 ///
 /// Rejects relation/schema drift and any DataFusion logical-plan construction failure.
 pub(crate) fn compile_derived_producer_closure(
-    _compiled_release: &CompiledProofAuthority,
     inputs: DerivedProducerClosureInputs,
     bindings: &DerivedProducerClosureBindings,
     bounds: ProducerClosureResourceBounds,
@@ -4197,7 +4192,7 @@ pub enum DerivedProducerClosureError {
     DataFusion(#[from] datafusion::error::DataFusionError),
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "daemon"))]
 mod tests {
     use std::collections::HashMap;
 
@@ -4209,7 +4204,6 @@ mod tests {
     use crate::fabric::epoch_runtime::{
         FABRIC_CATALOG, FabricEpochId, FabricEpochRuntimeConfig, FabricSchemaRole,
     };
-    use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::fabric::programmatic_epoch::{
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
@@ -4550,14 +4544,9 @@ mod tests {
     #[tokio::test]
     async fn release_owned_compiler_resolves_exact_epoch_relations_and_fields() {
         let epoch = sealed_release_epoch(Some(ACCEPTED_FACT_FAMILY_RELATION_ID), false).await;
-        let release = CompiledSemanticRelease::current();
-        let compiled = compile_release_owned_derived_producer_closure(
-            release.proof_authority(),
-            &epoch,
-            bounds(),
-        )
-        .await
-        .expect("exact sealed relations compile without caller bindings");
+        let compiled = compile_release_owned_derived_producer_closure(&epoch, bounds())
+            .await
+            .expect("exact sealed relations compile without caller bindings");
 
         let dependencies = compiled.observation().dependencies();
         for relation in [
@@ -4581,16 +4570,10 @@ mod tests {
 
     #[tokio::test]
     async fn release_owned_compiler_rejects_alternate_missing_and_drifted_inputs() {
-        let release = CompiledSemanticRelease::current();
         let alternate =
             sealed_release_epoch(Some("runtime.accepted_fact_family.alternate"), false).await;
         assert!(matches!(
-            compile_release_owned_derived_producer_closure(
-                release.proof_authority(),
-                &alternate,
-                bounds(),
-            )
-            .await,
+            compile_release_owned_derived_producer_closure(&alternate, bounds()).await,
             Err(DerivedProducerClosureError::MissingReleaseInputRelation {
                 relation: ACCEPTED_FACT_FAMILY_RELATION_ID,
             })
@@ -4598,12 +4581,7 @@ mod tests {
 
         let missing = sealed_release_epoch(None, false).await;
         assert!(matches!(
-            compile_release_owned_derived_producer_closure(
-                release.proof_authority(),
-                &missing,
-                bounds(),
-            )
-            .await,
+            compile_release_owned_derived_producer_closure(&missing, bounds()).await,
             Err(DerivedProducerClosureError::MissingReleaseInputRelation {
                 relation: ACCEPTED_FACT_FAMILY_RELATION_ID,
             })
@@ -4611,12 +4589,7 @@ mod tests {
 
         let drifted = sealed_release_epoch(Some(ACCEPTED_FACT_FAMILY_RELATION_ID), true).await;
         assert!(matches!(
-            compile_release_owned_derived_producer_closure(
-                release.proof_authority(),
-                &drifted,
-                bounds(),
-            )
-            .await,
+            compile_release_owned_derived_producer_closure(&drifted, bounds()).await,
             Err(DerivedProducerClosureError::SchemaFieldMismatch {
                 relation: "accepted_fact_family",
                 ordinal: 0,
@@ -4752,10 +4725,8 @@ mod tests {
         bindings: &DerivedProducerClosureBindings,
         inputs: DerivedProducerClosureInputs,
     ) -> DerivedProducerClosureExecution {
-        let release = super::super::production_kernel::CompiledSemanticRelease::current();
         let compiled =
-            compile_derived_producer_closure(release.proof_authority(), inputs, bindings, bounds())
-                .expect("compile closure");
+            compile_derived_producer_closure(inputs, bindings, bounds()).expect("compile closure");
         compiled
             .execute(&SessionContext::new())
             .await
@@ -4926,13 +4897,9 @@ mod tests {
         assert!(evidence.violations().is_empty());
         assert!(evidence.issues().is_empty());
 
-        let release = CompiledSemanticRelease::current();
         let proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(
-                release.proof_authority(),
-                &execution,
-            )
-            .expect("bind exact executed closure"),
+            ReleaseProducerClosureProofInput::try_from_execution(&execution)
+                .expect("bind exact executed closure"),
         );
         assert_eq!(proof.terminal(), ProofTerminalStatus::Pass);
         assert_eq!(proof.operation_id(), evidence.operation_id());
@@ -5237,13 +5204,9 @@ mod tests {
             execution.violation_schema()
         );
 
-        let release = CompiledSemanticRelease::current();
         let proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(
-                release.proof_authority(),
-                &execution,
-            )
-            .expect("bind empty executed closure as negative evidence"),
+            ReleaseProducerClosureProofInput::try_from_execution(&execution)
+                .expect("bind empty executed closure as negative evidence"),
         );
         assert_eq!(proof.terminal(), ProofTerminalStatus::Fail);
     }
@@ -5278,13 +5241,9 @@ mod tests {
                 && issue.subject_id().map(|value| value.as_ref()) == Some("family.empty-scope")
         }));
 
-        let release = CompiledSemanticRelease::current();
         let proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(
-                release.proof_authority(),
-                &execution,
-            )
-            .expect("bind zero-scope execution"),
+            ReleaseProducerClosureProofInput::try_from_execution(&execution)
+                .expect("bind zero-scope execution"),
         );
         assert_eq!(proof.terminal(), ProofTerminalStatus::Fail);
         assert!(proof.violations().is_empty());
@@ -5294,9 +5253,7 @@ mod tests {
     async fn wp35_neg_missing_compiled_input_field_dependency_fails_row_proof() {
         let bindings = bindings();
         let producer = producer("family.dependency", "producer.dependency@1");
-        let release = CompiledSemanticRelease::current();
         let mut compiled = compile_derived_producer_closure(
-            release.proof_authority(),
             inputs(
                 &bindings,
                 &[("family.dependency", FACT_CLASS)],
@@ -5326,11 +5283,8 @@ mod tests {
             issue.code() == "missing_compiled_release_dependency" && issue.subject_id().is_none()
         }));
         let proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(
-                release.proof_authority(),
-                &execution,
-            )
-            .expect("bind incomplete-dependency execution"),
+            ReleaseProducerClosureProofInput::try_from_execution(&execution)
+                .expect("bind incomplete-dependency execution"),
         );
         assert_eq!(proof.terminal(), ProofTerminalStatus::Fail);
         assert!(!proof.dependencies().contains(&missing));
@@ -5363,17 +5317,13 @@ mod tests {
             ),
         )
         .await;
-        let release = CompiledSemanticRelease::current();
         let valid_proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(release.proof_authority(), &valid)
+            ReleaseProducerClosureProofInput::try_from_execution(&valid)
                 .expect("bind valid execution"),
         );
         let mutated_proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(
-                release.proof_authority(),
-                &mutated,
-            )
-            .expect("bind mutated execution"),
+            ReleaseProducerClosureProofInput::try_from_execution(&mutated)
+                .expect("bind mutated execution"),
         );
 
         assert_eq!(valid_proof.terminal(), ProofTerminalStatus::Pass);

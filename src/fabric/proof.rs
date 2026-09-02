@@ -26,6 +26,7 @@ use super::derived_producer_closure::{
     ReleaseProducerClosureViolationRow, ReleaseProducerFamilyClosureRow,
     ReleaseQueryRequirementClosureRow,
 };
+#[cfg(feature = "daemon")]
 use super::production_kernel::CompiledProofAuthority;
 
 mod delta_history;
@@ -447,6 +448,7 @@ pub struct IndependentProofInput<'a> {
 /// required fault changes the authoritative table-version input and is accepted only when that
 /// substitution is detected as a semantic mismatch; no predecessor output, count, or digest is
 /// used as an expected answer.
+#[cfg(feature = "daemon")]
 pub(crate) fn evaluate_compiled_activation_candidate(
     _authority: &CompiledProofAuthority,
     pins: ProofCandidatePins,
@@ -654,22 +656,17 @@ pub(crate) fn evaluate_compiled_activation_candidate(
 /// evidence decoded by [`DerivedProducerClosureExecution`].
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ReleaseProducerClosureProofInput<'a> {
-    _release_authority: &'a CompiledProofAuthority,
     evidence: &'a ReleaseProducerClosureEvidence,
 }
 
 impl<'a> ReleaseProducerClosureProofInput<'a> {
     /// Bind the actual executed closure to its compiled authority/dependency provenance.
     pub(crate) fn try_from_execution(
-        release_authority: &'a CompiledProofAuthority,
         execution: &'a DerivedProducerClosureExecution,
     ) -> Result<Self, ProofError> {
         let evidence = execution.release_evidence();
         validate_release_producer_closure_binding(evidence)?;
-        Ok(Self {
-            _release_authority: release_authority,
-            evidence,
-        })
+        Ok(Self { evidence })
     }
 }
 

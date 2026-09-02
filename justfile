@@ -526,6 +526,16 @@ programmatic-model-free-restart-check:
 datafusion-contract-matrix-integrity-check:
     cargo nextest run --locked --lib -E 'test(/(constructs_qualified_schema_and_round_trips_index_mappings|direct_observed_schemas_bind_policy_casts_and_public_phase_output|transformation_contract_metadata_is_typed_and_queryable|programmatic_bindings_compile_from_live_schema_contracts_without_model_rows|recursive_plan_remains_optimizer_visible_and_has_no_extension|observation_fixed_point_policy_rejects_every_zero_bound|recursion_policy_fails_closed_without_a_native_iteration_cap|determinism_policy_rejects_nonimmutable_and_inert_volatility|schema_contract_cache_identity_frames_typed_policy_without_debug_text|compiled_relation_census_and_schema_contracts_are_exhaustive|provider_descriptor_rejects_an_unclassified_field|typed_identity_framing_distinguishes_field_boundaries|released_request_parser_is_authority_neutral_and_canonical|recipe_composes_compiled_v2_ports_with_shared_scope_authority|release_owned_compiler_resolves_exact_epoch_relations_and_fields)/)' --no-tests=fail
 
+[doc("Execute the isolated generic Arrow, DataFusion, proof, and exact-Delta fabric")]
+[group('test')]
+data-fabric-core-check:
+    cargo nextest run --locked --no-default-features --features data-fabric --lib -E 'test(/(synthetic_arrow_fabric_end_to_end|provider_plan_schema_observations_and_query_share_one_sealed_session)/)' --no-tests=fail
+
+[doc("Reject loss of structured scan arguments or transparent physical-plan properties")]
+[group('test')]
+datafusion-scan-contract-check:
+    cargo nextest run --locked --lib -E 'test(/(forwards_complete_structured_scan_and_preserves_native_plan|legacy_scan_also_uses_structured_path_and_delegates_truthful_metadata|datafusion_scan_and_property_loss_faults)/)' --no-tests=fail
+
 [doc("Prove plan-derived schemas, fixed-point observations, child views, and shared logical reuse")]
 [group('test')]
 datafusion-plan-schema-cache-check:

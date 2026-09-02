@@ -275,7 +275,7 @@ impl CompiledSemanticRelease {
         epoch: &ProgrammaticFabricEpoch,
         bounds: ProducerClosureResourceBounds,
     ) -> Result<CompiledDerivedProducerClosure, DerivedProducerClosureError> {
-        compile_release_owned_derived_producer_closure(self.proof_authority(), epoch, bounds).await
+        compile_release_owned_derived_producer_closure(epoch, bounds).await
     }
 
     /// Compile, execute, decode, and prove the release-owned producer closure for one exact epoch.
@@ -300,10 +300,7 @@ impl CompiledSemanticRelease {
             .execute_with_cancellation(&epoch.context(), cancellation)
             .await?;
         let proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(
-                self.proof_authority(),
-                &execution,
-            )?,
+            ReleaseProducerClosureProofInput::try_from_execution(&execution)?,
         );
         if proof.terminal() != ProofTerminalStatus::Pass {
             return Err(CompiledProducerClosureProofError::SemanticClosureRejected {
