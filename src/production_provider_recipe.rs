@@ -37,6 +37,15 @@ use crate::provider_boundary::{
     ProviderInstallerId, ProviderInstallerIdentity, ProviderLocalIdentityRole, ProviderOracleId,
     ProviderRevision, RetentionPolicy, UnavailableBehavior, UpstreamApiSymbol,
 };
+use crate::provider_contracts::{
+    ProviderBuildIdentity as ReleaseProviderBuildIdentity,
+    ProviderFamilyIdentity as ReleaseProviderFamilyIdentity,
+    ProviderIdentity as ReleaseProviderIdentity, ProviderLane as ReleaseProviderLane,
+    ProviderProgramIdentity as ReleaseProviderProgramIdentity,
+    ProviderProtocolIdentity as ReleaseProviderProtocolIdentity,
+    ProviderRelationIdentity as ReleaseProviderRelationIdentity,
+    ProviderSchemaIdentity as ReleaseProviderSchemaIdentity, ProviderTrustPosture,
+};
 use crate::provider_native_syntax::{
     NativeSyntaxRelation, ProviderNativeSyntaxRun, RUFF_COMPONENT_RELEASE,
     TREE_SITTER_PYTHON_GRAMMAR_RELEASE, TREE_SITTER_RUNTIME_RELEASE,
@@ -50,6 +59,10 @@ use crate::rustc_relation_schema::{
 };
 use crate::rustc_service::TrustQualifiedRustcCompilation;
 use crate::schema_contract::canonical_arrow_schema_fingerprint;
+use crate::semantic_release::{
+    ProviderFamilyProgramDefinition, ProviderLaneProgramDefinition, ProviderProgramDefinition,
+    SemanticReleaseError,
+};
 
 const RECIPE_RELEASE: &str = "codefabric-provider-admission-v2.2.0";
 
@@ -425,6 +438,92 @@ impl CompiledProviderAuthority {
             },
         }
     }
+}
+
+/// Assemble the exact v2.3 provider program from the current application-owned provider relation
+/// enums and their Arrow schemas.
+///
+/// This transition function is consumed by the new fallible release compiler. It carries no old
+/// authority token and derives no schema digest as semantic proof.
+pub(crate) fn current_v23_provider_program_definition()
+-> Result<ProviderProgramDefinition, SemanticReleaseError> {
+    let native_lane = |target: ProviderNativeLane| {
+        NativeSyntaxRelation::ALL
+            .into_iter()
+            .filter(|relation| native_lane(*relation) == target)
+            .map(|relation| release_provider_family(ProviderRelation::NativeSyntax(relation)))
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let pyrefly = PyreflyRelation::ALL
+        .into_iter()
+        .map(|relation| release_provider_family(ProviderRelation::Pyrefly(relation)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let rustc = RustcRelation::ALL
+        .into_iter()
+        .map(|relation| release_provider_family(ProviderRelation::Rustc(relation)))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    ProviderProgramDefinition::try_new(
+        ReleaseProviderProgramIdentity::try_new("codefabric.provider-program.v2.3")?,
+        vec![
+            ProviderLaneProgramDefinition::try_new(
+                ReleaseProviderLane::TreeSitter,
+                ReleaseProviderIdentity::try_new("tree-sitter-python")?,
+                ReleaseProviderProtocolIdentity::try_new("in-process-arrow@1")?,
+                ReleaseProviderBuildIdentity::try_new(format!(
+                    "tree-sitter={TREE_SITTER_RUNTIME_RELEASE};tree-sitter-python={TREE_SITTER_PYTHON_GRAMMAR_RELEASE}"
+                ))?,
+                ProviderTrustPosture::InProcessConstrained,
+                native_lane(ProviderNativeLane::TreeSitter)?,
+            )?,
+            ProviderLaneProgramDefinition::try_new(
+                ReleaseProviderLane::Ruff,
+                ReleaseProviderIdentity::try_new("ruff-python")?,
+                ReleaseProviderProtocolIdentity::try_new("in-process-arrow@1")?,
+                ReleaseProviderBuildIdentity::try_new(format!(
+                    "ruff-python={RUFF_COMPONENT_RELEASE};python-target=3.14"
+                ))?,
+                ProviderTrustPosture::InProcessConstrained,
+                native_lane(ProviderNativeLane::Ruff)?,
+            )?,
+            ProviderLaneProgramDefinition::try_new(
+                ReleaseProviderLane::Pyrefly,
+                ReleaseProviderIdentity::try_new("pyrefly-python")?,
+                ReleaseProviderProtocolIdentity::try_new("codefabric.pyrefly.provider.v1")?,
+                ReleaseProviderBuildIdentity::try_new("pyrefly-sidecar-pinned-source")?,
+                ProviderTrustPosture::LocalSidecarConstrained,
+                pyrefly,
+            )?,
+            ProviderLaneProgramDefinition::try_new(
+                ReleaseProviderLane::Rustc,
+                ReleaseProviderIdentity::try_new("rustc-public-mir")?,
+                ReleaseProviderProtocolIdentity::try_new(format!(
+                    "codefabric.rustc.extractor.{RUSTC_RELATION_PROTOCOL_VERSION}"
+                ))?,
+                ReleaseProviderBuildIdentity::try_new(format!(
+                    "rustc-public={RUSTC_PUBLIC_RELEASE};toolchain={RUSTC_TOOLCHAIN}"
+                ))?,
+                ProviderTrustPosture::CompilerSubprocessConstrained,
+                rustc,
+            )?,
+        ],
+    )
+}
+
+fn release_provider_family(
+    relation: ProviderRelation,
+) -> Result<ProviderFamilyProgramDefinition, SemanticReleaseError> {
+    let identity = relation.relation_identity();
+    ProviderFamilyProgramDefinition::try_new(
+        ReleaseProviderFamilyIdentity::try_new(format!(
+            "codefabric.provider-family.v2.3.{identity}"
+        ))?,
+        ReleaseProviderRelationIdentity::try_new(identity)?,
+        ReleaseProviderSchemaIdentity::try_new(format!(
+            "codefabric.provider-schema.v2.3.{identity}"
+        ))?,
+        relation.schema(),
+    )
 }
 
 /// Exact semantic roles assigned to one Arrow field by the compiled provider descriptor.
@@ -2254,6 +2353,19 @@ mod tests {
         SyntaxProviderRunPin,
     };
     use crate::provider_types::ProviderText;
+
+    #[test]
+    fn current_v23_release_compiles_all_exact_provider_relation_schemas() {
+        let release = crate::semantic_release::compile_current_v23_release(
+            current_v23_provider_program_definition().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(release.observation().provider_lanes, 4);
+        assert_eq!(release.observation().provider_relations, 53);
+        assert_eq!(release.observation().transformations, 53);
+        assert_eq!(release.observation().query_forms, 8);
+        assert_eq!(release.observation().proof_expectations, 53);
+    }
 
     fn real_native_run() -> ProviderNativeSyntaxRun {
         let source_text = "from pkg import value\nresult = value + 1\n";

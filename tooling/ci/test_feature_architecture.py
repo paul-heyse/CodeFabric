@@ -87,3 +87,27 @@ def test_provider_contracts_manifest_widening_is_rejected() -> None:
         _validate_manifest(
             {"features": {"provider-contracts": widened}}, "provider-contracts"
         )
+
+
+def test_release_compiler_isolated_graph_is_accepted() -> None:
+    contract = CONTRACTS["release-compiler"]
+    _validate_manifest(
+        {"features": {"release-compiler": sorted(contract.manifest_items)}},
+        "release-compiler",
+    )
+    metadata = _metadata()
+    metadata["resolve"]["nodes"][0]["features"].append("release-compiler")
+    report = _validate_metadata(metadata, "release-compiler")
+    assert report["scope"] == "release-compiler"
+
+
+def test_release_compiler_state_dependency_fault_is_rejected() -> None:
+    metadata = _metadata()
+    metadata["resolve"]["nodes"][0]["features"].append("release-compiler")
+    metadata["packages"].append({"id": "state", "name": "rusqlite"})
+    metadata["resolve"]["nodes"].append({"id": "state", "features": [], "deps": []})
+    metadata["resolve"]["nodes"][0]["deps"].append(
+        {"pkg": "state", "dep_kinds": [{"kind": None}]}
+    )
+    with pytest.raises(FeatureArchitectureError, match="forbidden=.*rusqlite"):
+        _validate_metadata(metadata, "release-compiler")

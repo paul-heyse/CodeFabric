@@ -73,7 +73,51 @@ CONTRACTS = {
                 "tree-sitter",
             }
         ),
-    )
+    ),
+    "release-compiler": FeatureContract(
+        manifest_items=frozenset({"provider-contracts"}),
+        required_root_features=frozenset(
+            {
+                "canonical-json",
+                "contract-models",
+                "provider-contracts",
+                "release-compiler",
+            }
+        ),
+        forbidden_root_features=frozenset(
+            {
+                "compatibility-probes",
+                "daemon",
+                "data-fabric",
+                "fact-generation",
+                "local-workstation",
+                "operational-state",
+                "repository-input",
+                "repository-state",
+                "rpc",
+                "s3-storage",
+                "semantic-release",
+            }
+        ),
+        required_packages=frozenset(
+            {"arrow-array", "arrow-schema", "codefabric", "thiserror"}
+        ),
+        forbidden_packages=frozenset(
+            {
+                "arc-swap",
+                "datafusion",
+                "deltalake",
+                "gix",
+                "prost",
+                "rayon",
+                "ruff_python_ast",
+                "rusqlite",
+                "tokio",
+                "tonic",
+                "tree-sitter",
+            }
+        ),
+    ),
 }
 
 

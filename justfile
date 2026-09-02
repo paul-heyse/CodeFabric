@@ -349,6 +349,8 @@ semantic-request-contract-integrity-check:
 [doc("Compile and execute all eight request forms through typed ingress, native programs, authorized children, and the production backend")]
 [group('test')]
 semantic-request-program-check:
+    cargo test --locked --no-default-features --features release-compiler --lib semantic_release::tests::compiled_release_query_program_operations
+    cargo test --locked --lib semantic_release::tests::compiled_release_query_program_executes_datafusion_fixture
     cargo nextest run --locked --lib -E 'test(/(all_eight_released_forms_compile_from_typed_program_rows|epoch_bound_ingress_consumes_every_typed_relation_row_once|epoch_bound_direct_compiler_lowers_exact_programs_returns_and_handoffs)/)' --no-tests=fail
     cargo nextest run --locked --lib -E 'test(/(all_eight_epoch_bound_forms_execute_through_one_real_authorized_child|relational_program_executes_only_through_authorized_child_inputs)/)' --no-tests=fail
 
@@ -832,12 +834,25 @@ production-evidence-recovery-operations-check: production-evidence-input-integri
 [group('test')]
 provider-job-contract-check:
     cargo test --locked --no-default-features --features provider-contracts --lib provider_contracts::tests
+    cargo test --locked --no-default-features --features release-compiler --lib semantic_release::tests::release_provider_preparation_and_admission_are_causal
+
+[doc("Compile every behavior-bearing release program and execute independent operand faults")]
+[group('test')]
+release-program-contract-check:
+    cargo test --locked --no-default-features --features release-compiler --lib semantic_release::tests
+    cargo test --locked --lib current_v23_release_compiles_all_exact_provider_relation_schemas
+
+[doc("Reject stale suite identity, categorical conflation, and forged release jobs")]
+[group('test')]
+compiled-suite-identity-check:
+    cargo test --locked --no-default-features --features release-compiler --lib semantic_release::tests::compiled_release_program_identity_integrity
+    cargo test --locked --no-default-features --features release-compiler --lib semantic_release::tests::compiled_release_forgery_and_conflation_faults
 
 [doc("Validate one independently useful target feature and its forbidden dependency edges")]
 [group('gate')]
 feature-architecture-check scope:
     PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/feature_architecture.py "{{scope}}"
-    ast-grep test --filter '^provider-contracts-application-boundary-only$'
+    ast-grep test --filter '^{{scope}}-inward-boundary-only$'
     cargo check --locked --no-default-features --features "{{scope}}"
 
 [doc("Validate exact Arrow IPC identities, schemas, pinned provider batches, and cross-process control contracts")]

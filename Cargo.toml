@@ -39,6 +39,7 @@ provider-contracts = [
     "dep:arrow-schema",
     "dep:thiserror",
 ]
+release-compiler = ["provider-contracts"]
 data-fabric = [
     "canonical-json",
     "contract-models",
@@ -99,6 +100,7 @@ daemon = [
     "contract-models",
     "data-fabric",
     "fact-generation",
+    "release-compiler",
     "repository-state",
     "rpc",
     "dep:notify-debouncer-full",

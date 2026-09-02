@@ -100,6 +100,10 @@ pub enum ProviderLane {
     Rustc,
 }
 
+impl ProviderLane {
+    pub const ALL: [Self; 4] = [Self::TreeSitter, Self::Ruff, Self::Pyrefly, Self::Rustc];
+}
+
 /// Trust posture resolved before provider execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderTrustPosture {

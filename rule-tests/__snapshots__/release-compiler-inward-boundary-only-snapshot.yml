@@ -1,0 +1,23 @@
+id: release-compiler-inward-boundary-only
+snapshots:
+  ? |
+    use crate::rpc::generated::codefabric::provider::v1::ProviderRunState;
+  : labels:
+    - source: use crate::rpc::generated::codefabric::provider::v1::ProviderRunState;
+      style: primary
+      start: 0
+      end: 70
+  ? |
+    use crate::supervisor::SupervisorConfig;
+  : labels:
+    - source: use crate::supervisor::SupervisorConfig;
+      style: primary
+      start: 0
+      end: 40
+  ? |
+    use datafusion::prelude::SessionContext;
+  : labels:
+    - source: use datafusion::prelude::SessionContext;
+      style: primary
+      start: 0
+      end: 40

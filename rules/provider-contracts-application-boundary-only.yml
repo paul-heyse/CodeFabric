@@ -1,4 +1,4 @@
-id: provider-contracts-application-boundary-only
+id: provider-contracts-inward-boundary-only
 language: Rust
 severity: error
 message: provider contracts may contain only application-owned types and minimal Arrow values.

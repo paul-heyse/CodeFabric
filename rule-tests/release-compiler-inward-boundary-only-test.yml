@@ -1,0 +1,12 @@
+id: release-compiler-inward-boundary-only
+valid:
+  - |
+      use crate::provider_contracts::ProviderJob;
+      use arrow_schema::SchemaRef;
+invalid:
+  - |
+      use datafusion::prelude::SessionContext;
+  - |
+      use crate::supervisor::SupervisorConfig;
+  - |
+      use crate::rpc::generated::codefabric::provider::v1::ProviderRunState;

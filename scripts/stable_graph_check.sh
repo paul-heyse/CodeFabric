@@ -94,6 +94,8 @@ printf '%s' "$root_shape" | jq -e '
   and (.features["provider-contracts"] | sort) == ([
     "contract-models", "dep:arrow-array", "dep:arrow-schema", "dep:thiserror"
   ] | sort)
+  and .features["release-compiler"] == ["provider-contracts"]
+  and (.features["daemon"] | index("release-compiler")) != null
   and (.features["data-fabric"] | index("provider-contracts")) != null
   and (.features["data-fabric"] | index("dep:petgraph")) != null
   and (.features["fact-generation"] | sort) == ([
@@ -212,6 +214,13 @@ require_in_tree "$provider_contract_tree" arrow-schema 'provider-contracts graph
 forbid_in_tree "$provider_contract_tree" \
   'datafusion.*|deltalake.*|pyo3|tonic|prost.*|tokio|rusqlite|gix|rayon|tree-sitter|ruff_python_.*' \
   'provider-contracts graph'
+
+release_compiler_tree="$(cargo_tree --no-default-features --features release-compiler)"
+require_in_tree "$release_compiler_tree" arrow-array 'release-compiler graph'
+require_in_tree "$release_compiler_tree" arrow-schema 'release-compiler graph'
+forbid_in_tree "$release_compiler_tree" \
+  'datafusion.*|deltalake.*|pyo3|tonic|prost.*|tokio|rusqlite|gix|rayon|tree-sitter|ruff_python_.*' \
+  'release-compiler graph'
 
 s3_tree="$(cargo_tree --no-default-features --features s3-storage)"
 require_in_tree "$s3_tree" deltalake-aws 's3-storage graph'

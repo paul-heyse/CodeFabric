@@ -112,6 +112,8 @@ pub mod relation_ipc;
 pub(crate) mod relation_ipc_contract;
 #[cfg(feature = "daemon")]
 pub(crate) mod semantic_query_contract;
+#[cfg(feature = "release-compiler")]
+pub mod semantic_release;
 #[cfg(feature = "daemon")]
 pub(crate) use rpc::generated::codefabric::provider::v1 as relation_ipc_proto_types;
 #[cfg(feature = "daemon")]

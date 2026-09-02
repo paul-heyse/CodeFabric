@@ -248,6 +248,7 @@ default = ["local-workstation"]
 canonical-json = ["dep:base64", "dep:blake3", "dep:serde", "dep:serde_json", "..."]
 contract-models = ["canonical-json", "dep:serde_yaml_ng"]
 provider-contracts = ["contract-models", "dep:arrow-array", "dep:arrow-schema", "dep:thiserror"]
+release-compiler = ["provider-contracts"]
 fact-generation = ["provider-contracts", "dep:tree-sitter", "dep:ruff_python_parser", "..."]
 data-fabric = ["provider-contracts", "dep:arrow", "...", "dep:datafusion", "dep:deltalake", "..."]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
@@ -264,6 +265,7 @@ s3-storage = ["data-fabric", "deltalake/s3"]
 | canonical JSON | `cargo check --no-default-features --features canonical-json` | strict JSON/JCS only; no data fabric, repository, or RPC |
 | contract models | `cargo check --no-default-features --features contract-models` | runtime wire models only; no compiler or generated-output closure |
 | provider contracts | `just feature-architecture-check provider-contracts` | application-owned jobs/results and minimal Arrow types; no provider, fabric, state, RPC, or daemon closure |
+| release compiler | `just feature-architecture-check release-compiler` | fallible behavior-bearing program compilation; no provider, fabric, state, RPC, or daemon closure |
 | Protobuf tooling | `cargo check --no-default-features --features proto-tooling --bin codefabric-proto-gen` | generator-only graph |
 | S3 deployment | `cargo check --all-targets --features s3-storage` | explicit delta-rs S3 graph |
 

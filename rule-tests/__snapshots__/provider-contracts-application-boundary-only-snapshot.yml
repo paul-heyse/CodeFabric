@@ -1,4 +1,4 @@
-id: provider-contracts-application-boundary-only
+id: provider-contracts-inward-boundary-only
 snapshots:
   ? |
     struct LeakedGeneratedControl {
