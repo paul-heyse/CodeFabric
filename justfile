@@ -731,6 +731,30 @@ fastmcp4-security-negative-check:
 fastmcp4-cancellation-recovery-check:
     cargo nextest run --locked --test integration -E 'test(wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation)' --no-tests=fail
 
+[doc("Validate the append-only FastMCP 4 evidence transaction and every frozen binding")]
+[group('test')]
+fastmcp4-production-evidence-integrity-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_production_evidence.py -k 'int_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_production_evidence.py integrity
+
+[doc("Validate independently expected FastMCP 4 behavior through the real installed topology")]
+[group('test')]
+fastmcp4-production-behavior-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_production_evidence.py -k 'beh_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_production_evidence.py behavior
+
+[doc("Prove one independently discriminating causal fault at every claimed successor layer")]
+[group('test')]
+fastmcp4-causal-fault-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_production_evidence.py -k 'neg_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_production_evidence.py causal-faults
+
+[doc("Validate clean build, wheel, runtime, mutation, and restart reconstruction evidence")]
+[group('test')]
+fastmcp4-clean-reconstruction-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_production_evidence.py -k 'ops_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_production_evidence.py clean-reconstruction
+
 [doc("Validate frozen WP33 claim, fixture, dependency, and review identities")]
 [group('test')]
 successor-evidence-transaction-integrity-check:
