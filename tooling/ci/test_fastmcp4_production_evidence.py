@@ -14,18 +14,26 @@ from typing import Any
 import pytest
 
 from tooling.ci.fastmcp4_production_evidence import (
+    ACTIVE_RELEASE_ID,
+    ACTIVE_RELEASE_PATH,
     BEHAVIOR_RUN_SPECS,
     CLAIM_RUN_IDS,
     CLEAN_RUN_SPECS,
     CRITERIA,
     EXPECTED_ENTRY_KINDS,
-    EXPECTED_INPUT_PATHS,
     FAULT_RUN_IDS,
     FAULT_RUN_SPECS,
     JUSTFILE_PATH,
+    LOCAL_OBSERVATION_CLAIMS,
+    LOCAL_OBSERVATION_RUN_SPEC,
     MAX_STDERR_BYTES,
     NEGATIVE_FIXTURE_RUN_IDS,
+    NORMAL_LOCAL_SOURCE,
+    NORMAL_REAL_SOURCE,
     ORACLES,
+    REAL_OBSERVATION_RUN_SPEC,
+    REAL_OBSERVER_MODULE_PATH,
+    REAL_TOPOLOGY_CLAIMS,
     REVIEW_PATH,
     REVIEW_REPORT_PATH,
     REVIEW_SCHEMA,
@@ -41,14 +49,21 @@ from tooling.ci.fastmcp4_production_evidence import (
     _append,
     _claim_payload,
     _clean_payload,
+    _expected_input_paths,
     _fault_payload,
     _limitations_payload,
     _load_jsonl,
+    _local_actual_observation,
+    _matched_comparison,
     _opened_payload,
     _recipe_body,
+    _rejected_comparison,
     _review_payload,
     _run,
+    _source_row,
+    _validate_capture_candidate,
     _validate_chain,
+    _validate_opened,
     _validate_recipe_specs,
     canonical_sha256,
     capture_transaction,
@@ -56,7 +71,15 @@ from tooling.ci.fastmcp4_production_evidence import (
     validate_capture,
     validate_transaction,
 )
-from tooling.ci.fastmcp4_successor_expectations import load_bundle
+from tooling.ci.fastmcp4_successor_expectations import (
+    R1_RELEASE_ID,
+    R1_RELEASE_PATH,
+    apply_merge_patch,
+    load_bundle,
+)
+
+TEST_RELEASE_PATH = R1_RELEASE_PATH
+TEST_RELEASE_ID = R1_RELEASE_ID
 
 
 def _run_record(spec: RunSpec) -> dict[str, object]:
@@ -117,10 +140,78 @@ def _write_jsonl(path: Path, entries: list[dict[str, Any]]) -> None:
     )
 
 
-def _draft(root: Path, *, reviewed: bool = True) -> list[dict[str, Any]]:
-    bundle = load_bundle(root)
+def _synthetic_observations(bundle: Any) -> list[dict[str, object]]:
+    """Build isolated validator fixtures; production capture never uses this source."""
+
+    expectations = {str(row["claim_id"]): row for row in bundle.expectations}
+    negatives = {str(row["claim_id"]): row for row in bundle.negative}
+    rows: list[dict[str, object]] = []
+    for claim_id in CLAIM_RUN_IDS:
+        expected = copy.deepcopy(expectations[claim_id]["expected_observation"])
+        fault = apply_merge_patch(expected, negatives[claim_id]["fault_patch"])
+        real = claim_id in REAL_TOPOLOGY_CLAIMS
+        rows.append(
+            _source_row(
+                claim_id=claim_id,
+                mode="normal",
+                actual=expected,
+                source_kind=NORMAL_REAL_SOURCE if real else NORMAL_LOCAL_SOURCE,
+            )
+        )
+        rows.append(
+            _source_row(
+                claim_id=claim_id,
+                mode="fault",
+                actual=fault,
+                source_kind=(
+                    f"{NORMAL_REAL_SOURCE}-fault-mode"
+                    if real
+                    else f"{NORMAL_LOCAL_SOURCE}-fault-mode"
+                ),
+            )
+        )
+    return rows
+
+
+def _semantic_run_records() -> dict[str, Mapping[str, object]]:
+    return {
+        REAL_OBSERVATION_RUN_SPEC.run_id: _run_record(REAL_OBSERVATION_RUN_SPEC),
+        LOCAL_OBSERVATION_RUN_SPEC.run_id: _run_record(LOCAL_OBSERVATION_RUN_SPEC),
+    }
+
+
+def _test_observation_collector(
+    root: Path,
+    _candidate_commit: str,
+    _candidate_tree: str,
+    release_path: Path,
+    _environment: Mapping[str, str],
+    _executor: Any,
+) -> tuple[list[Mapping[str, Any]], Mapping[str, Mapping[str, object]]]:
+    return _synthetic_observations(
+        load_bundle(root, release_path)
+    ), _semantic_run_records()
+
+
+def _draft(
+    root: Path,
+    *,
+    reviewed: bool = True,
+    candidate_commit: str = "1" * 40,
+    candidate_tree: str = "2" * 40,
+    snapshot_candidate: bool = False,
+) -> list[dict[str, Any]]:
+    bundle = load_bundle(root, TEST_RELEASE_PATH)
+    observations = _synthetic_observations(bundle)
     entries: list[dict[str, Any]] = []
-    opened = _opened_payload(root, "1" * 40, "2" * 40)
+    opened = _opened_payload(
+        root,
+        candidate_commit,
+        candidate_tree,
+        snapshot_candidate=snapshot_candidate,
+        release_path=TEST_RELEASE_PATH,
+        release_id=TEST_RELEASE_ID,
+    )
     opened["captured_at_utc"] = "2026-09-02T00:00:00+00:00"
     _append(
         entries,
@@ -131,7 +222,11 @@ def _draft(root: Path, *, reviewed: bool = True) -> list[dict[str, Any]]:
     _append(
         entries,
         "claim_observation_map",
-        _claim_payload(bundle, [_run_record(spec) for spec in BEHAVIOR_RUN_SPECS]),
+        _claim_payload(
+            bundle,
+            [_run_record(spec) for spec in BEHAVIOR_RUN_SPECS],
+            observations,
+        ),
         recorder="wp48-production-evidence-executor",
     )
     _append(
@@ -141,6 +236,7 @@ def _draft(root: Path, *, reviewed: bool = True) -> list[dict[str, Any]]:
             bundle,
             [_run_record(spec) for spec in FAULT_RUN_SPECS],
             [_run_record(spec) for spec in BEHAVIOR_RUN_SPECS],
+            observations,
         ),
         recorder="wp48-production-evidence-executor",
     )
@@ -185,7 +281,11 @@ def _rechain(entries: list[dict[str, Any]]) -> None:
 
 def _candidate(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
-    for path in (*EXPECTED_INPUT_PATHS, RUNNER_PATH, RUNNER_TEST_PATH):
+    for path in (
+        *_expected_input_paths(TEST_RELEASE_PATH),
+        RUNNER_PATH,
+        RUNNER_TEST_PATH,
+    ):
         destination = root / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / path, destination)
@@ -195,6 +295,17 @@ def _candidate(tmp_path: Path) -> Path:
     entries = _draft(root)
     _write_jsonl(root / TRANSACTION_PATH, entries)
     return root
+
+
+def _git(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
 
 
 @pytest.mark.skipif(
@@ -265,21 +376,248 @@ def test_int_transitive_recipe_dependency_drift_is_rejected(tmp_path: Path) -> N
     assert failure.value.code == "RFV5_EVIDENCE_RUNNER_DRIFT"
 
 
+def test_int_candidate_snapshot_survives_descendant_input_and_recipe_replacement(
+    tmp_path: Path,
+) -> None:
+    root = _candidate(tmp_path)
+    (root / TRANSACTION_PATH).unlink()
+    (root / REVIEW_PATH).unlink()
+    (root / REVIEW_REPORT_PATH).unlink()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.name", "WP48 Test")
+    _git(root, "config", "user.email", "wp48-test@example.invalid")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "candidate")
+    candidate = _git(root, "rev-parse", "HEAD")
+    candidate_tree = _git(root, "rev-parse", "HEAD^{tree}")
+    entries = _draft(
+        root,
+        candidate_commit=candidate,
+        candidate_tree=candidate_tree,
+        snapshot_candidate=True,
+    )
+    _write_jsonl(root / TRANSACTION_PATH, entries)
+    assert validate_transaction(root, check_git=True) == 16
+
+    (root / "Cargo.lock").write_text("descendant replacement\n", encoding="utf-8")
+    (root / JUSTFILE_PATH).write_text("descendant-check:\n    true\n", encoding="utf-8")
+    (root / RUNNER_PATH).write_text("# descendant replacement\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "descendant removes live WP48 selectors")
+    assert validate_transaction(root, check_git=True) == 16
+
+    opened = entries[0]["payload"]
+    bad_tree = copy.deepcopy(opened)
+    bad_tree["candidate_tree"] = "0" * 40
+    with pytest.raises(ProductionEvidenceError) as failure:
+        _validate_opened(bad_tree, root, check_git=True)
+    assert failure.value.code == "RFV5_EVIDENCE_CANDIDATE_INVALID"
+
+    bad_binding = copy.deepcopy(opened)
+    bad_binding["input_bindings"][0]["sha256"] = "0" * 64
+    with pytest.raises(ProductionEvidenceError) as failure:
+        _validate_opened(bad_binding, root, check_git=True)
+    assert failure.value.code == "RFV5_EVIDENCE_INPUT_DRIFT"
+
+    bad_candidate = copy.deepcopy(opened)
+    bad_candidate["candidate_commit"] = _git(root, "rev-parse", "HEAD")
+    with pytest.raises(ProductionEvidenceError) as failure:
+        _validate_opened(bad_candidate, root, check_git=True)
+    assert failure.value.code == "RFV5_EVIDENCE_CANDIDATE_INVALID"
+
+
+@pytest.mark.parametrize(
+    "path",
+    (RUNNER_PATH, JUSTFILE_PATH, REAL_OBSERVER_MODULE_PATH),
+    ids=("runner", "justfile", "observer"),
+)
+def test_int_capture_rejects_uncommitted_evidence_producer_mutation(
+    tmp_path: Path, path: Path
+) -> None:
+    root = _candidate(tmp_path)
+    (root / TRANSACTION_PATH).unlink()
+    (root / REVIEW_PATH).unlink()
+    (root / REVIEW_REPORT_PATH).unlink()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.name", "WP48 Test")
+    _git(root, "config", "user.email", "wp48-test@example.invalid")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "candidate")
+    candidate = _git(root, "rev-parse", "HEAD")
+
+    target = root / path
+    target.write_text(
+        target.read_text(encoding="utf-8")
+        + "\n# uncommitted evidence-producer mutation\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProductionEvidenceError) as failure:
+        _validate_capture_candidate(root, candidate)
+    assert failure.value.code == "RFV5_EVIDENCE_CANDIDATE_DIRTY"
+
+
+def test_int_capture_allows_only_unrelated_untitled_scratch_file(
+    tmp_path: Path,
+) -> None:
+    root = _candidate(tmp_path)
+    (root / TRANSACTION_PATH).unlink()
+    (root / REVIEW_PATH).unlink()
+    (root / REVIEW_REPORT_PATH).unlink()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.name", "WP48 Test")
+    _git(root, "config", "user.email", "wp48-test@example.invalid")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "candidate")
+    candidate = _git(root, "rev-parse", "HEAD")
+    candidate_tree = _git(root, "rev-parse", "HEAD^{tree}")
+
+    (root / "Untitled").write_text("user-owned scratch\n", encoding="utf-8")
+
+    assert _validate_capture_candidate(root, candidate) == candidate_tree
+
+
 def test_int_recipe_body_parser_stops_before_the_next_recipe() -> None:
     justfile = "target-check:\n    true\n\nnext-check:\n    forbidden-history-edge\n"
     assert _recipe_body(justfile, "target-check") == "    true\n\n"
 
 
-def test_beh_claims_bind_independent_values_to_executed_runs(tmp_path: Path) -> None:
+def test_beh_fabricated_actual_value_is_rejected(tmp_path: Path) -> None:
     root = _candidate(tmp_path)
     entries = _draft(root)
-    claim = entries[1]["payload"]["claims"][4]
-    claim["expected_observation_sha256"] = "0" * 64
+    claim = entries[1]["payload"]["claims"][0]
+    claim["actual_observation"]["protocol_version"] = "fabricated-version"
     _rechain(entries)
     _write_jsonl(root / TRANSACTION_PATH, entries)
     with pytest.raises(ProductionEvidenceError) as failure:
         validate_transaction(root, check_git=False)
-    assert failure.value.code == "RFV5_EVIDENCE_CLAIM_CLOSURE"
+    assert failure.value.code == "RFV5_EVIDENCE_OBSERVATION_MISMATCH"
+
+
+def test_beh_local_executable_sources_match_the_active_r2_release() -> None:
+    bundle = load_bundle(ROOT, ACTIVE_RELEASE_PATH)
+    assert bundle.spec.release_id == ACTIVE_RELEASE_ID
+    expectations = {str(row["claim_id"]): row for row in bundle.expectations}
+    fixtures = {str(row["claim_id"]): row for row in bundle.negative}
+    for claim_id in LOCAL_OBSERVATION_CLAIMS:
+        normal = _local_actual_observation(
+            ROOT, claim_id, "normal", ACTIVE_RELEASE_PATH
+        )
+        fault = _local_actual_observation(ROOT, claim_id, "fault", ACTIVE_RELEASE_PATH)
+        assert (
+            _matched_comparison(expectations[claim_id], normal)["status"] == "matched"
+        )
+        comparison = _rejected_comparison(
+            expectations[claim_id], fixtures[claim_id], normal, fault
+        )
+        assert comparison["status"] == "rejected"
+        assert comparison["typed_error"] == fixtures[claim_id]["expected_error"]
+        assert comparison["mismatch_paths"] == sorted(
+            fixtures[claim_id]["expected_mismatch_paths"]
+        )
+
+
+@pytest.mark.parametrize("mutation", ["omitted", "extra"])
+def test_beh_actual_leaf_closure_is_exact(tmp_path: Path, mutation: str) -> None:
+    root = _candidate(tmp_path)
+    entries = _draft(root)
+    actual = entries[1]["payload"]["claims"][0]["actual_observation"]
+    if mutation == "omitted":
+        actual.pop("protocol_version")
+    else:
+        actual["fabricated_leaf"] = True
+    _rechain(entries)
+    _write_jsonl(root / TRANSACTION_PATH, entries)
+    with pytest.raises(ProductionEvidenceError) as failure:
+        validate_transaction(root, check_git=False)
+    assert failure.value.code == "RFV5_EVIDENCE_OBSERVATION_LEAF_CLOSURE"
+
+
+def test_beh_field_source_omission_is_rejected(tmp_path: Path) -> None:
+    root = _candidate(tmp_path)
+    entries = _draft(root)
+    sources = entries[1]["payload"]["claims"][0]["field_sources"]
+    pointer = next(iter(sources))
+    sources.pop(pointer)
+    entries[2]["payload"]["negative_fixture_production_map"][0][
+        "normal_field_sources"
+    ].pop(pointer)
+    _rechain(entries)
+    _write_jsonl(root / TRANSACTION_PATH, entries)
+    with pytest.raises(ProductionEvidenceError) as failure:
+        validate_transaction(root, check_git=False)
+    assert failure.value.code == "RFV5_EVIDENCE_FIELD_SOURCE_CLOSURE"
+
+
+def test_beh_fabricated_source_class_is_rejected(tmp_path: Path) -> None:
+    root = _candidate(tmp_path)
+    entries = _draft(root)
+    sources = entries[1]["payload"]["claims"][0]["field_sources"]
+    pointer = next(iter(sources))
+    for descriptor in (
+        sources[pointer],
+        entries[2]["payload"]["negative_fixture_production_map"][0][
+            "normal_field_sources"
+        ][pointer],
+    ):
+        descriptor["probe_kind"] = "fabricated-observer"
+        descriptor["execution_class"] = "assertion-binding"
+    _rechain(entries)
+    _write_jsonl(root / TRANSACTION_PATH, entries)
+    with pytest.raises(ProductionEvidenceError) as failure:
+        validate_transaction(root, check_git=False)
+    assert failure.value.code == "RFV5_EVIDENCE_FIELD_SOURCE_INVALID"
+
+
+def test_beh_fabricated_source_probe_is_rejected(tmp_path: Path) -> None:
+    root = _candidate(tmp_path)
+    entries = _draft(root)
+    sources = entries[1]["payload"]["claims"][0]["field_sources"]
+    pointer = next(iter(sources))
+    sources[pointer]["probe_id"] = "fabricated-probe"
+    entries[2]["payload"]["negative_fixture_production_map"][0]["normal_field_sources"][
+        pointer
+    ]["probe_id"] = "fabricated-probe"
+    _rechain(entries)
+    _write_jsonl(root / TRANSACTION_PATH, entries)
+    with pytest.raises(ProductionEvidenceError) as failure:
+        validate_transaction(root, check_git=False)
+    assert failure.value.code == "RFV5_EVIDENCE_FIELD_SOURCE_INVALID"
+
+
+@pytest.mark.parametrize("mutation", ("probe", "class"))
+def test_beh_real_source_must_match_the_claim_local_executed_seam(
+    tmp_path: Path, mutation: str
+) -> None:
+    root = _candidate(tmp_path)
+    entries = _draft(root)
+    claim_id = "RFV5-FM4-002"
+    claim = next(
+        row for row in entries[1]["payload"]["claims"] if row["claim_id"] == claim_id
+    )
+    fault = next(
+        row
+        for row in entries[2]["payload"]["negative_fixture_production_map"]
+        if row["claim_id"] == claim_id
+    )
+    pointer = next(iter(claim["field_sources"]))
+    descriptors = (
+        claim["field_sources"][pointer],
+        fault["normal_field_sources"][pointer],
+        fault["field_sources"][pointer],
+    )
+    for descriptor in descriptors:
+        if mutation == "probe":
+            descriptor["probe_id"] = "installed-fastmcp-reference-completion"
+        else:
+            descriptor["probe_kind"] = "generated-tonic-client"
+            descriptor["execution_class"] = "production-tonic-authority"
+    _rechain(entries)
+    _write_jsonl(root / TRANSACTION_PATH, entries)
+
+    with pytest.raises(ProductionEvidenceError) as failure:
+        validate_transaction(root, check_git=False)
+    assert failure.value.code == "RFV5_EVIDENCE_FIELD_SOURCE_INVALID"
 
 
 def test_beh_fabricated_exit_or_command_is_rejected(tmp_path: Path) -> None:
@@ -330,15 +668,45 @@ def test_neg_every_required_layer_has_one_executed_fault(tmp_path: Path) -> None
     assert validate_transaction(root, check_git=False) == 16
 
 
-def test_neg_surviving_fault_is_rejected(tmp_path: Path) -> None:
+def test_neg_non_discriminating_fault_actual_is_rejected(tmp_path: Path) -> None:
     root = _candidate(tmp_path)
     entries = _draft(root)
-    entries[2]["payload"]["faults"][0]["distinguished"] = False
+    fault = entries[2]["payload"]["negative_fixture_production_map"][0]
+    fault["actual_observation"] = copy.deepcopy(fault["normal_observation"])
+    fault["field_sources"] = copy.deepcopy(fault["normal_field_sources"])
     _rechain(entries)
     _write_jsonl(root / TRANSACTION_PATH, entries)
     with pytest.raises(ProductionEvidenceError) as failure:
         validate_transaction(root, check_git=False)
-    assert failure.value.code == "RFV5_EVIDENCE_FAULT_SURVIVED"
+    assert failure.value.code == "RFV5_EVIDENCE_FAULT_NOT_DISCRIMINATING"
+
+
+def test_neg_incomplete_fault_diff_is_rejected(tmp_path: Path) -> None:
+    root = _candidate(tmp_path)
+    entries = _draft(root)
+    fault = entries[2]["payload"]["negative_fixture_production_map"][0]
+    fault["actual_observation"]["selected_suite"]["suite_version"] = fault[
+        "normal_observation"
+    ]["selected_suite"]["suite_version"]
+    _rechain(entries)
+    _write_jsonl(root / TRANSACTION_PATH, entries)
+    with pytest.raises(ProductionEvidenceError) as failure:
+        validate_transaction(root, check_git=False)
+    assert failure.value.code == "RFV5_EVIDENCE_FAULT_MISMATCH"
+
+
+def test_neg_fault_comparison_typed_error_cannot_be_fabricated(tmp_path: Path) -> None:
+    root = _candidate(tmp_path)
+    entries = _draft(root)
+    comparison = entries[2]["payload"]["negative_fixture_production_map"][0][
+        "comparison"
+    ]
+    comparison["typed_error"] = "FABRICATED_ERROR"
+    _rechain(entries)
+    _write_jsonl(root / TRANSACTION_PATH, entries)
+    with pytest.raises(ProductionEvidenceError) as failure:
+        validate_transaction(root, check_git=False)
+    assert failure.value.code == "RFV5_EVIDENCE_FIXTURE_DRIFT"
 
 
 def test_neg_independent_fixture_execution_cannot_be_omitted(tmp_path: Path) -> None:
@@ -392,6 +760,8 @@ def test_ops_capture_executes_every_closed_run_and_uses_a_fresh_target(
             "1" * 40,
             TRANSACTION_PATH,
             executor=executor,
+            observation_collector=_test_observation_collector,
+            release_path=TEST_RELEASE_PATH,
             check_git=False,
         )
         == 16
@@ -399,7 +769,7 @@ def test_ops_capture_executes_every_closed_run_and_uses_a_fresh_target(
     entries = _load_jsonl(root / TRANSACTION_PATH)
     _validate_chain(entries, reviewed=False)
     expected_count = (
-        len(BEHAVIOR_RUN_SPECS) + len(FAULT_RUN_SPECS) + len(CLEAN_RUN_SPECS)
+        len(BEHAVIOR_RUN_SPECS) - 2 + len(FAULT_RUN_SPECS) + len(CLEAN_RUN_SPECS)
     )
     assert len(calls) == expected_count
     clean_topology = next(
@@ -432,6 +802,8 @@ def test_ops_failed_capture_never_writes_a_success_transaction(tmp_path: Path) -
             "1" * 40,
             TRANSACTION_PATH,
             executor=executor,
+            observation_collector=_test_observation_collector,
+            release_path=TEST_RELEASE_PATH,
             check_git=False,
         )
     assert failure.value.code == "RFV5_EVIDENCE_COMMAND_FAILED"
@@ -468,6 +840,8 @@ def test_ops_capture_rejects_unbounded_command_output(tmp_path: Path) -> None:
             "1" * 40,
             TRANSACTION_PATH,
             executor=executor,
+            observation_collector=_test_observation_collector,
+            release_path=TEST_RELEASE_PATH,
             check_git=False,
         )
     assert failure.value.code == "RFV5_EVIDENCE_COMMAND_OUTPUT_UNBOUNDED"

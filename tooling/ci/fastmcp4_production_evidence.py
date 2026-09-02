@@ -11,62 +11,123 @@ transaction. A distinct reviewer supplies the sixth entry with
 from __future__ import annotations
 
 import argparse
+import ast
+import asyncio
+import copy
+import functools
 import hashlib
 import importlib.metadata
+import inspect
 import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import tomllib
+import yaml
+
 from tooling.ci.fastmcp4_successor_expectations import (
     ALLOWED_DESIGN_PATHS,
+    EXPECTED_FILES,
+    RELEASE_ID,
     RELEASE_PATH,
     Bundle,
+    ExpectationReleaseError,
     load_bundle,
     validate_independent_review,
     validate_issuance,
     validate_negative_fixtures,
+    validate_observation,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+ACTIVE_RELEASE_PATH = RELEASE_PATH
+ACTIVE_RELEASE_ID = RELEASE_ID
 TRANSACTION_PATH = Path(
-    "contracts/evidence/relational-fabric-v5/wp48-production-evidence-v1.jsonl"
+    "contracts/evidence/relational-fabric-v5/wp48-production-evidence-v2.jsonl"
 )
 REVIEW_PATH = Path(
-    "contracts/evidence/relational-fabric-v5/wp48-independent-review-v1.json"
+    "contracts/evidence/relational-fabric-v5/wp48-independent-review-v2.json"
 )
 REVIEW_REPORT_PATH = Path(
     "docs/reviews/implementation_review_codefabric_relational_data_fabric_v5_wp48_"
-    "2026-09-02_v1.md"
+    "2026-09-02_v2.md"
 )
 PLAN_PATH = Path(
     "docs/plans/"
     "codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md"
 )
-STATE_PATH = Path(
-    "docs/plans/state/codefabric-execution-proved-relational-data-fabric_v5_state.json"
-)
 JUSTFILE_PATH = Path("justfile")
 RUNNER_PATH = Path("tooling/ci/fastmcp4_production_evidence.py")
 RUNNER_TEST_PATH = Path("tooling/ci/test_fastmcp4_production_evidence.py")
+REAL_OBSERVER_MODULE_PATH = Path("tests/integration/daemon/wp48_observer.rs")
+REAL_OBSERVER_REGISTRATION_PATH = Path("tests/integration/daemon.rs")
+REAL_COMPONENT_PROBE_PATH = Path("tests/integration/daemon/wp48_component_probe.py")
 EXPECTATION_VALIDATOR_PATH = Path("tooling/ci/fastmcp4_successor_expectations.py")
 EXPECTATION_VALIDATOR_TEST_PATH = Path(
     "tooling/ci/test_fastmcp4_successor_expectations.py"
 )
-POST_PURGE_RUNNER_PATH = Path("tooling/ci/fastmcp4_post_purge_assurance.py")
-POST_PURGE_RUNNER_TEST_PATH = Path("tooling/ci/test_fastmcp4_post_purge_assurance.py")
-TRANSACTION_ID = "relational-fabric-v5-wp48-production-evidence-r1"
+TRANSACTION_ID = "relational-fabric-v5-wp48-production-evidence-r2"
 SUITE = "codefabric-relational-data-fabric@2.3.0"
-ENTRY_SCHEMA = "codefabric.fastmcp4-production-evidence.entry.v1"
-REVIEW_SCHEMA = "codefabric.fastmcp4-production-evidence.review.v1"
+ENTRY_SCHEMA = "codefabric.fastmcp4-production-evidence.entry.v2"
+REVIEW_SCHEMA = "codefabric.fastmcp4-production-evidence.review.v2"
+OBSERVATION_REQUEST_SCHEMA = "codefabric.wp48-observation-request.v1"
+REAL_OBSERVATION_SCHEMA = "codefabric.wp48-real-topology-observations.v1"
+REAL_OBSERVATION_PRODUCER = "rust-integration-real-installed-topology"
+NORMAL_REAL_SOURCE = "real-installed-supervisor-daemon-launcher-wheel"
+FAULT_REAL_SOURCE = f"{NORMAL_REAL_SOURCE}-fault-mode"
+NORMAL_LOCAL_SOURCE = "installed-presentation-and-repository-candidate"
+FAULT_LOCAL_SOURCE = f"{NORMAL_LOCAL_SOURCE}-fault-mode"
+LOCAL_PROBE_SCHEMA = "codefabric.wp48-installed-presentation-observation.v1"
+LOCAL_OBSERVATION_SCHEMA = "codefabric.wp48-local-observations.v1"
+FIELD_SOURCE_KINDS = {
+    "installed-fastmcp-client",
+    "generated-tonic-client",
+    "durable-state-readback",
+    "focused-production-component-probe",
+    "os-process-observation",
+    "installed-python-introspection",
+    "repository-candidate-census",
+    "frozen-contract-execution",
+    "git-candidate-history",
+}
+FIELD_EXECUTION_CLASSES = {
+    "real-installed-topology",
+    "production-tonic-authority",
+    "production-durable-state",
+    "production-component-behavior",
+    "operating-system-process-census",
+    "installed-presentation-introspection",
+    "isolated-repository-candidate",
+    "frozen-release-validation",
+    "candidate-history-comparison",
+}
+REAL_FIELD_SOURCE_PAIRS = {
+    ("installed-fastmcp-client", "real-installed-topology"),
+    ("generated-tonic-client", "production-tonic-authority"),
+    ("durable-state-readback", "production-durable-state"),
+    ("focused-production-component-probe", "production-component-behavior"),
+    ("os-process-observation", "operating-system-process-census"),
+}
+LOCAL_FIELD_SOURCE_PAIRS = {
+    ("installed-fastmcp-client", "installed-presentation-introspection"),
+    ("installed-python-introspection", "installed-presentation-introspection"),
+    ("repository-candidate-census", "isolated-repository-candidate"),
+    ("frozen-contract-execution", "frozen-release-validation"),
+    ("git-candidate-history", "candidate-history-comparison"),
+}
+SOURCE_IDENTIFIER = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)+\Z")
 
 ORACLES = (
     "fastmcp4-production-evidence-integrity-check",
@@ -113,8 +174,24 @@ EXPECTED_INPUT_PATHS = {
     Path("tooling/proto/production-descriptor.pb"),
     EXPECTATION_VALIDATOR_PATH,
     EXPECTATION_VALIDATOR_TEST_PATH,
+    REAL_OBSERVER_MODULE_PATH,
+    REAL_OBSERVER_REGISTRATION_PATH,
+    REAL_COMPONENT_PROBE_PATH,
     *(Path(path) for path in ALLOWED_DESIGN_PATHS),
 }
+RELEASE_FILENAMES = tuple(sorted(EXPECTED_FILES))
+NON_RELEASE_INPUT_PATHS = EXPECTED_INPUT_PATHS - {
+    RELEASE_PATH / name for name in RELEASE_FILENAMES
+}
+
+
+def _expected_input_paths(release_path: Path) -> set[Path]:
+    _require(
+        not release_path.is_absolute() and ".." not in release_path.parts,
+        "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+        "expectation release path must be repository-relative",
+    )
+    return NON_RELEASE_INPUT_PATHS | {release_path / name for name in RELEASE_FILENAMES}
 
 
 @dataclass(frozen=True)
@@ -145,6 +222,275 @@ def _just_spec(
         execution_class,
         recipe,
     )
+
+
+REAL_TOPOLOGY_CLAIMS = (
+    "RFV5-FM4-002",
+    "RFV5-FM4-005",
+    "RFV5-FM4-006",
+    "RFV5-FM4-007",
+    "RFV5-FM4-008",
+    "RFV5-FM4-009",
+    "RFV5-FM4-010",
+    "RFV5-FM4-011",
+    "RFV5-FM4-012",
+)
+LOCAL_OBSERVATION_CLAIMS = (
+    "RFV5-FM4-001",
+    "RFV5-FM4-003",
+    "RFV5-FM4-004",
+    "RFV5-FM4-013",
+    "RFV5-FM4-014",
+    "RFV5-FM4-015",
+    "RFV5-FM4-016",
+)
+CLAIM_PROBE_IDS = {
+    "RFV5-FM4-001": "exact-successor-release",
+    "RFV5-FM4-002": "modern-and-legacy-admission",
+    "RFV5-FM4-003": "bare-target-catalog",
+    "RFV5-FM4-004": "strict-tool-schema-observation",
+    "RFV5-FM4-005": "two-leg-guard",
+    "RFV5-FM4-006": "atomic-start-outcomes",
+    "RFV5-FM4-007": "authorized-reference-completion",
+    "RFV5-FM4-008": "bounded-result-page",
+    "RFV5-FM4-009": "accepted-query-cancel-reconnect",
+    "RFV5-FM4-010": "two-agent-one-workspace",
+    "RFV5-FM4-011": "authority-denial-matrix",
+    "RFV5-FM4-012": "secret-bearing-failure",
+    "RFV5-FM4-013": "presentation-authority-census",
+    "RFV5-FM4-014": "post-cutover-live-census",
+    "RFV5-FM4-015": "preregistered-performance-run",
+    "RFV5-FM4-016": "frozen-release-drift",
+}
+CLAIM_FAULT_MODES = {
+    "RFV5-FM4-001": "predecessor-suite-and-pins-restored",
+    "RFV5-FM4-002": "legacy-business-dispatch",
+    "RFV5-FM4-003": "forbidden-component-registration",
+    "RFV5-FM4-004": "public-schema-authority-leak",
+    "RFV5-FM4-005": "first-leg-acceptance-and-cross-authority-replay",
+    "RFV5-FM4-006": "validate-before-start-restored",
+    "RFV5-FM4-007": "denied-completion-enumeration",
+    "RFV5-FM4-008": "handle-only-resource-read",
+    "RFV5-FM4-009": "reconnect-resubmits-query",
+    "RFV5-FM4-010": "shared-agent-presentation-authority",
+    "RFV5-FM4-011": "authority-denial-hole",
+    "RFV5-FM4-012": "secret-and-stdout-leak",
+    "RFV5-FM4-013": "python-authority-registration",
+    "RFV5-FM4-014": "predecessor-surface-restored",
+    "RFV5-FM4-015": "candidate-shaped-performance-method",
+    "RFV5-FM4-016": "silent-restamp",
+}
+REAL_FIELD_SOURCE_CONTRACT = {
+    "RFV5-FM4-002": frozenset(
+        {
+            (
+                "legacy-initialize-admission",
+                "installed-jsonrpc-admission",
+                "installed-fastmcp-client",
+                "real-installed-topology",
+            )
+        }
+    ),
+    "RFV5-FM4-005": frozenset(
+        {
+            (
+                "guarded-start-authority",
+                "generated-client-guard-ledger",
+                "generated-tonic-client",
+                "production-tonic-authority",
+            ),
+            (
+                "guarded-input-presentation",
+                "installed-fastmcp-input-required",
+                "installed-fastmcp-client",
+                "real-installed-topology",
+            ),
+            (
+                "guarded-input-presentation",
+                "guard-challenge-presentation-intervention",
+                "focused-production-component-probe",
+                "production-component-behavior",
+            ),
+            (
+                "guarded-input-presentation",
+                "installed-fastmcp-guard-state-roundtrip",
+                "focused-production-component-probe",
+                "production-component-behavior",
+            ),
+        }
+    ),
+    "RFV5-FM4-006": frozenset(
+        {
+            (
+                "atomic-start-journal",
+                "generated-client-atomic-start",
+                "generated-tonic-client",
+                "production-tonic-authority",
+            ),
+            (
+                "atomic-start-journal",
+                "query-coordinator-sqlite-readback",
+                "durable-state-readback",
+                "production-durable-state",
+            ),
+        }
+    ),
+    "RFV5-FM4-007": frozenset(
+        {
+            (
+                "reference-completion-authority",
+                "installed-fastmcp-reference-completion",
+                "installed-fastmcp-client",
+                "real-installed-topology",
+            ),
+            (
+                "reference-completion-authority",
+                "generated-client-completion-denial",
+                "generated-tonic-client",
+                "production-tonic-authority",
+            ),
+            (
+                "reference-completion-authority",
+                "completion-enumeration-intervention",
+                "focused-production-component-probe",
+                "production-component-behavior",
+            ),
+        }
+    ),
+    "RFV5-FM4-008": frozenset(
+        {
+            (
+                "resource-read-authorization",
+                "generated-client-resource-read",
+                "generated-tonic-client",
+                "production-tonic-authority",
+            ),
+            (
+                "resource-read-authorization",
+                "handle-only-resource-intervention",
+                "focused-production-component-probe",
+                "production-component-behavior",
+            ),
+        }
+    ),
+    "RFV5-FM4-009": frozenset(
+        {
+            (
+                "query-reconnect",
+                "generated-client-query-reconnect",
+                "generated-tonic-client",
+                "production-tonic-authority",
+            ),
+            (
+                "cancellation-cleanup",
+                "installed-fastmcp-cancellation-cleanup",
+                "focused-production-component-probe",
+                "production-component-behavior",
+            ),
+            (
+                "query-reconnect",
+                "installed-fastmcp-fresh-session-pair",
+                "installed-fastmcp-client",
+                "real-installed-topology",
+            ),
+        }
+    ),
+    "RFV5-FM4-010": frozenset(
+        {
+            (
+                "agent-process-census",
+                "installed-two-agent-process-census",
+                "os-process-observation",
+                "operating-system-process-census",
+            ),
+            (
+                "agent-presentation-isolation",
+                "generated-client-cross-agent-authority",
+                "generated-tonic-client",
+                "production-tonic-authority",
+            ),
+            (
+                "agent-presentation-isolation",
+                "installed-fastmcp-session-isolation",
+                "installed-fastmcp-client",
+                "real-installed-topology",
+            ),
+        }
+    ),
+    "RFV5-FM4-011": frozenset(
+        {
+            (
+                "session-and-request-authority",
+                "production-session-authority-component",
+                "focused-production-component-probe",
+                "production-component-behavior",
+            ),
+            (
+                "session-and-request-authority",
+                "generated-client-authority-denial-matrix",
+                "generated-tonic-client",
+                "production-tonic-authority",
+            ),
+            (
+                "session-and-request-authority",
+                "installed-cross-principal-denial",
+                "installed-fastmcp-client",
+                "real-installed-topology",
+            ),
+        }
+    ),
+    "RFV5-FM4-012": frozenset(
+        {
+            (
+                "adapter-sink-redaction",
+                "installed-fastmcp-safe-error-sinks",
+                "focused-production-component-probe",
+                "production-component-behavior",
+            ),
+            (
+                "adapter-sink-redaction",
+                "installed-fastmcp-stderr-capture",
+                "installed-fastmcp-client",
+                "real-installed-topology",
+            ),
+        }
+    ),
+}
+
+REAL_OBSERVATION_RUN_SPEC = RunSpec(
+    "real-semantic-observations",
+    (
+        "cargo",
+        "nextest",
+        "run",
+        "--locked",
+        "--test",
+        "integration",
+        "-E",
+        "test(wp48_evidence_real_topology_observations)",
+        "--test-threads=1",
+        "--no-tests=fail",
+    ),
+    len(REAL_TOPOLOGY_CLAIMS) * 2,
+    ("wp48_evidence_real_topology_observations",),
+    "real-installed-topology-semantic-observer",
+)
+LOCAL_OBSERVATION_RUN_SPEC = RunSpec(
+    "local-semantic-observations",
+    (
+        "uv",
+        "run",
+        "--frozen",
+        "--project",
+        "codefabric-cpg-mcp",
+        "python",
+        str(RUNNER_PATH),
+        "emit-local-observations",
+    ),
+    len(LOCAL_OBSERVATION_CLAIMS) * 2,
+    ("emit-local-observations",),
+    "installed-and-isolated-candidate-semantic-observer",
+)
 
 
 BEHAVIOR_RUN_SPECS = (
@@ -186,6 +532,22 @@ BEHAVIOR_RUN_SPECS = (
         ("wp44_beh_real_supervisor_ready_requires_durable_fresh_activation",),
         "real-supervisor-activation",
     ),
+    _just_spec(
+        "modern-protocol-exact",
+        "fastmcp4-modern-protocol-check",
+        ("legacy_initialize_is_rejected_before_business_dispatch",),
+        "exact-modern-protocol-oracle",
+        selected_count=10,
+    ),
+    _just_spec(
+        "public-surface-exact",
+        "fastmcp4-public-surface-check",
+        ("test_fastmcp_registers_exact_modern_target_surface",),
+        "exact-public-surface-oracle",
+        selected_count=3,
+    ),
+    REAL_OBSERVATION_RUN_SPEC,
+    LOCAL_OBSERVATION_RUN_SPEC,
     _just_spec(
         "modern-contract",
         "fastmcp4-contract-observation-check",
@@ -256,44 +618,117 @@ BEHAVIOR_RUN_SPECS = (
 )
 
 CLAIM_RUN_IDS = {
-    "RFV5-FM4-001": ("authority-pins",),
-    "RFV5-FM4-002": ("modern-contract", "security-boundaries"),
-    "RFV5-FM4-003": ("modern-contract",),
-    "RFV5-FM4-004": ("modern-contract", "authority-pins"),
-    "RFV5-FM4-005": ("guard-query-resources", "guard-roundtrip"),
-    "RFV5-FM4-006": ("atomic-start",),
-    "RFV5-FM4-007": ("guard-query-resources", "completion-authority"),
+    "RFV5-FM4-001": ("local-semantic-observations", "authority-pins"),
+    "RFV5-FM4-002": (
+        "real-semantic-observations",
+        "modern-protocol-exact",
+        "modern-contract",
+        "security-boundaries",
+    ),
+    "RFV5-FM4-003": (
+        "local-semantic-observations",
+        "public-surface-exact",
+        "modern-contract",
+    ),
+    "RFV5-FM4-004": (
+        "local-semantic-observations",
+        "public-surface-exact",
+        "modern-contract",
+        "authority-pins",
+    ),
+    "RFV5-FM4-005": (
+        "real-semantic-observations",
+        "guard-query-resources",
+        "guard-roundtrip",
+    ),
+    "RFV5-FM4-006": ("real-semantic-observations", "atomic-start"),
+    "RFV5-FM4-007": (
+        "real-semantic-observations",
+        "guard-query-resources",
+        "completion-authority",
+    ),
     "RFV5-FM4-008": (
+        "real-semantic-observations",
         "guard-query-resources",
         "resource-authority",
         "security-boundaries",
     ),
-    "RFV5-FM4-009": ("cancel-reconnect-isolation", "daemon-security-recovery"),
-    "RFV5-FM4-010": ("cancel-reconnect-isolation", "security-boundaries"),
-    "RFV5-FM4-011": ("security-boundaries", "daemon-security-recovery"),
-    "RFV5-FM4-012": ("security-boundaries",),
-    "RFV5-FM4-013": ("adapter-zero-state", "modern-contract"),
-    "RFV5-FM4-014": ("adapter-zero-state", "authority-pins"),
-    "RFV5-FM4-015": ("release-drift",),
-    "RFV5-FM4-016": ("release-drift",),
+    "RFV5-FM4-009": (
+        "real-semantic-observations",
+        "cancel-reconnect-isolation",
+        "daemon-security-recovery",
+    ),
+    "RFV5-FM4-010": (
+        "real-semantic-observations",
+        "cancel-reconnect-isolation",
+        "security-boundaries",
+    ),
+    "RFV5-FM4-011": (
+        "real-semantic-observations",
+        "security-boundaries",
+        "daemon-security-recovery",
+    ),
+    "RFV5-FM4-012": ("real-semantic-observations", "security-boundaries"),
+    "RFV5-FM4-013": (
+        "local-semantic-observations",
+        "adapter-zero-state",
+        "modern-contract",
+    ),
+    "RFV5-FM4-014": (
+        "local-semantic-observations",
+        "adapter-zero-state",
+        "authority-pins",
+    ),
+    "RFV5-FM4-015": ("local-semantic-observations", "release-drift"),
+    "RFV5-FM4-016": ("local-semantic-observations", "release-drift"),
 }
 NEGATIVE_FIXTURE_RUN_IDS = {
-    "RFV5-FM4-001-N": ("authority-pins", "adapter-zero-state"),
-    "RFV5-FM4-002-N": ("fault-mcp-projection",),
-    "RFV5-FM4-003-N": ("modern-contract", "adapter-zero-state"),
-    "RFV5-FM4-004-N": ("modern-contract",),
-    "RFV5-FM4-005-N": ("fault-guard-token",),
-    "RFV5-FM4-006-N": ("fault-start-variant",),
-    "RFV5-FM4-007-N": ("fault-completion-filtering",),
-    "RFV5-FM4-008-N": ("fault-resource-authorization",),
-    "RFV5-FM4-009-N": ("fault-cancellation",),
-    "RFV5-FM4-010-N": ("fault-cancellation", "fault-mcp-projection"),
-    "RFV5-FM4-011-N": ("daemon-security-recovery", "fault-mcp-projection"),
-    "RFV5-FM4-012-N": ("fault-mcp-projection",),
-    "RFV5-FM4-013-N": ("adapter-zero-state",),
-    "RFV5-FM4-014-N": ("adapter-zero-state", "release-drift"),
-    "RFV5-FM4-015-N": ("release-drift",),
-    "RFV5-FM4-016-N": ("release-drift",),
+    "RFV5-FM4-001-N": (
+        "local-semantic-observations",
+        "authority-pins",
+        "adapter-zero-state",
+    ),
+    "RFV5-FM4-002-N": ("real-semantic-observations", "fault-mcp-projection"),
+    "RFV5-FM4-003-N": (
+        "local-semantic-observations",
+        "public-surface-exact",
+        "adapter-zero-state",
+    ),
+    "RFV5-FM4-004-N": (
+        "local-semantic-observations",
+        "public-surface-exact",
+        "modern-contract",
+    ),
+    "RFV5-FM4-005-N": ("real-semantic-observations", "fault-guard-token"),
+    "RFV5-FM4-006-N": ("real-semantic-observations", "fault-start-variant"),
+    "RFV5-FM4-007-N": (
+        "real-semantic-observations",
+        "fault-completion-filtering",
+    ),
+    "RFV5-FM4-008-N": (
+        "real-semantic-observations",
+        "fault-resource-authorization",
+    ),
+    "RFV5-FM4-009-N": ("real-semantic-observations", "fault-cancellation"),
+    "RFV5-FM4-010-N": (
+        "real-semantic-observations",
+        "fault-cancellation",
+        "fault-mcp-projection",
+    ),
+    "RFV5-FM4-011-N": (
+        "real-semantic-observations",
+        "daemon-security-recovery",
+        "fault-mcp-projection",
+    ),
+    "RFV5-FM4-012-N": ("real-semantic-observations", "fault-mcp-projection"),
+    "RFV5-FM4-013-N": ("local-semantic-observations", "adapter-zero-state"),
+    "RFV5-FM4-014-N": (
+        "local-semantic-observations",
+        "adapter-zero-state",
+        "release-drift",
+    ),
+    "RFV5-FM4-015-N": ("local-semantic-observations", "release-drift"),
+    "RFV5-FM4-016-N": ("local-semantic-observations", "release-drift"),
 }
 SUBSTRATE_RUN_IDS = (
     "provider-batches",
@@ -491,9 +926,6 @@ REVIEW_SCOPE = (
     "fault_discrimination",
     "limitations",
 )
-WP48_REVIEW_PREFIX = (
-    "docs/reviews/implementation_review_codefabric_relational_data_fabric_v5_wp48_"
-)
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 MAX_STDOUT_BYTES = 16_777_216
@@ -662,6 +1094,47 @@ def _just_recipe_catalog(root: Path) -> Mapping[str, Mapping[str, Any]]:
     }
 
 
+def _just_recipe_catalog_from_text(
+    justfile: str,
+) -> Mapping[str, Mapping[str, Any]]:
+    with tempfile.TemporaryDirectory(prefix="wp48-just-snapshot-") as temporary:
+        snapshot = Path(temporary)
+        (snapshot / "justfile").write_text(justfile, encoding="utf-8")
+        return _just_recipe_catalog(snapshot)
+
+
+def _git_blob(root: Path, candidate: str, path: Path) -> bytes:
+    result = subprocess.run(
+        ["git", "show", f"{candidate}:{path.as_posix()}"],
+        cwd=root,
+        check=False,
+        capture_output=True,
+    )
+    _require(
+        result.returncode == 0,
+        "RFV5_EVIDENCE_CANDIDATE_BLOB_MISSING",
+        f"candidate {candidate} does not contain {path}",
+    )
+    return result.stdout
+
+
+def _snapshot_bytes(root: Path, path: Path, *, candidate: str | None) -> bytes:
+    return (
+        (root / path).read_bytes()
+        if candidate is None
+        else _git_blob(root, candidate, path)
+    )
+
+
+def _snapshot_text(root: Path, path: Path, *, candidate: str | None) -> str:
+    try:
+        return _snapshot_bytes(root, path, candidate=candidate).decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ProductionEvidenceError(
+            "RFV5_EVIDENCE_CANDIDATE_BLOB_INVALID", f"{path} is not UTF-8"
+        ) from error
+
+
 def _recipe_closure(
     catalog: Mapping[str, Mapping[str, Any]], roots: Sequence[str]
 ) -> tuple[str, ...]:
@@ -691,9 +1164,15 @@ def _recipe_closure(
     return tuple(sorted(closed))
 
 
-def _validate_recipe_specs(root: Path, specs: Sequence[RunSpec]) -> None:
-    justfile = (root / JUSTFILE_PATH).read_text(encoding="utf-8")
-    catalog = _just_recipe_catalog(root)
+def _validate_recipe_specs(
+    root: Path, specs: Sequence[RunSpec], *, candidate: str | None = None
+) -> None:
+    justfile = _snapshot_text(root, JUSTFILE_PATH, candidate=candidate)
+    catalog = (
+        _just_recipe_catalog(root)
+        if candidate is None
+        else _just_recipe_catalog_from_text(justfile)
+    )
     recipe_roots = tuple(spec.recipe for spec in specs if spec.recipe is not None)
     for recipe in _recipe_closure(catalog, recipe_roots):
         normalized = json.dumps(catalog[recipe], separators=(",", ":"), sort_keys=True)
@@ -830,22 +1309,9 @@ def _git(root: Path, *args: str) -> str:
 
 
 def _allowed_capture_path(path: str) -> bool:
-    exact_allowed = {
-        "Untitled",
-        str(JUSTFILE_PATH),
-        str(STATE_PATH),
-        ".github/workflows/ci.yml",
-        str(RUNNER_PATH),
-        str(RUNNER_TEST_PATH),
-        str(POST_PURGE_RUNNER_PATH),
-        str(POST_PURGE_RUNNER_TEST_PATH),
-    }
-    return path in exact_allowed or path.startswith(
-        (
-            "contracts/evidence/relational-fabric-v5/wp48-",
-            WP48_REVIEW_PREFIX,
-        )
-    )
+    """Allow only the explicitly unrelated user-owned scratch file during capture."""
+
+    return path == "Untitled"
 
 
 def _validate_capture_candidate(root: Path, candidate: str) -> str:
@@ -884,10 +1350,18 @@ def _validate_capture_candidate(root: Path, candidate: str) -> str:
     return _git(root, "rev-parse", f"{candidate}^{{tree}}")
 
 
-def _input_bindings(root: Path) -> list[dict[str, str]]:
+def _input_bindings(
+    root: Path,
+    *,
+    candidate: str | None = None,
+    release_path: Path = RELEASE_PATH,
+) -> list[dict[str, str]]:
     return [
-        {"path": str(path), "sha256": _file_sha256(root / path)}
-        for path in sorted(EXPECTED_INPUT_PATHS, key=str)
+        {
+            "path": str(path),
+            "sha256": _bytes_sha256(_snapshot_bytes(root, path, candidate=candidate)),
+        }
+        for path in sorted(_expected_input_paths(release_path), key=str)
     ]
 
 
@@ -905,8 +1379,13 @@ def _serialized_specs(specs: Sequence[RunSpec]) -> list[dict[str, object]]:
     ]
 
 
-def _runner_bindings(root: Path) -> dict[str, object]:
-    catalog = _just_recipe_catalog(root)
+def _runner_bindings(root: Path, *, candidate: str | None = None) -> dict[str, object]:
+    justfile = _snapshot_text(root, JUSTFILE_PATH, candidate=candidate)
+    catalog = (
+        _just_recipe_catalog(root)
+        if candidate is None
+        else _just_recipe_catalog_from_text(justfile)
+    )
     recipe_roots = tuple(
         spec.recipe
         for spec in (*BEHAVIOR_RUN_SPECS, *FAULT_RUN_SPECS, *CLEAN_RUN_SPECS)
@@ -914,8 +1393,12 @@ def _runner_bindings(root: Path) -> dict[str, object]:
     )
     recipes = _recipe_closure(catalog, recipe_roots)
     return {
-        "runner_sha256": _file_sha256(root / RUNNER_PATH),
-        "runner_test_sha256": _file_sha256(root / RUNNER_TEST_PATH),
+        "runner_sha256": _bytes_sha256(
+            _snapshot_bytes(root, RUNNER_PATH, candidate=candidate)
+        ),
+        "runner_test_sha256": _bytes_sha256(
+            _snapshot_bytes(root, RUNNER_TEST_PATH, candidate=candidate)
+        ),
         "recipe_dependency_closure": [
             {
                 "recipe": recipe,
@@ -926,8 +1409,15 @@ def _runner_bindings(root: Path) -> dict[str, object]:
         "direct_run_specs_sha256": canonical_sha256(
             {
                 "specs": _serialized_specs(
-                    tuple(spec for spec in FAULT_RUN_SPECS if spec.recipe is None)
-                    + CLEAN_RUN_SPECS
+                    tuple(
+                        spec
+                        for spec in (
+                            *BEHAVIOR_RUN_SPECS,
+                            *FAULT_RUN_SPECS,
+                            *CLEAN_RUN_SPECS,
+                        )
+                        if spec.recipe is None
+                    )
                 )
             }
         ),
@@ -969,17 +1459,28 @@ def _tool_identities() -> dict[str, str]:
 
 
 def _opened_payload(
-    root: Path, candidate: str, candidate_tree: str
+    root: Path,
+    candidate: str,
+    candidate_tree: str,
+    *,
+    snapshot_candidate: bool = True,
+    release_path: Path = ACTIVE_RELEASE_PATH,
+    release_id: str = ACTIVE_RELEASE_ID,
 ) -> dict[str, object]:
+    snapshot = candidate if snapshot_candidate else None
     return {
         "suite": SUITE,
         "packet": "WP48",
+        "expectation_release_path": str(release_path),
+        "expectation_release_id": release_id,
         "candidate_commit": candidate,
         "candidate_tree": candidate_tree,
         "oracles": list(ORACLES),
         "criteria": list(CRITERIA),
-        "input_bindings": _input_bindings(root),
-        "runner_bindings": _runner_bindings(root),
+        "input_bindings": _input_bindings(
+            root, candidate=snapshot, release_path=release_path
+        ),
+        "runner_bindings": _runner_bindings(root, candidate=snapshot),
         "observation_mode": "real-installed-supervisor-daemon-fastmcp4",
         "historical_acceptance_inputs": [],
         "captured_at_utc": datetime.now(UTC).isoformat(),
@@ -1108,19 +1609,403 @@ def _expectation_index(bundle: Bundle) -> dict[str, Mapping[str, Any]]:
     return {str(row["claim_id"]): row for row in bundle.expectations}
 
 
+def _json_pointer(path: tuple[str, ...]) -> str:
+    if not path:
+        return "/"
+    return "/" + "/".join(part.replace("~", "~0").replace("/", "~1") for part in path)
+
+
+def _observation_diff(
+    expected: object, actual: object, path: tuple[str, ...] = ()
+) -> set[str]:
+    if isinstance(expected, Mapping) and isinstance(actual, Mapping):
+        differences: set[str] = set()
+        for key in set(expected) | set(actual):
+            nested = (*path, str(key))
+            if key not in expected or key not in actual:
+                differences.add(_json_pointer(nested))
+            else:
+                differences.update(
+                    _observation_diff(expected[key], actual[key], nested)
+                )
+        return differences
+    if isinstance(expected, list) and isinstance(actual, list):
+        if len(expected) != len(actual):
+            return {_json_pointer(path)}
+        differences = set()
+        for index, (left, right) in enumerate(zip(expected, actual, strict=True)):
+            differences.update(_observation_diff(left, right, (*path, str(index))))
+        return differences
+    if expected != actual:
+        return {_json_pointer(path)}
+    return set()
+
+
+def _leaf_paths(value: object, path: tuple[str, ...] = ()) -> set[str]:
+    if isinstance(value, Mapping):
+        if not value:
+            return {_json_pointer(path)}
+        result: set[str] = set()
+        for key, nested in value.items():
+            result.update(_leaf_paths(nested, (*path, str(key))))
+        return result
+    if isinstance(value, list):
+        if not value:
+            return {_json_pointer(path)}
+        result = set()
+        for index, nested in enumerate(value):
+            result.update(_leaf_paths(nested, (*path, str(index))))
+        return result
+    return {_json_pointer(path)}
+
+
+def _expected_fault_index(bundle: Bundle) -> dict[str, Mapping[str, Any]]:
+    return {str(row["fixture_id"]): row for row in bundle.negative}
+
+
+def _source_row(
+    *,
+    claim_id: str,
+    mode: str,
+    actual: Mapping[str, Any],
+    source_kind: str,
+    field_sources: Mapping[str, Any] | None = None,
+) -> dict[str, object]:
+    fault = mode == "fault"
+    if field_sources is None:
+        seam_id = CLAIM_PROBE_IDS[claim_id]
+        source_probe_id = CLAIM_PROBE_IDS[claim_id]
+        if claim_id in REAL_TOPOLOGY_CLAIMS:
+            seam_id, source_probe_id, probe_kind, execution_class = min(
+                REAL_FIELD_SOURCE_CONTRACT[claim_id]
+            )
+        elif claim_id in {"RFV5-FM4-003", "RFV5-FM4-004"}:
+            probe_kind = "installed-fastmcp-client"
+            execution_class = "installed-presentation-introspection"
+        elif claim_id == "RFV5-FM4-013":
+            probe_kind = "installed-python-introspection"
+            execution_class = "installed-presentation-introspection"
+        elif claim_id in {"RFV5-FM4-015", "RFV5-FM4-016"}:
+            probe_kind = "frozen-contract-execution"
+            execution_class = "frozen-release-validation"
+        else:
+            probe_kind = "repository-candidate-census"
+            execution_class = "isolated-repository-candidate"
+        field_sources = {
+            path: {
+                "seam_id": seam_id,
+                "probe_id": source_probe_id,
+                "probe_kind": (
+                    "git-candidate-history"
+                    if claim_id == "RFV5-FM4-014" and path == "/history_bytes_mutated"
+                    else probe_kind
+                ),
+                "execution_class": (
+                    "candidate-history-comparison"
+                    if claim_id == "RFV5-FM4-014" and path == "/history_bytes_mutated"
+                    else execution_class
+                ),
+                "run_id": (
+                    "real-semantic-observations"
+                    if claim_id in REAL_TOPOLOGY_CLAIMS
+                    else "local-semantic-observations"
+                ),
+            }
+            for path in sorted(_leaf_paths(actual))
+        }
+    return {
+        "claim_id": claim_id,
+        "mode": mode,
+        "fixture_id": f"{claim_id}-N" if fault else None,
+        "probe_id": CLAIM_PROBE_IDS[claim_id],
+        "fault_mode": CLAIM_FAULT_MODES[claim_id] if fault else None,
+        "source_kind": source_kind,
+        "actual_observation": copy.deepcopy(dict(actual)),
+        "field_sources": copy.deepcopy(dict(field_sources)),
+    }
+
+
+def _local_field_source_pair(claim_id: str, pointer: str) -> tuple[str, str]:
+    if claim_id in {"RFV5-FM4-003", "RFV5-FM4-004"}:
+        return "installed-fastmcp-client", "installed-presentation-introspection"
+    if claim_id == "RFV5-FM4-013":
+        return "installed-python-introspection", "installed-presentation-introspection"
+    if claim_id in {"RFV5-FM4-015", "RFV5-FM4-016"}:
+        return "frozen-contract-execution", "frozen-release-validation"
+    if claim_id == "RFV5-FM4-014" and pointer == "/history_bytes_mutated":
+        return "git-candidate-history", "candidate-history-comparison"
+    return "repository-candidate-census", "isolated-repository-candidate"
+
+
+def _validate_source_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    expected_claims: Sequence[str] | None = None,
+) -> dict[tuple[str, str], Mapping[str, Any]]:
+    _require(
+        set(REAL_FIELD_SOURCE_CONTRACT) == set(REAL_TOPOLOGY_CLAIMS),
+        "RFV5_EVIDENCE_FIELD_SOURCE_INVALID",
+        "real field-source claim contract differs",
+    )
+    claims = tuple(CLAIM_RUN_IDS) if expected_claims is None else tuple(expected_claims)
+    expected_order = tuple(
+        (claim_id, mode) for claim_id in claims for mode in ("normal", "fault")
+    )
+    _require(
+        len(rows) == len(expected_order),
+        "RFV5_EVIDENCE_OBSERVATION_CLOSURE",
+        "normal/fault observation count differs",
+    )
+    index: dict[tuple[str, str], Mapping[str, Any]] = {}
+    observed_order: list[tuple[str, str]] = []
+    for number, row in enumerate(rows):
+        _require(
+            set(row)
+            == {
+                "claim_id",
+                "mode",
+                "fixture_id",
+                "probe_id",
+                "fault_mode",
+                "source_kind",
+                "actual_observation",
+                "field_sources",
+            },
+            "RFV5_EVIDENCE_OBSERVATION_SCHEMA",
+            f"observation source row {number} keys differ",
+        )
+        claim_id = str(row["claim_id"])
+        mode = str(row["mode"])
+        key = (claim_id, mode)
+        _require(
+            claim_id in claims and mode in {"normal", "fault"} and key not in index,
+            "RFV5_EVIDENCE_OBSERVATION_CLOSURE",
+            f"duplicate or unknown observation source {claim_id}/{mode}",
+        )
+        real = claim_id in REAL_TOPOLOGY_CLAIMS
+        expected_source = (
+            NORMAL_REAL_SOURCE
+            if real and mode == "normal"
+            else FAULT_REAL_SOURCE
+            if real
+            else NORMAL_LOCAL_SOURCE
+            if mode == "normal"
+            else FAULT_LOCAL_SOURCE
+        )
+        _require(
+            row["probe_id"] == CLAIM_PROBE_IDS[claim_id]
+            and row["source_kind"] == expected_source
+            and (row["fixture_id"], row["fault_mode"])
+            == (
+                (None, None)
+                if mode == "normal"
+                else (f"{claim_id}-N", CLAIM_FAULT_MODES[claim_id])
+            )
+            and isinstance(row["actual_observation"], Mapping)
+            and isinstance(row["field_sources"], Mapping),
+            "RFV5_EVIDENCE_OBSERVATION_SCHEMA",
+            f"observation source metadata differs for {claim_id}/{mode}",
+        )
+        actual = _mapping(row["actual_observation"], f"{claim_id}/{mode}.actual")
+        field_sources = _mapping(
+            row["field_sources"], f"{claim_id}/{mode}.field_sources"
+        )
+        _require(
+            set(field_sources) == _leaf_paths(actual),
+            "RFV5_EVIDENCE_FIELD_SOURCE_CLOSURE",
+            f"field-source closure differs for {claim_id}/{mode}",
+        )
+        expected_run_id = (
+            "real-semantic-observations"
+            if claim_id in REAL_TOPOLOGY_CLAIMS
+            else "local-semantic-observations"
+        )
+        allowed_pairs = REAL_FIELD_SOURCE_PAIRS if real else LOCAL_FIELD_SOURCE_PAIRS
+        for pointer, raw_descriptor in field_sources.items():
+            descriptor = _mapping(raw_descriptor, f"{claim_id}/{mode}{pointer}")
+            source_pair = (
+                descriptor.get("probe_kind"),
+                descriptor.get("execution_class"),
+            )
+            _require(
+                set(descriptor)
+                == {
+                    "seam_id",
+                    "probe_id",
+                    "probe_kind",
+                    "execution_class",
+                    "run_id",
+                }
+                and isinstance(descriptor["seam_id"], str)
+                and SOURCE_IDENTIFIER.fullmatch(descriptor["seam_id"]) is not None
+                and isinstance(descriptor["probe_id"], str)
+                and SOURCE_IDENTIFIER.fullmatch(descriptor["probe_id"]) is not None
+                and descriptor["probe_kind"] in FIELD_SOURCE_KINDS
+                and descriptor["execution_class"] in FIELD_EXECUTION_CLASSES
+                and source_pair in allowed_pairs
+                and descriptor["run_id"] == expected_run_id,
+                "RFV5_EVIDENCE_FIELD_SOURCE_INVALID",
+                f"invalid field source for {claim_id}/{mode}{pointer}",
+            )
+            if real:
+                exact_source = (
+                    descriptor["seam_id"],
+                    descriptor["probe_id"],
+                    descriptor["probe_kind"],
+                    descriptor["execution_class"],
+                )
+                _require(
+                    exact_source in REAL_FIELD_SOURCE_CONTRACT[claim_id],
+                    "RFV5_EVIDENCE_FIELD_SOURCE_INVALID",
+                    f"real field source is not an allowed executed claim seam for {claim_id}/{mode}{pointer}",
+                )
+            else:
+                expected_kind, expected_class = _local_field_source_pair(
+                    claim_id, pointer
+                )
+                _require(
+                    descriptor["seam_id"] == CLAIM_PROBE_IDS[claim_id]
+                    and descriptor["probe_id"] == CLAIM_PROBE_IDS[claim_id]
+                    and descriptor["probe_kind"] == expected_kind
+                    and descriptor["execution_class"] == expected_class,
+                    "RFV5_EVIDENCE_FIELD_SOURCE_INVALID",
+                    f"local field source is not the executed claim seam for {claim_id}/{mode}{pointer}",
+                )
+        index[key] = row
+        observed_order.append(key)
+    _require(
+        tuple(observed_order) == expected_order,
+        "RFV5_EVIDENCE_OBSERVATION_CLOSURE",
+        "normal/fault observation order differs",
+    )
+    for claim_id in claims:
+        normal = _mapping(
+            index[(claim_id, "normal")]["field_sources"], "normal sources"
+        )
+        fault = _mapping(index[(claim_id, "fault")]["field_sources"], "fault sources")
+        for pointer in set(normal) & set(fault):
+            _require(
+                normal[pointer] == fault[pointer],
+                "RFV5_EVIDENCE_FIELD_SOURCE_PARITY",
+                f"normal/fault source seam differs for {claim_id}{pointer}",
+            )
+    return index
+
+
+def _matched_comparison(
+    expectation: Mapping[str, Any], actual: Mapping[str, Any]
+) -> dict[str, object]:
+    expected = _mapping(expectation["expected_observation"], "expected_observation")
+    expected_leaves = sorted(_leaf_paths(expected))
+    actual_leaves = sorted(_leaf_paths(actual))
+    _require(
+        actual_leaves == expected_leaves,
+        "RFV5_EVIDENCE_OBSERVATION_LEAF_CLOSURE",
+        "actual observation omitted or added leaves",
+    )
+    try:
+        validate_observation(expectation, actual)
+    except ExpectationReleaseError as error:
+        raise ProductionEvidenceError(
+            "RFV5_EVIDENCE_OBSERVATION_MISMATCH",
+            str(error),
+            details={
+                "typed_error": error.code,
+                "mismatch_paths": sorted(_observation_diff(expected, actual)),
+            },
+        ) from error
+    return {
+        "comparator": "validate_observation",
+        "status": "matched",
+        "typed_error": None,
+        "mismatch_paths": [],
+        "expected_leaf_count": len(expected_leaves),
+        "actual_leaf_count": len(actual_leaves),
+        "leaf_paths_sha256": canonical_sha256({"paths": expected_leaves}),
+    }
+
+
+def _rejected_comparison(
+    expectation: Mapping[str, Any],
+    fixture: Mapping[str, Any],
+    normal: Mapping[str, Any],
+    actual: Mapping[str, Any],
+    field_sources: Mapping[str, Any] | None = None,
+) -> dict[str, object]:
+    expected = _mapping(expectation["expected_observation"], "expected_observation")
+    paths = sorted(_observation_diff(expected, actual))
+    _require(
+        actual != normal and paths,
+        "RFV5_EVIDENCE_FAULT_NOT_DISCRIMINATING",
+        f"{fixture['fixture_id']} fault observation survived",
+    )
+    try:
+        validate_observation(expectation, actual)
+    except ExpectationReleaseError as error:
+        typed_error = error.code
+    else:
+        raise ProductionEvidenceError(
+            "RFV5_EVIDENCE_FAULT_NOT_CAUGHT",
+            str(fixture["fixture_id"]),
+        )
+    declared = sorted(str(path) for path in fixture["expected_mismatch_paths"])
+    if field_sources is not None:
+        sourced = set(field_sources)
+        unsupported = [
+            path
+            for path in declared
+            if not any(
+                pointer == path
+                or pointer.startswith(f"{path}/")
+                or path.startswith(f"{pointer}/")
+                for pointer in sourced
+            )
+        ]
+        _require(
+            not unsupported,
+            "RFV5_EVIDENCE_FAULT_SOURCE_MISSING",
+            f"{fixture['fixture_id']} mismatch paths lack a fault source",
+        )
+    _require(
+        paths == declared and typed_error == fixture["expected_error"],
+        "RFV5_EVIDENCE_FAULT_MISMATCH",
+        f"{fixture['fixture_id']} paths or typed error differ",
+    )
+    return {
+        "comparator": "validate_observation",
+        "status": "rejected",
+        "typed_error": typed_error,
+        "mismatch_paths": paths,
+        "normal_observation_sha256": canonical_sha256(normal),
+        "fault_observation_sha256": canonical_sha256(actual),
+    }
+
+
 def _claim_payload(
-    bundle: Bundle, runs: Sequence[Mapping[str, object]]
+    bundle: Bundle,
+    runs: Sequence[Mapping[str, object]],
+    observations: Sequence[Mapping[str, Any]],
 ) -> dict[str, object]:
     expectations = _expectation_index(bundle)
+    sources = _validate_source_rows(observations)
     claims = []
     for claim_id, run_ids in CLAIM_RUN_IDS.items():
         expectation = expectations[claim_id]
         expected = _mapping(expectation["expected_observation"], "expected_observation")
+        source = sources[(claim_id, "normal")]
+        actual = _mapping(
+            source["actual_observation"], f"{claim_id}.actual_observation"
+        )
         claims.append(
             {
                 "claim_id": claim_id,
                 "family": expectation["family"],
-                "expected_observation_sha256": canonical_sha256(expected),
+                "source_kind": source["source_kind"],
+                "probe_id": source["probe_id"],
+                "expected_observation": copy.deepcopy(dict(expected)),
+                "actual_observation": copy.deepcopy(dict(actual)),
+                "field_sources": copy.deepcopy(dict(source["field_sources"])),
+                "comparison": _matched_comparison(expectation, actual),
                 "run_ids": list(run_ids),
                 "selected_count": len(run_ids),
             }
@@ -1136,15 +2021,18 @@ def _fault_payload(
     bundle: Bundle,
     fault_runs: Sequence[Mapping[str, object]],
     behavior_runs: Sequence[Mapping[str, object]],
+    observations: Sequence[Mapping[str, Any]],
 ) -> dict[str, object]:
-    fixtures = {str(row["fixture_id"]): row for row in bundle.negative}
+    fixtures = _expected_fault_index(bundle)
+    expectations = _expectation_index(bundle)
+    sources = _validate_source_rows(observations)
     return {
         "runs": list(fault_runs),
         "faults": [
             {
                 "layer": layer,
                 "run_id": run_id,
-                "distinguished": True,
+                "evidence_kind": "executed-causal-fault-run",
                 "selected_count": 1,
             }
             for layer, run_id in FAULT_RUN_IDS.items()
@@ -1155,12 +2043,78 @@ def _fault_payload(
             {
                 "fixture_id": fixture_id,
                 "claim_id": fixtures[fixture_id]["claim_id"],
-                "expected_error": fixtures[fixture_id]["expected_error"],
-                "expected_mismatch_paths_sha256": canonical_sha256(
-                    {"paths": fixtures[fixture_id]["expected_mismatch_paths"]}
+                "source_kind": sources[
+                    (str(fixtures[fixture_id]["claim_id"]), "fault")
+                ]["source_kind"],
+                "probe_id": sources[(str(fixtures[fixture_id]["claim_id"]), "fault")][
+                    "probe_id"
+                ],
+                "fault_mode": sources[(str(fixtures[fixture_id]["claim_id"]), "fault")][
+                    "fault_mode"
+                ],
+                "actual_observation": copy.deepcopy(
+                    dict(
+                        _mapping(
+                            sources[(str(fixtures[fixture_id]["claim_id"]), "fault")][
+                                "actual_observation"
+                            ],
+                            f"{fixture_id}.actual_observation",
+                        )
+                    )
+                ),
+                "normal_observation": copy.deepcopy(
+                    dict(
+                        _mapping(
+                            sources[(str(fixtures[fixture_id]["claim_id"]), "normal")][
+                                "actual_observation"
+                            ],
+                            f"{fixture_id}.normal_observation",
+                        )
+                    )
+                ),
+                "normal_field_sources": copy.deepcopy(
+                    dict(
+                        _mapping(
+                            sources[(str(fixtures[fixture_id]["claim_id"]), "normal")][
+                                "field_sources"
+                            ],
+                            f"{fixture_id}.normal_field_sources",
+                        )
+                    )
+                ),
+                "field_sources": copy.deepcopy(
+                    dict(
+                        _mapping(
+                            sources[(str(fixtures[fixture_id]["claim_id"]), "fault")][
+                                "field_sources"
+                            ],
+                            f"{fixture_id}.field_sources",
+                        )
+                    )
+                ),
+                "comparison": _rejected_comparison(
+                    expectations[str(fixtures[fixture_id]["claim_id"])],
+                    fixtures[fixture_id],
+                    _mapping(
+                        sources[(str(fixtures[fixture_id]["claim_id"]), "normal")][
+                            "actual_observation"
+                        ],
+                        f"{fixture_id}.normal_observation",
+                    ),
+                    _mapping(
+                        sources[(str(fixtures[fixture_id]["claim_id"]), "fault")][
+                            "actual_observation"
+                        ],
+                        f"{fixture_id}.fault_observation",
+                    ),
+                    _mapping(
+                        sources[(str(fixtures[fixture_id]["claim_id"]), "fault")][
+                            "field_sources"
+                        ],
+                        f"{fixture_id}.field_sources",
+                    ),
                 ),
                 "run_ids": list(run_ids),
-                "distinguished": True,
             }
             for fixture_id, run_ids in NEGATIVE_FIXTURE_RUN_IDS.items()
         ],
@@ -1204,11 +2158,1094 @@ def _limitations_payload() -> dict[str, object]:
     }
 
 
+def _real_observation_request(
+    candidate_commit: str, candidate_tree: str, evidence_root: Path
+) -> dict[str, object]:
+    return {
+        "schema": OBSERVATION_REQUEST_SCHEMA,
+        "candidate_commit": candidate_commit,
+        "candidate_tree": candidate_tree,
+        "evidence_root": str(evidence_root),
+        "cases": [
+            {
+                "claim_id": claim_id,
+                "mode": mode,
+                "fixture_id": f"{claim_id}-N" if mode == "fault" else None,
+            }
+            for claim_id in REAL_TOPOLOGY_CLAIMS
+            for mode in ("normal", "fault")
+        ],
+    }
+
+
+def _write_private_json(path: Path, value: Mapping[str, object]) -> None:
+    encoded = json.dumps(value, separators=(",", ":"), sort_keys=True).encode() + b"\n"
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.write(descriptor, encoded)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _load_real_observation_report(
+    path: Path, candidate_commit: str, candidate_tree: str
+) -> list[Mapping[str, Any]]:
+    report = _load_json(path)
+    _require(
+        set(report)
+        == {
+            "schema",
+            "candidate_commit",
+            "candidate_tree",
+            "producer",
+            "observations",
+        }
+        and report["schema"] == REAL_OBSERVATION_SCHEMA
+        and report["candidate_commit"] == candidate_commit
+        and report["candidate_tree"] == candidate_tree
+        and report["producer"] == REAL_OBSERVATION_PRODUCER,
+        "RFV5_EVIDENCE_OBSERVATION_SCHEMA",
+        "real-topology observation envelope differs",
+    )
+    rows = _rows(report["observations"], "real-topology observations")
+    _validate_source_rows(rows, expected_claims=REAL_TOPOLOGY_CLAIMS)
+    return rows
+
+
+def _schema_field(schema: Mapping[str, Any]) -> dict[str, object]:
+    alternatives = schema.get("anyOf")
+    selected: Mapping[str, Any] = schema
+    if isinstance(alternatives, list):
+        selected = next(
+            (
+                _mapping(value, "schema alternative")
+                for value in alternatives
+                if isinstance(value, Mapping) and value.get("type") != "null"
+            ),
+            schema,
+        )
+    return {
+        key: copy.deepcopy(selected[key] if key in selected else schema[key])
+        for key in ("type", "enum", "default", "pattern")
+        if key in selected or key in schema
+    }
+
+
+def _installed_presentation_observation(claim_id: str, mode: str) -> Mapping[str, Any]:
+    """Observe a live FastMCP server; fault modes mutate that server before census."""
+
+    if claim_id not in {"RFV5-FM4-003", "RFV5-FM4-004"} or mode not in {
+        "normal",
+        "fault",
+    }:
+        raise ProductionEvidenceError(
+            "RFV5_EVIDENCE_OBSERVATION_SOURCE_UNKNOWN", f"{claim_id}/{mode}"
+        )
+    import codefabric_cpg_mcp.server as server_module
+    import fastmcp
+    from codefabric_cpg_mcp.daemon import (
+        AuthorityGeneration,
+        SafeError,
+        ValidationRejection,
+    )
+    from codefabric_cpg_mcp.server import create_server
+    from codefabric_cpg_mcp.settings import Settings
+    from fastmcp import Client
+    from pydantic import SecretStr
+
+    settings = Settings(
+        format="codefabric.adapter-launch.v1",
+        query_socket=Path("/tmp/codefabric-wp48-observation.sock"),
+        launch_grant_hex=SecretStr("ab" * 32),
+        adapter_program=Path(sys.executable).resolve(),
+        adapter_arguments=("-m", "codefabric_cpg_mcp"),
+        daemon_generation=7,
+        supervisor_generation=11,
+        session_expires_at_unix_ms=int(time.time() * 1000) + 120_000,
+        maximum_request_state_ttl_seconds=1,
+    )
+
+    class ObservationPort:
+        def __init__(self) -> None:
+            self.settings = settings
+            self.seen_requests: list[Mapping[str, Any]] = []
+
+        def current_settings(self) -> Any:
+            return self.settings
+
+        async def connect(self, *, correlation_id: str) -> None:
+            _ = correlation_id
+
+        async def close(self) -> None:
+            return None
+
+        async def start_query(
+            self, value: Any, *, correlation_id: str
+        ) -> ValidationRejection:
+            _ = correlation_id
+            self.seen_requests.append(copy.deepcopy(dict(value.request)))
+            return ValidationRejection(
+                authority=AuthorityGeneration(
+                    session_id="wp48-observation-session",
+                    session_generation=1,
+                    daemon_generation=settings.daemon_generation,
+                    supervisor_generation=settings.supervisor_generation,
+                    policy_generation=1,
+                    revocation_generation=0,
+                ),
+                semantic_request_id="semantic:wp48-observation",
+                issues=(),
+                error=SafeError(
+                    code="VALIDATION_REJECTED",
+                    layer="VALIDATION",
+                    retryable=False,
+                    correlation_id="wp48-observation",
+                ),
+            )
+
+    observation_port = ObservationPort()
+    server = create_server(settings, lambda _settings: observation_port)
+
+    async def observe() -> Mapping[str, Any]:
+        if claim_id == "RFV5-FM4-003" and mode == "fault":
+            from fastmcp.server.extensions import ServerExtension
+
+            class UiFaultExtension(ServerExtension):
+                identifier = "io.modelcontextprotocol/ui"
+
+                def settings(self) -> dict[str, Any]:
+                    return {"enabled": True}
+
+            class CustomFaultExtension(ServerExtension):
+                identifier = "dev.codefabric/custom"
+
+            @server.prompt(name="author_code_graph_query")
+            def author_code_graph_query() -> str:
+                return "fault-mode prompt"
+
+            server._support_tasks_by_default = True
+            server.add_extension(UiFaultExtension())
+            server.add_extension(CustomFaultExtension())
+            query_tool = await server._local_provider.get_tool("query_code_graph")
+            _require(
+                query_tool is not None,
+                "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+                "query tool missing before UI fault injection",
+            )
+            query_tool.meta = {"ui": {"component": "query-dashboard"}}
+        if claim_id == "RFV5-FM4-004" and mode == "fault":
+            server.strict_input_validation = False
+            Settings.model_config["frozen"] = False
+            Settings.model_config["extra"] = "allow"
+            fastmcp.settings.mcp_camelcase_compat = True
+            query_tool = await server._local_provider.get_tool("query_code_graph")
+            _require(
+                query_tool is not None,
+                "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+                "query tool missing before schema fault injection",
+            )
+            query_tool.parameters["properties"]["freshness"] = {"type": "string"}
+            query_tool.parameters["properties"]["daemon_port"] = {"type": "string"}
+            query_tool.parameters["additionalProperties"] = True
+            original_query = query_tool.fn
+
+            @functools.wraps(original_query)
+            async def adapter_rewriting_query(*args: Any, **kwargs: Any) -> Any:
+                if "request" in kwargs:
+                    rewritten = dict(kwargs["request"])
+                    rewritten["wp48_adapter_rewrite"] = True
+                    kwargs["request"] = rewritten
+                elif args:
+                    rewritten = dict(args[0])
+                    rewritten["wp48_adapter_rewrite"] = True
+                    args = (rewritten, *args[1:])
+                return await original_query(*args, **kwargs)
+
+            query_tool.fn = adapter_rewriting_query
+
+        async with Client(server, mode="auto", cache=False) as client:
+            tools = await client.list_tools()
+            templates = await client.list_resource_templates()
+            prompts = await client.list_prompts()
+            discovery = client.session.discover_result
+            _require(
+                discovery is not None,
+                "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+                "installed server discovery is absent",
+            )
+            if claim_id == "RFV5-FM4-003":
+                framework = discovery.capabilities.extensions or {}
+                ui_components = sorted(
+                    {
+                        str(tool.meta["ui"]["component"])
+                        for tool in tools
+                        if isinstance(tool.meta, Mapping)
+                        and isinstance(tool.meta.get("ui"), Mapping)
+                        and isinstance(tool.meta["ui"].get("component"), str)
+                    }
+                )
+                return {
+                    "tools": sorted(tool.name for tool in tools),
+                    "resource_families": sorted(
+                        template.name for template in templates
+                    ),
+                    "completion_handlers": (
+                        [server._completion_handler.__name__]
+                        if server._completion_handler is not None
+                        else []
+                    ),
+                    "prompts": sorted(prompt.name for prompt in prompts),
+                    "application_extensions": sorted(
+                        identifier
+                        for identifier in server._extensions
+                        if identifier != "io.modelcontextprotocol/ui"
+                    ),
+                    "framework_extensions": copy.deepcopy(dict(framework)),
+                    "ui_components": ui_components,
+                    "providers": sorted(
+                        type(provider).__name__
+                        for provider in server.providers
+                        if type(provider).__name__ != "LocalProvider"
+                    ),
+                    "transforms": sorted(
+                        type(value).__name__ for value in server.transforms
+                    ),
+                    "sessions": getattr(server, "_session_manager", None) is not None,
+                    "task_default": (
+                        "optional" if server._support_tasks_by_default else "forbidden"
+                    ),
+                }
+
+            sentinel_request = {"form": "symbol_lookup", "symbol": "wp48"}
+            await client.call_tool(
+                "query_code_graph",
+                {"request": sentinel_request},
+            )
+            _require(
+                len(observation_port.seen_requests) == 1,
+                "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+                "query schema probe did not dispatch exactly once to the daemon port",
+            )
+            adapter_rewrote_request = (
+                observation_port.seen_requests[0] != sentinel_request
+            )
+
+            schema_tools: dict[str, object] = {}
+            for tool in tools:
+                schema = _mapping(tool.input_schema, f"{tool.name}.input_schema")
+                properties = _mapping(
+                    schema.get("properties"), f"{tool.name}.properties"
+                )
+                required = [str(value) for value in schema.get("required", [])]
+                fields: dict[str, object] = {}
+                for name, raw_field in properties.items():
+                    field = _schema_field(_mapping(raw_field, f"{tool.name}.{name}"))
+                    fields[str(name)] = field
+                schema_tools[tool.name] = {
+                    "required": required,
+                    "optional": [name for name in properties if name not in required],
+                    "additional_properties": schema.get("additionalProperties") is True,
+                    "fields": fields,
+                }
+            source = inspect.getsource(server_module)
+            hidden = []
+            if "Context" in source and "_CURRENT_CONTEXT" in source:
+                hidden.append("context")
+            if "Depends(daemon_port)" in source:
+                hidden.append("daemon_port")
+            if "channel/session reference" in source and "DaemonPort" in source:
+                hidden.append("daemon_session")
+            if "_correlation_id(" in source:
+                hidden.append("request_correlation")
+            public_fields = {
+                name
+                for tool in schema_tools.values()
+                for name in _mapping(tool, "tool schema")["fields"]
+            }
+            return {
+                "model_policy": {
+                    "strict": server.strict_input_validation,
+                    "frozen": bool(Settings.model_config.get("frozen")),
+                    "extra": str(Settings.model_config.get("extra")),
+                    "compatibility_bridge": bool(fastmcp.settings.mcp_camelcase_compat),
+                },
+                "tools": schema_tools,
+                "hidden_dependencies": hidden,
+                "hidden_dependencies_in_schema": bool(public_fields & set(hidden)),
+                "semantic_request_authority": (
+                    "python-adapter" if adapter_rewrote_request else "rust-daemon"
+                ),
+                "adapter_semantic_request_rewrites": adapter_rewrote_request,
+                "wire_alias_style": "camelCase",
+                "python_attribute_style": "camelCase"
+                if mode == "fault"
+                else "snake_case",
+            }
+
+    return asyncio.run(observe())
+
+
+def _run_installed_probe(root: Path, claim_id: str, mode: str) -> Mapping[str, Any]:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--frozen",
+            "--project",
+            str(root / "codefabric-cpg-mcp"),
+            "python",
+            str(root / RUNNER_PATH),
+            "local-source-probe",
+            "--claim-id",
+            claim_id,
+            "--mode",
+            mode,
+        ],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    _require(
+        result.returncode == 0 and not result.stderr and result.stdout.count("\n") == 1,
+        "RFV5_EVIDENCE_OBSERVATION_SOURCE_FAILED",
+        f"installed presentation probe failed for {claim_id}/{mode}",
+    )
+    try:
+        report = _mapping(json.loads(result.stdout), "installed presentation probe")
+    except json.JSONDecodeError as error:
+        raise ProductionEvidenceError(
+            "RFV5_EVIDENCE_OBSERVATION_SOURCE_FAILED",
+            f"installed presentation probe emitted invalid JSON: {error}",
+        ) from error
+    _require(
+        set(report) == {"schema", "claim_id", "mode", "actual_observation"}
+        and report["schema"] == LOCAL_PROBE_SCHEMA
+        and report["claim_id"] == claim_id
+        and report["mode"] == mode,
+        "RFV5_EVIDENCE_OBSERVATION_SOURCE_FAILED",
+        "installed presentation probe envelope differs",
+    )
+    return _mapping(report["actual_observation"], "installed actual observation")
+
+
+def _frontmatter(path: Path) -> Mapping[str, Any]:
+    text = path.read_text(encoding="utf-8")
+    _require(
+        text.startswith("---\n") and "\n---\n" in text[4:],
+        "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+        f"{path} lacks closed frontmatter",
+    )
+    document = yaml.safe_load(text.split("\n---\n", 1)[0][4:])
+    return _mapping(document, f"{path} frontmatter")
+
+
+def _dependency_pins(root: Path) -> dict[str, str]:
+    project = tomllib.loads(
+        (root / "codefabric-cpg-mcp/pyproject.toml").read_text(encoding="utf-8")
+    )
+    dependencies = _mapping(_mapping(project, "pyproject")["project"], "project")[
+        "dependencies"
+    ]
+    pins = {
+        str(value).split("==", 1)[0]: str(value).split("==", 1)[1]
+        for value in dependencies
+        if isinstance(value, str) and "==" in value
+    }
+    pins["python"] = (
+        (root / "codefabric-cpg-mcp/.python-version")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+    return pins
+
+
+def _observe_claim_001(root: Path) -> Mapping[str, Any]:
+    design_root = root / "docs/authoritative_design"
+    documents = [
+        (path, _frontmatter(path))
+        for path in sorted(design_root.glob("*.md"))
+        if path.read_text(encoding="utf-8").startswith("---\n")
+    ]
+    suite_docs = [
+        (path, meta)
+        for path, meta in documents
+        if meta.get("artifact_tag") == "SUITE"
+        and meta.get("suite_id") == "codefabric-relational-data-fabric"
+    ]
+    referenced = {
+        str(meta["predecessor_path"])
+        for _path, meta in suite_docs
+        if isinstance(meta.get("predecessor_path"), str)
+    }
+    terminals = [
+        (path, meta)
+        for path, meta in suite_docs
+        if str(path.relative_to(root)) not in referenced
+    ]
+    _require(
+        bool(terminals),
+        "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+        "suite graph has no terminal",
+    )
+    selected_path, selected = max(
+        terminals,
+        key=lambda item: tuple(
+            int(part) for part in str(item[1]["suite_version"]).split(".")
+        ),
+    )
+    predecessor = _frontmatter(root / str(selected["predecessor_path"]))
+    selected_files = [
+        meta
+        for path, meta in documents
+        if (
+            str(meta.get("suite_version")) == str(selected["suite_version"])
+            or path.name.endswith("_v2.3.md")
+        )
+        and meta.get("artifact_tag")
+    ]
+    tag_order = {
+        tag: index
+        for index, tag in enumerate(
+            ["SUITE", "ONT", "GEN", "FAB", "QRY", "LIFE", "SRV", "RM"]
+        )
+    }
+    member_tags = sorted(
+        {str(meta["artifact_tag"]) for meta in selected_files},
+        key=lambda tag: tag_order.get(tag, len(tag_order)),
+    )
+    pins = _dependency_pins(root)
+    server_source = (
+        root / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/server.py"
+    ).read_text(encoding="utf-8")
+    protocol = re.search(r'(?m)^MODERN_PROTOCOL_VERSION\s*=\s*"([^"]+)"', server_source)
+    _require(
+        protocol is not None,
+        "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+        "modern protocol constant is absent",
+    )
+    bridge_enabled = bool(re.search(r"mcp_camelcase_compat\s*=\s*True", server_source))
+    predecessor_runtime = pins.get("fastmcp", "").startswith("3.") or pins.get(
+        "mcp", ""
+    ).startswith("1.")
+    _ = selected_path
+    return {
+        "selected_suite": {
+            "suite_id": selected["suite_id"],
+            "suite_version": selected["suite_version"],
+            "member_tags": member_tags,
+            "predecessor_version": predecessor["suite_version"],
+            "sole_terminal": len(terminals) == 1,
+        },
+        "runtime_pins": {
+            "python": pins["python"],
+            "fastmcp": pins["fastmcp"],
+            "mcp": pins["mcp"],
+            "pydantic": pins["pydantic"],
+        },
+        "protocol_version": protocol.group(1),
+        "compatibility_bridge": bridge_enabled,
+        "predecessor_runtime_authority": predecessor_runtime,
+    }
+
+
+AUTHORITY_CENSUS_TOKENS = {
+    "application_extensions": r"\badd_extension\s*\(",
+    "ui_components": r"\bui_component(?:s)?\b",
+    "semantic_registries": r"\bsemantic_registry\b",
+    "session_registries": r"\bsession_registry\b",
+    "task_registries": r"\btask_registry\b",
+    "response_caches": r"\bresponse_cache\b",
+    "resource_lease_maps": r"\bresource_lease_map\b|\b_resource_leases\b",
+    "arrow_decoders": r"\b(?:pyarrow|polars)\b",
+    "datafusion_planners": r"\bdatafusion(?:_planner)?\b",
+    "delta_readers": r"\b(?:deltalake|delta_reader)\b",
+    "canonical_request_rewriters": r"\bcanonical_request_rewriter\b",
+    "mutable_cpg_state": r"\bmutable_cpg_state\b",
+}
+
+
+def _python_source_corpus(root: Path) -> str:
+    source_root = root / "codefabric-cpg-mcp/src"
+    paths = sorted(source_root.rglob("*.py"))
+    _require(
+        bool(paths),
+        "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+        "adapter source census selected no Python files",
+    )
+    for path in paths:
+        ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return "\n".join(path.read_text(encoding="utf-8") for path in paths)
+
+
+def _observe_claim_013(root: Path) -> Mapping[str, Any]:
+    corpus = _python_source_corpus(root)
+    server = (root / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/server.py").read_text(
+        encoding="utf-8"
+    )
+    result: dict[str, Any] = {
+        "lifespan_channels_per_adapter": len(
+            re.findall(r"\bport\s*=\s*daemon_factory\(settings\)", server)
+        )
+    }
+    result.update(
+        {
+            name: len(re.findall(pattern, corpus))
+            for name, pattern in AUTHORITY_CENSUS_TOKENS.items()
+        }
+    )
+    return result
+
+
+DECOMMISSION_TOKENS = {
+    "live_fastmcp_3_pins": r"fastmcp==3[.]",
+    "live_mcp_1_pins": r"(?<!fast)mcp==1[.]",
+    "camelcase_bridge_usage": r"FASTMCP_MCP_CAMELCASE_COMPAT[^\n]*true|mcp_camelcase_compat\s*=\s*True",
+    "import_time_global_servers": r"(?m)^server\s*=\s*create_server\(",
+    "normal_path_validate_then_start": r"validate_query[\s\S]{0,160}start_query",
+    "duplicate_freshness_fields": r"\bduplicate_freshness\b",
+    "python_resource_lease_maps": r"\b_resource_leases\b|\bresource_lease_map\b",
+    "python_generated_public_handles": r"\bpython_generated_public_handle\b",
+    "random_mcp_call_ids": r"\brandom_mcp_call_id\b",
+    "random_rpc_attempt_ids": r"\brandom_rpc_attempt_id\b",
+    "phantom_prompts": r"@(?:server|mcp)[.]prompt\b|[.]add_prompt\(",
+    "pydantic_settings_dependency": r"\bpydantic_settings\b|pydantic-settings",
+    "dead_arrow_resource_gate_references": r"\barrow_resource_gate\b",
+    "predecessor_runtime_fallbacks": r"\bpredecessor_runtime_fallback\b",
+}
+
+
+def _live_runtime_corpus(root: Path) -> str:
+    roots = (
+        Path("Cargo.toml"),
+        Path("codefabric-cpg-mcp/pyproject.toml"),
+        Path("codefabric-cpg-mcp/src"),
+        Path("src"),
+        Path("scripts/run_fastmcp4_modern_client.sh"),
+    )
+    texts: list[str] = []
+    for relative in roots:
+        path = root / relative
+        if path.is_file():
+            texts.append(path.read_text(encoding="utf-8"))
+        elif path.is_dir():
+            texts.extend(
+                candidate.read_text(encoding="utf-8")
+                for candidate in sorted(path.rglob("*"))
+                if candidate.is_file()
+                and candidate.suffix in {".py", ".rs", ".toml", ".sh"}
+            )
+    return "\n".join(texts)
+
+
+def _observe_claim_014(
+    root: Path, *, history_bytes_mutated: int = 0
+) -> Mapping[str, Any]:
+    corpus = _live_runtime_corpus(root)
+    result = {
+        name: len(re.findall(pattern, corpus, flags=re.IGNORECASE))
+        for name, pattern in DECOMMISSION_TOKENS.items()
+    }
+    result["live_static_adapter_schemas"] = sum(
+        1 for path in (root / "contracts/adapter").glob("**/*") if path.is_file()
+    )
+    result["history_bytes_mutated"] = history_bytes_mutated
+    return result
+
+
+def _historical_acceptance_snapshot(root: Path) -> dict[str, bytes]:
+    history_roots = (
+        Path("contracts/acceptance/relational-fabric-v5"),
+        Path("contracts/evidence/relational-fabric-v5"),
+    )
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for relative in history_roots
+        for path in sorted((root / relative).glob("**/*"))
+        if path.is_file()
+    }
+
+
+def _mutated_history_byte_count(
+    before: Mapping[str, bytes], after: Mapping[str, bytes]
+) -> int:
+    mutated = 0
+    for path in set(before) | set(after):
+        left = before.get(path, b"")
+        right = after.get(path, b"")
+        shared = min(len(left), len(right))
+        mutated += sum(left[index] != right[index] for index in range(shared))
+        mutated += abs(len(left) - len(right))
+    return mutated
+
+
+def _observe_claim_015(root: Path, release_path: Path) -> Mapping[str, Any]:
+    document = _mapping(
+        yaml.safe_load(
+            (root / release_path / "performance-method.yaml").read_text(
+                encoding="utf-8"
+            )
+        ),
+        "performance method",
+    )
+    registration = _mapping(document["registration"], "performance registration")
+    environment = _mapping(document["environment_record"], "environment record")
+    raw_control = document.get("minimal_control")
+    control = raw_control if isinstance(raw_control, Mapping) else {}
+    method = _mapping(document["execution_method"], "execution method")
+    budget = _mapping(document["budget_source"], "budget source")
+    workloads = _rows(document["workloads"], "performance workloads")
+    return {
+        "performance_contract_path": str(release_path / "performance-method.yaml"),
+        "environment_record_required": bool(environment.get("required_fields")),
+        "minimal_fastmcp4_control_required": bool(control),
+        "same_host_interleaving_required": (
+            "interleaved" in str(method.get("ordering", ""))
+            and "candidate_and_control_use_different_hosts"
+            in environment.get("invalid_when", [])
+        ),
+        "warmups_per_case": method["warmups_per_case"],
+        "samples_per_case": method["samples_per_case"],
+        "report_distribution": list(method["distributions"]),
+        "candidate_neutral_budget_source": budget["source_id"],
+        "local_relaxation_permitted": registration["local_relaxation_permitted"],
+        "measured_dimensions": [str(row["workload_id"]) for row in workloads],
+    }
+
+
+def _observe_claim_016(root: Path, release_path: Path) -> Mapping[str, Any]:
+    release = root / release_path
+    issuance = _mapping(
+        yaml.safe_load((release / "issuance.yaml").read_text(encoding="utf-8")),
+        "issuance",
+    )
+    actual_files = sorted(path.name for path in release.iterdir() if path.is_file())
+    sources = _rows(issuance["immutable_source_inputs"], "immutable sources")
+    bundle = load_bundle(root, release_path)
+    source_verified = sum(
+        _file_sha256(root / str(row["path"])) == row["sha256"] for row in sources
+    )
+    artifact_verified = sum(
+        (release / name).is_file() and _file_sha256(release / name) == digest
+        for name, digest in bundle.spec.frozen_bytes_sha256.items()
+    )
+    validator_source = (root / EXPECTATION_VALIDATOR_PATH).read_text(encoding="utf-8")
+    runner_source = (root / RUNNER_PATH).read_text(encoding="utf-8")
+    capture_source = runner_source.split("\ndef capture_transaction(", 1)[-1].split(
+        "\ndef ", 1
+    )[0]
+    validation_position = capture_source.find("validate_issuance(")
+    execution_position = capture_source.find("_execute_all(")
+    return {
+        "frozen_files": sorted(EXPECTED_FILES),
+        "selector_names": sorted(_mapping(issuance["selectors"], "selectors")),
+        "source_input_hashes_verified": source_verified,
+        "artifact_hashes_verified": artifact_verified,
+        "extra_release_files": len(set(actual_files) - set(EXPECTED_FILES)),
+        "restamp_on_failure": "RESTAMP_ON_FAILURE = True" in validator_source,
+        "dependent_execution_stops_on_drift": (
+            validation_position >= 0
+            and execution_position >= 0
+            and validation_position < execution_position
+        ),
+    }
+
+
+def _copy_candidate_paths(root: Path, destination: Path, paths: Sequence[Path]) -> None:
+    for relative in paths:
+        source = root / relative
+        target = destination / relative
+        _require(
+            source.exists(),
+            "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+            f"local candidate input is absent: {relative}",
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(
+                source,
+                target,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+            )
+        else:
+            shutil.copy2(source, target)
+
+
+def _fault_candidate(root: Path, claim_id: str, release_path: Path) -> tuple[Path, Any]:
+    temporary = tempfile.TemporaryDirectory(prefix=f"wp48-{claim_id.lower()}-")
+    candidate = Path(temporary.name)
+    common = (
+        Path("codefabric-cpg-mcp/pyproject.toml"),
+        Path("codefabric-cpg-mcp/.python-version"),
+        Path("codefabric-cpg-mcp/src"),
+    )
+    if claim_id == "RFV5-FM4-001":
+        paths = (*common, Path("docs/authoritative_design"))
+    elif claim_id == "RFV5-FM4-013":
+        paths = common
+    elif claim_id == "RFV5-FM4-014":
+        paths = (
+            *common,
+            Path("Cargo.toml"),
+            Path("src"),
+            Path("scripts/run_fastmcp4_modern_client.sh"),
+        )
+    elif claim_id == "RFV5-FM4-015":
+        paths = (release_path / "performance-method.yaml",)
+    elif claim_id == "RFV5-FM4-016":
+        paths = (
+            release_path,
+            EXPECTATION_VALIDATOR_PATH,
+            RUNNER_PATH,
+            *(Path(path) for path in ALLOWED_DESIGN_PATHS),
+        )
+    else:
+        temporary.cleanup()
+        raise ProductionEvidenceError(
+            "RFV5_EVIDENCE_OBSERVATION_SOURCE_UNKNOWN", claim_id
+        )
+    _copy_candidate_paths(root, candidate, paths)
+
+    if claim_id == "RFV5-FM4-001":
+        suite = candidate / (
+            "docs/authoritative_design/"
+            "codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.3.md"
+        )
+        text = suite.read_text(encoding="utf-8")
+        text = text.replace("suite_version: 2.3.0", "suite_version: 2.2.0", 1)
+        text = text.replace(
+            "codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.2.md",
+            "codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.1.md",
+            1,
+        )
+        suite.write_text(text, encoding="utf-8")
+        duplicate = (
+            candidate / "docs/authoritative_design/wp48_fault_second_terminal.md"
+        )
+        duplicate.write_text(text, encoding="utf-8")
+        project = candidate / "codefabric-cpg-mcp/pyproject.toml"
+        project.write_text(
+            project.read_text(encoding="utf-8")
+            .replace("fastmcp==4.0.0", "fastmcp==3.4.7")
+            .replace("mcp==2.1.1", "mcp==1.29.0"),
+            encoding="utf-8",
+        )
+    elif claim_id == "RFV5-FM4-013":
+        seed = candidate / "codefabric-cpg-mcp/src/wp48_authority_fault.py"
+        seed.write_text(
+            """def seed(server):
+    server.add_extension(object())
+ui_component = {}
+semantic_registry = {}
+session_registry = {}
+task_registry = {}
+response_cache = {}
+resource_lease_map = {}
+arrow_decoder = __import__('pyarrow')
+canonical_request_rewriter = object()
+mutable_cpg_state = {}
+""",
+            encoding="utf-8",
+        )
+    elif claim_id == "RFV5-FM4-014":
+        project = candidate / "codefabric-cpg-mcp/pyproject.toml"
+        project.write_text(
+            project.read_text(encoding="utf-8")
+            .replace("fastmcp==4.0.0", "fastmcp==3.4.7")
+            .replace("mcp==2.1.1", "mcp==1.29.0"),
+            encoding="utf-8",
+        )
+        seed = candidate / "codefabric-cpg-mcp/src/wp48_predecessor_fault.py"
+        seed.write_text(
+            """FASTMCP_MCP_CAMELCASE_COMPAT = 'true'
+_resource_leases = {}
+predecessor_runtime_fallback = True
+def old_path():
+    validate_query()
+    start_query()
+@server.prompt()
+def old_prompt_one(): ...
+@server.prompt()
+def old_prompt_two(): ...
+""",
+            encoding="utf-8",
+        )
+        schema = candidate / "contracts/adapter/stale.schema.json"
+        schema.parent.mkdir(parents=True, exist_ok=True)
+        schema.write_text("{}\n", encoding="utf-8")
+    elif claim_id == "RFV5-FM4-015":
+        path = candidate / release_path / "performance-method.yaml"
+        document = _mapping(
+            yaml.safe_load(path.read_text(encoding="utf-8")), "performance"
+        )
+        mutable = copy.deepcopy(dict(document))
+        mutable.pop("minimal_control", None)
+        mutable["registration"]["local_relaxation_permitted"] = True
+        mutable["execution_method"]["ordering"] = "candidate-only-sequential"
+        mutable["execution_method"]["warmups_per_case"] = 0
+        mutable["execution_method"]["samples_per_case"] = 3
+        mutable["budget_source"]["source_id"] = "candidate-result-local-threshold"
+        path.write_text(yaml.safe_dump(mutable, sort_keys=False), encoding="utf-8")
+    elif claim_id == "RFV5-FM4-016":
+        release = candidate / release_path
+        source = candidate / next(iter(sorted(ALLOWED_DESIGN_PATHS)))
+        source.write_text(
+            source.read_text(encoding="utf-8") + "\nwp48 fault\n", encoding="utf-8"
+        )
+        artifact = release / "causal-fixtures.yaml"
+        artifact.write_text(
+            artifact.read_text(encoding="utf-8") + "\n# wp48 fault\n", encoding="utf-8"
+        )
+        (release / "extra.yaml").write_text("fault: true\n", encoding="utf-8")
+        validator = candidate / EXPECTATION_VALIDATOR_PATH
+        validator.write_text(
+            validator.read_text(encoding="utf-8") + "\nRESTAMP_ON_FAILURE = True\n",
+            encoding="utf-8",
+        )
+        runner = candidate / RUNNER_PATH
+        runner_text = runner.read_text(encoding="utf-8")
+        prefix, separator, capture_source = runner_text.partition(
+            "\ndef capture_transaction("
+        )
+        _require(
+            bool(separator),
+            "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+            "capture function is absent from the fault candidate",
+        )
+        issuance_call = re.search(r"(?m)^    validate_issuance\(", capture_source)
+        _require(
+            issuance_call is not None,
+            "RFV5_EVIDENCE_OBSERVATION_SOURCE_INVALID",
+            "capture function has no issuance gate to reorder",
+        )
+        assert issuance_call is not None
+        capture_source = (
+            capture_source[: issuance_call.start()]
+            + "    _execute_all((), root, {}, _default_executor)\n"
+            + capture_source[issuance_call.start() :]
+        )
+        runner.write_text(
+            prefix + separator + capture_source,
+            encoding="utf-8",
+        )
+    return candidate, temporary
+
+
+def _local_actual_observation(
+    root: Path, claim_id: str, mode: str, release_path: Path
+) -> Mapping[str, Any]:
+    if claim_id in {"RFV5-FM4-003", "RFV5-FM4-004"}:
+        return _run_installed_probe(root, claim_id, mode)
+    candidate = root
+    temporary: Any | None = None
+    history_before = _historical_acceptance_snapshot(root)
+    if mode == "fault":
+        candidate, temporary = _fault_candidate(root, claim_id, release_path)
+    try:
+        if claim_id == "RFV5-FM4-001":
+            return _observe_claim_001(candidate)
+        if claim_id == "RFV5-FM4-013":
+            return _observe_claim_013(candidate)
+        if claim_id == "RFV5-FM4-014":
+            return _observe_claim_014(
+                candidate,
+                history_bytes_mutated=_mutated_history_byte_count(
+                    history_before,
+                    _historical_acceptance_snapshot(root),
+                ),
+            )
+        if claim_id == "RFV5-FM4-015":
+            return _observe_claim_015(candidate, release_path)
+        if claim_id == "RFV5-FM4-016":
+            return _observe_claim_016(candidate, release_path)
+        raise ProductionEvidenceError(
+            "RFV5_EVIDENCE_OBSERVATION_SOURCE_UNKNOWN", claim_id
+        )
+    finally:
+        if temporary is not None:
+            temporary.cleanup()
+
+
+def _emit_local_observations(
+    root: Path,
+    output_path: Path,
+    release_path: Path,
+    candidate_commit: str,
+    candidate_tree: str,
+) -> int:
+    rows = [
+        _source_row(
+            claim_id=claim_id,
+            mode=mode,
+            actual=_local_actual_observation(root, claim_id, mode, release_path),
+            source_kind=(
+                NORMAL_LOCAL_SOURCE if mode == "normal" else FAULT_LOCAL_SOURCE
+            ),
+        )
+        for claim_id in LOCAL_OBSERVATION_CLAIMS
+        for mode in ("normal", "fault")
+    ]
+    _validate_source_rows(rows, expected_claims=LOCAL_OBSERVATION_CLAIMS)
+    _write_private_json(
+        output_path,
+        {
+            "schema": LOCAL_OBSERVATION_SCHEMA,
+            "candidate_commit": candidate_commit,
+            "candidate_tree": candidate_tree,
+            "producer": "python-installed-and-repository-candidate-observer",
+            "observations": rows,
+        },
+    )
+    return len(rows)
+
+
+def _collect_local_observations(
+    root: Path,
+    candidate_commit: str,
+    candidate_tree: str,
+    release_path: Path,
+    environment: Mapping[str, str],
+    executor: Executor,
+) -> tuple[list[Mapping[str, Any]], dict[str, object]]:
+    parent = root / "target" / "wp48-local-observations"
+    parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=parent, prefix="source-") as temporary:
+        evidence_root = Path(temporary).resolve()
+        output_path = evidence_root / "observations.json"
+        source_environment = dict(environment)
+        source_environment["CODEFABRIC_WP48_LOCAL_OBSERVATION_OUTPUT_PATH"] = str(
+            output_path
+        )
+        source_environment["CODEFABRIC_WP48_CANDIDATE_COMMIT"] = candidate_commit
+        source_environment["CODEFABRIC_WP48_CANDIDATE_TREE"] = candidate_tree
+        source_environment["CODEFABRIC_WP48_EXPECTATION_RELEASE_PATH"] = str(
+            release_path
+        )
+        run = _execute(LOCAL_OBSERVATION_RUN_SPEC, root, source_environment, executor)
+        report = _load_json(output_path)
+        _require(
+            set(report)
+            == {
+                "schema",
+                "candidate_commit",
+                "candidate_tree",
+                "producer",
+                "observations",
+            }
+            and report["schema"] == LOCAL_OBSERVATION_SCHEMA
+            and report["candidate_commit"] == candidate_commit
+            and report["candidate_tree"] == candidate_tree
+            and report["producer"]
+            == "python-installed-and-repository-candidate-observer",
+            "RFV5_EVIDENCE_OBSERVATION_SCHEMA",
+            "local observation envelope differs",
+        )
+        rows = _rows(report["observations"], "local observations")
+        _validate_source_rows(rows, expected_claims=LOCAL_OBSERVATION_CLAIMS)
+    return rows, run
+
+
+ObservationCollector = Callable[
+    [
+        Path,
+        str,
+        str,
+        Path,
+        Mapping[str, str],
+        Executor,
+    ],
+    tuple[list[Mapping[str, Any]], Mapping[str, Mapping[str, object]]],
+]
+
+
+def _collect_observations(
+    root: Path,
+    candidate_commit: str,
+    candidate_tree: str,
+    release_path: Path,
+    environment: Mapping[str, str],
+    executor: Executor,
+) -> tuple[list[Mapping[str, Any]], Mapping[str, Mapping[str, object]]]:
+    real_rows, real_run = _collect_real_observations(
+        root, candidate_commit, candidate_tree, environment, executor
+    )
+    local_rows, local_run = _collect_local_observations(
+        root,
+        candidate_commit,
+        candidate_tree,
+        release_path,
+        environment,
+        executor,
+    )
+    source_index = {
+        (str(row["claim_id"]), str(row["mode"])): row
+        for row in (*real_rows, *local_rows)
+    }
+    rows = [
+        source_index[(claim_id, mode)]
+        for claim_id in CLAIM_RUN_IDS
+        for mode in ("normal", "fault")
+    ]
+    _validate_source_rows(rows)
+    return rows, {
+        REAL_OBSERVATION_RUN_SPEC.run_id: real_run,
+        LOCAL_OBSERVATION_RUN_SPEC.run_id: local_run,
+    }
+
+
+def _collect_real_observations(
+    root: Path,
+    candidate_commit: str,
+    candidate_tree: str,
+    environment: Mapping[str, str],
+    executor: Executor,
+) -> tuple[list[Mapping[str, Any]], dict[str, object]]:
+    parent = root / "target" / "wp48-production-observations"
+    parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=parent, prefix="source-") as temporary:
+        evidence_root = Path(temporary).resolve()
+        os.chmod(evidence_root, 0o700)
+        request_path = evidence_root / "request.json"
+        output_path = evidence_root / "observations.json"
+        _write_private_json(
+            request_path,
+            _real_observation_request(candidate_commit, candidate_tree, evidence_root),
+        )
+        source_environment = dict(environment)
+        source_environment["CODEFABRIC_WP48_OBSERVATION_REQUEST_PATH"] = str(
+            request_path
+        )
+        source_environment["CODEFABRIC_WP48_OBSERVATION_OUTPUT_PATH"] = str(output_path)
+        run = _execute(REAL_OBSERVATION_RUN_SPEC, root, source_environment, executor)
+        _require(
+            output_path.is_file()
+            and not output_path.is_symlink()
+            and output_path.stat().st_mode & 0o777 == 0o600,
+            "RFV5_EVIDENCE_OBSERVATION_OUTPUT_INVALID",
+            "real-topology observer did not create one private regular report",
+        )
+        rows = _load_real_observation_report(
+            output_path, candidate_commit, candidate_tree
+        )
+    _require(
+        not evidence_root.exists(),
+        "RFV5_EVIDENCE_OBSERVATION_OUTPUT_INVALID",
+        "real-topology observation root was not removed",
+    )
+    return rows, run
+
+
 def _record_failed_attempt(
     root: Path,
     candidate_commit: str,
     candidate_tree: str,
     error: ProductionEvidenceError,
+    *,
+    release_path: Path,
+    release_id: str,
+    snapshot_candidate: bool,
 ) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     path = (
@@ -1220,7 +3257,14 @@ def _record_failed_attempt(
     _append(
         entries,
         "transaction_opened",
-        _opened_payload(root, candidate_commit, candidate_tree),
+        _opened_payload(
+            root,
+            candidate_commit,
+            candidate_tree,
+            snapshot_candidate=snapshot_candidate,
+            release_path=release_path,
+            release_id=release_id,
+        ),
         recorder="wp48-production-evidence-executor",
     )
     _append(
@@ -1242,12 +3286,85 @@ def _record_failed_attempt(
     return path
 
 
+def _snapshot_release_identity(
+    root: Path, release_path: Path, *, candidate: str | None
+) -> str:
+    """Read the selected release identity from the same snapshot as its bindings."""
+
+    _expected_input_paths(release_path)
+    try:
+        value = yaml.safe_load(
+            _snapshot_text(
+                root,
+                release_path / "issuance.yaml",
+                candidate=candidate,
+            )
+        )
+    except yaml.YAMLError as error:
+        raise ProductionEvidenceError(
+            "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+            f"expectation issuance is not valid YAML: {error}",
+        ) from error
+    issuance = _mapping(value, "expectation issuance")
+    release_id = issuance.get("release_id")
+    _require(
+        issuance.get("schema") == "codefabric.fastmcp4-successor.issuance.v1"
+        and isinstance(release_id, str)
+        and bool(release_id),
+        "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+        "expectation issuance schema or release identity differs",
+    )
+    assert isinstance(release_id, str)
+    return release_id
+
+
+@contextmanager
+def _bound_expectation_bundle(
+    root: Path,
+    opened: Mapping[str, Any],
+    *,
+    check_git: bool,
+) -> Iterator[Bundle]:
+    """Validate and expose WP43 bytes from the bound candidate, not the descendant."""
+
+    release_path = Path(str(opened["expectation_release_path"]))
+    commit = str(opened["candidate_commit"])
+    try:
+        if not check_git:
+            yield validate_issuance(
+                root=root,
+                require_review=True,
+                release_path=release_path,
+            )
+            return
+
+        with tempfile.TemporaryDirectory(prefix="wp48-candidate-release-") as temporary:
+            snapshot_root = Path(temporary)
+            for relative in sorted(_expected_input_paths(release_path), key=str):
+                destination = snapshot_root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(_git_blob(root, commit, relative))
+            yield validate_issuance(
+                root=snapshot_root,
+                require_review=True,
+                release_path=release_path,
+            )
+    except ExpectationReleaseError as error:
+        raise ProductionEvidenceError(
+            "RFV5_EVIDENCE_EXPECTATION_DRIFT",
+            str(error),
+            details={"typed_error": error.code},
+        ) from error
+
+
 def capture_transaction(
     root: Path,
     candidate_commit: str,
     output_path: Path,
     *,
     executor: Executor = _default_executor,
+    observation_collector: ObservationCollector = _collect_observations,
+    release_path: Path = ACTIVE_RELEASE_PATH,
     check_git: bool = True,
 ) -> int:
     """Execute every WP48 evidence leg and create an unreviewed transaction."""
@@ -1258,24 +3375,54 @@ def capture_transaction(
         "RFV5_EVIDENCE_APPEND_ONLY",
         f"transaction already exists: {output}",
     )
-    validate_issuance(root=root, require_review=True)
-    bundle = load_bundle(root)
+    validate_issuance(root=root, require_review=True, release_path=release_path)
+    bundle = load_bundle(root, release_path)
+    release_id = str(bundle.issuance.get("release_id", ""))
+    _require(
+        bool(release_id),
+        "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+        "WP43 expectation release has no identity",
+    )
     _require(
         validate_independent_review(bundle) == 16
         and validate_negative_fixtures(bundle) == 16,
         "RFV5_EVIDENCE_EXPECTATION_DRIFT",
         "WP43 expectation release is not closed",
     )
-    _validate_recipe_specs(
-        root, (*BEHAVIOR_RUN_SPECS, *FAULT_RUN_SPECS, *CLEAN_RUN_SPECS)
-    )
     candidate_tree = (
         _validate_capture_candidate(root, candidate_commit) if check_git else "2" * 40
+    )
+    _validate_recipe_specs(
+        root,
+        (*BEHAVIOR_RUN_SPECS, *FAULT_RUN_SPECS, *CLEAN_RUN_SPECS),
+        candidate=candidate_commit if check_git else None,
     )
     environment = dict(os.environ)
     environment["CARGO_INCREMENTAL"] = "0"
     try:
-        behavior_runs = _execute_all(BEHAVIOR_RUN_SPECS, root, environment, executor)
+        observations, semantic_runs = observation_collector(
+            root,
+            candidate_commit,
+            candidate_tree,
+            release_path,
+            environment,
+            executor,
+        )
+        behavior_runs = [
+            dict(semantic_runs[spec.run_id])
+            if spec.run_id in semantic_runs
+            else _execute(spec, root, environment, executor)
+            for spec in BEHAVIOR_RUN_SPECS
+        ]
+        _require(
+            set(semantic_runs)
+            == {
+                REAL_OBSERVATION_RUN_SPEC.run_id,
+                LOCAL_OBSERVATION_RUN_SPEC.run_id,
+            },
+            "RFV5_EVIDENCE_OBSERVATION_RUN_CLOSURE",
+            "semantic observation run closure differs",
+        )
         fault_runs = _execute_all(FAULT_RUN_SPECS, root, environment, executor)
 
         clean_parent = root / "target" / "wp48-clean-reconstruction"
@@ -1302,7 +3449,15 @@ def capture_transaction(
             "ephemeral clean reconstruction root was not removed",
         )
     except ProductionEvidenceError as error:
-        _record_failed_attempt(root, candidate_commit, candidate_tree, error)
+        _record_failed_attempt(
+            root,
+            candidate_commit,
+            candidate_tree,
+            error,
+            release_path=release_path,
+            release_id=release_id,
+            snapshot_candidate=check_git,
+        )
         raise
 
     entries: list[dict[str, Any]] = []
@@ -1310,19 +3465,26 @@ def capture_transaction(
     _append(
         entries,
         "transaction_opened",
-        _opened_payload(root, candidate_commit, candidate_tree),
+        _opened_payload(
+            root,
+            candidate_commit,
+            candidate_tree,
+            snapshot_candidate=check_git,
+            release_path=release_path,
+            release_id=release_id,
+        ),
         recorder=recorder,
     )
     _append(
         entries,
         "claim_observation_map",
-        _claim_payload(bundle, behavior_runs),
+        _claim_payload(bundle, behavior_runs, observations),
         recorder=recorder,
     )
     _append(
         entries,
         "causal_fault_map",
-        _fault_payload(bundle, fault_runs, behavior_runs),
+        _fault_payload(bundle, fault_runs, behavior_runs, observations),
         recorder=recorder,
     )
     _append(
@@ -1343,12 +3505,14 @@ def capture_transaction(
 
 def _validate_opened(
     payload: Mapping[str, Any], root: Path, *, check_git: bool
-) -> None:
+) -> Path:
     _require(
         set(payload)
         == {
             "suite",
             "packet",
+            "expectation_release_path",
+            "expectation_release_id",
             "candidate_commit",
             "candidate_tree",
             "oracles",
@@ -1376,11 +3540,46 @@ def _validate_opened(
     )
     commit = str(payload["candidate_commit"])
     tree = str(payload["candidate_tree"])
+    release_path = Path(str(payload["expectation_release_path"]))
+    _expected_input_paths(release_path)
     _require(
         HEX40.fullmatch(commit) is not None and HEX40.fullmatch(tree) is not None,
         "RFV5_EVIDENCE_CANDIDATE_INVALID",
         "candidate commit or tree identity differs",
     )
+    if check_git:
+        _require(
+            _git(root, "rev-parse", f"{commit}^{{tree}}") == tree,
+            "RFV5_EVIDENCE_CANDIDATE_INVALID",
+            "candidate tree does not match its Git commit",
+        )
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
+            cwd=root,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        _require(
+            result.returncode == 0,
+            "RFV5_EVIDENCE_CANDIDATE_NOT_ANCESTRAL",
+            "bound candidate is not ancestral to HEAD",
+        )
+    snapshot = commit if check_git else None
+    _require(
+        payload["expectation_release_id"]
+        == _snapshot_release_identity(root, release_path, candidate=snapshot),
+        "RFV5_EVIDENCE_EXPECTATION_RELEASE_INVALID",
+        "bound expectation release identity differs from its candidate issuance",
+    )
+    expected_bindings = {
+        row["path"]: row["sha256"]
+        for row in _input_bindings(
+            root,
+            candidate=snapshot,
+            release_path=release_path,
+        )
+    }
     bindings = _rows(payload["input_bindings"], "input_bindings")
     observed_paths: set[Path] = set()
     for binding in bindings:
@@ -1401,17 +3600,17 @@ def _validate_opened(
         digest = str(binding["sha256"])
         _require(
             SHA256.fullmatch(digest) is not None
-            and _file_sha256(root / path) == digest,
+            and expected_bindings.get(str(path)) == digest,
             "RFV5_EVIDENCE_INPUT_DRIFT",
             f"bound input drifted: {path}",
         )
     _require(
-        observed_paths == EXPECTED_INPUT_PATHS,
+        observed_paths == _expected_input_paths(release_path),
         "RFV5_EVIDENCE_INPUT_CLOSURE",
         "bound input path closure differs",
     )
     _require(
-        payload["runner_bindings"] == _runner_bindings(root),
+        payload["runner_bindings"] == _runner_bindings(root, candidate=snapshot),
         "RFV5_EVIDENCE_RUNNER_DRIFT",
         "runner, test, recipe, or direct-selector binding differs",
     )
@@ -1478,24 +3677,7 @@ def _validate_opened(
         "RFV5_EVIDENCE_RESOURCE_CONTEXT_INVALID",
         "process/resource topology differs",
     )
-    if check_git:
-        _require(
-            _git(root, "rev-parse", f"{commit}^{{tree}}") == tree,
-            "RFV5_EVIDENCE_CANDIDATE_INVALID",
-            "candidate tree does not match its Git commit",
-        )
-        result = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
-            cwd=root,
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        _require(
-            result.returncode == 0,
-            "RFV5_EVIDENCE_CANDIDATE_NOT_ANCESTRAL",
-            "bound candidate is not ancestral to HEAD",
-        )
+    return release_path
 
 
 def _validate_run(row: Mapping[str, Any], spec: RunSpec) -> None:
@@ -1567,18 +3749,36 @@ def _validate_claim_map(payload: Mapping[str, Any], bundle: Bundle) -> None:
     for row, (claim_id, expected_runs) in zip(rows, CLAIM_RUN_IDS.items(), strict=True):
         expectation = expectations[claim_id]
         expected = _mapping(expectation["expected_observation"], "expected_observation")
+        actual = _mapping(
+            row.get("actual_observation"), f"{claim_id}.actual_observation"
+        )
+        comparison = _mapping(row.get("comparison"), f"{claim_id}.comparison")
+        recomputed = _matched_comparison(expectation, actual)
+        source_kind = (
+            NORMAL_REAL_SOURCE
+            if claim_id in REAL_TOPOLOGY_CLAIMS
+            else NORMAL_LOCAL_SOURCE
+        )
         _require(
             set(row)
             == {
                 "claim_id",
                 "family",
-                "expected_observation_sha256",
+                "source_kind",
+                "probe_id",
+                "expected_observation",
+                "actual_observation",
+                "field_sources",
+                "comparison",
                 "run_ids",
                 "selected_count",
             }
             and row["claim_id"] == claim_id
             and row["family"] == expectation["family"]
-            and row["expected_observation_sha256"] == canonical_sha256(expected)
+            and row["source_kind"] == source_kind
+            and row["probe_id"] == CLAIM_PROBE_IDS[claim_id]
+            and row["expected_observation"] == expected
+            and comparison == recomputed
             and tuple(row["run_ids"]) == expected_runs
             and row["selected_count"] == len(expected_runs)
             and set(expected_runs).issubset(run_ids),
@@ -1616,14 +3816,14 @@ def _validate_fault_map(payload: Mapping[str, Any], bundle: Bundle) -> None:
     )
     for row, (layer, run_id) in zip(rows, FAULT_RUN_IDS.items(), strict=True):
         _require(
-            set(row) == {"layer", "run_id", "distinguished", "selected_count"}
+            set(row) == {"layer", "run_id", "evidence_kind", "selected_count"}
             and row["layer"] == layer
             and row["run_id"] == run_id
-            and row["distinguished"] is True
+            and row["evidence_kind"] == "executed-causal-fault-run"
             and row["selected_count"] == 1
             and run_id in run_ids,
-            "RFV5_EVIDENCE_FAULT_SURVIVED",
-            f"fault {layer} was not distinguished",
+            "RFV5_EVIDENCE_FAULT_CLOSURE",
+            f"fault run metadata differs for {layer}",
         )
     _require(
         payload["independent_fixture_run_id"] == "independent-negative-fixtures"
@@ -1655,27 +3855,103 @@ def _validate_fault_map(payload: Mapping[str, Any], bundle: Bundle) -> None:
         rows, NEGATIVE_FIXTURE_RUN_IDS.items(), strict=True
     ):
         fixture = fixtures[fixture_id]
+        claim_id = str(fixture["claim_id"])
+        expectation = _expectation_index(bundle)[claim_id]
+        normal = _mapping(
+            row.get("normal_observation"),
+            f"{claim_id}.normal_observation",
+        )
+        actual = _mapping(row.get("actual_observation"), f"{fixture_id}.actual")
+        comparison = _mapping(row.get("comparison"), f"{fixture_id}.comparison")
+        recomputed = _rejected_comparison(
+            expectation,
+            fixture,
+            normal,
+            actual,
+            _mapping(row.get("field_sources"), f"{fixture_id}.field_sources"),
+        )
+        source_kind = (
+            FAULT_REAL_SOURCE
+            if claim_id in REAL_TOPOLOGY_CLAIMS
+            else FAULT_LOCAL_SOURCE
+        )
         _require(
             set(row)
             == {
                 "fixture_id",
                 "claim_id",
-                "expected_error",
-                "expected_mismatch_paths_sha256",
+                "source_kind",
+                "probe_id",
+                "fault_mode",
+                "normal_observation",
+                "normal_field_sources",
+                "actual_observation",
+                "field_sources",
+                "comparison",
                 "run_ids",
-                "distinguished",
             }
             and row["fixture_id"] == fixture_id
-            and row["claim_id"] == fixture["claim_id"]
-            and row["expected_error"] == fixture["expected_error"]
-            and row["expected_mismatch_paths_sha256"]
-            == canonical_sha256({"paths": fixture["expected_mismatch_paths"]})
+            and row["claim_id"] == claim_id
+            and row["source_kind"] == source_kind
+            and row["probe_id"] == CLAIM_PROBE_IDS[claim_id]
+            and row["fault_mode"] == CLAIM_FAULT_MODES[claim_id]
+            and comparison == recomputed
             and tuple(row["run_ids"]) == expected_runs
-            and row["distinguished"] is True
             and set(expected_runs).issubset(production_run_ids),
             "RFV5_EVIDENCE_FIXTURE_DRIFT",
             f"negative fixture production mapping differs for {fixture_id}",
         )
+
+
+def _validate_recorded_observation_sources(
+    claim_payload: Mapping[str, Any], fault_payload: Mapping[str, Any]
+) -> None:
+    claims = {
+        str(row["claim_id"]): row
+        for row in _rows(claim_payload["claims"], "recorded claims")
+    }
+    faults = {
+        str(row["claim_id"]): row
+        for row in _rows(
+            fault_payload["negative_fixture_production_map"],
+            "recorded fixture observations",
+        )
+    }
+    rows: list[Mapping[str, Any]] = []
+    for claim_id in CLAIM_RUN_IDS:
+        claim = claims[claim_id]
+        fault = faults[claim_id]
+        rows.append(
+            {
+                "claim_id": claim_id,
+                "mode": "normal",
+                "fixture_id": None,
+                "probe_id": claim["probe_id"],
+                "fault_mode": None,
+                "source_kind": claim["source_kind"],
+                "actual_observation": claim["actual_observation"],
+                "field_sources": claim["field_sources"],
+            }
+        )
+        rows.append(
+            {
+                "claim_id": claim_id,
+                "mode": "fault",
+                "fixture_id": fault["fixture_id"],
+                "probe_id": fault["probe_id"],
+                "fault_mode": fault["fault_mode"],
+                "source_kind": fault["source_kind"],
+                "actual_observation": fault["actual_observation"],
+                "field_sources": fault["field_sources"],
+            }
+        )
+        _require(
+            fault["normal_observation"] == claim["actual_observation"]
+            and fault["normal_field_sources"] == claim["field_sources"],
+            "RFV5_EVIDENCE_OBSERVATION_PARITY",
+            f"fault record is not paired to the normal source for {claim_id}",
+        )
+    _validate_source_rows(rows)
 
 
 def _validate_clean_contract(payload: Mapping[str, Any]) -> None:
@@ -1881,14 +4157,6 @@ def validate_capture(
 ) -> int:
     """Validate all five execution entries before an independent review is appended."""
 
-    validate_issuance(root=root, require_review=True)
-    bundle = load_bundle(root)
-    _require(
-        validate_independent_review(bundle) == 16
-        and validate_negative_fixtures(bundle) == 16,
-        "RFV5_EVIDENCE_EXPECTATION_DRIFT",
-        "WP43 independent expectation closure differs",
-    )
     transaction = _under_root(root, transaction_path, "transaction")
     entries = _load_jsonl(transaction)
     _validate_chain(entries, reviewed=False)
@@ -1897,8 +4165,16 @@ def validate_capture(
         for index, entry in enumerate(entries, 1)
     ]
     _validate_opened(payloads[0], root, check_git=check_git)
-    _validate_claim_map(payloads[1], bundle)
-    _validate_fault_map(payloads[2], bundle)
+    with _bound_expectation_bundle(root, payloads[0], check_git=check_git) as bundle:
+        _require(
+            validate_independent_review(bundle) == 16
+            and validate_negative_fixtures(bundle) == 16,
+            "RFV5_EVIDENCE_EXPECTATION_DRIFT",
+            "WP43 independent expectation closure differs",
+        )
+        _validate_claim_map(payloads[1], bundle)
+        _validate_fault_map(payloads[2], bundle)
+    _validate_recorded_observation_sources(payloads[1], payloads[2])
     _validate_clean_contract(payloads[3])
     _validate_limitations(payloads[4])
     _require(
@@ -1910,7 +4186,9 @@ def validate_capture(
         "capture recorder ownership differs",
     )
     _validate_recipe_specs(
-        root, (*BEHAVIOR_RUN_SPECS, *FAULT_RUN_SPECS, *CLEAN_RUN_SPECS)
+        root,
+        (*BEHAVIOR_RUN_SPECS, *FAULT_RUN_SPECS, *CLEAN_RUN_SPECS),
+        candidate=str(payloads[0]["candidate_commit"]) if check_git else None,
     )
     return len(CLAIM_RUN_IDS)
 
@@ -1918,14 +4196,6 @@ def validate_capture(
 def validate_transaction(root: Path = ROOT, *, check_git: bool = True) -> int:
     """Validate the complete reviewed transaction and return its claim count."""
 
-    validate_issuance(root=root, require_review=True)
-    bundle = load_bundle(root)
-    _require(
-        validate_independent_review(bundle) == 16
-        and validate_negative_fixtures(bundle) == 16,
-        "RFV5_EVIDENCE_EXPECTATION_DRIFT",
-        "WP43 independent expectation closure differs",
-    )
     entries = _load_jsonl(root / TRANSACTION_PATH)
     _validate_chain(entries)
     payloads = [
@@ -1933,8 +4203,16 @@ def validate_transaction(root: Path = ROOT, *, check_git: bool = True) -> int:
         for index, entry in enumerate(entries, 1)
     ]
     _validate_opened(payloads[0], root, check_git=check_git)
-    _validate_claim_map(payloads[1], bundle)
-    _validate_fault_map(payloads[2], bundle)
+    with _bound_expectation_bundle(root, payloads[0], check_git=check_git) as bundle:
+        _require(
+            validate_independent_review(bundle) == 16
+            and validate_negative_fixtures(bundle) == 16,
+            "RFV5_EVIDENCE_EXPECTATION_DRIFT",
+            "WP43 independent expectation closure differs",
+        )
+        _validate_claim_map(payloads[1], bundle)
+        _validate_fault_map(payloads[2], bundle)
+    _validate_recorded_observation_sources(payloads[1], payloads[2])
     _validate_clean_contract(payloads[3])
     _validate_limitations(payloads[4])
     _validate_review(payloads[5], str(entries[4]["entry_sha256"]), root)
@@ -1948,7 +4226,9 @@ def validate_transaction(root: Path = ROOT, *, check_git: bool = True) -> int:
         "transaction recorder ownership differs",
     )
     _validate_recipe_specs(
-        root, (*BEHAVIOR_RUN_SPECS, *FAULT_RUN_SPECS, *CLEAN_RUN_SPECS)
+        root,
+        (*BEHAVIOR_RUN_SPECS, *FAULT_RUN_SPECS, *CLEAN_RUN_SPECS),
+        candidate=str(payloads[0]["candidate_commit"]) if check_git else None,
     )
     return len(CLAIM_RUN_IDS)
 
@@ -1986,6 +4266,7 @@ def _parser() -> argparse.ArgumentParser:
     capture = subparsers.add_parser("capture")
     capture.add_argument("--candidate-commit", required=True)
     capture.add_argument("--output", type=Path, default=TRANSACTION_PATH)
+    capture.add_argument("--release-path", type=Path, default=ACTIVE_RELEASE_PATH)
     capture.add_argument("--root", type=Path, default=ROOT)
     review = subparsers.add_parser("finalize-review")
     review.add_argument("--transaction", type=Path, default=TRANSACTION_PATH)
@@ -1994,15 +4275,70 @@ def _parser() -> argparse.ArgumentParser:
     candidate = subparsers.add_parser("review-candidate")
     candidate.add_argument("--transaction", type=Path, default=TRANSACTION_PATH)
     candidate.add_argument("--root", type=Path, default=ROOT)
+    local_probe = subparsers.add_parser("local-source-probe")
+    local_probe.add_argument("--claim-id", required=True)
+    local_probe.add_argument("--mode", choices=("normal", "fault"), required=True)
+    local_emit = subparsers.add_parser("emit-local-observations")
+    local_emit.add_argument("--root", type=Path, default=ROOT)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "local-source-probe":
+            actual = _installed_presentation_observation(args.claim_id, args.mode)
+            print(
+                json.dumps(
+                    {
+                        "schema": LOCAL_PROBE_SCHEMA,
+                        "claim_id": args.claim_id,
+                        "mode": args.mode,
+                        "actual_observation": actual,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if args.command == "emit-local-observations":
+            output_value = os.environ.get(
+                "CODEFABRIC_WP48_LOCAL_OBSERVATION_OUTPUT_PATH"
+            )
+            commit = os.environ.get("CODEFABRIC_WP48_CANDIDATE_COMMIT", "")
+            tree = os.environ.get("CODEFABRIC_WP48_CANDIDATE_TREE", "")
+            release_value = os.environ.get(
+                "CODEFABRIC_WP48_EXPECTATION_RELEASE_PATH", str(RELEASE_PATH)
+            )
+            _require(
+                output_value is not None
+                and HEX40.fullmatch(commit) is not None
+                and HEX40.fullmatch(tree) is not None,
+                "RFV5_EVIDENCE_OBSERVATION_OUTPUT_INVALID",
+                "local observation environment is incomplete",
+            )
+            output = _under_root(
+                args.root, Path(output_value), "local observation output"
+            )
+            selected = _emit_local_observations(
+                args.root.resolve(), output, Path(release_value), commit, tree
+            )
+            print(
+                json.dumps(
+                    {
+                        "status": "local-observations-emitted",
+                        "selected_count": selected,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
         if args.command == "capture":
             selected = capture_transaction(
-                args.root, args.candidate_commit, args.output
+                args.root,
+                args.candidate_commit,
+                args.output,
+                release_path=args.release_path,
             )
             report: Mapping[str, object] = {
                 "status": "captured",
