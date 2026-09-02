@@ -26,6 +26,9 @@ use serde_json::{Value, json};
 
 const PROCESS_DEADLINE: Duration = Duration::from_secs(180);
 
+#[cfg(feature = "rpc")]
+mod wp48_observer;
+
 struct InstalledProductionStack {
     _root: tempfile::TempDir,
     codefabric: PathBuf,
