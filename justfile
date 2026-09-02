@@ -884,8 +884,9 @@ inprocess-provider-lifecycle-check:
 [doc("Reject provider-native, fabric, state, release, daemon, and transport types outside their owning adapter boundaries")]
 [group('gate')]
 provider-type-boundary-check:
-    ast-grep test --filter '^(fact-generation-inward-boundary-only|tree-sitter-boundary-only|ruff-boundary-only|generated-rustc-types-transport-only)$'
+    ast-grep test --filter '^(fact-generation-inward-boundary-only|tree-sitter-boundary-only|ruff-boundary-only|generated-rustc-types-transport-only|no-pyrefly-public-api)$'
     ast-grep scan --filter '^(fact-generation-inward-boundary-only|tree-sitter-boundary-only|ruff-boundary-only|generated-rustc-types-transport-only)$' src
+    ast-grep scan --filter '^no-pyrefly-public-api$' pyrefly-sidecar/src
 
 [doc("Reject generated compiler transport values outside the Rust extractor adapter")]
 [group('gate')]
@@ -897,6 +898,12 @@ generated-type-boundary-check:
 [group('test')]
 rustc-provider-lifecycle-check:
     cargo nextest run --locked --lib -E 'test(/rustc_(generated_type_termination_integrity|provider_application_result_semantics|ipc_and_admission_faults|provider_process_lifecycle)/)' --no-tests=fail
+
+[doc("Prove retained Pyrefly native state, exact reconstruction, bounded memory, cancellation, and joined drain")]
+[group('test')]
+pyrefly-incremental-lifecycle-check:
+    cargo nextest run --locked --lib -E 'test(/(pyrefly_native_state_containment_integrity|pyrefly_context_trust_and_memory_faults|pyrefly_cooperative_drain_reconstruction|wp34_ops_pyrefly_stale_generation_rejection_falsification)/)' --no-tests=fail
+    cd pyrefly-sidecar && cargo test --locked pyrefly_
 
 [doc("Reject descriptor gaps, empty success, opaque payloads, schema shortcuts, and provider-local canonical identity")]
 [group('test')]

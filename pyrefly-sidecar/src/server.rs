@@ -84,6 +84,20 @@ struct ActiveRun {
     credit_notify: tokio::sync::Notify,
 }
 
+struct ActiveRunRegistration {
+    runs: Arc<Mutex<BTreeMap<String, Arc<ActiveRun>>>>,
+    provider_run_id: String,
+}
+
+impl Drop for ActiveRunRegistration {
+    fn drop(&mut self) {
+        self.runs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.provider_run_id);
+    }
+}
+
 impl ActiveRun {
     fn request_cancel(&self, superseded: bool) {
         self.cancelled.store(true, Ordering::Release);
@@ -107,6 +121,7 @@ struct Service {
     runs: Arc<Mutex<BTreeMap<String, Arc<ActiveRun>>>>,
     state_root: Arc<PathBuf>,
     sandbox_profile_digest: Arc<String>,
+    shutdown: Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 impl Service {
@@ -119,12 +134,29 @@ impl Service {
         }
         fs::create_dir_all(state_root)
             .map_err(|error| format!("create Pyrefly sidecar state root: {error}"))?;
+        let (shutdown, _receiver) = tokio::sync::watch::channel(false);
         Ok(Self {
             contexts: Arc::new(Mutex::new(BTreeMap::new())),
             runs: Arc::new(Mutex::new(BTreeMap::new())),
             state_root: Arc::new(state_root.to_owned()),
             sandbox_profile_digest: Arc::new(sandbox_profile_digest.to_owned()),
+            shutdown: Arc::new(shutdown),
         })
+    }
+
+    fn shutdown_receiver(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.shutdown.subscribe()
+    }
+}
+
+async fn wait_for_shutdown(mut receiver: tokio::sync::watch::Receiver<bool>) {
+    loop {
+        if *receiver.borrow_and_update() {
+            return;
+        }
+        if receiver.changed().await.is_err() {
+            return;
+        }
     }
 }
 
@@ -686,7 +718,12 @@ impl PyreflySidecar for Service {
         ));
         let (sender, receiver) = tokio::sync::mpsc::channel(8);
         let sandbox_profile_digest = Arc::clone(&self.sandbox_profile_digest);
+        let registration = ActiveRunRegistration {
+            runs: Arc::clone(&self.runs),
+            provider_run_id: start.provider_run_id.clone(),
+        };
         tokio::spawn(async move {
+            let _registration = registration;
             let source_manifest = lease.source_manifest_digest.clone();
             let _ = sender
                 .send(Ok(AnalyzeEvent {
@@ -1089,8 +1126,34 @@ impl PyreflySidecar for Service {
 
     async fn shutdown(
         &self,
-        _request: Request<ShutdownRequest>,
+        request: Request<ShutdownRequest>,
     ) -> Result<Response<ShutdownResponse>, Status> {
+        if request.into_inner().reason.is_empty() {
+            return Err(Status::invalid_argument(
+                "Pyrefly shutdown reason is required",
+            ));
+        }
+        for run in self
+            .runs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+        {
+            if run.terminal_state().is_none() {
+                run.request_cancel(false);
+            }
+        }
+        self.runs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        self.contexts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        self.shutdown
+            .send(true)
+            .map_err(|_| Status::unavailable("Pyrefly serving-loop drain receiver is absent"))?;
         Ok(Response::new(ShutdownResponse { accepted: true }))
     }
 }
@@ -1109,6 +1172,7 @@ pub(crate) fn serve(socket: &Path, sandbox_profile_digest: &str) -> Result<(), S
             .ok_or_else(|| "Pyrefly socket has no parent state root".to_owned())?
             .join("pyrefly-state");
         let service = Service::new(&state_root, sandbox_profile_digest)?;
+        let shutdown = service.shutdown_receiver();
         let listener = tokio::net::UnixListener::bind(socket)
             .map_err(|error| format!("bind Pyrefly sidecar socket: {error}"))?;
         fs::set_permissions(socket, fs::Permissions::from_mode(0o600))
@@ -1120,7 +1184,7 @@ pub(crate) fn serve(socket: &Path, sandbox_profile_digest: &str) -> Result<(), S
                     .max_decoding_message_size(MAX_FRAME_BYTES)
                     .max_encoding_message_size(MAX_FRAME_BYTES),
             )
-            .serve_with_incoming(incoming)
+            .serve_with_incoming_shutdown(incoming, wait_for_shutdown(shutdown))
             .await
             .map_err(|error| format!("serve Pyrefly sidecar: {error}"))
     });
@@ -1158,6 +1222,26 @@ mod tests {
             source_pin: [4; 32],
             context_pin: [5; 32],
         }
+    }
+
+    fn active_run(context_handle: &str, source_generation: u64) -> Arc<ActiveRun> {
+        Arc::new(ActiveRun {
+            context_handle: context_handle.to_owned(),
+            source_generation,
+            cancelled: AtomicBool::new(false),
+            superseded: AtomicBool::new(false),
+            terminal: Mutex::new(None),
+            credits: Mutex::new(CreditState {
+                available_frames: 1,
+                available_bytes: 4,
+                outstanding: BTreeMap::new(),
+                next_ack_sequence: [(relation_identity().stream_id.to_vec(), 0)]
+                    .into_iter()
+                    .collect(),
+                rejected: None,
+            }),
+            credit_notify: tokio::sync::Notify::new(),
+        })
     }
 
     #[test]
@@ -1221,6 +1305,7 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&state_root);
         let service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
+        let shutdown = service.shutdown_receiver();
 
         let mut mismatch = hello();
         mismatch.protocol_major = 2;
@@ -1282,23 +1367,7 @@ mod tests {
             tonic::Code::FailedPrecondition
         );
 
-        let run = Arc::new(ActiveRun {
-            context_handle: opened.context_handle,
-            source_generation: 2,
-            cancelled: AtomicBool::new(false),
-            superseded: AtomicBool::new(false),
-            terminal: Mutex::new(None),
-            credits: Mutex::new(CreditState {
-                available_frames: 1,
-                available_bytes: 4,
-                outstanding: BTreeMap::new(),
-                next_ack_sequence: [(relation_identity().stream_id.to_vec(), 0)]
-                    .into_iter()
-                    .collect(),
-                rejected: None,
-            }),
-            credit_notify: tokio::sync::Notify::new(),
-        });
+        let run = active_run(&opened.context_handle, 2);
         let identity = relation_identity();
         reserve_relation_credit(&run, identity, 1, 4).await.unwrap();
         assert!(
@@ -1375,6 +1444,102 @@ mod tests {
                 .unwrap()
                 .into_inner()
                 .accepted
+        );
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            wait_for_shutdown(shutdown),
+        )
+        .await
+        .expect("the real serving-loop shutdown signal must be observable");
+        drop(service);
+        let _ = fs::remove_dir_all(state_root);
+    }
+
+    #[test]
+    fn pyrefly_context_trust_and_memory_faults() {
+        assert!(Service::new(Path::new("relative"), TEST_SANDBOX_PROFILE_DIGEST).is_err());
+        assert!(Service::new(Path::new("/tmp"), "sha256:not-a-digest").is_err());
+
+        let state_root = std::env::temp_dir().join(format!(
+            "codefabric-pyrefly-registration-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&state_root);
+        let service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
+        let run = active_run("context-bounded", 1);
+        service
+            .runs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert("run-bounded".to_owned(), Arc::clone(&run));
+        {
+            let _registration = ActiveRunRegistration {
+                runs: Arc::clone(&service.runs),
+                provider_run_id: "run-bounded".to_owned(),
+            };
+            assert_eq!(
+                service
+                    .runs
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .len(),
+                1
+            );
+        }
+        assert!(
+            service
+                .runs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty(),
+            "terminal run registration must not accumulate across generations"
+        );
+        drop(service);
+        let _ = fs::remove_dir_all(state_root);
+    }
+
+    #[tokio::test]
+    async fn pyrefly_cooperative_drain_reconstruction() {
+        let state_root =
+            std::env::temp_dir().join(format!("codefabric-pyrefly-drain-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&state_root);
+        let service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
+        let shutdown = service.shutdown_receiver();
+        let run = active_run("context-drain", 9);
+        service
+            .runs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert("run-drain".to_owned(), Arc::clone(&run));
+
+        let accepted = service
+            .shutdown(Request::new(ShutdownRequest {
+                reason: "workspace drain".to_owned(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(accepted.accepted);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            wait_for_shutdown(shutdown),
+        )
+        .await
+        .expect("cooperative drain must stop the serving loop within its bound");
+        assert!(run.cancelled.load(Ordering::Acquire));
+        assert!(
+            service
+                .runs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
+        );
+        assert!(
+            service
+                .contexts
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
         );
         drop(service);
         let _ = fs::remove_dir_all(state_root);

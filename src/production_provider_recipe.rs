@@ -328,64 +328,6 @@ pub(crate) enum ProviderRelation {
     Rustc(RustcRelation),
 }
 
-/// Exact provider execution lane selected by the compiled semantic release.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CompiledProviderLane {
-    Pyrefly,
-}
-
-/// Application-owned execution bounds for one exact provider lane.
-///
-/// These values are part of the compiled provider recipe. They are not a second registry and
-/// cannot be selected or replaced without the non-forgeable release authority.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CompiledProviderExecutionProfile {
-    pub(crate) provider_id: &'static str,
-    pub(crate) placement: &'static str,
-    pub(crate) resource_profile_id: &'static str,
-    pub(crate) max_input_bytes: u64,
-    pub(crate) max_work_units: u64,
-    pub(crate) max_wall_millis: u64,
-    pub(crate) max_visited_nodes: u64,
-    pub(crate) max_traversal_depth: u16,
-    pub(crate) max_output_records: u64,
-    pub(crate) max_output_bytes: u64,
-    pub(crate) max_diagnostics: u16,
-    pub(crate) max_parser_workers: u16,
-    pub(crate) max_retained_tree_revisions: u16,
-    pub(crate) cancellation_check_interval: u32,
-    pub(crate) cancellation_ack_millis: u16,
-}
-
-impl CompiledProviderAuthority {
-    /// Select the exact provider-specific execution recipe compiled into this release.
-    #[must_use]
-    pub(crate) const fn execution_profile(
-        &self,
-        lane: CompiledProviderLane,
-    ) -> CompiledProviderExecutionProfile {
-        match lane {
-            CompiledProviderLane::Pyrefly => CompiledProviderExecutionProfile {
-                provider_id: "pyrefly-python",
-                placement: "SIDECAR",
-                resource_profile_id: "sidecar-semantic-standard",
-                max_input_bytes: 67_108_864,
-                max_work_units: 20_000_000,
-                max_wall_millis: 120_000,
-                max_visited_nodes: 4_000_000,
-                max_traversal_depth: 512,
-                max_output_records: 4_000_000,
-                max_output_bytes: 536_870_912,
-                max_diagnostics: 20_000,
-                max_parser_workers: 2,
-                max_retained_tree_revisions: 1,
-                cancellation_check_interval: 1_024,
-                cancellation_ack_millis: 2_000,
-            },
-        }
-    }
-}
-
 /// Assemble the exact v2.3 provider program from the current application-owned provider relation
 /// enums and their Arrow schemas.
 ///

@@ -12,4 +12,4 @@ rule:
         - regex: "(datafusion|deltalake|gix|rusqlite|tonic|prost|tokio|tree_sitter|ruff_|crate::(daemon|fabric|rpc|supervisor|production_provider_recipe))"
     - all:
         - kind: type_identifier
-        - regex: "^(CompilationBegin|CompilationEnd|OwnerBegin|OwnerEnd|ExtractionEvent|CompiledProviderAuthority|CompiledProviderExecutionProfile|CompiledProviderLane)$"
+        - regex: "^(CompilationBegin|CompilationEnd|OwnerBegin|OwnerEnd|ExtractionEvent)$"

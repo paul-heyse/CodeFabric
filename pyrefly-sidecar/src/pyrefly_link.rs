@@ -80,6 +80,8 @@ pub(crate) struct SemanticContext {
     view: ProviderView,
     query: Query,
     loaded: BTreeMap<String, LoadedModule>,
+    completed_generations: u64,
+    peak_loaded_modules: usize,
 }
 
 impl Drop for ProviderView {
@@ -296,9 +298,12 @@ impl SemanticContext {
             view: ProviderView { root },
             query,
             loaded: BTreeMap::new(),
+            completed_generations: 0,
+            peak_loaded_modules: 0,
         })
     }
 
+    #[allow(clippy::too_many_lines)] // Native incremental change classification and exact result projection stay adjacent.
     pub(crate) fn analyze_modules(
         &mut self,
         run: &AnalysisRunIdentity,
@@ -322,6 +327,27 @@ impl SemanticContext {
                 "Pyrefly source paths and digests must identify existing immutable files"
                     .to_owned(),
             );
+        }
+
+        let requested_names = modules
+            .iter()
+            .map(|module| module.module_name.as_str())
+            .collect::<BTreeSet<_>>();
+        let removed_names = self
+            .loaded
+            .keys()
+            .filter(|name| !requested_names.contains(name.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut removed = Vec::with_capacity(removed_names.len());
+        for name in removed_names {
+            let target = provider_module_path(&self.view.root, &name)?;
+            match std::fs::remove_file(&target) {
+                Ok(()) => removed.push(target),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(format!("remove stale Pyrefly provider source: {error}")),
+            }
+            self.loaded.remove(&name);
         }
 
         let mut created = Vec::new();
@@ -366,6 +392,7 @@ impl SemanticContext {
         let events = CategorizedEvents {
             created,
             modified,
+            removed,
             ..CategorizedEvents::default()
         };
         if !events.is_empty() {
@@ -391,12 +418,23 @@ impl SemanticContext {
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
+        self.completed_generations = self.completed_generations.saturating_add(1);
+        self.peak_loaded_modules = self.peak_loaded_modules.max(self.loaded.len());
         Ok(ContextAnalysis {
             modules: analyses,
             // `change_files` and `add_files` do not return the actual affected set. Returning
             // requested modules here would falsely claim recheck evidence.
             proven_rechecked_module_ids: Vec::new(),
         })
+    }
+
+    #[cfg(test)]
+    fn lifecycle_observation(&self) -> (u64, usize, usize) {
+        (
+            self.completed_generations,
+            self.loaded.len(),
+            self.peak_loaded_modules,
+        )
     }
 }
 
@@ -1466,6 +1504,69 @@ mod tests {
             claim_001_text(&changed, "provider_run_id")
         );
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn pyrefly_same_context_incremental_semantics() {
+        let root = claim_001_temp_root("incremental-lifecycle");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let source_path = root.join("admitted.py");
+        let before = b"class Item:\n    value: int = 1\n\ndef use(item: Item) -> int:\n    return item.value\n";
+        let after = b"class Item:\n    label: str = 'x'\n\ndef use(item: Item) -> str:\n    return item.label\n";
+        let module_for = |source: &[u8]| ModuleInput {
+            module_id: "module:incremental".to_owned(),
+            module_name: "incremental_fixture".to_owned(),
+            file_id: "file:incremental".to_owned(),
+            source_path: source_path.clone(),
+            source_digest: b3(source),
+        };
+        let run_for = |generation| AnalysisRunIdentity {
+            provider_run_id: format!("run:incremental:{generation}"),
+            analysis_context_id: "context:incremental".to_owned(),
+            semantic_environment_digest: b3(b"environment:incremental"),
+            source_generation: generation,
+        };
+
+        std::fs::write(&source_path, before).unwrap();
+        let mut incremental = SemanticContext::new(&root, "incremental-context").unwrap();
+        let baseline = incremental
+            .analyze_modules(&run_for(1), &[module_for(before)])
+            .unwrap();
+        std::fs::write(&source_path, after).unwrap();
+        let changed = incremental
+            .analyze_modules(&run_for(2), &[module_for(after)])
+            .unwrap();
+        assert_ne!(
+            baseline.modules[0].module_digest,
+            changed.modules[0].module_digest
+        );
+        assert_eq!(incremental.lifecycle_observation(), (2, 1, 1));
+
+        let mut clean = SemanticContext::new(&root, "clean-equivalent-context").unwrap();
+        let clean_changed = clean
+            .analyze_modules(&run_for(2), &[module_for(after)])
+            .unwrap();
+        assert_eq!(
+            changed.modules[0].module_digest,
+            clean_changed.modules[0].module_digest
+        );
+        assert_eq!(
+            changed.modules[0]
+                .relations
+                .iter()
+                .map(|relation| (&relation.relation, &relation.arrow_ipc))
+                .collect::<Vec<_>>(),
+            clean_changed.modules[0]
+                .relations
+                .iter()
+                .map(|relation| (&relation.relation, &relation.arrow_ipc))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(clean.lifecycle_observation(), (1, 1, 1));
+        drop(clean);
+        drop(incremental);
         let _ = std::fs::remove_dir_all(root);
     }
 
