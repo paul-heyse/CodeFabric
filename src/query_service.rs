@@ -3955,9 +3955,9 @@ fn result_status(error: StreamedResultRegistryError) -> Status {
         }
         StreamedResultRegistryError::Expired => (Code::DeadlineExceeded, "RESOURCE_EXPIRED"),
         StreamedResultRegistryError::Released => (Code::FailedPrecondition, "RESOURCE_RELEASED"),
-        StreamedResultRegistryError::InvalidChunkBound
-        | StreamedResultRegistryError::RangeOutsideResource
-        | StreamedResultRegistryError::RangeOverflow => (Code::InvalidArgument, "RESOURCE_RANGE"),
+        StreamedResultRegistryError::InvalidChunkBound => (Code::InvalidArgument, "RESOURCE_BOUND"),
+        StreamedResultRegistryError::RangeOutsideResource
+        | StreamedResultRegistryError::RangeOverflow => (Code::OutOfRange, "RESOURCE_RANGE"),
         StreamedResultRegistryError::ResourceIntegrity => (Code::DataLoss, "RESOURCE_INTEGRITY"),
         StreamedResultRegistryError::RetainedLocatorMismatch => {
             (Code::DataLoss, "RESULT_EVENT_BINDING")
@@ -3995,7 +3995,7 @@ fn public_error_detail(code: Code, public_code: &str) -> SafeErrorMetadata {
         "QUERY_NOT_FOUND" => SafeErrorCode::QueryNotFound,
         "RESOURCE_NOT_FOUND" => SafeErrorCode::ResourceNotFound,
         "RESOURCE_EXPIRED" => SafeErrorCode::ResourceExpired,
-        "RESOURCE_RANGE" | "RESOURCE_BOUND" => SafeErrorCode::RangeNotSatisfiable,
+        "RESOURCE_RANGE" => SafeErrorCode::RangeNotSatisfiable,
         "QUERY_CAPACITY" | "SESSION_CAPACITY" | "CHALLENGE_CAPACITY" | "START_CAPACITY"
         | "RESOURCE_CAPACITY" => SafeErrorCode::CapacityUnavailable,
         "QUERY_CANCELLED" => SafeErrorCode::Cancelled,
@@ -5396,6 +5396,52 @@ mod tests {
         assert!(detail.retryable);
         assert!(detail.diagnostic_reference.is_none());
         assert!(detail.correlation_id.is_empty());
+    }
+
+    #[test]
+    fn wp48_resource_bound_and_extent_failures_keep_distinct_typed_authority() {
+        let invalid_bound = result_status(StreamedResultRegistryError::InvalidChunkBound);
+        assert_eq!(invalid_bound.code(), Code::InvalidArgument);
+        assert_eq!(status_public_code(&invalid_bound), "RESOURCE_BOUND");
+        let invalid_bound_detail = SafeErrorMetadata::decode(
+            invalid_bound
+                .metadata()
+                .get_bin("codefabric-safe-error-bin")
+                .unwrap()
+                .to_bytes()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            invalid_bound_detail.code,
+            SafeErrorCode::InvalidRequest as i32
+        );
+        assert_eq!(invalid_bound_detail.layer, SafeErrorLayer::Resource as i32);
+        assert!(!invalid_bound_detail.retryable);
+
+        for error in [
+            StreamedResultRegistryError::RangeOutsideResource,
+            StreamedResultRegistryError::RangeOverflow,
+        ] {
+            let outside_extent = result_status(error);
+            assert_eq!(outside_extent.code(), Code::OutOfRange);
+            assert_eq!(status_public_code(&outside_extent), "RESOURCE_RANGE");
+            let outside_extent_detail = SafeErrorMetadata::decode(
+                outside_extent
+                    .metadata()
+                    .get_bin("codefabric-safe-error-bin")
+                    .unwrap()
+                    .to_bytes()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                outside_extent_detail.code,
+                SafeErrorCode::RangeNotSatisfiable as i32
+            );
+            assert_eq!(outside_extent_detail.layer, SafeErrorLayer::Resource as i32);
+            assert!(!outside_extent_detail.retryable);
+        }
     }
 
     #[test]
