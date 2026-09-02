@@ -163,3 +163,57 @@ def test_fact_generation_fabric_dependency_fault_is_rejected() -> None:
     )
     with pytest.raises(FeatureArchitectureError, match="forbidden=.*datafusion"):
         _validate_metadata(metadata, "fact-generation")
+
+
+def _contract_metadata(scope: str) -> dict[str, Any]:
+    contract = CONTRACTS[scope]
+    package_names = sorted(contract.required_packages - {"codefabric"})
+    metadata: dict[str, Any] = {
+        "packages": [{"id": "root", "name": "codefabric"}],
+        "resolve": {
+            "nodes": [
+                {
+                    "id": "root",
+                    "features": sorted(contract.required_root_features),
+                    "deps": [],
+                }
+            ]
+        },
+    }
+    root = metadata["resolve"]["nodes"][0]
+    for name in package_names:
+        identifier = f"package:{name}"
+        metadata["packages"].append({"id": identifier, "name": name})
+        metadata["resolve"]["nodes"].append(
+            {"id": identifier, "features": [], "deps": []}
+        )
+        root["deps"].append({"pkg": identifier, "dep_kinds": [{"kind": None}]})
+    return metadata
+
+
+@pytest.mark.parametrize(
+    "scope",
+    ("data-fabric", "repository-input", "operational-state", "semantic-release"),
+)
+def test_target_capability_contracts_accept_exact_graphs(scope: str) -> None:
+    contract = CONTRACTS[scope]
+    _validate_manifest({"features": {scope: sorted(contract.manifest_items)}}, scope)
+    assert _validate_metadata(_contract_metadata(scope), scope)["scope"] == scope
+
+
+@pytest.mark.parametrize(
+    "scope,forbidden_feature",
+    (
+        ("data-fabric", "repository-input"),
+        ("repository-input", "data-fabric"),
+        ("operational-state", "repository-input"),
+        ("semantic-release", "rpc"),
+    ),
+)
+def test_target_capability_reverse_feature_faults_are_rejected(
+    scope: str, forbidden_feature: str
+) -> None:
+    metadata = _contract_metadata(scope)
+    metadata["resolve"]["nodes"][0]["features"].append(forbidden_feature)
+    with pytest.raises(FeatureArchitectureError, match=f"forbidden=.*{forbidden_feature}"):
+        _validate_metadata(metadata, scope)

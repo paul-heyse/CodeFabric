@@ -1,0 +1,12 @@
+id: repository-input-inward-boundary-only
+valid:
+  - |
+      use gix::object::tree::diff::ChangeDetached;
+      use crate::registries::GitHashAlgorithm;
+invalid:
+  - |
+      use datafusion::prelude::SessionContext;
+  - |
+      use crate::operational_store::OperationalStore;
+  - |
+      use tonic::Status;

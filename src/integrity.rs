@@ -10,8 +10,7 @@ use std::fmt::Write as _;
     feature = "canonical-json",
     feature = "daemon",
     feature = "data-fabric",
-    feature = "fact-generation",
-    feature = "repository-state"
+    feature = "fact-generation"
 ))]
 pub use crate::identity_recipes::{CacheKeyDomain, IntegrityDomain};
 
@@ -65,8 +64,7 @@ impl IntegrityHasher {
         feature = "canonical-json",
         feature = "daemon",
         feature = "data-fabric",
-        feature = "fact-generation",
-        feature = "repository-state"
+        feature = "fact-generation"
     ))]
     #[must_use]
     pub fn for_domain(domain: IntegrityDomain) -> Self {
@@ -110,8 +108,7 @@ impl CacheKeyHasher {
         feature = "canonical-json",
         feature = "daemon",
         feature = "data-fabric",
-        feature = "fact-generation",
-        feature = "repository-state"
+        feature = "fact-generation"
     ))]
     #[must_use]
     pub fn for_domain(domain: CacheKeyDomain) -> Self {

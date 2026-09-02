@@ -44,7 +44,6 @@ data-fabric = [
     "canonical-json",
     "contract-models",
     "provider-contracts",
-    "repository-state",
     "dep:async-trait",
     "dep:arrow",
     "dep:arrow-array",
@@ -84,23 +83,33 @@ fact-generation = [
     "dep:thiserror",
 ]
 rpc = ["dep:prost", "dep:prost-types", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
-repository-state = [
+repository-input = [
     "contract-models",
-    "dep:blake3",
     "dep:gix",
-    "dep:rusqlite",
     "dep:rustix",
-    "dep:thiserror",
     "dep:url",
 ]
-compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
+operational-state = [
+    "contract-models",
+    "dep:arrow-schema",
+    "dep:rusqlite",
+    "dep:rustix",
+    "dep:url",
+]
+semantic-release = ["release-compiler", "fact-generation", "data-fabric"]
+compatibility-probes = [
+    "canonical-json",
+    "data-fabric",
+    "repository-input",
+    "operational-state",
+    "rpc",
+]
 daemon = [
     "dep:arc-swap",
     "contract-models",
-    "data-fabric",
-    "fact-generation",
-    "release-compiler",
-    "repository-state",
+    "semantic-release",
+    "repository-input",
+    "operational-state",
     "rpc",
     "dep:notify-debouncer-full",
     "dep:hyper-util",

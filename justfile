@@ -350,7 +350,8 @@ semantic-request-contract-integrity-check:
 [group('test')]
 semantic-request-program-check:
     cargo test --locked --no-default-features --features release-compiler --lib semantic_release::tests::compiled_release_query_program_operations
-    cargo test --locked --lib semantic_release::tests::compiled_release_query_program_executes_datafusion_fixture
+    cargo test --locked --no-default-features --features semantic-release --lib semantic_release::tests::semantic_release_provider_to_proof_fixture
+    cargo test --locked --no-default-features --features semantic-release --lib semantic_release::tests::compiled_release_query_program_executes_datafusion_fixture
     cargo nextest run --locked --lib -E 'test(/(all_eight_released_forms_compile_from_typed_program_rows|epoch_bound_ingress_consumes_every_typed_relation_row_once|epoch_bound_direct_compiler_lowers_exact_programs_returns_and_handoffs)/)' --no-tests=fail
     cargo nextest run --locked --lib -E 'test(/(all_eight_epoch_bound_forms_execute_through_one_real_authorized_child|relational_program_executes_only_through_authorized_child_inputs)/)' --no-tests=fail
 
@@ -555,6 +556,11 @@ datafusion-cache-resource-operations-check:
 [group('test')]
 delta-durability-protocol-integrity-check:
     cargo nextest run --locked --lib -E 'test(/wp32_int_/)' --no-tests=fail
+
+[doc("Prove partial-publication invisibility, exact activation, pinned reopen, competing-writer rejection, and unknown-outcome reconciliation")]
+[group('test')]
+delta-publication-contract-check:
+    cargo nextest run --locked --lib -E 'test(/(fault_matrix_never_promotes_partial_progress_to_success|wp32_int_exact_delta_append_readback_and_marker_reconciliation_round_trip|semantic_read_stays_on_an_older_exact_version_after_a_newer_commit_exists|restart_readback_uses_the_loaded_exact_commit_after_the_head_advances|concurrent_advance_is_a_typed_conflict_and_never_retries|conflict_and_unknown_outcomes_both_require_durable_reconciliation)/)' --no-tests=fail
 
 [doc("Reconstruct the activation-selected exact Delta versions and decoded rows, including an older selected version")]
 [group('test')]
@@ -858,12 +864,11 @@ compiled-suite-identity-check:
     cargo test --locked --no-default-features --features release-compiler --lib semantic_release::tests::compiled_release_program_identity_integrity
     cargo test --locked --no-default-features --features release-compiler --lib semantic_release::tests::compiled_release_forgery_and_conflation_faults
 
-[doc("Validate one independently useful target feature and its forbidden dependency edges")]
+[doc("Validate one or all independently useful target features and forbidden dependency edges")]
 [group('gate')]
-feature-architecture-check scope:
+feature-architecture-check scope="all":
     PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/feature_architecture.py "{{scope}}"
-    ast-grep test --filter '^{{scope}}-inward-boundary-only$'
-    cargo check --locked --no-default-features --features "{{scope}}"
+    @if [ "{{scope}}" = "state" ]; then features='repository-input operational-state'; elif [ "{{scope}}" = "all" ]; then features='provider-contracts release-compiler fact-generation data-fabric repository-input operational-state semantic-release'; else features='{{scope}}'; fi; for feature in $features; do ast-grep test --filter "^${feature}-inward-boundary-only$"; cargo check --locked --no-default-features --features "$feature"; done
 
 [doc("Validate exact Arrow IPC identities, schemas, pinned provider batches, and cross-process control contracts")]
 [group('test')]

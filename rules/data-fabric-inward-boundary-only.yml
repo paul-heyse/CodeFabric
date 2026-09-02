@@ -1,0 +1,16 @@
+id: data-fabric-inward-boundary-only
+language: Rust
+severity: error
+message: generic data-fabric code may not import concrete repository, operational, transport, or daemon authority.
+note: Keep the Arrow/DataFusion/Delta engine useful with application-owned inputs and without provider runtimes.
+files:
+  - src/fabric/programmatic_schema.rs
+  - src/fabric/programmatic_epoch.rs
+  - src/fabric/derived_producer_closure.rs
+  - src/fabric/proof.rs
+  - src/fabric/delta_exact.rs
+  - src/fabric/delta_write.rs
+rule:
+  all:
+    - kind: use_declaration
+    - regex: "(gix|rusqlite|tonic|prost|crate::(daemon|git_state|operational_store|rpc|supervisor|workspace_registry))"

@@ -331,6 +331,7 @@ fn attach_id_domain(field: Field, domain: &str) -> Result<Field, ArrowError> {
     }
 }
 
+#[cfg(feature = "data-fabric")]
 fn id_domain_registrations() -> Vec<ExtensionTypeRegistrationRef> {
     vec![
         id_domain_registration::<WorkspaceIdExtension>(),

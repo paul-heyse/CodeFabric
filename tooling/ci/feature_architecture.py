@@ -195,7 +195,205 @@ CONTRACTS = {
             }
         ),
     ),
+    "data-fabric": FeatureContract(
+        manifest_items=frozenset(
+            {
+                "canonical-json",
+                "contract-models",
+                "provider-contracts",
+                "dep:async-trait",
+                "dep:arrow",
+                "dep:arrow-array",
+                "dep:arrow-buffer",
+                "dep:arrow-cast",
+                "dep:arrow-ipc",
+                "dep:arrow-ord",
+                "dep:arrow-row",
+                "dep:arrow-schema",
+                "dep:arrow-select",
+                "dep:arrow-string",
+                "dep:datafusion",
+                "dep:deltalake",
+                "dep:futures",
+                "dep:object_store",
+                "dep:parquet",
+                "dep:petgraph",
+                "dep:tokio",
+                "dep:tracing",
+                "dep:url",
+            }
+        ),
+        required_root_features=frozenset(
+            {"canonical-json", "contract-models", "data-fabric", "provider-contracts"}
+        ),
+        forbidden_root_features=frozenset(
+            {
+                "compatibility-probes",
+                "daemon",
+                "fact-generation",
+                "local-workstation",
+                "operational-state",
+                "release-compiler",
+                "repository-input",
+                "rpc",
+                "s3-storage",
+                "semantic-release",
+            }
+        ),
+        required_packages=frozenset(
+            {
+                "arrow-array",
+                "arrow-schema",
+                "codefabric",
+                "datafusion",
+                "deltalake",
+                "object_store",
+                "parquet",
+                "petgraph",
+                "tokio",
+            }
+        ),
+        forbidden_packages=frozenset(
+            {
+                "arc-swap",
+                "gix",
+                "rayon",
+                "ruff_python_ast",
+                "rusqlite",
+                "tonic",
+                "tree-sitter",
+            }
+        ),
+    ),
+    "repository-input": FeatureContract(
+        manifest_items=frozenset(
+            {"contract-models", "dep:gix", "dep:rustix", "dep:url"}
+        ),
+        required_root_features=frozenset(
+            {"canonical-json", "contract-models", "repository-input"}
+        ),
+        forbidden_root_features=frozenset(
+            {
+                "compatibility-probes",
+                "daemon",
+                "data-fabric",
+                "fact-generation",
+                "local-workstation",
+                "operational-state",
+                "release-compiler",
+                "rpc",
+                "s3-storage",
+                "semantic-release",
+            }
+        ),
+        required_packages=frozenset(
+            {"codefabric", "gix", "rustix", "url"}
+        ),
+        forbidden_packages=frozenset(
+            {
+                "arrow-array",
+                "datafusion",
+                "deltalake",
+                "prost",
+                "rayon",
+                "ruff_python_ast",
+                "rusqlite",
+                "tokio",
+                "tonic",
+                "tree-sitter",
+            }
+        ),
+    ),
+    "operational-state": FeatureContract(
+        manifest_items=frozenset(
+            {
+                "contract-models",
+                "dep:arrow-schema",
+                "dep:rusqlite",
+                "dep:rustix",
+                "dep:url",
+            }
+        ),
+        required_root_features=frozenset(
+            {"canonical-json", "contract-models", "operational-state"}
+        ),
+        forbidden_root_features=frozenset(
+            {
+                "compatibility-probes",
+                "daemon",
+                "data-fabric",
+                "fact-generation",
+                "local-workstation",
+                "release-compiler",
+                "repository-input",
+                "rpc",
+                "s3-storage",
+                "semantic-release",
+            }
+        ),
+        required_packages=frozenset(
+            {"arrow-schema", "codefabric", "rusqlite", "rustix", "url"}
+        ),
+        forbidden_packages=frozenset(
+            {
+                "arc-swap",
+                "datafusion",
+                "deltalake",
+                "gix",
+                "prost",
+                "rayon",
+                "ruff_python_ast",
+                "tokio",
+                "tonic",
+                "tree-sitter",
+            }
+        ),
+    ),
+    "semantic-release": FeatureContract(
+        manifest_items=frozenset(
+            {"data-fabric", "fact-generation", "release-compiler"}
+        ),
+        required_root_features=frozenset(
+            {
+                "canonical-json",
+                "contract-models",
+                "data-fabric",
+                "fact-generation",
+                "provider-contracts",
+                "release-compiler",
+                "semantic-release",
+            }
+        ),
+        forbidden_root_features=frozenset(
+            {
+                "compatibility-probes",
+                "daemon",
+                "local-workstation",
+                "operational-state",
+                "repository-input",
+                "rpc",
+                "s3-storage",
+            }
+        ),
+        required_packages=frozenset(
+            {
+                "arrow-array",
+                "codefabric",
+                "datafusion",
+                "deltalake",
+                "rayon",
+                "ruff_python_ast",
+                "tree-sitter",
+            }
+        ),
+        forbidden_packages=frozenset(
+            {"arc-swap", "gix", "rusqlite", "tonic"}
+        ),
+    ),
 }
+
+STATE_SCOPES = ("repository-input", "operational-state")
+ALL_SCOPES = tuple(CONTRACTS)
 
 
 def _validate_manifest(manifest: dict[str, Any], scope: str) -> None:
@@ -301,6 +499,16 @@ def validate(scope: str, root: Path = ROOT) -> dict[str, Any]:
     Raises:
         FeatureArchitectureError: if the scope is unknown or its graph differs.
     """
+    if scope == "state":
+        return {
+            "scope": scope,
+            "capabilities": [validate(child, root) for child in STATE_SCOPES],
+        }
+    if scope == "all":
+        return {
+            "scope": scope,
+            "capabilities": [validate(child, root) for child in ALL_SCOPES],
+        }
     if scope not in CONTRACTS:
         raise FeatureArchitectureError(
             f"unsupported feature architecture scope: {scope}"
@@ -332,7 +540,7 @@ def validate(scope: str, root: Path = ROOT) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("scope", choices=sorted(CONTRACTS))
+    parser.add_argument("scope", choices=[*sorted(CONTRACTS), "all", "state"])
     args = parser.parse_args()
     print(json.dumps(validate(args.scope), indent=2, sort_keys=True))
     return 0

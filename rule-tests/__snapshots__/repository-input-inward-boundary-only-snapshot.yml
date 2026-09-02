@@ -1,0 +1,23 @@
+id: repository-input-inward-boundary-only
+snapshots:
+  ? |
+    use crate::operational_store::OperationalStore;
+  : labels:
+    - source: use crate::operational_store::OperationalStore;
+      style: primary
+      start: 0
+      end: 47
+  ? |
+    use datafusion::prelude::SessionContext;
+  : labels:
+    - source: use datafusion::prelude::SessionContext;
+      style: primary
+      start: 0
+      end: 40
+  ? |
+    use tonic::Status;
+  : labels:
+    - source: use tonic::Status;
+      style: primary
+      start: 0
+      end: 18

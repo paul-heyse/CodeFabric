@@ -1,0 +1,23 @@
+id: data-fabric-inward-boundary-only
+snapshots:
+  ? |
+    use crate::git_state::GitState;
+  : labels:
+    - source: use crate::git_state::GitState;
+      style: primary
+      start: 0
+      end: 31
+  ? |
+    use crate::rpc::generated::codefabric::provider::v1::ProviderResult;
+  : labels:
+    - source: use crate::rpc::generated::codefabric::provider::v1::ProviderResult;
+      style: primary
+      start: 0
+      end: 68
+  ? |
+    use rusqlite::Connection;
+  : labels:
+    - source: use rusqlite::Connection;
+      style: primary
+      start: 0
+      end: 25

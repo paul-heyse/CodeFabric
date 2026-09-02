@@ -1,0 +1,12 @@
+id: semantic-release-inward-boundary-only
+valid:
+  - |
+      use crate::provider_contracts::ProviderJob;
+      use crate::relational_program::RelationalProgram;
+invalid:
+  - |
+      use crate::operational_store::OperationalStore;
+  - |
+      use tonic::Status;
+  - |
+      use gix::Repository;

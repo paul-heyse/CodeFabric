@@ -1,0 +1,12 @@
+id: data-fabric-inward-boundary-only
+valid:
+  - |
+      use datafusion::prelude::SessionContext;
+      use crate::provider_contracts::ProviderResult;
+invalid:
+  - |
+      use rusqlite::Connection;
+  - |
+      use crate::git_state::GitState;
+  - |
+      use crate::rpc::generated::codefabric::provider::v1::ProviderResult;

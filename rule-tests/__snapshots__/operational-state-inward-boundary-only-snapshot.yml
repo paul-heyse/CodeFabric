@@ -1,0 +1,23 @@
+id: operational-state-inward-boundary-only
+snapshots:
+  ? |
+    use crate::fabric::activation::ActivationEvent;
+  : labels:
+    - source: use crate::fabric::activation::ActivationEvent;
+      style: primary
+      start: 0
+      end: 47
+  ? |
+    use deltalake::DeltaTable;
+  : labels:
+    - source: use deltalake::DeltaTable;
+      style: primary
+      start: 0
+      end: 26
+  ? |
+    use gix::Repository;
+  : labels:
+    - source: use gix::Repository;
+      style: primary
+      start: 0
+      end: 20

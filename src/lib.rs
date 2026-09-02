@@ -8,8 +8,7 @@
     feature = "canonical-json",
     feature = "daemon",
     feature = "data-fabric",
-    feature = "fact-generation",
-    feature = "repository-state"
+    feature = "fact-generation"
 ))]
 pub mod analysis_context;
 pub mod cancellation;
@@ -26,8 +25,7 @@ pub mod daemon;
     feature = "contract-models",
     feature = "daemon",
     feature = "data-fabric",
-    feature = "fact-generation",
-    feature = "repository-state"
+    feature = "fact-generation"
 ))]
 pub mod error;
 #[cfg(feature = "daemon")]
@@ -36,8 +34,7 @@ pub mod freshness;
     feature = "canonical-json",
     feature = "daemon",
     feature = "data-fabric",
-    feature = "fact-generation",
-    feature = "repository-state"
+    feature = "fact-generation"
 ))]
 pub mod identity;
 /// Released application-owned identity recipe primitives.
@@ -45,19 +42,14 @@ pub mod identity;
     feature = "canonical-json",
     feature = "daemon",
     feature = "data-fabric",
-    feature = "fact-generation",
-    feature = "repository-state"
+    feature = "fact-generation"
 ))]
 pub(crate) mod identity_recipes;
-#[cfg(any(
-    feature = "canonical-json",
-    feature = "fact-generation",
-    feature = "repository-state"
-))]
+#[cfg(any(feature = "canonical-json", feature = "fact-generation"))]
 pub mod integrity;
 #[cfg(feature = "daemon")]
 pub mod inventory;
-#[cfg(feature = "data-fabric")]
+#[cfg(feature = "operational-state")]
 pub mod operational_store;
 #[cfg(feature = "daemon")]
 pub mod owned_unix_socket;
@@ -102,7 +94,6 @@ pub mod query_service;
     feature = "daemon",
     feature = "data-fabric",
     feature = "fact-generation",
-    feature = "repository-state",
     feature = "rpc"
 ))]
 pub mod registries;
@@ -141,7 +132,7 @@ pub(crate) mod rustc_relation_schema;
 pub mod rustc_service;
 #[cfg(feature = "data-fabric")]
 pub mod schema_contract;
-#[cfg(feature = "data-fabric")]
+#[cfg(any(feature = "data-fabric", feature = "operational-state"))]
 pub mod schema_registry;
 #[cfg(feature = "daemon")]
 pub mod secure_path;
@@ -153,20 +144,19 @@ pub mod session_authority;
     feature = "canonical-json",
     feature = "daemon",
     feature = "data-fabric",
-    feature = "fact-generation",
-    feature = "repository-state"
+    feature = "fact-generation"
 ))]
 pub mod snapshot;
 #[cfg(feature = "daemon")]
 pub mod source_image;
 #[cfg(feature = "daemon")]
 pub mod supervisor;
-#[cfg(feature = "data-fabric")]
+#[cfg(feature = "operational-state")]
 pub mod workspace_registry;
 
 #[cfg(feature = "data-fabric")]
 pub mod fabric;
-#[cfg(feature = "repository-state")]
+#[cfg(feature = "repository-input")]
 pub mod git_state;
 #[cfg(feature = "fact-generation")]
 pub mod tree_sitter_adapter;

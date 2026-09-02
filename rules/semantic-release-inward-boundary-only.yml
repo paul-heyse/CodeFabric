@@ -1,0 +1,11 @@
+id: semantic-release-inward-boundary-only
+language: Rust
+severity: error
+message: semantic release may compose providers and fabric but not repository, operational, transport, or daemon authority.
+note: Release programs compile and execute independently before daemon injection.
+files:
+  - src/semantic_release.rs
+rule:
+  all:
+    - kind: use_declaration
+    - regex: "(gix|rusqlite|tonic|prost|crate::(daemon|git_state|operational_store|rpc|supervisor|workspace_registry))"

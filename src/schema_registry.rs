@@ -1,11 +1,20 @@
 //! Application-owned Arrow logical extensions and live operational-store schemas.
 
+#[cfg(feature = "operational-state")]
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
+#[cfg(feature = "operational-state")]
+use std::sync::OnceLock;
 
+#[cfg(any(feature = "operational-state", all(test, feature = "data-fabric")))]
+use arrow_schema::Schema;
 use arrow_schema::extension::ExtensionType;
-use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef, TimeUnit};
+use arrow_schema::{ArrowError, DataType, Field};
+#[cfg(feature = "operational-state")]
+use arrow_schema::{SchemaRef, TimeUnit};
+#[cfg(feature = "data-fabric")]
 use datafusion::common::types::DFExtensionType;
+#[cfg(feature = "data-fabric")]
 use datafusion::logical_expr::registry::{ExtensionTypeRegistration, ExtensionTypeRegistrationRef};
 
 /// Descriptor for one application-owned ID logical type.
@@ -168,12 +177,14 @@ macro_rules! define_hash32_extension {
     };
 }
 
+#[cfg(feature = "data-fabric")]
 #[derive(Debug)]
 struct DataFusionCodeFabricExtension {
     storage_type: DataType,
     metadata: String,
 }
 
+#[cfg(feature = "data-fabric")]
 impl DFExtensionType for DataFusionCodeFabricExtension {
     fn storage_type(&self) -> DataType {
         self.storage_type.clone()
@@ -184,6 +195,7 @@ impl DFExtensionType for DataFusionCodeFabricExtension {
     }
 }
 
+#[cfg(feature = "data-fabric")]
 fn id_domain_registration<T: CodeFabricIdExtension>() -> ExtensionTypeRegistrationRef {
     ExtensionTypeRegistration::new_arc(T::NAME, |storage_type, metadata| {
         T::deserialize_metadata(metadata)?;
@@ -195,6 +207,7 @@ fn id_domain_registration<T: CodeFabricIdExtension>() -> ExtensionTypeRegistrati
     })
 }
 
+#[cfg(feature = "data-fabric")]
 fn hash32_registration() -> ExtensionTypeRegistrationRef {
     ExtensionTypeRegistration::new_arc(Hash32Extension::NAME, |storage_type, metadata| {
         Hash32Extension::deserialize_metadata(metadata)?;
@@ -215,6 +228,7 @@ pub const fn id_domains() -> &'static [IdDomainSpec] {
 }
 
 /// Create one DataFusion registration factory for every logical ID/hash extension.
+#[cfg(feature = "data-fabric")]
 #[must_use]
 pub fn extension_type_registrations() -> Vec<ExtensionTypeRegistrationRef> {
     id_domain_registrations()
@@ -251,6 +265,7 @@ pub fn validate_logical_extension_field(field: &Field) -> Result<(), ArrowError>
 }
 
 /// SQLite affinity mapped to one query-visible Arrow physical type.
+#[cfg(feature = "operational-state")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationalSqliteType {
     Integer,
@@ -260,6 +275,7 @@ pub enum OperationalSqliteType {
 }
 
 /// One immutable operational SQLite/Arrow table contract.
+#[cfg(feature = "operational-state")]
 #[derive(Clone, Debug)]
 pub struct OperationalTableSpec {
     pub name: &'static str,
@@ -271,6 +287,7 @@ pub struct OperationalTableSpec {
 }
 
 /// Route from an operational row to its owning workspace.
+#[cfg(feature = "operational-state")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationalWorkspaceScope {
     Direct {
@@ -284,6 +301,7 @@ pub enum OperationalWorkspaceScope {
     },
 }
 
+#[cfg(feature = "operational-state")]
 #[derive(Clone, Copy)]
 enum OperationalLogicalType {
     Id16,
@@ -294,6 +312,7 @@ enum OperationalLogicalType {
     TimestampUtc,
 }
 
+#[cfg(feature = "operational-state")]
 #[derive(Clone, Copy)]
 struct OperationalColumnContract {
     name: &'static str,
@@ -303,6 +322,7 @@ struct OperationalColumnContract {
     nullable: bool,
 }
 
+#[cfg(feature = "operational-state")]
 #[derive(Clone, Copy)]
 struct OperationalTableContract {
     name: &'static str,
@@ -312,8 +332,10 @@ struct OperationalTableContract {
     workspace_scope: Option<OperationalWorkspaceScope>,
 }
 
+#[cfg(feature = "operational-state")]
 include!("operational_schema_specs.rs");
 
+#[cfg(feature = "operational-state")]
 fn operational_physical_type(logical: OperationalLogicalType) -> DataType {
     match logical {
         OperationalLogicalType::Id16 => DataType::FixedSizeBinary(16),
@@ -327,6 +349,7 @@ fn operational_physical_type(logical: OperationalLogicalType) -> DataType {
     }
 }
 
+#[cfg(feature = "operational-state")]
 fn operational_field(contract: OperationalColumnContract, primary_key: &[&str]) -> Field {
     let mut metadata = HashMap::new();
     if matches!(contract.logical_type, OperationalLogicalType::Id16) {
@@ -363,6 +386,7 @@ fn operational_field(contract: OperationalColumnContract, primary_key: &[&str]) 
     }
 }
 
+#[cfg(feature = "operational-state")]
 fn build_operational(contract: OperationalTableContract) -> OperationalTableSpec {
     let fields = contract
         .columns
@@ -385,6 +409,7 @@ fn build_operational(contract: OperationalTableContract) -> OperationalTableSpec
 }
 
 /// Return every live operational-store contract in source order.
+#[cfg(feature = "operational-state")]
 #[must_use]
 pub fn operational_table_specs() -> &'static [OperationalTableSpec] {
     static OPERATIONAL_SPECS: OnceLock<Vec<OperationalTableSpec>> = OnceLock::new();
@@ -398,6 +423,7 @@ pub fn operational_table_specs() -> &'static [OperationalTableSpec] {
 }
 
 /// Resolve one operational-store contract by table name.
+#[cfg(feature = "operational-state")]
 #[must_use]
 pub fn operational_table_spec(name: &str) -> Option<&'static OperationalTableSpec> {
     operational_table_specs()
@@ -405,8 +431,9 @@ pub fn operational_table_spec(name: &str) -> Option<&'static OperationalTableSpe
         .find(|table| table.name == name)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "data-fabric"))]
 mod tests {
+    #[cfg(feature = "operational-state")]
     use std::collections::BTreeSet;
     use std::io::{Cursor, Seek as _};
     use std::sync::Arc;
@@ -505,6 +532,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "operational-state")]
     fn operational_contracts_are_complete_and_uniquely_named() {
         let specs = operational_table_specs();
         let names = specs.iter().map(|spec| spec.name).collect::<BTreeSet<_>>();

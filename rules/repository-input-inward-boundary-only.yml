@@ -1,0 +1,11 @@
+id: repository-input-inward-boundary-only
+language: Rust
+severity: error
+message: repository input may not import fabric, operational, transport, provider, or daemon authority.
+note: The isolated capability emits application-owned observations from gix and descriptor-relative reads.
+files:
+  - src/git_state.rs
+rule:
+  all:
+    - kind: use_declaration
+    - regex: "(datafusion|deltalake|tonic|prost|crate::(daemon|fabric|operational_store|rpc|supervisor|workspace_registry))"

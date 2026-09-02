@@ -57,7 +57,7 @@ impl Cancellation {
         self.check_interval
     }
 
-    #[allow(dead_code)] // Used only by repository-state/gix feature combinations.
+    #[allow(dead_code)] // Used only by repository-input/gix feature combinations.
     pub(crate) fn interrupt_flag(&self) -> &AtomicBool {
         self.requested.as_ref()
     }

@@ -958,7 +958,7 @@ fn is_zero(bytes: &[u8]) -> bool {
     bytes.iter().all(|byte| *byte == 0)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "operational-state"))]
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};

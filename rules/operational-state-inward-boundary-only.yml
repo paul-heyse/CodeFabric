@@ -1,0 +1,12 @@
+id: operational-state-inward-boundary-only
+language: Rust
+severity: error
+message: operational state may not import repository, semantic fabric, transport, provider, or daemon authority.
+note: SQLite records queues and lifecycle progress but never selects semantic Delta state.
+files:
+  - src/operational_store.rs
+  - src/workspace_registry.rs
+rule:
+  all:
+    - kind: use_declaration
+    - regex: "(datafusion|deltalake|gix|tonic|prost|crate::(daemon|fabric|git_state|rpc|supervisor))"

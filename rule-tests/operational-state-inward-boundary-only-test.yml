@@ -1,0 +1,12 @@
+id: operational-state-inward-boundary-only
+valid:
+  - |
+      use rusqlite::Connection;
+      use crate::contracts::ContractError;
+invalid:
+  - |
+      use deltalake::DeltaTable;
+  - |
+      use crate::fabric::activation::ActivationEvent;
+  - |
+      use gix::Repository;

@@ -95,8 +95,17 @@ printf '%s' "$root_shape" | jq -e '
     "contract-models", "dep:arrow-array", "dep:arrow-schema", "dep:thiserror"
   ] | sort)
   and .features["release-compiler"] == ["provider-contracts"]
-  and (.features["daemon"] | index("release-compiler")) != null
+  and (.features | has("repository-state") | not)
+  and (.features["semantic-release"] | sort) == ([
+    "data-fabric", "fact-generation", "release-compiler"
+  ] | sort)
+  and (.features["daemon"] | index("semantic-release")) != null
+  and (.features["daemon"] | index("repository-input")) != null
+  and (.features["daemon"] | index("operational-state")) != null
+  and (.features["daemon"] | index("rpc")) != null
   and (.features["data-fabric"] | index("provider-contracts")) != null
+  and (.features["data-fabric"] | index("repository-input")) == null
+  and (.features["data-fabric"] | index("operational-state")) == null
   and (.features["data-fabric"] | index("dep:petgraph")) != null
   and (.features["fact-generation"] | sort) == ([
     "provider-contracts", "dep:blake3", "dep:petgraph", "dep:rayon", "dep:ruff_python_ast",
@@ -104,9 +113,11 @@ printf '%s' "$root_shape" | jq -e '
     "dep:ruff_source_file", "dep:ruff_text_size", "dep:tree-sitter",
     "dep:tree-sitter-python", "dep:tree-sitter-rust", "dep:thiserror"
   ] | sort)
-  and (.features["repository-state"] | sort) == ([
-    "contract-models", "dep:blake3", "dep:gix", "dep:rusqlite", "dep:rustix",
-    "dep:thiserror", "dep:url"
+  and (.features["repository-input"] | sort) == ([
+    "contract-models", "dep:gix", "dep:rustix", "dep:url"
+  ] | sort)
+  and (.features["operational-state"] | sort) == ([
+    "contract-models", "dep:arrow-schema", "dep:rusqlite", "dep:rustix", "dep:url"
   ] | sort)
   and (.features["daemon"] | index("dep:petgraph")) == null
   and .features.default == ["local-workstation"]
@@ -221,6 +232,36 @@ require_in_tree "$release_compiler_tree" arrow-schema 'release-compiler graph'
 forbid_in_tree "$release_compiler_tree" \
   'datafusion.*|deltalake.*|pyo3|tonic|prost.*|tokio|rusqlite|gix|rayon|tree-sitter|ruff_python_.*' \
   'release-compiler graph'
+
+data_fabric_tree="$(cargo_tree --no-default-features --features data-fabric)"
+for package in arrow-array arrow-schema datafusion deltalake object_store parquet petgraph tokio; do
+  require_in_tree "$data_fabric_tree" "$package" 'data-fabric graph'
+done
+forbid_in_tree "$data_fabric_tree" 'gix|rusqlite|tonic|arc-swap|ruff_python_.*|tree-sitter' \
+  'data-fabric graph'
+
+repository_input_tree="$(cargo_tree --no-default-features --features repository-input)"
+for package in gix rustix url; do
+  require_in_tree "$repository_input_tree" "$package" 'repository-input graph'
+done
+forbid_in_tree "$repository_input_tree" \
+  'datafusion.*|deltalake.*|arrow.*|rusqlite|tonic|ruff_python_.*|tree-sitter' \
+  'repository-input graph'
+
+operational_state_tree="$(cargo_tree --no-default-features --features operational-state)"
+for package in arrow-schema rusqlite rustix url; do
+  require_in_tree "$operational_state_tree" "$package" 'operational-state graph'
+done
+forbid_in_tree "$operational_state_tree" \
+  'datafusion.*|deltalake.*|gix|tonic|ruff_python_.*|tree-sitter' \
+  'operational-state graph'
+
+semantic_release_tree="$(cargo_tree --no-default-features --features semantic-release)"
+for package in datafusion deltalake rayon ruff_python_ast tree-sitter; do
+  require_in_tree "$semantic_release_tree" "$package" 'semantic-release graph'
+done
+forbid_in_tree "$semantic_release_tree" 'gix|rusqlite|tonic|arc-swap' \
+  'semantic-release graph'
 
 s3_tree="$(cargo_tree --no-default-features --features s3-storage)"
 require_in_tree "$s3_tree" deltalake-aws 's3-storage graph'

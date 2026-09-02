@@ -1826,6 +1826,89 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "data-fabric")]
+    #[tokio::test]
+    async fn semantic_release_provider_to_proof_fixture() {
+        let target = ProviderRelationIdentity::try_new("normalized.0").unwrap();
+        let mut definition = fixture_definition();
+        for query in &mut definition.queries.queries {
+            query.required_relations = vec![target.clone()];
+        }
+        definition.proof.expectations = vec![ProofExpectationDefinition::new(
+            ProofExpectationIdentity::try_new("expectation.provider-to-proof").unwrap(),
+            target.clone(),
+            2,
+        )];
+        let release = CompiledSemanticRelease::compile(definition).unwrap();
+
+        let (_, cancellation) = CancellationProbe::pair(64).unwrap();
+        let prepared = release
+            .providers()
+            .prepare_job(
+                release.policy(),
+                ProviderJobInput {
+                    lane: ProviderLane::TreeSitter,
+                    source: source_binding(),
+                    context: context_binding(),
+                    run: run_binding(),
+                    scope: ProviderScopeIdentity::try_new("workspace").unwrap(),
+                    requested_families: vec![(
+                        ProviderFamilyIdentity::try_new("tree-sitter.family").unwrap(),
+                        2,
+                    )],
+                    operational_ceilings: ceilings(2, 10),
+                    deadline: Instant::now() + Duration::from_secs(5),
+                    cancellation,
+                },
+            )
+            .unwrap();
+        let admitted = release
+            .providers()
+            .admit(prepared, tree_sitter_result())
+            .unwrap();
+        let raw = &admitted.result().relations()[0];
+
+        let transformation = release.transformations().compile(&target).unwrap();
+        assert_eq!(transformation.operator, TransformationOperator::Normalize);
+        assert_eq!(transformation.inputs.as_ref(), [raw.relation().clone()]);
+        assert_eq!(transformation.output_schema, raw.schema().clone());
+
+        let transformed = SessionContext::new()
+            .read_batches(raw.batches().to_vec())
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let transformed_rows = transformed.iter().map(RecordBatch::num_rows).sum::<usize>();
+        assert_eq!(transformed_rows, 2);
+
+        for form in SemanticQueryForm::ALL {
+            let query = release.queries().compile(form).unwrap();
+            assert_eq!(query.required_relations.as_ref(), [target.clone()]);
+            let result = SessionContext::new()
+                .read_batches(transformed.clone())
+                .unwrap()
+                .limit(0, Some(usize::try_from(query.maximum_rows).unwrap()))
+                .unwrap()
+                .collect()
+                .await
+                .unwrap();
+            assert_eq!(result.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
+        }
+
+        let proof = release.proof().construct_input();
+        let proof_passes = |row_count: usize| {
+            proof.expectations.iter().all(|(_, relation, minimum)| {
+                relation == &target && u64::try_from(row_count).unwrap() >= *minimum
+            })
+        };
+        assert!(proof_passes(transformed_rows));
+        assert!(
+            !proof_passes(1),
+            "a causal provider-row loss must change the independent proof terminal"
+        );
+    }
+
     #[test]
     fn release_provider_preparation_and_admission_are_causal() {
         let release = compiled();
