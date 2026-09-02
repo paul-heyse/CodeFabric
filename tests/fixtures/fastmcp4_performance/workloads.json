@@ -1,0 +1,222 @@
+{
+  "schema": "codefabric.fastmcp4-release-performance.method.v1",
+  "method_id": "fastmcp4-local-stdio-v1",
+  "method_revision": "wp50-r1",
+  "authority": {
+    "registered_method_path": "contracts/acceptance/relational-fabric-v5/performance-method.yaml",
+    "registered_method_sha256": "ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df",
+    "registered_before_candidate_results": true,
+    "candidate_results_used": false,
+    "local_relaxation_permitted": false,
+    "amendment_policy": "forward-versioned-independent-review"
+  },
+  "statistics": {
+    "warmups_per_case": 3,
+    "samples_per_case": 30,
+    "clock": "monotonic_ns",
+    "latency_unit": "milliseconds",
+    "memory_source": "operating-system-resident-set-bytes",
+    "percentile_policy": {
+      "name": "nearest-rank",
+      "rank_expression": "max(1,ceil(percentile*sample_count))",
+      "reported_percentiles": [0, 50, 95, 100]
+    },
+    "bootstrap": {
+      "seed": 2026090150,
+      "resamples": 2000,
+      "confidence_percent": 95,
+      "sampling": "with-replacement-same-cardinality",
+      "statistics": ["median", "p95"]
+    },
+    "ordering": {
+      "name": "deterministic-randomized-interleaved-candidate-control-blocks",
+      "seed": 2026090151,
+      "arms": ["candidate", "control"],
+      "block_contract": "each warmup and measured block contains each arm exactly once"
+    },
+    "outlier_policy": "report-all-no-post-hoc-removal",
+    "failure_policy": "any-timeout-crash-protocol-error-skip-or-missing-sample-fails"
+  },
+  "comparison": {
+    "minimal_control_id": "minimal-fastmcp4-stdio-control-v1",
+    "candidate_id": "installed-codefabric-fastmcp4-stdio-v1",
+    "daemon_control_id": "same-candidate-direct-daemon-rpc-v1",
+    "predecessor_comparison_permitted": false,
+    "same_host_required": true,
+    "same_power_profile_required": true,
+    "semantic_equality": "canonical-json-decoded-observations-must-match-per-block",
+    "different_semantics_permitted": false
+  },
+  "topology": {
+    "candidate": "one-supervisor-one-daemon-one-launcher-and-installed-adapter-per-agent",
+    "minimal_control": "one-installed-fastmcp4-stdio-process-per-agent-no-daemon",
+    "daemon_control": "same-candidate-supervisor-and-daemon-with-direct-rpc-probe",
+    "aggregate_rss_scope": "sum-unique-os-rss-for-every-live-process-in-the-measured-topology",
+    "eight_agent_aggregate_ceiling_bytes": 1073741824,
+    "eight_agent_ceiling_interpretation": "one-total-topology-ceiling-not-a-per-process-or-per-agent-ceiling",
+    "concurrency_levels": [1, 2, 4, 8]
+  },
+  "structural_bounds": {
+    "daemon_processes_per_workspace_max": 1,
+    "channels_per_adapter_max": 1,
+    "per_call_server_construction_max": 0,
+    "per_call_channel_construction_max": 0,
+    "python_sync_blocking_semantic_operations_max": 0,
+    "python_arrow_decodes_max": 0,
+    "python_threadpool_semantic_operations_max": 0,
+    "completion_candidates_max": 100,
+    "materialized_resource_pages_max": 1,
+    "guard_rounds_max": 3,
+    "concurrent_queries_per_agent_max": 4,
+    "queued_queries_total_max": 128,
+    "captured_log_bytes_max": 131072,
+    "start_query_resubmissions_max": 0,
+    "orphan_processes_max": 0,
+    "cleanup_joined_required": true,
+    "stdout_protocol_only_required": true
+  },
+  "environment_required_fields": [
+    "recorded_at_utc",
+    "repository_head",
+    "repository_tree",
+    "dirty_tree_digest",
+    "operating_system",
+    "kernel_version",
+    "architecture",
+    "cpu_model",
+    "physical_core_count",
+    "logical_cpu_count",
+    "memory_bytes",
+    "python_version",
+    "fastmcp_version",
+    "mcp_version",
+    "pydantic_version",
+    "grpcio_version",
+    "adapter_wheel_sha256",
+    "daemon_executable_sha256",
+    "supervisor_executable_sha256",
+    "host_profile",
+    "power_profile",
+    "competing_load_description"
+  ],
+  "environment_required_values": {
+    "python_version": "3.14.7",
+    "fastmcp_version": "4.0.0",
+    "mcp_version": "2.1.1",
+    "pydantic_version": "2.13.4",
+    "host_profile": "local-workstation-v1"
+  },
+  "workloads": [
+    {
+      "workload_id": "startup_to_protocol_ready",
+      "control_kind": "minimal-fastmcp4-stdio-control-v1",
+      "concurrency_levels": [1],
+      "cases": ["fresh-installed-process"],
+      "metrics": ["latency_ms"],
+      "budgets": {
+        "p95_max_ms": 2000,
+        "candidate_minus_control_p95_max_ms": 750
+      }
+    },
+    {
+      "workload_id": "idle_and_active_rss",
+      "control_kind": "minimal-fastmcp4-stdio-control-v1",
+      "concurrency_levels": [1, 2, 4, 8],
+      "cases": [
+        "idle_after_discovery",
+        "active_status",
+        "active_query",
+        "active_resource"
+      ],
+      "metrics": ["adapter_rss_bytes", "topology_rss_bytes"],
+      "budgets": {
+        "idle_adapter_p95_max_bytes": 201326592,
+        "active_increment_p95_max_bytes": 67108864,
+        "eight_agent_total_topology_p95_max_bytes": 1073741824
+      }
+    },
+    {
+      "workload_id": "status_presentation_overhead",
+      "control_kind": "same-candidate-direct-daemon-rpc-v1",
+      "concurrency_levels": [1],
+      "cases": ["fixed-local-ready-status"],
+      "metrics": ["latency_ms"],
+      "budgets": {"candidate_minus_control_p95_max_ms": 25}
+    },
+    {
+      "workload_id": "query_acceptance_presentation_overhead",
+      "control_kind": "same-candidate-direct-daemon-rpc-v1",
+      "concurrency_levels": [1],
+      "cases": ["fixed-immediate-accepted-outcome"],
+      "metrics": ["latency_ms"],
+      "budgets": {"candidate_minus_control_p95_max_ms": 50}
+    },
+    {
+      "workload_id": "guard_one_and_max_round_overhead",
+      "control_kind": "same-candidate-direct-daemon-rpc-v1",
+      "concurrency_levels": [1],
+      "cases": ["one-input-required-leg", "three-valid-rounds"],
+      "metrics": ["latency_ms", "guard_rounds"],
+      "budgets": {
+        "one_leg_candidate_minus_control_p95_max_ms": 75,
+        "maximum_rounds_candidate_minus_control_p95_max_ms": 300,
+        "guard_rounds_max": 3
+      }
+    },
+    {
+      "workload_id": "completion_latency_and_cardinality",
+      "control_kind": "same-candidate-direct-daemon-rpc-v1",
+      "concurrency_levels": [1],
+      "cases": ["one-candidate", "one-hundred-candidates", "denied-empty"],
+      "metrics": ["latency_ms", "candidate_count"],
+      "budgets": {"p95_max_ms": 100, "candidate_count_max": 100}
+    },
+    {
+      "workload_id": "resource_first_byte_and_throughput",
+      "control_kind": "same-candidate-direct-daemon-rpc-v1",
+      "concurrency_levels": [1],
+      "cases": ["one-page-64-kib", "one-page-1-mib"],
+      "metrics": [
+        "first_byte_ms",
+        "throughput_bytes_per_second",
+        "materialized_pages"
+      ],
+      "budgets": {
+        "first_byte_p95_max_ms": 250,
+        "sustained_min_bytes_per_second": 16777216,
+        "resident_pages_max": 1
+      }
+    },
+    {
+      "workload_id": "cancellation_ack_and_cleanup",
+      "control_kind": "same-candidate-direct-daemon-rpc-v1",
+      "concurrency_levels": [1],
+      "cases": ["cancel-after-acceptance", "cancel-during-resource-read"],
+      "metrics": ["acknowledgement_ms", "cleanup_ms"],
+      "budgets": {
+        "acknowledgement_p95_max_ms": 250,
+        "cleanup_p95_max_ms": 1000
+      }
+    },
+    {
+      "workload_id": "reconnect_and_resume",
+      "control_kind": "same-candidate-direct-daemon-rpc-v1",
+      "concurrency_levels": [1],
+      "cases": ["transport-loss-after-acceptance", "daemon-generation-change"],
+      "metrics": ["latency_ms", "start_query_resubmissions"],
+      "budgets": {"p95_max_ms": 1500, "start_query_resubmissions_max": 0}
+    },
+    {
+      "workload_id": "n_agent_fairness_and_aggregate_memory",
+      "control_kind": "same-candidate-direct-daemon-rpc-v1",
+      "concurrency_levels": [1, 2, 4, 8],
+      "cases": ["mixed-status-query-resource"],
+      "metrics": ["latency_ms", "fairness_ratio", "topology_rss_bytes"],
+      "budgets": {
+        "fairness_ratio_max": 2.0,
+        "concurrency_level_required": 8,
+        "eight_agent_total_topology_p95_max_bytes": 1073741824
+      }
+    }
+  ]
+}
