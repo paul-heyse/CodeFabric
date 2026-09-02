@@ -116,6 +116,7 @@ daemon = [
     "dep:command-fds",
     "dep:sha2",
     "dep:tokio-stream",
+    "dep:tokio-util",
     "dep:tonic-health",
     "dep:toml",
     "dep:tower",
@@ -174,6 +175,7 @@ unicode-casefold = { version = "=0.2.0", optional = true }
 unicode-normalization = { version = "=0.1.25", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "io-std", "process", "signal"], optional = true }
 tokio-stream = { version = "=0.1.18", features = ["net"], optional = true }
+tokio-util = { version = "=0.7.19", features = ["rt"], optional = true }
 toml = { version = "=1.1.4", default-features = false, features = ["std", "parse", "serde"], optional = true }
 tonic = { version = "=0.14.6", features = ["transport"], optional = true }
 tonic-health = { version = "=0.14.6", optional = true }

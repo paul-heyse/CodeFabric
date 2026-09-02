@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::{Stream, stream};
@@ -13,7 +13,6 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tonic::metadata::MetadataValue;
 use tonic::{Code, Request, Response, Status};
 
-use crate::cancellation::Cancellation;
 use crate::fabric::arrow_result_resource::QueryExecutionPin;
 use crate::fabric::command::{LeaseId, PrincipalId, WorkspaceId};
 use crate::fabric::production_kernel::{
@@ -552,6 +551,7 @@ pub struct ProductionQueryService<B: SemanticQueryBackend> {
     admission: Arc<RpcAdmission>,
     retention_running: Arc<AtomicBool>,
     retention_failed: Arc<AtomicBool>,
+    retention_sequence: Arc<AtomicU64>,
     starts: Arc<Mutex<StartState>>,
     daemon_instance_id: Arc<str>,
 }
@@ -600,6 +600,7 @@ impl<B: SemanticQueryBackend> ProductionQueryService<B> {
             admission,
             retention_running: Arc::new(AtomicBool::new(false)),
             retention_failed: Arc::new(AtomicBool::new(false)),
+            retention_sequence: Arc::new(AtomicU64::new(0)),
             starts: Arc::new(Mutex::new(StartState::default())),
             daemon_instance_id: daemon_instance_id.into(),
         }
@@ -625,31 +626,49 @@ impl<B: SemanticQueryBackend> ProductionQueryService<B> {
                 "RESULT_RECOVERY_UNAVAILABLE",
             ));
         }
-        self.schedule_retention(observed_at_unix_ms);
+        self.schedule_retention(observed_at_unix_ms).await?;
         Ok(session)
     }
 
-    fn schedule_retention(&self, observed_at_unix_ms: i64) {
+    async fn schedule_retention(&self, observed_at_unix_ms: i64) -> Result<(), Status> {
         if self
             .retention_running
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            return;
+            return Ok(());
         }
         let results = Arc::clone(&self.results);
         let coordinator = Arc::clone(&self.coordinator);
         let running = Arc::clone(&self.retention_running);
         let failed = Arc::clone(&self.retention_failed);
-        tokio::spawn(async move {
-            if collect_retention_authority(&results, &coordinator, observed_at_unix_ms)
-                .await
-                .is_err()
-            {
-                failed.store(true, Ordering::Release);
-            }
-            running.store(false, Ordering::Release);
-        });
+        let sequence = self.retention_sequence.fetch_add(1, Ordering::AcqRel);
+        let task_name = format!("retention:{sequence}");
+        if let Err(error) = self
+            .coordinator
+            .spawn_service_task(&task_name, async move {
+                if collect_retention_authority(&results, &coordinator, observed_at_unix_ms)
+                    .await
+                    .is_err()
+                {
+                    failed.store(true, Ordering::Release);
+                }
+                running.store(false, Ordering::Release);
+            })
+            .await
+        {
+            self.retention_running.store(false, Ordering::Release);
+            self.retention_failed.store(true, Ordering::Release);
+            return Err(public_status(
+                Code::Unavailable,
+                if matches!(error, QueryCoordinatorError::TaskCapacity) {
+                    "RETENTION_TASK_CAPACITY"
+                } else {
+                    "RETENTION_TASK_OWNERSHIP"
+                },
+            ));
+        }
+        Ok(())
     }
 
     async fn collect_retention(&self, observed_at_unix_ms: i64) -> Result<(), Status> {
@@ -2029,8 +2048,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                 self.record_accepted_start(&ready, acceptance.clone(), semantic_request_id.clone())
                     .await?;
                 if !replay {
-                    let (release, start) = tokio::sync::oneshot::channel();
-                    let task = tokio::spawn(execute_accepted_query(ExecutionTask {
+                    let task = execute_accepted_query(ExecutionTask {
                         backend: Arc::clone(&self.backend),
                         coordinator: Arc::clone(&self.coordinator),
                         results: Arc::clone(&self.results),
@@ -2043,16 +2061,13 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                         daemon_generation: session.daemon_generation(),
                         policy_generation: session.policy_generation(),
                         revocation_generation: session.revocation_generation(),
-                        start,
-                    }));
+                    });
                     if self
                         .coordinator
-                        .register_task(&acceptance.query_id, task)
+                        .spawn_task(&acceptance.query_id, task)
                         .await
-                        .is_ok()
+                        .is_err()
                     {
-                        let _ = release.send(());
-                    } else {
                         let _ = self
                             .coordinator
                             .terminal(
@@ -2189,6 +2204,10 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                     .cancel_idempotent(&query_id, &request.cancellation_id, observed_at)
                     .await
                     .map_err(coordinator_status)?;
+                self.coordinator
+                    .join_query_tasks(&query_id, Duration::from_secs(2))
+                    .await
+                    .map_err(coordinator_status)?;
                 let acknowledgement = if cancellation.idempotent_replay {
                     CancellationAcknowledgement::Replayed
                 } else if matches!(cancellation.phase, QueryExecutionPhase::Terminal(_)) {
@@ -2252,7 +2271,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                         "RESULT_RECOVERY_UNAVAILABLE",
                     ));
                 }
-                self.schedule_retention(observed_at_unix_ms);
+                self.schedule_retention(observed_at_unix_ms).await?;
                 validate_context(request.get_ref().context.as_ref(), &session)?;
                 let request = request.into_inner();
                 if request.public_handle.is_empty() || request.public_handle.len() > 256 {
@@ -2393,7 +2412,6 @@ struct ExecutionTask<B: SemanticQueryBackend> {
     daemon_generation: u64,
     policy_generation: u64,
     revocation_generation: u64,
-    start: tokio::sync::oneshot::Receiver<()>,
 }
 
 #[derive(Debug)]
@@ -2434,19 +2452,10 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>)
         daemon_generation,
         policy_generation,
         revocation_generation,
-        start,
     } = task;
     let parsed = prepared.resolved().parsed();
     let snapshot = prepared.snapshot().clone();
     let execution_deadline = tokio::time::Instant::from_std(deadline);
-    match tokio::time::timeout_at(execution_deadline, start).await {
-        Ok(Ok(())) => {}
-        Ok(Err(_)) => return,
-        Err(_) => {
-            close_query_at_deadline(&coordinator, &query_id).await;
-            return;
-        }
-    }
     let Ok(permit) = await_running_until(&coordinator, &query_id, deadline).await else {
         return;
     };
@@ -2474,11 +2483,10 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>)
             now_millis(),
         )
         .await;
-    let Some(shared_cancellation) = coordinator.cancellation(&query_id).await else {
+    let Some(cancellation) = coordinator.cancellation_probe(&query_id, 1).await else {
         permit.complete();
         return;
     };
-    let cancellation = Cancellation::from_shared(shared_cancellation, 1);
     let query_pin = QueryExecutionPin::from_bytes(identity32(
         b"codefabric.query-execution.v2",
         &[
@@ -4127,6 +4135,7 @@ mod tests {
     use std::os::unix::net::UnixStream as StdUnixStream;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use crate::cancellation::Cancellation;
     use crate::fabric::query_coordinator::{QueryCoordinatorPolicy, SqliteQueryCoordinatorJournal};
     use crate::query_backend::{
         SemanticAuthorizedChoice, SemanticExecutionPreparation, SemanticInputConstraints,
@@ -5317,8 +5326,6 @@ mod tests {
             .collect();
         let resolved = ResolvedSemanticExecutionRequest::try_new(parsed, answers).unwrap();
         let prepared = backend.admit_execution_request(resolved).unwrap();
-        let (release, start) = tokio::sync::oneshot::channel();
-        release.send(()).unwrap();
         execute_accepted_query(ExecutionTask {
             backend,
             coordinator: Arc::clone(&coordinator),
@@ -5332,7 +5339,6 @@ mod tests {
             daemon_generation: 7,
             policy_generation: 1,
             revocation_generation: 1,
-            start,
         })
         .await;
 

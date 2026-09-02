@@ -1,0 +1,20 @@
+id: cancellation-inward-boundary-only
+valid:
+  - |
+      async fn owned(scope: &StructuredCancellationScope) {
+          scope.spawn("query", async move { run_query().await }).await.unwrap();
+      }
+  - |
+      async fn joined() {
+          let task = tokio::spawn(async move { run_query().await });
+          task.await.unwrap();
+      }
+invalid:
+  - |
+      fn detached() {
+          tokio::spawn(async move { run_query().await });
+      }
+  - |
+      fn removed_unjoined() {
+          query_tasks.remove(query_id).inspect(|task| task.abort());
+      }

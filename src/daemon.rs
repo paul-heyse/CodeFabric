@@ -8,7 +8,7 @@ use std::io::Write as _;
 use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -18,6 +18,7 @@ use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
 
+use crate::cancellation::StructuredCancellationScope;
 use crate::contracts::deployment_profile::DeploymentProfileDocument;
 use crate::fabric::command::LeaseId;
 use crate::fabric::production_kernel::{
@@ -1156,12 +1157,46 @@ async fn serve_writer_fenced_v2(
             return finish_writer_fenced_v2(startup, workspace, false, Some(error)).await;
         }
     };
-    let coordinator = match QueryCoordinator::try_new(
+    let daemon_task_scope =
+        match StructuredCancellationScope::try_root("daemon", policy.structured_task_capacity()) {
+            Ok(scope) => scope,
+            Err(error) => {
+                return finish_writer_fenced_v2(
+                    startup,
+                    workspace,
+                    false,
+                    Some(DaemonError::Config(format!(
+                        "daemon task hierarchy: {error}"
+                    ))),
+                )
+                .await;
+            }
+        };
+    let query_task_scope = match daemon_task_scope
+        .child("workspace")
+        .and_then(|scope| scope.child("primary"))
+        .and_then(|scope| scope.child("query-runtime"))
+    {
+        Ok(scope) => scope,
+        Err(error) => {
+            return finish_writer_fenced_v2(
+                startup,
+                workspace,
+                false,
+                Some(DaemonError::Config(format!(
+                    "workspace task hierarchy: {error}"
+                ))),
+            )
+            .await;
+        }
+    };
+    let coordinator = match QueryCoordinator::try_new_in_scope(
         policy,
         hello.daemon_generation,
         cursor_secret,
         journal,
         observed_at,
+        query_task_scope,
     ) {
         Ok(coordinator) => Arc::new(coordinator),
         Err(error) => {
@@ -1353,8 +1388,13 @@ async fn serve_writer_fenced_v2(
         return finish_writer_fenced_v2(startup, workspace, false, Some(error.into())).await;
     }
     let (serve_result, query_already_joined) = {
-        let control_future =
-            serve_daemon_control(&mut control, &mut control_state, Arc::clone(&sessions));
+        let control_future = serve_daemon_control(
+            &mut control,
+            &mut control_state,
+            Arc::clone(&sessions),
+            Arc::clone(&startup.lifecycle),
+            Arc::clone(&coordinator),
+        );
         tokio::pin!(control_future);
         tokio::select! {
             result = &mut control_future => (result, false),
@@ -1379,6 +1419,11 @@ async fn serve_writer_fenced_v2(
     let primary = serve_result
         .and_then(|drained| query_join.map(|()| drained))
         .and_then(|drained| query_retire.map(|()| drained));
+    let task_drain = daemon_task_scope
+        .cancel_and_join(Duration::from_secs(2))
+        .await
+        .map_err(|error| DaemonError::Serving(format!("daemon task drain: {error}")));
+    let primary = primary.and_then(|drained| task_drain.map(|()| drained));
     let primary = match primary {
         Ok(true) => await_shutdown_after_drain(&mut control, &mut control_state)
             .await
@@ -1398,6 +1443,8 @@ async fn serve_daemon_control(
     stream: &mut UnixStream,
     state: &mut DaemonControlReadState,
     sessions: Arc<LaunchGrantAuthority>,
+    lifecycle: Arc<LifecycleAuthority>,
+    coordinator: Arc<QueryCoordinator>,
 ) -> Result<bool, DaemonError> {
     loop {
         let accepted = read_daemon_control(stream, state).await?;
@@ -1448,6 +1495,13 @@ async fn serve_daemon_control(
                 .await
                 .map_err(|error| format!("GENERATION_ADVANCE_REJECTED:{error}")),
             DaemonControlRequest::Drain { .. } => {
+                lifecycle.begin_draining()?;
+                coordinator
+                    .drain_owned_tasks(Duration::from_secs(10))
+                    .await
+                    .map_err(|error| {
+                        DaemonError::Serving(format!("accepted query drain: {error}"))
+                    })?;
                 acknowledge_control(stream, state, &header, &request_id, true, "DRAIN_ACCEPTED")
                     .await?;
                 return Ok(true);

@@ -393,7 +393,115 @@ CONTRACTS = {
 }
 
 STATE_SCOPES = ("repository-input", "operational-state")
-ALL_SCOPES = tuple(CONTRACTS)
+ALL_SCOPES = (*CONTRACTS, "cancellation")
+
+
+def _resolved_root_graph(root: Path, feature: str) -> tuple[set[str], set[str]]:
+    completed = subprocess.run(
+        (
+            "cargo",
+            "metadata",
+            "--locked",
+            "--format-version",
+            "1",
+            "--no-default-features",
+            "--features",
+            feature,
+        ),
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    metadata = json.loads(completed.stdout)
+    resolve = metadata.get("resolve")
+    packages = metadata.get("packages")
+    if not isinstance(resolve, dict) or not isinstance(packages, list):
+        raise FeatureArchitectureError("cargo metadata omitted packages or resolution")
+    package_names = {
+        package["id"]: package["name"]
+        for package in packages
+        if isinstance(package, dict)
+        and isinstance(package.get("id"), str)
+        and isinstance(package.get("name"), str)
+    }
+    nodes = resolve.get("nodes")
+    if not isinstance(nodes, list):
+        raise FeatureArchitectureError("cargo metadata omitted resolved nodes")
+    nodes_by_id = {
+        node["id"]: node
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("id"), str)
+    }
+    root_ids = [
+        identifier
+        for identifier in nodes_by_id
+        if package_names.get(identifier) == "codefabric"
+    ]
+    if len(root_ids) != 1:
+        raise FeatureArchitectureError("cargo metadata did not identify one root package")
+    reachable = set(root_ids)
+    pending = list(root_ids)
+    while pending:
+        node = nodes_by_id[pending.pop()]
+        for dependency in node.get("deps", []):
+            if not isinstance(dependency, dict) or not isinstance(
+                dependency.get("pkg"), str
+            ):
+                continue
+            dependency_kinds = dependency.get("dep_kinds", [])
+            if not isinstance(dependency_kinds, list) or not any(
+                isinstance(kind, dict) and kind.get("kind") != "dev"
+                for kind in dependency_kinds
+            ):
+                continue
+            package_id = dependency["pkg"]
+            if package_id in nodes_by_id and package_id not in reachable:
+                reachable.add(package_id)
+                pending.append(package_id)
+    root_features = nodes_by_id[root_ids[0]].get("features")
+    if not isinstance(root_features, list):
+        raise FeatureArchitectureError("cargo metadata omitted root feature selection")
+    return ({package_names[identifier] for identifier in reachable}, set(root_features))
+
+
+def _validate_cancellation(root: Path) -> dict[str, Any]:
+    with (root / "Cargo.toml").open("rb") as source:
+        manifest = tomllib.load(source)
+    features = manifest.get("features")
+    dependencies = manifest.get("dependencies")
+    if not isinstance(features, dict) or not isinstance(dependencies, dict):
+        raise FeatureArchitectureError("Cargo.toml omitted features or dependencies")
+    daemon = features.get("daemon")
+    tokio_util = dependencies.get("tokio-util")
+    if not isinstance(daemon, list) or "dep:tokio-util" not in daemon:
+        raise FeatureArchitectureError("daemon does not directly activate tokio-util")
+    if not isinstance(tokio_util, dict) or tokio_util.get("optional") is not True:
+        raise FeatureArchitectureError("tokio-util must remain an optional direct dependency")
+    if tokio_util.get("version") != "=0.7.19" or tokio_util.get("features") != ["rt"]:
+        raise FeatureArchitectureError("tokio-util cancellation pin/features changed")
+    inward = ("provider-contracts", "release-compiler", "fact-generation", "data-fabric")
+    leaked = [
+        feature
+        for feature in inward
+        if "dep:tokio-util" in set(features.get(feature, []))
+    ]
+    if leaked:
+        raise FeatureArchitectureError(
+            f"tokio-util leaked into inward capabilities: {sorted(leaked)}"
+        )
+    daemon_packages, daemon_features = _resolved_root_graph(root, "daemon")
+    fact_packages, _ = _resolved_root_graph(root, "fact-generation")
+    if "tokio-util" not in daemon_packages or "daemon" not in daemon_features:
+        raise FeatureArchitectureError("daemon resolution omitted structured cancellation")
+    if "tokio-util" in fact_packages:
+        raise FeatureArchitectureError("fact-generation resolved daemon cancellation support")
+    return {
+        "scope": "cancellation",
+        "daemon_feature": "daemon",
+        "tokio_util": "0.7.19",
+        "fact_generation_isolated": True,
+    }
 
 
 def _validate_manifest(manifest: dict[str, Any], scope: str) -> None:
@@ -509,6 +617,8 @@ def validate(scope: str, root: Path = ROOT) -> dict[str, Any]:
             "scope": scope,
             "capabilities": [validate(child, root) for child in ALL_SCOPES],
         }
+    if scope == "cancellation":
+        return _validate_cancellation(root)
     if scope not in CONTRACTS:
         raise FeatureArchitectureError(
             f"unsupported feature architecture scope: {scope}"
@@ -540,7 +650,9 @@ def validate(scope: str, root: Path = ROOT) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("scope", choices=[*sorted(CONTRACTS), "all", "state"])
+    parser.add_argument(
+        "scope", choices=[*sorted(CONTRACTS), "all", "cancellation", "state"]
+    )
     args = parser.parse_args()
     print(json.dumps(validate(args.scope), indent=2, sort_keys=True))
     return 0

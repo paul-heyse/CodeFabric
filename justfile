@@ -376,6 +376,13 @@ query-admission-materialization-bypass-rejection-check:
 query-retention-cancellation-restart-check:
     cargo nextest run --locked --lib -E 'test(/wp36_ops_/)' --no-tests=fail
 
+[doc("Prove daemon-rooted cancellation propagation, durable replay, joined cleanup, and task faults")]
+[group('test')]
+cancellation-tree-check:
+    cargo nextest run --locked --lib -E 'test(/(parent_propagates_without_cancelling_a_sibling_from_its_child|owned_tasks_are_joined_and_observation_drop_is_not_cancellation|cleanup_timeout_escalates_then_observes_every_handle|completed_tasks_are_observed_before_capacity_is_reused|wp56_running_cancel_is_durable_then_joins_one_terminal_task|wp45_cancel_is_idempotent_for_queued_running_and_terminal_work|wp45_ops_restart_after_cancellation_side_effect_before_ack_reports_replay|wp45_watch_iteration_deadline_releases_admission)/)' --no-tests=fail
+    ast-grep test --filter '^cancellation-inward-boundary-only$'
+    ast-grep scan --rule rules/cancellation-inward-boundary-only.yml --error src
+
 [doc("Validate the exact production workspace factory, typed inputs, ports, and release pins")]
 [group('test')]
 production-composition-contract-integrity-check:
@@ -868,7 +875,7 @@ compiled-suite-identity-check:
 [group('gate')]
 feature-architecture-check scope="all":
     PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/feature_architecture.py "{{scope}}"
-    @if [ "{{scope}}" = "state" ]; then features='repository-input operational-state'; elif [ "{{scope}}" = "all" ]; then features='provider-contracts release-compiler fact-generation data-fabric repository-input operational-state semantic-release'; else features='{{scope}}'; fi; for feature in $features; do ast-grep test --filter "^${feature}-inward-boundary-only$"; cargo check --locked --no-default-features --features "$feature"; done
+    @if [ "{{scope}}" = "state" ]; then scopes='repository-input operational-state'; elif [ "{{scope}}" = "all" ]; then scopes='provider-contracts release-compiler fact-generation data-fabric repository-input operational-state semantic-release cancellation'; else scopes='{{scope}}'; fi; for scope in $scopes; do if [ "$scope" = cancellation ]; then feature=daemon; else feature="$scope"; fi; ast-grep test --filter "^${scope}-inward-boundary-only$"; cargo check --locked --no-default-features --features "$feature"; done
 
 [doc("Validate exact Arrow IPC identities, schemas, pinned provider batches, and cross-process control contracts")]
 [group('test')]

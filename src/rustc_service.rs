@@ -4,10 +4,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::future::Future;
 use std::io::Cursor;
+use std::num::NonZeroUsize;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use arrow_array::RecordBatch;
@@ -19,6 +21,7 @@ use tonic::service::InterceptorLayer;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
+use crate::cancellation::StructuredCancellationScope;
 use crate::provider_contracts::{
     CanonicalEntityIdentity, ProviderContractError, ProviderCoverage, ProviderCoverageState,
     ProviderGap, ProviderJob, ProviderLane, ProviderRelationOutput, ProviderRunEvidenceSpec,
@@ -1295,6 +1298,8 @@ pub struct RustcObservationService {
     active: Arc<Mutex<BTreeMap<String, ActiveRun>>>,
     accepted: mpsc::Sender<AcceptedRustcCompilation>,
     supervisor_cancellation: RustCompilationCancellationSignal,
+    stream_tasks: StructuredCancellationScope,
+    stream_sequence: Arc<AtomicU64>,
 }
 
 impl RustcObservationService {
@@ -1366,6 +1371,12 @@ impl RustcObservationService {
                     "rustc launch-plan binding differs from protocol admission: {error}"
                 ))
             })?;
+        let stream_tasks = StructuredCancellationScope::try_root(
+            "rustc-provider",
+            NonZeroUsize::new(32).expect("rustc provider stream-task capacity is nonzero"),
+        )
+        .and_then(|root| root.child("observation"))
+        .map_err(|error| Status::internal(format!("rustc stream-task hierarchy: {error}")))?;
         let (accepted, receiver) = mpsc::channel(MAX_OUTSTANDING_FRAMES as usize);
         Ok((
             Self {
@@ -1376,6 +1387,8 @@ impl RustcObservationService {
                 active: Arc::new(Mutex::new(BTreeMap::new())),
                 accepted,
                 supervisor_cancellation: RustCompilationCancellationSignal::default(),
+                stream_tasks,
+                stream_sequence: Arc::new(AtomicU64::new(0)),
             },
             receiver,
         ))
@@ -1385,6 +1398,13 @@ impl RustcObservationService {
     #[must_use]
     pub fn supervisor_cancellation_signal(&self) -> RustCompilationCancellationSignal {
         self.supervisor_cancellation.clone()
+    }
+
+    async fn drain_stream_tasks(&self) -> Result<(), Status> {
+        self.stream_tasks
+            .cancel_and_join(std::time::Duration::from_secs(2))
+            .await
+            .map_err(|error| Status::unavailable(format!("rustc stream-task drain: {error}")))
     }
 
     /// Request cancellation through the existing reverse command stream.
@@ -1833,6 +1853,10 @@ where
         .await
         .map_err(RustcProviderLifecycleError::CancellationBridgeTask)?;
     let _ = shutdown_sender.send(());
+    monitor
+        .drain_stream_tasks()
+        .await
+        .map_err(RustcProviderLifecycleError::Protocol)?;
     let server_result = server
         .await
         .map_err(RustcProviderLifecycleError::ServerTask)?;
@@ -2109,14 +2133,18 @@ impl RustcExtractor for RustcObservationService {
     ) -> Result<Response<Self::ObserveStream>, Status> {
         let (sender, receiver) = mpsc::channel((MAX_OUTSTANDING_FRAMES + 2) as usize);
         let service = self.clone();
-        tokio::spawn(async move {
-            if let Err(error) = service
-                .process_stream(request.into_inner(), sender.clone())
-                .await
-            {
-                let _ = sender.send(Err(error)).await;
-            }
-        });
+        let sequence = self.stream_sequence.fetch_add(1, Ordering::AcqRel);
+        self.stream_tasks
+            .spawn(&format!("stream:{sequence}"), async move {
+                if let Err(error) = service
+                    .process_stream(request.into_inner(), sender.clone())
+                    .await
+                {
+                    let _ = sender.send(Err(error)).await;
+                }
+            })
+            .await
+            .map_err(|error| Status::resource_exhausted(format!("rustc stream owner: {error}")))?;
         let output = stream::unfold(receiver, |mut receiver| async move {
             receiver.recv().await.map(|item| (item, receiver))
         });

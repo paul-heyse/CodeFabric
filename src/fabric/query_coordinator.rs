@@ -7,6 +7,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
+#[cfg(feature = "daemon")]
+use std::future::Future;
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,10 +19,15 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{Mutex, Notify};
 
+#[cfg(feature = "daemon")]
+use crate::cancellation::{Cancellation, StructuredCancellationScope, StructuredTaskError};
+
 use super::command::{PrincipalId, WorkspaceId};
 use super::streamed_result_package::PendingResultObjectSet;
 
 const MAX_CANCELLATION_IDENTITIES_PER_QUERY: usize = 64;
+#[cfg(feature = "daemon")]
+const QUERY_TASK_CLEANUP_RESERVE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Closed sharing policy for accepted query authority across authenticated daemon sessions.
 ///
@@ -251,6 +258,13 @@ impl QueryCoordinatorPolicy {
             ));
         }
         Ok(policy)
+    }
+
+    /// Capacity for the daemon task tree after reserving bounded service/transport ownership.
+    #[cfg(feature = "daemon")]
+    pub(crate) fn structured_task_capacity(self) -> NonZeroUsize {
+        NonZeroUsize::new(self.max_tasks.get().saturating_add(64))
+            .expect("a nonzero query-task bound plus reserve remains nonzero")
     }
 }
 
@@ -607,6 +621,8 @@ struct QueryHandle {
     event_bytes: usize,
     result_retention: ResultRetentionState,
     changed: Arc<Notify>,
+    #[cfg(feature = "daemon")]
+    task_scope: StructuredCancellationScope,
 }
 
 impl fmt::Debug for QueryHandle {
@@ -630,7 +646,7 @@ struct CoordinatorState {
     reserved_result_bytes: u64,
     reserved_result_pages: u64,
     task_reservations: BTreeSet<String>,
-    tasks: BTreeMap<String, tokio::task::JoinHandle<()>>,
+    attached_tasks: BTreeSet<String>,
 }
 
 impl Default for CoordinatorState {
@@ -645,7 +661,7 @@ impl Default for CoordinatorState {
             reserved_result_bytes: 0,
             reserved_result_pages: 0,
             task_reservations: BTreeSet::new(),
-            tasks: BTreeMap::new(),
+            attached_tasks: BTreeSet::new(),
         }
     }
 }
@@ -658,6 +674,8 @@ pub struct QueryCoordinator {
     cursor_secret: [u8; 32],
     journal: Arc<dyn QueryCoordinatorJournal>,
     state: Arc<Mutex<CoordinatorState>>,
+    #[cfg(feature = "daemon")]
+    task_scope: StructuredCancellationScope,
 }
 
 impl fmt::Debug for QueryCoordinator {
@@ -712,6 +730,103 @@ impl QueryCoordinator {
         if generation == 0 || cursor_secret.iter().all(|byte| *byte == 0) {
             return Err(QueryCoordinatorError::InvalidCoordinatorIdentity);
         }
+        #[cfg(feature = "daemon")]
+        let task_scope = StructuredCancellationScope::try_root(
+            "daemon",
+            NonZeroUsize::new(policy.max_tasks.get().saturating_add(32))
+                .ok_or(QueryCoordinatorError::InvalidCoordinatorIdentity)?,
+        )?;
+        #[cfg(feature = "daemon")]
+        return Self::try_new_in_scope(
+            policy,
+            generation,
+            cursor_secret,
+            journal,
+            observed_at_unix_ms,
+            task_scope,
+        );
+        #[cfg(not(feature = "daemon"))]
+        {
+            Self::try_new_inner(
+                policy,
+                generation,
+                cursor_secret,
+                journal,
+                observed_at_unix_ms,
+            )
+        }
+    }
+
+    /// Reopen durable control state inside the caller's daemon/workspace task tree.
+    #[cfg(feature = "daemon")]
+    pub(crate) fn try_new_in_scope(
+        policy: QueryCoordinatorPolicy,
+        generation: u64,
+        cursor_secret: [u8; 32],
+        journal: Arc<dyn QueryCoordinatorJournal>,
+        observed_at_unix_ms: i64,
+        task_scope: StructuredCancellationScope,
+    ) -> Result<Self, QueryCoordinatorError> {
+        Self::try_new_inner(
+            policy,
+            generation,
+            cursor_secret,
+            journal,
+            observed_at_unix_ms,
+            task_scope,
+        )
+    }
+
+    #[cfg(feature = "daemon")]
+    fn try_new_inner(
+        policy: QueryCoordinatorPolicy,
+        generation: u64,
+        cursor_secret: [u8; 32],
+        journal: Arc<dyn QueryCoordinatorJournal>,
+        observed_at_unix_ms: i64,
+        task_scope: StructuredCancellationScope,
+    ) -> Result<Self, QueryCoordinatorError> {
+        if generation == 0 || cursor_secret.iter().all(|byte| *byte == 0) {
+            return Err(QueryCoordinatorError::InvalidCoordinatorIdentity);
+        }
+        Self::recover(
+            policy,
+            generation,
+            cursor_secret,
+            journal,
+            observed_at_unix_ms,
+            task_scope,
+        )
+    }
+
+    #[cfg(not(feature = "daemon"))]
+    fn try_new_inner(
+        policy: QueryCoordinatorPolicy,
+        generation: u64,
+        cursor_secret: [u8; 32],
+        journal: Arc<dyn QueryCoordinatorJournal>,
+        observed_at_unix_ms: i64,
+    ) -> Result<Self, QueryCoordinatorError> {
+        if generation == 0 || cursor_secret.iter().all(|byte| *byte == 0) {
+            return Err(QueryCoordinatorError::InvalidCoordinatorIdentity);
+        }
+        Self::recover(
+            policy,
+            generation,
+            cursor_secret,
+            journal,
+            observed_at_unix_ms,
+        )
+    }
+
+    fn recover(
+        policy: QueryCoordinatorPolicy,
+        generation: u64,
+        cursor_secret: [u8; 32],
+        journal: Arc<dyn QueryCoordinatorJournal>,
+        observed_at_unix_ms: i64,
+        #[cfg(feature = "daemon")] task_scope: StructuredCancellationScope,
+    ) -> Result<Self, QueryCoordinatorError> {
         let recovered = journal.load(policy.max_recovery_records.get().saturating_add(1))?;
         if recovered.len() > policy.max_recovery_records.get() {
             return Err(QueryCoordinatorError::RecoveryLimit);
@@ -817,6 +932,8 @@ impl QueryCoordinator {
                     .ok_or(QueryCoordinatorError::CounterOverflow)
             })?;
             let query_id = durable.acceptance.query_id.clone();
+            #[cfg(feature = "daemon")]
+            let recovered_task_scope = task_scope.child("query")?.child(&query_id)?;
             state.idempotency.insert(scope, query_id.clone());
             state.handles.insert(
                 query_id,
@@ -830,6 +947,8 @@ impl QueryCoordinator {
                     event_bytes,
                     result_retention: durable.result_retention,
                     changed: Arc::new(Notify::new()),
+                    #[cfg(feature = "daemon")]
+                    task_scope: recovered_task_scope,
                 },
             );
         }
@@ -839,6 +958,8 @@ impl QueryCoordinator {
             cursor_secret,
             journal,
             state: Arc::new(Mutex::new(state)),
+            #[cfg(feature = "daemon")]
+            task_scope,
         })
     }
 
@@ -899,6 +1020,8 @@ impl QueryCoordinator {
             generation: self.generation,
             phase: QueryExecutionPhase::Queued,
         };
+        #[cfg(feature = "daemon")]
+        let query_task_scope = self.task_scope.child("query")?.child(&query_id)?;
         let handle = QueryHandle {
             operation,
             acceptance: acceptance.clone(),
@@ -909,6 +1032,8 @@ impl QueryCoordinator {
             event_bytes: 0,
             result_retention: ResultRetentionState::Reserved,
             changed: Arc::new(Notify::new()),
+            #[cfg(feature = "daemon")]
+            task_scope: query_task_scope,
         };
         self.journal.create(&durable_record(&handle))?;
         state.reserved_result_bytes = next_bytes;
@@ -960,22 +1085,55 @@ impl QueryCoordinator {
         }
     }
 
-    /// Attach the one task owner after a new acceptance; replay never creates a second task.
-    pub async fn register_task(
+    /// Spawn the one structured task owner after a new acceptance.
+    ///
+    /// Replay never creates a second task, and validation completes before the future is spawned,
+    /// so an attachment failure cannot leave detached accepted work.
+    #[cfg(feature = "daemon")]
+    pub async fn spawn_task<F>(
         &self,
         query_id: &str,
-        task: tokio::task::JoinHandle<()>,
-    ) -> Result<(), QueryCoordinatorError> {
-        let mut state = self.state.lock().await;
-        if !state.handles.contains_key(query_id) {
-            task.abort();
-            return Err(QueryCoordinatorError::UnknownQuery(query_id.to_owned()));
+        future: F,
+    ) -> Result<(), QueryCoordinatorError>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let scope = {
+            let mut state = self.state.lock().await;
+            let (phase, scope) = state
+                .handles
+                .get(query_id)
+                .map(|handle| (handle.acceptance.phase, handle.task_scope.clone()))
+                .ok_or_else(|| QueryCoordinatorError::UnknownQuery(query_id.to_owned()))?;
+            if matches!(phase, QueryExecutionPhase::Terminal(_))
+                || !state.task_reservations.contains(query_id)
+                || !state.attached_tasks.insert(query_id.to_owned())
+            {
+                return Err(QueryCoordinatorError::TaskCapacity);
+            }
+            scope
+        };
+        if let Err(error) = scope.spawn("execution", future).await {
+            self.state.lock().await.attached_tasks.remove(query_id);
+            return Err(error.into());
         }
-        if !state.task_reservations.contains(query_id) || state.tasks.contains_key(query_id) {
-            task.abort();
-            return Err(QueryCoordinatorError::TaskCapacity);
-        }
-        state.tasks.insert(query_id.to_owned(), task);
+        Ok(())
+    }
+
+    /// Spawn daemon maintenance under the same owned root as accepted query work.
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn spawn_service_task<F>(
+        &self,
+        name: &str,
+        future: F,
+    ) -> Result<(), QueryCoordinatorError>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.task_scope
+            .child("service")?
+            .spawn(name, future)
+            .await?;
         Ok(())
     }
 
@@ -1147,6 +1305,10 @@ impl QueryCoordinator {
             handle.events.push(event.clone());
             handle.event_bytes = next_bytes;
             handle.acceptance.phase = QueryExecutionPhase::Terminal(terminal);
+            #[cfg(feature = "daemon")]
+            if terminal != QueryTerminalState::Succeeded {
+                handle.task_scope.cancel();
+            }
             if release_result {
                 handle.result_retention = if cleanup_object_set(&handle.events).is_some() {
                     ResultRetentionState::CleanupPending
@@ -1174,7 +1336,7 @@ impl QueryCoordinator {
         if release_result {
             release_result_reservation(&mut state, reserved_bytes, reserved_pages)?;
         }
-        state.tasks.remove(query_id);
+        state.attached_tasks.remove(query_id);
         state.task_reservations.remove(query_id);
         self.dispatch_locked(&mut state)?;
         drop(state);
@@ -1195,6 +1357,8 @@ impl QueryCoordinator {
                 .get(query_id)
                 .ok_or_else(|| QueryCoordinatorError::UnknownQuery(query_id.to_owned()))?;
             handle.cancelled.store(true, Ordering::Release);
+            #[cfg(feature = "daemon")]
+            handle.task_scope.cancel();
             handle.acceptance.phase == QueryExecutionPhase::Queued
         };
         if queued {
@@ -1256,6 +1420,8 @@ impl QueryCoordinator {
                     // Persist the identity before the process-local side effect. Loss of the
                     // eventual RPC acknowledgement therefore replays after daemon recovery.
                     handle.cancelled.store(true, Ordering::Release);
+                    #[cfg(feature = "daemon")]
+                    handle.task_scope.cancel();
                     return Ok(QueryCancellationOutcome {
                         phase,
                         idempotent_replay: false,
@@ -1304,6 +1470,8 @@ impl QueryCoordinator {
                 return Err(error);
             }
             handle.cancelled.store(true, Ordering::Release);
+            #[cfg(feature = "daemon")]
+            handle.task_scope.cancel();
             (
                 Arc::clone(&handle.changed),
                 handle.operation.maximum_result_bytes,
@@ -1312,7 +1480,7 @@ impl QueryCoordinator {
         };
         state.queue.retain(|queued| queued != query_id);
         release_result_reservation(&mut state, reserved_bytes, reserved_pages)?;
-        state.tasks.remove(query_id);
+        state.attached_tasks.remove(query_id);
         state.task_reservations.remove(query_id);
         self.dispatch_locked(&mut state)?;
         drop(state);
@@ -1331,6 +1499,64 @@ impl QueryCoordinator {
             .handles
             .get(query_id)
             .map(|handle| Arc::clone(&handle.cancelled))
+    }
+
+    /// Return the structured daemon token as the synchronous application probe consumed by work.
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn cancellation_probe(
+        &self,
+        query_id: &str,
+        check_interval: u32,
+    ) -> Option<Cancellation> {
+        self.state
+            .lock()
+            .await
+            .handles
+            .get(query_id)
+            .map(|handle| handle.task_scope.probe(check_interval))
+    }
+
+    /// Stop new query task attachment, signal every accepted query, and join all owned work.
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn drain_owned_tasks(
+        &self,
+        cleanup_reserve: std::time::Duration,
+    ) -> Result<(), QueryCoordinatorError> {
+        {
+            let state = self.state.lock().await;
+            for handle in state.handles.values() {
+                handle.cancelled.store(true, Ordering::Release);
+                handle.task_scope.cancel();
+            }
+        }
+        self.task_scope.cancel_and_join(cleanup_reserve).await?;
+        self.state.lock().await.attached_tasks.clear();
+        Ok(())
+    }
+
+    /// Cooperatively cancel and observe every task owned by one durable query identity.
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn join_query_tasks(
+        &self,
+        query_id: &str,
+        cleanup_reserve: std::time::Duration,
+    ) -> Result<(), QueryCoordinatorError> {
+        let scope = self
+            .state
+            .lock()
+            .await
+            .handles
+            .get(query_id)
+            .map(|handle| handle.task_scope.clone())
+            .ok_or_else(|| QueryCoordinatorError::UnknownQuery(query_id.to_owned()))?;
+        scope.cancel_and_join(cleanup_reserve).await?;
+        self.state.lock().await.attached_tasks.remove(query_id);
+        Ok(())
+    }
+
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn owned_task_count(&self) -> usize {
+        self.task_scope.live_task_count().await
     }
 
     /// Return an immutable bounded event suffix.
@@ -1552,6 +1778,8 @@ impl QueryCoordinator {
         observed_at_unix_ms: i64,
     ) -> Result<usize, QueryCoordinatorError> {
         let mut state = self.state.lock().await;
+        #[cfg(feature = "daemon")]
+        let mut expired_task_scopes = Vec::new();
         let expired = state
             .handles
             .iter()
@@ -1614,8 +1842,14 @@ impl QueryCoordinator {
                 } else if prior_phase == QueryExecutionPhase::Queued {
                     state.queue.retain(|queued| queued != query_id);
                 }
+                #[cfg(feature = "daemon")]
+                if let Some(handle) = state.handles.get(query_id) {
+                    handle.cancelled.store(true, Ordering::Release);
+                    handle.task_scope.cancel();
+                    expired_task_scopes.push(handle.task_scope.clone());
+                }
                 release_result_reservation(&mut state, reserved_bytes, reserved_pages)?;
-                state.tasks.remove(query_id).inspect(|task| task.abort());
+                state.attached_tasks.remove(query_id);
                 state.task_reservations.remove(query_id);
                 notify.notify_waiters();
                 continue;
@@ -1639,7 +1873,13 @@ impl QueryCoordinator {
                     handle.operation.maximum_result_pages,
                 )?;
             }
-            state.tasks.remove(query_id).inspect(|task| task.abort());
+            #[cfg(feature = "daemon")]
+            {
+                handle.cancelled.store(true, Ordering::Release);
+                handle.task_scope.cancel();
+                expired_task_scopes.push(handle.task_scope.clone());
+            }
+            state.attached_tasks.remove(query_id);
             state.task_reservations.remove(query_id);
             state.idempotency.remove(&IdempotencyScope {
                 workspace_id: handle.operation.workspace_id,
@@ -1649,6 +1889,11 @@ impl QueryCoordinator {
             self.journal.delete(query_id)?;
         }
         self.dispatch_locked(&mut state)?;
+        drop(state);
+        #[cfg(feature = "daemon")]
+        for scope in expired_task_scopes {
+            scope.cancel_and_join(QUERY_TASK_CLEANUP_RESERVE).await?;
+        }
         Ok(expired.len())
     }
 
@@ -2151,6 +2396,16 @@ pub enum QueryCoordinatorError {
     Sqlite(#[from] rusqlite::Error),
     #[error("query journal I/O failure: {0}")]
     Io(#[source] std::io::Error),
+    #[cfg(feature = "daemon")]
+    #[error("query structured-task failure: {0}")]
+    StructuredTask(String),
+}
+
+#[cfg(feature = "daemon")]
+impl From<StructuredTaskError> for QueryCoordinatorError {
+    fn from(error: StructuredTaskError) -> Self {
+        Self::StructuredTask(error.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -2819,6 +3074,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wp56_running_cancel_is_durable_then_joins_one_terminal_task() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let coordinator = coordinator(&temp, policy(1, 1_024, 64), 7, 1_000);
+        let accepted = acceptance(
+            coordinator
+                .accept(operation("structured-cancel", 1), 1_000)
+                .await
+                .expect("running acceptance"),
+        );
+        let probe = coordinator
+            .cancellation_probe(&accepted.query_id, 1)
+            .await
+            .expect("query cancellation probe");
+        let task_coordinator = coordinator.clone();
+        let task_query_id = accepted.query_id.clone();
+        coordinator
+            .spawn_task(&accepted.query_id, async move {
+                while !probe.is_cancelled() {
+                    tokio::task::yield_now().await;
+                }
+                task_coordinator
+                    .terminal(
+                        &task_query_id,
+                        QueryTerminalState::Cancelled,
+                        Some("CANCELLED".to_owned()),
+                        None,
+                        1_002,
+                    )
+                    .await
+                    .expect("one durable cancellation terminal");
+            })
+            .await
+            .expect("structured task attachment");
+
+        let cancellation = coordinator
+            .cancel_idempotent(&accepted.query_id, "cancel:structured", 1_001)
+            .await
+            .expect("durable cancellation identity");
+        assert_eq!(cancellation.phase, QueryExecutionPhase::Running);
+        coordinator
+            .join_query_tasks(&accepted.query_id, Duration::from_secs(1))
+            .await
+            .expect("cancelled task joins");
+        assert_eq!(coordinator.owned_task_count().await, 0);
+        assert_eq!(
+            coordinator.phase(&accepted.query_id).await.unwrap(),
+            QueryExecutionPhase::Terminal(QueryTerminalState::Cancelled)
+        );
+        let events = coordinator
+            .events_after(&accepted.query_id, 0)
+            .await
+            .unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.payload.is_terminal())
+                .count(),
+            1
+        );
+        assert!(
+            coordinator
+                .cancel_idempotent(&accepted.query_id, "cancel:structured", 1_003)
+                .await
+                .expect("durable replay")
+                .idempotent_replay
+        );
+    }
+
+    #[tokio::test]
     async fn wp45_neg_policy_revocation_and_session_sharing_bind_authorization_and_cursor() {
         let temp = tempfile::tempdir().expect("tempdir");
         let coordinator = coordinator(&temp, policy(1, 1_024, 64), 7, 1_000);
@@ -3099,11 +3423,19 @@ mod tests {
             let state = coordinator.state.lock().await;
             assert_eq!(state.task_reservations.len(), 1);
             assert!(state.task_reservations.contains(&accepted.query_id));
-            assert!(state.tasks.is_empty());
+            assert!(state.attached_tasks.is_empty());
         }
-        let task = tokio::spawn(std::future::pending::<()>());
+        let cancellation = coordinator
+            .cancellation_probe(&accepted.query_id, 1)
+            .await
+            .expect("accepted query cancellation scope");
+        let task = async move {
+            while !cancellation.is_cancelled() {
+                tokio::task::yield_now().await;
+            }
+        };
         coordinator
-            .register_task(&accepted.query_id, task)
+            .spawn_task(&accepted.query_id, task)
             .await
             .expect("fulfill the exact reserved task slot");
         coordinator
@@ -3121,6 +3453,11 @@ mod tests {
             .accept(operation("task-slot-after-release", 3), 1_002)
             .await
             .expect("released slot admits the next bounded task");
+        coordinator
+            .drain_owned_tasks(Duration::from_secs(1))
+            .await
+            .expect("all structured query tasks join");
+        assert_eq!(coordinator.owned_task_count().await, 0);
     }
 
     #[tokio::test]

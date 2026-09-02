@@ -11,6 +11,7 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Read as _, Seek as _, SeekFrom, Write as _};
 use std::net::Shutdown;
+use std::num::NonZeroUsize;
 use std::os::fd::{AsFd as _, OwnedFd};
 use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _, OpenOptionsExt as _};
 use std::os::unix::net::UnixStream as StdUnixStream;
@@ -31,6 +32,7 @@ use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, RwLock, Semaphore, mpsc};
 
+use crate::cancellation::StructuredCancellationScope;
 use crate::daemon::DaemonConfig;
 use crate::identity::{IdentityDomain, decode_public_id};
 use crate::operational_store::OperationalStore;
@@ -1917,6 +1919,14 @@ pub async fn serve_supervisor(config_path: &Path) -> Result<(), SupervisorError>
         control: daemon.control.clone(),
     }));
     let connection_slots = Arc::new(Semaphore::new(SUPERVISOR_RENDEZVOUS_TASK_LIMIT));
+    let connection_tasks = StructuredCancellationScope::try_root(
+        "supervisor",
+        NonZeroUsize::new(SUPERVISOR_RENDEZVOUS_TASK_LIMIT + 8)
+            .expect("supervisor task capacity is nonzero"),
+    )
+    .and_then(|root| root.child("rendezvous"))
+    .map_err(|error| SupervisorError::Control(format!("supervisor task hierarchy: {error}")))?;
+    let mut connection_sequence = 0_u64;
     let (escalation_sender, mut escalation_receiver) = mpsc::unbounded_channel();
     let mut launch_reaper = tokio::time::interval(Duration::from_millis(250));
     launch_reaper.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1953,22 +1963,35 @@ pub async fn serve_supervisor(config_path: &Path) -> Result<(), SupervisorError>
                 let escalation_sender = escalation_sender.clone();
                 let peer_uid = credentials.uid();
                 let peer_pid = credentials.pid().and_then(|value| u32::try_from(value).ok());
-                tokio::spawn(async move {
-                    let _permit = permit;
-                    let _ = serve_supervisor_connection(
-                        stream,
-                        &launch_policies,
-                        &launches,
-                        &query_socket,
-                        &serving,
-                        supervisor_generation,
-                        workspace_id,
-                        peer_uid,
-                        peer_pid,
-                        &escalation_sender,
-                    )
-                    .await;
-                });
+                connection_sequence = connection_sequence.checked_add(1).ok_or_else(|| {
+                    SupervisorError::Control("supervisor connection sequence exhausted".into())
+                })?;
+                let cancellation = connection_tasks.clone();
+                connection_tasks
+                    .spawn(&format!("connection:{connection_sequence}"), async move {
+                        let _permit = permit;
+                        tokio::select! {
+                            () = cancellation.cancelled() => {}
+                            _ = serve_supervisor_connection(
+                                stream,
+                                &launch_policies,
+                                &launches,
+                                &query_socket,
+                                &serving,
+                                supervisor_generation,
+                                workspace_id,
+                                peer_uid,
+                                peer_pid,
+                                &escalation_sender,
+                            ) => {}
+                        }
+                    })
+                    .await
+                    .map_err(|error| {
+                        SupervisorError::Control(format!(
+                            "supervisor connection ownership: {error}"
+                        ))
+                    })?;
                 SupervisorLoopEvent::Continue
             }
             status = daemon.child.wait() => {
@@ -2067,6 +2090,10 @@ pub async fn serve_supervisor(config_path: &Path) -> Result<(), SupervisorError>
         serving.control = daemon.control.clone();
     }
     serving.write().await.ready = false;
+    let connection_shutdown = connection_tasks
+        .cancel_and_join(SUPERVISOR_RENDEZVOUS_HANDLE_TIMEOUT)
+        .await
+        .map_err(|error| SupervisorError::Control(format!("supervisor connection drain: {error}")));
     let shutdown_result = drain_shutdown_and_join_daemon(&mut daemon, &launches).await;
     if shutdown_result.is_err() {
         let _ = terminate_and_join_child(&mut daemon.child, "failed ordered daemon drain").await;
@@ -2074,6 +2101,7 @@ pub async fn serve_supervisor(config_path: &Path) -> Result<(), SupervisorError>
     let discovery_cleanup =
         remove_owned_file_at(&lease.directory, SUPERVISOR_DISCOVERY, &discovery_path);
     let socket_cleanup = socket.retire().map_err(SupervisorError::from);
+    connection_shutdown?;
     shutdown_result?;
     discovery_cleanup?;
     socket_cleanup?;

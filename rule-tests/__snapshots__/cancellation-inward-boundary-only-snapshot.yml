@@ -1,0 +1,20 @@
+id: cancellation-inward-boundary-only
+snapshots:
+  ? |
+    fn detached() {
+        tokio::spawn(async move { run_query().await });
+    }
+  : labels:
+    - source: tokio::spawn(async move { run_query().await });
+      style: primary
+      start: 20
+      end: 67
+  ? |
+    fn removed_unjoined() {
+        query_tasks.remove(query_id).inspect(|task| task.abort());
+    }
+  : labels:
+    - source: query_tasks.remove(query_id).inspect(|task| task.abort())
+      style: primary
+      start: 28
+      end: 85

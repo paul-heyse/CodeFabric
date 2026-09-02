@@ -1,0 +1,25 @@
+id: cancellation-inward-boundary-only
+language: Rust
+severity: error
+message: Production asynchronous work must be retained by an explicit owner and joined.
+note: Detached spawns and remove-then-abort task registries bypass the daemon cancellation tree.
+files:
+  - src/daemon.rs
+  - src/query_service.rs
+  - src/supervisor.rs
+  - src/rustc_service.rs
+  - src/pyrefly_service.rs
+  - src/freshness.rs
+  - src/fabric/query_coordinator.rs
+  - src/fabric/command_runtime.rs
+  - src/fabric/command_actor.rs
+  - src/fabric/child_session/resource_governance.rs
+rule:
+  any:
+    - pattern: tokio::spawn($$$ARGS);
+    - pattern: tokio::task::spawn($$$ARGS);
+    - pattern: $TASKS.remove($KEY).inspect(|$TASK| $TASK.abort())
+    - pattern: $TASKS.remove($KEY).map(|$TASK| $TASK.abort())
+constraints:
+  TASKS:
+    regex: .*(task|Task).*
