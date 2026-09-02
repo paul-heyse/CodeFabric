@@ -582,6 +582,30 @@ expectation-drift-selector-sensitivity-check:
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance_v4.py -k 'ops_'
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance_v4.py expectation-drift-selector-sensitivity-check
 
+[doc("Bind the independently authored FastMCP 4 expectations to active v5 and terminal suite 2.3")]
+[group('test')]
+fastmcp4-successor-authority-integrity-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_successor_expectations.py -k 'int_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_successor_expectations.py successor-authority-integrity
+
+[doc("Require independent acceptance of every controlled FastMCP 4 successor expectation")]
+[group('test')]
+fastmcp4-independent-expectation-review-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_successor_expectations.py -k 'beh_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_successor_expectations.py independent-expectation-review
+
+[doc("Prove FastMCP 4 causal and rejection fixtures are independent and discriminating")]
+[group('test')]
+fastmcp4-negative-fixture-independence-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_successor_expectations.py -k 'neg_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_successor_expectations.py negative-fixture-independence
+
+[doc("Fail closed when a frozen FastMCP 4 input, selector, or performance method drifts")]
+[group('test')]
+fastmcp4-expectation-drift-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_successor_expectations.py -k 'ops_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_successor_expectations.py expectation-drift
+
 [doc("Validate the accepted supervisor policy, singleton, control, fd-3, and restart expectation slice")]
 [group('test')]
 supervisor-launch-contract-check:
@@ -991,7 +1015,7 @@ model-zero-state-check:
 
 [doc("Run structural, artifact, provenance, compatibility, and zero-state governance")]
 [group('gate')]
-governance: tool-version-contract-check governance-scan authoritative-design-conformance-check proto-check model-zero-state-check remaining-legacy-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check successor-authority-expectation-integrity-check independent-expected-relation-review-check negative-fixture-independence-check expectation-drift-selector-sensitivity-check oracle-substance-check plan-dependency-check
+governance: tool-version-contract-check governance-scan authoritative-design-conformance-check proto-check model-zero-state-check remaining-legacy-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check fastmcp4-successor-authority-integrity-check fastmcp4-independent-expectation-review-check fastmcp4-negative-fixture-independence-check fastmcp4-expectation-drift-check oracle-substance-check plan-dependency-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]

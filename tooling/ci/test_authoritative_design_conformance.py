@@ -21,11 +21,11 @@ from tooling.ci.authoritative_design_conformance import (
 def test_relational_authoritative_design_conformance() -> None:
     report = validate_authoritative_design()
     assert report["current_master_count"] == 8
-    assert report["historical_master_count"] == 24
+    assert report["historical_master_count"] == 32
     assert report["generated_manifest_authority_count"] == 0
     assert report["suite_id"] == "codefabric-relational-data-fabric"
-    assert report["suite_version"] == "2.2.0"
-    assert report["plan_selection"] == "active-v4"
+    assert report["suite_version"] == "2.3.0"
+    assert report["plan_selection"] == "active-v5"
 
 
 def _write_suite(root: Path) -> Path:
@@ -118,14 +118,14 @@ def test_relational_authoritative_design_legacy_reference_policy() -> None:
     assert historical_hits
 
 
-def test_relational_plan_v4_dependency_graph_after_activation() -> None:
+def test_relational_plan_v5_dependency_graph_after_activation() -> None:
     completed = subprocess.run(
         (
             "just",
             "plan-dependency-check",
             (
                 "docs/plans/"
-                "codefabric_execution_proved_relational_data_fabric_implementation_plan_v4_2026-09-01.md"
+                "codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md"
             ),
         ),
         cwd=ROOT,
@@ -134,7 +134,7 @@ def test_relational_plan_v4_dependency_graph_after_activation() -> None:
         text=True,
     )
     assert completed.returncode == 0, completed.stderr
-    assert "14 packets" in completed.stdout
+    assert "10 packets" in completed.stdout
 
 
 @pytest.mark.parametrize("mode", ["missing", "empty"])

@@ -51,3 +51,12 @@ Completeness requires:
 - every proof obligation has an executable discriminator;
 - removed contracts have no selectable live consumer;
 - unknown or skipped inventory is a failure, not implicit deletion.
+
+## 5. V2.3 serving contract ownership
+
+The atomic start outcome, input challenge/continuation, public resource handle, reference
+completion, cancellation acknowledgement, and modern protocol/catalog contracts enter as released
+explicit inputs owned by QRY/SRV. Their live availability, authorization, limits, and component
+observations remain derived. The inert framework-owned UI advertisement is recorded separately
+from the empty CodeFabric extension registry and empty UI component catalogs; none is semantic or
+authorization authority.

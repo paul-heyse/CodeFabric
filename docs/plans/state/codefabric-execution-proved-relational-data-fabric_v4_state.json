@@ -4,7 +4,7 @@
   "design_path": "docs/reviews/interface_design_review_daemon_grpc_fastmcp_boundary_2026-09-01_v5.md",
   "baseline_commit": "6a76b5cff3d84e8249e5bedaa52a17f2abb816dd",
   "status": "executing",
-  "current_packet": "WP37",
+  "current_packet": null,
   "packets": {
     "WP33": {
       "status": "complete",
@@ -18,10 +18,11 @@
       "blockers": []
     },
     "WP29": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "2ef15f5f0cb9276be455b07de9112b3c970395d9",
       "deviations": [
-        "The stale selector was rebound to substantive successor-owned production composition and lifecycle-admission behavior instead of restoring deleted release-vector or epoch-registry authority."
+        "The stale selector was rebound to substantive successor-owned production composition and lifecycle-admission behavior instead of restoring deleted release-vector or epoch-registry authority.",
+        "The current working-tree programmatic-production-composition-check now includes the unfinished WP37 terminal vertical and fails closed when fresh activation reaches AwaitingReconciliation after ReadbackUnavailable. The ancestral WP29 implementation remains reusable, but its current named acceptance contract is not green and must be revalidated through the successor plan without restoring deleted authority."
       ],
       "failed_approaches": [
         "Earlier review rounds found incomplete post-bind cleanup and partial multi-workspace writer-owner release; the accepted implementation joins and releases every acquired owner before returning each startup failure."
@@ -29,10 +30,11 @@
       "blockers": []
     },
     "WP30": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "24001089ec2dee99166fb3f3a5098d30d4d3cc1c",
       "deviations": [
-        "The revalidated v2 activation-residue contract records eight retained target-owned runtime primitives and three disposed predecessor authorities. Its executable negative check searches every live Rust path and fails if any disposed authority reappears; no removed authority was restored."
+        "The revalidated v2 activation-residue contract records eight retained target-owned runtime primitives and three disposed predecessor authorities. Its executable negative check searches every live Rust path and fails if any disposed authority reappears; no removed authority was restored.",
+        "The current working-tree compiled-release-consumer and model-free-restart recipes now depend on the unfinished WP37 terminal vertical and fail on the same fresh-activation ReadbackUnavailable path. Bootstrap/model/ontology and remaining-legacy zero-state checks remain green, so the decommission direction is preserved while packet completion awaits successor revalidation."
       ],
       "failed_approaches": [],
       "blockers": []
@@ -86,30 +88,38 @@
       "blockers": []
     },
     "WP37": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Substantial uncommitted supervisor, owned-UDS, session, generated gRPC v2, adapter, and real-process vertical work exists and the root, adapter, Protobuf, and supervisor-contract focused checks are green. The accepted FastMCP 4 review invalidates the packet's FastMCP 3.4.7 library target, dual-era assumptions, query preparation flow, Python resource-lease ownership, correlation model, schema authority, and terminal proof contract. Reuse the compatible Rust/gRPC substrate only through a successor plan."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP38": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The evidence packet depends on the invalidated WP37 surface and v2.2/FastMCP 3 expectations. Independent evidence must be reissued for the modern-only FastMCP 4 guard, public-resource, completion, cancellation, and zero-state contract."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP39": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The purge packet remains directionally correct but its live inventory omits the newly displaced FastMCP 3 pins, compatibility bridge, prompts, duplicate freshness and validation, Python lease registry, correlation IDs, stale adapter schemas, and task/session/cache/extension authority denials. A successor packet must own the expanded zero state."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP40": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Post-purge release and performance evidence must measure the accepted FastMCP 4 modern-only edge, guarded rounds, completion, cancellation, resource streaming, startup, per-agent RSS, and N-agent behavior rather than the predecessor serving profile."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -121,9 +131,11 @@
       "blockers": []
     },
     "WP42": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The v4 certification target cannot certify an accepted design that it does not contain. Terminal certification must be regenerated from the successor plan while retaining re-execution of the trusted WP29-WP36 data-fabric oracles."
+      ],
       "failed_approaches": [],
       "blockers": []
     }
@@ -137,10 +149,11 @@
       "blockers": []
     },
     "M03": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "24001089ec2dee99166fb3f3a5098d30d4d3cc1c",
       "deviations": [
-        "WP29 and WP30 were revalidated against target-owned behavior and multidimensional successor zero state after WP32 removed the remaining activation authority; the stale predecessor selectors and manifest expectations were replaced, not revived."
+        "WP29 and WP30 were revalidated against target-owned behavior and multidimensional successor zero state after WP32 removed the remaining activation authority; the stale predecessor selectors and manifest expectations were replaced, not revived.",
+        "The decommission remains intact, but current WP29/WP30 acceptance recipes were later coupled to the unfinished WP37 terminal vertical and are no longer green."
       ],
       "failed_approaches": [],
       "blockers": []
@@ -155,21 +168,21 @@
       "blockers": []
     },
     "M05": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M06": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "M07": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -194,21 +207,21 @@
       "blockers": []
     },
     "DB11": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB12": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB13": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -233,9 +246,17 @@
     "WP35 closed the release-owned producer census, typed analyses, executable decoded proof closure, cancellation, and substantive fixed-point/resource oracle at c58f98be94990b2608992247885ce2a0950e7237.",
     "WP36 closed full-meaning idempotency, global/workspace/principal admission, durable control-only restart state, native DataFusion streaming, bounded manifest-last Arrow pages, exact package reopen, cancellation cleanup, and retention at 4449febd59c36f9835f21b92c6eac534211eb057.",
     "Implement WP37's real supervisor, public gRPC v2 UDS service, and presentation-only FastMCP vertical; replace placeholder recipes and add the missing boundary-rejection recipe.",
-    "Create and execute the still-missing WP38 through WP42 packet oracles only as their dependency-closed implementation surfaces land."
+    "Create and execute the still-missing WP38 through WP42 packet oracles only as their dependency-closed implementation surfaces land.",
+    "Accepted design docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md supersedes the FastMCP-serving assumptions of WP37-WP40 and WP42 while preserving the compatible supervisor, UDS, gRPC v2, and Rust data-fabric substrate.",
+    "The current real supervisor vertical fails closed during fresh activation because ReadbackUnavailable leaves the command in AwaitingReconciliation with no probe evidence; close coherent append/readback reconciliation before claiming Ready.",
+    "Create a successor implementation plan that versions the suite to the FastMCP 4 target, preserves trusted WP29-WP36 proof, expands decommission zero state, and replaces invalidated serving/evidence/performance/certification packets."
   ],
-  "plan_deviations": [],
-  "next_action": "Implement WP37's target-only supervisor, public gRPC v2 UDS service, and presentation-only FastMCP vertical over the WP36 coordinator and streamed package authority; run all four WP37 packet oracles and close M05 and DB11.",
-  "updated_at": "2026-09-01T18:43:51Z"
+  "plan_deviations": [
+    {
+      "kind": "accepted_fastmcp4_design_evolution",
+      "summary": "The accepted FastMCP 4 target is a material post-activation design evolution. Do not resume or repair v4 WP37-WP40 or WP42 in place; preserve compatible work and move the remaining scope into a new versioned plan."
+    }
+  ],
+  "next_action": "Issue, audit, approve, and activate the FastMCP 4 successor plan. Its first implementation boundary must preserve the dirty-tree Rust/gRPC/supervisor work, close fresh-activation readback reconciliation, version the authoritative suite, and then implement the modern-only FastMCP 4 contract without restoring FastMCP 3 or displaced ontology/bootstrap authority.",
+  "updated_at": "2026-09-01T23:22:41Z"
 }

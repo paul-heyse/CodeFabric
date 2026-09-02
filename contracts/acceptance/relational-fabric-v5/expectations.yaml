@@ -1,0 +1,583 @@
+schema: codefabric.fastmcp4-successor.expectations.v1
+release_id: relational-fabric-v5-wp43-r1
+expectations:
+  - claim_id: RFV5-FM4-001
+    family: successor_identity_and_pins
+    title: The v2.3 successor and exact presentation stack are the sole target authority
+    oracle_categories: [INT, OPS]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["0", "10", "15", "16"]
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v2.md
+        sections: ["0", "1", "3"]
+      - path: docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md
+        sections: ["2.1", "2.2", "WP43"]
+    controlled_input:
+      case_id: exact-successor-release
+      suite_id: codefabric-relational-data-fabric
+      suite_version: 2.3.0
+      protocol_version: "2026-07-28"
+      compatibility_bridge: false
+    expected_observation:
+      selected_suite:
+        suite_id: codefabric-relational-data-fabric
+        suite_version: 2.3.0
+        member_tags: [SUITE, ONT, GEN, FAB, QRY, LIFE, SRV, RM]
+        predecessor_version: 2.2.0
+        sole_terminal: true
+      runtime_pins:
+        python: 3.14.7
+        fastmcp: 4.0.0
+        mcp: 2.1.1
+        pydantic: 2.13.4
+      protocol_version: "2026-07-28"
+      compatibility_bridge: false
+      predecessor_runtime_authority: false
+    provenance: &independent_provenance
+      authored_from: accepted-design-manual-derivation
+      expected_value_origin: independent-manual
+      imports: []
+      generated: false
+      target_execution_used: false
+      predecessor_expected_values_used: false
+    discriminating_fault:
+      fixture_id: RFV5-FM4-001-N
+      mutation: Select v2.2 or restore any predecessor dependency pin
+      required_observation: Suite selection or exact pin comparison fails closed
+
+  - claim_id: RFV5-FM4-002
+    family: modern_protocol_admission
+    title: Only protocol 2026-07-28 reaches business dispatch
+    oracle_categories: [BEH, NEG]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["5.1", "6.4", "7.3", "16"]
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v2.md
+        sections: ["0", "3"]
+    controlled_input:
+      case_id: modern-and-legacy-admission
+      attempts:
+        - protocol: "2026-07-28"
+          method: server/discover
+        - protocol: "2025-11-25"
+          method: initialize
+    expected_observation:
+      modern:
+        admitted: true
+        business_dispatches: 1
+        middleware_rechecks: 1
+      legacy:
+        admitted: false
+        error_code: -32600
+        public_code: unsupported_protocol_era
+        business_dispatches: 0
+      initialize_domain_state: false
+      compatibility_fallback: false
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-002-N
+      mutation: Allow a legacy initialize request to reach a tool
+      required_observation: Legacy business dispatch count becomes nonzero and is rejected
+
+  - claim_id: RFV5-FM4-003
+    family: exact_catalog_and_extensions
+    title: The catalog has four tools, two resource families, one completion, and no application extension
+    oracle_categories: [INT, BEH, NEG]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["5.2", "5.3", "5.4", "5.5", "9", "16"]
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v2.md
+        sections: ["0", "2", "3"]
+    controlled_input:
+      case_id: bare-target-catalog
+      discovery_mode: modern-live-client
+    expected_observation:
+      tools:
+        - get_code_graph_reference
+        - get_code_graph_status
+        - query_code_graph
+        - validate_code_graph_query
+      resource_families:
+        - codefabric-reference
+        - codefabric-result
+      completion_handlers:
+        - authorized_reference_selector
+      prompts: []
+      application_extensions: []
+      framework_extensions:
+        io.modelcontextprotocol/ui: {}
+      ui_components: []
+      providers: []
+      transforms: []
+      sessions: false
+      task_default: forbidden
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-003-N
+      mutation: Register a prompt, task, provider, UI component, or another extension identifier
+      required_observation: Exact catalog and independently observed component zero state diverge
+
+  - claim_id: RFV5-FM4-004
+    family: exact_public_schemas
+    title: Strict presentation schemas expose only the frozen outer fields
+    oracle_categories: [INT, BEH]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["5.2", "7.2", "10", "16"]
+      - path: docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md
+        sections: ["2.2", "WP43"]
+    controlled_input:
+      case_id: strict-tool-schema-observation
+      schema_dialect: https://json-schema.org/draft/2020-12/schema
+    expected_observation:
+      model_policy:
+        strict: true
+        frozen: true
+        extra: forbid
+        compatibility_bridge: false
+      tools:
+        query_code_graph:
+          required: [request]
+          optional: [delivery]
+          additional_properties: false
+          fields:
+            request: {authority: QRY-2.3.0, type: object}
+            delivery: {type: string, enum: [automatic, inline, resource], default: automatic}
+        validate_code_graph_query:
+          required: [request]
+          optional: []
+          additional_properties: false
+          fields:
+            request: {authority: QRY-2.3.0, type: object}
+        get_code_graph_status:
+          required: []
+          optional: []
+          additional_properties: false
+          fields: {}
+        get_code_graph_reference:
+          required: [kind]
+          optional: [version]
+          additional_properties: false
+          fields:
+            kind:
+              type: string
+              enum: [capability, guide, recipe, request-schema, response-schema, snapshot]
+            version: {type: string, pattern: "^[0-9]+[.][0-9]+[.][0-9]+$"}
+      hidden_dependencies: [context, daemon_port, daemon_session, request_correlation]
+      hidden_dependencies_in_schema: false
+      wire_alias_style: camelCase
+      python_attribute_style: snake_case
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-004-N
+      mutation: Add freshness, daemon transport, context, or an undeclared field to a tool schema
+      required_observation: Strict field and hidden-dependency census fails
+
+  - claim_id: RFV5-FM4-005
+    family: guarded_input_roundtrip
+    title: Guarded input has bounded daemon-authored legs and accepts only after complete valid input
+    oracle_categories: [BEH, NEG]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["6.1", "6.2", "6.3", "6.4", "16"]
+    controlled_input:
+      case_id: two-leg-guard
+      request_identity: semantic-request:guard-a
+      required_field: traversal_direction
+      valid_answer: outgoing
+    expected_observation:
+      first_leg:
+        outcome: input_required
+        accepted_query_count: 0
+        daemon_authored_fields: [traversal_direction]
+        fastmcp_request_state_sealed: true
+        daemon_token_opaque_to_adapter: true
+      valid_second_leg:
+        middleware_reentered: true
+        daemon_reauthorized: true
+        outcome: accepted
+        accepted_query_count: 1
+      invalid_legs:
+        tampered: rejected
+        expired: rejected
+        replayed: rejected
+        wrong_arguments: rejected
+        wrong_principal: rejected
+        wrong_workspace: rejected
+        wrong_generation: rejected
+        excess_rounds: rejected
+      abandoned_guard:
+        accepted_query_count: 0
+        task_count: 0
+        resource_lease_count: 0
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-005-N
+      mutation: Accept work on the incomplete first leg or reuse state across an authority boundary
+      required_observation: Acceptance count or invalid-leg matrix changes
+
+  - claim_id: RFV5-FM4-006
+    family: atomic_start
+    title: Ordinary execution uses one closed atomic start outcome while validation remains pure
+    oracle_categories: [BEH, NEG]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["6.1", "8", "16"]
+    controlled_input:
+      case_id: atomic-start-outcomes
+      ordinary_query: complete
+      explicit_validation: requested
+    expected_observation:
+      ordinary_query:
+        rpc_sequence: [StartQuery]
+        validate_query_calls: 0
+        start_query_calls: 1
+        outcome_variant: Accepted
+        accepted_query_count: 1
+      incomplete_query:
+        rpc_sequence: [StartQuery]
+        outcome_variant: InputRequired
+        accepted_query_count: 0
+      rejected_query:
+        rpc_sequence: [StartQuery]
+        outcome_variant: Rejected
+        accepted_query_count: 0
+      explicit_validation:
+        rpc_sequence: [ValidateQuery]
+        start_query_calls: 0
+        accepted_query_count: 0
+      preflight_acceptance_race: impossible
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-006-N
+      mutation: Restore ValidateQuery before ordinary StartQuery
+      required_observation: RPC sequence gains a second acceptance path
+
+  - claim_id: RFV5-FM4-007
+    family: completion_authorization
+    title: Completion is live, capped, authorized, non-enumerating, and advisory
+    oracle_categories: [BEH, NEG]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["5.5", "16"]
+    controlled_input:
+      case_id: authorized-reference-completion
+      reference_kind_prefix: req
+      principal: principal-a
+    expected_observation:
+      handler: authorized_reference_selector
+      middleware_reentered: true
+      daemon_authorization_calls: 1
+      values: [request-schema]
+      total: 1
+      has_more: false
+      candidate_count_max: 100
+      denied_reference_values: []
+      forbidden_selector_classes: [entity-inventory, principal-data, repository-path, result-handle, source-inventory]
+      eventual_resource_revalidates: true
+      inspect_is_completion_authority: false
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-007-N
+      mutation: Return a denied reference or trust completion at resource read time
+      required_observation: Candidate or reauthorization observation diverges
+
+  - claim_id: RFV5-FM4-008
+    family: resource_authority
+    title: Daemon-minted bounded resources are reauthorized on every operation
+    oracle_categories: [BEH, NEG]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["5.3", "8", "16"]
+    controlled_input:
+      case_id: bounded-result-page
+      public_handle: public:result:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      page_index: 2
+      requested_pages: 1
+    expected_observation:
+      handle_minter: rust-daemon
+      python_handle_map: false
+      internal_lease_token_exposed: false
+      storage_path_exposed: false
+      per_read_authorization_calls: 1
+      materialized_pages: 1
+      independently_decodable: true
+      cross_agent_read: denied
+      cross_workspace_read: denied
+      expired_read: denied
+      revoked_read: denied
+      stale_generation_read: denied
+      release_idempotent: true
+      restart_requires_new_public_handle: true
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-008-N
+      mutation: Read by opaque handle alone or retain a Python handle-to-lease map
+      required_observation: Per-read authorization or authority zero state fails
+
+  - claim_id: RFV5-FM4-009
+    family: cancellation_and_reconnect
+    title: Host cancellation reaches the daemon once and reconnect never resubmits accepted work
+    oracle_categories: [BEH, NEG]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["8", "12", "16"]
+    controlled_input:
+      case_id: accepted-query-cancel-reconnect
+      accepted_query_id: query:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      transport_loss_after_acceptance: true
+    expected_observation:
+      host_cancel:
+        cancel_query_calls: 1
+        cleanup_shielded: true
+        cleanup_budget_enforced: true
+      watch_loss:
+        cancel_query_calls: 0
+        start_query_resubmissions: 0
+        daemon_work_authority_unchanged: true
+      reconnect:
+        fresh_grant: true
+        fresh_session: true
+        start_query_resubmissions: 0
+        resumed_query_id: query:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        resumed_by_cursor: true
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-009-N
+      mutation: Treat watch loss as cancellation or retry StartQuery after reconnect
+      required_observation: Cancel count or start resubmission count becomes nonconforming
+
+  - claim_id: RFV5-FM4-010
+    family: two_agent_isolation
+    title: Two agent presentation cells share one daemon without sharing presentation state
+    oracle_categories: [BEH, NEG]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["0", "4", "11", "12", "16"]
+    controlled_input:
+      case_id: two-agent-one-workspace
+      agents: [agent-a, agent-b]
+      workspace: workspace-a
+    expected_observation:
+      workspace_daemons: 1
+      adapter_processes: 2
+      grpc_channels: 2
+      channels_per_adapter: 1
+      shared_python_session_state: false
+      agent_a_guard_used_by_agent_b: denied
+      agent_a_resource_used_by_agent_b: denied
+      agent_a_cancel_by_agent_b: denied
+      agent_a_completion_leaked_to_agent_b: false
+      independent_stdio_streams: true
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-010-N
+      mutation: Share one FastMCP process/session or allow an agent-b use of agent-a authority
+      required_observation: Process/channel counts or cross-agent denial matrix changes
+
+  - claim_id: RFV5-FM4-011
+    family: security_denial_matrix
+    title: Every grant, session, challenge, resource, and generation boundary fails closed
+    oracle_categories: [BEH, NEG]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["11", "16"]
+    controlled_input:
+      case_id: authority-denial-matrix
+      valid_principal: principal-a
+      valid_workspace: workspace-a
+      valid_generation: 7
+    expected_observation:
+      denied_cases:
+        wrong_uid: PERMISSION_DENIED
+        wrong_principal: PERMISSION_DENIED
+        wrong_workspace: PERMISSION_DENIED
+        wrong_operation: PERMISSION_DENIED
+        wrong_semantic_profile: PERMISSION_DENIED
+        wrong_generation: FAILED_PRECONDITION
+        expired_grant: UNAUTHENTICATED
+        revoked_session: UNAUTHENTICATED
+        replayed_grant: UNAUTHENTICATED
+        replayed_request_state: INVALID_ARGUMENT
+        replayed_challenge: INVALID_ARGUMENT
+        replayed_query_start: ALREADY_EXISTS
+        replayed_release: idempotent_same_result
+        oversized_input_requirement: RESOURCE_EXHAUSTED
+        oversized_resource_range: OUT_OF_RANGE
+      denied_before_bytes: true
+      denied_before_business_dispatch: true
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-011-N
+      mutation: Permit one wrong-authority or replay case
+      required_observation: Exact denial matrix loses or changes a case
+
+  - claim_id: RFV5-FM4-012
+    family: redaction_and_stdout_purity
+    title: Public observations are allowlisted and protocol stdout contains no diagnostics
+    oracle_categories: [BEH, NEG]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["7.4", "11", "16"]
+    controlled_input:
+      case_id: secret-bearing-failure
+      secret_classes: [capability-token, daemon-token, lease-token, source-bytes, storage-path]
+      daemon_error: INTERNAL
+    expected_observation:
+      public_error_fields: [code, correlation_id, message, retryable]
+      public_code: INTERNAL_ERROR
+      correlation_is_semantic_identity: false
+      leaked_secret_classes: []
+      leaked_to_error: []
+      leaked_to_log: []
+      leaked_to_span: []
+      leaked_to_stderr: []
+      stdout_non_protocol_bytes: 0
+      grpc_prose_branching: false
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-012-N
+      mutation: Include a token/path in an error or write one diagnostic byte to STDOUT
+      required_observation: Redaction or stdout byte count fails
+
+  - claim_id: RFV5-FM4-013
+    family: adapter_authority_zero_state
+    title: Python retains only lifespan transport and bounded in-flight cleanup state
+    oracle_categories: [NEG, OPS]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["4.2", "7", "9", "14", "16"]
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v2.md
+        sections: ["2", "3"]
+    controlled_input:
+      case_id: presentation-authority-census
+      scope: installed-adapter-and-live-discovery
+    expected_observation:
+      lifespan_channels_per_adapter: 1
+      application_extensions: 0
+      ui_components: 0
+      semantic_registries: 0
+      session_registries: 0
+      task_registries: 0
+      response_caches: 0
+      resource_lease_maps: 0
+      arrow_decoders: 0
+      datafusion_planners: 0
+      delta_readers: 0
+      canonical_request_rewriters: 0
+      mutable_cpg_state: 0
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-013-N
+      mutation: Add one rejected Python authority or FastMCP component
+      required_observation: Zero-state census becomes nonzero
+
+  - claim_id: RFV5-FM4-014
+    family: predecessor_decommission
+    title: FastMCP 3 and displaced presentation authorities remain history-only
+    oracle_categories: [NEG, OPS]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["14", "16"]
+      - path: docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md
+        sections: ["WP43", "DB15", "DB16", "DB17"]
+    controlled_input:
+      case_id: post-cutover-live-census
+      history_roots_excluded: true
+    expected_observation:
+      live_fastmcp_3_pins: 0
+      live_mcp_1_pins: 0
+      camelcase_bridge_usage: 0
+      import_time_global_servers: 0
+      normal_path_validate_then_start: 0
+      duplicate_freshness_fields: 0
+      python_resource_lease_maps: 0
+      python_generated_public_handles: 0
+      random_mcp_call_ids: 0
+      random_rpc_attempt_ids: 0
+      live_static_adapter_schemas: 0
+      phantom_prompts: 0
+      pydantic_settings_dependency: 0
+      dead_arrow_resource_gate_references: 0
+      predecessor_runtime_fallbacks: 0
+      history_bytes_mutated: 0
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-014-N
+      mutation: Restore one predecessor pin, schema, prompt, state map, ID, or fallback
+      required_observation: Live-scope zero state becomes nonzero without treating history as runtime
+
+  - claim_id: RFV5-FM4-015
+    family: performance_method_registration
+    title: Performance is measured by a frozen candidate-neutral method and control
+    oracle_categories: [OPS]
+    design_basis:
+      - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+        sections: ["12", "16", "17"]
+      - path: docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md
+        sections: ["WP43", "WP50"]
+    controlled_input:
+      case_id: preregistered-performance-run
+      method_id: fastmcp4-local-stdio-v1
+      candidate_results_available_at_registration: false
+    expected_observation:
+      performance_contract_path: contracts/acceptance/relational-fabric-v5/performance-method.yaml
+      environment_record_required: true
+      minimal_fastmcp4_control_required: true
+      same_host_interleaving_required: true
+      warmups_per_case: 3
+      samples_per_case: 30
+      report_distribution: [minimum, median, p95, maximum]
+      candidate_neutral_budget_source: wp43-preimplementation-operator-budget-v1
+      local_relaxation_permitted: false
+      measured_dimensions:
+        - startup_to_protocol_ready
+        - idle_and_active_rss
+        - status_presentation_overhead
+        - query_acceptance_presentation_overhead
+        - guard_one_and_max_round_overhead
+        - completion_latency_and_cardinality
+        - resource_first_byte_and_throughput
+        - cancellation_ack_and_cleanup
+        - reconnect_and_resume
+        - n_agent_fairness_and_aggregate_memory
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-015-N
+      mutation: Reduce samples, omit the control, or select a budget after seeing candidate results
+      required_observation: Frozen performance method validation fails before measurement
+
+  - claim_id: RFV5-FM4-016
+    family: release_drift_control
+    title: Frozen inputs, selectors, expectations, fixtures, and performance method cannot drift silently
+    oracle_categories: [OPS, INT]
+    design_basis:
+      - path: docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md
+        sections: ["WP43"]
+    controlled_input:
+      case_id: frozen-release-drift
+      hash_algorithm: sha256
+      expected_file_count: 6
+    expected_observation:
+      frozen_files:
+        - causal-fixtures.yaml
+        - expectations.yaml
+        - independent-review.yaml
+        - issuance.yaml
+        - negative-fixtures.yaml
+        - performance-method.yaml
+      selector_names:
+        - expectation-drift
+        - independent-expectation-review
+        - negative-fixture-independence
+        - successor-authority-integrity
+      source_input_hashes_verified: 3
+      artifact_hashes_verified: 6
+      extra_release_files: 0
+      restamp_on_failure: false
+      dependent_execution_stops_on_drift: true
+    provenance: *independent_provenance
+    discriminating_fault:
+      fixture_id: RFV5-FM4-016-N
+      mutation: Change one source hash, selector, fixture, or performance-method byte
+      required_observation: Drift oracle exits nonzero and downstream execution stops

@@ -1,0 +1,101 @@
+schema: codefabric.fastmcp4-successor.issuance.v1
+release_id: relational-fabric-v5-wp43-r1
+issued_for_packet: WP43
+suite:
+  suite_id: codefabric-relational-data-fabric
+  suite_version: 2.3.0
+  predecessor_version: 2.2.0
+  members:
+    - tag: SUITE
+      path: docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/codefabric_present_state_cpg_suite_governance_and_release_manifest_v2.2.md
+    - tag: ONT
+      path: docs/authoritative_design/code_property_graph_present_state_fact_ontology_specification_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/code_property_graph_present_state_fact_ontology_specification_v2.2.md
+    - tag: GEN
+      path: docs/authoritative_design/present_state_cpg_fact_generation_specification_python_rust_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/present_state_cpg_fact_generation_specification_python_rust_v2.2.md
+    - tag: FAB
+      path: docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/present_state_cpg_data_fabric_specification_rust_arrow_datafusion_deltalake_v2.2.md
+    - tag: QRY
+      path: docs/authoritative_design/code_property_graph_semantic_query_specification_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/code_property_graph_semantic_query_specification_v2.2.md
+    - tag: LIFE
+      path: docs/authoritative_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/codefabric_continuous_cpg_update_lifecycle_management_specification_v2.2.md
+    - tag: SRV
+      path: docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v2.3.md
+      artifact_version: 2.3.0
+      predecessor_path: docs/authoritative_design/present_state_cpg_fastmcp_serving_specification_v2.2.md
+    - tag: RM
+      path: docs/authoritative_design/codefabric_2.3_implementation_roadmap_v1.0.md
+      artifact_version: 1.0.0
+      predecessor_path: docs/authoritative_design/codefabric_2.2_implementation_roadmap_v1.0.md
+  required_authority_tokens:
+    - FastMCP 4.0.0
+    - "2026-07-28"
+    - InputRequiredResult
+    - RequestStateSecurity
+    - StartQueryOutcome
+    - io.modelcontextprotocol/ui
+    - fastmcp  == 4.0.0
+    - mcp      == 2.1.1
+    - pydantic == 2.13.4
+
+immutable_source_inputs:
+  - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v1.md
+    sha256: 21c957501ca2607c98067ace58ac07f49eddb72154bd2debff72d7f28d122084
+  - path: docs/reviews/interface_design_review_fastmcp4_presentation_boundary_2026-09-01_v2.md
+    sha256: 202329441a517e097ac3a045cbf1022bf05242c8de2e8f2e2f58d5ecd3b9ee6f
+  - path: docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md
+    sha256: fe3259191cf8e90f8593d35ca913145789eed4ca6ba7f7592218a88effb398fb
+
+authoring_constraints:
+  author_identity: codex-wp43-independent-expectation-author
+  method: manual-derivation-from-accepted-design-before-production-target
+  imports_production_modules: false
+  generated_observations_used: false
+  target_execution_used: false
+  predecessor_expected_values_used: false
+  forbidden_sources:
+    - codefabric-cpg-mcp/src
+    - src
+    - tooling/proto/generated
+    - contracts/acceptance/relational-fabric-v3
+    - contracts/acceptance/relational-fabric-v4
+
+selectors:
+  successor-authority-integrity:
+    oracle: fastmcp4-successor-authority-integrity-check
+    criterion: PC-WP43-INT
+  independent-expectation-review:
+    oracle: fastmcp4-independent-expectation-review-check
+    criterion: PC-WP43-BEH
+  negative-fixture-independence:
+    oracle: fastmcp4-negative-fixture-independence-check
+    criterion: PC-WP43-NEG
+  expectation-drift:
+    oracle: fastmcp4-expectation-drift-check
+    criterion: PC-WP43-OPS
+
+counts:
+  expectations: 16
+  causal_fixtures: 16
+  negative_fixtures: 16
+  reviewed_claims: 16
+  frozen_artifacts: 6
+
+artifact_sha256:
+  causal-fixtures.yaml: aa8f3c8eff736171f04d51d6e4c9ccef2f6cc149be0460026043d48a63a5329f
+  expectations.yaml: c9e2fa028343914dac6bb8b1a3266c10f8538cea62ac5dc77f86ae9155865cdc
+  independent-review.yaml: 0fdb22c5509545bd8f330a805a15223337676ae99a93e1df6d9c82459d64b0f9
+  issuance.yaml: self-excluded-use-sha256sums
+  negative-fixtures.yaml: 12ccb79370b729552926ad69118c444ffdbbaf92db77f4172bf4481df0e387c2
+  performance-method.yaml: ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df

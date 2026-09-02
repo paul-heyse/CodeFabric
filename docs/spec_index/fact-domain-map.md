@@ -14,7 +14,7 @@ freshness, and SRV owns delivery.
 | analysis | owner-local flow, MIR-derived flow, graph, effect/resource, interprocedural summary | exactly one producer or explicit unsupported remainder |
 | epoch | exact input/program/provider/application releases, observed schema contract, table pin, policy, proof, activation, lease | one reconstructible programmatic FabricEpoch |
 | request | request form, phrase, projection, bound, ordering, page | closed compositional grammar |
-| result | canonical row, evidence, capability, truncation, artifact resource | exact epoch/result contract and stable public projection |
+| result | canonical row, evidence, capability, truncation, artifact resource | exact epoch/result contract, daemon public handle, and stable bounded projection |
 
 ## 2. Provider authority
 
@@ -53,3 +53,11 @@ FabricCommand turns source/repository changes into invalidation relations and on
 Publication creates exact Delta history versions and immutable Arrow segments. Activation selects
 a proved exact relation-root/version vector only after readback. Candidate-free recovery rebuilds
 the session from that vector before admission, and a query lease never mixes generations.
+
+## 7. Modern serving projection
+
+QRY preparation may expose typed missing-input requirements without creating accepted work. SRV
+maps those requirements through guarded FastMCP request state while the daemon retains continuation
+authority. Accepted results remain daemon packages; public handles, completion candidates,
+cancellation, and every resource read/release are daemon-authorized projections rather than new
+fact, provider, or fabric authority.

@@ -222,27 +222,42 @@ def test_active_program_structural_acceptance() -> None:
     assert report["declared_input_count"] == len(declared_inputs(DEFAULT_PLAN))
 
 
-def test_active_v4_artifact_contract_uses_only_v4_evidence(
+def test_active_v5_artifact_contract_uses_only_v5_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from types import SimpleNamespace
 
-    from tooling.ci import successor_evidence_issuance, successor_evidence_issuance_v4
+    from tooling.ci import (
+        fastmcp4_successor_expectations,
+        successor_evidence_issuance,
+        successor_evidence_issuance_v4,
+    )
 
-    expected_claims = successor_evidence_issuance_v4.EXPECTED_CLAIM_IDS
+    expected_claims = tuple(sorted(fastmcp4_successor_expectations.REQUIRED_FAMILIES))
 
-    def predecessor_must_not_run(_root: Path) -> int:
-        raise AssertionError("v3 evidence remained live after v4 activation")
+    def v3_predecessor_must_not_run(_root: Path) -> int:
+        raise AssertionError("v3 evidence remained live after v5 activation")
+
+    def v4_predecessor_must_not_run(_root: Path, *, require_review: bool) -> None:
+        del require_review
+        raise AssertionError("v4 evidence remained live after v5 activation")
 
     monkeypatch.setattr(
         successor_evidence_issuance,
         "validate_transaction_integrity",
-        predecessor_must_not_run,
+        v3_predecessor_must_not_run,
     )
     monkeypatch.setattr(
         successor_evidence_issuance_v4,
         "validate_issuance",
-        lambda _root, *, require_review: SimpleNamespace(expectations=expected_claims),
+        v4_predecessor_must_not_run,
+    )
+    monkeypatch.setattr(
+        fastmcp4_successor_expectations,
+        "validate_issuance",
+        lambda _root, *, require_review: SimpleNamespace(
+            expectations=expected_claims if require_review else ()
+        ),
     )
     plan = parse_frontmatter(DEFAULT_PLAN)
     assert _successor_evidence_claim_count(ROOT, plan) == len(expected_claims)

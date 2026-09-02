@@ -30,7 +30,7 @@ never from this derived file.
 |---|---|
 | repository/worktree authority and Git acceleration | gix_rust_advanced_reference.md |
 | filesystem event loss, debounce, rename, rescan | notify_debouncer_full_rust_reference.md |
-| FastMCP server, tools/resources, transport, lifecycle | fastmcp_python_advanced_reference_3.4.7.md |
+| FastMCP 4 modern protocol, tools/resources, guarded input, completion, context, middleware, testing, and 3-to-4 migration | fastmcp_python_advanced_reference_4.0.0.md |
 | Python public contract validation and serialization | pydantic_python_advanced_reference_2.13.4.md |
 | gRPC behavior and async transport | grpcio_python_advanced_reference_1.83.0.md |
 | Protobuf wire/presence/evolution | protobuf_python_advanced_reference_7.36.0.md |

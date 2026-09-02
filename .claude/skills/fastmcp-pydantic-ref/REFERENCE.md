@@ -3,8 +3,12 @@
 Companion to `SKILL.md` in this folder. SKILL.md is the map you read first; this file is what you
 come back to once you know which document you need. Both target `docs/library_ref/`:
 
-* **`fastmcp`** = `fastmcp_python_advanced_reference_3.4.7.md` — 15,682 lines, §0-§37
+* **`fastmcp`** = `fastmcp_python_advanced_reference_4.0.0.md` — 12,692 lines, §0-§44
 * **`pydantic`** = `pydantic_python_advanced_reference_2.13.4.md` — 7,340 lines, §0-§51
+
+The same directory still holds `fastmcp_python_advanced_reference_3.4.7.md` (15,682 lines, §0-§37),
+the **superseded v3** reference. Nothing in this file points at it; its chapter numbers overlap and
+its content disagrees. Open it only to answer "what did v3 do?", and say so when you cite it.
 
 Citations are `fastmcp §N.M` / `pydantic §N.M`, matching the documents' own numbering. Line numbers
 appear only in §1, because line numbers move when a document is regenerated and section numbers do
@@ -13,87 +17,108 @@ not — seek by line, cite by section, and if a line looks wrong re-derive §1 w
 | Section | What it is | Reach for it when |
 |---|---|---|
 | **§1** | Chapter and appendix maps, with line numbers and subsection depth | you have a section number, or you need to know where to `Read` |
-| **§2** | **Symbol → canonical location**, ~230 public API names | you have a name and need the definition |
+| **§2** | **Symbol → canonical location**, ~240 public API names | you have a name and need the definition |
 | **§3** | Task → location, phrased as goals | you have a goal and no name |
-| **§4** | Ten decision trees | you are choosing between library options |
+| **§4** | Eleven decision trees | you are choosing between library options |
 | **§5** | The `fastmcp` ↔ `pydantic` seam | the answer might be in either document |
-| **§6** | Fourteen navigation rules | before searching either file |
+| **§6** | Fifteen navigation rules | before searching either file |
 
 ---
 
 ## §1 — Document maps
 
-### §1.1 `fastmcp` — 38 chapters
+### §1.1 `fastmcp` — 45 chapters
 
-Front matter: title (1) · **"Proposed comprehensive documentation map"** (85) · "Stable release
-delta — what changed after FastMCP 3.0" (245) · "Source index used throughout this reference" (262).
-Deep-dive chapters start at 306. There is **no end-of-reference marker**; §37 runs to EOF.
+Front matter: title (1) · version/source anchors and the **protocol-era rule** (5) · **"What
+materially changed from the prior 3.4.7 reference"** (30) · the v4 mental-model diagram (49) ·
+**"Comprehensive documentation map"** (86) · "Source index used throughout this reference" (136).
+Deep-dive chapters start at 154. There is **no end-of-reference marker**; §44 runs to EOF (12,692).
+Eleven chapters close with a `### Sources` block, the rest with footnote link definitions.
 
-The **Depth** column is load-bearing: it says whether `lib-outline --view expanded` will show you
-that chapter's subsections. `**###**` means it shows *nothing*; `##` + `###`×k means it shows all
-but k of them (almost always just `N.0`). See Rule 2.
+Two columns are load-bearing. **Depth** says whether `lib-outline --view expanded` will show you
+that chapter's subsections: `**###**` means it shows *nothing*; `##` + `###`×k means it shows all
+but k of them (almost always just `N.0`). See Rule 2. **Banner** marks the 28 chapters that retain
+the 3.4.7 topology and open with a bold **"FastMCP 4 status."** paragraph stating that chapter's v4
+delta — it sits *above* `N.0`, so read from the chapter heading, not from the first subsection
+(Rule 3). Unbannered chapters were rewritten for v4 or are new to it.
 
-| § | Line | Lines | Depth | Subs | Title |
-|---|---:|---:|---|---|---|
-| **§0** | 306 | 213 | **`###`** | 0.1-0.8 | Scope, versioning, and mental model |
-| **§1** | 519 | 495 | `##` | 1.0-1.16 | Installation, package selection, dependency policy, and project layout |
-| **§2** | 1014 | 633 | `##` | 2.0-2.22 | First executable server, client, and test |
-| **§3** | 1647 | 336 | `##` + `###`×1 | 3.0-3.7 | Core API map and object model |
-| **§4** | 1983 | 324 | `##` + `###`×1 | 4.0-4.12 | Server construction and lifecycle |
-| **§5** | 2307 | 290 | **`###`** | 5.0-5.13 | Tools: definition, registration, and execution contract |
-| **§6** | 2597 | 326 | **`###`** | 6.0-6.14 | Tools: typing, validation, hidden parameters, outputs, and content blocks |
-| **§7** | 2923 | 385 | **`###`** | 7.0-7.17 | Resources and resource templates |
-| **§8** | 3308 | 303 | **`###`** | 8.0-8.13 | Prompts and prompt rendering |
-| **§9** | 3611 | 408 | **`###`** | 9.0-9.18 | MCP Context |
-| **§10** | 4019 | 313 | **`###`** | 10.0-10.16 | Dependency injection |
-| **§11** | 4332 | 489 | `##` | 11.0-11.23 | Lifespans, session state, storage, and state ownership |
-| **§12** | 4821 | 247 | **`###`** | 12.0-12.13 | Background tasks and long-running workflows |
-| **§13** | 5068 | 443 | **`###`** | 13.0-13.25 | Middleware and the server policy layer |
-| **§14** | 5511 | 392 | **`###`** | 14.0-14.24 | Providers and dynamic component sources |
-| **§15** | 5903 | 499 | `##` | 15.0-15.26 | Transforms, visibility, versioning, pagination, and discovery shaping |
-| **§16** | 6402 | 416 | `##` | 16.0-16.24 | Search transforms, Code Mode, composition, proxying, and gateways |
-| **§17** | 6818 | 416 | `##` + `###`×1 | 17.0-17.2 | Authentication and authorization |
-| **§18** | 7234 | 481 | `##` | 18.0-18.24 | Advanced security policy and identity-aware execution |
-| **§19** | 7715 | 379 | **`###`** | 19.0-19.11 | Running and deploying servers |
-| **§20** | 8094 | 494 | `##` | 20.0-20.26 | HTTP hardening, reverse proxies, scaling, and event delivery |
-| **§21** | 8588 | 345 | **`###`** | 21.0-21.12 | Programmatic client fundamentals |
-| **§22** | 8933 | 689 | `##` + `###`×2 | 22.0-22.18 | Client transports, handlers, roots, and client-side auth |
-| **§23** | 9622 | 327 | `##` | 23.0-23.19 | Client-only packaging and `fastmcp-remote` |
-| **§24** | 9949 | 337 | **`###`** | 24.0-24.17 | Apps and interactive UI delivery |
-| **§25** | 10286 | 390 | `##` + `###`×1 | 25.0-25.13 | Prefab, built-in app providers, Generative UI, and custom renderers |
-| **§26** | 10676 | 422 | `##` + `###`×1 | 26.0-26.15 | OpenAPI and FastAPI integration |
-| **§27** | 11098 | 361 | `##` + `###`×8 | 27.0-27.14 | Project configuration, settings, and portable deployment contracts |
-| **§28** | 11459 | 310 | `##` + `###`×1 | 28.0-28.15 | CLI and developer workflows |
-| **§29** | 11769 | 194 | **`###`** | 29.0-29.11 | Observability, inspection, telemetry, and operational diagnostics |
-| **§30** | 11963 | 452 | `##` + `###`×1 | 30.0-30.20 | Testing, contract verification, and tool fingerprinting |
-| **§31** | 12415 | 301 | `##` + `###`×1 | 31.0-31.17 | Ecosystem and host integrations |
-| **§32** | 12716 | 463 | `##` + `###`×1 | 32.0-32.24 | Security hardening and governance |
-| **§33** | 13179 | 464 | `##` + `###`×1 | 33.0-33.23 | Performance, scaling, resilience, and large-catalog engineering |
-| **§34** | 13643 | 445 | `##` + `###`×1 | 34.0-34.18 | Production architecture patterns |
-| **§35** | 14088 | 405 | `##` + `###`×1 | 35.0-35.24 | API stability, upgrade discipline, and FastMCP 2 → 3 migration |
-| **§36** | 14493 | 443 | `##` + `###`×1 | 36.0-36.22 | FastMCP 4 prerelease transition guide |
-| **§37** | 14936 | 747 | `##` letters | A)-AJ) | Dense appendices and lookup matrices |
+| § | Line | Lines | Depth | Banner | Subs | Title |
+|---|---:|---:|---|:-:|---|---|
+| **§0** | 154 | 216 | **`###`** | ● | 0.1-0.8 | Scope, versioning, and mental model |
+| **§1** | 370 | 204 | `##` | | 1.0-1.12 | Installation, package selection, dependency policy, and project layout |
+| **§2** | 574 | 636 | `##` | ● | 2.0-2.22 | First executable server, client, and test |
+| **§3** | 1210 | 97 | `##` | | 3.0-3.10 | Core API map and object model |
+| **§4** | 1307 | 162 | `##` | | 4.0-4.13 | Server construction and lifecycle |
+| **§5** | 1469 | 293 | **`###`** | ● | 5.0-5.13 | Tools: definition, registration, and execution contract |
+| **§6** | 1762 | 329 | **`###`** | ● | 6.0-6.14 | Tools: typing, validation, hidden parameters, outputs, and content blocks |
+| **§7** | 2091 | 388 | **`###`** | ● | 7.0-7.17 | Resources and resource templates |
+| **§8** | 2479 | 306 | **`###`** | ● | 8.0-8.13 | Prompts and prompt rendering |
+| **§9** | 2785 | 98 | `##` | | 9.0-9.8 | MCP Context |
+| **§10** | 2883 | 56 | `##` | | 10.0-10.6 | Dependency injection |
+| **§11** | 2939 | 91 | `##` | | 11.0-11.8 | Lifespans, request state, session state, storage, and state ownership |
+| **§12** | 3030 | 87 | `##` | | 12.0-12.8 | Background tasks and long-running workflows |
+| **§13** | 3117 | 446 | **`###`** | ● | 13.0-13.25 | Middleware and the server policy layer |
+| **§14** | 3563 | 395 | **`###`** | ● | 14.0-14.24 | Providers and dynamic component sources |
+| **§15** | 3958 | 502 | `##` | ● | 15.0-15.26 | Transforms, visibility, versioning, pagination, and discovery shaping |
+| **§16** | 4460 | 419 | `##` | ● | 16.0-16.24 | Search transforms, Code Mode, composition, proxying, and gateways |
+| **§17** | 4879 | 419 | `##` + `###`×18 | ● | 17.0-17.2 | Authentication and authorization |
+| **§18** | 5298 | 484 | `##` | ● | 18.0-18.24 | Advanced security policy and identity-aware execution |
+| **§19** | 5782 | 382 | **`###`** | ● | 19.0-19.11 | Running and deploying servers |
+| **§20** | 6164 | 497 | `##` | ● | 20.0-20.26 | HTTP hardening, reverse proxies, scaling, and event delivery |
+| **§21** | 6661 | 348 | **`###`** | ● | 21.0-21.12 | Programmatic client fundamentals |
+| **§22** | 7009 | 693 | `##` + `###`×11 | ● | 22.0-22.18 | Client transports, handlers, roots, and client-side auth |
+| **§23** | 7702 | 330 | `##` | ● | 23.0-23.19 | Client-only packaging and `fastmcp-remote` |
+| **§24** | 8032 | 340 | **`###`** | ● | 24.0-24.17 | Apps and interactive UI delivery |
+| **§25** | 8372 | 393 | `##` + `###`×1 | ● | 25.0-25.13 | Prefab, built-in app providers, Generative UI, and custom renderers |
+| **§26** | 8765 | 425 | `##` + `###`×1 | ● | 26.0-26.15 | OpenAPI and FastAPI integration |
+| **§27** | 9190 | 364 | `##` + `###`×14 | ● | 27.0-27.14 | Project configuration, settings, and portable deployment contracts |
+| **§28** | 9554 | 313 | `##` + `###`×1 | ● | 28.0-28.15 | CLI and developer workflows |
+| **§29** | 9867 | 197 | **`###`** | ● | 29.0-29.11 | Observability, inspection, telemetry, and operational diagnostics |
+| **§30** | 10064 | 455 | `##` + `###`×1 | ● | 30.0-30.20 | Testing, contract verification, and tool fingerprinting |
+| **§31** | 10519 | 304 | `##` + `###`×1 | ● | 31.0-31.17 | Ecosystem and host integrations |
+| **§32** | 10823 | 466 | `##` + `###`×1 | ● | 32.0-32.24 | Security hardening and governance |
+| **§33** | 11289 | 467 | `##` + `###`×1 | ● | 33.0-33.23 | Performance, scaling, resilience, and large-catalog engineering |
+| **§34** | 11756 | 448 | `##` + `###`×1 | ● | 34.0-34.18 | Production architecture patterns |
+| **§35** | 12204 | 98 | `##` | | 35.0-35.12 | API stability, upgrade discipline, and FastMCP 3 → 4 migration |
+| **§36** | 12302 | 49 | `##` | | 36.0-36.3 | FastMCP 4 capability delta and protocol-era matrix |
+| **§37** | 12351 | 114 | `##` letters | | A)-I) | Dense appendices and lookup matrices |
+| **§38** | 12465 | 24 | `##` | | 38.0-38.4 | Modern multi-round interaction and request-state guards |
+| **§39** | 12489 | 37 | `##` | | 39.0-39.5 | Server extensions and negotiated capabilities |
+| **§40** | 12526 | 24 | `##` | | 40.0-40.4 | FastMCP 4 session state: `UserSession`, `SessionId`, `SessionProvider` |
+| **§41** | 12550 | 28 | `##` | | 41.0-41.3 | Argument completion |
+| **§42** | 12578 | 26 | `##` | | 42.0-42.4 | Modern identity, roles, scope challenges, and machine-to-machine authentication |
+| **§43** | 12604 | 35 | `##` | | 43.0-43.4 | Client groups and multi-server orchestration |
+| **§44** | 12639 | 54 | `##` | | 44.0 | FastMCP 4 production readiness and migration gate |
 
-Three chapters where the depth column understates the problem:
+**§38-§44 are 228 lines for all seven.** They are the only chapters short enough to read whole, and
+they carry the v4 capabilities that the retained chapters only reference. Read the whole run once
+before writing v4 code.
 
-* **§17** — only `17.0`, `17.1`, `17.2` are numbered at that level. Every symbol lives one level
-  further down, at `### 17.1.1`-`### 17.2.9`: `TokenVerifier` (6833) · `RemoteAuthProvider` (6854) ·
-  `OAuthProxy` (6884) · `OIDCProxy` (6920) · `OAuthProvider` (6941) · `MultiAuth` (6968) ·
-  decision framework (7006) · `require_scopes(...)` (7024) · `restrict_tag(...)` (7045) ·
-  AND-composition (7072) · custom/async checks (7093) · component-level authz (7117) ·
-  `AuthMiddleware` (7142) · access-token-aware tools (7172).
-* **§27** — `27.0`-`27.7` are `###` (the entire `fastmcp.json` schema: `source` 11140, `environment`
-  11158, `deployment` 11185, JSON-schema support 11213, CLI override precedence 11229, auto-detection
-  11243); only `27.8`-`27.14`, the CLI commands, are visible at `##`.
-* **§22** — `22.0` and `22.1` are `###`; `22.2`-`22.18` are `##`. Also carries a third level:
-  `22.2.1`-`22.2.3` (StdioTransport environment/path/session rules, 8975-9010), `22.3.1` (TLS,
-  9054), `22.8.1` (9213), `22.9.1`-`22.9.3` (OAuth parameters/flow/guidance, 9248-9293),
-  `22.10.1` (CIMD document requirements, 9320).
+Three chapters where the depth column understates the problem — each hides its real content one
+level below what `--view expanded` reports:
 
-**§3** also carries a full third level — the object-model breakdown at `3.1.1`-`3.6.3`
-(1671-1947), which is where `FastMCP`'s `local_provider` (1703), provider aggregation order (1728),
-transform placement levels (1782), and `mount`/`import_server`/`create_proxy` (1935/1941/1947) are
-actually defined.
+* **§17** — only `17.0`, `17.1`, `17.2` are numbered at that level. Every symbol lives at
+  `### 17.1.1`-`### 17.2.9`: `TokenVerifier` (4897) · `RemoteAuthProvider` (4918) ·
+  `OAuthProxy` (4948) · `OIDCProxy` (4984) · `OAuthProvider` (5005) · `MultiAuth` (5032) ·
+  decision framework (5070) · deployment advisories (5074) · `require_scopes(...)` (5088) ·
+  `restrict_tag(...)` (5109) · AND-composition (5136) · custom/async checks (5157) ·
+  component-level authz (5181) · `AuthMiddleware` (5206) · component + middleware auth (5227) ·
+  access-token-aware tools (5236) · authorization advisory (5277).
+* **§27** — `27.0`-`27.7` are `###` (the entire `fastmcp.json` schema: `source` 9235, `environment`
+  9253, `deployment` 9280, JSON-schema support 9308, CLI override precedence 9324, auto-detection
+  9338); only `27.8`-`27.13`, the CLI commands, are visible at `##`, and those carry a third level
+  of their own: `27.8.1` (9376), `27.10.1`-`27.10.2` (9424/9444), `27.12.1`-`27.12.3` (9495-9515).
+* **§22** — `22.0` and `22.1` are `###`; `22.2`-`22.18` are `##`. Third level:
+  `22.2.1`-`22.2.3` (StdioTransport environment/path/session rules, 7054-7089), `22.3.1` (TLS,
+  7133), `22.8.1` (7292), `22.9.1`-`22.9.3` (OAuth parameters/flow/guidance, 7327-7372),
+  `22.10.1` (CIMD document requirements, 7399).
+
+Six chapters also carry `####` sub-blocks under their `###` subsections, invisible to every outline
+view: §0 (the five end-to-end flow stages, 210-286), §5 (the ten per-argument blocks of `5.7`,
+1655-1695), §7 (the five direct resource classes in `7.9` and the three RFC 6570 forms in `7.13`,
+2251-2405), §13 (the three custom-middleware patterns of `13.20`, 3424-3454), §19 (transports in
+`19.2` and the two deployment shapes of `19.3`, 5838-5892), §21 (the five transports of `21.3`,
+6746-6792).
 
 ### §1.2 `pydantic` — 52 chapters
 
@@ -159,51 +184,28 @@ here. §51 is the only chapter that numbers from `.1` rather than `.0`.
 | **§50** | 5926 | 151 | `##` | 50.0-50.10 | Production architecture patterns |
 | **§51** | 6077 | 1264 | `##` | 51.1-51.60 | Dense appendices and lookup matrices |
 
-### §1.3 `fastmcp` §37 — 35 lettered lookup matrices (14936-EOF)
+### §1.3 `fastmcp` §37 — 9 lettered lookup matrices (12351-12464)
 
-Letters run **`A)`-`J)`, then `L)`-`Z)`, then `AA)`-`AJ)` — `K)` does not exist.** This is the
-intended fast-lookup layer; the letters are opaque, so use this table rather than opening the
-chapter. Note the appendix is really **two overlapping series**: `A)`-`J)` were written against the
-early chapters, `L)`-`AJ)` against the later ones, so transport appears at both `F)` and `O)`,
-client auth at both `G)` and `Z)`, and providers at both `D)` and `V)`. Read both when they collide.
+**This chapter shrank hard in v4**: 3.4.7 carried 35 letters over 747 lines in two overlapping
+series; 4.0.0 carries **9 letters over 114 lines** in one series, `A)`-`I)`, no gaps. Everything the
+old `L)`-`AJ)` run covered — transport, tool authoring, resources, prompts, the `Context` capability
+matrix, visibility, auth, apps, OpenAPI, CLI, contract testing, the security and performance
+checklists, the architecture chooser, the source-of-truth hierarchy — **is gone from the appendix**
+and now lives only in its topical chapter, or in the per-chapter `Agent checklist` / `Anti-pattern
+inventory` blocks that most chapters close with. Do not expect §37 to answer a v3-era appendix
+question; it is now a v4-delta lookup layer, not a whole-document one.
 
 | Letter | Line | Answers |
 |---|---:|---|
-| **A)** | 14943 | Decorator-argument matrix — every argument `@mcp.tool`/`@mcp.resource`/`@mcp.prompt` accepts, plus auto-inference rules |
-| **B)** | 14978 | Dependency-injection matrix — which DI primitive for which runtime value, and the rules worth memorising |
-| **C)** | 15006 | Task-mode truth table — when a call runs inline vs as a background task |
-| **D)** | 15027 | Provider comparison grid |
-| **E)** | 15051 | Transform comparison grid, plus `add_transform(...)` vs `wrap_transform(...)` |
-| **F)** | 15079 | Client transport decision matrix |
-| **G)** | 15093 | Client auth decision matrix |
-| **H)** | 15107 | **Output-schema and content-block conversion rules** — server-side conversion matrix (`H.1`) and the client-side result-object cheat sheet (`H.2`) |
-| **I)** | 15138 | Deployment mounting invariants, with fast-path examples |
-| **J)** | 15161 | **Fast lookup rules** — the document's own "what knob do I need?" table; the single best first stop |
-| **L)** | 15190 | Stable version-gate matrix — which capability arrived in which release |
-| **M)** | 15215 | Package / extra selection matrix (`fastmcp` vs `fastmcp-slim` vs `fastmcp-remote`) |
-| **N)** | 15232 | Server-definition vs deployment matrix — what belongs in the constructor vs the run step |
-| **O)** | 15246 | Transport decision matrix |
-| **P)** | 15259 | HTTP deployment invariants |
-| **Q)** | 15278 | Tool authoring quick matrix |
-| **R)** | 15301 | Tool-result conversion quick matrix — what a return value becomes on the wire |
-| **S)** | 15318 | Resource selection matrix |
-| **T)** | 15341 | Prompt quick matrix |
-| **U)** | 15356 | **`Context` capability matrix — stable v3**; the compact answer to "what can `ctx` do?" |
-| **V)** | 15373 | Provider / transform decision matrix |
-| **W)** | 15396 | Visibility / version / authorization matrix |
-| **X)** | 15419 | Authentication decision matrix — the compact form of §17.1 |
-| **Y)** | 15435 | Client construction matrix |
-| **Z)** | 15458 | Client auth matrix |
-| **AA)** | 15473 | Apps / provider quick matrix |
-| **AB)** | 15490 | OpenAPI / FastAPI generation matrix |
-| **AC)** | 15506 | CLI workflow matrix |
-| **AD)** | 15525 | Contract-testing matrix |
-| **AE)** | 15551 | Security checklist — condensed |
-| **AF)** | 15575 | Performance/scaling checklist — condensed |
-| **AG)** | 15595 | **V2 → V3 migration grep sheet** — literal strings to search for in v2 code |
-| **AH)** | 15620 | Stable v3 vs FastMCP 4 beta boundary |
-| **AI)** | 15639 | Production architecture quick chooser |
-| **AJ)** | 15656 | **Source-of-truth hierarchy for LLM coding agents** — read this before trusting any example, here or on the web |
+| **A)** | 12353 | FastMCP 4 package matrix — `fastmcp` vs `fastmcp-slim[client]` vs the `[tasks]`/`[apps]`/`[code-mode]` extras vs `fastmcp-remote` |
+| **B)** | 12364 | **Protocol model naming** — the eight camelCase→snake_case field renames (`inputSchema`→`input_schema`, `isError`→`is_error`, …) |
+| **C)** | 12377 | **State decision table** — request state vs `request_state` vs `UserSession` vs `SessionId` vs domain store vs task backend |
+| **D)** | 12388 | Interactivity decision table — modern guard vs handshake-era `ctx.elicit`, per capability |
+| **E)** | 12396 | **Task truth table** — the seven rules that make `task=` work, and what the client calls |
+| **F)** | 12409 | Extension vs middleware vs provider vs transform — the four-way abstraction choice |
+| **G)** | 12418 | Client aggregation choices — `Client` vs `create_proxy` vs `mount` vs `ClientGroup` vs `fastmcp-remote` |
+| **H)** | 12428 | **Upgrade anti-patterns** — the thirteen v3 habits that are now wrong; the closest thing to a v4 grep sheet |
+| **I)** | 12444 | Production readiness checklist — condensed; §44 is the long form |
 
 ### §1.4 `pydantic` §51 — 60 appendix subsections (6077-7293)
 
@@ -257,9 +259,10 @@ question (7258) · `51.60` **final agent invariants** (7274, fifteen numbered).
 
 **Use this instead of grep.** Both documents use their own public API names constantly in examples,
 so a literal search returns dozens of hits with no signal about which one is the definition:
-`Context` appears **201** times in `fastmcp`, `TypeAdapter` **103** times in `pydantic`, `Depends`
-51, `ToolResult` 40, `model_validate_json` 22. Every row below points at the subsection that
-*defines* the symbol; the **Also** column lists the other places worth reading.
+`Context` appears **119** times in `fastmcp`, `TypeAdapter` **103** times in `pydantic`,
+`ToolResult` 32, `UserSession` 25, `Depends` 22, `ClientGroup` 17, `InputRequiredResult` 15,
+`model_validate_json` 22. Every row below points at the subsection that *defines* the symbol; the
+**Also** column lists the other places worth reading. **Bold** rows are new in FastMCP 4.
 
 ### §2.1 `pydantic`
 
@@ -409,164 +412,205 @@ so a literal search returns dozens of hits with no signal about which one is the
 
 ### §2.2 `fastmcp`
 
-**Server object and constructor** — the constructor's four groups are `identity` / `composition` /
-`behavior` / `handlers+storage` (§3.1.2, §4.0). Each individual behavior field has its own
-*unnumbered* `###` block inside §4.4, which is why they are unfindable by outline.
+**Server object, lifecycle, serving**
 
 | Symbol | Defined at | Also |
 |---|---|---|
-| `FastMCP(...)` | §3.1, §4.0-§4.5 | §3.1.3 owns a `local_provider` · §3.1.6 aggregation order · §4.1 the "always set these" rule |
-| `name` · `instructions` · `version` · `website_url` · `icons` | §4.2 identity fields | §3.1.2 |
-| `tools` · `auth` · `middleware` · `providers` · `transforms` · `lifespan` | §4.3 composition fields | §3.1.2 |
-| `on_duplicate` | §4.4 | §35.4 v2→v3 duplicate-policy consolidation |
-| `strict_input_validation` | §4.4 | **§6.3 flexible vs strict** — the semantic half |
-| `mask_error_details` | §4.4 | §18.20 · §32.19 information disclosure |
-| `list_page_size` | §4.4 | §15.16-§15.17 pagination |
-| `tasks` | §4.4 | §12.1 · App. **C)** |
-| `client_log_level` | §4.4 | §9.4 `ctx.log()` |
-| `dereference_schemas` | §4.4 | §6.2 serve-time schema shaping · §33.17 its cost |
-| `sampling_handler` · `sampling_handler_behavior` · `session_state_store` | §4.5 | §11.7 store boundary · §11.8-§11.9 · §22.12 the client-side handler |
-| `run()` | §19.1 | §19.2 transport selection · App. **O)** |
-| `http_app()` / ASGI export | §19.3 | §20.1 · §20.2 path composition · App. **I)** |
+| `FastMCP(...)` | §3.1, §4.0-§4.2 | §3.0 the v4 ownership map · §4.1 set name/version explicitly · §4.13 the construction checklist |
+| identity: `name` · `version` · `instructions` · `icons` | §4.1 | §3.1 |
+| composition: `providers` · `transforms` · `middleware` · `lifespan` · `auth` | §4.2 | §3.1 the five server families · §14.20 conflict precedence |
+| `lifespan=` / the `@lifespan` decorator | §4.4, §11.1 | §11.0 the state taxonomy · §20.3 ASGI forwarding · §19.6-§19.7 mounting |
+| `session_state_store` | §4.5, §11.6 | §33.13 store latency · §32.17 security |
+| `RequestStateSecurity` / request-state keys | §9.7, §38.3 | §4.6 · §44.0 the multi-replica gate |
+| `add_middleware(...)` | §13.1 | §4.7 · §13.3 stack order |
+| **`add_extension(...)`** | §4.8, §39.0 | §39.4 register on the *served* server, not a mounted child |
+| **`@mcp.completion` / `add_completion_handler()`** | §4.9, §41.0 | §41.1 completion context · §41.3 the authorization caveat |
+| `strict_input_validation` | §6.3 | §5.10 the execution contract — it is **server-level, not per-tool** |
+| `mask_error_details` | §5.12 | §18.20 · §32.19 information disclosure |
+| `list_page_size` | §15.16 | §33.8 pagination cost |
+| `$ref` dereferencing at serve time | §6.2 | §33.17 its cost |
+| `mcp.enable()` / `mcp.disable()` | §5.7 (Deprecated knobs) | replaced the per-component `enabled=` |
+| `run()` | §19.1, §4.10 | §19.2 transport selection · §21.3 |
+| `http_app()` / ASGI export | §19.3 | §20.1 · §20.2 path composition · §19.5-§19.8 mounting |
 | `run_http_async()` | §19.4 | §19.10 ASGI-only knobs |
 | `stateless_http` | §20.5 | §19.9 horizontal scaling · §33.12 |
-| custom routes | §4.10 | §20.18 |
-| `call_tool` · `read_resource` · `render_prompt` (server-side) | §3.1.4 | §8.11 definition lookup vs execution |
-| `mount(...)` | §14.18, §3.6.1 | §15.3 `namespace=` · §16.10 vs import · §35.14 |
-| `import_server(...)` | §3.6.2 (deprecated in v3) | §35.14 · §36.15 |
-| `create_proxy(...)` / `FastMCPProxy` | §3.6.3, §14.19 | §16.11-§16.13 · §35.15 |
+| custom HTTP routes | §4.12 | §20.18 |
+| `call_tool` · `read_resource` · `render_prompt` (server-side) | §3.1 | §8.11 definition lookup vs execution |
+| `mount(...)` | §14.18 | §15.3 `namespace=` · §16.10 vs copy · §35.6 replaced `import_server` |
+| `create_proxy(...)` / `ProxyProvider` | §14.19, §14.4 | §16.11-§16.13 · §16.0 proxies mirror the frontend era · §35.6 replaced `as_proxy` |
+
+> **Not in the v4 reference at all:** `on_duplicate` and `client_log_level`, both documented
+> constructor fields in 3.4.7, have **zero occurrences** here. Absence from this document is not
+> proof of removal from the package — check the installed signatures (Rule 12).
+
+**Protocol era and the v4 interaction model**
+
+| Symbol | Defined at | Also |
+|---|---|---|
+| protocol-era negotiation · `2026-07-28` vs handshake era | §0 (the protocol-era rule), §4.11 | §3.6 · **§36.2 the era matrix** · §31.14 host negotiation strategy |
+| `Client(mode="auto")` · `mode="legacy"` | §3.6, §21 banner | §9.4 · §12.3 legacy never negotiates tasks · §35.8 |
+| `server/discover` | §36.2 | replaced the initialize handshake on the modern era |
+| **`InputRequiredResult`** | §9.3, §38.0 | §38.4 **guards re-run from the top** · §12.6 inside a task · App. **D)** |
+| `ctx.input_responses` | §9.3, §38.1 | `None` on the first leg |
+| `ctx.request_state` (sealed) | §9.3, §38.1 | §9.7 sealing keys · §11.7 vs session state · App. **C)** |
+| `input_required_max_rounds` | §38.2 | default 10, on the client driver |
+| `ctx.elicit()` | §9.4 | **raises on `2026-07-28`** · §35.8 migration · §28.7 through the CLI |
+| `ctx.sample()` · `ctx.sample_step()` · `ctx.list_roots()` | §9.5 (**removed**) | §35.5 · §4.3 the constructor half · App. **H)** |
+| snake_case MCP model fields | §1.4, App. **B)** | §6 banner · §35.2 the `mcp_camelcase_compat` bridge · §30 disable it in CI |
+| `FASTMCP_MCP_CAMELCASE_COMPAT` | §27 banner | migration shim only |
+| `httpx2` | §1.6, §35.4 | §26 banner — OpenAPI/proxy/auth clients you pass in must migrate |
 
 **Components**
 
 | Symbol | Defined at | Also |
 |---|---|---|
-| `@mcp.tool` | §5.2 | §5.6 full decorator surface · App. **A)** · §35.8 v3 returns the original function |
-| `mcp.add_tool(...)` | §5.3 | — |
-| standalone `@tool()` | §5.4 | §35.9 method registration |
-| `ToolResult` | §5.11, §6.11 | App. **R)** conversion matrix · §35.6 replaced the v2 tool serializer |
-| `output_schema={...}` | §6.10 | §6.9 automatic generation from return annotations · App. **H)** |
+| `@mcp.tool` | §5.2 | §5.6 **the exact decorator/`Tool.from_function` surface** · §5.7 per-argument semantics |
+| `mcp.add_tool(...)` | §5.3 | §5.4 standalone `@tool()` for methods |
+| `@mcp.tool(auth=…)` · `timeout=` · `version=` · `task=` · `meta=` · `annotations=` | §5.7 (one `####` block each) | §17.2.5 component auth · §15.12 versioning · §12 tasks |
+| deprecated `enabled=` · `exclude_args=` · `serializer=` | §5.7 (Deprecated knobs) | → `enable()`/`disable()`, `Depends()`, `ToolResult` |
+| `ToolResult` | §5.11, §6.11 | §6.12 conversion rules · `ToolResult(meta=…)` is *runtime* metadata, `@mcp.tool(meta=…)` is definition metadata (§5.7) |
+| `output_schema={...}` | §6.10 | §6.9 automatic generation from return annotations · must be an object type |
 | `Image` · `Audio` · `File` | §6.13 | §6.12 content-block conversion rules |
-| `@mcp.resource(...)` | §7.1 | §7.3 `add_resource` · §7.4 standalone `@resource()` · App. **S)** |
+| `@mcp.resource(...)` | §7.1 | §7.3 `add_resource` · §7.4 standalone `@resource()` · §7.9 the five direct resource classes |
 | `ResourceResult` · `ResourceContent` | §7.6 | §7.5 return contract |
-| resource templates / RFC 6570 | §7.12-§7.13 | §7.14 coercion · §7.15-§7.16 validation |
-| `@mcp.prompt` | §8.1 | §8.3 decorator arguments · App. **T)** |
-| `Message` | §8.7 | §8.6 return contract · §35.11 v2→v3 message-type migration |
+| resource templates / RFC 6570 | §7.12-§7.13 | §7.14 coercion · §7.15-§7.16 validation · §7 banner: **path-traversal screening now runs before handlers** |
+| `@mcp.prompt` | §8.1 | §8.3 decorator arguments · §8.2 `add_prompt` and standalone `@prompt()` |
+| `Message` | §8.7 | §8.6 return contract · §8.8 `PromptResult` |
 | `PromptResult` | §8.8 | §8.9 static vs runtime metadata |
 
 **`Context` and dependency injection**
 
 | Symbol | Defined at | Also |
 |---|---|---|
-| `Context` | §9.0, §9.1 (three access patterns) | **App. `U)` capability matrix** · §9.17 vs ordinary Python · §9.16 when *not* to use it |
-| `ctx.debug` · `ctx.info` · `ctx.warning` · `ctx.error` (and `log(...)`) | §9.4 | §4.4 `client_log_level` · §22.14 the client-side `log_handler` |
-| `ctx.report_progress(...)` | §9.5 | §12.8 · §22.15 client-side `progress_handler` |
-| resource / prompt access from a tool | §9.6-§9.7 | — |
-| elicitation | §9.8 | §22.13 client-side handler · §28.7 through the CLI · §36.6 v4 changes |
-| sampling | §9.9 | §22.12 client-side handler · §31.10 |
-| session state | §9.10 | §11.5-§11.9 · §35.10 became async in v3 |
-| per-session visibility | §9.11 | §15.11 |
-| request metadata / session and request IDs | §9.12-§9.13 | §11.18 it is not lifespan state |
-| `CurrentContext()` | §10.5 | §9.1 |
-| `CurrentFastMCP()` | §10.6 | — |
-| `CurrentRequest()` | §10.7 | HTTP-only |
-| `CurrentAccessToken()` | §10.8 | §18.4 · §17.2.8 access-token-aware tools |
-| `Depends(...)` | §10.9 | §10.10 nested · §10.11 caching · §10.12 async CM dependencies · App. **B)** |
-| `Progress()` · `CurrentDocket()` · `CurrentWorker()` | §10.13 | §12 tasks |
-| hidden-parameter contract | §10.2, §6.5 | §10.4 callers cannot override injected parameters |
+| `Context` | §9.0 (the v4 boundary diagram), §9.1 | §6.6 as a hidden injected parameter · §9.8 the agent checklist |
+| `ctx.set_state()` / `get_state()` / `delete_state()` | §9.2, §11.2 | **request-local on the modern era** · §11.0 taxonomy |
+| `ctx.debug/info/warning/error` · progress | §9.6 | §22.14-§22.15 the client-side `log_handler` / `progress_handler` |
+| resource / prompt access from a tool | §9.0 | — |
+| `ctx.request_context.protocol_version` | §9.1 | §9.4 branch on it to support both eras |
+| `Depends(...)` | §10.2 | §6.5 hidden parameters · §10.1 the public-schema invariant |
+| **`CallArgument(...)`** | §10.3 | binds a hidden dependency to a *public* tool argument · §10.5 not an authorization substitute |
+| `CurrentContext()` · `CurrentRequest()` · `CurrentFastMCP()` | §10.0 | §9.1 for `CurrentContext` |
+| `CurrentAccessToken()` | §10.0, §17.2.8 | §18.4 injection · §10.5 identity comes from auth, never from a caller argument |
+| `Progress()` | §10.4 | portable across foreground and task execution |
+| `CurrentDocket()` · `CurrentWorker()` | §10.4, §12.7 | **moved to `fastmcp_tasks.dependencies`** (§35.6) |
 
-**State, tasks, middleware**
+**State and background tasks**
 
 | Symbol | Defined at | Also |
 |---|---|---|
-| `lifespan=` | §11.1 | §11.2 access from a tool · §11.3 unconditional cleanup · §11.4 ASGI composition · §20.3 forwarding |
-| state ownership | §11.10 (table) | §11.13 DI vs lifespan · §11.11 never module globals · §34.13 by architecture |
-| `TaskConfig` | §12.2 | §12.1 enabling · §12.3 poll interval · App. **C)** |
-| task backends | §12.6 | §12.7 worker topology · §33.14 |
-| `result()` · `status()` · `wait()` · `cancel()` · `on_status_change(...)` | §12.11 | §12.10 client-side task objects |
+| the state taxonomy | §11.0 | §3.8 · App. **C)** · §34.13 by architecture |
+| **`UserSession`** | §11.3, §40.1 | injected, hidden from the schema, **requires authentication** · §40.3 |
+| **`SessionId` · `SessionProvider` · `get_session()`** | §11.4, §40.2 | §11.5 isolation — an id alone is not authority · §40.3 |
+| session storage / `AsyncKeyValue` / TTL | §11.6, §40.4 | shared store for multi-replica · §32.17 |
+| **`TasksExtension` / `fastmcp-tasks`** | §12.0-§12.1 | a `task=True` tool without it **fails at startup** · §1.1 packaging |
+| `@mcp.tool(task=True)` | §12.1 | **tools only, async only** — v3's resource/template/prompt task surface is gone (§7-§8 banners) |
+| `TaskConfig` | §12.2 | import from `fastmcp.utilities.tasks` (§35.6) · modes `forbidden`/`optional`/`required` |
+| `call_tool_task(...)` | §12.3 | plain `client.call_tool()` now follows a task transparently; `call_tool(..., task=True)` is **removed** |
+| task backends · workers | §12.4 | §33.14 scaling · Redis/Valkey for production |
+| `FASTMCP_TASKS_ENCRYPTION_KEY` | §12.5 | the snapshot holds caller credentials · §32.18 |
+| interactive tasks | §12.6 | guard pattern, never a blocking `ctx.elicit()` |
+
+**Middleware and extensions**
+
+| Symbol | Defined at | Also |
+|---|---|---|
 | `Middleware` · `add_middleware(...)` | §13.1 | §13.20 subclassing · §13.2 `call_next(context)` · §13.3 stack order |
 | hooks: `on_message` · `on_request` · `on_call_tool` · `on_list_tools` … | §13.5 | §13.6 signature · §13.9 operation hooks · §13.11 raw `__call__` |
 | `MiddlewareContext` | §13.6 | §13.22 component metadata · §13.23 storing state |
-| `on_initialize` | §13.10 | carries a hard timing rule |
+| `on_initialize` | §13.10 | carries a hard timing rule · **§36.2: no initialize event on the modern era** |
+| the widened v4 message surface | §13 banner, §3.4 | §35.10 audit counters and generic hooks |
 | built-in middleware | logging §13.13 · timing §13.14 · **caching §13.15** · rate limiting §13.16 · error handling §13.17 · retry §13.18 · ping §13.19 | §32.16 caching security · §33.15 overhead |
+| **`ServerExtension`** | §39.0, §3.5 | §4.8 registration · App. **F)** vs middleware/provider/transform |
+| `MethodBinding` | §39.2 | additive methods only — **may not shadow `tools/call`** |
+| `intercept_tool_call()` | §39.3 | runs after middleware, before the tool body; nests registration-order-outermost |
+| `client_extension_settings(...)` | §39.1 | **negotiation is per request** — check opt-in before changing semantics |
+| `ClientExtension` · `Client(extensions=[...])` | §39.5 | `advertise()` only when the client really implements it |
 
 **Providers, transforms, discovery**
 
 | Symbol | Defined at | Also |
 |---|---|---|
-| `Provider` | §3.2, §14.1 | §3.2.2 core methods · §3.2.3 built-in categories · App. **D)**/**V)** |
-| `LocalProvider` | §14.2 | §3.1.3 |
-| `FastMCPProvider` | §14.3 | §16.9 |
+| `Provider` | §14.1, §3.2 | §14.0 source vs rewrite vs policy layer · §14.23 provider vs middleware |
+| `LocalProvider` | §14.2 | §3.1 direct registrations land here |
+| `FastMCPProvider` | §14.3 | §16.9 composing focused child servers |
 | `ProxyProvider` | §14.4 | §14.5 session models · §14.6 feature forwarding · §32.9 credential separation |
 | `FileSystemProvider` | §14.7 | §31.12 |
-| `OpenAPIProvider` | §26.2 | §26.3 default route mapping · §32.10 SSRF |
-| `Transform` | §3.3, §14.10 | §3.3.2 placement levels · §15.1 provider vs server level · §15.19 order is API behavior |
-| `add_transform(...)` vs `wrap_transform(...)` | §14.12 | App. **E)** |
-| `Namespace(...)` | §14.13 | §15.2 · §16.15 |
-| `ToolTransform(...)` | §14.14 | §15.4 · §15.5 transform vs wrapper tool · §35.16 |
-| `ToolSearch(...)` | §14.15 | §16.1-§16.3 · §33.6 · §16.3 **search is not security** |
+| `SkillsDirectoryProvider` | §14.8 | **renamed from v3's `SkillsProvider`** (§14 banner) |
+| `OpenAPIProvider` | §26.2 | §26.3 default route mapping · §32.10 SSRF · new import home `fastmcp.server.providers.openapi` (§35.6) |
+| `Transform` | §14.10, §3.3 | §15.1 provider vs server level · §15.19 order is API behavior |
+| `add_transform(...)` vs `wrap_transform(...)` | §14.12 | §15.20 wrap for reusable providers |
+| `Namespace(...)` | §14.13 | §15.2 · §16.15 · `mount(namespace=…)` replaced `prefix=` (§35.6) |
+| `ToolTransform(...)` | §14.14 | §15.4 · §15.5 transform vs wrapper tool |
+| `ToolSearch(...)` | §14.15 | §16.1-§16.3 · §33.6 · **§16.3 search is not security** |
 | `ResourcesAsTools` · `PromptsAsTools` | §14.16-§14.17 | §15.6-§15.7 |
 | Code Mode | §16.4-§16.8 | §16.21 suitability matrix · §32.12 security · §33.7 |
 | visibility / `only=True` / component keys | §15.8-§15.10 | §15.22 publication is not authorization · §18.7 · §32.4 |
 | versioned components | §15.12-§15.14 | §15.15 versioning is not migration · §30.10 |
 
-**Auth** — all six provider families live under §17's hidden third level (see §1.1).
+**Auth and identity** — the six provider families live under §17's hidden third level (see §1.1); the v4 additions are a separate chapter.
 
 | Symbol | Defined at | Also |
 |---|---|---|
-| `TokenVerifier` | §17.1.1 | §18.8 verifier invariants · App. **X)** |
+| `TokenVerifier` | §17.1.1 | §18.8 verifier invariants |
 | `RemoteAuthProvider` | §17.1.2 | — |
 | `OAuthProxy` | §17.1.3 | §18.10 trust boundary · §32.7 |
 | `OIDCProxy` | §17.1.4 | — |
 | `OAuthProvider` | §17.1.5 | — |
-| `MultiAuth` | §17.1.6 | §17.1.7 decision framework |
-| `require_scopes(...)` | §17.2.1 | §18.6 scope vs resource checks |
-| `restrict_tag(...)` | §17.2.2 | §17.2.3 AND-composition |
+| `MultiAuth` | §17.1.6 | §17.1.7 decision framework · §17.1.8 deployment advisories |
+| `require_scopes(...)` | §17.2.1 | §18.6 scope vs resource checks · §5.7 as `@mcp.tool(auth=…)` |
+| `restrict_tag(...)` | §17.2.2 | §17.2.3 AND-composition · §17.2.4 custom/async checks |
 | `AuthMiddleware` | §17.2.6 | §17.2.7 component + middleware auth · §18.3 |
+| **`require_roles(...)` / roles vs scopes** | §42.1 | §17 banner · keep roles an authorization check, not a visibility tag |
+| **insufficient-scope challenges** | §42.2 | names the missing scopes instead of an opaque denial |
+| **identity assertion (SEP-990, beta)** | §42.3 | validate audience/issuer/expiry before using it as a tenant boundary |
+| **client-credentials auth** | §42.4 | non-interactive service→service; rotate separately from human OAuth clients |
 | CIMD / client assertions | §18.11 | §22.10 client side · §32.8 |
 
 **Client**
 
 | Symbol | Defined at | Also |
 |---|---|---|
-| `Client(...)` | §21.1, §22.0-§22.1 | §21.2 `async with` lifecycle · App. **Y)** |
-| `ping()` | §21.5 | — |
-| `list_tools()` · `list_resources()` · `list_prompts()` | §21.6 | §35.7 v3 component list APIs |
-| `call_tool(...)` (client) | §21.7 | §21.10 `.data` vs `.content` |
+| `Client(...)` | §21.1, §22.0-§22.1 | §21.2 `async with`, reentrancy and `auto_initialize=False` · §22.1 prefer explicit transports in production |
+| `Client(Path("server.py"))` | §1.8 | **bare script strings are deprecated** (§35.11) — strings converge on URLs in FastMCP 5 |
+| `ping()` | §21.5 | **not routed on the modern sessionless era** (§21 banner) |
+| `list_tools()` · `list_resources()` · `list_prompts()` | §21.6 | — |
+| `call_tool(...)` (client) | §21.7 | §21.10 `.data` vs `.content` · §12.3 it now follows a task transparently |
 | `read_resource(...)` · `get_prompt(...)` | §21.8-§21.9 | §21.10 |
 | `StdioTransport` | §22.2 | **§22.2.1 nothing is inherited from the parent environment** · §22.2.3 session reuse |
 | `StreamableHttpTransport` | §22.3 | §22.3.1 TLS |
 | `SSETransport` | §22.4 | backward compatibility only |
 | in-memory client/server | §22.5 | §2.3 · §30.2 **the default integration-test primitive** |
+| `MCPConfig` / config-dict transports | §22.6 | §21.1 inference rules |
 | `auth="<token>"` / `BearerAuth(...)` | §22.8 | §22.8.1 |
-| `auth="oauth"` / `OAuth(...)` | §22.9 | §22.9.1 parameters that matter · §22.9.2 flow and token storage |
-| `message_handler` · `sampling_handler` · `elicitation_handler` · `log_handler` · `progress_handler` | §22.11-§22.15 | §22.17 notifications |
-| roots | §22.16 | static and dynamic forms |
-| `fastmcp-slim[client]` · `fastmcp-remote` | §23.1, §23.4 | §23.11-§23.12 vs `Client` and vs a gateway · §1.3-§1.4 · App. **M)** |
+| `auth="oauth"` / `OAuth(...)` | §22.9 | §22.9.1 parameters that matter · §22.9.2 flow and token storage · §22.10 CIMD |
+| `message_handler` · `sampling_handler` · `elicitation_handler` · `log_handler` · `progress_handler` | §22.11-§22.15 | §22 banner: they serve **both** legacy pushed requests and modern returned input requests |
+| roots | §22.16 | static and dynamic forms — the *server* method is removed (§9.5) |
+| **`ClientGroup`** | §43.0-§43.1 | §43.2 `resolve_tool()` provenance · §43.4 consume vs republish · App. **G)** |
+| `fastmcp-slim[client]` · `fastmcp-remote` | §23.1, §23.4 | §23.11-§23.12 vs `Client` and vs a gateway · §1.1, §1.7 · App. **A)** |
 
 **Apps, config, CLI, testing**
 
 | Symbol | Defined at | Also |
 |---|---|---|
 | `@mcp.tool(app=True)` (Prefab) | §24.2, §25.2 | §24.3 · §25.9 **pin `prefab-ui` yourself** |
-| `FastMCPApp` | §3.4, §24.4, §25.3 | §3.4.2 entry vs backend tools · §24.7 why it exists |
-| `@app.ui()` · `@app.tool()` | §24.5-§24.6 | §3.4.4 `get_app_tool` bypass |
+| `FastMCPApp` | §24.4, §25.3, §3.9 | §24.7 why it exists · new import home `fastmcp.apps` (§35.6) |
+| `@app.ui()` · `@app.tool()` | §24.5-§24.6 | §25.3 string backend names are fragile |
 | `CallTool(...)` · `result_key` | §24.8 | — |
-| `GenerativeUI()` | §24.10, §25.8 | §32.13 security |
-| `Approval` · `Choice` · `FormInput` · `FileUpload` | §25.4-§25.7 | §25.4 **`Approval` is UX, not a security boundary** (§32.15) |
-| `AppConfig` · `ui://` resources | §24.12-§24.13 | §24.14 CSP and permissions |
-| `FastMCP.from_openapi(...)` | §26.1 | §26.11 generated vs model-facing schemas |
+| `GenerativeUI()` | §24.10, §25.8 | §32.13 security · §25.8 sandbox is necessary, not sufficient |
+| `Approval` · `Choice` · `FormInput` · `FileUpload` | §25.4-§25.7 | §25.4 **`Approval` is UX, not a security boundary** (§32.15) · §25.7 file security checklist |
+| `AppConfig` · `ui://` resources | §24.12-§24.13 | §24.14 CSP and permissions · §24.15 host support detection |
+| `FastMCP.from_openapi(...)` | §26.1 | §26.11 generated vs model-facing schemas · pass an `httpx2.AsyncClient` |
 | `FastMCP.from_fastapi(...)` | §26.9 | §26.10 conversion vs mounting |
 | `RouteMap` · `MCPType` | §26.4 | §26.5 exclusion-first policy |
 | `fastmcp.json` | §27.0-§27.7 (all `###`) | `source` §27.2 · `environment` §27.3 · `deployment` §27.4 · schema §27.5 · precedence §27.6 · §27.13 vs standard MCP JSON |
 | `fastmcp run` | §27.8, §28.2 | §27.8.1 dependency behavior |
-| `fastmcp inspect` | §27.11, §28.4 | §30.7 manifest generation · App. **AC)** |
+| `fastmcp inspect` | §27.11, §28.4 | §29.5 the primary manifest check · §30.9 snapshots |
 | `fastmcp install` | §27.10, §28.9 | §27.10.1 `mcp-json` · §27.10.2 `stdio` |
-| `fastmcp generate-cli` | §27.12, §28.10 | §27.12.1-§27.12.3 |
-| `fastmcp dev` · `list` · `call` · `discover` | §28.3, §28.5-§28.6, §28.8 | §28.12 debugging decision tree |
-| tool fingerprinting | §30.5 | §30.6 what belongs in one · §30.8 drift classification · App. **AD)** |
-| OpenTelemetry instrumentation | §29.1-§29.3 | §33.20 |
-
----
+| `fastmcp generate-cli` | §27.12, §28.10 | §27.12.1-§27.12.3 · §28.10 drift warning |
+| `fastmcp dev` · `list` · `call` · `discover` | §28.3, §28.5-§28.6, §28.8 | §28.12 debugging decision tree · §24.16 `fastmcp dev apps` |
+| tool fingerprinting | §30.5 | §30.6 what belongs in one · §30.8 drift classification · §30.9 |
+| protocol-mode acceptance tests | §30.15, §30.11 | §31.15 cross-host suite · §44.0 |
+| OpenTelemetry instrumentation | §29.1-§29.3 | one SERVER span per request, with protocol version (§29 banner) · §33.20 |
 
 ## §3 — Task → location
 
@@ -625,26 +669,32 @@ way the documents title their chapters.
 
 | I need to… | Go to |
 |---|---|
-| register a tool / resource / prompt | `fastmcp` §5.2 / §7.1 / §8.1 · App. **A)** |
-| decide whether something should be a tool, a resource or a prompt | §4 tree 6 · `fastmcp` App. **Q)**/**S)**/**T)** |
-| hide a runtime-only value from the published schema | `fastmcp` §10 (DI), §6.5, §10.14 · App. **B)** |
-| get at logging, progress, elicitation or sampling from inside a handler | `fastmcp` §9.4-§9.9 · App. **U)** |
-| open a database pool once for the process | `fastmcp` §11.1-§11.3 (lifespan), §11.12 concurrency-safety |
-| decide where a value lives — lifespan, session, DI, `Context` | `fastmcp` §11.10 ownership table · §11.13 |
-| run work that outlives one request | `fastmcp` §12.1-§12.2 · App. **C)** |
+| register a tool / resource / prompt | `fastmcp` §5.2 / §7.1 / §8.1 · §5.6 the exact decorator surface |
+| decide whether something should be a tool, a resource or a prompt | §4 tree 8 · `fastmcp` §5.0, §7.0, §8.0 |
+| hide a runtime-only value from the published schema | `fastmcp` §10.1-§10.2 (DI), §6.5 |
+| hide a value that still has to depend on a public tool argument | `fastmcp` §10.3 `CallArgument` |
+| get logging or progress from inside a handler | `fastmcp` §9.6 · §22.14-§22.15 for the client half |
+| ask the caller a question mid-execution | `fastmcp` §9.3 + §38 (`InputRequiredResult`) · §9.4 for the legacy path · App. **D)** |
+| open a database pool once for the process | `fastmcp` §4.4, §11.1 (lifespan) |
+| decide where a value lives — lifespan, request, session, domain | `fastmcp` §11.0 taxonomy · App. **C)** · §34.13 by architecture |
+| keep state between two separate tool calls | `fastmcp` §11.3 `UserSession` / §11.4 `SessionId` · §40 |
+| run work that outlives one request | `fastmcp` §12.0-§12.1 (install `fastmcp-tasks`, register `TasksExtension`) · App. **E)** |
 | add cross-cutting policy (logging, rate limit, retry, cache) | `fastmcp` §13.13-§13.19 built-ins · §13.20 custom |
-| combine several servers into one surface | `fastmcp` §14.18 `mount` · §16.9-§16.11 · App. **I)** |
-| put a remote MCP server behind this one | `fastmcp` §14.19, §16.11-§16.13 |
+| add a protocol capability of my own | `fastmcp` §39 `ServerExtension` · App. **F)** for the four-way choice |
+| autocomplete a prompt argument or template parameter | `fastmcp` §41 · §4.9 registration · §41.3 authorization caveat |
+| combine several servers into one surface | `fastmcp` §14.18 `mount` · §16.9-§16.10 |
+| put a remote MCP server behind this one | `fastmcp` §14.19 `create_proxy`, §16.11-§16.13 |
+| consume several servers without republishing them | `fastmcp` §43 `ClientGroup` · App. **G)** |
 | stop a large catalog eating the model's context | `fastmcp` §14.15 `ToolSearch`, §15.16 pagination, §33.5-§33.6 |
 | rename or reshape a tool coming from a provider | `fastmcp` §14.14 `ToolTransform` · §15.4-§15.5 |
 | publish two versions of one tool name | `fastmcp` §15.12-§15.14 |
-| turn an OpenAPI spec or FastAPI app into a server | `fastmcp` §26.1 / §26.9 · App. **AB)** |
-| pick an auth provider | `fastmcp` §17.1.1-§17.1.7 · App. **X)** |
-| authorize a specific tool | `fastmcp` §17.2.1-§17.2.5 · §18.3 |
-| choose STDIO vs HTTP, and deploy it | `fastmcp` §19.2-§19.3, §20 · App. **O)**/**P)** |
+| turn an OpenAPI spec or FastAPI app into a server | `fastmcp` §26.1 / §26.9 (pass an `httpx2` client) |
+| pick an auth provider | `fastmcp` §17.1.1-§17.1.7 |
+| authorize a specific tool | `fastmcp` §17.2.1-§17.2.5 · §18.3 · §42.1 for roles |
+| choose STDIO vs HTTP, and deploy it | `fastmcp` §19.2-§19.3, §20 |
 | make the project reproducible for a host | `fastmcp` §27.0-§27.7 `fastmcp.json` · §27.10 install |
-| test it | `fastmcp` §30.2 in-memory first · §2.12 pytest fixture · §30.3-§30.4 |
-| upgrade from v2 | `fastmcp` §35.20 workflow · **§35.21 / App. `AG)` grep lists** |
+| test it | `fastmcp` §30.2 in-memory first · §2.12 pytest fixture · §30.3-§30.4 · §30.15 protocol parity |
+| upgrade from v3 | `fastmcp` **§35** · App. **H)** anti-patterns · §35.12 and §44 the gates |
 
 ### §3.5 Configuration and secrets
 
@@ -667,16 +717,19 @@ way the documents title their chapters.
 | stop rebuilding schemas per request | `pydantic` §21.6, §40.2 · §9.7 / §40.9 to defer instead |
 | cut import/startup cost | `pydantic` §9.7 `defer_build`, §40.13 · `fastmcp` §33.1-§33.2 |
 | turn a `ValidationError` into an API error body | `pydantic` §36.8, §36.0 · §51.57 · §51.33 error codes |
-| stop raw input appearing in error output | `pydantic` §9.10, §36.7 · §49.9 |
+| stop raw input appearing in error output | `pydantic` §9.10, §36.7 · §49.9 · `fastmcp` §5.12 `mask_error_details` |
 | work out which of two libraries owns the bug | **§5** |
-| understand why a v2 example does not work | `fastmcp` §35.2-§35.19 · App. **AG)** |
-| understand why a 2.14 or v4 example does not work | `pydantic` §47 · `fastmcp` §36 |
+| understand why a v3 FastMCP example does not work | `fastmcp` §35 (start at §35.5-§35.6) · App. **H)** · §36.2 the era matrix |
+| understand why an `AttributeError` names a camelCase field | `fastmcp` §1.4, App. **B)** · §35.2 the compat bridge |
+| understand why `ctx.elicit()` / `ctx.sample()` raises | `fastmcp` §9.4-§9.5, §35.5, §36.2 |
+| understand why state vanished between two calls | `fastmcp` §9.2, §11.0, §35.9 |
+| understand why a 2.14 Pydantic example does not work | `pydantic` §47 |
 
 ---
 
 ## §4 — Decision trees
 
-Ten choices the two libraries force on you. Each tree ends in a citation; the citation is the
+Eleven choices the two libraries force on you. Each tree ends in a citation; the citation is the
 authority, the tree is only the shortest route to it.
 
 **1. Which validation entry point?** (`pydantic` §5.0, §51.3)
@@ -784,7 +837,7 @@ errors are unreadable
 stop at the highest step that works; each step down costs maintenance
 ```
 
-**8. Tool, resource, or prompt?** (`fastmcp` App. **Q)**/**S)**/**T)**, §5.0, §7.0, §8.0)
+**8. Tool, resource, or prompt?** (`fastmcp` §5.0, §7.0, §8.0)
 
 ```
 the model should be able to *do* something, with arguments
@@ -795,160 +848,234 @@ the *user* picks a reusable message scaffold
   -> prompt                                        §8.1
 the client only supports tools
   -> ResourcesAsTools / PromptsAsTools             §14.16-§14.17
+... and only tools may carry task=True in v4       §12.1, App. E)
 ```
 
-**9. Compose, mount, import, or proxy?** (`fastmcp` §3.6, §16.9-§16.13, App. **I)**)
+**9. Compose, mount, proxy, or group?** (`fastmcp` §3.10, §14.18-§14.19, §43.4, App. **G)**)
 
 ```
 components declared in this process
   -> LocalProvider, implicitly                     §14.2
 another FastMCP server object, live and nested
   -> mount(child, namespace=...)                   §14.18, §15.3
-a one-time copy of another server's components
-  -> import_server(...)   -- deprecated in v3      §3.6.2, §35.14
-a remote MCP server, projected locally
+   ... import_server() and mount(prefix=) are gone §35.6
+a remote MCP server, republished under this one
   -> create_proxy(...) / ProxyProvider             §14.19, §16.11
-a whole catalog from a spec or filesystem
-  -> OpenAPIProvider / FileSystemProvider          §26.2, §14.7
+   ... the proxy mirrors the frontend protocol era on its backend   §16 banner
+several servers you only want to *consume*, each keeping its own
+auth, handlers and protocol era
+  -> ClientGroup                                   §43.0-§43.1
+a whole catalog from a spec, filesystem or skills directory
+  -> OpenAPIProvider / FileSystemProvider / SkillsDirectoryProvider   §26.2, §14.7, §14.8
+a stdio-only host that must reach a remote HTTP server
+  -> fastmcp-remote                                §1.7, §23.4
 you only need to rename/reshape what a source already gives you
   -> a Transform, not a new provider               §14.10, §15.5
 ```
 
-**10. Where does this value come from?** (`fastmcp` §11.10, §11.13, §9.16)
+**10. Where does this value come from, and how long does it live?** (`fastmcp` §11.0, App. **C)**)
 
 ```
 the model supplies it
   -> an ordinary typed parameter                   §5.7
 the runtime supplies it and the model must not see it
-  -> DI: Depends(...) / CurrentContext() / CurrentAccessToken()   §10.9, §10.5, §10.8
-it is per-request MCP capability (log, progress, elicit, sample)
-  -> Context                                       §9.1, App. U)
-it is per-process and expensive to build (pool, client, config)
-  -> lifespan                                      §11.1  -- make it concurrency-safe §11.12
-it must survive across calls in one session
-  -> session state                                 §9.10, §11.5
-it must survive across processes
-  -> a distributed session_state_store             §11.7, §11.9
+  -> DI: Depends(...) / CurrentContext() / CurrentAccessToken()   §10.2, §10.0
+the hidden dependency needs a *public* argument's validated value
+  -> Depends(f, arg=CallArgument("public_name"))   §10.3
+per-request MCP capability (log, progress, resource read)
+  -> Context                                       §9.0-§9.1
+coordination between middleware and the tool, this request only
+  -> ctx.set_state()/get_state()                   §9.2, §11.2   -- NOT across calls
+small opaque value carried between the legs of ONE guard interaction
+  -> sealed ctx.request_state                      §9.3, §38.1   -- needs a shared key ring §38.3
+one bucket per authenticated user, across calls
+  -> UserSession                                   §11.3, §40.1  -- requires auth
+several named buckets per user, caller passes the handle
+  -> SessionId + SessionProvider + get_session()   §11.4, §40.2
+per-process and expensive to build (pool, client, model)
+  -> lifespan                                      §4.4, §11.1
+durable business truth
+  -> your own domain store                         §11.7
+background execution status/result
+  -> the tasks backend                             §12.4
 never
-  -> a module global                               §11.11
+  -> a module global, or a modern HTTP connection object   §11.8
+```
+
+**11. Which interaction and protocol era?** (`fastmcp` §36.2, §9.3-§9.5, App. **D)**)
+
+```
+the tool needs input from the caller mid-execution
+  modern 2026-07-28  -> return InputRequiredResult; re-read ctx.input_responses   §9.3, §38
+  handshake era only -> await ctx.elicit(...)                                     §9.4
+   ... ctx.elicit() RAISES on the modern era; branch on
+       ctx.request_context.protocol_version if you must serve both     §9.4
+the server wants the client's model to generate something
+  -> ctx.sample()/sample_step() are REMOVED         §9.5, §35.5
+     call a model provider directly from server code, or guard for it
+the server wants filesystem roots
+  -> ctx.list_roots() is REMOVED                    §9.5
+     take paths as explicit tool arguments, or guard for them
+you control every caller and cannot port a handshake-only capability yet
+  -> Client(mode="legacy"), as a transitional step  §35.8, §36.3
+you serve public or uncontrolled clients
+  -> design for modern sessionless semantics        §36.3
+you claim to support both
+  -> test both; §30.15 parity tests, §44.0 the gate
 ```
 
 ---
 
 ## §5 — The `fastmcp` ↔ `pydantic` seam
 
-Each document treats the other library as background — `fastmcp` names Pydantic 37 times, mostly in
-§6 — so the seam is where an agent loses the thread. Four crossings, and one rule.
+Each document treats the other library as background, so the seam is where an agent loses the
+thread. Five crossings, and one rule.
 
 | Crossing | `fastmcp` side | `pydantic` side |
 |---|---|---|
 | **A tool signature is a schema.** Type hints on the function become the published input schema. | §6.1 generation from hints · §6.2 serve-time shaping and `$ref` dereferencing · §6.4 `Annotated[...]`/`Field(...)` on parameters · §2.6 worked example | §7 fields and `Annotated` · §34 JSON Schema · §29 for a type that will not schematise |
-| **Input coercion policy.** Flexible mode allows Pydantic-style coercion so `"10"` satisfies `int`; strict mode validates against the exact generated schema first. | §6.3 · §4.4 `strict_input_validation` | §10 strict vs lax, and the four places to set it · §10.5 for JSON-specific behavior |
-| **Output shape.** What a return value becomes on the wire — content blocks, structured content, output schema. | §6.8-§6.10 · §6.11 `ToolResult` · App. **H)**, App. **R)** | §16 `model_dump` modes · §18 exclusion · §19 subclass leakage · §34.2 serialization-mode schema |
+| **Input coercion policy.** Flexible mode allows Pydantic-style coercion so `"10"` satisfies `int`; strict mode validates against the exact generated schema first, and it is **server-level, not per-tool**. | §6.3 `strict_input_validation` · §5.10 the execution contract | §10 strict vs lax, and the four places to set it · §10.5 for JSON-specific behavior |
+| **Output shape.** What a return value becomes on the wire — content blocks, structured content, output schema. | §6.8-§6.10 · §6.11 `ToolResult` · §6.12 conversion rules | §16 `model_dump` modes · §18 exclusion · §19 subclass leakage · §34.2 serialization-mode schema |
 | **Server configuration.** FastMCP has `fastmcp.json` for the *project*; typed process settings are Pydantic's job. | §27.0-§27.7 `fastmcp.json` · §27.6 CLI override precedence | §38-§39 `pydantic-settings` · §51.38 source map |
+| **The version floor.** FastMCP 4 requires **Pydantic ≥2.12**, and extension `MethodBinding` request params are validated with Pydantic models. | §1.0 dependency floors · §35.1 · §39.2 | §1 install and pinning — 2.13.4 clears the floor |
 
 **The rule.** In a traceback that spans both, split it at the schema. Anything about *whether a
 value was accepted, coerced, or rejected*, and anything about *what a dumped object looks like*, is
 a `pydantic` question even when the symbol in the traceback is a FastMCP one. Anything about
-*whether the component was registered, visible, routed, or authorized* is a `fastmcp` question even
-when the payload is a model.
+*whether the component was registered, visible, routed, authorized, or negotiated* is a `fastmcp`
+question even when the payload is a model.
 
-Two consequences worth stating outright:
+Three consequences worth stating outright:
 
 * **`pydantic` §19 applies to tool return values.** A tool annotated `-> Base` that returns a
   `Derived` will not emit `Derived`'s extra fields, because that is Pydantic's annotation-driven
   default (§19.0) — not a FastMCP bug.
 * **`pydantic` §21.6 applies to tool handlers.** A `TypeAdapter` constructed inside a handler is
-  recompiled on every call. Build it at module scope.
+  recompiled on every call. Build it at module scope. It applies twice over to a **guard** tool,
+  whose body re-executes on every interaction round (`fastmcp` §38.4).
+* **The MCP model rename is not a Pydantic alias question.** `input_schema` vs `inputSchema` is the
+  MCP SDK v2 field/alias split (`fastmcp` §1.4, App. **B)**), not something `serialize_by_alias` or
+  `validate_by_name` controls on *your* models.
 
 ---
 
 ## §6 — Navigation rules
 
-Fourteen rules, all verified against the two files. Rules 1-6 are about finding things; 7-10 about
-reading them; 11-14 about trusting what you find.
+Fifteen rules, all verified against the two files. Rules 1-6 are about finding things; 7-10 about
+reading them; 11-15 about trusting what you find.
 
 **1. Look symbols up in §2, never by grepping.** These documents teach by example, so a public API
 name appears wherever it is *used*, not only where it is defined. Measured hit counts: `Context`
-**201** in `fastmcp`, `TypeAdapter` **103** in `pydantic`, `Depends` 51, `ToolResult` 40,
-`model_validate_json` 22, `ToolTransform` 20, `SecretStr` 12, `mask_error_details` 8. A grep gives
-you the noise and hides the definition inside it.
+**119** in `fastmcp`, `TypeAdapter` **103** in `pydantic`, `ToolResult` 32, `UserSession` 25,
+`Depends` 22, `model_validate_json` 22, `ClientGroup` 17, `ToolTransform` 15,
+`InputRequiredResult` 15, `SecretStr` 12. A grep gives you the noise and hides the definition
+inside it.
 
 **2. `lib-outline --view expanded` is only trustworthy on `pydantic`.** That extractor maps `##` to
 members, and `fastmcp`'s subsection depth is inconsistent:
 
-* **14 chapters number their subsections at `###`** — §0, §5, §6, §7, §8, §9, §10, §12, §13, §14,
-  §19, §21, §24, §29. Together **4,575 lines, 29.2% of the document.** Expanding them returns
-  *nothing at all*, silently. That includes tools, `Context`, DI, middleware and providers — five of
-  the highest-traffic chapters in the file.
+* **11 chapters number their subsections at `###`** — §0, §5, §6, §7, §8, §13, §14, §19, §21, §24,
+  §29. Together **3,640 lines, 28.7% of the document.** Expanding them returns *nothing at all*,
+  silently. That includes tools, middleware and providers — three of the highest-traffic chapters
+  in the file.
 * **§17, §22 and §27 return a partial list**, which is worse than nothing because it looks
-  complete. §17 shows 2 entries and hides all six auth providers one level below; §27 shows 7 and
-  hides the entire `fastmcp.json` schema; §22 hides `22.0`-`22.1`.
-* **13 chapters** demote only `N.0` to `###`, so just their orientation subsection is missing —
-  §3, §4, §17, §25, §26, §28, §30, §31, §32, §33, §34, §35, §36.
-* **Only 9 chapters expand completely**: §1, §2, §11, §15, §16, §18, §20, §23, and §37 (whose
-  letters are `##`, so they list correctly even though they are not `N.M`).
+  complete. §17 shows 2 entries and hides all six auth providers plus all nine authorization
+  subsections one level below; §27 shows 7 and hides the entire `fastmcp.json` schema; §22 hides
+  `22.0`-`22.1` and nine third-level blocks.
+* **8 chapters** demote only `N.0` to `###`, so just their orientation subsection is missing —
+  §25, §26, §28, §30, §31, §32, §33, §34.
+* **23 chapters expand completely**: §1-§4, §9-§12, §15, §16, §18, §20, §23, §35, §36, §38-§44,
+  and §37 (whose letters are `##`, so they list correctly even though they are not `N.M`).
 
-Use §1.1's Depth column to know in advance. For a `###`-numbered chapter, grep `^### N\.` instead.
+Use §1.1's Depth column to know in advance. For a `###`-numbered chapter, grep `^### N\.` instead —
+and remember that six chapters carry `####` blocks that no outline view reaches at all (§1.1).
 `pydantic` has no equivalent problem: 594 `##` against 48 `###`, uniform `## N.M` in all 52 chapters.
 
-**3. A bare `rg '^# '` is roughly half wrong on both files.** It reports **85** top-level headings in
-`fastmcp` and **78** in `pydantic`; the real counts are **42** and **57**. The difference is
-`#`-prefixed shell and Python comments inside fenced blocks — **43 decoys** in `fastmcp`, **21** in
-`pydantic` — things like `# Recommended with uv`, `# Code Mode transform`, `# contracts/types.py`.
+**3. In `fastmcp`, read from the chapter heading, not from `N.0`.** 28 of the 45 chapters — §0, §2,
+§5-§8, and every chapter §13-§34 — retain the 3.4.7 topology and state their v4 delta in a bold
+**"FastMCP 4 status."** paragraph placed *above* the first numbered subsection. It is often the only
+place a chapter says that something was removed, renamed or re-scoped (that `task=` left prompts,
+that `SkillsProvider` became `SkillsDirectoryProvider`, that OpenAPI clients must now be `httpx2`).
+A `Read` that seeks to `N.0` skips all of it. The other 17 chapters (§1, §3, §4, §9-§12, §35-§44)
+were rewritten for v4 or are new, and carry no banner.
+
+**4. A bare `rg '^# '` is roughly half wrong on both files.** It reports **81** top-level headings in
+`fastmcp` and **78** in `pydantic`; the real counts are **46** and **57**. The difference is
+`#`-prefixed shell and Python comments inside fenced blocks — **35 decoys** in `fastmcp`, **21** in
+`pydantic` — things like `# obsolete in v4`, `# ASGI export`, `# contracts/types.py`.
 `lib-outline` parses markdown and is immune; a hand-rolled search needs a fence toggle.
 
-**4. Build indexes from chapter headings, never from either document's own map.** The "Proposed
-comprehensive documentation map" is an outline written before the chapters and never reconciled.
-`fastmcp` diverges on **five** titles — §0, §22 ("client-side authentication" → "client-side auth"),
-§25 ("custom HTML" → "custom renderers"), §27 (drops "and portable deployment contracts"), §32
-(drops "checklist") — and `pydantic` on **one** (§0). The chapter heading is the real title.
+**5. Build indexes from chapter headings, never from either document's own map.** The
+"Comprehensive documentation map" is an outline written before the chapters and never reconciled.
+In the 4.0.0 `fastmcp` reference **25 of 45 titles diverge** — §9 ("MCP Context in FastMCP 4" →
+"MCP Context"), §10 (drops "and call-argument binding"), §12 ("through the tasks extension" →
+"and long-running workflows"), §22 (the map promises "protocol modes", the chapter says
+"client-side auth"), and 21 more. `pydantic` diverges on one (§0). The chapter heading is the real
+title; the map is useful only as a table of contents.
 
-**5. Neither document has an end-of-reference marker.** `gix`/`notify` end with `# End of reference`;
+**6. Neither document has an end-of-reference marker.** `gix`/`notify` end with `# End of reference`;
 these do not. A chapter runs until the next `# … Advanced — N)` heading, and the final chapter runs
-to EOF: `fastmcp` §37 ends in a source list, `pydantic` §51 is followed only by
-`# Reference source URLs` (7294).
+to EOF: `fastmcp` §44 ends in a checklist block, `pydantic` §51 is followed only by
+`# Reference source URLs` (7294). Eleven `fastmcp` chapters close with a `### Sources` block and the
+rest with footnote link definitions — both look like content to a line-window read.
 
-**6. Numbering starts in three different places.** `fastmcp` §0 has **no `0.0`** (it opens at `0.1`);
-`pydantic` §51 has **no `51.0`** (it opens at `51.1`); everything else opens at `N.0`. And all 14 of
-`fastmcp`'s `###`-numbered chapters open with a *bare, unnumbered* `###` line restating the chapter
-title before the first real subsection (§0's restatement is worded slightly differently). Seeking to
+**7. Numbering starts in three different places.** `fastmcp` §0 has **no `0.0`** (it opens at `0.1`);
+`pydantic` §51 has **no `51.0`** (it opens at `51.1`); everything else opens at `N.0`. And every one
+of `fastmcp`'s `###`-numbered chapters opens with a *bare, unnumbered* `###` line restating the
+chapter title, usually followed by the status banner, before the first real subsection. Seeking to
 "the first subsection" lands on that echo.
 
-**7. Read `pydantic` by the chapter, `fastmcp` by the subsection.** `pydantic` chapters have a
-median of **~112** lines (range 73-234 once §51 is set aside); reading the whole chapter usually costs less than locating
-the right part of it. `fastmcp` chapters have a median of **~400** (range 194-747) — never read one
-whole.
+**8. Read `pydantic` by the chapter, `fastmcp` by the subsection — except §38-§44.** `pydantic`
+chapters have a median of **~112** lines (range 73-234 once §51 is set aside); reading the whole
+chapter usually costs less than locating the right part of it. `fastmcp` §0-§37 have a median of
+**~344** (up to 693) — never read one whole. But `fastmcp` §38-§44 are **24-54 lines each, 228 for
+all seven**, and they carry the v4 capabilities the retained chapters only cross-reference: read
+that whole run once.
 
-**8. Blank-line density is ~30% in both** — 31.2% in `fastmcp`, 30.3% in `pydantic` — so a
+**9. Blank-line density is ~30% in both** — 31.4% in `fastmcp`, 30.3% in `pydantic` — so a
 `Read(offset, limit)` window holds roughly what it appears to. (The `gix` reference in this same
 directory is 53%, which is why that skill warns to double the limit; these two do not need it.)
 
-**9. Go to the appendix chapter first for a signature or a matrix.** `pydantic` §51 (1,264 lines,
-**17% of the file**) and `fastmcp` §37 (747 lines, 35 lettered matrices) are the intended lookup
-layers, indexed at §1.4 and §1.3. Read the prose chapter afterwards, for *why*.
-
-**10. `fastmcp` §37's letters skip `K`,** and the appendix is two overlapping series — `A)`-`J)`
-written against the early chapters, `L)`-`AJ)` against the later ones. Transport is at both `F)` and
-`O)`, client auth at both `G)` and `Z)`, providers at both `D)` and `V)`. When two letters cover one
-topic, read both.
+**10. The two appendix chapters are no longer comparable in weight.** `pydantic` §51 is still the
+intended lookup layer — 1,264 lines, **17% of the file**, indexed at §1.4; go there first for a
+signature or a matrix. `fastmcp` §37 shrank from 35 lettered matrices to **9** (114 lines, §1.3) and
+now covers only the v4 delta: packages, the field rename, state, interactivity, tasks, the
+abstraction choice, client aggregation, upgrade anti-patterns, readiness. Everything the old
+`L)`-`AJ)` series answered — the `Context` capability matrix, transport and auth matrices, the tool
+and resource quick matrices, the CLI and testing matrices, the source-of-truth hierarchy — is only
+in the topical chapters now, or in the per-chapter `Agent checklist` / `Anti-pattern inventory`
+blocks. Do not send a v3-era appendix question to §37.
 
 **11. A named symbol is not necessarily in the document.** `JsonValue`, for one, is never mentioned
-in the `pydantic` reference. Absence from §2 means absence from the document, not absence from the
-library — fall back to the installed package.
+in the `pydantic` reference; `on_duplicate` and `client_log_level`, both documented `FastMCP(...)`
+fields in 3.4.7, have zero occurrences in the 4.0.0 reference. Absence from §2 means absence from
+the document, **not** absence from the library — fall back to the installed package.
 
-**12. Both documents rank themselves below the installed package.** `fastmcp` App. `AJ)` and
-`pydantic` §0.0 give near-identical hierarchies: the project's pinned version and its actual
-signatures outrank the official docs, which outrank these references. Reconcile any example against
-the pin before applying it.
+**12. Both documents rank themselves below the installed package.** `pydantic` §0.0 and the
+`fastmcp` source-precedence list (front matter, §1.3) give near-identical hierarchies: the project's
+pinned version and its actual signatures outrank the official docs, which outrank these references.
+`fastmcp` additionally ranks PyPI and the official 3→4 upgrade guide above its own prose, and §5.6
+openly notes that the docs surface and the source-level `Tool.from_function(...)` surface differ.
+Reconcile any example against the pin before applying it.
 
-**13. Prerelease material is quarantined, and it looks like the rest of the document.**
-`fastmcp` §36 (443 lines) is FastMCP 4; `pydantic` §47 (74 lines) is 2.14. Both are written in the
-same voice as the stable chapters and both are explicitly labelled as migration research. If a
-symbol only resolves to §36 or §47, it does not exist in the pinned version.
+**13. Only `pydantic` still quarantines a prerelease.** `pydantic` §47 (74 lines) is 2.14, written
+in the same voice as the stable chapters; if a symbol only resolves there, it does not exist in the
+pinned version. The `fastmcp` reference no longer has such a chapter — v4 **is** the stable
+baseline, §35 is the 3→4 migration and §36 is the shipped capability delta. The only forward-looking
+claim in it is §35.11's note that string client sources converge on URL semantics in FastMCP 5.
 
 **14. Version-sensitive claims live in the delta chapters, not the feature chapters.** Behavior that
-changed recently is described *twice*: once in the topical chapter and once in `pydantic` §46 /
-`fastmcp` §35, and the delta chapter is usually the one that says what the old behavior was. For a
-"this used to work" question, start there — `fastmcp` §35.21 and App. `AG)` are literal grep sheets
-for v2 idioms, and `pydantic` §51.44-§51.47 catch the three classic V1→V2 traps.
+changed is described *twice*: once in the topical chapter (usually only in its status banner) and
+once in `fastmcp` §35-§36 / `pydantic` §46. The delta chapter is the one that says what the old
+behavior was. For a "this used to work" question start there — `fastmcp` §35.5-§35.6 lists the
+removals and the new import homes, App. **H)** is the closest thing to a v4 grep sheet, and
+`pydantic` §51.44-§51.47 catch the three classic V1→V2 traps.
+
+**15. Two `fastmcp` references sit in the same directory, and a glob will match both.**
+`fastmcp_python_advanced_reference_4.0.0.md` is the one this file indexes;
+`fastmcp_python_advanced_reference_3.4.7.md` (15,682 lines) is the superseded v3 reference. They
+share chapter numbers and disagree on content — 3.4.7 §36 is a *prerelease* v4 guide whose API
+sketches were not all borne out, and its §9-§12 describe the callback-channel model v4 removed.
+Always name the file you read. Note that `docs/spec_index/library-routing.md` still routes FastMCP
+questions to the 3.4.7 filename; that index is derived navigation, never normative, and this skill
+is the more current pointer.

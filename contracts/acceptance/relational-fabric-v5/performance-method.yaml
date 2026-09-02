@@ -1,0 +1,179 @@
+schema: codefabric.fastmcp4-successor.performance-method.v1
+release_id: relational-fabric-v5-wp43-r1
+method_id: fastmcp4-local-stdio-v1
+registration:
+  status: preregistered
+  registered_before_candidate_results: true
+  candidate_results_used: false
+  local_relaxation_permitted: false
+  amendment_policy: forward-versioned-independent-review
+
+environment_record:
+  required_fields:
+    - recorded_at_utc
+    - repository_head
+    - dirty_tree_digest
+    - operating_system
+    - kernel_version
+    - architecture
+    - cpu_model
+    - physical_core_count
+    - logical_cpu_count
+    - memory_bytes
+    - python_version
+    - fastmcp_version
+    - mcp_version
+    - pydantic_version
+    - grpcio_version
+    - adapter_wheel_sha256
+    - daemon_executable_sha256
+    - supervisor_executable_sha256
+    - host_profile
+    - power_profile
+    - competing_load_description
+  required_values:
+    python_version: 3.14.7
+    fastmcp_version: 4.0.0
+    mcp_version: 2.1.1
+    pydantic_version: 2.13.4
+    host_profile: local-workstation-v1
+    compatibility_bridge: false
+  invalid_when:
+    - version_or_artifact_identity_missing
+    - candidate_and_control_use_different_hosts
+    - candidate_and_control_use_different_power_profiles
+    - stdout_contains_non_protocol_bytes
+    - daemon_or_adapter_is_not_installed_artifact
+
+minimal_control:
+  control_id: minimal-fastmcp4-stdio-control-v1
+  purpose: Isolate pinned FastMCP and MCP framing cost from CodeFabric presentation cost.
+  stack:
+    python: 3.14.7
+    fastmcp: 4.0.0
+    mcp: 2.1.1
+    pydantic: 2.13.4
+  construction:
+    transport: direct-stdio
+    tasks: false
+    protocol: "2026-07-28"
+    middleware: [modern-protocol-admission]
+    tools: [no_op]
+    resources: []
+    prompts: []
+    completion_handlers: []
+    application_extensions: []
+    daemon_channel: false
+  forbidden_substitutions:
+    - in_memory_client_for_stdio
+    - fastmcp_3_control
+    - legacy_protocol_control
+    - production_daemon_hidden_inside_control
+
+execution_method:
+  process_model: fresh-process-where-cold-and-reused-process-where-steady
+  ordering: randomized-interleaved-candidate-and-control-blocks
+  warmups_per_case: 3
+  samples_per_case: 30
+  clock: monotonic
+  latency_unit: milliseconds
+  memory_source: operating-system-resident-set-bytes
+  distributions: [minimum, median, p95, maximum]
+  outlier_policy: report-all-no-post-hoc-removal
+  confidence_policy: retain-raw-samples-and-bootstrap-95-percent-ci
+  concurrency_levels: [1, 2, 4, 8]
+  fairness_measure: per-agent-p95-divided-by-all-agent-median
+  failure_policy: any-timeout-crash-protocol-error-or-missing-sample-fails-the-case
+
+workloads:
+  - workload_id: startup_to_protocol_ready
+    process_scope: fresh-installed-adapter
+    start: child_process_spawn
+    stop: successful_modern_server_discover
+    compare_to_control: true
+  - workload_id: idle_and_active_rss
+    process_scope: reused-installed-adapter
+    states: [idle_after_discovery, active_status, active_query, active_resource]
+    compare_to_control: true
+  - workload_id: status_presentation_overhead
+    operation: get_code_graph_status
+    daemon_fixture: fixed-local-ready-status
+    subtract_daemon_rpc_baseline: true
+  - workload_id: query_acceptance_presentation_overhead
+    operation: query_code_graph
+    daemon_fixture: fixed-immediate-accepted-outcome
+    subtract_daemon_rpc_baseline: true
+  - workload_id: guard_one_and_max_round_overhead
+    operation: query_code_graph
+    cases: [one-input-required-leg, configured-maximum-valid-rounds]
+    subtract_daemon_rpc_baseline: true
+  - workload_id: completion_latency_and_cardinality
+    operation: completion/complete
+    cases: [one-candidate, one-hundred-candidates, denied-empty]
+  - workload_id: resource_first_byte_and_throughput
+    operation: resources/read
+    cases: [one-page-64-kib, one-page-1-mib]
+    maximum_materialized_pages: 1
+  - workload_id: cancellation_ack_and_cleanup
+    operation: query_code_graph
+    cases: [cancel-after-acceptance, cancel-during-resource-read]
+  - workload_id: reconnect_and_resume
+    operation: watch-query
+    cases: [transport-loss-after-acceptance, daemon-generation-change]
+    start_query_resubmissions_allowed: 0
+  - workload_id: n_agent_fairness_and_aggregate_memory
+    operation: mixed-status-query-resource
+    concurrency_levels: [1, 2, 4, 8]
+    one_daemon_required: true
+    one_channel_per_adapter_required: true
+
+budget_source:
+  source_id: wp43-preimplementation-operator-budget-v1
+  source_kind: release-acceptance-policy
+  selected_before_candidate_measurement: true
+  candidate_neutral: true
+  local_override_permitted: false
+  budgets:
+    startup_to_protocol_ready:
+      p95_max_ms: 2000
+      candidate_minus_control_p95_max_ms: 750
+    idle_and_active_rss:
+      idle_adapter_p95_max_bytes: 201326592
+      active_increment_p95_max_bytes: 67108864
+      eight_agent_aggregate_p95_max_bytes: 1073741824
+    status_presentation_overhead: {p95_max_ms: 25}
+    query_acceptance_presentation_overhead: {p95_max_ms: 50}
+    guard_one_and_max_round_overhead:
+      one_leg_p95_max_ms: 75
+      maximum_rounds_p95_max_ms: 300
+    completion_latency_and_cardinality:
+      p95_max_ms: 100
+      candidate_count_max: 100
+    resource_first_byte_and_throughput:
+      first_byte_p95_max_ms: 250
+      sustained_min_bytes_per_second: 16777216
+      resident_pages_max: 1
+    cancellation_ack_and_cleanup:
+      acknowledgement_p95_max_ms: 250
+      cleanup_p95_max_ms: 1000
+    reconnect_and_resume:
+      p95_max_ms: 1500
+      start_query_resubmissions_max: 0
+    n_agent_fairness_and_aggregate_memory:
+      fairness_ratio_max: 2.0
+      concurrency_level_required: 8
+
+result_record:
+  required_fields:
+    - method_id
+    - environment
+    - candidate_samples
+    - control_samples
+    - raw_sample_sha256
+    - distribution_summary
+    - budget_source_id
+    - budget_disposition
+  prohibited_fields:
+    - locally_relaxed_budget
+    - samples_deleted_after_observation
+    - synthetic_control_result

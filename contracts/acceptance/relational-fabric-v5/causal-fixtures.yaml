@@ -1,0 +1,160 @@
+schema: codefabric.fastmcp4-successor.causal-fixtures.v1
+release_id: relational-fabric-v5-wp43-r1
+fixtures:
+  - fixture_id: RFV5-FM4-001-C
+    claim_id: RFV5-FM4-001
+    base_case_id: exact-successor-release
+    input_patch: {protocol_version: "2025-11-25"}
+    expected_patch: {protocol_version: unsupported, predecessor_runtime_authority: false}
+    changed_input_paths: [/protocol_version]
+    changed_output_paths: [/protocol_version]
+    distinguishes: A predecessor protocol cannot become target authority when its controlled version changes.
+
+  - fixture_id: RFV5-FM4-002-C
+    claim_id: RFV5-FM4-002
+    base_case_id: modern-and-legacy-admission
+    input_patch:
+      attempts:
+        - {protocol: "2025-06-18", method: initialize}
+    expected_patch:
+      modern: {admitted: false, business_dispatches: 0, middleware_rechecks: 0}
+    changed_input_paths: [/attempts]
+    changed_output_paths: [/modern/admitted, /modern/business_dispatches, /modern/middleware_rechecks]
+    distinguishes: A different legacy era remains rejected before business dispatch with the stable public code.
+
+  - fixture_id: RFV5-FM4-003-C
+    claim_id: RFV5-FM4-003
+    base_case_id: bare-target-catalog
+    input_patch: {discovery_mode: legacy-negative-control}
+    expected_patch:
+      framework_extensions: null
+    changed_input_paths: [/discovery_mode]
+    changed_output_paths: [/framework_extensions]
+    distinguishes: The framework UI advertisement is a modern live-discovery observation, not a legacy product feature.
+
+  - fixture_id: RFV5-FM4-004-C
+    claim_id: RFV5-FM4-004
+    base_case_id: strict-tool-schema-observation
+    input_patch: {schema_dialect: https://json-schema.org/draft/2019-09/schema}
+    expected_patch:
+      model_policy: {strict: true, frozen: true, extra: forbid, compatibility_bridge: false}
+      schema_dialect_supported: false
+    changed_input_paths: [/schema_dialect]
+    changed_output_paths: [/schema_dialect_supported]
+    distinguishes: A dialect-control change cannot authorize coercion, mutable DTOs, extras, or Python camel-case attributes.
+
+  - fixture_id: RFV5-FM4-005-C
+    claim_id: RFV5-FM4-005
+    base_case_id: two-leg-guard
+    input_patch: {valid_answer: incoming}
+    expected_patch:
+      valid_second_leg: {middleware_reentered: true, daemon_reauthorized: true, outcome: accepted, accepted_query_count: 1, accepted_answer: incoming}
+    changed_input_paths: [/valid_answer]
+    changed_output_paths: [/valid_second_leg/accepted_answer]
+    distinguishes: A different allowed answer is passed back to daemon authority and still accepts exactly once.
+
+  - fixture_id: RFV5-FM4-006-C
+    claim_id: RFV5-FM4-006
+    base_case_id: atomic-start-outcomes
+    input_patch: {ordinary_query: incomplete}
+    expected_patch:
+      ordinary_query:
+        rpc_sequence: [StartQuery]
+        validate_query_calls: 0
+        start_query_calls: 1
+        outcome_variant: InputRequired
+        accepted_query_count: 0
+    changed_input_paths: [/ordinary_query]
+    changed_output_paths: [/ordinary_query/outcome_variant, /ordinary_query/accepted_query_count]
+    distinguishes: Changing completeness changes only the closed StartQuery outcome and never adds ValidateQuery.
+
+  - fixture_id: RFV5-FM4-007-C
+    claim_id: RFV5-FM4-007
+    base_case_id: authorized-reference-completion
+    input_patch: {reference_kind_prefix: res}
+    expected_patch: {values: [response-schema], total: 1, has_more: false}
+    changed_input_paths: [/reference_kind_prefix]
+    changed_output_paths: [/values]
+    distinguishes: A safe authorized prefix changes the advisory candidate without changing authorization or caps.
+
+  - fixture_id: RFV5-FM4-008-C
+    claim_id: RFV5-FM4-008
+    base_case_id: bounded-result-page
+    input_patch: {page_index: 3}
+    expected_patch: {per_read_authorization_calls: 1, materialized_pages: 1, materialized_page_index: 3}
+    changed_input_paths: [/page_index]
+    changed_output_paths: [/materialized_page_index]
+    distinguishes: A different bounded page is independently authorized and materialized once.
+
+  - fixture_id: RFV5-FM4-009-C
+    claim_id: RFV5-FM4-009
+    base_case_id: accepted-query-cancel-reconnect
+    input_patch: {transport_loss_after_acceptance: false}
+    expected_patch:
+      reconnect: {fresh_grant: false, fresh_session: false, start_query_resubmissions: 0, resumed_query_id: null, resumed_by_cursor: false}
+    changed_input_paths: [/transport_loss_after_acceptance]
+    changed_output_paths: [/reconnect/fresh_grant, /reconnect/fresh_session, /reconnect/resumed_query_id, /reconnect/resumed_by_cursor]
+    distinguishes: Without transport loss there is no reconnect, while accepted work is still never resubmitted.
+
+  - fixture_id: RFV5-FM4-010-C
+    claim_id: RFV5-FM4-010
+    base_case_id: two-agent-one-workspace
+    input_patch: {agents: [agent-a, agent-b, agent-c]}
+    expected_patch: {adapter_processes: 3, grpc_channels: 3, workspace_daemons: 1}
+    changed_input_paths: [/agents]
+    changed_output_paths: [/adapter_processes, /grpc_channels]
+    distinguishes: Agent count scales presentation cells and channels but not the shared workspace daemon.
+
+  - fixture_id: RFV5-FM4-011-C
+    claim_id: RFV5-FM4-011
+    base_case_id: authority-denial-matrix
+    input_patch: {valid_generation: 8}
+    expected_patch: {denied_before_bytes: true, denied_before_business_dispatch: true, active_generation: 8}
+    changed_input_paths: [/valid_generation]
+    changed_output_paths: [/active_generation]
+    distinguishes: Generation rotation preserves fail-closed denial before bytes and dispatch.
+
+  - fixture_id: RFV5-FM4-012-C
+    claim_id: RFV5-FM4-012
+    base_case_id: secret-bearing-failure
+    input_patch: {daemon_error: UNAVAILABLE}
+    expected_patch: {public_code: DAEMON_UNAVAILABLE, leaked_secret_classes: [], stdout_non_protocol_bytes: 0}
+    changed_input_paths: [/daemon_error]
+    changed_output_paths: [/public_code]
+    distinguishes: A typed transport failure changes only the safe public code and never redaction or stdout purity.
+
+  - fixture_id: RFV5-FM4-013-C
+    claim_id: RFV5-FM4-013
+    base_case_id: presentation-authority-census
+    input_patch: {scope: installed-adapter-live-discovery-and-wheel}
+    expected_patch: {lifespan_channels_per_adapter: 1, application_extensions: 0, mutable_cpg_state: 0, coverage_scope: installed-adapter-live-discovery-and-wheel}
+    changed_input_paths: [/scope]
+    changed_output_paths: [/coverage_scope]
+    distinguishes: Widening the census to the installed wheel preserves all rejected-authority zero states.
+
+  - fixture_id: RFV5-FM4-014-C
+    claim_id: RFV5-FM4-014
+    base_case_id: post-cutover-live-census
+    input_patch: {history_roots_excluded: false}
+    expected_patch: {history_bytes_mutated: 0, predecessor_runtime_fallbacks: 0, history_candidates_classified: true}
+    changed_input_paths: [/history_roots_excluded]
+    changed_output_paths: [/history_candidates_classified]
+    distinguishes: Including classified history never turns history into runtime authority or permits history mutation.
+
+  - fixture_id: RFV5-FM4-015-C
+    claim_id: RFV5-FM4-015
+    base_case_id: preregistered-performance-run
+    input_patch: {candidate_results_available_at_registration: true}
+    expected_patch: {local_relaxation_permitted: false, candidate_neutral_budget_source: registration_invalid_after_candidate_observation}
+    changed_input_paths: [/candidate_results_available_at_registration]
+    changed_output_paths: [/candidate_neutral_budget_source]
+    distinguishes: Registration after candidate observation is explicitly invalid rather than silently restamped.
+
+  - fixture_id: RFV5-FM4-016-C
+    claim_id: RFV5-FM4-016
+    base_case_id: frozen-release-drift
+    input_patch: {hash_algorithm: sha512}
+    expected_patch: {dependent_execution_stops_on_drift: true, restamp_on_failure: false, hash_algorithm_supported: false}
+    changed_input_paths: [/hash_algorithm]
+    changed_output_paths: [/hash_algorithm_supported]
+    distinguishes: An unsupported hash-method change stops dependent execution and cannot be accepted by local restamping.

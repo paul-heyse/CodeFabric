@@ -838,6 +838,19 @@ def _successor_evidence_claim_count(root: Path, plan: Mapping[str, Any]) -> int:
     if plan.get("plan_id") != "codefabric-execution-proved-relational-data-fabric":
         return 0
     version = plan.get("version")
+    if version == "v5":
+        from tooling.ci import fastmcp4_successor_expectations
+
+        try:
+            return len(
+                fastmcp4_successor_expectations.validate_issuance(
+                    root, require_review=True
+                ).expectations
+            )
+        except fastmcp4_successor_expectations.ExpectationReleaseError as error:
+            raise ArtifactContractError(
+                f"v5 FastMCP 4 expectation release {error.code}: {error}"
+            ) from error
     if version == "v4":
         from tooling.ci import (
             successor_evidence_contracts_v4,

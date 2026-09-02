@@ -18,6 +18,10 @@ global-invariant section.
 | one idempotent durable command path | LIFE | FabricCommand and transaction contract |
 | one fenced writer and activation chain | LIFE | writer fence and activation fault matrix |
 | one supervisor/daemon plus attach-only presentation | LIFE, SRV | singleton, policy/grant, descriptor, UDS, v2 RPC, and STDIO boundary checks |
+| one closed atomic start and daemon-authored guarded input | QRY, SRV | atomic-start, guard roundtrip, tamper/replay/expiry, and no-work-before-acceptance checks |
+| daemon public handles and authorized reference completion | QRY, SRV, FAB | per-read/release authorization, restart invalidation, bounded completion, and denied-existence checks |
+| modern-only FastMCP 4 application zero state | SUITE, SRV | bridge-off protocol admission, exact catalog, empty application extension/UI component registries, and bounded framework advertisement |
+| explicit cancellation and observation recovery | QRY, LIFE, SRV | cancel acknowledgement, terminal observation, reconnect by query/cursor, and no-start-resubmission checks |
 | independent execution proof | SUITE | semantic, causal, hostile, public, and recovery oracles |
 | complete consumer-first legacy purge | SUITE, RM | inventory, disposition coverage, zero state, clean reconstruction |
 

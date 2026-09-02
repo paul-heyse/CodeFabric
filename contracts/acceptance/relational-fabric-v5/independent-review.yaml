@@ -1,0 +1,40 @@
+schema: codefabric.fastmcp4-successor.independent-review.v1
+release_id: relational-fabric-v5-wp43-r1
+review:
+  status: accepted
+  reviewer_identity: codex-wp43-independent-contract-falsification-reviewer
+  reviewer_is_author: false
+  production_imports_used: false
+  target_execution_used: false
+  predecessor_expected_values_used: false
+  reviewed_expectations_sha256: c9e2fa028343914dac6bb8b1a3266c10f8538cea62ac5dc77f86ae9155865cdc
+  reviewed_causal_fixtures_sha256: aa8f3c8eff736171f04d51d6e4c9ccef2f6cc149be0460026043d48a63a5329f
+  reviewed_negative_fixtures_sha256: 12ccb79370b729552926ad69118c444ffdbbaf92db77f4172bf4481df0e387c2
+  reviewed_performance_method_sha256: ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df
+  scopes:
+    - suite-causality
+    - expectation-independence
+    - negative-fixture-discrimination
+    - no-history-or-comparator-authority
+    - performance-method-candidate-neutrality
+  dispositions:
+    - claim_range: RFV5-FM4-001..RFV5-FM4-016
+      disposition: accepted
+      rationale: Every expected value is manually authored from the accepted design inputs, every controlled family has a causal fixture, and every committed negative fault changes a frozen decoded observation.
+  reviewed_claim_ids:
+    - RFV5-FM4-001
+    - RFV5-FM4-002
+    - RFV5-FM4-003
+    - RFV5-FM4-004
+    - RFV5-FM4-005
+    - RFV5-FM4-006
+    - RFV5-FM4-007
+    - RFV5-FM4-008
+    - RFV5-FM4-009
+    - RFV5-FM4-010
+    - RFV5-FM4-011
+    - RFV5-FM4-012
+    - RFV5-FM4-013
+    - RFV5-FM4-014
+    - RFV5-FM4-015
+    - RFV5-FM4-016

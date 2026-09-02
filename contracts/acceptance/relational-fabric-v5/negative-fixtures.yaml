@@ -1,0 +1,290 @@
+schema: codefabric.fastmcp4-successor.negative-fixtures.v1
+release_id: relational-fabric-v5-wp43-r1
+fixtures:
+  - fixture_id: RFV5-FM4-001-N
+    claim_id: RFV5-FM4-001
+    fault: predecessor-suite-and-pins-restored
+    fault_patch:
+      selected_suite: {suite_version: 2.2.0, predecessor_version: 2.1.0, sole_terminal: false}
+      runtime_pins: {fastmcp: 3.4.7, mcp: 1.29.0}
+      predecessor_runtime_authority: true
+    expected_mismatch_paths:
+      - /selected_suite/suite_version
+      - /selected_suite/predecessor_version
+      - /selected_suite/sole_terminal
+      - /runtime_pins/fastmcp
+      - /runtime_pins/mcp
+      - /predecessor_runtime_authority
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-002-N
+    claim_id: RFV5-FM4-002
+    fault: legacy-business-dispatch
+    fault_patch: {legacy: {admitted: true, business_dispatches: 1}, compatibility_fallback: true}
+    expected_mismatch_paths: [/legacy/admitted, /legacy/business_dispatches, /compatibility_fallback]
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-003-N
+    claim_id: RFV5-FM4-003
+    fault: forbidden-component-registration
+    fault_patch:
+      prompts: [author_code_graph_query]
+      application_extensions: [codefabric.custom]
+      framework_extensions: {io.modelcontextprotocol/ui: {enabled: true}, codefabric.custom: {}}
+      ui_components: [query-dashboard]
+      task_default: optional
+    expected_mismatch_paths:
+      - /prompts
+      - /application_extensions
+      - /framework_extensions/io.modelcontextprotocol~1ui/enabled
+      - /framework_extensions/codefabric.custom
+      - /ui_components
+      - /task_default
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-004-N
+    claim_id: RFV5-FM4-004
+    fault: public-schema-authority-leak
+    fault_patch:
+      model_policy: {strict: false, frozen: false, extra: allow, compatibility_bridge: true}
+      tools:
+        query_code_graph:
+          optional: [delivery, freshness, daemon_port]
+          additional_properties: true
+      hidden_dependencies_in_schema: true
+      python_attribute_style: camelCase
+    expected_mismatch_paths:
+      - /model_policy/strict
+      - /model_policy/frozen
+      - /model_policy/extra
+      - /model_policy/compatibility_bridge
+      - /tools/query_code_graph/optional
+      - /tools/query_code_graph/additional_properties
+      - /hidden_dependencies_in_schema
+      - /python_attribute_style
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-005-N
+    claim_id: RFV5-FM4-005
+    fault: first-leg-acceptance-and-cross-authority-replay
+    fault_patch:
+      first_leg: {outcome: accepted, accepted_query_count: 1}
+      invalid_legs: {wrong_principal: accepted, replayed: accepted}
+      abandoned_guard: {accepted_query_count: 1, task_count: 1, resource_lease_count: 1}
+    expected_mismatch_paths:
+      - /first_leg/outcome
+      - /first_leg/accepted_query_count
+      - /invalid_legs/wrong_principal
+      - /invalid_legs/replayed
+      - /abandoned_guard/accepted_query_count
+      - /abandoned_guard/task_count
+      - /abandoned_guard/resource_lease_count
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-006-N
+    claim_id: RFV5-FM4-006
+    fault: validate-before-start-restored
+    fault_patch:
+      ordinary_query: {rpc_sequence: [ValidateQuery, StartQuery], validate_query_calls: 1, start_query_calls: 1}
+      preflight_acceptance_race: possible
+    expected_mismatch_paths:
+      - /ordinary_query/rpc_sequence
+      - /ordinary_query/validate_query_calls
+      - /preflight_acceptance_race
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-007-N
+    claim_id: RFV5-FM4-007
+    fault: denied-completion-enumeration
+    fault_patch:
+      daemon_authorization_calls: 0
+      values: [request-schema, repository-path, result-handle]
+      total: 3
+      denied_reference_values: [repository-path, result-handle]
+      eventual_resource_revalidates: false
+    expected_mismatch_paths:
+      - /daemon_authorization_calls
+      - /values
+      - /total
+      - /denied_reference_values
+      - /eventual_resource_revalidates
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-008-N
+    claim_id: RFV5-FM4-008
+    fault: handle-only-resource-read
+    fault_patch:
+      handle_minter: python-adapter
+      python_handle_map: true
+      internal_lease_token_exposed: true
+      storage_path_exposed: true
+      per_read_authorization_calls: 0
+      materialized_pages: 8
+      cross_agent_read: allowed
+    expected_mismatch_paths:
+      - /handle_minter
+      - /python_handle_map
+      - /internal_lease_token_exposed
+      - /storage_path_exposed
+      - /per_read_authorization_calls
+      - /materialized_pages
+      - /cross_agent_read
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-009-N
+    claim_id: RFV5-FM4-009
+    fault: reconnect-resubmits-query
+    fault_patch:
+      host_cancel: {cancel_query_calls: 2, cleanup_shielded: false}
+      watch_loss: {cancel_query_calls: 1, start_query_resubmissions: 1, daemon_work_authority_unchanged: false}
+      reconnect: {start_query_resubmissions: 1, resumed_by_cursor: false}
+    expected_mismatch_paths:
+      - /host_cancel/cancel_query_calls
+      - /host_cancel/cleanup_shielded
+      - /watch_loss/cancel_query_calls
+      - /watch_loss/start_query_resubmissions
+      - /watch_loss/daemon_work_authority_unchanged
+      - /reconnect/start_query_resubmissions
+      - /reconnect/resumed_by_cursor
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-010-N
+    claim_id: RFV5-FM4-010
+    fault: shared-agent-presentation-authority
+    fault_patch:
+      adapter_processes: 1
+      grpc_channels: 1
+      shared_python_session_state: true
+      agent_a_guard_used_by_agent_b: allowed
+      agent_a_resource_used_by_agent_b: allowed
+      agent_a_cancel_by_agent_b: allowed
+      independent_stdio_streams: false
+    expected_mismatch_paths:
+      - /adapter_processes
+      - /grpc_channels
+      - /shared_python_session_state
+      - /agent_a_guard_used_by_agent_b
+      - /agent_a_resource_used_by_agent_b
+      - /agent_a_cancel_by_agent_b
+      - /independent_stdio_streams
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-011-N
+    claim_id: RFV5-FM4-011
+    fault: authority-denial-hole
+    fault_patch:
+      denied_cases: {wrong_workspace: allowed, replayed_request_state: allowed, oversized_resource_range: allowed}
+      denied_before_bytes: false
+      denied_before_business_dispatch: false
+    expected_mismatch_paths:
+      - /denied_cases/wrong_workspace
+      - /denied_cases/replayed_request_state
+      - /denied_cases/oversized_resource_range
+      - /denied_before_bytes
+      - /denied_before_business_dispatch
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-012-N
+    claim_id: RFV5-FM4-012
+    fault: secret-and-stdout-leak
+    fault_patch:
+      public_error_fields: [code, correlation_id, message, retryable, daemon_token]
+      leaked_secret_classes: [daemon-token, storage-path]
+      leaked_to_error: [daemon-token]
+      leaked_to_span: [storage-path]
+      stdout_non_protocol_bytes: 1
+      grpc_prose_branching: true
+    expected_mismatch_paths:
+      - /public_error_fields
+      - /leaked_secret_classes
+      - /leaked_to_error
+      - /leaked_to_span
+      - /stdout_non_protocol_bytes
+      - /grpc_prose_branching
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-013-N
+    claim_id: RFV5-FM4-013
+    fault: python-authority-registration
+    fault_patch:
+      application_extensions: 1
+      ui_components: 1
+      semantic_registries: 1
+      session_registries: 1
+      task_registries: 1
+      response_caches: 1
+      resource_lease_maps: 1
+      arrow_decoders: 1
+      canonical_request_rewriters: 1
+      mutable_cpg_state: 1
+    expected_mismatch_paths:
+      - /application_extensions
+      - /ui_components
+      - /semantic_registries
+      - /session_registries
+      - /task_registries
+      - /response_caches
+      - /resource_lease_maps
+      - /arrow_decoders
+      - /canonical_request_rewriters
+      - /mutable_cpg_state
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-014-N
+    claim_id: RFV5-FM4-014
+    fault: predecessor-surface-restored
+    fault_patch:
+      live_fastmcp_3_pins: 1
+      live_mcp_1_pins: 1
+      camelcase_bridge_usage: 1
+      normal_path_validate_then_start: 1
+      python_resource_lease_maps: 1
+      live_static_adapter_schemas: 1
+      phantom_prompts: 2
+      predecessor_runtime_fallbacks: 1
+    expected_mismatch_paths:
+      - /live_fastmcp_3_pins
+      - /live_mcp_1_pins
+      - /camelcase_bridge_usage
+      - /normal_path_validate_then_start
+      - /python_resource_lease_maps
+      - /live_static_adapter_schemas
+      - /phantom_prompts
+      - /predecessor_runtime_fallbacks
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-015-N
+    claim_id: RFV5-FM4-015
+    fault: candidate-shaped-performance-method
+    fault_patch:
+      minimal_fastmcp4_control_required: false
+      same_host_interleaving_required: false
+      warmups_per_case: 0
+      samples_per_case: 3
+      candidate_neutral_budget_source: candidate-result-local-threshold
+      local_relaxation_permitted: true
+    expected_mismatch_paths:
+      - /minimal_fastmcp4_control_required
+      - /same_host_interleaving_required
+      - /warmups_per_case
+      - /samples_per_case
+      - /candidate_neutral_budget_source
+      - /local_relaxation_permitted
+    expected_error: RFV5_OBSERVATION_DRIFT
+
+  - fixture_id: RFV5-FM4-016-N
+    claim_id: RFV5-FM4-016
+    fault: silent-restamp
+    fault_patch:
+      source_input_hashes_verified: 2
+      artifact_hashes_verified: 5
+      extra_release_files: 1
+      restamp_on_failure: true
+      dependent_execution_stops_on_drift: false
+    expected_mismatch_paths:
+      - /source_input_hashes_verified
+      - /artifact_hashes_verified
+      - /extra_release_files
+      - /restamp_on_failure
+      - /dependent_execution_stops_on_drift
+    expected_error: RFV5_OBSERVATION_DRIFT
