@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_compiled_release_provider_fabric_runtime_boundary_design_v1_2026-09-02.md",
   "baseline_commit": "de5db65c2834458eb57c7133183b8cef67a2491a",
   "status": "executing",
-  "current_packet": "WP60",
+  "current_packet": "WP57",
   "packets": {
     "WP53": {
       "status": "complete",
@@ -35,7 +35,7 @@
       "blockers": []
     },
     "WP57": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -56,8 +56,8 @@
       "blockers": []
     },
     "WP60": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "2413720a4180b765da56f260f9551b0307d08306",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -107,8 +107,8 @@
   },
   "milestones": {
     "M13": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "2413720a4180b765da56f260f9551b0307d08306",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -144,7 +144,7 @@
   },
   "decommission_batches": {
     "DB19": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -198,6 +198,6 @@
       "summary": "V6 was never activated. V7 corrects its design-order dependency closure and activation assurance without changing the accepted target architecture."
     }
   ],
-  "next_action": "Implement WP60 behavior-bearing semantic release compilation, release-owned provider preparation/admission, and causal program oracles.",
-  "updated_at": "2026-09-02T18:30:16Z"
+  "next_action": "Implement WP57 Tree-sitter and Ruff application-owned provider-job execution, Arrow result admission, lifecycle evidence, and native-type zero state.",
+  "updated_at": "2026-09-02T18:56:22Z"
 }
