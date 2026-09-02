@@ -23,10 +23,12 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 R1_RELEASE_PATH = Path("contracts/acceptance/relational-fabric-v5")
 R2_RELEASE_PATH = Path("contracts/acceptance/relational-fabric-v5-r2")
+R3_RELEASE_PATH = Path("contracts/acceptance/relational-fabric-v5-r3")
 R1_RELEASE_ID = "relational-fabric-v5-wp43-r1"
 R2_RELEASE_ID = "relational-fabric-v5-wp43-r2"
-RELEASE_PATH = R2_RELEASE_PATH
-RELEASE_ID = R2_RELEASE_ID
+R3_RELEASE_ID = "relational-fabric-v5-wp43-r3"
+RELEASE_PATH = R3_RELEASE_PATH
+RELEASE_ID = R3_RELEASE_ID
 EXPECTED_FILES = {
     "causal-fixtures.yaml",
     "expectations.yaml",
@@ -51,7 +53,15 @@ R2_FROZEN_BYTES_SHA256 = {
     "negative-fixtures.yaml": "471e0e99573ffd59b814d2ffc9165c8755bb46c7389b2d98451a866fd209d60c",
     "performance-method.yaml": "ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df",
 }
-FROZEN_BYTES_SHA256 = R2_FROZEN_BYTES_SHA256
+R3_FROZEN_BYTES_SHA256 = {
+    "causal-fixtures.yaml": "753cf58067d344bbb946d340de0ae5f9fc95d32a01b068c6ffe84dde60d7f3a0",
+    "expectations.yaml": "ec5caeed0532f8109dd4519c3d05a10190a8480293ed7b5a12da048a6cf3acf2",
+    "independent-review.yaml": "912311626f40e617444edb8ccd4206e86b872c11a4c747b35caec0434ca77fae",
+    "issuance.yaml": "7a8b4f0ba65735d9759b470648187a58fa11699fc24fc0b390538ae0c33a0311",
+    "negative-fixtures.yaml": "aa21f762eb9b60edfe667c2cf0bcf377fcf19cca9a8141330aeb40ad95dbfb28",
+    "performance-method.yaml": "ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df",
+}
+FROZEN_BYTES_SHA256 = R3_FROZEN_BYTES_SHA256
 REQUIRED_FAMILIES = {
     "successor_identity_and_pins",
     "modern_protocol_admission",
@@ -102,6 +112,15 @@ R1_SOURCE_INPUT_PATHS = frozenset(
     }
 )
 R2_SOURCE_INPUT_PATHS = frozenset(ALLOWED_DESIGN_PATHS)
+R3_ADJUDICATION_SOURCE_PATHS = frozenset(
+    {
+        "contracts/rpc/cpg_query_service.proto",
+        "docs/library_ref/rust_grpc_daemon_advanced_reference_tonic_0.14.6.md",
+        "docs/library_ref/grpcio_python_advanced_reference_1.83.0.md",
+    }
+)
+R3_SOURCE_INPUT_PATHS = R2_SOURCE_INPUT_PATHS | R3_ADJUDICATION_SOURCE_PATHS
+ALLOWED_SOURCE_INPUT_PATHS = R3_SOURCE_INPUT_PATHS
 
 
 class ExpectationReleaseError(ValueError):
@@ -177,6 +196,14 @@ RELEASE_SPECS = {
         frozen_bytes_sha256=R2_FROZEN_BYTES_SHA256,
         source_input_paths=R2_SOURCE_INPUT_PATHS,
         review_status="accepted",
+    ),
+    R3_RELEASE_PATH: ReleaseSpec(
+        path=R3_RELEASE_PATH,
+        release_id=R3_RELEASE_ID,
+        performance_release_id=R1_RELEASE_ID,
+        frozen_bytes_sha256=R3_FROZEN_BYTES_SHA256,
+        source_input_paths=R3_SOURCE_INPUT_PATHS,
+        review_status="pending",
     ),
 }
 
@@ -429,6 +456,16 @@ def _expectation_index(bundle: Bundle) -> dict[str, Mapping[str, Any]]:
                 "RFV5_EXPECTATION_NOT_INDEPENDENT",
                 f"{claim_id}: r2 correction provenance is incomplete",
             )
+        elif bundle.spec.release_id == R3_RELEASE_ID:
+            _require(
+                provenance.get("release_lineage") == R2_RELEASE_ID
+                and provenance.get("target_execution_revealed_evidence_gap") is True
+                and provenance.get("target_output_used_as_expected_value_source")
+                is False
+                and provenance.get("static_authority_adjudication_completed") is True,
+                "RFV5_EXPECTATION_NOT_INDEPENDENT",
+                f"{claim_id}: r3 adjudication provenance is incomplete",
+            )
         basis = _rows(row.get("design_basis"), f"{claim_id}.design_basis")
         _require(
             all(item.get("path") in ALLOWED_DESIGN_PATHS for item in basis),
@@ -476,6 +513,66 @@ def _expectation_index(bundle: Bundle) -> dict[str, Mapping[str, Any]]:
         "RFV5_CATEGORY_COVERAGE",
         "oracle category coverage drifted",
     )
+    if bundle.spec.release_id == R3_RELEASE_ID:
+        denial = index["RFV5-FM4-011"]
+        controlled = _mapping(
+            denial.get("controlled_input"), "RFV5-FM4-011.controlled_input"
+        )
+        resource_reads = _mapping(
+            controlled.get("resource_read_denials"),
+            "RFV5-FM4-011.controlled_input.resource_read_denials",
+        )
+        oversized_input = _mapping(
+            controlled.get("oversized_input_requirement"),
+            "RFV5-FM4-011.controlled_input.oversized_input_requirement",
+        )
+        observation = _mapping(
+            denial.get("expected_observation"),
+            "RFV5-FM4-011.expected_observation",
+        )
+        denied_cases = _mapping(
+            observation.get("denied_cases"),
+            "RFV5-FM4-011.expected_observation.denied_cases",
+        )
+        _require(
+            oversized_input
+            == {
+                "semantic_request_bytes_relation": (
+                    "greater_than_released_semantic_request_limit"
+                ),
+                "grpc_encoded_message_bytes_relation": (
+                    "less_than_grpc_transport_decode_limit"
+                ),
+            }
+            and denied_cases.get("oversized_input_requirement") == "RESOURCE_EXHAUSTED"
+            and resource_reads
+            == {
+                "invalid_resource_maximum_bytes": {
+                    "offset": 0,
+                    "maximum_bytes": (1 << 64) - 1,
+                    "bound_relation": "exceeds_effective_maximum_resource_chunk_bytes",
+                },
+                "resource_offset_past_end": {
+                    "offset_relation": "resource_byte_length_plus_one",
+                    "maximum_bytes": 1,
+                },
+            }
+            and denied_cases.get("invalid_resource_maximum_bytes")
+            == {
+                "grpc_status": "INVALID_ARGUMENT",
+                "safe_error_code": "SAFE_ERROR_CODE_INVALID_REQUEST",
+            }
+            and denied_cases.get("resource_offset_past_end")
+            == {
+                "grpc_status": "OUT_OF_RANGE",
+                "safe_error_code": "SAFE_ERROR_CODE_RANGE_NOT_SATISFIABLE",
+            }
+            and "oversized_resource_range" not in denied_cases
+            and observation.get("denied_before_bytes") is True
+            and observation.get("denied_before_business_dispatch") is True,
+            "RFV5_RESOURCE_DENIAL_CONTRACT_DRIFT",
+            "r3 resource read denial classes or pre-dispatch semantics drifted",
+        )
     return index
 
 
@@ -587,6 +684,76 @@ def _validate_issuance(bundle: Bundle) -> None:
             and len(dispositions) == 16,
             "RFV5_CORRECTION_AUDIT_DRIFT",
             "r2 correction audit is incomplete or target-authored",
+        )
+    elif bundle.spec.release_id == R3_RELEASE_ID:
+        _require(
+            authoring.get("target_execution_revealed_evidence_gap") is True
+            and authoring.get("target_execution_used_to_author_expected_values")
+            is False
+            and authoring.get("target_output_copied_as_expected_values") is False
+            and authoring.get("static_authority_adjudication_completed") is True
+            and authoring.get("correction_completed_after_target_execution") is True,
+            "RFV5_EXPECTATION_NOT_INDEPENDENT",
+            "r3 provenance does not separate target-revealed gap discovery from static expected-value authority",
+        )
+        lineage = _mapping(issuance.get("lineage"), "issuance.lineage")
+        inherited = _mapping(
+            lineage.get("inherited_artifacts"), "lineage.inherited_artifacts"
+        )
+        inherited_performance = _mapping(
+            inherited.get("performance-method.yaml"),
+            "lineage.inherited_artifacts.performance-method.yaml",
+        )
+        _require(
+            lineage.get("predecessor_release_id") == R2_RELEASE_ID
+            and lineage.get("predecessor_release_path") == R2_RELEASE_PATH.as_posix()
+            and lineage.get("r1_bytes_mutated") is False
+            and lineage.get("r2_bytes_mutated") is False
+            and lineage.get("r2_acceptance_reused_for_r3") is False
+            and lineage.get("r3_requires_fresh_independent_review") is True
+            and inherited_performance.get("source_release_id") == R1_RELEASE_ID
+            and inherited_performance.get("source_path")
+            == (R1_RELEASE_PATH / "performance-method.yaml").as_posix()
+            and inherited_performance.get("sha256")
+            == R1_FROZEN_BYTES_SHA256["performance-method.yaml"]
+            and inherited_performance.get("byte_identical") is True,
+            "RFV5_RELEASE_LINEAGE_DRIFT",
+            "r3 lineage or inherited performance method drifted",
+        )
+        audit = _mapping(issuance.get("correction_audit"), "issuance.correction_audit")
+        dispositions = _rows(
+            audit.get("claim_dispositions"),
+            "issuance.correction_audit.claim_dispositions",
+        )
+        disposition_index = {
+            str(row.get("claim_id")): row.get("disposition") for row in dispositions
+        }
+        expected_dispositions = {
+            f"RFV5-FM4-{number:03d}": "carried-forward" for number in range(1, 15)
+        }
+        expected_dispositions.update(
+            {
+                "RFV5-FM4-011": "forward-corrected",
+                "RFV5-FM4-015": "lineage-path-corrected",
+                "RFV5-FM4-016": "lineage-count-corrected",
+            }
+        )
+        _require(
+            audit.get("target_execution_revealed_gap") is True
+            and audit.get("static_authority_adjudication_completed") is True
+            and audit.get("target_output_used_as_authority") is False
+            and audit.get("expected_value_changes") == ["RFV5-FM4-011"]
+            and audit.get("release_mechanics_changes")
+            == ["RFV5-FM4-015", "RFV5-FM4-016"]
+            and disposition_index == expected_dispositions
+            and len(dispositions) == 16
+            and all(
+                isinstance(row.get("literal_audit"), str)
+                and bool(row.get("literal_audit"))
+                for row in dispositions
+            ),
+            "RFV5_CORRECTION_AUDIT_DRIFT",
+            "r3 correction audit is incomplete or target-authored",
         )
     artifact_hashes = _mapping(issuance.get("artifact_sha256"), "artifact_sha256")
     expected_hashes = {
@@ -778,12 +945,22 @@ def _validate_pending_review_handoff(bundle: Bundle) -> None:
     review = _mapping(bundle.review.get("review"), "independent review")
     expectations = _expectation_index(bundle)
     handoff = _mapping(review.get("handoff"), "independent review handoff")
+    authoring = _mapping(
+        bundle.issuance.get("authoring_constraints"), "authoring_constraints"
+    )
     frozen = bundle.spec.frozen_bytes_sha256
     _require(
         review.get("status") == "pending"
         and review.get("acceptance_authority") is False
+        and review.get("author_identity") == authoring.get("author_identity")
         and review.get("reviewer_identity") is None
         and review.get("reviewer_is_author") is None
+        and review.get("production_imports_used") is False
+        and review.get("target_execution_used") is False
+        and review.get("predecessor_expected_values_used") is False
+        and review.get("reviewed_candidate_commit") is None
+        and review.get("changed_claim_ids")
+        == ["RFV5-FM4-011", "RFV5-FM4-015", "RFV5-FM4-016"]
         and review.get("reviewed_claim_ids") == []
         and review.get("dispositions") == []
         and set(review.get("required_claim_ids", [])) == set(expectations)
@@ -796,14 +973,14 @@ def _validate_pending_review_handoff(bundle: Bundle) -> None:
         == frozen["performance-method.yaml"]
         and review.get("inherited_performance_release_id") == R1_RELEASE_ID
         and handoff.get("author_may_accept") is False
-        and handoff.get("r1_acceptance_may_be_reused") is False
+        and handoff.get("r2_acceptance_may_be_reused") is False
         and handoff.get("target_output_may_author_expected_values") is False
         and handoff.get("acceptance_requires_distinct_reviewer") is True
         and handoff.get("acceptance_requires_exact_candidate_hash_binding") is True
         and handoff.get("acceptance_requires_falsification_of_all_changed_claims")
         is True,
         "RFV5_REVIEW_HANDOFF_INVALID",
-        "r2 independent-review handoff is not strictly pending or hash-bound",
+        "candidate independent-review handoff is not strictly pending or hash-bound",
     )
 
 
@@ -927,7 +1104,8 @@ def validate_drift(bundle: Bundle) -> int:
         relative = str(source.get("path"))
         digest = str(source.get("sha256"))
         _require(
-            relative in ALLOWED_DESIGN_PATHS and SHA256.fullmatch(digest) is not None,
+            relative in ALLOWED_SOURCE_INPUT_PATHS
+            and SHA256.fullmatch(digest) is not None,
             "RFV5_SOURCE_HASH_INVALID",
             relative,
         )

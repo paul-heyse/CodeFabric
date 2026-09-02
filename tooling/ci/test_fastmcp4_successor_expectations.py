@@ -13,12 +13,16 @@ import pytest
 
 from tooling.ci.fastmcp4_successor_expectations import (
     ALLOWED_DESIGN_PATHS,
+    ALLOWED_SOURCE_INPUT_PATHS,
     R1_FROZEN_BYTES_SHA256,
     R1_RELEASE_ID,
     R1_RELEASE_PATH,
     R2_FROZEN_BYTES_SHA256,
     R2_RELEASE_ID,
     R2_RELEASE_PATH,
+    R3_FROZEN_BYTES_SHA256,
+    R3_RELEASE_ID,
+    R3_RELEASE_PATH,
     RELEASE_PATH,
     ROOT,
     SUBCOMMANDS,
@@ -44,11 +48,15 @@ def _r1_bundle():
     return load_bundle(release_path=R1_RELEASE_PATH)
 
 
+def _r2_bundle():
+    return load_bundle(release_path=R2_RELEASE_PATH)
+
+
 def _copy_root(tmp_path: Path, release_path: Path = RELEASE_PATH) -> Path:
     release = tmp_path / release_path
     release.parent.mkdir(parents=True)
     shutil.copytree(ROOT / release_path, release)
-    for relative in ALLOWED_DESIGN_PATHS:
+    for relative in ALLOWED_SOURCE_INPUT_PATHS:
         destination = tmp_path / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / relative, destination)
@@ -58,33 +66,34 @@ def _copy_root(tmp_path: Path, release_path: Path = RELEASE_PATH) -> Path:
 def test_int_public_issuance_api_returns_all_independent_cases() -> None:
     r1 = validate_issuance(release_path=R1_RELEASE_PATH, require_review=True)
     r2 = validate_issuance(release_path=R2_RELEASE_PATH, require_review=True)
-    for bundle in (r1, r2):
+    r3 = validate_issuance(release_path=R3_RELEASE_PATH, require_review=False)
+    for bundle in (r1, r2, r3):
         assert len(bundle.expectations) == 16
         assert len(bundle.causal) == 16
         assert len(bundle.negative) == 16
 
 
-def test_int_active_release_is_allowlisted_r2() -> None:
+def test_int_active_release_is_allowlisted_r3_candidate() -> None:
     bundle = load_bundle()
-    assert RELEASE_PATH == R2_RELEASE_PATH
-    assert bundle.spec.release_id == R2_RELEASE_ID
-    assert bundle.release_dir == ROOT / R2_RELEASE_PATH
+    assert RELEASE_PATH == R3_RELEASE_PATH
+    assert bundle.spec.release_id == R3_RELEASE_ID
+    assert bundle.release_dir == ROOT / R3_RELEASE_PATH
+    assert bundle.spec.review_status == "pending"
 
 
-def test_int_both_release_paths_are_allowlisted_and_absolute_form_is_supported() -> (
-    None
-):
+def test_int_all_release_paths_are_allowlisted_and_absolute_form_is_supported() -> None:
     assert load_bundle(release_path=R1_RELEASE_PATH).spec.release_id == R1_RELEASE_ID
     assert load_bundle(release_path=R2_RELEASE_PATH).spec.release_id == R2_RELEASE_ID
+    assert load_bundle(release_path=R3_RELEASE_PATH).spec.release_id == R3_RELEASE_ID
     assert (
-        load_bundle(release_path=(ROOT / R2_RELEASE_PATH).resolve()).spec.release_id
-        == R2_RELEASE_ID
+        load_bundle(release_path=(ROOT / R3_RELEASE_PATH).resolve()).spec.release_id
+        == R3_RELEASE_ID
     )
 
 
 @pytest.mark.parametrize(
     "release_path",
-    [Path("contracts/acceptance/relational-fabric-v5-r3"), Path("../outside")],
+    [Path("contracts/acceptance/relational-fabric-v5-r4"), Path("../outside")],
 )
 def test_neg_unallowlisted_release_path_is_rejected(release_path: Path) -> None:
     with pytest.raises(ExpectationReleaseError) as failure:
@@ -106,13 +115,22 @@ def test_ops_r1_frozen_bytes_remain_unchanged() -> None:
         )
 
 
-def test_ops_r2_inherits_performance_method_byte_identically() -> None:
+def test_ops_r2_frozen_bytes_remain_unchanged() -> None:
+    for name, digest in R2_FROZEN_BYTES_SHA256.items():
+        assert (
+            hashlib.sha256((ROOT / R2_RELEASE_PATH / name).read_bytes()).hexdigest()
+            == digest
+        )
+
+
+def test_ops_r2_and_r3_inherit_performance_method_byte_identically() -> None:
     r1 = (ROOT / R1_RELEASE_PATH / "performance-method.yaml").read_bytes()
     r2 = (ROOT / R2_RELEASE_PATH / "performance-method.yaml").read_bytes()
-    assert r2 == r1
+    r3 = (ROOT / R3_RELEASE_PATH / "performance-method.yaml").read_bytes()
+    assert r3 == r2 == r1
     assert (
-        hashlib.sha256(r2).hexdigest()
-        == R2_FROZEN_BYTES_SHA256["performance-method.yaml"]
+        hashlib.sha256(r3).hexdigest()
+        == R3_FROZEN_BYTES_SHA256["performance-method.yaml"]
     )
 
 
@@ -131,6 +149,62 @@ def test_ops_every_r2_selector_reports_nonzero_selection(command: str) -> None:
     assert report["status"] == "passed"
     assert report["release_id"] == R2_RELEASE_ID
     assert int(report["selected_count"]) > 0
+
+
+@pytest.mark.parametrize(
+    "command",
+    sorted(set(SUBCOMMANDS) - {"independent-expectation-review"}),
+)
+def test_ops_every_review_independent_r3_selector_reports_nonzero_selection(
+    command: str,
+) -> None:
+    report = _run(command, ROOT, R3_RELEASE_PATH)
+    assert report["status"] == "passed"
+    assert report["release_id"] == R3_RELEASE_ID
+    assert int(report["selected_count"]) > 0
+
+
+def test_beh_r3_independent_review_remains_pending() -> None:
+    with pytest.raises(ExpectationReleaseError) as failure:
+        validate_issuance(release_path=R3_RELEASE_PATH, require_review=True)
+    assert failure.value.code == "RFV5_REVIEW_PENDING"
+
+
+def test_beh_r3_provenance_separates_gap_discovery_from_expected_value_authority() -> (
+    None
+):
+    bundle = _bundle()
+    provenance = bundle.expectations[0]["provenance"]
+    authoring = bundle.issuance["authoring_constraints"]
+    audit = bundle.issuance["correction_audit"]
+
+    assert provenance["target_execution_revealed_evidence_gap"] is True
+    assert provenance["target_execution_used"] is False
+    assert provenance["target_output_used_as_expected_value_source"] is False
+    assert provenance["static_authority_adjudication_completed"] is True
+    assert authoring["target_execution_revealed_evidence_gap"] is True
+    assert authoring["target_execution_used_to_author_expected_values"] is False
+    assert authoring["target_output_copied_as_expected_values"] is False
+    assert authoring["correction_completed_after_target_execution"] is True
+    assert authoring["static_authority_adjudication_completed"] is True
+    assert audit["target_execution_revealed_gap"] is True
+    assert audit["target_output_used_as_authority"] is False
+    assert audit["static_authority_adjudication_completed"] is True
+
+
+def test_beh_r3_pending_handoff_cannot_reuse_r2_acceptance_or_drift_hash() -> None:
+    bundle = _bundle()
+    review_document = copy.deepcopy(bundle.review)
+    review = review_document["review"]
+    assert review["status"] == "pending"
+    assert review["acceptance_authority"] is False
+    assert review["reviewed_claim_ids"] == []
+    assert review["dispositions"] == []
+    assert review["handoff"]["r2_acceptance_may_be_reused"] is False
+    review["candidate_expectations_sha256"] = "0" * 64
+    with pytest.raises(ExpectationReleaseError) as failure:
+        validate_drift(replace(bundle, review=review_document))
+    assert failure.value.code == "RFV5_REVIEW_HANDOFF_INVALID"
 
 
 def test_beh_r2_review_is_distinct_claim_specific_and_accepted() -> None:
@@ -168,13 +242,14 @@ def test_ops_main_emits_machine_readable_report(
     assert report["selected_count"] == 16
 
 
-def test_beh_main_reports_active_r2_review_accepted(
+def test_beh_main_reports_active_r3_review_pending(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert main(["independent-expectation-review"]) == 0
-    report = json.loads(capsys.readouterr().out)
-    assert report["release_id"] == R2_RELEASE_ID
-    assert report["selected_count"] == 16
+    assert main(["independent-expectation-review"]) == 1
+    captured = capsys.readouterr()
+    report = json.loads(captured.err)
+    assert report["code"] == "RFV5_REVIEW_PENDING"
+    assert report["status"] == "failed"
 
 
 @pytest.mark.parametrize(
@@ -216,11 +291,13 @@ def test_beh_all_causal_fixtures_change_controlled_input_and_expected_observatio
     None
 ):
     assert validate_independent_review(_r1_bundle()) == 16
-    assert validate_independent_review(_bundle()) == 16
+    assert validate_independent_review(_r2_bundle()) == 16
+    bundle = validate_issuance(release_path=R3_RELEASE_PATH, require_review=False)
+    assert len(bundle.causal) == 16
 
 
 def test_beh_independent_review_hash_binding_drift_is_rejected() -> None:
-    bundle = _bundle()
+    bundle = _r2_bundle()
     review_document = copy.deepcopy(bundle.review)
     review = review_document["review"]
     assert isinstance(review, dict)
@@ -241,7 +318,7 @@ def test_beh_independent_review_hash_binding_drift_is_rejected() -> None:
 def test_beh_r2_non_independent_acceptance_is_rejected(
     field: str, value: object
 ) -> None:
-    bundle = _bundle()
+    bundle = _r2_bundle()
     review_document = copy.deepcopy(bundle.review)
     review = review_document["review"]
     assert isinstance(review, dict)
@@ -252,7 +329,7 @@ def test_beh_r2_non_independent_acceptance_is_rejected(
 
 
 def test_beh_r2_incomplete_claim_dispositions_are_rejected() -> None:
-    bundle = _bundle()
+    bundle = _r2_bundle()
     review_document = copy.deepcopy(bundle.review)
     review = review_document["review"]
     assert isinstance(review, dict)
@@ -316,7 +393,7 @@ def test_neg_duplicate_declared_json_pointer_is_rejected(
 
 
 def test_beh_r2_corrected_claim_and_fault_shapes_are_relational() -> None:
-    bundle = _bundle()
+    bundle = _r2_bundle()
     expectations = {str(row["claim_id"]): row for row in bundle.expectations}
     causal = {str(row["claim_id"]): row for row in bundle.causal}
     negative = {str(row["claim_id"]): row for row in bundle.negative}
@@ -398,21 +475,68 @@ def test_beh_r2_corrected_claim_and_fault_shapes_are_relational() -> None:
     )
 
 
-def test_int_r2_immutable_source_count_matches_release_claim() -> None:
+def test_beh_r3_resource_denials_are_split_and_typed() -> None:
+    bundle = _bundle()
+    expectations = {str(row["claim_id"]): row for row in bundle.expectations}
+    negative = {str(row["claim_id"]): row for row in bundle.negative}
+    claim = expectations["RFV5-FM4-011"]
+
+    assert claim["controlled_input"]["oversized_input_requirement"] == {
+        "semantic_request_bytes_relation": (
+            "greater_than_released_semantic_request_limit"
+        ),
+        "grpc_encoded_message_bytes_relation": (
+            "less_than_grpc_transport_decode_limit"
+        ),
+    }
+    assert claim["controlled_input"]["resource_read_denials"] == {
+        "invalid_resource_maximum_bytes": {
+            "offset": 0,
+            "maximum_bytes": (1 << 64) - 1,
+            "bound_relation": "exceeds_effective_maximum_resource_chunk_bytes",
+        },
+        "resource_offset_past_end": {
+            "offset_relation": "resource_byte_length_plus_one",
+            "maximum_bytes": 1,
+        },
+    }
+    denied = claim["expected_observation"]["denied_cases"]
+    assert denied["oversized_input_requirement"] == "RESOURCE_EXHAUSTED"
+    assert denied["invalid_resource_maximum_bytes"] == {
+        "grpc_status": "INVALID_ARGUMENT",
+        "safe_error_code": "SAFE_ERROR_CODE_INVALID_REQUEST",
+    }
+    assert denied["resource_offset_past_end"] == {
+        "grpc_status": "OUT_OF_RANGE",
+        "safe_error_code": "SAFE_ERROR_CODE_RANGE_NOT_SATISFIABLE",
+    }
+    assert "oversized_resource_range" not in denied
+    assert claim["expected_observation"]["denied_before_bytes"] is True
+    mismatch_paths = set(negative["RFV5-FM4-011"]["expected_mismatch_paths"])
+    assert {
+        "/denied_cases/invalid_resource_maximum_bytes/grpc_status",
+        "/denied_cases/invalid_resource_maximum_bytes/safe_error_code",
+        "/denied_cases/resource_offset_past_end/grpc_status",
+        "/denied_cases/resource_offset_past_end/safe_error_code",
+        "/denied_before_bytes",
+    } <= mismatch_paths
+
+
+def test_int_r3_immutable_source_count_matches_release_claim() -> None:
     bundle = _bundle()
     sources = bundle.issuance["immutable_source_inputs"]
     claim = next(
         row for row in bundle.expectations if row["claim_id"] == "RFV5-FM4-016"
     )
-    assert len(sources) == 5
+    assert len(sources) == 8
     assert claim["expected_observation"]["source_input_hashes_verified"] == len(sources)
 
 
-@pytest.mark.parametrize("name", sorted(R2_FROZEN_BYTES_SHA256))
+@pytest.mark.parametrize("name", sorted(R3_FROZEN_BYTES_SHA256))
 def test_neg_duplicate_yaml_mapping_key_is_rejected(tmp_path: Path, name: str) -> None:
     root = _copy_root(tmp_path)
-    path = root / R2_RELEASE_PATH / name
-    release_id = R1_RELEASE_ID if name == "performance-method.yaml" else R2_RELEASE_ID
+    path = root / R3_RELEASE_PATH / name
+    release_id = R1_RELEASE_ID if name == "performance-method.yaml" else R3_RELEASE_ID
     path.write_text(
         path.read_text(encoding="utf-8") + f"release_id: {release_id}\n",
         encoding="utf-8",
@@ -469,7 +593,7 @@ def test_ops_duplicate_source_path_cannot_mask_missing_hash_coverage() -> None:
     bundle = _bundle()
     issuance = copy.deepcopy(bundle.issuance)
     sources = issuance["immutable_source_inputs"]
-    assert isinstance(sources, list) and len(sources) == 5
+    assert isinstance(sources, list) and len(sources) == 8
     sources[-1] = copy.deepcopy(sources[0])
     with pytest.raises(ExpectationReleaseError) as failure:
         validate_drift(replace(bundle, issuance=issuance))

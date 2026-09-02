@@ -1,0 +1,47 @@
+schema: codefabric.fastmcp4-successor.independent-review.v1
+release_id: relational-fabric-v5-wp43-r3
+review:
+  status: pending
+  acceptance_authority: false
+  author_identity: codex-wp43-r3-expectation-release-author
+  reviewer_identity: null
+  reviewer_is_author: null
+  production_imports_used: false
+  target_execution_used: false
+  predecessor_expected_values_used: false
+  reviewed_candidate_commit: null
+  candidate_expectations_sha256: ec5caeed0532f8109dd4519c3d05a10190a8480293ed7b5a12da048a6cf3acf2
+  candidate_causal_fixtures_sha256: 753cf58067d344bbb946d340de0ae5f9fc95d32a01b068c6ffe84dde60d7f3a0
+  candidate_negative_fixtures_sha256: aa21f762eb9b60edfe667c2cf0bcf377fcf19cca9a8141330aeb40ad95dbfb28
+  candidate_performance_method_sha256: ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df
+  inherited_performance_release_id: relational-fabric-v5-wp43-r1
+  changed_claim_ids:
+    - RFV5-FM4-011
+    - RFV5-FM4-015
+    - RFV5-FM4-016
+  required_claim_ids:
+    - RFV5-FM4-001
+    - RFV5-FM4-002
+    - RFV5-FM4-003
+    - RFV5-FM4-004
+    - RFV5-FM4-005
+    - RFV5-FM4-006
+    - RFV5-FM4-007
+    - RFV5-FM4-008
+    - RFV5-FM4-009
+    - RFV5-FM4-010
+    - RFV5-FM4-011
+    - RFV5-FM4-012
+    - RFV5-FM4-013
+    - RFV5-FM4-014
+    - RFV5-FM4-015
+    - RFV5-FM4-016
+  reviewed_claim_ids: []
+  dispositions: []
+  handoff:
+    author_may_accept: false
+    r2_acceptance_may_be_reused: false
+    target_output_may_author_expected_values: false
+    acceptance_requires_distinct_reviewer: true
+    acceptance_requires_exact_candidate_hash_binding: true
+    acceptance_requires_falsification_of_all_changed_claims: true
