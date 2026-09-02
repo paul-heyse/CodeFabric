@@ -828,6 +828,18 @@ production-evidence-recovery-operations-check: production-evidence-input-integri
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_production_evidence.py -k 'ops_'
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/production_evidence.py recovery-operations
 
+[doc("Execute application-owned provider job, result, coverage, gap, resource, and admission contracts")]
+[group('test')]
+provider-job-contract-check:
+    cargo test --locked --no-default-features --features provider-contracts --lib provider_contracts::tests
+
+[doc("Validate one independently useful target feature and its forbidden dependency edges")]
+[group('gate')]
+feature-architecture-check scope:
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/feature_architecture.py "{{scope}}"
+    ast-grep test --filter '^provider-contracts-application-boundary-only$'
+    cargo check --locked --no-default-features --features "{{scope}}"
+
 [doc("Validate exact Arrow IPC identities, schemas, pinned provider batches, and cross-process control contracts")]
 [group('test')]
 provider-ipc-contract-integrity-check:

@@ -1,0 +1,15 @@
+id: provider-contracts-application-boundary-only
+language: Rust
+severity: error
+message: provider contracts may contain only application-owned types and minimal Arrow values.
+note: Keep provider-native, generated transport, DataFusion, Delta, repository, and daemon types outside this boundary.
+files:
+  - src/provider_contracts.rs
+rule:
+  any:
+    - all:
+        - kind: use_declaration
+        - regex: "(datafusion|deltalake|gix|rusqlite|tonic|prost|tokio|tree_sitter|ruff_|crate::(daemon|fabric|rpc|supervisor|production_provider_recipe))"
+    - all:
+        - kind: type_identifier
+        - regex: "^(CompilationBegin|CompilationEnd|OwnerBegin|OwnerEnd|ExtractionEvent|CompiledProviderAuthority|CompiledProviderExecutionProfile|CompiledProviderLane)$"

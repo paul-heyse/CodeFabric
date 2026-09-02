@@ -33,9 +33,16 @@ contract-models = [
     "canonical-json",
     "dep:serde_yaml_ng",
 ]
+provider-contracts = [
+    "contract-models",
+    "dep:arrow-array",
+    "dep:arrow-schema",
+    "dep:thiserror",
+]
 data-fabric = [
     "canonical-json",
     "contract-models",
+    "provider-contracts",
     "repository-state",
     "dep:async-trait",
     "dep:arrow",
@@ -60,6 +67,7 @@ data-fabric = [
 ]
 fact-generation = [
     "contract-models",
+    "provider-contracts",
     "dep:blake3",
     "dep:petgraph",
     "dep:rayon",

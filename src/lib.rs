@@ -75,6 +75,8 @@ pub mod provider_admission;
 pub mod provider_boundary;
 #[cfg(feature = "daemon")]
 pub mod provider_capability;
+#[cfg(feature = "provider-contracts")]
+pub mod provider_contracts;
 #[cfg(all(feature = "data-fabric", feature = "fact-generation"))]
 pub mod provider_native_syntax;
 #[cfg(feature = "fact-generation")]

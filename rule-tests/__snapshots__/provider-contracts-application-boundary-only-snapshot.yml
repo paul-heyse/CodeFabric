@@ -1,0 +1,25 @@
+id: provider-contracts-application-boundary-only
+snapshots:
+  ? |
+    struct LeakedGeneratedControl {
+        begin: CompilationBegin,
+    }
+  : labels:
+    - source: CompilationBegin
+      style: primary
+      start: 43
+      end: 59
+  ? |
+    use crate::rpc::generated::codefabric::rustc::v1::CompilationBegin;
+  : labels:
+    - source: use crate::rpc::generated::codefabric::rustc::v1::CompilationBegin;
+      style: primary
+      start: 0
+      end: 67
+  ? |
+    use datafusion::prelude::SessionContext;
+  : labels:
+    - source: use datafusion::prelude::SessionContext;
+      style: primary
+      start: 0
+      end: 40
