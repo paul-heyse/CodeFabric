@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_compiled_release_provider_fabric_runtime_boundary_design_v1_2026-09-02.md",
   "baseline_commit": "de5db65c2834458eb57c7133183b8cef67a2491a",
   "status": "executing",
-  "current_packet": "WP60",
+  "current_packet": "WP62",
   "packets": {
     "WP53": {
       "status": "complete",
@@ -56,8 +56,8 @@
       "blockers": []
     },
     "WP60": {
-      "status": "in_progress",
-      "proving_commit": "2413720a4180b765da56f260f9551b0307d08306",
+      "status": "complete",
+      "proving_commit": "eb92eb742b376743045ee3765c5edff3dc14ff45",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -70,7 +70,7 @@
       "blockers": []
     },
     "WP62": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -107,11 +107,9 @@
   },
   "milestones": {
     "M13": {
-      "status": "stale",
-      "proving_commit": "2413720a4180b765da56f260f9551b0307d08306",
-      "deviations": [
-        "WP53 and WP60 retain their implemented substrate but their full named gates cannot pass on the interrupted WP61 tree, so M13 requires focused revalidation after integration repair."
-      ],
+      "status": "complete",
+      "proving_commit": "eb92eb742b376743045ee3765c5edff3dc14ff45",
+      "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
@@ -229,6 +227,6 @@
       "summary": "The prior value did not identify a Git object; the corrected value is the ancestral commit titled implement v7 WP54 state authority split."
     }
   ],
-  "next_action": "Re-prove WP60's behavior-bearing semantic release, provider-job authority, categorical identity, and eight-form query program.",
-  "updated_at": "2026-09-03T10:11:00Z"
+  "next_action": "Execute WP62's physical purge of marker/global/profile authority and stale live evidence, then prove every target zero-state, feature, package, and retained-behavior gate.",
+  "updated_at": "2026-09-03T10:16:30Z"
 }
