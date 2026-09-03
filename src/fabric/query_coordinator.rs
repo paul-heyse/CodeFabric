@@ -3074,7 +3074,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wp56_running_cancel_is_durable_then_joins_one_terminal_task() {
+    async fn cancellation_terminal_and_sibling_semantics() {
+        let task_root = StructuredCancellationScope::try_root(
+            "daemon",
+            NonZeroUsize::new(4).expect("non-zero task capacity"),
+        )
+        .expect("daemon task root");
+        let cancelled_sibling = task_root.child("query:left").expect("left query scope");
+        let live_sibling = task_root.child("query:right").expect("right query scope");
+        cancelled_sibling.cancel();
+        assert!(cancelled_sibling.is_cancelled());
+        assert!(!live_sibling.is_cancelled());
+        task_root.cancel();
+        assert!(live_sibling.is_cancelled());
+
         let temp = tempfile::tempdir().expect("tempdir");
         let coordinator = coordinator(&temp, policy(1, 1_024, 64), 7, 1_000);
         let accepted = acceptance(
@@ -3250,7 +3263,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wp45_ops_restart_after_cancellation_side_effect_before_ack_reports_replay() {
+    async fn cancellation_restart_drain_operations() {
         let temp = tempfile::tempdir().expect("tempdir");
         let base_policy = policy(1, 1_024, 64);
         let query_id = {

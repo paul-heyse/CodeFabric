@@ -356,7 +356,7 @@ query-retention-cancellation-restart-check:
 [doc("Prove daemon-rooted cancellation propagation, durable replay, joined cleanup, and task faults")]
 [group('test')]
 cancellation-tree-check:
-    cargo nextest run --locked --lib -E 'test(/(parent_propagates_without_cancelling_a_sibling_from_its_child|owned_tasks_are_joined_and_observation_drop_is_not_cancellation|cleanup_timeout_escalates_then_observes_every_handle|completed_tasks_are_observed_before_capacity_is_reused|wp56_running_cancel_is_durable_then_joins_one_terminal_task|wp45_cancel_is_idempotent_for_queued_running_and_terminal_work|wp45_ops_restart_after_cancellation_side_effect_before_ack_reports_replay|wp45_watch_iteration_deadline_releases_admission)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(parent_propagates_without_cancelling_a_sibling_from_its_child|structured_task_tree_ownership_integrity|unjoined_task_and_cleanup_reserve_faults|completed_tasks_are_observed_before_capacity_is_reused|cancellation_terminal_and_sibling_semantics|wp45_cancel_is_idempotent_for_queued_running_and_terminal_work|cancellation_restart_drain_operations|wp45_watch_iteration_deadline_releases_admission)/)' --no-tests=fail
     ast-grep test --filter '^cancellation-inward-boundary-only$'
     ast-grep scan --rule rules/cancellation-inward-boundary-only.yml --error src
 

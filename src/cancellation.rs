@@ -414,7 +414,7 @@ mod tests {
 
     #[cfg(feature = "daemon")]
     #[tokio::test]
-    async fn owned_tasks_are_joined_and_observation_drop_is_not_cancellation() {
+    async fn structured_task_tree_ownership_integrity() {
         let root =
             StructuredCancellationScope::try_root("daemon", NonZeroUsize::new(8).unwrap()).unwrap();
         let query = root.child("query:1").unwrap();
@@ -434,7 +434,7 @@ mod tests {
 
     #[cfg(feature = "daemon")]
     #[tokio::test]
-    async fn cleanup_timeout_escalates_then_observes_every_handle() {
+    async fn unjoined_task_and_cleanup_reserve_faults() {
         let root =
             StructuredCancellationScope::try_root("daemon", NonZeroUsize::new(8).unwrap()).unwrap();
         let leaked = root.child("leaked").unwrap();
