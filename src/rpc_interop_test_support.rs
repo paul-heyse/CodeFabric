@@ -63,6 +63,8 @@ pub const INTEROP_REVOCATION_GENERATION: u64 = 9;
 pub const INTEROP_PRINCIPAL: PrincipalId = PrincipalId::from_bytes([0x11; 16]);
 pub const INTEROP_WORKSPACE: WorkspaceId = WorkspaceId::from_bytes([0x22; 16]);
 pub const INTEROP_SEMANTIC_PROFILE: &str = "codefabric.semantic-query.v2";
+/// One effective transport/registry chunk capability shared by the production interop fixture.
+pub const INTEROP_MAXIMUM_RESOURCE_CHUNK_BYTES: u64 = 64 * 1_024;
 
 /// Exact production-service specialization used by the cross-language wire oracle.
 pub type InteropProductionQueryService = ProductionQueryService<InteropSemanticBackend>;
@@ -615,7 +617,7 @@ pub async fn production_rpc_interop_fixture(
                 SessionOperation::ReleaseResource,
             ]),
             semantic_profiles: BTreeSet::from([INTEROP_SEMANTIC_PROFILE.to_owned()]),
-            maximum_resource_chunk_bytes: 64 * 1_024,
+            maximum_resource_chunk_bytes: INTEROP_MAXIMUM_RESOURCE_CHUNK_BYTES,
             maximum_result_bytes: 8 << 20,
             maximum_result_pages: 16,
             maximum_request_state_ttl_seconds: 30,
@@ -631,7 +633,13 @@ pub async fn production_rpc_interop_fixture(
         })
         .await
         .expect("register interop launch grant");
-    let results = Arc::new(StreamedResultRegistry::try_new(32).expect("interop result registry"));
+    let results = Arc::new(
+        StreamedResultRegistry::try_new(
+            usize::try_from(INTEROP_MAXIMUM_RESOURCE_CHUNK_BYTES)
+                .expect("interop resource chunk bound fits usize"),
+        )
+        .expect("interop result registry"),
+    );
     let release = Arc::new(
         crate::semantic_release::compile_current_v23_release(
             crate::production_provider_recipe::current_v23_provider_program_definition()

@@ -35,7 +35,7 @@ DEFAULT_REPORT_PATH = Path(
 METHOD_SCHEMA = "codefabric.compiled-release-performance.method.v2"
 REPORT_SCHEMA = "codefabric.compiled-release-performance.raw-report.v2"
 METHOD_ID = "relational-fabric-v7-final-target-v1"
-METHOD_REVISION = "wp65-preregistered-v3"
+METHOD_REVISION = "wp65-preregistered-v4"
 OBSERVATION_PREFIX = b"CODEFABRIC_WP65_OBSERVATION="
 MAX_CAPTURE_BYTES = 67_108_864
 

@@ -36,8 +36,8 @@ use codefabric::rpc::generated::codefabric::pyrefly::v1::Hello;
 use codefabric::rpc::generated::codefabric::rustc::v1::CompilationAccepted;
 use codefabric::rpc::{AuthorizedUnixStream, MAX_CONTROL_MESSAGE_BYTES, SameUserInterceptor};
 use codefabric::rpc_interop_test_support::{
-    INTEROP_DAEMON_GENERATION, INTEROP_SEMANTIC_PROFILE, ProductionRpcInteropControl,
-    interop_workspace_public_id, production_rpc_interop_fixture,
+    INTEROP_DAEMON_GENERATION, INTEROP_MAXIMUM_RESOURCE_CHUNK_BYTES, INTEROP_SEMANTIC_PROFILE,
+    ProductionRpcInteropControl, interop_workspace_public_id, production_rpc_interop_fixture,
 };
 use codefabric::session_authority::SESSION_METADATA_KEY;
 use hyper_util::rt::TokioIo;
@@ -434,7 +434,7 @@ fn production_handshake(launch_grant: [u8; 32], adapter_version: &str) -> Handsh
         minimum_minor: 0,
         maximum_minor: 0,
         desired_semantic_profiles: vec![INTEROP_SEMANTIC_PROFILE.to_owned()],
-        maximum_resource_chunk_bytes: 64 * 1_024,
+        maximum_resource_chunk_bytes: INTEROP_MAXIMUM_RESOURCE_CHUNK_BYTES,
         remaining_budget: Some(prost_types::Duration {
             seconds: 10,
             nanos: 0,
@@ -911,7 +911,7 @@ async fn wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable() 
                     })),
                 }),
                 offset: 0,
-                maximum_bytes: 64 * 1_024,
+                maximum_bytes: INTEROP_MAXIMUM_RESOURCE_CHUNK_BYTES,
             },
             &handshake.session_token,
         ))
@@ -960,7 +960,7 @@ async fn wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable() 
                     })),
                 }),
                 offset: 0,
-                maximum_bytes: 64 * 1_024,
+                maximum_bytes: INTEROP_MAXIMUM_RESOURCE_CHUNK_BYTES,
             },
             &handshake.session_token,
         ))

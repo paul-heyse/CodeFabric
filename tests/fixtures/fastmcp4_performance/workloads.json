@@ -1,7 +1,7 @@
 {
   "schema": "codefabric.compiled-release-performance.method.v2",
   "method_id": "relational-fabric-v7-final-target-v1",
-  "method_revision": "wp65-preregistered-v3",
+  "method_revision": "wp65-preregistered-v4",
   "authority": {
     "plan_path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v7_2026-09-02.md",
     "packet": "WP65",
@@ -10,7 +10,8 @@
     "candidate_results_used": false,
     "predecessor_comparison_permitted": false,
     "local_bound_relaxation_permitted": false,
-    "amendment_policy": "forward-versioned-before-any-new-measurement"
+    "amendment_policy": "forward-versioned-before-any-new-measurement",
+    "amendment_reason": "v3 failed closed before evidence because the interop registry did not share the session chunk capability; v4 centralizes that capability and leaves every workload, sample count, deadline, and bound unchanged"
   },
   "statistics": {
     "clock": "monotonic_ns",
