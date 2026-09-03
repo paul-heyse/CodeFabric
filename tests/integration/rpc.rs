@@ -657,6 +657,75 @@ async fn wp10_behavioral_acceptance() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn released_uds_transport_operations() {
+    let launch_grant = [0x61; 32];
+    let server = start_production_server("wp61-released-transport", launch_grant).await;
+    let mut client = configured_client(channel(&server.socket).await, true);
+    let handshake = client
+        .handshake(production_handshake(
+            launch_grant,
+            "rust-wp61-generated-client",
+        ))
+        .await
+        .expect("released handshake over the private UDS")
+        .into_inner();
+    let authority = handshake.authority.clone().expect("daemon authority");
+    let control = handshake
+        .reserved_control
+        .as_ref()
+        .expect("reserved control contract");
+    assert_eq!(control.reserved_capacity, 1);
+    assert_eq!(control.operations.len(), 4);
+    assert_eq!(handshake.session_token.len(), 32);
+
+    let status = client
+        .get_status(authenticated_request(
+            GetStatusRequest {
+                context: Some(request_context(&authority, "wp61-status")),
+                include_diagnostics: false,
+            },
+            &handshake.session_token,
+        ))
+        .await
+        .expect("released status operation")
+        .into_inner();
+    let public_status: serde_json::Value =
+        serde_json::from_slice(&status.canonical_public_status_json).expect("canonical status");
+    assert_eq!(
+        public_status["semantic_release"],
+        "codefabric-relational-data-fabric@2.3.0"
+    );
+    assert_eq!(
+        status
+            .authority
+            .as_ref()
+            .map(|value| value.session_id.as_str()),
+        Some(authority.session_id.as_str())
+    );
+
+    let cancellation = tokio::time::timeout(
+        Duration::from_millis(500),
+        client.cancel_query(authenticated_request(
+            CancelQueryRequest {
+                context: Some(request_context(&authority, "wp61-cancel")),
+                daemon_query_id: "query:absent-wp61".to_owned(),
+                cancellation_id: "cancel:wp61-control".to_owned(),
+            },
+            &handshake.session_token,
+        )),
+    )
+    .await
+    .expect("reserved control call remains prompt")
+    .expect("unknown-query cancellation is a typed response")
+    .into_inner();
+    assert_eq!(
+        cancellation.acknowledgement,
+        CancellationAcknowledgement::QueryNotFound as i32
+    );
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn wp45_rust_tonic_uds_accepts_generated_rust_client() {
     let launch_grant = [0x31; 32];
     let server = start_production_server("wp45-rust-production", launch_grant).await;
@@ -1040,7 +1109,6 @@ async fn wp45_rust_tonic_uds_accepts_generated_python_client() {
         .arg(&ready_ack)
         .current_dir(directory.path())
         .env_remove("PYTHONPATH")
-        .env("FASTMCP_MCP_CAMELCASE_COMPAT", "false")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

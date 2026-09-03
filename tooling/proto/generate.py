@@ -1,4 +1,4 @@
-"""Generate and verify all production bindings from one descriptor authority."""
+"""Generate and verify the production descriptor and selected runtime bindings."""
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ CPGD_V2_HISTORY_ID = "cpgd-v2-pre-fastmcp4"
 CPGD_V2_HISTORY_DESCRIPTOR = HISTORY_ROOT / f"{CPGD_V2_HISTORY_ID}-descriptor.pb"
 CPGD_V2_HISTORY_CENSUS = HISTORY_ROOT / f"{CPGD_V2_HISTORY_ID}-census.json"
 UNRELEASED_PACKAGES = frozenset({"codefabric.cpgd.v2"})
+PYTHON_RUNTIME_PACKAGES = frozenset({"codefabric.cpgd.v2"})
 EXACT_PYTHON_PACKAGES = {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
@@ -98,20 +99,18 @@ def output_destinations(output_kind: str) -> tuple[Path, ...]:
     suffix = suffixes.get(output_kind)
     if suffix is None:
         raise RuntimeError(f"unknown Proto output kind: {output_kind}")
-    return tuple(
+    destinations = tuple(
         sorted(
-            PYTHON_OUTPUT_ROOT / f"{relative.stem}{suffix}" for relative, _ in sources
+            PYTHON_OUTPUT_ROOT / f"{relative.stem}{suffix}"
+            for relative, path in sources
+            if proto_package(path) in PYTHON_RUNTIME_PACKAGES
         )
     )
-
-
-def one_output_destination(output_kind: str) -> Path:
-    matches = output_destinations(output_kind)
-    if len(matches) != 1:
+    if not destinations:
         raise RuntimeError(
-            f"catalog must declare one {output_kind} output, got {matches}"
+            f"no governed Proto source owns the {output_kind} Python runtime surface"
         )
-    return matches[0]
+    return destinations
 
 
 COMPILER_SOURCES = proto_sources()
@@ -228,7 +227,7 @@ def cargo_package_versions() -> dict[str, str]:
 
 
 def invoke_compiler(python_output: Path, descriptor: Path) -> None:
-    """Invoke the exact compiler once for Python code and descriptor IR."""
+    """Invoke the exact compiler once for descriptor IR and candidate Python code."""
     bundled_include = importlib.resources.files("grpc_tools").joinpath("_proto")
     arguments = [
         "grpc_tools.protoc",
@@ -826,8 +825,9 @@ def identity(files: dict[str, Path], versions: dict[str, str]) -> dict[str, Any]
     return {
         "schema": 5,
         "authority": (
-            "one exact grpc_tools.protoc invocation emits the sole FDS and Python "
-            "bindings; the same FDS drives tonic_prost_build::Builder::compile_fds"
+            "one exact grpc_tools.protoc invocation emits the sole FDS and candidate "
+            "Python outputs; only adapter-owned cpgd.v2 bindings are committed, and "
+            "the same FDS drives tonic_prost_build::Builder::compile_fds"
         ),
         "sources": source_identities(),
         "descriptor_sha256": hashlib.sha256(

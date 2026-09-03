@@ -717,14 +717,6 @@ fn wait_for_process_child_with_cmdline(parent_pid: u32, expected: &[u8], label: 
     }
 }
 
-#[cfg(target_os = "linux")]
-fn process_environment_has(pid: u32, expected: &[u8]) -> bool {
-    fs::read(format!("/proc/{pid}/environ"))
-        .expect("live process environment")
-        .split(|byte| *byte == 0)
-        .any(|entry| entry == expected)
-}
-
 fn modern_client_report(output: &Output) -> Value {
     assert!(
         output.status.success(),
@@ -1583,31 +1575,6 @@ fn wp47_neg_real_agent_scope_legacy_framing_and_secret_denial() {
     );
     let owner_scenario = write_modern_client_scenario(&fixture, "owner", &owner_scenario);
     let owner = spawn_modern_client(&stack, &owner_scenario);
-    #[cfg(target_os = "linux")]
-    {
-        let launcher_pid = wait_for_process_child_with_cmdline(
-            owner.id(),
-            b"\0mcp\0serve\0",
-            "installed client driver",
-        );
-        let adapter_pid = wait_for_process_child_with_cmdline(
-            launcher_pid,
-            b"\0-m\0codefabric_cpg_mcp\0",
-            "attach-only launcher",
-        );
-        assert!(
-            process_environment_has(launcher_pid, b"FASTMCP_MCP_CAMELCASE_COMPAT=true"),
-            "the launcher did not receive the deliberately hostile ambient bridge setting"
-        );
-        assert!(
-            process_environment_has(adapter_pid, b"FASTMCP_MCP_CAMELCASE_COMPAT=false"),
-            "production launch did not replace the ambient bridge setting for the adapter"
-        );
-        assert!(
-            !process_environment_has(adapter_pid, b"FASTMCP_MCP_CAMELCASE_COMPAT=true"),
-            "the adapter retained the hostile ambient bridge setting"
-        );
-    }
     let owner_report = modern_client_report(&owner.wait_with_output().expect("join owner agent"));
     let foreign_uri = modern_structured(modern_step(&owner_report, "reference"))["resource"]["uri"]
         .as_str()

@@ -155,9 +155,7 @@ def test_fact_generation_isolated_graph_is_accepted() -> None:
 def test_fact_generation_fabric_dependency_fault_is_rejected() -> None:
     metadata = _fact_generation_metadata()
     metadata["packages"].append({"id": "query", "name": "datafusion"})
-    metadata["resolve"]["nodes"].append(
-        {"id": "query", "features": [], "deps": []}
-    )
+    metadata["resolve"]["nodes"].append({"id": "query", "features": [], "deps": []})
     metadata["resolve"]["nodes"][0]["deps"].append(
         {"pkg": "query", "dep_kinds": [{"kind": None}]}
     )
@@ -193,7 +191,13 @@ def _contract_metadata(scope: str) -> dict[str, Any]:
 
 @pytest.mark.parametrize(
     "scope",
-    ("data-fabric", "repository-input", "operational-state", "semantic-release"),
+    (
+        "data-fabric",
+        "repository-input",
+        "operational-state",
+        "semantic-release",
+        "daemon",
+    ),
 )
 def test_target_capability_contracts_accept_exact_graphs(scope: str) -> None:
     contract = CONTRACTS[scope]
@@ -215,5 +219,18 @@ def test_target_capability_reverse_feature_faults_are_rejected(
 ) -> None:
     metadata = _contract_metadata(scope)
     metadata["resolve"]["nodes"][0]["features"].append(forbidden_feature)
-    with pytest.raises(FeatureArchitectureError, match=f"forbidden=.*{forbidden_feature}"):
+    with pytest.raises(
+        FeatureArchitectureError, match=f"forbidden=.*{forbidden_feature}"
+    ):
         _validate_metadata(metadata, scope)
+
+
+def test_daemon_s3_dependency_fault_is_rejected() -> None:
+    metadata = _contract_metadata("daemon")
+    metadata["packages"].append({"id": "s3", "name": "aws-sdk-s3"})
+    metadata["resolve"]["nodes"].append({"id": "s3", "features": [], "deps": []})
+    metadata["resolve"]["nodes"][0]["deps"].append(
+        {"pkg": "s3", "dep_kinds": [{"kind": None}]}
+    )
+    with pytest.raises(FeatureArchitectureError, match="forbidden=.*aws-sdk-s3"):
+        _validate_metadata(metadata, "daemon")

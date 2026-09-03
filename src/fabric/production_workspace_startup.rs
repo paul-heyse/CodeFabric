@@ -101,7 +101,6 @@ use crate::inventory::{InclusionState, InventoryLimits, InventoryWalker};
 use crate::operational_store::OperationalStore;
 use crate::production_provider_recipe::{
     ExactProviderLaneAuthority, ProductionProviderAuthority, ProductionProviderRuns,
-    current_v23_provider_program_definition,
 };
 use crate::provider_admission::{ExactProviderLaneRuns, ProviderLaneGap};
 use crate::provider_contracts::{
@@ -115,7 +114,7 @@ use crate::provider_native_syntax::{
 };
 use crate::relation_ipc::{ContextPin, SourcePin};
 use crate::secure_path::{PlatformPath, open_workspace_root};
-use crate::semantic_release::{ProviderJobInput, compile_current_v23_release};
+use crate::semantic_release::ProviderJobInput;
 use crate::source_image::{
     CaptureOutcome, CaptureRequest, SourceBlobHolderKind, SourceCapturePolicy, SourceImageStore,
     SourceLanguage, advance_source_generation, current_source_generation,
@@ -439,7 +438,7 @@ async fn build_fresh_candidate(
     state_root: &Path,
     operational_database: &Path,
     record: &WorkspaceRecord,
-    release: CompiledSemanticRelease,
+    release: &CompiledSemanticRelease,
     fence: super::command::WriterFence,
 ) -> Result<FreshCandidate, ProductionWorkspaceStartupError> {
     let workspace_id = WorkspaceId::from_bytes(record.workspace_id);
@@ -475,7 +474,7 @@ async fn build_fresh_candidate(
     let semantic_environment = digest32(
         b"codefabric.native-semantic-environment.v1\0",
         &[
-            release.suite().display().as_bytes(),
+            release.suite().as_str().as_bytes(),
             &record.authorization_fingerprint,
         ],
     );
@@ -536,11 +535,6 @@ async fn build_fresh_candidate(
     let builder =
         ProgrammaticFabricEpochBuilder::try_new(epoch_id, FabricEpochRuntimeConfig::default())
             .map_err(|error| step("epoch-builder", error))?;
-    let provider_release = compile_current_v23_release(
-        current_v23_provider_program_definition()
-            .map_err(|error| step("provider-release-definition", error))?,
-    )
-    .map_err(|error| step("provider-release-compile", error))?;
     let mut runner =
         ExactPythonSyntaxRunner::new().map_err(|error| step("native-provider-open", error))?;
     let mut native_runs = Vec::with_capacity(sources.len());
@@ -589,10 +583,10 @@ async fn build_fresh_candidate(
         let operational_ceilings = inprocess_operational_ceilings()
             .map_err(|error| step("in-process-provider-ceilings", error))?;
         let deadline = Instant::now() + Duration::from_secs(30);
-        let tree_prepared = provider_release
+        let tree_prepared = release
             .providers()
             .prepare_job(
-                provider_release.policy(),
+                release.policy(),
                 ProviderJobInput {
                     lane: ProviderLane::TreeSitter,
                     source: source_binding.clone(),
@@ -607,7 +601,7 @@ async fn build_fresh_candidate(
                     )
                     .map_err(|error| step("tree-sitter-run-binding", error))?,
                     scope: scope.clone(),
-                    requested_families: provider_release
+                    requested_families: release
                         .providers()
                         .families(ProviderLane::TreeSitter)
                         .map_err(|error| step("tree-sitter-family-program", error))?
@@ -620,10 +614,10 @@ async fn build_fresh_candidate(
                 },
             )
             .map_err(|error| step("tree-sitter-job", error))?;
-        let ruff_prepared = provider_release
+        let ruff_prepared = release
             .providers()
             .prepare_job(
-                provider_release.policy(),
+                release.policy(),
                 ProviderJobInput {
                     lane: ProviderLane::Ruff,
                     source: source_binding,
@@ -638,7 +632,7 @@ async fn build_fresh_candidate(
                     )
                     .map_err(|error| step("ruff-run-binding", error))?,
                     scope,
-                    requested_families: provider_release
+                    requested_families: release
                         .providers()
                         .families(ProviderLane::Ruff)
                         .map_err(|error| step("ruff-family-program", error))?
@@ -665,11 +659,11 @@ async fn build_fresh_candidate(
                 },
             )
             .map_err(|error| step("native-provider-run", error))?;
-        provider_release
+        release
             .providers()
             .admit(tree_prepared, run.tree_sitter_result().clone())
             .map_err(|error| step("tree-sitter-admission", error))?;
-        provider_release
+        release
             .providers()
             .admit(ruff_prepared, run.ruff_result().clone())
             .map_err(|error| step("ruff-admission", error))?;
@@ -768,18 +762,18 @@ async fn build_fresh_candidate(
 
     let input_release = InputReleaseRef::from_bytes(digest32(
         b"codefabric.input-release.v1\0",
-        &[release.suite().display().as_bytes()],
+        &[release.suite().as_str().as_bytes()],
     ));
     let program_release = ProgramReleaseRef::from_bytes(digest32(
         b"codefabric.program-release.v1\0",
-        &[release.suite().display().as_bytes()],
+        &[release.suite().as_str().as_bytes()],
     ));
     let application_release =
-        ApplicationReleaseRef::from_bytes(compiled_query_release_pin(release.query_authority()));
+        ApplicationReleaseRef::from_bytes(compiled_query_release_pin(release));
     let source_authority = SourceAuthorityRef::from_bytes(inventory.digest);
     let provider_release = ProviderReleaseRef::from_bytes(digest32(
         b"codefabric.provider-release.v1\0",
-        &[release.suite().display().as_bytes()],
+        &[release.suite().as_str().as_bytes()],
     ));
     let provider_set = ProviderSetRef::from_bytes(digest32(
         b"codefabric.provider-set.v1\0",
@@ -894,7 +888,7 @@ pub(crate) async fn start_production_workspace(
     state_root: &Path,
     operational_database: &Path,
     record: &WorkspaceRecord,
-    release: CompiledSemanticRelease,
+    release: Arc<CompiledSemanticRelease>,
     slot: Arc<WorkspaceSlot>,
     generations: Arc<SqliteWriterGenerationStore>,
     writer_lease: WorkspaceWriterLease,
@@ -944,7 +938,7 @@ pub(crate) async fn start_production_workspace(
         .map_err(|error| step("active-workspace-resource-policy", error))?;
     let active_builder: Arc<dyn ReleaseOwnedActiveWorkspaceBuilder> =
         Arc::new(ProductionActiveWorkspaceBuilder::new(
-            release,
+            Arc::clone(&release),
             active_config,
             Arc::clone(&admission),
             Arc::clone(&published_results),
@@ -968,7 +962,7 @@ pub(crate) async fn start_production_workspace(
                     state_root,
                     operational_database,
                     record,
-                    release,
+                    release.as_ref(),
                     writer_lease.fence(),
                 )
                 .await?,
@@ -1190,7 +1184,7 @@ pub(crate) async fn start_production_workspace(
                 )),
                 CompatibilityClassRef::from_bytes(digest32(
                     b"codefabric.compatibility-class.v1\0",
-                    &[release.suite().display().as_bytes()],
+                    &[release.suite().as_str().as_bytes()],
                 )),
                 RetentionPolicyRef::from_bytes(digest32(
                     b"codefabric.retention-policy.v1\0",

@@ -15,12 +15,6 @@
 
 set shell := ["./scripts/repo-shell.sh"]
 
-# FastMCP 4 is exercised only in its modern snake-case mode. Export this at the
-# command boundary so every adapter lint, type, test, inspection, STDIO, wheel,
-# and release recipe fails instead of inheriting the deprecated compatibility
-# bridge from a caller environment.
-export FASTMCP_MCP_CAMELCASE_COMPAT := "false"
-
 # Variadic recipes forward their arguments with "$@" rather than {{ args }}.
 # Without this, just re-expands the interpolated string and a quoted argument
 # containing a space is silently re-split -- so `just spec-outline <path>
@@ -167,28 +161,11 @@ proto-check:
 proto-repro-check: proto-check
     PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/proto/generate.py repro-check
 
-[doc("Validate compact v3 L/DB dispositions, retained targets, exact exclusions, and permanent oracles")]
-[group('gate')]
-legacy-disposition-artifact-integrity-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_post_purge_assurance.py -k 'wp39_int_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/post_purge_assurance.py disposition-integrity
-
-[doc("Rerun retained composition, provider, analysis, query, and adapter behavior after purge")]
-[group('test')]
-retained-target-post-purge-behavior-check: programmatic-production-composition-check exact-provider-batch-check analysis-producer-semantic-check semantic-request-program-check adapter-test
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_post_purge_assurance.py -k 'wp39_beh_'
-
 [doc("Reject executable predecessor authority while retaining named historical evidence")]
 [group('gate')]
 remaining-legacy-zero-state-check:
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_remaining_legacy_zero_state.py
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/remaining_legacy_zero_state.py
-
-[doc("Build and inventory every retained domain, feature, lock, graph, and adapter package after purge")]
-[group('gate')]
-post-purge-package-build-operations-check: root-check extractor-check sidecar-check adapter-wheel-test stable-graph-check features-each proto-repro-check
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_post_purge_assurance.py -k 'wp39_ops_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/post_purge_assurance.py package-inventory
 
 [doc("Reconstruct identical programmatic epochs from activation-selected exact Delta versions")]
 [group('gate')]
@@ -419,43 +396,6 @@ public-lifecycle-wire-contract-integrity-check:
 lifecycle-production-vertical-check:
     cargo nextest run --locked --test integration -E 'test(/(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation|wp44_ops_real_supervisor_restarts_daemon_and_joins_owned_endpoints|wp37_neg_codefabricd_rejects_direct_start_without_supervisor_control)/)' --no-tests=fail
 
-[doc("Keep FastMCP UDS-only and presentation-only while proving real generated-gRPC Arrow delivery")]
-[group('test')]
-fastmcp-presentation-boundary-check:
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp_presentation_boundary.py
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_server.py codefabric-cpg-mcp/tests/test_arrow_resources.py codefabric-cpg-mcp/tests/test_stdio.py codefabric-cpg-mcp/tests/test_settings.py
-
-[doc("Prove bounded backpressure, cancellation cleanup, reconnect attachment, shutdown, and restart recovery")]
-[group('test')]
-resource-cancellation-recovery-check:
-    cargo nextest run --locked --lib -E 'test(/(flow_control_credit_is_bounded_and_cancellation_is_terminal|frame_count_byte_budget_and_backpressure_are_enforced_before_allocation|cancellation_is_terminal_after_ipc_end_or_coverage_trailer|cancelled_transaction_never_consumes_epoch_capacity_or_result_lease|ordered_shutdown_closes_every_ingress_clone|shutdown_all_attempts_every_runtime_and_aggregates_in_workspace_order|sqlite_rehydrates_exact_delta_request_and_reconciliation_after_process_reopen)/)' --no-tests=fail
-    cargo nextest run --locked --test integration -E 'test(rust_client_deadline_cancels_a_slow_rpc)' --no-tests=fail
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_server.py codefabric-cpg-mcp/tests/test_arrow_resources.py -k 'transport_loss or wp15_arrow or checksum_offset_length or wrong_owner_token'
-
-[doc("Validate immutable WP40 identities, exact frozen inputs, live test names, and development-only certification state")]
-[group('test')]
-release-evidence-record-integrity-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_relational_fabric_release.py -k 'int_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_release.py record-integrity
-
-[doc("Execute the post-purge successor matrix against independently reviewed expectations")]
-[group('test')]
-release-evidence-matrix-v3-check: successor-expected-behavior-review-check first-principles-production-behavior-check retained-target-post-purge-behavior-check
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_relational_fabric_release.py -k 'beh_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_release.py matrix-v3
-
-[doc("Execute authorization, containment, provider, protocol, resource, activation, and legacy rejection evidence")]
-[group('test')]
-security-resource-release-rejection-check: causal-fault-discrimination-check provider-trust-coverage-remainder-check candidate-free-recovery-check resource-cancellation-recovery-check remaining-legacy-zero-state-check
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_relational_fabric_release.py -k 'neg_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_release.py security-resource-rejection
-
-[doc("Execute clean/incremental equivalence, restart, CDF, cache, resource, package, and honest performance evidence")]
-[group('test')]
-clean-incremental-recovery-performance-check: production-evidence-recovery-operations-check exact-provider-batch-check lifecycle-production-vertical-check post-purge-package-build-operations-check
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_relational_fabric_release.py -k 'ops_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/relational_fabric_release.py clean-incremental-recovery-performance
-
 [doc("Validate content-addressed cutover events, prepared commands, schema closure, and fencing")]
 [group('test')]
 cutover-event-contract-integrity-check:
@@ -475,31 +415,6 @@ predecessor-restart-revocation-check:
 [group('test')]
 unknown-cutover-reconciliation-check:
     cargo nextest run --locked --lib -E 'test(/wp41_ops_/) | test(/wp41_prod_ops_/)' --no-tests=fail
-
-[doc("Validate exact WP29-WP42 scope, 56 substantive oracles, proof ancestry, and independent review")]
-[group('test')]
-successor-provenance-state-integrity-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_certification.py -k 'int_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_certification.py contract-integrity
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_certification.py provenance-state-integrity
-
-[doc("Execute and record all 56 successor oracles at one trusted certification HEAD")]
-[group('test')]
-relational-fabric-v3-certification:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_certification.py -k 'beh_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_certification.py certify
-
-[doc("Reject any restored legacy route, missing fault, stale selector, or package reachability")]
-[group('test')]
-successor-final-zero-state-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_certification.py -k 'neg_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_certification.py final-zero-state
-
-[doc("Run four isolated build domains and record unavailable host profiles fail closed")]
-[group('test')]
-successor-four-domain-release-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_certification.py -k 'ops_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_certification.py four-domain-release
 
 [doc("Prove retired bootstrap, model, ontology, dual-epoch, and candidate authority stays absent")]
 [group('test')]
@@ -589,30 +504,6 @@ activation-receipt-nonauthority-check:
 candidate-free-recovery-check:
     cargo nextest run --locked --lib -E 'test(/wp32_ops_/)' --no-tests=fail
 
-[doc("Bind the independent v4 expectations to the active plan and terminal 2.2 suite")]
-[group('test')]
-successor-authority-expectation-integrity-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance_v4.py -k 'int_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance_v4.py successor-authority-expectation-integrity-check
-
-[doc("Require claim-specific independent acceptance of every decoded v4 expectation")]
-[group('test')]
-independent-expected-relation-review-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance_v4.py -k 'beh_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance_v4.py independent-expected-relation-review-check
-
-[doc("Prove every v4 causal and rejection fixture is independent and discriminating")]
-[group('test')]
-negative-fixture-independence-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance_v4.py -k 'neg_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance_v4.py negative-fixture-independence-check
-
-[doc("Fail closed when a frozen v4 input or nonzero evidence selector drifts")]
-[group('test')]
-expectation-drift-selector-sensitivity-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance_v4.py -k 'ops_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance_v4.py expectation-drift-selector-sensitivity-check
-
 [doc("Bind the independently authored FastMCP 4 expectations to active v5 and terminal suite 2.3")]
 [group('test')]
 fastmcp4-successor-authority-integrity-check:
@@ -636,12 +527,6 @@ fastmcp4-negative-fixture-independence-check:
 fastmcp4-expectation-drift-check:
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_successor_expectations.py -k 'ops_'
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_successor_expectations.py expectation-drift
-
-[doc("Validate the accepted supervisor policy, singleton, control, fd-3, and restart expectation slice")]
-[group('test')]
-supervisor-launch-contract-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_supervisor_launch_contract_v4.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/supervisor_launch_contract_v4.py
 
 [doc("Compile-probe typed launch settings, authenticated control, private sockets, and replacement-safe cleanup")]
 [group('test')]
@@ -715,7 +600,7 @@ fastmcp4-completion-authorization-check: _wp45-generated-client-uds-interop
 [doc("Pin the exact FastMCP 4 stack, public imports, and bridge-off dependency contract")]
 [group('adapter')]
 fastmcp4-dependency-contract-check: adapter-lint
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python -c 'import os,tomllib; from importlib.metadata import version; from pathlib import Path; expected=["blake3==1.0.9","fastmcp==4.0.0","grpcio==1.83.0","mcp==2.1.1","opentelemetry-api==1.44.0","protobuf==7.36.0","pydantic==2.13.4","rfc8785==0.1.4"]; actual=tomllib.loads(Path("codefabric-cpg-mcp/pyproject.toml").read_text())["project"]["dependencies"]; assert actual == expected, actual; assert (version("fastmcp"),version("mcp"),version("pydantic"),version("grpcio"),version("protobuf"),version("opentelemetry-api")) == ("4.0.0","2.1.1","2.13.4","1.83.0","7.36.0","1.44.0"); assert os.environ["FASTMCP_MCP_CAMELCASE_COMPAT"] == "false"'
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python -c 'import tomllib; from importlib.metadata import version; from pathlib import Path; expected=["blake3==1.0.9","fastmcp==4.0.0","grpcio==1.83.0","mcp==2.1.1","opentelemetry-api==1.44.0","protobuf==7.36.0","pydantic==2.13.4","rfc8785==0.1.4"]; actual=tomllib.loads(Path("codefabric-cpg-mcp/pyproject.toml").read_text())["project"]["dependencies"]; assert actual == expected, actual; assert (version("fastmcp"),version("mcp"),version("pydantic"),version("grpcio"),version("protobuf"),version("opentelemetry-api")) == ("4.0.0","2.1.1","2.13.4","1.83.0","7.36.0","1.44.0")'
     uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_adapter_contracts.py codefabric-cpg-mcp/tests/test_settings.py codefabric-cpg-mcp/tests/test_proto.py
 
 [doc("Serve only protocol 2026-07-28 and reject every legacy era before daemon dispatch")]
@@ -780,78 +665,29 @@ fastmcp4-clean-reconstruction-check:
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_production_evidence.py -k 'ops_'
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_production_evidence.py clean-reconstruction
 
-[doc("Validate frozen WP33 claim, fixture, dependency, and review identities")]
-[group('test')]
-successor-evidence-transaction-integrity-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance.py -k 'int_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance.py transaction-integrity
+[doc("Validate complete live-surface coverage and the exact retained FastMCP 4 target")]
+[group('gate')]
+fastmcp4-post-purge-surface-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_post_purge_assurance.py -k 'int_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_post_purge_assurance.py surface
 
-[doc("Validate independently reviewed decoded successor expectations and mutation detection")]
+[doc("Rerun representative daemon, guard, resource, completion, cancellation, and installed-adapter behavior after purge")]
 [group('test')]
-successor-expected-behavior-review-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance.py -k 'beh_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance.py expected-behavior-review
+fastmcp4-retained-target-behavior-check: fastmcp4-atomic-start-check fastmcp4-guard-roundtrip-check fastmcp4-resource-authority-check fastmcp4-completion-authorization-check fastmcp4-modern-protocol-check fastmcp4-contract-observation-check fastmcp4-stdio-vertical-check fastmcp4-security-negative-check fastmcp4-cancellation-recovery-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_post_purge_assurance.py -k 'beh_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_post_purge_assurance.py retained
 
-[doc("Validate semantic causal/negative fixtures cannot import target or historical output")]
-[group('test')]
-successor-negative-fixture-independence-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance.py -k 'neg_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance.py negative-fixture-independence
+[doc("Reject every displaced serving, adapter-authority, schema, recipe, package, and evidence surface")]
+[group('gate')]
+fastmcp4-decommission-zero-state-check: remaining-legacy-zero-state-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_post_purge_assurance.py -k 'neg_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_post_purge_assurance.py zero-state
 
-[doc("Validate WP33 issuance precedes consumers and fails closed on zero selection or mutation")]
-[group('test')]
-successor-evidence-issuance-readiness-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_successor_evidence_issuance.py -k 'ops_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/successor_evidence_issuance.py readiness
-
-[doc("Execute frozen Claim 018 through real clean and incremental Arrow/DataFusion successor code")]
-[group('test')]
-wp38-claim-018-production-check:
-    cargo nextest run --locked --lib -E 'test(/(wp38_claim_018_clean_incremental_equivalence_executes_successor_arrow_datafusion|wp38_claim_018_causal_source_change_is_discriminated_by_successor_execution|wp38_claim_018_missing_delete_fault_is_rejected_by_successor_execution)/)' --no-tests=fail
-
-[doc("Execute every currently implemented artifact-bound positive WP38 observation")]
-[group('test')]
-wp38-artifact-bound-positive-execution-check:
-    cd pyrefly-sidecar && cargo test --locked wp38_claim_001_positive_executes_frozen_pyrefly_provider_observation
-    cargo nextest run --locked --lib -E 'test(/(wp38_claim_002_positive_executes_frozen_typed_datafusion_transformation|wp38_claim_003_positive_executes_candidate_preserving_common_call_graph|wp38_claim_004_positive_production_execution|wp38_claim_005_positive_production_execution|wp38_claim_006_positive_production_execution|wp38_claim_007_positive_production_execution|wp38_claim_008_positive_production_execution|wp38_claim_009_positive_production_execution|wp38_claim_010_positive_production_execution|wp38_claim_011_positive_production_execution|wp38_claim_012_positive_executes_frozen_exact_delta_and_cdf_semantics|wp38_claim_013_positive_recovers_the_artifact_bound_exact_epoch|wp38_claim_014_positive_production_execution|wp38_claim_015_positive_executes_typed_arrow_ipc_and_canonical_artifact_identity|wp38_claim_016_positive_executes_fail_closed_production_preflight|wp38_claim_018_clean_incremental_equivalence_executes_successor_arrow_datafusion)/)' --no-tests=fail
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_production_evidence_claim017.py::test_wp38_claim_017_positive_executes_frozen_released_response_projection
-
-[doc("Execute every currently implemented artifact-bound causal WP38 observation")]
-[group('test')]
-wp38-artifact-bound-causal-execution-check:
-    cd pyrefly-sidecar && cargo test --locked wp38_claim_001_causal_source_mutation_changes_production_pyrefly_target
-    cargo nextest run --locked --lib -E 'test(/(wp38_claim_002_causal_fixture_changes_real_datafusion_rows|wp38_claim_003_causal_provider_target_changes_common_call_graph|wp38_claim_004_causal_production_execution|wp38_claim_005_causal_production_execution|wp38_claim_006_causal_production_execution|wp38_claim_007_causal_production_execution|wp38_claim_008_causal_production_execution|wp38_claim_009_causal_production_execution|wp38_claim_010_causal_production_execution|wp38_claim_011_causal_production_execution|wp38_claim_012_causal_exact_version_changes_the_decoded_snapshot|wp38_claim_013_causal_new_head_changes_the_recovered_exact_epoch|wp38_claim_014_causal_production_execution|wp38_claim_015_causal_row_budget_rejects_before_resource_publication|wp38_claim_016_causal_authorization_executes_degraded_trusted_local_plan|wp38_claim_018_causal_source_change_is_discriminated_by_successor_execution)/)' --no-tests=fail
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_production_evidence_claim017.py::test_wp38_claim_017_causal_terminal_selects_frozen_cancelled_response
-
-[doc("Execute every currently implemented artifact-bound rejection WP38 observation")]
-[group('test')]
-wp38-artifact-bound-negative-execution-check:
-    cargo nextest run --locked --lib -E 'test(/(wp38_claim_001_negative_rejects_open_provider_coverage|wp38_claim_002_negative_fixture_rejects_undeclared_typed_column|wp38_claim_003_negative_preserves_known_fact_and_typed_unknown|wp38_claim_004_negative_production_execution|wp38_claim_005_negative_production_execution|wp38_claim_006_negative_production_execution|wp38_claim_007_negative_production_execution|wp38_claim_008_negative_production_execution|wp38_claim_009_negative_production_execution|wp38_claim_010_negative_production_execution|wp38_claim_011_negative_production_execution|wp38_claim_012_negative_rejects_frozen_unsupported_writer_feature|wp38_claim_013_negative_transaction_mismatch_keeps_admission_closed|wp38_claim_014_negative_production_execution|wp38_claim_015_negative_cancellation_releases_without_publication|wp38_claim_016_negative_rejects_seccomp_requirement_weakening|wp38_claim_018_missing_delete_fault_is_rejected_by_successor_execution)/)' --no-tests=fail
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q codefabric-cpg-mcp/tests/test_production_evidence_claim017.py::test_wp38_claim_017_negative_rejects_frozen_candidate_public_projection
-
-[doc("Bind frozen WP33 inputs to the append-only, independently reviewed WP38 transaction")]
-[group('test')]
-production-evidence-input-integrity-check: successor-evidence-transaction-integrity-check remaining-legacy-zero-state-check
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_production_evidence.py -k 'int_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/production_evidence.py input-integrity
-
-[doc("Execute positive successor observations for every independently issued release claim")]
-[group('test')]
-first-principles-production-behavior-check: production-evidence-input-integrity-check exact-provider-batch-check provider-ipc-contract-integrity-check datafusion-contract-matrix-integrity-check analysis-producer-semantic-check semantic-request-program-check delta-exact-reconstruction-v3-check lifecycle-production-vertical-check public-lifecycle-wire-contract-integrity-check wp38-artifact-bound-positive-execution-check
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_production_evidence.py -k 'beh_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/production_evidence.py behavior
-
-[doc("Execute issued causal and rejection faults without historical acceptance dependencies")]
-[group('test')]
-causal-fault-discrimination-check: production-evidence-input-integrity-check provider-admission-exclusivity-check caller-defined-semantic-authority-denial-check analysis-causal-fault-check query-unknown-negative-proof-check activation-receipt-nonauthority-check fastmcp-presentation-boundary-check wp38-artifact-bound-causal-execution-check wp38-artifact-bound-negative-execution-check
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_production_evidence.py -k 'neg_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/production_evidence.py causal-faults
-
-[doc("Execute restart, cache-loss, resource, security, equivalence, and recovery evidence")]
-[group('test')]
-production-evidence-recovery-operations-check: production-evidence-input-integrity-check provider-trust-coverage-remainder-check datafusion-cache-resource-operations-check candidate-free-recovery-check graph-query-resource-operations-check resource-cancellation-recovery-check wp38-claim-018-production-check
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_production_evidence.py -k 'ops_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/production_evidence.py recovery-operations
+[doc("Build and inventory all retained domains, features, generated bindings, wheels, entry points, recipes, and services")]
+[group('gate')]
+fastmcp4-package-build-check: root-check extractor-check sidecar-check adapter-wheel-test stable-graph-check features-each proto-repro-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_post_purge_assurance.py -k 'ops_'
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_post_purge_assurance.py package
 
 [doc("Execute application-owned provider job, result, coverage, gap, resource, and admission contracts")]
 [group('test')]
@@ -875,7 +711,7 @@ compiled-suite-identity-check:
 [group('gate')]
 feature-architecture-check scope="all":
     PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/feature_architecture.py "{{scope}}"
-    @if [ "{{scope}}" = "state" ]; then scopes='repository-input operational-state'; elif [ "{{scope}}" = "all" ]; then scopes='provider-contracts release-compiler fact-generation data-fabric repository-input operational-state semantic-release cancellation'; else scopes='{{scope}}'; fi; for scope in $scopes; do if [ "$scope" = cancellation ]; then feature=daemon; else feature="$scope"; fi; ast-grep test --filter "^${scope}-inward-boundary-only$"; cargo check --locked --no-default-features --features "$feature"; done
+    @if [ "{{scope}}" = "state" ]; then scopes='repository-input operational-state'; elif [ "{{scope}}" = "all" ]; then scopes='provider-contracts release-compiler fact-generation data-fabric repository-input operational-state semantic-release daemon cancellation'; else scopes='{{scope}}'; fi; for scope in $scopes; do if [ "$scope" = cancellation ]; then feature=daemon; else feature="$scope"; fi; ast-grep test --filter "^${scope}-inward-boundary-only$"; cargo check --locked --no-default-features --features "$feature"; done
 
 [doc("Validate exact Arrow IPC identities, schemas, pinned provider batches, and cross-process control contracts")]
 [group('test')]
@@ -913,8 +749,14 @@ provider-type-boundary-check:
 [doc("Reject generated compiler transport values outside the Rust extractor adapter")]
 [group('gate')]
 generated-type-boundary-check:
-    ast-grep test --filter '^generated-rustc-types-transport-only$'
-    ast-grep scan --filter '^generated-rustc-types-transport-only$' src
+    ast-grep test --filter '^(generated-rustc-types-transport-only|generated-cpg-types-transport-only|daemon-inward-boundary-only)$'
+    ast-grep scan --filter '^(generated-rustc-types-transport-only|generated-cpg-types-transport-only|daemon-inward-boundary-only)$' src
+
+[doc("Prove release injection, bounded data admission, reserved control capacity, and real UDS cancellation")]
+[group('test')]
+grpc-flow-control-contract-check:
+    cargo nextest run --locked --lib -E 'test(/(injected_release_runtime_boundary_integrity|single_release_consumer_composition|grpc_flow_control_and_release_mismatch_faults|reserved_control_keeps_cancel_and_release_admissible|watch_iteration_deadline_releases_admission|read_iteration_deadline_releases_admission)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(released_uds_transport_operations)' --no-tests=fail
 
 [doc("Prove job-bound rustc conversion, provider results, cancellation, faults, and joined cleanup")]
 [group('test')]
@@ -1343,11 +1185,6 @@ features-no-default:
 msrv:
     cargo msrv verify
 
-[doc("Exercise the persisted data-fabric contract in both directions across two revisions")]
-[group('compat')]
-data-fabric-stack-compat baseline_ref target_ref:
-    ./scripts/data_fabric_revision_check.sh compat "{{baseline_ref}}" "{{target_ref}}"
-
 [doc("Rust API compatibility against a baseline revision")]
 [group('compat')]
 semver baseline:
@@ -1382,11 +1219,6 @@ bloat:
 [group('perf')]
 symbols:
     cargo nm --release
-
-[doc("Compare the predeclared data-fabric workload across two revisions")]
-[group('perf')]
-data-fabric-upgrade-bench baseline_ref target_ref:
-    ./scripts/data_fabric_revision_check.sh benchmark "{{baseline_ref}}" "{{target_ref}}"
 
 [doc("Section sizes of the release artifact")]
 [group('perf')]

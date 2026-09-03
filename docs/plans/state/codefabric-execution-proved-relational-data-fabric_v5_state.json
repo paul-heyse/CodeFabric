@@ -146,7 +146,17 @@
   },
   "baseline_failures": [],
   "discovered_obligations": [],
-  "plan_deviations": [],
+  "plan_deviations": [
+    {
+      "kind": "accepted_gate_substitution",
+      "replacement_packet": "WP49",
+      "superseded_packets": [
+        "WP44",
+        "WP47"
+      ],
+      "summary": "WP49's target-only supervisor, installed FastMCP 4 behavior, package, and zero-state proof supersedes immutable plan references to the physically removed v4 supervisor-launch-contract-check and predecessor resource-cancellation-recovery-check recipes. Their functional invariants remain covered by current typed launch and real-topology oracles; the retired recipes must not be restored for historical greenness."
+    }
+  ],
   "next_action": "Physically purge displaced FastMCP 3, duplicate adapter authority, static schema, and stale live surfaces for WP49.",
   "updated_at": "2026-09-02T07:01:50-04:00"
 }

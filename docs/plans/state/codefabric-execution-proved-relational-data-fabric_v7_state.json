@@ -7,65 +7,83 @@
   "current_packet": "WP61",
   "packets": {
     "WP53": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "033fce490d48c26fef85ef0e5205401267cb62a5",
-      "deviations": [],
+      "deviations": [
+        "The provider-contract implementation and narrow provider-job proof remain present, but the interrupted WP61 constructor transition leaves the default lib-test and all-target build uncompilable. WP53 cannot retain complete status until its full named gate set is rerun on the coherent cutover tree."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP54": {
-      "status": "complete",
-      "proving_commit": "49d50fb95fda6e1cc271b72b931b4ca845a61b4e",
-      "deviations": [],
+      "status": "stale",
+      "proving_commit": "49d50fb2592a492d9df0b50e447b9f00493cbdae",
+      "deviations": [
+        "The recorded proving commit was demonstrably corrupt and has been corrected to the ancestral WP54 implementation commit. All four declared WP54 oracle identifiers still lack exact substantive definitions, and the interrupted WP61 tree prevents the default packet gates from compiling."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP55": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "75a13e06655585ddbe6a4b7de0055a6d26ab4498",
-      "deviations": [],
+      "deviations": [
+        "The generic fabric implementation remains ancestral and the isolated data-fabric feature boundary is green, but the declared generic_fabric_dependency_boundary_integrity and datafusion_stream_cache_resource_operations oracles have no exact substantive definitions. Default lib-test compilation is also broken by the in-progress WP61 API transition."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP56": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "444e04d",
-      "deviations": [],
+      "deviations": [
+        "The structured cancellation implementation and isolated cancellation feature boundary remain present, but none of WP56's four declared oracle identifiers has an exact substantive definition. Its default runtime gates are additionally unrunnable while the WP61 constructor transition leaves lib-test compilation red."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP57": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "b51c2b56237002907f97bc1c14b797d1da55b369",
-      "deviations": [],
+      "deviations": [
+        "The job-driven Tree-sitter/Ruff implementation and isolated fact-generation feature boundary remain present, but the packet's default-lib acceptance selectors cannot compile on the interrupted WP61 tree. Revalidate rather than reimplement after the cutover test call sites are coherent."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP58": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "200c90682f2c35c151a770286bd46938be521e4b",
-      "deviations": [],
+      "deviations": [
+        "The rustc application-owned ingress and generated-type structural rule remain present, but the four declared WP58 oracle identifiers do not have exact substantive definitions; similarly named prefixed tests are not governed selector definitions. Default lib-test compilation is also red during WP61."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP59": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "7fd0f896768ed4017ca0329e5f09e7adcf5ff61c",
-      "deviations": [],
+      "deviations": [
+        "The supervised incremental Pyrefly implementation and its exact oracle definitions remain present, but the packet's default-lib lifecycle and IPC selectors cannot compile on the interrupted WP61 tree. Revalidate the retained implementation after the shared test target is repaired."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP60": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "2413720a4180b765da56f260f9551b0307d08306",
-      "deviations": [],
+      "deviations": [
+        "The behavior-bearing release and narrow provider-job proof remain present, but WP61 directly changes release consumers and several release/query test helpers still use the displaced marker-oriented signatures. The full WP60 named gate set cannot pass until that integration is completed and re-proved."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP61": {
       "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The working tree compiles one Arc<CompiledSemanticRelease> in ProductionDaemonFactory and injects it through startup, workspace, backend, and query-service constructors, while preserving the released proto/UDS checks. The transition is not coherent yet: default lib tests retain old signatures, Tonic and application service concerns remain combined, the daemon feature-architecture scope is unsupported, the gRPC flow-control recipe is absent, and the generated-type gate still covers only rustc transport values."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -107,23 +125,29 @@
   },
   "milestones": {
     "M13": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "2413720a4180b765da56f260f9551b0307d08306",
-      "deviations": [],
+      "deviations": [
+        "WP53 and WP60 retain their implemented substrate but their full named gates cannot pass on the interrupted WP61 tree, so M13 requires focused revalidation after integration repair."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "M14": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "7fd0f896768ed4017ca0329e5f09e7adcf5ff61c",
-      "deviations": [],
+      "deviations": [
+        "WP57-WP59 retain the provider-lane implementations, but their default-lib gates are currently unrunnable and WP58 lacks exact governed oracle definitions. M14 must be re-proved on the coherent cutover tree."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "M15": {
       "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "The inward feature/state/cancellation substrate is substantially implemented, and the production release injection is partially present. M15 remains open because WP54-WP56 are stale, WP61 is unproved, thin Tonic separation and bounded gRPC flow-control proof are absent, and the shared default test target does not compile."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -165,9 +189,11 @@
       "blockers": []
     },
     "DB22": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Target-neutral predecessor evidence, Python provider bindings, and stale tooling deletions are materially present, and the retained remaining-legacy and FastMCP decommission zero-state checks pass. DB22 remains incomplete because WP62 has not begun, v7 compiled-release zero-state does not exist, live RFV5-prefixed tooling remains, and the final package/gate inventory is unproved."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -188,6 +214,26 @@
       "kind": "activation_tooling_correction",
       "packet": "WP53",
       "summary": "Preserve the activation-time ancestry, complete dirty-tree snapshot, baseline-failure seeding, and v7 executable-oracle selector as current governance behavior."
+    },
+    {
+      "kind": "declared_oracle_definition_closure",
+      "packets": [
+        "WP54",
+        "WP55",
+        "WP56",
+        "WP58"
+      ],
+      "summary": "Implement one exact substantive definition for every declared packet oracle; equivalent recipes or prefixed test names do not satisfy the governed selector contract."
+    },
+    {
+      "kind": "wp61_gate_surface_completion",
+      "packet": "WP61",
+      "summary": "Add the missing grpc-flow-control-contract-check, add a supported daemon feature-architecture scope, and extend generated-type enforcement through the Tonic application boundary."
+    },
+    {
+      "kind": "wp61_test_migration_completion",
+      "packet": "WP61",
+      "summary": "Complete every release-aware constructor and test-helper migration so default all-target and lib-test compilation is restored before packet proof."
     }
   ],
   "plan_deviations": [
@@ -196,8 +242,15 @@
       "from": "v6",
       "to": "v7",
       "summary": "V6 was never activated. V7 corrects its design-order dependency closure and activation assurance without changing the accepted target architecture."
+    },
+    {
+      "kind": "state_proving_commit_correction",
+      "packet": "WP54",
+      "from": "49d50fb95fda6e1cc271b72b931b4ca845a61b4e",
+      "to": "49d50fb2592a492d9df0b50e447b9f00493cbdae",
+      "summary": "The prior value did not identify a Git object; the corrected value is the ancestral commit titled implement v7 WP54 state authority split."
     }
   ],
-  "next_action": "Complete WP61 by injecting one compiled semantic release through production startup, provider, fabric, query, status, reference, and recovery consumers behind a thin generated Tonic boundary.",
-  "updated_at": "2026-09-02T22:49:06Z"
+  "next_action": "Stabilize the in-progress WP61 cutover without restoring legacy authority: finish release-aware test and constructor migration, split application query behavior from the Tonic adapter, add the missing gRPC flow-control and daemon-boundary gates, close exact oracle-definition gaps in WP54-WP56/WP58, then rerun and re-record WP53-WP61 proof before beginning WP62.",
+  "updated_at": "2026-09-03T03:58:03Z"
 }

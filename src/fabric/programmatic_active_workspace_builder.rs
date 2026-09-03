@@ -188,7 +188,7 @@ impl ProductionActiveWorkspaceConfig {
 
 /// Concrete target-only builder shared by activation and clean restart.
 pub(crate) struct ProductionActiveWorkspaceBuilder {
-    release: CompiledSemanticRelease,
+    release: Arc<CompiledSemanticRelease>,
     config: ProductionActiveWorkspaceConfig,
     admission: Arc<FabricAdmissionRuntime>,
     published_results: Arc<PublishedArrowResultRegistry>,
@@ -204,7 +204,7 @@ impl ProductionActiveWorkspaceBuilder {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        release: CompiledSemanticRelease,
+        release: Arc<CompiledSemanticRelease>,
         config: ProductionActiveWorkspaceConfig,
         admission: Arc<FabricAdmissionRuntime>,
         published_results: Arc<PublishedArrowResultRegistry>,
@@ -341,7 +341,7 @@ impl ProductionActiveWorkspaceBuilder {
         ));
         let delta_runtime = Arc::new(
             ProgrammaticDeltaRuntime::try_new(
-                &self.release,
+                self.release.as_ref(),
                 &selection,
                 &epoch,
                 self.delta_ports.clone(),
@@ -379,7 +379,7 @@ impl ProductionActiveWorkspaceBuilder {
             .map_err(|_| Self::invalid("activation-authority-install"))?;
         let runtime = Arc::new(
             ProgrammaticWorkspaceRuntime::try_from_selected(
-                &self.release,
+                self.release.as_ref(),
                 &selection,
                 Arc::clone(&self.admission),
                 Arc::clone(&self.published_results),

@@ -38,9 +38,11 @@ use futures::StreamExt as _;
 use object_store::ObjectStore;
 use url::Url;
 
+#[cfg(feature = "daemon")]
+use crate::relational_program::SupplementalProgramRelationBinding;
 use crate::relational_program::{
     CompilationObservations, ProgramBindings, RelationInput, RelationalProgram,
-    RelationalProgramCompiler, RelationalProgramError, SupplementalProgramRelationBinding,
+    RelationalProgramCompiler, RelationalProgramError,
 };
 use crate::schema_contract::SchemaContract;
 

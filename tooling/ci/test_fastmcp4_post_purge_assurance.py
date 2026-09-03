@@ -76,7 +76,13 @@ dependencies = [
         "src/bin/codefabricd.rs",
         "fn main() { let _ = FabricDaemonProcessSettings::parse(std::env::args_os()); }\n",
     )
-    _write(root, "src/generated/codefabric.cpgd.v2.rs", "// generated v2 target\n")
+    for filename in (
+        "codefabric.cpgd.v2.rs",
+        "codefabric.provider.v1.rs",
+        "codefabric.pyrefly.v1.rs",
+        "codefabric.rustc.v1.rs",
+    ):
+        _write(root, f"src/generated/{filename}", "// generated target\n")
     _write(root, "src/lib.rs", "pub fn target() {}\n")
     _write(root, "tests/integration.rs", "#[test] fn target() {}\n")
     _write(
@@ -88,6 +94,7 @@ dependencies = [
         "def test_target():\n    assert True\n",
     )
     for filename in (
+        "__init__.py",
         "cpg_query_service_pb2.py",
         "cpg_query_service_pb2_grpc.py",
     ):
@@ -101,11 +108,13 @@ dependencies = [
         "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/cpg_query_service_pb2.pyi",
         "# generated v2 target\n",
     )
-    _write(
-        root,
-        "contracts/rpc/cpg_query_service.proto",
-        'syntax = "proto3";\npackage codefabric.cpgd.v2;\n',
-    )
+    for filename in (
+        "cpg_query_service.proto",
+        "provider_control.proto",
+        "pyrefly_sidecar.proto",
+        "rustc_extractor.proto",
+    ):
+        _write(root, f"contracts/rpc/{filename}", 'syntax = "proto3";\n')
     _write(root, "contracts/schema/target.json", "{}\n")
     _write(root, "scripts/target.sh", "#!/bin/sh\nexit 0\n")
     _write(root, "tooling/ci/target.py", "VALUE = 1\n")
@@ -113,6 +122,7 @@ dependencies = [
     _write(root, "tooling/fastmcp4_modern_client_driver.py", "VALUE = 1\n")
     _write(root, "tooling/proto/target.py", "VALUE = 1\n")
     _write(root, "tooling/proto/generate.rs", "fn main() {}\n")
+    _write(root, "tooling/proto/production-descriptor.pb", "descriptor\n")
     _write(root, "rules/target.yml", "id: target\n")
     _write(root, "rule-tests/target.yml", "id: target\n")
     _write(root, ".github/workflows/target.yml", "name: target\n")
@@ -143,8 +153,10 @@ def test_beh_retained_package_contract_is_exact(tmp_path: Path) -> None:
         "runtime_dependencies": 8,
         "root_binaries": 3,
         "operational_binaries": 2,
-        "rust_cpgd_bindings": 1,
-        "python_cpgd_bindings": 3,
+        "proto_files": 4,
+        "descriptor_sets": 1,
+        "rust_generated_bindings": 4,
+        "python_generated_bindings": 4,
     }
 
 
@@ -154,6 +166,35 @@ def test_beh_extra_binary_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_package_contract(root)
     assert failure.value.code == "RFV5_PURGE_BINARY_SURFACE"
+
+
+@pytest.mark.parametrize(
+    ("relative", "contents"),
+    (
+        ("contracts/rpc/retired_service.proto", 'syntax = "proto3";\n'),
+        ("src/generated/codefabric.retired.v1.rs", "// retired binding\n"),
+        (
+            "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/retired_pb2.py",
+            "# retired binding\n",
+        ),
+    ),
+)
+def test_beh_extra_generated_surface_is_rejected(
+    tmp_path: Path, relative: str, contents: str
+) -> None:
+    root = _minimal_root(tmp_path)
+    _write(root, relative, contents)
+    with pytest.raises(PostPurgeAssuranceError) as failure:
+        validate_package_contract(root)
+    assert failure.value.code == "RFV5_PURGE_GENERATED_BINDING"
+
+
+def test_beh_missing_production_descriptor_is_rejected(tmp_path: Path) -> None:
+    root = _minimal_root(tmp_path)
+    (root / "tooling/proto/production-descriptor.pb").unlink()
+    with pytest.raises(PostPurgeAssuranceError) as failure:
+        validate_package_contract(root)
+    assert failure.value.code == "RFV5_PURGE_GENERATED_BINDING"
 
 
 def test_beh_direct_dependency_drift_is_rejected(tmp_path: Path) -> None:
@@ -196,6 +237,31 @@ def test_neg_transitive_fastmcp_lock_entries_are_not_application_adoption(
         encoding="utf-8",
     )
     assert validate_zero_state(root)["live_matches"] == 0
+
+
+def test_neg_retired_token_guard_recipe_is_classified_without_hiding_others(
+    tmp_path: Path,
+) -> None:
+    root = _minimal_root(tmp_path)
+    guard_body = "|".join(RETIRED_TOKENS.values())
+    _write(
+        root,
+        "justfile",
+        "fastmcp4-adapter-authority-zero-state-check:\n"
+        f"    @if rg '{guard_body}' src; then exit 1; fi\n",
+    )
+    assert validate_zero_state(root)["live_matches"] == 0
+    _write(
+        root,
+        "justfile",
+        "target-check:\n"
+        f"    @echo '{RETIRED_TOKENS['mcp_call_identity']}'\n"
+        "fastmcp4-adapter-authority-zero-state-check:\n"
+        f"    @if rg '{guard_body}' src; then exit 1; fi\n",
+    )
+    with pytest.raises(PostPurgeAssuranceError) as failure:
+        validate_zero_state(root)
+    assert failure.value.code == "RFV5_PURGE_RETIRED_TOKEN"
 
 
 @pytest.mark.parametrize("path", sorted(CURRENT_NEGATIVE_ASSURANCE_PATHS))

@@ -21,7 +21,6 @@ fi
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 unset PYTHONHOME PYTHONPATH VIRTUAL_ENV CONDA_PREFIX CONDA_DEFAULT_ENV
-export FASTMCP_MCP_CAMELCASE_COMPAT=false
 export PYTHONNOUSERSITE=1
 
 exec "$installed_python" -I \

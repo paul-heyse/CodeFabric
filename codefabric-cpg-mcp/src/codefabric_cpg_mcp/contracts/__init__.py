@@ -1,23 +1,5 @@
-"""Machine-contract encoding helpers shared with the Rust daemon."""
+"""Strict presentation-boundary encoding helpers."""
 
-from .identity import (
-    SOURCE_CONTEXT_ID,
-    CbefField,
-    CbefRecord,
-    CbefValue,
-    DerivedIdentity,
-    IdentityDomain,
-    IdentityError,
-    TypeCode,
-    WorkspacePath,
-    canonical_type_term,
-    decode_public_id,
-    decode_record,
-    derive_identity,
-    encode_public_id,
-    encode_record,
-    validate_workspace_paths,
-)
 from .json import (
     PROFILE,
     CanonicalJsonError,
@@ -34,30 +16,14 @@ from .json import (
 
 __all__ = [
     "PROFILE",
-    "CbefField",
-    "CbefRecord",
-    "CbefValue",
     "CanonicalJsonError",
-    "DerivedIdentity",
-    "IdentityDomain",
-    "IdentityError",
-    "SOURCE_CONTEXT_ID",
-    "TypeCode",
-    "WorkspacePath",
     "canonicalize_json",
     "canonicalize_value",
-    "canonical_type_term",
     "checksum",
-    "decode_public_id",
-    "decode_record",
-    "derive_identity",
-    "encode_public_id",
-    "encode_record",
     "non_string_map_records",
     "validate_bytes",
     "validate_checksum",
     "validate_int64",
     "validate_lowercase_public",
     "validate_uint64",
-    "validate_workspace_paths",
 ]

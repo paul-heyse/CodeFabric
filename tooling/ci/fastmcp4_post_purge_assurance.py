@@ -37,8 +37,20 @@ EXPECTED_ROOT_BINS = {
     "codefabricd": ("src/bin/codefabricd.rs", ("daemon",)),
 }
 EXPECTED_OPERATIONAL_BIN_FILES = {"codefabric.rs", "codefabricd.rs"}
-EXPECTED_CPGD_RUST_BINDINGS = {"codefabric.cpgd.v2.rs"}
-EXPECTED_CPGD_PYTHON_BINDINGS = {
+EXPECTED_PROTO_FILES = {
+    "cpg_query_service.proto",
+    "provider_control.proto",
+    "pyrefly_sidecar.proto",
+    "rustc_extractor.proto",
+}
+EXPECTED_RUST_BINDINGS = {
+    "codefabric.cpgd.v2.rs",
+    "codefabric.provider.v1.rs",
+    "codefabric.pyrefly.v1.rs",
+    "codefabric.rustc.v1.rs",
+}
+EXPECTED_PYTHON_BINDINGS = {
+    "__init__.py",
     "cpg_query_service_pb2.py",
     "cpg_query_service_pb2.pyi",
     "cpg_query_service_pb2_grpc.py",
@@ -46,6 +58,7 @@ EXPECTED_CPGD_PYTHON_BINDINGS = {
 
 FORBIDDEN_PATHS = {
     "contracts/adapter",
+    "contracts/governance/relational-fabric-v3-disposition-ledger.json",
     "src/generated/codefabric.cpgd.v1.rs",
     "src/production_evidence_core_tests.rs",
     "src/production_evidence_tests.rs",
@@ -95,6 +108,19 @@ RETIRED_TOKENS = {
     "old_wp38_projection_test": "test_production_evidence_" + "claim017.py",
 }
 RETIRED_RECIPE_NAMES = {
+    "clean-incremental-recovery-performance-check",
+    "fastmcp-presentation-boundary-check",
+    "resource-cancellation-recovery-check",
+    "successor-provenance-state-integrity-check",
+    "relational-fabric-v3-certification",
+    "successor-final-zero-state-check",
+    "successor-four-domain-release-check",
+    "supervisor-launch-contract-check",
+    "successor-evidence-transaction-integrity-check",
+    "successor-expected-behavior-review-check",
+    "successor-negative-fixture-independence-check",
+    "successor-evidence-issuance-readiness-check",
+    "wp38-claim-018-production-check",
     "successor-authority-expectation-integrity-check",
     "independent-expected-relation-review-check",
     "negative-fixture-independence-check",
@@ -167,7 +193,9 @@ ORACLE_SELF_PATHS = {
 CURRENT_NEGATIVE_ASSURANCE_PATHS = {
     Path("tooling/ci/fastmcp4_production_evidence.py"),
     Path("tooling/ci/test_fastmcp4_production_evidence.py"),
+    Path("tooling/ci/remaining_legacy_zero_state.py"),
 }
+RETIRED_TOKEN_NEGATIVE_RECIPES = {"fastmcp4-adapter-authority-zero-state-check"}
 TRANSITIVE_LOCK_ONLY_TOKEN_CLASSES = {
     "pydantic_settings_import",
     "fastmcp_slim_import",
@@ -343,6 +371,28 @@ def _source_authority_files(files: Iterable[Path]) -> list[Path]:
     ]
 
 
+def _token_scan_text(root: Path, path: Path) -> str:
+    """Exclude only the command bodies that define retained negative guards."""
+
+    text = _read_live_text(root, path)
+    if path != Path("justfile"):
+        return text
+    declaration = re.compile(r"^([a-zA-Z0-9_-]+)(?:\s+[^:]*)?:(?:\s+.*)?$")
+    current_recipe: str | None = None
+    retained: list[str] = []
+    for line in text.splitlines(keepends=True):
+        match = declaration.fullmatch(line.rstrip("\r\n"))
+        if match is not None:
+            current_recipe = match.group(1)
+            retained.append(line)
+        elif (
+            current_recipe not in RETIRED_TOKEN_NEGATIVE_RECIPES
+            or not line[:1].isspace()
+        ):
+            retained.append(line)
+    return "".join(retained)
+
+
 def validate_zero_state(root: Path = ROOT) -> Mapping[str, object]:
     """Reject every physically displaced serving and authority class."""
 
@@ -360,7 +410,7 @@ def validate_zero_state(root: Path = ROOT) -> Mapping[str, object]:
     for path in _source_authority_files(files):
         if path in ORACLE_SELF_PATHS or path in CURRENT_NEGATIVE_ASSURANCE_PATHS:
             continue
-        text = _read_live_text(root, path)
+        text = _token_scan_text(root, path)
         for category, token in RETIRED_TOKENS.items():
             if (
                 path == Path("codefabric-cpg-mcp/uv.lock")
@@ -470,31 +520,45 @@ def validate_package_contract(root: Path = ROOT) -> Mapping[str, object]:
         "semantic generation/execution leaked into thin binaries",
     )
 
-    rust_cpgd = {
-        path.name for path in (root / "src/generated").glob("codefabric.cpgd.*.rs")
+    proto_files = {path.name for path in (root / "contracts/rpc").glob("*.proto")}
+    _require(
+        proto_files == EXPECTED_PROTO_FILES,
+        "RFV5_PURGE_GENERATED_BINDING",
+        f"Protobuf source inventory differs: {proto_files}",
+    )
+    descriptor = root / "tooling/proto/production-descriptor.pb"
+    _require(
+        descriptor.is_file() and descriptor.stat().st_size > 0,
+        "RFV5_PURGE_GENERATED_BINDING",
+        "production descriptor set is absent or empty",
+    )
+    rust_generated = {
+        path.name for path in (root / "src/generated").iterdir() if path.is_file()
     }
     _require(
-        rust_cpgd == EXPECTED_CPGD_RUST_BINDINGS,
+        rust_generated == EXPECTED_RUST_BINDINGS,
         "RFV5_PURGE_GENERATED_BINDING",
-        f"Rust CPG daemon bindings differ: {rust_cpgd}",
+        f"Rust generated binding inventory differs: {rust_generated}",
     )
     python_generated = (
         root / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated"
     )
-    python_cpgd = {
-        path.name for path in python_generated.glob("cpg_query_service_pb2*")
+    python_bindings = {
+        path.name for path in python_generated.iterdir() if path.is_file()
     }
     _require(
-        python_cpgd == EXPECTED_CPGD_PYTHON_BINDINGS,
+        python_bindings == EXPECTED_PYTHON_BINDINGS,
         "RFV5_PURGE_GENERATED_BINDING",
-        f"Python CPG daemon bindings differ: {python_cpgd}",
+        f"Python generated binding inventory differs: {python_bindings}",
     )
     return {
         "runtime_dependencies": len(dependencies),
         "root_binaries": len(observed_bins),
         "operational_binaries": len(bin_files),
-        "rust_cpgd_bindings": len(rust_cpgd),
-        "python_cpgd_bindings": len(python_cpgd),
+        "proto_files": len(proto_files),
+        "descriptor_sets": 1,
+        "rust_generated_bindings": len(rust_generated),
+        "python_generated_bindings": len(python_bindings),
     }
 
 

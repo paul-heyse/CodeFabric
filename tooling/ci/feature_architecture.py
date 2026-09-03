@@ -286,9 +286,7 @@ CONTRACTS = {
                 "semantic-release",
             }
         ),
-        required_packages=frozenset(
-            {"codefabric", "gix", "rustix", "url"}
-        ),
+        required_packages=frozenset({"codefabric", "gix", "rustix", "url"}),
         forbidden_packages=frozenset(
             {
                 "arrow-array",
@@ -386,9 +384,75 @@ CONTRACTS = {
                 "tree-sitter",
             }
         ),
-        forbidden_packages=frozenset(
-            {"arc-swap", "gix", "rusqlite", "tonic"}
+        forbidden_packages=frozenset({"arc-swap", "gix", "rusqlite", "tonic"}),
+    ),
+    "daemon": FeatureContract(
+        manifest_items=frozenset(
+            {
+                "dep:arc-swap",
+                "contract-models",
+                "semantic-release",
+                "repository-input",
+                "operational-state",
+                "rpc",
+                "dep:notify-debouncer-full",
+                "dep:hyper-util",
+                "dep:command-fds",
+                "dep:sha2",
+                "dep:tokio-stream",
+                "dep:tokio-util",
+                "dep:tonic-health",
+                "dep:toml",
+                "dep:tower",
+                "dep:tracing",
+            }
         ),
+        required_root_features=frozenset(
+            {
+                "canonical-json",
+                "contract-models",
+                "daemon",
+                "data-fabric",
+                "fact-generation",
+                "operational-state",
+                "provider-contracts",
+                "release-compiler",
+                "repository-input",
+                "rpc",
+                "semantic-release",
+            }
+        ),
+        forbidden_root_features=frozenset(
+            {"compatibility-probes", "local-workstation", "s3-storage"}
+        ),
+        required_packages=frozenset(
+            {
+                "arc-swap",
+                "arrow-array",
+                "arrow-schema",
+                "codefabric",
+                "command-fds",
+                "datafusion",
+                "deltalake",
+                "gix",
+                "hyper-util",
+                "notify-debouncer-full",
+                "prost",
+                "ruff_python_ast",
+                "rusqlite",
+                "sha2",
+                "tokio",
+                "tokio-stream",
+                "tokio-util",
+                "toml",
+                "tonic",
+                "tonic-health",
+                "tonic-prost",
+                "tower",
+                "tree-sitter",
+            }
+        ),
+        forbidden_packages=frozenset({"aws-config", "aws-sdk-s3", "deltalake-aws"}),
     ),
 }
 
@@ -439,7 +503,9 @@ def _resolved_root_graph(root: Path, feature: str) -> tuple[set[str], set[str]]:
         if package_names.get(identifier) == "codefabric"
     ]
     if len(root_ids) != 1:
-        raise FeatureArchitectureError("cargo metadata did not identify one root package")
+        raise FeatureArchitectureError(
+            "cargo metadata did not identify one root package"
+        )
     reachable = set(root_ids)
     pending = list(root_ids)
     while pending:
@@ -477,10 +543,17 @@ def _validate_cancellation(root: Path) -> dict[str, Any]:
     if not isinstance(daemon, list) or "dep:tokio-util" not in daemon:
         raise FeatureArchitectureError("daemon does not directly activate tokio-util")
     if not isinstance(tokio_util, dict) or tokio_util.get("optional") is not True:
-        raise FeatureArchitectureError("tokio-util must remain an optional direct dependency")
+        raise FeatureArchitectureError(
+            "tokio-util must remain an optional direct dependency"
+        )
     if tokio_util.get("version") != "=0.7.19" or tokio_util.get("features") != ["rt"]:
         raise FeatureArchitectureError("tokio-util cancellation pin/features changed")
-    inward = ("provider-contracts", "release-compiler", "fact-generation", "data-fabric")
+    inward = (
+        "provider-contracts",
+        "release-compiler",
+        "fact-generation",
+        "data-fabric",
+    )
     leaked = [
         feature
         for feature in inward
@@ -493,9 +566,13 @@ def _validate_cancellation(root: Path) -> dict[str, Any]:
     daemon_packages, daemon_features = _resolved_root_graph(root, "daemon")
     fact_packages, _ = _resolved_root_graph(root, "fact-generation")
     if "tokio-util" not in daemon_packages or "daemon" not in daemon_features:
-        raise FeatureArchitectureError("daemon resolution omitted structured cancellation")
+        raise FeatureArchitectureError(
+            "daemon resolution omitted structured cancellation"
+        )
     if "tokio-util" in fact_packages:
-        raise FeatureArchitectureError("fact-generation resolved daemon cancellation support")
+        raise FeatureArchitectureError(
+            "fact-generation resolved daemon cancellation support"
+        )
     return {
         "scope": "cancellation",
         "daemon_feature": "daemon",

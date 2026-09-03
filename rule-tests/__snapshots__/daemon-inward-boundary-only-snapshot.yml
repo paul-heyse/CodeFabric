@@ -1,0 +1,14 @@
+id: daemon-inward-boundary-only
+snapshots:
+  ? |
+    impl<B: SemanticQueryBackend> CpgQueryService for QueryApplicationService<B> {
+        async fn handshake(&self, request: Request<HandshakeRequest>) {}
+    }
+  : labels:
+    - source: |-
+        impl<B: SemanticQueryBackend> CpgQueryService for QueryApplicationService<B> {
+            async fn handshake(&self, request: Request<HandshakeRequest>) {}
+        }
+      style: primary
+      start: 0
+      end: 149

@@ -35,8 +35,7 @@ use super::admission::FabricQueryLease;
 use super::arrow_result_resource::ResultResourceLease;
 use super::command::WorkspaceId;
 use super::production_kernel::{
-    ActiveWorkspaceLease, CompiledPolicyAuthority, CompiledQueryAuthority, CompiledSemanticRelease,
-    LifecycleAuthority, WorkspaceSlotRegistry,
+    ActiveWorkspaceLease, CompiledSemanticRelease, LifecycleAuthority, WorkspaceSlotRegistry,
 };
 use super::programmatic_schema::ProgrammaticRelationId;
 use super::programmatic_workspace::{ProgrammaticWorkspaceRuntime, WorkspaceEpochQueryAuthority};
@@ -298,14 +297,15 @@ impl CompiledV20ProgrammaticScopeAuthorization {
     /// Rejects a policy mismatch, an incomplete/duplicate scope set, sentinel handoff pins, an
     /// empty table capability, or a zero result bound.
     pub(crate) fn try_new(
-        _compiled_query: &CompiledQueryAuthority,
-        _compiled_policy: &CompiledPolicyAuthority,
+        release: &CompiledSemanticRelease,
         policy_pin: [u8; 32],
         execution_catalog: &EpochBoundSemanticExecutionCatalog,
         table_relations: BTreeSet<ProgrammaticRelationId>,
         max_output_rows: usize,
     ) -> Result<Self, ProgrammaticQueryPortError> {
-        if policy_pin == [0; 32]
+        let compiled_policy = release.observation().policy_program.as_str();
+        if compiled_policy.is_empty()
+            || policy_pin == [0; 32]
             || execution_catalog.policy_pin != policy_pin
             || table_relations.is_empty()
             || max_output_rows == 0
@@ -681,7 +681,7 @@ impl ProgrammaticSemanticQueryPorts {
     /// Construct ports only under the compiled release and when every implementation names a
     /// real release/policy identity.
     pub(crate) fn try_new(
-        compiled_release: &CompiledQueryAuthority,
+        compiled_release: &CompiledSemanticRelease,
         ingress: Arc<dyn ProgrammaticSemanticIngressPort>,
         scope_authorization: Arc<dyn ProgrammaticScopeAuthorizationPort>,
         snapshot: Arc<dyn ProgrammaticSnapshotProjectionPort>,
@@ -727,6 +727,7 @@ impl ProgrammaticSemanticQueryPorts {
 
 /// Read-only query routing over target-owned active-workspace and lifecycle authority.
 pub struct ProgrammaticSemanticQueryBackend {
+    release: Arc<CompiledSemanticRelease>,
     workspace_slots: Arc<WorkspaceSlotRegistry>,
     lifecycle: Arc<LifecycleAuthority>,
     package_builder: StreamedResultPackageBuilder,
@@ -755,15 +756,22 @@ impl ProgrammaticSemanticQueryBackend {
     /// sealer installed by the daemon composition root.
     #[must_use]
     pub fn new(
+        release: Arc<CompiledSemanticRelease>,
         workspace_slots: Arc<WorkspaceSlotRegistry>,
         lifecycle: Arc<LifecycleAuthority>,
         package_builder: StreamedResultPackageBuilder,
     ) -> Self {
         Self {
+            release,
             workspace_slots,
             lifecycle,
             package_builder,
         }
+    }
+
+    #[must_use]
+    pub(crate) const fn release(&self) -> &Arc<CompiledSemanticRelease> {
+        &self.release
     }
 
     fn require_semantic_admission(&self) -> Result<(), SemanticQueryError> {
@@ -800,6 +808,12 @@ impl ProgrammaticSemanticQueryBackend {
         let workspace = lease.workspace().runtime();
         let authority = workspace.query_authority();
         let ports = lease.workspace().query_ports();
+        if ports.application_release() != compiled_query_release_pin(self.release.as_ref()) {
+            return Err(query_error(
+                "application_release",
+                "active workspace differs from the daemon-injected semantic release",
+            ));
+        }
         if *authority.activation_pins().application_release.as_bytes()
             != ports.application_release()
         {
@@ -854,6 +868,10 @@ impl ProgrammaticSemanticQueryBackend {
 #[async_trait]
 impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
     type ExecutionAuthority = ProgrammaticExecutionAuthority;
+
+    fn application_release_pin(&self) -> Option<[u8; 32]> {
+        Some(compiled_query_release_pin(self.release.as_ref()))
+    }
 
     fn retained_package_builder(&self) -> Option<StreamedResultPackageBuilder> {
         Some(self.package_builder.clone())
@@ -1271,13 +1289,14 @@ pub fn canonical_request_content_pin(canonical_bytes: &[u8]) -> [u8; 32] {
 /// identity is derived solely from the compiled suite and the sole released query language; it is
 /// never accepted as an operational input.
 #[must_use]
-pub(crate) fn compiled_query_release_pin(_authority: &CompiledQueryAuthority) -> [u8; 32] {
-    let suite = CompiledSemanticRelease::current().suite();
+pub(crate) fn compiled_query_release_pin(release: &CompiledSemanticRelease) -> [u8; 32] {
+    let observation = release.observation();
     let mut hasher = blake3::Hasher::new();
     for part in [
         COMPILED_QUERY_RELEASE_PIN_DOMAIN,
-        suite.suite_id().as_bytes(),
-        suite.suite_version().as_bytes(),
+        release.suite().as_str().as_bytes(),
+        observation.query_program.as_str().as_bytes(),
+        observation.policy_program.as_str().as_bytes(),
         b"composable semantic CPG fact query".as_slice(),
         b"2.0".as_slice(),
     ] {
@@ -1548,8 +1567,9 @@ mod tests {
         policy: [u8; 32],
         snapshot: [u8; 32],
     ) -> Result<ProgrammaticSemanticQueryPorts, ProgrammaticSemanticQueryBackendError> {
+        let release = super::super::production_kernel::CompiledSemanticRelease::current();
         ProgrammaticSemanticQueryPorts::try_new(
-            super::super::production_kernel::CompiledSemanticRelease::current().query_authority(),
+            &release,
             Arc::new(IngressProbe(ingress)),
             Arc::new(ScopeProbe(policy)),
             Arc::new(SnapshotProbe(snapshot)),
@@ -1560,7 +1580,7 @@ mod tests {
     #[test]
     fn port_bundle_requires_application_and_every_component_identity() {
         let release = super::super::production_kernel::CompiledSemanticRelease::current();
-        let release_pin = compiled_query_release_pin(release.query_authority());
+        let release_pin = compiled_query_release_pin(&release);
         for (expected, pins) in [
             ("semantic ingress", ([0; 32], [2; 32], [3; 32])),
             ("scope authorization", (release_pin, [0; 32], [3; 32])),
@@ -1580,7 +1600,7 @@ mod tests {
         let ports = probes(release_pin, [2; 32], [3; 32]).unwrap();
         assert_eq!(
             ports.application_release(),
-            compiled_query_release_pin(release.query_authority())
+            compiled_query_release_pin(&release)
         );
         assert_ne!(ports.application_release(), [0; 32]);
     }
@@ -1607,7 +1627,9 @@ mod tests {
             1024 * 1024,
         )
         .unwrap();
+        let release = Arc::new(super::super::production_kernel::CompiledSemanticRelease::current());
         let backend = ProgrammaticSemanticQueryBackend::new(
+            release,
             Arc::new(WorkspaceSlotRegistry::new()),
             Arc::clone(&lifecycle),
             StreamedResultPackageBuilder::new(sink, limits),

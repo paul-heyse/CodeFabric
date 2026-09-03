@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export FASTMCP_MCP_CAMELCASE_COMPAT=false
-
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/codefabric-adapter-wheel.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
@@ -72,7 +70,14 @@ settings = Settings(
 )
 
 contracts_root = files("codefabric_cpg_mcp.contracts")
-for module in ("fingerprints", "index", "model_registries", "query_forms", "schemas"):
+for module in (
+    "fingerprints",
+    "identity",
+    "index",
+    "model_registries",
+    "query_forms",
+    "schemas",
+):
     assert find_spec(f"codefabric_cpg_mcp.contracts.{module}") is None
 for artifact in (
     "adapter-fingerprints.json",
@@ -87,6 +92,13 @@ for artifact in (
     "schemas.py",
 ):
     assert not contracts_root.joinpath(artifact).is_file()
+generated_root = files("codefabric_cpg_mcp.daemon.generated")
+assert {entry.name for entry in generated_root.iterdir() if entry.is_file()} == {
+    "__init__.py",
+    "cpg_query_service_pb2.py",
+    "cpg_query_service_pb2.pyi",
+    "cpg_query_service_pb2_grpc.py",
+}
 fingerprints = dict(wire_schema_fingerprints("serialization"))
 schema = wire_schema(WireSchemaName.STATUS_TOOL_OUTPUT, "serialization")
 assert schema["title"] == "StatusToolOutput"

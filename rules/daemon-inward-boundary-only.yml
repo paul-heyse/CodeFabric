@@ -1,0 +1,11 @@
+id: daemon-inward-boundary-only
+language: Rust
+severity: error
+message: Generated Tonic services must terminate at the daemon transport adapter, never at the application service.
+note: ProductionQueryService is the transport adapter; QueryApplicationService owns application composition behind it.
+files:
+  - src/query_service.rs
+rule:
+  all:
+    - kind: impl_item
+    - regex: "CpgQueryService\\s+for\\s+QueryApplicationService"

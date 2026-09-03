@@ -1,0 +1,11 @@
+id: daemon-inward-boundary-only
+valid:
+  - |
+      impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
+          async fn handshake(&self, request: Request<HandshakeRequest>) {}
+      }
+invalid:
+  - |
+      impl<B: SemanticQueryBackend> CpgQueryService for QueryApplicationService<B> {
+          async fn handshake(&self, request: Request<HandshakeRequest>) {}
+      }

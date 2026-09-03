@@ -37,17 +37,37 @@ def test_history_exclusion_is_explicit_and_does_not_hide_live_residue() -> None:
         {
             "docs/plans/retained_v1_plan.md",
             "contracts/acceptance/released-artifact-census-v1.json",
+            "contracts/acceptance/relational-fabric-v4/expectations.jsonl",
             "src/current.rs",
             "contracts/governance/relational-fabric-legacy-freeze.json",
         }
     )
     assert retained == [
+        "contracts/acceptance/relational-fabric-v4/expectations.jsonl",
         "contracts/acceptance/released-artifact-census-v1.json",
         "docs/plans/retained_v1_plan.md",
     ]
     assert live == ["src/current.rs"]
     assert issues == [
         "forbidden predecessor path: contracts/governance/relational-fabric-legacy-freeze.json"
+    ]
+
+
+def test_retired_evidence_and_disposition_paths_are_forbidden_live_surfaces() -> None:
+    live, retained, issues = classify_paths(
+        {
+            "src/current.rs",
+            "tooling/ci/production_evidence.py",
+            "tooling/ci/successor_evidence_issuance_v4.py",
+            "contracts/governance/relational-fabric-v3-disposition-ledger.json",
+        }
+    )
+    assert live == ["src/current.rs"]
+    assert retained == []
+    assert issues == [
+        "forbidden predecessor path: contracts/governance/relational-fabric-v3-disposition-ledger.json",
+        "forbidden predecessor path: tooling/ci/production_evidence.py",
+        "forbidden predecessor path: tooling/ci/successor_evidence_issuance_v4.py",
     ]
 
 

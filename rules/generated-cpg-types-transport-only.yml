@@ -1,0 +1,16 @@
+id: generated-cpg-types-transport-only
+language: Rust
+severity: error
+message: Generated CPG Protobuf types must terminate inside the query transport adapter.
+note: Convert generated requests and responses at src/query_service.rs; inward modules consume application-owned values only.
+files:
+  - src/**/*.rs
+ignores:
+  - src/generated/**/*.rs
+  - src/rpc.rs
+  - src/daemon.rs
+  - src/query_service.rs
+rule:
+  all:
+    - kind: use_declaration
+    - regex: "crate::rpc::generated::codefabric::cpgd"

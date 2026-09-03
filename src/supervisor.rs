@@ -3386,8 +3386,6 @@ async fn launch_adapter(
     let mut command = Command::new(&preparation.adapter_program);
     command
         .args(&preparation.adapter_arguments)
-        .env_remove("FASTMCP_MCP_CAMELCASE_COMPAT")
-        .env("FASTMCP_MCP_CAMELCASE_COMPAT", "false")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::piped())

@@ -169,8 +169,9 @@ Four independent build domains, no root `[workspace]` and no `crates/` directory
 
 ```
 CodeFabric/
-├── Cargo.toml  Cargo.lock  rust-toolchain.toml  stable daemon/data-plane rlib
-├── src/  tests/                               stable-root code and one test target
+├── Cargo.toml  Cargo.lock  rust-toolchain.toml  stable daemon/data-plane package
+├── src/                                        library + thin codefabric/codefabricd binaries
+├── tests/                                      one stable-root integration-test target
 ├── rustc-extractor/                           dated-nightly Cargo root
 ├── pyrefly-sidecar/                           pinned-source Cargo root
 ├── codefabric-cpg-mcp/                        Python adapter + local uv.lock
@@ -202,7 +203,7 @@ CodeFabric/
 | `supply-chain/` (cargo-vet) | dependency trust becomes an engineering goal (§32) |
 | `tests/fixtures/` | a test needs reusable non-code data (§4.4) |
 | `deep-assurance.yml` | the surfaces it covers exist; a permanently-red workflow is worse than none (§52) |
-| `src/main.rs`, `src/bin/` | a CLI is needed — same package, reusing the lib target (§3) |
+| `src/main.rs`, additional `src/bin/*` | another operational shell clears repo-spec §3 independently; reuse the existing lib target |
 | `scripts/artifact_check.sh`, `scripts/plan_status.sh` + recipes | phase 2 of the process-policy redesign lands them (`.claude/skills/_shared/artifact-schemas.md` §8) |
 
 ### 2.1 Why the domains are separate
@@ -487,8 +488,8 @@ there is no root uv project.
 
 ## 7. Test architecture and what each layer proves
 
-Evidence is **orthogonal**, not redundant (repo-spec §25). WP01 starts with executable
-compatibility tests; each later packet adds behavioral proof at the boundary it owns.
+Evidence is **orthogonal**, not redundant (repo-spec §25). Compatibility tests, boundary
+tests, and end-to-end observations each prove the behavior at the layer they own.
 
 | Question | Instrument | Recipe |
 |---|---|---|
@@ -502,7 +503,7 @@ compatibility tests; each later packet adds behavioral proof at the boundary it 
 | What inputs find new behavior? | cargo-fuzz | `just fuzz jcs_decode_canonicalize` |
 | Did structured output change? | cargo-insta | `just snapshots-review` |
 | Do unsafe/concurrent executions violate Rust's rules? | Miri | `just miri`, `just miri-seeds` |
-| Does the adapter protocol behave? | adapter-local pytest/FastMCP client | added in WP04 |
+| Does the adapter protocol behave? | adapter-local pytest/FastMCP 4 client | `just adapter-test` |
 
 ### Three traps the tooling will not catch for you
 
@@ -525,9 +526,9 @@ the file carries a commented example.
 
 ### Adapter test posture
 
-From WP04 onward, Python tests exercise the FastMCP adapter through its public protocol
-surface and real gRPC stubs; they do not replay Rust domain logic or import a native
-extension. Rust owns domain validation, Arrow processing, and query execution.
+Python tests exercise the modern-only FastMCP 4 adapter through its public protocol surface
+and real gRPC stubs; they do not replay Rust domain logic or import a native extension. Rust
+owns domain validation, Arrow processing, and query execution.
 
 ---
 

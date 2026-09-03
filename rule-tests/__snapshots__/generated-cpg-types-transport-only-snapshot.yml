@@ -1,0 +1,12 @@
+id: generated-cpg-types-transport-only
+snapshots:
+  ? |
+    use crate::rpc::generated::codefabric::cpgd::v2::StartQueryRequest;
+    struct ApplicationRequest {
+        request: StartQueryRequest,
+    }
+  : labels:
+    - source: use crate::rpc::generated::codefabric::cpgd::v2::StartQueryRequest;
+      style: primary
+      start: 0
+      end: 67

@@ -1,0 +1,11 @@
+id: generated-cpg-types-transport-only
+valid:
+  - |
+      use crate::query_backend::ResolvedSemanticExecutionRequest;
+      fn execute(request: ResolvedSemanticExecutionRequest) {}
+invalid:
+  - |
+      use crate::rpc::generated::codefabric::cpgd::v2::StartQueryRequest;
+      struct ApplicationRequest {
+          request: StartQueryRequest,
+      }

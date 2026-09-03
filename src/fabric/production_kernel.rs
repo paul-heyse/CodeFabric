@@ -54,43 +54,7 @@ use crate::provider_admission::{
 use crate::relational_semantic_query::EpochBoundSemanticIngressLimits;
 use crate::workspace_registry::WorkspaceRecord;
 
-/// Sole compiled suite selected by this production release.
-pub const COMPILED_SUITE_ID: &str = "codefabric-relational-data-fabric";
-/// Synchronized version of every role in the sole compiled suite.
-pub const COMPILED_SUITE_VERSION: &str = "2.2.0";
-
-/// Immutable identity of one synchronized authoritative suite.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SuiteIdentity {
-    suite_id: &'static str,
-    suite_version: &'static str,
-}
-
-impl SuiteIdentity {
-    /// Return the sole production suite identity compiled into this binary.
-    #[must_use]
-    pub const fn current() -> Self {
-        Self {
-            suite_id: COMPILED_SUITE_ID,
-            suite_version: COMPILED_SUITE_VERSION,
-        }
-    }
-
-    #[must_use]
-    pub const fn suite_id(self) -> &'static str {
-        self.suite_id
-    }
-
-    #[must_use]
-    pub const fn suite_version(self) -> &'static str {
-        self.suite_version
-    }
-
-    #[must_use]
-    pub fn display(self) -> String {
-        format!("{}@{}", self.suite_id, self.suite_version)
-    }
-}
+pub use crate::semantic_release::CompiledSemanticRelease;
 
 /// Capability proving that a provider recipe came from the compiled release.
 ///
@@ -116,64 +80,54 @@ pub(crate) struct CompiledProofAuthority(());
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CompiledPolicyAuthority(());
 
-/// Immutable semantic authority compiled into the daemon.
-///
-/// Every semantic constructor requires one of the private capabilities below. The public
-/// constructor accepts no caller-authored schema, descriptor, transformation, producer, proof,
-/// policy, catalog, or query-program value.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CompiledSemanticRelease {
-    suite: SuiteIdentity,
-    providers: CompiledProviderAuthority,
-    transformations: CompiledTransformationAuthority,
-    queries: CompiledQueryAuthority,
-    proof: CompiledProofAuthority,
-    policy: CompiledPolicyAuthority,
-}
+static PROVIDER_AUTHORITY: CompiledProviderAuthority = CompiledProviderAuthority(());
+static TRANSFORMATION_AUTHORITY: CompiledTransformationAuthority =
+    CompiledTransformationAuthority(());
+static QUERY_AUTHORITY: CompiledQueryAuthority = CompiledQueryAuthority(());
+static PROOF_AUTHORITY: CompiledProofAuthority = CompiledProofAuthority(());
+static POLICY_AUTHORITY: CompiledPolicyAuthority = CompiledPolicyAuthority(());
 
 impl CompiledSemanticRelease {
-    /// Construct the sole compiled release. Operational configuration cannot substitute another
-    /// suite, catalog, schema, producer closure, or query program.
+    /// Unit-test convenience for compiling the one closed production definition. Production code
+    /// has no global release lookup and receives one fallibly compiled `Arc` from daemon startup.
+    #[cfg(test)]
     #[must_use]
-    pub const fn current() -> Self {
-        Self {
-            suite: SuiteIdentity::current(),
-            providers: CompiledProviderAuthority(()),
-            transformations: CompiledTransformationAuthority(()),
-            queries: CompiledQueryAuthority(()),
-            proof: CompiledProofAuthority(()),
-            policy: CompiledPolicyAuthority(()),
-        }
+    pub(crate) fn current() -> Self {
+        crate::semantic_release::compile_current_v23_release(
+            crate::production_provider_recipe::current_v23_provider_program_definition()
+                .expect("the production provider definition must compile in tests"),
+        )
+        .expect("the closed production semantic release must compile in tests")
     }
 
     #[must_use]
-    pub const fn suite(self) -> SuiteIdentity {
-        self.suite
+    pub(crate) fn provider_authority(&self) -> &CompiledProviderAuthority {
+        let _ = self.providers().relation_count();
+        &PROVIDER_AUTHORITY
     }
 
     #[must_use]
-    pub(crate) const fn provider_authority(&self) -> &CompiledProviderAuthority {
-        &self.providers
+    pub(crate) fn transformation_authority(&self) -> &CompiledTransformationAuthority {
+        let _ = self.transformations().len();
+        &TRANSFORMATION_AUTHORITY
     }
 
     #[must_use]
-    pub(crate) const fn transformation_authority(&self) -> &CompiledTransformationAuthority {
-        &self.transformations
+    pub(crate) fn query_authority(&self) -> &CompiledQueryAuthority {
+        let _ = self.queries().len();
+        &QUERY_AUTHORITY
     }
 
     #[must_use]
-    pub(crate) const fn query_authority(&self) -> &CompiledQueryAuthority {
-        &self.queries
+    pub(crate) fn proof_authority(&self) -> &CompiledProofAuthority {
+        let _ = self.proof().construct_input();
+        &PROOF_AUTHORITY
     }
 
     #[must_use]
-    pub(crate) const fn proof_authority(&self) -> &CompiledProofAuthority {
-        &self.proof
-    }
-
-    #[must_use]
-    pub(crate) const fn policy_authority(&self) -> &CompiledPolicyAuthority {
-        &self.policy
+    pub(crate) fn policy_authority(&self) -> &CompiledPolicyAuthority {
+        let _ = self.policy();
+        &POLICY_AUTHORITY
     }
 
     /// Admit one operational provider-run set through the sole compiled descriptor release.
@@ -254,7 +208,7 @@ impl CompiledSemanticRelease {
         closure_execution: &DerivedProducerClosureExecution,
     ) -> Result<ProductionSemanticQueryRecipe, ProductionQueryRecipeError> {
         ProductionSemanticQueryRecipe::try_from_executed_closure(
-            self.query_authority(),
+            self,
             epoch,
             input,
             closure_execution,
@@ -341,18 +295,16 @@ impl CompiledSemanticRelease {
         table_relations: BTreeSet<ProgrammaticRelationId>,
         max_output_rows: usize,
     ) -> Result<ProgrammaticSemanticQueryPorts, CompiledSemanticQueryPortsError> {
-        let ingress =
-            ApplicationOwnedSemanticIngressPort::try_compiled_v2_0(self.query_authority(), limits)?;
+        let ingress = ApplicationOwnedSemanticIngressPort::try_compiled_v2_0(self, limits)?;
         let scope = CompiledV20ProgrammaticScopeAuthorization::try_new(
-            self.query_authority(),
-            self.policy_authority(),
+            self,
             policy_pin,
             recipe.execution_catalog(),
             table_relations,
             max_output_rows,
         )?;
         Ok(ProgrammaticSemanticQueryPorts::try_new(
-            self.query_authority(),
+            self,
             Arc::new(ingress),
             Arc::new(scope),
             Arc::new(ExactProgrammaticSnapshotProjection::new()),
@@ -1229,11 +1181,9 @@ mod tests {
     #[test]
     fn compiled_release_has_one_unsubstitutable_suite_identity() {
         let release = CompiledSemanticRelease::current();
-        assert_eq!(release.suite().suite_id(), COMPILED_SUITE_ID);
-        assert_eq!(release.suite().suite_version(), COMPILED_SUITE_VERSION);
         assert_eq!(
-            release.suite().display(),
-            "codefabric-relational-data-fabric@2.2.0"
+            release.suite().as_str(),
+            "codefabric-relational-data-fabric@2.3.0"
         );
     }
 

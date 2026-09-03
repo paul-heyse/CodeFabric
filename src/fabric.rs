@@ -56,6 +56,7 @@ pub mod explicit_unknown;
 pub mod graph_program;
 #[cfg(feature = "daemon")]
 pub mod production_kernel;
+#[cfg(feature = "daemon")]
 pub(crate) mod production_workspace_startup;
 #[cfg(feature = "daemon")]
 pub mod programmatic_activation_admission;
@@ -112,6 +113,7 @@ pub mod source_wave_command_effect;
 pub mod streamed_result_package;
 #[cfg(feature = "daemon")]
 pub mod streamed_result_registry;
+#[cfg(feature = "daemon")]
 pub(crate) mod switchable_activation_authority;
 #[cfg(feature = "daemon")]
 pub mod writer_generation_sqlite;

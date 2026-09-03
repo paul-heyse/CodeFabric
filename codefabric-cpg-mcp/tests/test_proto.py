@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from google.protobuf import descriptor_pb2, descriptor_pool
+from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 from google.protobuf.duration_pb2 import Duration
 from google.protobuf.message import Message
 
@@ -20,9 +20,6 @@ from codefabric_cpg_mcp.daemon.channel import (
     create_local_channel,
 )
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2 as cpg
-from codefabric_cpg_mcp.daemon.generated import provider_control_pb2 as provider
-from codefabric_cpg_mcp.daemon.generated import pyrefly_sidecar_pb2 as pyrefly
-from codefabric_cpg_mcp.daemon.generated import rustc_extractor_pb2 as rustc
 
 ROOT = Path(__file__).resolve().parents[2]
 DESCRIPTOR_PATH = ROOT / "tooling/proto/production-descriptor.pb"
@@ -35,7 +32,26 @@ def _clear_derived_json_names(messages: Iterable[descriptor_pb2.DescriptorProto]
         _clear_derived_json_names(message.nested_type)
 
 
+def _production_descriptor_set() -> descriptor_pb2.FileDescriptorSet:
+    return descriptor_pb2.FileDescriptorSet.FromString(DESCRIPTOR_PATH.read_bytes())
+
+
+def _production_descriptor_pool() -> descriptor_pool.DescriptorPool:
+    pool = descriptor_pool.DescriptorPool()
+    for file in _production_descriptor_set().file:
+        pool.AddSerializedFile(file.SerializeToString())
+    return pool
+
+
+def _dynamic_message(
+    pool: descriptor_pool.DescriptorPool, full_name: str, **fields: object
+) -> Message:
+    message_type = message_factory.GetMessageClass(pool.FindMessageTypeByName(full_name))
+    return message_type(**fields)
+
+
 def _messages() -> dict[str, Message]:
+    pool = _production_descriptor_pool()
     return {
         "cpg_start_query": cpg.StartQueryRequest(
             context=cpg.RequestContext(
@@ -55,15 +71,24 @@ def _messages() -> dict[str, Message]:
                 ),
             ),
         ),
-        "provider_job": provider.ProviderJobSpec(
+        "provider_job": _dynamic_message(
+            pool,
+            "codefabric.provider.v1.ProviderJobSpec",
             provider_run_id="run:test",
             workspace_id="ws:test",
             analysis_context_id="context:source",
             source_generation=7,
             resource_profile_id="in-process-syntax-standard",
         ),
-        "pyrefly_hello": pyrefly.Hello(protocol_major=1, maximum_arrow_ipc_bytes=1_048_576),
-        "rustc_accepted": rustc.CompilationAccepted(
+        "pyrefly_hello": _dynamic_message(
+            pool,
+            "codefabric.pyrefly.v1.Hello",
+            protocol_major=1,
+            maximum_arrow_ipc_bytes=1_048_576,
+        ),
+        "rustc_accepted": _dynamic_message(
+            pool,
+            "codefabric.rustc.v1.CompilationAccepted",
             provider_run_id="run:test",
             compilation_unit_id="unit:test",
             accepted_generation=7,
@@ -84,27 +109,24 @@ def test_all_production_packages_match_independent_wire_kats() -> None:
         assert type(message).FromString(encoded) == message
 
 
-def test_generated_descriptors_match_the_one_committed_fds() -> None:
-    descriptor_set = descriptor_pb2.FileDescriptorSet.FromString(DESCRIPTOR_PATH.read_bytes())
+def test_sole_generated_python_descriptor_matches_the_one_committed_fds() -> None:
+    descriptor_set = _production_descriptor_set()
     files = {file.name: file for file in descriptor_set.file}
-    modules = {
-        "contracts/rpc/cpg_query_service.proto": cpg,
-        "contracts/rpc/provider_control.proto": provider,
-        "contracts/rpc/pyrefly_sidecar.proto": pyrefly,
-        "contracts/rpc/rustc_extractor.proto": rustc,
+    assert set(files) == {
+        "contracts/rpc/cpg_query_service.proto",
+        "contracts/rpc/provider_control.proto",
+        "contracts/rpc/pyrefly_sidecar.proto",
+        "contracts/rpc/rustc_extractor.proto",
+        "google/protobuf/duration.proto",
     }
-    assert set(files) == {*modules, "google/protobuf/duration.proto"}
-    for name, module in modules.items():
-        source = descriptor_pb2.FileDescriptorProto()
-        source.CopyFrom(files[name])
-        _clear_derived_json_names(source.message_type)
-        generated = descriptor_pb2.FileDescriptorProto()
-        module.DESCRIPTOR.CopyToProto(generated)
-        assert generated == source
+    source = descriptor_pb2.FileDescriptorProto()
+    source.CopyFrom(files["contracts/rpc/cpg_query_service.proto"])
+    _clear_derived_json_names(source.message_type)
+    generated = descriptor_pb2.FileDescriptorProto()
+    cpg.DESCRIPTOR.CopyToProto(generated)
+    assert generated == source
 
-    pool = descriptor_pool.DescriptorPool()
-    for file in descriptor_set.file:
-        pool.AddSerializedFile(file.SerializeToString())
+    pool = _production_descriptor_pool()
     service = pool.FindServiceByName("codefabric.cpgd.v2.CpgQueryService")
     assert tuple(method.name for method in service.methods) == (
         "Handshake",
@@ -117,6 +139,9 @@ def test_generated_descriptors_match_the_one_committed_fds() -> None:
         "ReadResource",
         "ReleaseResource",
     )
+    assert pool.FindServiceByName("codefabric.provider.v1.ProviderControl")
+    assert pool.FindServiceByName("codefabric.pyrefly.v1.PyreflySidecar")
+    assert pool.FindServiceByName("codefabric.rustc.v1.RustcExtractor")
     with pytest.raises(KeyError):
         pool.FindServiceByName("codefabric.cpgd.v1.CpgQueryService")
 
@@ -386,7 +411,7 @@ def test_relative_budget_generations_and_reserved_control_are_explicit() -> None
 
 
 def test_v2_has_no_duplicate_freshness_attempt_secret_or_v3_surface() -> None:
-    descriptor_set = descriptor_pb2.FileDescriptorSet.FromString(DESCRIPTOR_PATH.read_bytes())
+    descriptor_set = _production_descriptor_set()
     assert not any(file.package.startswith("codefabric.cpgd.v3") for file in descriptor_set.file)
     cpg_file = next(file for file in descriptor_set.file if file.package == "codefabric.cpgd.v2")
     field_names = {field.name for message in cpg_file.message_type for field in message.field}

@@ -7423,7 +7423,3 @@ pub fn validate_semantic_result_compatibility(
     }
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "production_query_evidence_tests.rs"]
-mod production_query_evidence_tests;

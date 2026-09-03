@@ -262,6 +262,10 @@ pub enum DaemonError {
     NoOperationalWorkspace,
     #[error(transparent)]
     Identity(#[from] crate::identity::IdentityError),
+    #[error(transparent)]
+    SemanticRelease(#[from] crate::semantic_release::SemanticReleaseError),
+    #[error(transparent)]
+    QueryService(#[from] crate::query_service::QueryServiceCompositionError),
 }
 
 #[cfg(test)]
@@ -454,7 +458,7 @@ pub struct WriterFenced {
 /// Phase-typed startup owner. Semantic phase values cannot be supplied by configuration.
 pub struct ProductionStartupCoordinator<Phase> {
     config: DaemonConfig,
-    release: CompiledSemanticRelease,
+    release: Arc<CompiledSemanticRelease>,
     lifecycle: Arc<LifecycleAuthority>,
     workspace_slots: Arc<WorkspaceSlotRegistry>,
     phase: Phase,
@@ -542,7 +546,7 @@ fn cleanup_owned_startup_failure(
 }
 
 impl ProductionStartupCoordinator<Configured> {
-    fn new(config: DaemonConfig, release: CompiledSemanticRelease) -> Self {
+    fn new(config: DaemonConfig, release: Arc<CompiledSemanticRelease>) -> Self {
         Self {
             config,
             release,
@@ -763,17 +767,25 @@ impl ProductionStartupCoordinator<DaemonLeased> {
 }
 
 /// Sole factory used by the production `codefabricd` entrypoint.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct ProductionDaemonFactory {
-    release: CompiledSemanticRelease,
+    release: Arc<CompiledSemanticRelease>,
 }
 
 impl ProductionDaemonFactory {
-    #[must_use]
-    pub const fn current() -> Self {
-        Self {
-            release: CompiledSemanticRelease::current(),
-        }
+    /// Compile the one closed semantic release before any workspace can become ready.
+    ///
+    /// # Errors
+    ///
+    /// Returns a release-definition or closed-program validation failure. There is no fallback
+    /// release, runtime selector, or partially initialized daemon kernel.
+    pub fn compile() -> Result<Self, DaemonError> {
+        let definition =
+            crate::production_provider_recipe::current_v23_provider_program_definition()?;
+        let release = crate::semantic_release::compile_current_v23_release(definition)?;
+        Ok(Self {
+            release: Arc::new(release),
+        })
     }
 
     /// Validate operational configuration and construct one side-effect-free kernel.
@@ -799,7 +811,7 @@ impl fmt::Debug for DaemonKernel {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("DaemonKernel")
-            .field("suite", &self.startup.release.suite().display())
+            .field("suite", &self.startup.release.suite().as_str())
             .field("lifecycle", &self.startup.lifecycle.observe())
             .finish_non_exhaustive()
     }
@@ -820,8 +832,8 @@ impl DaemonKernel {
     }
 
     #[must_use]
-    pub const fn release(&self) -> CompiledSemanticRelease {
-        self.startup.release
+    pub const fn release(&self) -> &Arc<CompiledSemanticRelease> {
+        &self.startup.release
     }
 
     /// Run the target-only daemon after an authenticated supervisor hello has been consumed.
@@ -996,7 +1008,7 @@ async fn serve_writer_fenced_v2(
         &startup.config.static_config.state_root,
         &operational_database,
         &record,
-        startup.release,
+        Arc::clone(&startup.release),
         slot,
         Arc::clone(&startup.phase.generation_store),
         writer_lease,
@@ -1243,6 +1255,7 @@ async fn serve_writer_fenced_v2(
         }
     };
     let backend = Arc::new(ProgrammaticSemanticQueryBackend::new(
+        Arc::clone(&startup.release),
         Arc::clone(&startup.workspace_slots),
         Arc::clone(&startup.lifecycle),
         package_builder,
@@ -1253,7 +1266,8 @@ async fn serve_writer_fenced_v2(
             return finish_writer_fenced_v2(startup, workspace, false, Some(error)).await;
         }
     };
-    let query_service = ProductionQueryService::new(
+    let query_service = ProductionQueryService::try_new(
+        Arc::clone(&startup.release),
         backend,
         Arc::clone(&startup.lifecycle),
         Arc::clone(&startup.workspace_slots),
@@ -1261,7 +1275,7 @@ async fn serve_writer_fenced_v2(
         Arc::clone(&sessions),
         Arc::clone(&results),
         daemon_instance_id,
-    );
+    )?;
     let (query_listener, mut query_socket) = match OwnedUnixSocket::bind(
         &startup.config.static_config.runtime_root,
         &startup.config.static_config.query_socket_endpoint,
@@ -1597,7 +1611,7 @@ pub async fn serve_controlled(
     mut control: UnixStream,
 ) -> Result<DaemonExit, DaemonError> {
     let (hello, hello_header, control_state) = accept_control_hello(&mut control).await?;
-    ProductionDaemonFactory::current()
+    ProductionDaemonFactory::compile()?
         .build(config)?
         .run_controlled(control, hello, hello_header, control_state)
         .await
@@ -1790,8 +1804,10 @@ maintenance_schedule = "daily-idle"
             &generations,
         )
         .unwrap();
-        let startup =
-            ProductionStartupCoordinator::new(config.clone(), CompiledSemanticRelease::current());
+        let startup = ProductionStartupCoordinator::new(
+            config.clone(),
+            Arc::new(CompiledSemanticRelease::current()),
+        );
         let lifecycle = Arc::clone(&startup.lifecycle);
         let workspace_slots = Arc::clone(&startup.workspace_slots);
 
@@ -1839,12 +1855,14 @@ maintenance_schedule = "daily-idle"
         )
         .unwrap();
 
-        let mut startup =
-            ProductionStartupCoordinator::new(config.clone(), CompiledSemanticRelease::current())
-                .acquire_daemon_lease()
-                .unwrap()
-                .acquire_workspace_writers()
-                .unwrap();
+        let mut startup = ProductionStartupCoordinator::new(
+            config.clone(),
+            Arc::new(CompiledSemanticRelease::current()),
+        )
+        .acquire_daemon_lease()
+        .unwrap()
+        .acquire_workspace_writers()
+        .unwrap();
         let workspace_id = crate::fabric::command::WorkspaceId::from_bytes(record.workspace_id);
         let slot = startup.workspace_slots.slot(workspace_id).unwrap();
         let writer_lease = startup.phase.writer_leases.swap_remove(0);
@@ -1856,7 +1874,7 @@ maintenance_schedule = "daily-idle"
             &config.static_config.state_root,
             &operational_database,
             &record,
-            startup.release,
+            Arc::clone(&startup.release),
             Arc::clone(&slot),
             Arc::clone(&startup.phase.generation_store),
             writer_lease,
@@ -1980,6 +1998,7 @@ maintenance_schedule = "daily-idle"
             .unwrap(),
         );
         let backend = ProgrammaticSemanticQueryBackend::new(
+            Arc::clone(&startup.release),
             Arc::clone(&startup.workspace_slots),
             Arc::clone(&startup.lifecycle),
             package_builder,

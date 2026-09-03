@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -16,7 +17,7 @@ use tonic::{Code, Request, Response, Status};
 use crate::fabric::arrow_result_resource::QueryExecutionPin;
 use crate::fabric::command::{LeaseId, PrincipalId, WorkspaceId};
 use crate::fabric::production_kernel::{
-    LifecycleAuthority, ProductionLifecyclePhase, WorkspaceSlotRegistry,
+    CompiledSemanticRelease, LifecycleAuthority, ProductionLifecyclePhase, WorkspaceSlotRegistry,
 };
 use crate::fabric::programmatic_workspace::WorkspaceEpochQueryAuthority;
 use crate::fabric::published_arrow_result::{OpaqueResultLeaseToken, PublishedResultOwner};
@@ -204,6 +205,7 @@ struct LiveReferenceProjection {
 
 impl LiveReferenceProjection {
     fn from_workspace(
+        release: &CompiledSemanticRelease,
         authority: &WorkspaceEpochQueryAuthority,
         lifecycle: ProductionLifecyclePhase,
         lifecycle_sequence: u64,
@@ -211,8 +213,7 @@ impl LiveReferenceProjection {
         let forms = authority
             .advertised_semantic_forms()
             .map_err(|_| public_status(Code::Internal, "REFERENCE_AUTHORITY"))?;
-        let suite = crate::fabric::production_kernel::CompiledSemanticRelease::current().suite();
-        let released_version = suite.suite_version();
+        let released_version = release.suite().as_str();
         let query_forms = forms.iter().map(|form| form.label()).collect::<Vec<_>>();
         let ingress = authority.ingress_catalog();
         let execution = authority.execution_catalog();
@@ -323,7 +324,7 @@ impl LiveReferenceProjection {
             })
             .collect::<Vec<_>>();
         let common = serde_json::json!({
-            "suite": suite.display(),
+            "suite": release.suite().as_str(),
             "released_version": released_version,
             "semantic_profile": SEMANTIC_PROFILE,
             "workspace_epoch": format!("epoch:{}", hex(authority.epoch_id().as_bytes())),
@@ -541,14 +542,14 @@ impl Default for StartState {
 }
 
 #[derive(Clone)]
-pub struct ProductionQueryService<B: SemanticQueryBackend> {
+pub struct QueryApplicationService<B: SemanticQueryBackend> {
+    release: Arc<CompiledSemanticRelease>,
     backend: Arc<B>,
     lifecycle: Arc<LifecycleAuthority>,
     workspace_slots: Arc<WorkspaceSlotRegistry>,
     coordinator: Arc<QueryCoordinator>,
     sessions: Arc<LaunchGrantAuthority>,
     results: Arc<StreamedResultRegistry>,
-    admission: Arc<RpcAdmission>,
     retention_running: Arc<AtomicBool>,
     retention_failed: Arc<AtomicBool>,
     retention_sequence: Arc<AtomicU64>,
@@ -556,10 +557,11 @@ pub struct ProductionQueryService<B: SemanticQueryBackend> {
     daemon_instance_id: Arc<str>,
 }
 
-impl<B: SemanticQueryBackend> std::fmt::Debug for ProductionQueryService<B> {
+impl<B: SemanticQueryBackend> std::fmt::Debug for QueryApplicationService<B> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("ProductionQueryServiceV2")
+            .debug_struct("QueryApplicationService")
+            .field("semantic_release", &self.release.suite().as_str())
             .field("lifecycle", &self.lifecycle.observe())
             .field("workspace_count", &self.workspace_slots.len())
             .field("daemon_instance_id", &self.daemon_instance_id)
@@ -567,10 +569,11 @@ impl<B: SemanticQueryBackend> std::fmt::Debug for ProductionQueryService<B> {
     }
 }
 
-impl<B: SemanticQueryBackend> ProductionQueryService<B> {
+impl<B: SemanticQueryBackend> QueryApplicationService<B> {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub fn new(
+    fn new(
+        release: Arc<CompiledSemanticRelease>,
         backend: Arc<B>,
         lifecycle: Arc<LifecycleAuthority>,
         workspace_slots: Arc<WorkspaceSlotRegistry>,
@@ -582,28 +585,25 @@ impl<B: SemanticQueryBackend> ProductionQueryService<B> {
         if let Some(builder) = backend.retained_package_builder() {
             results.install_package_builder(builder);
         }
-        let transport_data_capacity = usize::try_from(MAX_QUERY_TRANSPORT_STREAMS / 2)
-            .expect("transport stream bound fits usize");
-        let transport_control_wait_capacity = usize::try_from(MAX_QUERY_TRANSPORT_STREAMS / 2)
-            .expect("transport control-wait bound fits usize");
-        let admission = Arc::new(RpcAdmission::new(
-            coordinator.maximum_tasks().min(transport_data_capacity),
-            transport_control_wait_capacity,
-        ));
         Self {
+            release,
             backend,
             lifecycle,
             workspace_slots,
             coordinator,
             sessions,
             results,
-            admission,
             retention_running: Arc::new(AtomicBool::new(false)),
             retention_failed: Arc::new(AtomicBool::new(false)),
             retention_sequence: Arc::new(AtomicU64::new(0)),
             starts: Arc::new(Mutex::new(StartState::default())),
             daemon_instance_id: daemon_instance_id.into(),
         }
+    }
+
+    #[must_use]
+    pub(crate) const fn release(&self) -> &Arc<CompiledSemanticRelease> {
+        &self.release
     }
 
     async fn authorize<T>(
@@ -1151,6 +1151,89 @@ impl<B: SemanticQueryBackend> ProductionQueryService<B> {
     }
 }
 
+/// Thin Tonic transport adapter over the application-owned query service.
+///
+/// The adapter stores no semantic, lifecycle, session, result, or release authority of its own.
+/// Generated request/response values terminate in this module and application state remains in
+/// [`QueryApplicationService`].
+#[derive(Clone)]
+pub struct ProductionQueryService<B: SemanticQueryBackend> {
+    application: Arc<QueryApplicationService<B>>,
+    admission: Arc<RpcAdmission>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum QueryServiceCompositionError {
+    #[error("semantic backend is bound to a different compiled release")]
+    ReleaseMismatch,
+}
+
+impl<B: SemanticQueryBackend> ProductionQueryService<B> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new(
+        release: Arc<CompiledSemanticRelease>,
+        backend: Arc<B>,
+        lifecycle: Arc<LifecycleAuthority>,
+        workspace_slots: Arc<WorkspaceSlotRegistry>,
+        coordinator: Arc<QueryCoordinator>,
+        sessions: Arc<LaunchGrantAuthority>,
+        results: Arc<StreamedResultRegistry>,
+        daemon_instance_id: impl Into<Arc<str>>,
+    ) -> Result<Self, QueryServiceCompositionError> {
+        if backend.application_release_pin().is_some_and(|observed| {
+            observed
+                != crate::fabric::programmatic_query_backend::compiled_query_release_pin(
+                    release.as_ref(),
+                )
+        }) {
+            return Err(QueryServiceCompositionError::ReleaseMismatch);
+        }
+        let transport_data_capacity = usize::try_from(MAX_QUERY_TRANSPORT_STREAMS / 2)
+            .expect("transport stream bound fits usize");
+        let transport_control_wait_capacity = usize::try_from(MAX_QUERY_TRANSPORT_STREAMS / 2)
+            .expect("transport control-wait bound fits usize");
+        let admission = Arc::new(RpcAdmission::new(
+            coordinator.maximum_tasks().min(transport_data_capacity),
+            transport_control_wait_capacity,
+        ));
+        Ok(Self {
+            application: Arc::new(QueryApplicationService::new(
+                release,
+                backend,
+                lifecycle,
+                workspace_slots,
+                coordinator,
+                sessions,
+                results,
+                daemon_instance_id,
+            )),
+            admission,
+        })
+    }
+
+    #[must_use]
+    pub(crate) const fn application(&self) -> &Arc<QueryApplicationService<B>> {
+        &self.application
+    }
+}
+
+impl<B: SemanticQueryBackend> Deref for ProductionQueryService<B> {
+    type Target = QueryApplicationService<B>;
+
+    fn deref(&self) -> &Self::Target {
+        self.application.as_ref()
+    }
+}
+
+impl<B: SemanticQueryBackend> std::fmt::Debug for ProductionQueryService<B> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProductionQueryServiceV2TransportAdapter")
+            .field("application", &self.application)
+            .finish()
+    }
+}
+
 fn close_challenge_rejection<A>(
     starts: &mut StartState,
     record: &ChallengeRecord,
@@ -1601,6 +1684,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                         })
                 });
                 let status_value = serde_json::json!({
+                    "semantic_release": self.release.suite().as_str(),
                     "lifecycle": projection.phase().code(),
                     "lifecycle_sequence": projection.sequence(),
                     "active_epoch_id": active_epoch_id,
@@ -1655,6 +1739,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                     .and_then(|slot| slot.lease().ok());
                 let references = match workspace_lease.as_ref() {
                     Some(lease) => LiveReferenceProjection::from_workspace(
+                        self.release.as_ref(),
                         lease.workspace().runtime().query_authority(),
                         projection.phase(),
                         projection.sequence(),
@@ -4174,11 +4259,16 @@ mod tests {
         fail_preparation: std::sync::atomic::AtomicBool,
         admission_calls: AtomicUsize,
         live_execution_leases: Arc<AtomicUsize>,
+        application_release_pin: Option<[u8; 32]>,
     }
 
     #[async_trait::async_trait]
     impl SemanticQueryBackend for ThreeRoundBackend {
         type ExecutionAuthority = TestExecutionLease;
+
+        fn application_release_pin(&self) -> Option<[u8; 32]> {
+            self.application_release_pin
+        }
 
         fn validate_execution_request(
             &self,
@@ -4411,7 +4501,8 @@ mod tests {
         PreparedSubmission,
     ) {
         let (sessions, session) = test_session().await;
-        let service = ProductionQueryService::new(
+        let service = ProductionQueryService::try_new(
+            Arc::new(CompiledSemanticRelease::current()),
             Arc::new(ThreeRoundBackend::default()),
             Arc::new(LifecycleAuthority::new()),
             Arc::new(WorkspaceSlotRegistry::new()),
@@ -4419,12 +4510,121 @@ mod tests {
             sessions,
             Arc::new(StreamedResultRegistry::try_new(1_024).unwrap()),
             "daemon:guard-ledger",
-        );
+        )
+        .unwrap();
         let parsed = parse_request(TEST_REQUEST).unwrap();
         let prepared = service
             .prepare_semantic_submission(parsed, Vec::new())
             .unwrap();
         (service, session, prepared)
+    }
+
+    #[tokio::test]
+    async fn injected_release_runtime_boundary_integrity() {
+        let temp = tempfile::tempdir().unwrap();
+        let release = Arc::new(CompiledSemanticRelease::current());
+        let (sessions, _session) = test_session().await;
+        let service = ProductionQueryService::try_new(
+            Arc::clone(&release),
+            Arc::new(ThreeRoundBackend::default()),
+            Arc::new(LifecycleAuthority::new()),
+            Arc::new(WorkspaceSlotRegistry::new()),
+            test_coordinator(&temp),
+            sessions,
+            Arc::new(StreamedResultRegistry::try_new(32).unwrap()),
+            "daemon:injected-release-oracle",
+        )
+        .unwrap();
+
+        assert!(Arc::ptr_eq(service.application().release(), &release));
+        assert_eq!(
+            service.application().release().suite().as_str(),
+            "codefabric-relational-data-fabric@2.3.0"
+        );
+        assert_eq!(
+            service.application().daemon_instance_id.as_ref(),
+            "daemon:injected-release-oracle"
+        );
+    }
+
+    #[tokio::test]
+    async fn single_release_consumer_composition() {
+        let temp = tempfile::tempdir().unwrap();
+        let release = Arc::new(CompiledSemanticRelease::current());
+        let release_pin =
+            crate::fabric::programmatic_query_backend::compiled_query_release_pin(&release);
+        let backend = Arc::new(ThreeRoundBackend {
+            application_release_pin: Some(release_pin),
+            ..ThreeRoundBackend::default()
+        });
+        let (sessions, _session) = test_session().await;
+        let service = ProductionQueryService::try_new(
+            Arc::clone(&release),
+            Arc::clone(&backend),
+            Arc::new(LifecycleAuthority::new()),
+            Arc::new(WorkspaceSlotRegistry::new()),
+            test_coordinator(&temp),
+            sessions,
+            Arc::new(StreamedResultRegistry::try_new(32).unwrap()),
+            "daemon:single-release-oracle",
+        )
+        .unwrap();
+
+        assert!(Arc::ptr_eq(service.application().release(), &release));
+        assert_eq!(backend.application_release_pin(), Some(release_pin));
+        assert_eq!(
+            crate::fabric::programmatic_query_backend::compiled_query_release_pin(
+                service.application().release().as_ref(),
+            ),
+            release_pin
+        );
+    }
+
+    #[tokio::test]
+    async fn grpc_flow_control_and_release_mismatch_faults() {
+        let release = Arc::new(CompiledSemanticRelease::current());
+        let expected =
+            crate::fabric::programmatic_query_backend::compiled_query_release_pin(&release);
+        let mismatch = Arc::new(ThreeRoundBackend {
+            application_release_pin: Some(identity32(b"mismatched-release", &[&expected])),
+            ..ThreeRoundBackend::default()
+        });
+        let temp = tempfile::tempdir().unwrap();
+        let (sessions, _session) = test_session().await;
+        let service = ProductionQueryService::try_new(
+            release,
+            mismatch,
+            Arc::new(LifecycleAuthority::new()),
+            Arc::new(WorkspaceSlotRegistry::new()),
+            test_coordinator(&temp),
+            sessions,
+            Arc::new(StreamedResultRegistry::try_new(32).unwrap()),
+            "daemon:mismatch-oracle",
+        );
+        assert!(matches!(
+            service,
+            Err(QueryServiceCompositionError::ReleaseMismatch)
+        ));
+
+        let admission = RpcAdmission::new(1, 1);
+        let data = admission.data().expect("one bounded data stream");
+        assert_eq!(
+            admission.data().unwrap_err().code(),
+            Code::ResourceExhausted
+        );
+        let control = admission
+            .control(RpcBudget::from_duration(Duration::from_secs(1)).unwrap())
+            .await
+            .expect("reserved control remains prompt while data capacity is occupied");
+        drop(data);
+        drop(control);
+        assert!(admission.data().is_ok());
+        assert!(
+            admission
+                .control(RpcBudget::from_duration(Duration::from_secs(1)).unwrap())
+                .await
+                .is_ok()
+        );
     }
 
     fn scope(session: &AuthorizedSession, key: &str) -> StartScope {

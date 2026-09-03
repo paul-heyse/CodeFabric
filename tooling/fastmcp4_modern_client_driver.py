@@ -825,9 +825,6 @@ async def _run(scenario: Scenario, stack: dict[str, str]) -> tuple[dict[str, Any
     transport = StdioTransport(
         command=scenario.server.command,
         args=list(scenario.server.arguments),
-        # Deliberately present the attach-only launcher with the hostile ambient
-        # default. Production launch authority must replace it for the adapter.
-        env={"FASTMCP_MCP_CAMELCASE_COMPAT": "true"},
         cwd=scenario.server.cwd,
         keep_alive=False,
         log_file=writer,

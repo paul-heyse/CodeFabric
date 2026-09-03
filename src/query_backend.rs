@@ -269,6 +269,15 @@ pub trait SemanticQueryBackend: Send + Sync + 'static {
         None
     }
 
+    /// Return the application-release binding when this backend is release-bound.
+    ///
+    /// Generic independently testable backends may remain unbound. Production backends expose
+    /// only opaque application identity bytes so this inward contract does not import release
+    /// compiler types.
+    fn application_release_pin(&self) -> Option<[u8; 32]> {
+        None
+    }
+
     /// Validate semantic executability against the installed epoch without starting work.
     fn validate_execution_request(
         &self,

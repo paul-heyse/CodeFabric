@@ -29,7 +29,7 @@ use crate::semantic_query_contract::{
     SemanticQueryRequest, SemanticReference, parse_request,
 };
 
-use super::production_kernel::CompiledQueryAuthority;
+use super::production_kernel::CompiledSemanticRelease;
 use super::programmatic_query_backend::{
     ProgrammaticQueryPortError, ProgrammaticSemanticIngressPort, canonical_request_content_pin,
     compiled_query_release_pin,
@@ -266,7 +266,7 @@ impl ApplicationOwnedSemanticIngressPort {
     ///
     /// Returns an error if the compiled mapping is internally incomplete or ambiguous.
     pub(crate) fn try_compiled_v2_0(
-        compiled_release: &CompiledQueryAuthority,
+        compiled_release: &CompiledSemanticRelease,
         limits: EpochBoundSemanticIngressLimits,
     ) -> Result<Self, ProgrammaticQueryPortError> {
         Self::build(
@@ -3070,7 +3070,7 @@ mod tests {
 
     fn port() -> ApplicationOwnedSemanticIngressPort {
         let release = super::super::production_kernel::CompiledSemanticRelease::current();
-        ApplicationOwnedSemanticIngressPort::try_compiled_v2_0(release.query_authority(), limits())
+        ApplicationOwnedSemanticIngressPort::try_compiled_v2_0(&release, limits())
             .expect("complete compiled 2.0 mapping")
     }
 
@@ -3656,7 +3656,7 @@ mod tests {
     fn compiled_constructor_is_v2_only_and_has_no_caller_mapping_parameters() {
         type ProductionConstructor =
             fn(
-                &super::super::production_kernel::CompiledQueryAuthority,
+                &super::super::production_kernel::CompiledSemanticRelease,
                 EpochBoundSemanticIngressLimits,
             )
                 -> Result<ApplicationOwnedSemanticIngressPort, ProgrammaticQueryPortError>;
@@ -3664,11 +3664,8 @@ mod tests {
         let constructor: ProductionConstructor =
             ApplicationOwnedSemanticIngressPort::try_compiled_v2_0;
         let release = super::super::production_kernel::CompiledSemanticRelease::current();
-        let port = constructor(release.query_authority(), limits()).expect("compiled v2 mapping");
-        assert_eq!(
-            port.authority_pin(),
-            compiled_query_release_pin(release.query_authority())
-        );
+        let port = constructor(&release, limits()).expect("compiled v2 mapping");
+        assert_eq!(port.authority_pin(), compiled_query_release_pin(&release));
         assert_ne!(port.authority_pin(), [0; 32]);
         assert_eq!(port.released_version.as_ref(), "2.0");
 

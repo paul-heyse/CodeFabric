@@ -19,7 +19,7 @@ use datafusion::common::TableReference;
 use crate::fabric::derived_producer_closure::{
     DerivedProducerClosureExecution, FamilyClosureFields, ProducerClosureCompilationDependency,
 };
-use crate::fabric::production_kernel::CompiledQueryAuthority;
+use crate::fabric::production_kernel::{CompiledQueryAuthority, CompiledSemanticRelease};
 use crate::fabric::programmatic_epoch::ProgrammaticFabricEpoch;
 use crate::fabric::programmatic_ingress_port::ProgrammaticFormIngressField;
 use crate::fabric::programmatic_schema::ProgrammaticRelationId;
@@ -216,7 +216,7 @@ impl ProductionSemanticQueryRecipe {
     /// Rejects duplicate installed forms, relation/field drift, invalid operator graphs,
     /// incomplete ingress realization, or any producer-closure violation.
     pub(crate) fn try_from_executed_closure(
-        compiled_release: &CompiledQueryAuthority,
+        compiled_release: &CompiledSemanticRelease,
         epoch: &ProgrammaticFabricEpoch,
         input: ProductionSemanticQueryRecipeInput,
         closure_execution: &DerivedProducerClosureExecution,
@@ -231,7 +231,7 @@ impl ProductionSemanticQueryRecipe {
     }
 
     fn assemble(
-        _compiled_release: &CompiledQueryAuthority,
+        compiled_release: &CompiledSemanticRelease,
         epoch: &ProgrammaticFabricEpoch,
         input: ProductionSemanticQueryRecipeInput,
         producer_closure: ProducerClosureProof,
@@ -239,6 +239,13 @@ impl ProductionSemanticQueryRecipe {
         validate_pin("source", input.source_pin)?;
         validate_pin("policy", input.policy_pin)?;
         validate_identity("factual semantic class", RELEASE_FACTUAL_SEMANTIC_CLASS_ID)?;
+        for form in crate::semantic_release::SemanticQueryForm::ALL {
+            compiled_release.queries().compile(form).map_err(|error| {
+                ProductionQueryRecipeError::InvalidCompiledRelease {
+                    detail: error.to_string(),
+                }
+            })?;
+        }
         let forms = compiled_released_form_programs(epoch, &producer_closure)?;
         let scopes = compiled_release_scopes();
         let program_release_pin = compiled_release_identity_pin(&forms, &scopes);
@@ -2498,7 +2505,7 @@ mod tests {
         input: ProductionSemanticQueryRecipeInput,
     ) -> Result<ProductionSemanticQueryRecipe, ProductionQueryRecipeError> {
         let release = CompiledSemanticRelease::current();
-        ProductionSemanticQueryRecipe::assemble(release.query_authority(), epoch, input, closure())
+        ProductionSemanticQueryRecipe::assemble(&release, epoch, input, closure())
     }
 
     #[tokio::test]
@@ -2608,9 +2615,7 @@ mod tests {
             .expect("recipe and release-owned ports share one v2 scope authority");
         assert_eq!(
             ports.application_release(),
-            crate::fabric::programmatic_query_backend::compiled_query_release_pin(
-                release.query_authority()
-            )
+            crate::fabric::programmatic_query_backend::compiled_query_release_pin(&release)
         );
     }
 

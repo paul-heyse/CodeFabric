@@ -16,6 +16,8 @@ from tooling.proto.generate import (
     CPGD_V2_HISTORY_DESCRIPTOR,
     EXACT_PYTHON_PACKAGES,
     HISTORY_INDEX_DESTINATION,
+    PYTHON_DESTINATIONS,
+    RUST_DESTINATIONS,
     UNRELEASED_PACKAGES,
     assert_compatible,
     assert_declared_descriptor_identities,
@@ -96,6 +98,22 @@ def test_descriptor_census_covers_every_released_source() -> None:
     expected = {relative.as_posix() for relative, _ in COMPILER_SOURCES}
 
     assert expected <= names
+
+
+def test_runtime_binding_inventory_keeps_four_rust_families_and_one_python_service() -> (
+    None
+):
+    assert set(RUST_DESTINATIONS) == {
+        "codefabric.cpgd.v2.rs",
+        "codefabric.provider.v1.rs",
+        "codefabric.pyrefly.v1.rs",
+        "codefabric.rustc.v1.rs",
+    }
+    assert set(PYTHON_DESTINATIONS) == {
+        "cpg_query_service_pb2.py",
+        "cpg_query_service_pb2.pyi",
+        "cpg_query_service_pb2_grpc.py",
+    }
 
 
 def test_descriptor_census_covers_four_production_packages_and_well_known_dependency() -> (

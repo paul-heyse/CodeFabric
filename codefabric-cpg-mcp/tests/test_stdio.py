@@ -1,7 +1,6 @@
 """Locked-command and STDIO-isolation tests."""
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
@@ -18,18 +17,11 @@ LOCKED_COMMAND = (
 )
 
 
-def adapter_environment() -> dict[str, str]:
-    environment = os.environ.copy()
-    environment["FASTMCP_MCP_CAMELCASE_COMPAT"] = "false"
-    return environment
-
-
 def test_identity_is_stderr_only_and_exact() -> None:
     completed = subprocess.run(
         (*LOCKED_COMMAND, "--identity"),
         check=False,
         capture_output=True,
-        env=adapter_environment(),
         timeout=30,
     )
 
@@ -52,7 +44,6 @@ def test_stdio_process_rejects_startup_without_inherited_launch_socket() -> None
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=adapter_environment(),
     )
     assert process.stdin is not None
     assert process.stdout is not None

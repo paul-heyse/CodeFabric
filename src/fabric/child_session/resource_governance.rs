@@ -23,6 +23,7 @@ use crate::fabric::arrow_result_resource::{
     ArrowResultResourceError, ArrowResultResourcePackage, ResultResourceLease,
 };
 use crate::fabric::command::{EpochId, LeaseId, PrincipalId};
+#[cfg(feature = "daemon")]
 use crate::fabric::streamed_result_package::SealedStreamedResultPackage;
 
 use super::{ChildResourceLimits, ClosedObjectStoreRegistry};
@@ -522,6 +523,7 @@ impl EpochResourceCoordinator {
     }
 
     /// Reserve the exact object-backed page/manifest bytes of a streamed result package.
+    #[cfg(feature = "daemon")]
     pub fn retain_streamed_result(
         &self,
         principal_id: PrincipalId,

@@ -9,31 +9,33 @@ capability gap rather than an empty result implying “none.”
 
 ## Implementation status
 
-Production implementation is in progress under the versioned plan in `docs/plans/`.
-Wave 0 has established all four isolated build domains, their exact dependency/toolchain
-identities, the locked Protobuf generator, and cross-domain gates. Contract and runtime
-behavior land in Waves 1–3.
+Plan v5 is active against the synchronized v2.3 design suite. The four isolated build
+domains, relational data plane, daemon v2 boundary, workspace supervisor, attach-only
+launcher, and modern FastMCP 4 presentation process are present. Terminal evidence and
+physical predecessor decommission continue under the versioned plan in `docs/plans/`.
 
 ## Architecture
 
 Four independently built domains meet across process or generated-contract boundaries:
 
 ```text
-agent
-  → codefabric-cpg-mcp/       Python FastMCP adapter; presentation only
+agent → codefabric mcp serve (attach-only Rust launcher)
+  → codefabric-cpg-mcp/ (one Python FastMCP 4 STDIO process per agent)
     → private Protobuf/gRPC over a Unix-domain socket
-      → root Cargo package   stable Rust daemon and Arrow/Delta/DataFusion data plane
+      → one codefabricd daemon per workspace
            ├─ rustc-extractor/   dated-nightly rustc/MIR subprocess
            └─ pyrefly-sidecar/   pinned Pyrefly semantic subprocess
+WorkspaceSupervisor owns the daemon singleton, control, grants, and process lifecycle.
 ```
 
-The root package is one rlib crate, edition 2024 with Rust 1.95.0 as its verified
-compatibility floor. It has no native-extension build surface or root Python package. Its default
+The root package contains one rlib crate and the two thin `codefabric` and `codefabricd`
+operational binaries. It uses edition 2024 with Rust 1.95.0 as its verified compatibility
+floor and has no native-extension build surface or root Python package. Its default
 `local-workstation` accepts only local filesystem storage and excludes the Delta S3
 implementation and AWS SDK; `s3-storage` enables them explicitly. The pinned Delta
 kernel still compiles latent `object_store` cloud features, which the graph and advisory
 policy checks report rather than concealing. Narrow `canonical-json`, `contract-models`,
-`proto-tooling`, `rpc`, `repository-state`, and `data-fabric`
+`proto-tooling`, `rpc`, `repository-state`, `fact-generation`, and `data-fabric`
 features keep focused tools from compiling unrelated production subsystems.
 
 The additional Cargo roots are not a Cargo workspace. Their separate toolchains and
@@ -46,7 +48,7 @@ dependency isolation are build-domain requirements, not semantic source organiza
 | Stable daemon/data plane | Linux and macOS; exact development toolchain 1.98.0, verified MSRV 1.95.0 |
 | rustc extractor | `nightly-2026-08-18`; exact compiler identity recorded |
 | Pyrefly sidecar | Pyrefly 1.2.0 at an immutable source revision |
-| FastMCP adapter | Python 3.14.7 development pin; package floor 3.12 |
+| FastMCP adapter | Python 3.14.7 locked development/runtime identity; package floor 3.14.7 |
 
 ## Bootstrap
 
@@ -140,9 +142,9 @@ never dependencies of a gate. Note that `cargo nextest` does not execute doctest
 ## Governing documents
 
 The authoritative system design is the discovered
-`codefabric-relational-data-fabric` v2.0 suite under `docs/authoritative_design/`; its roadmap
-orders capability stages and the active versioned implementation plan owns packet execution.
-The adjacent v1.3 masters remain historical transition evidence, not a coequal target.
+`codefabric-relational-data-fabric` v2.3 suite under `docs/authoritative_design/`; its roadmap
+orders capability stages and the active v5 implementation plan owns packet execution. The
+v2.2, v2.1, v2.0, and v1.3 suites remain historical transition evidence, not coequal targets.
 `AGENTS.md` documents the repository tooling, assurance model, design map, and operating rules.
 The older `docs/rust_core_python_interface_repository_specification_2026-08-20.md` remains the
 infrastructure source for compatible decisions unless the current suite explicitly supersedes

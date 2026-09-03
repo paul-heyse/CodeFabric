@@ -570,7 +570,15 @@ pub async fn production_rpc_interop_fixture(
         .await
         .expect("register interop launch grant");
     let results = Arc::new(StreamedResultRegistry::try_new(32).expect("interop result registry"));
-    let service = ProductionQueryService::new(
+    let release = Arc::new(
+        crate::semantic_release::compile_current_v23_release(
+            crate::production_provider_recipe::current_v23_provider_program_definition()
+                .expect("interop provider definition"),
+        )
+        .expect("interop compiled release"),
+    );
+    let service = ProductionQueryService::try_new(
+        release,
         Arc::clone(&backend),
         Arc::clone(&lifecycle),
         Arc::new(WorkspaceSlotRegistry::new()),
@@ -578,7 +586,8 @@ pub async fn production_rpc_interop_fixture(
         sessions,
         Arc::clone(&results),
         "daemon:interop-production-handler",
-    );
+    )
+    .expect("interop backend and application service use one release");
     let control = ProductionRpcInteropControl {
         lifecycle,
         coordinator,

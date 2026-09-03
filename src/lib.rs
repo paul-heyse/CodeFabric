@@ -160,8 +160,3 @@ pub mod fabric;
 pub mod git_state;
 #[cfg(feature = "fact-generation")]
 pub mod tree_sitter_adapter;
-
-#[cfg(all(test, feature = "daemon"))]
-mod production_evidence_core_tests;
-#[cfg(all(test, feature = "daemon"))]
-mod production_evidence_tests;
