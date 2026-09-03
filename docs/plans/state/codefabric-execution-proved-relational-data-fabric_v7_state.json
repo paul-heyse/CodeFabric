@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_compiled_release_provider_fabric_runtime_boundary_design_v1_2026-09-02.md",
   "baseline_commit": "de5db65c2834458eb57c7133183b8cef67a2491a",
   "status": "executing",
-  "current_packet": "WP64",
+  "current_packet": "WP65",
   "packets": {
     "WP53": {
       "status": "complete",
@@ -84,14 +84,14 @@
       "blockers": []
     },
     "WP64": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "197c104cc952b956c5538d91d23e39ddc34faf32",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP65": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -172,8 +172,8 @@
       "blockers": []
     },
     "DB23": {
-      "status": "not_started",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "197c104cc952b956c5538d91d23e39ddc34faf32",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -225,6 +225,6 @@
       "summary": "The prior value did not identify a Git object; the corrected value is the ancestral commit titled implement v7 WP54 state authority split."
     }
   ],
-  "next_action": "Execute WP64 FreshActivation from an empty supported root, census deployed predecessor state, delete dormant switchable authority machinery, and prove exact restart/reconciliation forward repair.",
-  "updated_at": "2026-09-03T11:37:46Z"
+  "next_action": "Pre-register WP65 target-only workloads and resource bounds against the frozen WP64 topology, then measure release, providers, DataFusion, Delta, gRPC, FastMCP, cancellation, and admitted concurrency without a predecessor baseline.",
+  "updated_at": "2026-09-03T12:19:53Z"
 }
