@@ -20,7 +20,6 @@ from tooling.ci.fastmcp4_post_purge_assurance import (
     ROOT,
     _iter_live_files,
     _read_live_text,
-    _source_authority_files,
     validate_coverage,
 )
 
@@ -80,7 +79,7 @@ def validate_compiled_release_zero_state(root: Path = ROOT) -> Mapping[str, obje
     files, skipped, classified_symlinks = _iter_live_files(root)
     matches: list[str] = []
     scanned = 0
-    for path in _source_authority_files(files):
+    for path in files:
         if path in SELF_PATHS or path in NEGATIVE_GUARD_PATHS:
             continue
         text = _read_live_text(root, path)
