@@ -1456,7 +1456,7 @@ mod tests {
     }
 
     #[test]
-    fn pyrefly_context_trust_and_memory_faults() {
+    fn sidecar_context_trust_and_memory_faults() {
         assert!(Service::new(Path::new("relative"), TEST_SANDBOX_PROFILE_DIGEST).is_err());
         assert!(Service::new(Path::new("/tmp"), "sha256:not-a-digest").is_err());
 
@@ -1499,7 +1499,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pyrefly_cooperative_drain_reconstruction() {
+    async fn sidecar_cooperative_drain_operations() {
         let state_root =
             std::env::temp_dir().join(format!("codefabric-pyrefly-drain-{}", std::process::id()));
         let _ = fs::remove_dir_all(&state_root);

@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_compiled_release_provider_fabric_runtime_boundary_design_v1_2026-09-02.md",
   "baseline_commit": "de5db65c2834458eb57c7133183b8cef67a2491a",
   "status": "executing",
-  "current_packet": "WP58",
+  "current_packet": "WP59",
   "packets": {
     "WP53": {
       "status": "complete",
@@ -42,18 +42,16 @@
       "blockers": []
     },
     "WP58": {
-      "status": "in_progress",
-      "proving_commit": "200c90682f2c35c151a770286bd46938be521e4b",
+      "status": "complete",
+      "proving_commit": "be0062d02eaf478f9230214da27bb776bbb4926d",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP59": {
-      "status": "stale",
+      "status": "in_progress",
       "proving_commit": "7fd0f896768ed4017ca0329e5f09e7adcf5ff61c",
-      "deviations": [
-        "The supervised incremental Pyrefly implementation and its exact oracle definitions remain present, but the packet's default-lib lifecycle and IPC selectors cannot compile on the interrupted WP61 tree. Revalidate the retained implementation after the shared test target is repaired."
-      ],
+      "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
@@ -235,6 +233,6 @@
       "summary": "The prior value did not identify a Git object; the corrected value is the ancestral commit titled implement v7 WP54 state authority split."
     }
   ],
-  "next_action": "Close WP58's exact rustc ingress and process-lifecycle oracle definitions, then re-prove all stable-root and dated-nightly extractor gates.",
-  "updated_at": "2026-09-03T10:02:30Z"
+  "next_action": "Re-prove WP59's long-lived Pyrefly context reuse, reconstruction, containment, flow-control, and sidecar-domain gates.",
+  "updated_at": "2026-09-03T10:08:00Z"
 }
