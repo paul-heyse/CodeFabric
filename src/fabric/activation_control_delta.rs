@@ -3977,9 +3977,11 @@ mod tests {
         let table_path = temporary.path().join("activation-control");
         fs::create_dir_all(&table_path).unwrap();
         let root = Url::from_directory_path(&table_path).unwrap();
+        let provision_started = std::time::Instant::now();
         let (predecessor, table) = provision_activation_control_history(root.clone())
             .await
             .unwrap();
+        let provision_millis = provision_started.elapsed().as_secs_f64() * 1_000.0;
         let epoch_id = EpochId::from_bytes(bytes16(0xa1));
         let selected_epoch =
             ProgrammaticFabricEpochBuilder::try_new(epoch_id, FabricEpochRuntimeConfig::default())
@@ -4040,7 +4042,9 @@ mod tests {
             } if unchanged_chain.current_head() == ExpectedHead::Empty
         ));
         let contract = append_contract(semantic, Arc::clone(&versions), request_control.clone());
+        let commit_started = std::time::Instant::now();
         let outcome = authority.append_and_readback(contract).await;
+        let commit_readback_millis = commit_started.elapsed().as_secs_f64() * 1_000.0;
         let (event, chain) = match outcome {
             ActivationAppendOutcome::Committed {
                 selection,
@@ -4085,7 +4089,9 @@ mod tests {
                 unknown_file_count: 1,
             }
         );
+        let exact_read_started = std::time::Instant::now();
         let readback = committed.read_all(recovery_fence).await.unwrap();
+        let exact_read_millis = exact_read_started.elapsed().as_secs_f64() * 1_000.0;
         assert_eq!(readback.rows().len(), 1);
         assert_eq!(readback.rows()[0].row(), semantic);
         assert_eq!(
@@ -4151,12 +4157,14 @@ mod tests {
                 fence: restarted_fence,
             }),
         );
+        let reopen_started = std::time::Instant::now();
         let restarted_selection = match restarted_authority.current_selection().await.unwrap() {
             ExactActivationControlSelection::Selected(selected) => selected,
             ExactActivationControlSelection::GenesisRequired(_) => {
                 panic!("restart must retain the exact durable selection")
             }
         };
+        let reopen_selection_millis = reopen_started.elapsed().as_secs_f64() * 1_000.0;
         assert_eq!(restarted_selection.event(), selected.event());
         assert_eq!(
             restarted_selection.table_versions().as_ref(),
@@ -4325,5 +4333,19 @@ mod tests {
             selected_epoch.table_version_set_ref(),
             restarted.table_version_set_ref()
         );
+        if std::env::var_os("CODEFABRIC_WP65_MEASURE").is_some() {
+            println!(
+                "CODEFABRIC_WP65_OBSERVATION={}",
+                serde_json::json!({
+                    "workload_id": "delta_exact_publication",
+                    "provision_millis": provision_millis,
+                    "commit_readback_millis": commit_readback_millis,
+                    "exact_read_millis": exact_read_millis,
+                    "reopen_selection_millis": reopen_selection_millis,
+                    "activation_rows": readback.rows().len(),
+                    "committed_version": committed.control_relation().table().version(),
+                })
+            );
+        }
     }
 }

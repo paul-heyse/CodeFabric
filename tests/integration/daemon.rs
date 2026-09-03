@@ -1981,8 +1981,12 @@ fn wp63_beh_real_source_to_installed_fastmcp_is_causal_and_epoch_coherent() {
     const MUTATED: &[u8] = b"def answer(value: int) -> int:\n    return value + 1\n\ndef doubled(value: int) -> int:\n    return value * 2\n";
 
     let stack = InstalledProductionStack::build();
+    let baseline_started = Instant::now();
     let baseline = installed_vertical_observation(&stack, BASELINE, "causal-baseline");
+    let baseline_millis = baseline_started.elapsed().as_secs_f64() * 1_000.0;
+    let mutated_started = Instant::now();
     let mutated = installed_vertical_observation(&stack, MUTATED, "causal-mutated");
+    let mutated_millis = mutated_started.elapsed().as_secs_f64() * 1_000.0;
 
     assert_eq!(baseline.query_rows, 1, "pre-registered baseline clause");
     assert_eq!(mutated.query_rows, 2, "pre-registered mutation clause");
@@ -1998,6 +2002,20 @@ fn wp63_beh_real_source_to_installed_fastmcp_is_causal_and_epoch_coherent() {
         baseline.reference_content, mutated.reference_content,
         "source mutation changed unrelated request-schema presentation"
     );
+    if std::env::var_os("CODEFABRIC_WP65_MEASURE").is_some() {
+        println!(
+            "CODEFABRIC_WP65_OBSERVATION={}",
+            json!({
+                "workload_id": "installed_fastmcp_vertical",
+                "baseline_millis": baseline_millis,
+                "mutated_millis": mutated_millis,
+                "baseline_rows": baseline.query_rows,
+                "mutated_rows": mutated.query_rows,
+                "semantic_change_observed": baseline.query_rows != mutated.query_rows,
+                "joined": true,
+            })
+        );
+    }
 }
 
 #[test]

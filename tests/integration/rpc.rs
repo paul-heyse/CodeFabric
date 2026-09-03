@@ -781,6 +781,7 @@ async fn wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable() 
     )
     .await;
     server.control.wait_for_query_count(1).await;
+    let watch_started = tokio::time::Instant::now();
     let mut held_watch = client
         .watch_query(authenticated_request(
             WatchQueryRequest {
@@ -805,6 +806,7 @@ async fn wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable() 
     let snapshot = server.control.coordinator_snapshot().await;
     assert!(snapshot.running <= 2 && snapshot.accepted <= 4);
 
+    let cancellation_started = tokio::time::Instant::now();
     let cancellation = tokio::time::timeout(
         Duration::from_millis(500),
         client.cancel_query(authenticated_request(
@@ -820,6 +822,7 @@ async fn wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable() 
     .expect("reserved cancellation remains prompt beside an unread watch")
     .expect("cancel unread-watch query")
     .into_inner();
+    let cancellation_ack_millis = cancellation_started.elapsed().as_secs_f64() * 1_000.0;
     assert_eq!(
         cancellation.acknowledgement,
         CancellationAcknowledgement::Accepted as i32
@@ -827,7 +830,9 @@ async fn wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable() 
 
     let mut sequences = Vec::new();
     let mut terminal_count = 0;
+    let mut first_event_millis = None;
     while let Some(event) = held_watch.message().await.expect("held watch event") {
+        first_event_millis.get_or_insert_with(|| watch_started.elapsed().as_secs_f64() * 1_000.0);
         let sequence = match event.event.expect("typed watch event") {
             WireQueryEvent::SnapshotPinned(event) => event.header,
             WireQueryEvent::Progress(event) => event.header,
@@ -847,7 +852,9 @@ async fn wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable() 
         sequences,
         (1..=u64::try_from(sequences.len()).expect("watch sequence length")).collect::<Vec<_>>()
     );
+    let cleanup_started = tokio::time::Instant::now();
     wait_for_owned_task_count(&server.control, steady_owned_tasks).await;
+    let cleanup_millis = cleanup_started.elapsed().as_secs_f64() * 1_000.0;
 
     let dropped = start_production_query(
         &mut client,
@@ -940,18 +947,34 @@ async fn wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable() 
     );
     drop(held_resource);
 
-    let observed = read_production_resource(
-        &mut client,
-        &authority,
-        &handshake.session_token,
-        &reference.public_handle,
-        WireResourceSelector::Reference(ReferenceReadRequest {
-            kind: ReferenceKind::Guide as i32,
-            version: Some("2.3-bounded".to_owned()),
-        }),
-        "wp63-read-retained-resource",
-    )
-    .await;
+    let resource_started = tokio::time::Instant::now();
+    let mut resource_stream = client
+        .read_resource(authenticated_request(
+            ReadResourceRequest {
+                context: Some(request_context(&authority, "wp63-read-retained-resource")),
+                public_handle: reference.public_handle.clone(),
+                selector: Some(ResourceSelector {
+                    selector: Some(WireResourceSelector::Reference(ReferenceReadRequest {
+                        kind: ReferenceKind::Guide as i32,
+                        version: Some("2.3-bounded".to_owned()),
+                    })),
+                }),
+                offset: 0,
+                maximum_bytes: 64 * 1_024,
+            },
+            &handshake.session_token,
+        ))
+        .await
+        .expect("read retained resource")
+        .into_inner();
+    let mut observed = Vec::new();
+    let mut resource_first_chunk_millis = None;
+    while let Some(chunk) = resource_stream.message().await.expect("resource chunk") {
+        resource_first_chunk_millis
+            .get_or_insert_with(|| resource_started.elapsed().as_secs_f64() * 1_000.0);
+        observed.extend_from_slice(&chunk.content);
+    }
+    let resource_total_millis = resource_started.elapsed().as_secs_f64() * 1_000.0;
     assert_eq!(observed, expected, "watch drop must not release the lease");
     let released = release_production_resource(
         &mut client,
@@ -966,6 +989,73 @@ async fn wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable() 
         server.control.query_phase(&cancelled.daemon_query_id).await,
         QueryExecutionPhase::Terminal(QueryTerminalState::Cancelled)
     ));
+
+    let mut admission_millis = Vec::new();
+    let mut maximum = Vec::new();
+    for ordinal in 0..4 {
+        let started = tokio::time::Instant::now();
+        maximum.push(
+            start_production_query(
+                &mut client,
+                &authority,
+                &handshake.session_token,
+                production_submission(&format!("request:wp65-maximum-{ordinal}")),
+                &format!("wp65-maximum-{ordinal}"),
+            )
+            .await,
+        );
+        admission_millis.push(started.elapsed().as_secs_f64() * 1_000.0);
+    }
+    for (ordinal, accepted) in maximum.iter().enumerate() {
+        client
+            .cancel_query(authenticated_request(
+                CancelQueryRequest {
+                    context: Some(request_context(
+                        &authority,
+                        format!("wp65-cancel-maximum-{ordinal}"),
+                    )),
+                    daemon_query_id: accepted.daemon_query_id.clone(),
+                    cancellation_id: format!("cancel:wp65-maximum-{ordinal}"),
+                },
+                &handshake.session_token,
+            ))
+            .await
+            .expect("cancel maximum-admission query");
+    }
+    wait_for_owned_task_count(&server.control, steady_owned_tasks).await;
+    let minimum_admission = admission_millis
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min)
+        .max(f64::EPSILON);
+    let fairness_ratio = admission_millis.iter().copied().fold(0.0, f64::max) / minimum_admission;
+    let resource_seconds = (resource_total_millis / 1_000.0).max(f64::EPSILON);
+    let owned_tasks_after = server
+        .control
+        .owned_task_count()
+        .await
+        .saturating_sub(steady_owned_tasks);
+    if std::env::var_os("CODEFABRIC_WP65_MEASURE").is_some() {
+        println!(
+            "CODEFABRIC_WP65_OBSERVATION={}",
+            serde_json::json!({
+                "workload_id": "grpc_streaming_and_maximum_admission",
+                "first_event_millis": first_event_millis.unwrap(),
+                "cancellation_ack_millis": cancellation_ack_millis,
+                "cleanup_millis": cleanup_millis,
+                "resource_first_chunk_millis": resource_first_chunk_millis.unwrap(),
+                "resource_total_millis": resource_total_millis,
+                "resource_bytes": observed.len(),
+                "resource_throughput_bytes_per_second": observed.len() as f64 / resource_seconds,
+                "slow_consumer_rss_delta_bytes": rss_after.saturating_sub(rss_before),
+                "maximum_queries": maximum.len(),
+                "fairness_ratio": fairness_ratio,
+                "owned_tasks_after": owned_tasks_after,
+                "channels_created": 1,
+                "servers_created": 1,
+            })
+        );
+    }
     server.stop().await;
 }
 

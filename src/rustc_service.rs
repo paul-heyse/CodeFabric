@@ -3102,9 +3102,11 @@ mod tests {
             panic!("fixture ends with the compiler terminal")
         };
 
+        let corrupt_started = std::time::Instant::now();
         let result = execute_test_lifecycle(&harness, events, true)
             .await
             .unwrap();
+        let corrupt_millis = corrupt_started.elapsed().as_secs_f64() * 1_000.0;
         assert!(result.compilations().is_empty());
         assert_eq!(result.result().terminal(), ProviderTerminalStatus::Corrupt);
         assert!(matches!(
@@ -3116,9 +3118,11 @@ mod tests {
         ));
         assert!(!harness.paths.extractor_socket_path.exists());
 
+        let complete_started = std::time::Instant::now();
         let reconstructed = execute_test_lifecycle(&harness, completed_event_stream(), false)
             .await
             .unwrap();
+        let complete_millis = complete_started.elapsed().as_secs_f64() * 1_000.0;
         assert_eq!(
             reconstructed.result().terminal(),
             ProviderTerminalStatus::Complete
@@ -3126,9 +3130,11 @@ mod tests {
         assert_eq!(reconstructed.compilations().len(), 1);
         assert!(!harness.paths.extractor_socket_path.exists());
 
+        let failure_started = std::time::Instant::now();
         let compile_gap = execute_test_lifecycle(&harness, failed_event_stream(), false)
             .await
             .unwrap();
+        let failure_millis = failure_started.elapsed().as_secs_f64() * 1_000.0;
         assert!(compile_gap.compilations().is_empty());
         assert_eq!(
             compile_gap.result().terminal(),
@@ -3155,6 +3161,7 @@ mod tests {
         });
         let cancellation_observed = Arc::new(AtomicBool::new(false));
         let supervisor_observation = Arc::clone(&cancellation_observed);
+        let cancellation_started = std::time::Instant::now();
         let cancelled = execute_prepared_rustc_lifecycle(
             provider_job,
             lifecycle_plan(&cancellation_harness),
@@ -3177,6 +3184,7 @@ mod tests {
         )
         .await
         .unwrap();
+        let cancellation_millis = cancellation_started.elapsed().as_secs_f64() * 1_000.0;
         cancellation_trigger.await.unwrap();
         assert!(cancellation_observed.load(Ordering::Acquire));
         assert_eq!(
@@ -3185,6 +3193,22 @@ mod tests {
         );
         assert!(cancelled.compilations().is_empty());
         assert!(!cancellation_harness.paths.extractor_socket_path.exists());
+        if std::env::var_os("CODEFABRIC_WP65_MEASURE").is_some() {
+            println!(
+                "CODEFABRIC_WP65_OBSERVATION={}",
+                serde_json::json!({
+                    "workload_id": "rustc_provider_process",
+                    "corrupt_millis": corrupt_millis,
+                    "complete_millis": complete_millis,
+                    "failure_millis": failure_millis,
+                    "cancellation_millis": cancellation_millis,
+                    "complete_compilations": reconstructed.compilations().len(),
+                    "cancellation_observed": cancellation_observed.load(Ordering::Acquire),
+                    "joined": !harness.paths.extractor_socket_path.exists()
+                        && !cancellation_harness.paths.extractor_socket_path.exists(),
+                })
+            );
+        }
     }
 
     #[tokio::test]

@@ -2771,4 +2771,91 @@ pub(crate) mod job_tests {
         assert_eq!(lifecycle.tree_sitter_completed_runs, 2);
         assert_eq!(lifecycle.ruff_completed_runs, 2);
     }
+
+    #[test]
+    fn wp65_measure_inprocess_tree_sitter_ruff() {
+        let mut first_text = String::new();
+        for index in 0..256 {
+            use std::fmt::Write as _;
+            writeln!(
+                first_text,
+                "def function_{index}(value: int) -> int:\n    return value + 1\n"
+            )
+            .unwrap();
+        }
+        let edit_start = first_text.rfind('1').expect("frozen one-byte edit");
+        let mut second_text = first_text.clone().into_bytes();
+        second_text[edit_start] = b'2';
+        let second_text = String::from_utf8(second_text).unwrap();
+
+        let first_source = source_with_marker(&first_text, 1, 0x65);
+        let first_jobs = jobs_with_marker(&first_source, 0x65);
+        let mut retained = ExactPythonSyntaxRunner::new().unwrap();
+        let initial_started = Instant::now();
+        let initial = retained
+            .run_full(first_jobs.borrowed(), 1, &first_source, module())
+            .unwrap();
+        let initial_millis = initial_started.elapsed().as_secs_f64() * 1_000.0;
+
+        let second_source = source_with_marker(&second_text, 2, 0x66);
+        let second_jobs = jobs_with_marker(&second_source, 0x66);
+        let incremental_started = Instant::now();
+        let incremental = retained
+            .run_incremental(
+                second_jobs.borrowed(),
+                2,
+                &second_source,
+                TreeSitterEdit {
+                    start_byte: edit_start,
+                    old_end_byte: edit_start + 1,
+                    new_end_byte: edit_start + 1,
+                },
+                module(),
+            )
+            .unwrap();
+        let incremental_millis = incremental_started.elapsed().as_secs_f64() * 1_000.0;
+
+        let clean_started = Instant::now();
+        let clean = ExactPythonSyntaxRunner::new()
+            .unwrap()
+            .run_full(second_jobs.borrowed(), 2, &second_source, module())
+            .unwrap();
+        let clean_millis = clean_started.elapsed().as_secs_f64() * 1_000.0;
+        assert_eq!(incremental.relations, clean.relations);
+        let output_rows = initial
+            .relations
+            .values()
+            .chain(incremental.relations.values())
+            .map(RecordBatch::num_rows)
+            .sum::<usize>();
+        let output_bytes = initial
+            .relations
+            .values()
+            .chain(incremental.relations.values())
+            .map(RecordBatch::get_array_memory_size)
+            .sum::<usize>();
+        let elapsed_seconds = ((initial_millis + incremental_millis) / 1_000.0).max(f64::EPSILON);
+        let lifecycle = retained.lifecycle_observation();
+        assert_eq!(lifecycle.tree_sitter_retained_revisions, 2);
+        assert_eq!(lifecycle.ruff_retained_revisions, 1);
+
+        if std::env::var_os("CODEFABRIC_WP65_MEASURE").is_some() {
+            println!(
+                "CODEFABRIC_WP65_OBSERVATION={}",
+                serde_json::json!({
+                    "workload_id": "inprocess_tree_sitter_ruff",
+                    "initial_millis": initial_millis,
+                    "incremental_millis": incremental_millis,
+                    "clean_millis": clean_millis,
+                    "input_bytes": first_text.len() + second_text.len(),
+                    "output_rows": output_rows,
+                    "output_bytes": output_bytes,
+                    "throughput_bytes_per_second": output_bytes as f64 / elapsed_seconds,
+                    "incremental_equals_clean": true,
+                    "tree_sitter_retained_revisions": lifecycle.tree_sitter_retained_revisions,
+                    "ruff_retained_revisions": lifecycle.ruff_retained_revisions,
+                })
+            );
+        }
+    }
 }

@@ -3135,6 +3135,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wp65_measure_datafusion_stream() {
+        let epoch = sealed_epoch().await;
+        let resources = resource_coordinator(&epoch);
+        let child = epoch
+            .authorized_child_session(
+                policy(
+                    &epoch,
+                    vec![grant(ALLOWED_RELATION)],
+                    ChildRegistryAllowlist::default(),
+                ),
+                &resources,
+            )
+            .await
+            .unwrap();
+        let (_, program) = input_program(&epoch, ALLOWED_RELATION);
+
+        let planning_started = std::time::Instant::now();
+        let streamed = child
+            .execute_relational_program_stream(&program)
+            .await
+            .unwrap();
+        let planning_millis = planning_started.elapsed().as_secs_f64() * 1_000.0;
+        assert_eq!(
+            streamed.plan_observation().outcome,
+            LogicalPlanCacheOutcome::Miss
+        );
+        let mut stream = streamed.into_stream();
+        let first_started = std::time::Instant::now();
+        let first = stream.next().await.unwrap().unwrap();
+        let first_batch_millis = first_started.elapsed().as_secs_f64() * 1_000.0;
+        let full_started = std::time::Instant::now();
+        let mut row_count = first.num_rows();
+        let mut output_bytes = first.get_array_memory_size();
+        while let Some(batch) = stream.next().await {
+            let batch = batch.unwrap();
+            row_count += batch.num_rows();
+            output_bytes += batch.get_array_memory_size();
+        }
+        let full_stream_millis =
+            first_batch_millis + full_started.elapsed().as_secs_f64() * 1_000.0;
+        assert_eq!(row_count, 2);
+
+        let cached_started = std::time::Instant::now();
+        let cached = child
+            .execute_relational_program_stream(&program)
+            .await
+            .unwrap();
+        let cached_planning_millis = cached_started.elapsed().as_secs_f64() * 1_000.0;
+        assert_eq!(
+            cached.plan_observation().outcome,
+            LogicalPlanCacheOutcome::Hit
+        );
+        drop(cached);
+        tokio::task::yield_now().await;
+        let observation = child.resource_observation();
+        assert_eq!(observation.memory_reserved_bytes, 0);
+        assert_eq!(observation.active_spill_files, 0);
+
+        if std::env::var_os("CODEFABRIC_WP65_MEASURE").is_some() {
+            println!(
+                "CODEFABRIC_WP65_OBSERVATION={}",
+                serde_json::json!({
+                    "workload_id": "datafusion_stream",
+                    "planning_millis": planning_millis,
+                    "first_batch_millis": first_batch_millis,
+                    "full_stream_millis": full_stream_millis,
+                    "cached_planning_millis": cached_planning_millis,
+                    "row_count": row_count,
+                    "output_bytes": output_bytes,
+                    "spilled_bytes": observation.spilled_bytes,
+                    "active_spill_files": observation.active_spill_files,
+                    "memory_reserved_after": observation.memory_reserved_bytes,
+                    "drop_cancels_stream": true,
+                })
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn relational_program_executes_only_through_authorized_child_inputs() {
         let epoch = sealed_epoch().await;
         let resources = resource_coordinator(&epoch);

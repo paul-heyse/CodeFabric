@@ -702,6 +702,54 @@ fresh_activation_reconciliation_operations: fabric-activation-recovery-check fab
 [group('gate')]
 compiled-release-fresh-activation-check: fresh_activation_sole_authority_integrity empty_root_fresh_activation_semantics predecessor_seed_hash_latest_route_faults fresh_activation_reconciliation_operations
 
+# WP65's measurement recipes are intentionally private implementation details of the frozen
+# method. Each selects one real product scenario and emits no synthetic candidate observation.
+_wp65-measure-release-compile:
+    cargo build --locked --release --bin codefabric --bin codefabricd
+
+_wp65-measure-fresh-activation:
+    cargo test --locked --test integration integration::daemon::wp44_beh_real_supervisor_ready_requires_durable_fresh_activation -- --exact --nocapture
+
+_wp65-measure-retained-reconstruction:
+    cargo test --locked --test integration integration::daemon::wp63_ops_installed_restart_reconstructs_only_exact_activation_authority -- --exact --nocapture
+
+_wp65-measure-inprocess-providers:
+    cargo test --locked --lib provider_native_syntax::job_tests::wp65_measure_inprocess_tree_sitter_ruff -- --exact --nocapture
+
+_wp65-measure-pyrefly:
+    cd pyrefly-sidecar && cargo test --locked pyrefly_link::tests::wp65_measure_retained_pyrefly -- --exact --nocapture
+
+_wp65-measure-rustc-provider:
+    cargo test --locked --lib rustc_service::tests::rustc_provider_process_lifecycle -- --exact --nocapture
+
+_wp65-measure-datafusion:
+    cargo test --locked --lib fabric::child_session::tests::wp65_measure_datafusion_stream -- --exact --nocapture
+
+_wp65-measure-delta:
+    cargo test --locked --lib fabric::activation_control_delta::tests::exact_delta_activation_authority_split -- --exact --nocapture
+
+_wp65-measure-grpc:
+    cargo test --locked --test integration integration::rpc::wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable -- --exact --nocapture
+
+_wp65-measure-installed-fastmcp:
+    cargo test --locked --test integration integration::daemon::wp63_beh_real_source_to_installed_fastmcp_is_causal_and_epoch_coherent -- --exact --nocapture
+
+[doc("Validate the pre-registered target-only WP65 method and reject expectation drift")]
+[group('gate')]
+fastmcp4-expectation-drift-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_release_performance.py method-integrity
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_release_performance.py
+
+[doc("Validate raw final-topology samples, structural runs, bounds, review, and git lineage")]
+[group('test')]
+compiled_release_resource_performance_envelope:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_release_performance.py method-integrity
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_release_performance.py validate
+
+[doc("Certify the frozen target-only WP65 resource and performance envelope")]
+[group('gate')]
+compiled-release-resource-performance-check: fastmcp4-expectation-drift-check compiled_release_resource_performance_envelope
+
 [doc("Execute application-owned provider job, result, coverage, gap, resource, and admission contracts")]
 [group('test')]
 provider-job-contract-check:
@@ -1254,6 +1302,13 @@ profile-build:
 # dependency of any gate. After running one: inspect the diff, identify the semantic
 # impact, rerun the relevant validation, and disclose what the tool changed
 # (spec section 63).
+
+[confirm("Execute the frozen WP65 workloads and create exclusive raw/review evidence. Continue?")]
+[doc("MUTATES: create target-only WP65 measurement evidence and an isolated release target")]
+[group('mutating')]
+compiled-release-resource-performance-capture:
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/benchmarks/fastmcp4_release_benchmark.py run
+    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_release_performance.py summarize
 
 [confirm("Create schema-2 state and activate the approved plan atomically. Continue?")]
 [doc("MUTATES: create validated execution state before switching the active-plan pointer")]

@@ -1571,6 +1571,118 @@ mod tests {
     }
 
     #[test]
+    fn wp65_measure_retained_pyrefly() {
+        let root = claim_001_temp_root("wp65-retained");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let source_path = root.join("admitted.py");
+        let source_for = |generation: u64| {
+            let mut source = String::new();
+            for index in 0..64 {
+                use std::fmt::Write as _;
+                writeln!(
+                    source,
+                    "def function_{index}(value: int) -> int:\n    return value + {generation}\n"
+                )
+                .unwrap();
+            }
+            source.into_bytes()
+        };
+        let module_for = |source: &[u8]| ModuleInput {
+            module_id: "module:wp65-retained".to_owned(),
+            module_name: "wp65_retained_fixture".to_owned(),
+            file_id: "file:wp65-retained".to_owned(),
+            source_path: source_path.clone(),
+            source_digest: b3(source),
+        };
+        let run_for = |generation| AnalysisRunIdentity {
+            provider_run_id: format!("run:wp65-retained:{generation}"),
+            analysis_context_id: "context:wp65-retained".to_owned(),
+            semantic_environment_digest: b3(b"environment:wp65-retained"),
+            source_generation: generation,
+        };
+
+        let first = source_for(1);
+        std::fs::write(&source_path, &first).unwrap();
+        let mut retained = SemanticContext::new(&root, "wp65-retained-context").unwrap();
+        let initial_started = std::time::Instant::now();
+        retained
+            .analyze_modules(&run_for(1), &[module_for(&first)])
+            .unwrap();
+        let initial_millis = initial_started.elapsed().as_secs_f64() * 1_000.0;
+
+        let mut change_files_millis = Vec::new();
+        let mut final_analysis = None;
+        let mut final_source = Vec::new();
+        for generation in 2..=9 {
+            let source = source_for(generation);
+            std::fs::write(&source_path, &source).unwrap();
+            let started = std::time::Instant::now();
+            let analysis = retained
+                .analyze_modules(&run_for(generation), &[module_for(&source)])
+                .unwrap();
+            change_files_millis.push(started.elapsed().as_secs_f64() * 1_000.0);
+            final_analysis = Some(analysis);
+            final_source = source;
+        }
+        let final_analysis = final_analysis.unwrap();
+        let mut clean = SemanticContext::new(&root, "wp65-clean-context").unwrap();
+        let clean_analysis = clean
+            .analyze_modules(&run_for(9), &[module_for(&final_source)])
+            .unwrap();
+        assert_eq!(
+            final_analysis.modules[0]
+                .relations
+                .iter()
+                .map(|relation| (&relation.relation, &relation.arrow_ipc))
+                .collect::<Vec<_>>(),
+            clean_analysis.modules[0]
+                .relations
+                .iter()
+                .map(|relation| (&relation.relation, &relation.arrow_ipc))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(retained.lifecycle_observation(), (9, 1, 1));
+        let output_rows = final_analysis.modules[0]
+            .relations
+            .iter()
+            .map(|relation| relation.row_count)
+            .sum::<u64>();
+        let output_bytes = final_analysis.modules[0]
+            .relations
+            .iter()
+            .map(|relation| relation.arrow_ipc.len())
+            .sum::<usize>();
+        let change_files_total_millis = change_files_millis.iter().sum::<f64>();
+        let mut ordered = change_files_millis.clone();
+        ordered.sort_by(f64::total_cmp);
+        let p95_index = (ordered.len() * 95).div_ceil(100).saturating_sub(1);
+        let elapsed_seconds =
+            ((initial_millis + change_files_total_millis) / 1_000.0).max(f64::EPSILON);
+        if std::env::var_os("CODEFABRIC_WP65_MEASURE").is_some() {
+            println!(
+                "CODEFABRIC_WP65_OBSERVATION={}",
+                json!({
+                    "workload_id": "retained_pyrefly",
+                    "initial_millis": initial_millis,
+                    "change_files_total_millis": change_files_total_millis,
+                    "change_files_p95_millis": ordered[p95_index],
+                    "generations": 9,
+                    "loaded_modules": 1,
+                    "peak_loaded_modules": 1,
+                    "output_rows": output_rows,
+                    "output_bytes": output_bytes,
+                    "throughput_bytes_per_second": output_bytes as f64 / elapsed_seconds,
+                    "final_equal_clean": true,
+                })
+            );
+        }
+        drop(clean);
+        drop(retained);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn operational_source_paths_do_not_escape_diagnostics() {
         let path = Path::new("/private/tmp/provider-run-42/pkg/module.py");
         let normalized = normalize_diagnostic(
