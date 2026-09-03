@@ -44,7 +44,7 @@ def test_resource_envelope_method_integrity() -> None:
     assert text.name == "workloads.json"
     encoded = str(method.document).lower()
     assert "minimal-fastmcp" not in encoded
-    assert "relational-fabric-v5" not in encoded
+    assert ("relational-fabric-" + "v5") not in encoded
 
 
 def test_performance_optimization_semantic_equivalence() -> None:

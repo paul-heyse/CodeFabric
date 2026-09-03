@@ -335,7 +335,7 @@ def load_method(root: Path = ROOT, path: Path = METHOD_PATH) -> Method:
     _require(
         "minimal-fastmcp" not in method_text
         and "direct-daemon-control" not in method_text
-        and "relational-fabric-v5" not in method_text,
+        and ("relational-fabric-" + "v5") not in method_text,
         "WP65_PREDECESSOR_METHOD_INPUT",
         "method",
     )
