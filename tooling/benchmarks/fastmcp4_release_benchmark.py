@@ -38,6 +38,7 @@ METHOD_ID = "relational-fabric-v7-final-target-v1"
 METHOD_REVISION = "wp65-preregistered-v4"
 OBSERVATION_PREFIX = b"CODEFABRIC_WP65_OBSERVATION="
 MAX_CAPTURE_BYTES = 67_108_864
+MAX_FAILURE_DIAGNOSTIC_BYTES = 4_096
 
 
 class BenchmarkError(ValueError):
@@ -483,6 +484,12 @@ def _parse_observation(stdout: bytes, stderr: bytes) -> Mapping[str, Any] | None
     return records[0] if records else None
 
 
+def _failure_tail(output: bytes) -> str:
+    clipped = output[-MAX_FAILURE_DIAGNOSTIC_BYTES:]
+    prefix = "<earlier output omitted>\n" if len(output) > len(clipped) else ""
+    return prefix + clipped.decode("utf-8", errors="replace")
+
+
 def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
     try:
         os.killpg(process.pid, signal.SIGTERM)
@@ -567,7 +574,15 @@ def execute_workload(
         stderr.seek(0)
         stdout_bytes = stdout.read()
         stderr_bytes = stderr.read()
-    _require(process.returncode == 0, "WP65_WORKLOAD_FAILED", workload.workload_id)
+    if process.returncode != 0:
+        _fail(
+            "WP65_WORKLOAD_FAILED",
+            (
+                f"{workload.workload_id} exited {process.returncode}; "
+                f"stdout_tail={_failure_tail(stdout_bytes)!r}; "
+                f"stderr_tail={_failure_tail(stderr_bytes)!r}"
+            ),
+        )
     observation = _parse_observation(stdout_bytes, stderr_bytes)
     if workload.required_observation_fields:
         _require(

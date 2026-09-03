@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import math
+import sys
 
 import pytest
 
@@ -12,7 +13,9 @@ from tooling.benchmarks.fastmcp4_release_benchmark import (
     METHOD_PATH,
     ROOT,
     BenchmarkError,
+    Workload,
     bootstrap_interval,
+    execute_workload,
     load_json,
     load_method,
     nearest_rank,
@@ -144,3 +147,37 @@ def test_duplicate_json_members_fail_closed(tmp_path) -> None:
     with pytest.raises(BenchmarkError) as error:
         load_json(path)
     assert error.value.code == "WP65_JSON_DUPLICATE_MEMBER"
+
+
+def test_failed_workload_preserves_bounded_diagnostic_tail() -> None:
+    workload = Workload(
+        workload_id="diagnostic-probe",
+        coverage=("diagnostic",),
+        command=(
+            sys.executable,
+            "-c",
+            "import sys; print('candidate stdout'); print('candidate stderr', file=sys.stderr); raise SystemExit(7)",
+        ),
+        state_classification="diagnostic",
+        data_scale="one-process",
+        warmups=0,
+        samples=1,
+        timeout_seconds=10,
+        isolated_cargo_target=False,
+        required_observation_fields=(),
+        observation_expectations={},
+        ceilings={},
+    )
+    with pytest.raises(BenchmarkError) as error:
+        execute_workload(
+            workload,
+            phase="diagnostic",
+            sample_index=0,
+            root=ROOT,
+            cargo_target=None,
+            sampling_interval_millis=10,
+        )
+    assert error.value.code == "WP65_WORKLOAD_FAILED"
+    assert "exited 7" in str(error.value)
+    assert "candidate stdout" in str(error.value)
+    assert "candidate stderr" in str(error.value)
