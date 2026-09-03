@@ -71,7 +71,7 @@
     },
     "WP62": {
       "status": "complete",
-      "proving_commit": "c415b1501bbc0f36e7d0151b2c36d44b92916a3d",
+      "proving_commit": "fc3a8bd3c94d3b823cba8600a5000b3a702c5704",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
@@ -145,28 +145,28 @@
   "decommission_batches": {
     "DB19": {
       "status": "complete",
-      "proving_commit": "c415b1501bbc0f36e7d0151b2c36d44b92916a3d",
+      "proving_commit": "fc3a8bd3c94d3b823cba8600a5000b3a702c5704",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB20": {
       "status": "complete",
-      "proving_commit": "c415b1501bbc0f36e7d0151b2c36d44b92916a3d",
+      "proving_commit": "fc3a8bd3c94d3b823cba8600a5000b3a702c5704",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB21": {
       "status": "complete",
-      "proving_commit": "c415b1501bbc0f36e7d0151b2c36d44b92916a3d",
+      "proving_commit": "fc3a8bd3c94d3b823cba8600a5000b3a702c5704",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "DB22": {
       "status": "complete",
-      "proving_commit": "c415b1501bbc0f36e7d0151b2c36d44b92916a3d",
+      "proving_commit": "fc3a8bd3c94d3b823cba8600a5000b3a702c5704",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
