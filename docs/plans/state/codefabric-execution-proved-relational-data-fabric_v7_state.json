@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_compiled_release_provider_fabric_runtime_boundary_design_v1_2026-09-02.md",
   "baseline_commit": "de5db65c2834458eb57c7133183b8cef67a2491a",
   "status": "executing",
-  "current_packet": "WP65",
+  "current_packet": "WP66",
   "packets": {
     "WP53": {
       "status": "complete",
@@ -91,14 +91,28 @@
       "blockers": []
     },
     "WP65": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [],
-      "failed_approaches": [],
+      "status": "complete",
+      "proving_commit": "81355b61af2ec027d0eb4766494f2903ae145d1a",
+      "deviations": [
+        {
+          "summary": "The preregistered method advanced to revision v4 before accepted evidence: explicit Cargo target arguments survive the repository shell boundary, process-tree sampling moved to 100 ms to bound observer interference, and the interop registry/session share one 64 KiB chunk capability. Workloads, sample counts, deadlines, and resource/performance bounds were not relaxed."
+        }
+      ],
+      "failed_approaches": [
+        {
+          "summary": "The first capture was interrupted and invalidated before evidence when repository shell sanitization removed an inherited CARGO_TARGET_DIR and the cold release build entered the shared target. The exact orphan process group was joined and the empty isolated directory removed before forward preregistration."
+        },
+        {
+          "summary": "A later capture failed closed before evidence because the new assurance files spelled a forbidden v5 artifact selector literally and therefore self-matched the complete legacy census. The selector remains enforced but is assembled self-safely; the files were not excluded from census."
+        },
+        {
+          "summary": "One capture failed closed at retained FastMCP structural verification without preserving child output. Three direct repetitions passed; bounded failure-tail preservation was added before the final candidate, whose full 30-sample and seven-contract capture passed."
+        }
+      ],
       "blockers": []
     },
     "WP66": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
@@ -225,6 +239,6 @@
       "summary": "The prior value did not identify a Git object; the corrected value is the ancestral commit titled implement v7 WP54 state authority split."
     }
   ],
-  "next_action": "Pre-register WP65 target-only workloads and resource bounds against the frozen WP64 topology, then measure release, providers, DataFusion, Delta, gRPC, FastMCP, cancellation, and admitted concurrency without a predecessor baseline.",
-  "updated_at": "2026-09-03T12:19:53Z"
+  "next_action": "Implement WP66 aggregate certification tooling and exact oracles, run the complete successor matrix at one committed candidate, produce the independent implementation review, and only then close M17 and v7 state.",
+  "updated_at": "2026-09-03T13:41:10Z"
 }
