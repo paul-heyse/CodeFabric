@@ -13,6 +13,7 @@ use std::sync::{Arc, Weak};
 use thiserror::Error;
 
 use super::activation_command_effect::ActivationCommandEffect;
+use super::activation_control_delta::DeltaActivationRuntimeAuthority;
 use super::activation_transaction::{
     ActivationReconciliationReceiptCache, ActivationRecoveryCoordinator,
     ActivationTransactionCoordinator, IdempotentActivationAcknowledgements,
@@ -55,7 +56,6 @@ use super::programmatic_delta_runtime::ProgrammaticDeltaRuntime;
 use super::programmatic_workspace::WorkspaceEpochQueryAuthority;
 use super::published_arrow_result::PublishedArrowResultRegistry;
 use super::relational_query_runtime::RelationalQueryRuntime;
-use super::switchable_activation_authority::SwitchableActivationAuthority;
 
 /// Exact live authorities used to construct the single daemon-owned command actor.
 ///
@@ -71,7 +71,7 @@ pub(crate) struct ProgrammaticCommandRuntimeContext {
     query_authority: Arc<WorkspaceEpochQueryAuthority>,
     query_runtime: Arc<RelationalQueryRuntime>,
     delta_runtime: Arc<ProgrammaticDeltaRuntime>,
-    activation_authority: Arc<SwitchableActivationAuthority>,
+    activation_authority: Arc<DeltaActivationRuntimeAuthority>,
     workspace_slot: Weak<WorkspaceSlot>,
 }
 
@@ -85,7 +85,7 @@ impl ProgrammaticCommandRuntimeContext {
         query_authority: Arc<WorkspaceEpochQueryAuthority>,
         query_runtime: Arc<RelationalQueryRuntime>,
         delta_runtime: Arc<ProgrammaticDeltaRuntime>,
-        activation_authority: Arc<SwitchableActivationAuthority>,
+        activation_authority: Arc<DeltaActivationRuntimeAuthority>,
         workspace_slot: Weak<WorkspaceSlot>,
     ) -> Self {
         let resources = Arc::clone(query_authority.resources());
@@ -131,7 +131,7 @@ impl ProgrammaticCommandRuntimeContext {
         &self.delta_runtime
     }
     #[must_use]
-    pub const fn activation_authority(&self) -> &Arc<SwitchableActivationAuthority> {
+    pub const fn activation_authority(&self) -> &Arc<DeltaActivationRuntimeAuthority> {
         &self.activation_authority
     }
     #[must_use]
@@ -390,7 +390,7 @@ impl ExactProgrammaticCommandEffectClosure {
         workspace_id: WorkspaceId,
         admission_runtime: Arc<FabricAdmissionRuntime>,
         workspace_slot: Weak<WorkspaceSlot>,
-        activation_authority: Arc<SwitchableActivationAuthority>,
+        activation_authority: Arc<DeltaActivationRuntimeAuthority>,
     ) -> Arc<FabricCommandEffectRouter> {
         let acknowledgements = Arc::new(IdempotentActivationAcknowledgements::new(workspace_id));
         // This reconstructible projection is private to the command runtime. It starts empty on

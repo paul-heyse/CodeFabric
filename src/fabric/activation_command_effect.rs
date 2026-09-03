@@ -805,6 +805,24 @@ mod tests {
         }
     }
 
+    fn request_for_attempt(
+        fixture: &Fixture,
+        attempt: ActivationAttempt,
+    ) -> ActivationTransactionRequest {
+        ActivationTransactionRequest::try_new(
+            attempt,
+            Arc::clone(fixture.request.candidate()),
+            fixture.request.pins(),
+            fixture.request.event_id(),
+            fixture.request.compatibility(),
+            fixture.request.retention(),
+            fixture.request.operation_selection(),
+            fixture.request.transaction(),
+            fixture.request.control_relation().clone(),
+        )
+        .unwrap()
+    }
+
     fn executing(fixture: &Fixture) -> CommandRecord {
         let admitted = CommandReducer::admit(
             None,
@@ -876,8 +894,16 @@ mod tests {
                 fixture.request.transaction(),
             )
             .unwrap();
+            let prepared_attempt =
+                ActivationAttempt::from_validated(ValidatedCommandAttempt::for_test_prepared(
+                    *fixture.request.command(),
+                    fixture.request.attempt().attempt(),
+                    fixture.request.attempt().execution_owner(),
+                    fixture.request.transaction(),
+                ));
+            let recovery_request = request_for_attempt(fixture, prepared_attempt);
             let recovery = ResolvedActivationRecovery::try_new(
-                fixture.request.recovery_request(),
+                recovery_request.recovery_request(),
                 fixture.request.transaction(),
             )
             .unwrap();
@@ -908,8 +934,33 @@ mod tests {
         ) -> Result<ResolvedActivationTransaction, CommandPortError> {
             self.resolves.fetch_add(1, Ordering::SeqCst);
             assert_eq!(record.command(), self.resolved.request().command());
-            assert_eq!(attempt, self.resolved.request().attempt());
-            Ok(self.resolved.clone())
+            assert_eq!(
+                attempt.command(),
+                self.resolved.request().attempt().command()
+            );
+            assert_eq!(
+                attempt.attempt(),
+                self.resolved.request().attempt().attempt()
+            );
+            assert_eq!(
+                attempt.execution_owner(),
+                self.resolved.request().attempt().execution_owner()
+            );
+            let transaction = self.resolved.transaction();
+            let request = ActivationTransactionRequest::try_new(
+                attempt,
+                Arc::clone(self.resolved.request().candidate()),
+                self.resolved.request().pins(),
+                self.resolved.request().event_id(),
+                self.resolved.request().compatibility(),
+                self.resolved.request().retention(),
+                self.resolved.request().operation_selection(),
+                transaction,
+                self.resolved.request().control_relation().clone(),
+            )
+            .map_err(|_| CommandPortError::CorruptRecord)?;
+            ResolvedActivationTransaction::try_new(request, transaction)
+                .map_err(|_| CommandPortError::CorruptRecord)
         }
 
         async fn classify_not_selected(

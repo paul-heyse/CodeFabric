@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use arrow_array::builder::{
     FixedSizeBinaryBuilder, ListBuilder, StringBuilder, StructBuilder, UInt64Builder,
@@ -1323,25 +1323,27 @@ impl ActivationControlDeltaProvider {
     }
 }
 
-/// Fenced semantic reader over one exact activation-control Delta horizon.
+/// Sole process owner of the exact activation-control Delta horizon.
 ///
-/// The provider supplies durable relational history while the generation
-/// store independently supplies current writer authority. Callers replace
-/// this value with a provider loaded at the newly committed control version
-/// after activation; this object never performs a hidden refresh or latest
-/// lookup.
+/// The installed provider is immutable and exact-version bound. This owner advances it only from
+/// a successful append/readback or operation-marker reconciliation that returned a complete
+/// [`SelectedEpochRecord`]. It never performs a latest lookup, accepts an externally selected
+/// successor, or keeps a predecessor authority live in parallel.
 pub struct DeltaActivationRuntimeAuthority {
     workspace_id: WorkspaceId,
-    control: Arc<ActivationControlDeltaProvider>,
+    control: RwLock<Arc<ActivationControlDeltaProvider>>,
     generations: Arc<dyn DurableWriterGenerationPort>,
 }
 
 impl fmt::Debug for DeltaActivationRuntimeAuthority {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("DeltaActivationRuntimeAuthority")
-            .field("workspace_id", &self.workspace_id)
-            .field("control_relation", self.control.control_relation())
+        let mut debug = formatter.debug_struct("DeltaActivationRuntimeAuthority");
+        debug.field("workspace_id", &self.workspace_id);
+        match self.control.read() {
+            Ok(control) => debug.field("control_relation", control.control_relation()),
+            Err(_) => debug.field("control_relation", &"poisoned"),
+        };
+        debug
             .field("generations", &"installed")
             .finish_non_exhaustive()
     }
@@ -1356,7 +1358,7 @@ impl DeltaActivationRuntimeAuthority {
     ) -> Self {
         Self {
             workspace_id,
-            control,
+            control: RwLock::new(control),
             generations,
         }
     }
@@ -1367,8 +1369,90 @@ impl DeltaActivationRuntimeAuthority {
     }
 
     #[must_use]
-    pub fn control_relation(&self) -> &ActivationControlRelationPin {
-        self.control.control_relation()
+    pub(crate) fn current_control(
+        &self,
+    ) -> Result<Arc<ActivationControlDeltaProvider>, DeltaActivationRuntimeAuthoritySnapshotError>
+    {
+        self.control
+            .read()
+            .map(|control| Arc::clone(&control))
+            .map_err(|_| DeltaActivationRuntimeAuthoritySnapshotError::AuthorityStatePoisoned)
+    }
+
+    async fn advance_from_selected_readback(
+        &self,
+        selection: &SelectedEpochRecord,
+    ) -> Result<(), DeltaActivationRuntimeAuthoritySnapshotError> {
+        if selection.workspace_id() != self.workspace_id {
+            return Err(DeltaActivationRuntimeAuthoritySnapshotError::Control(
+                ActivationControlError::Binding(
+                    "selected activation horizon belongs to another workspace".to_owned(),
+                ),
+            ));
+        }
+        let selected = selection.control_horizon().control_relation();
+        let current = self.current_control()?;
+        let current_pin = current.control_relation();
+        if current_pin == selected {
+            return Ok(());
+        }
+        if current_pin.table().canonical_root() != selected.table().canonical_root()
+            || current_pin.binding() != selected.binding()
+            || selected.table().version() != current_pin.table().version().saturating_add(1)
+        {
+            return Err(DeltaActivationRuntimeAuthoritySnapshotError::Control(
+                ActivationControlError::Binding(
+                    "selected activation horizon is not the exact next control snapshot".to_owned(),
+                ),
+            ));
+        }
+        let table = DeltaTableBuilder::from_url(selected.table().canonical_root().clone())
+            .map_err(|error| {
+                DeltaActivationRuntimeAuthoritySnapshotError::Control(
+                    ActivationControlError::Delta(error.to_string()),
+                )
+            })?
+            .with_version(selected.table().version())
+            .load()
+            .await
+            .map_err(|error| {
+                DeltaActivationRuntimeAuthoritySnapshotError::Control(
+                    ActivationControlError::Delta(error.to_string()),
+                )
+            })?;
+        let successor = Arc::new(
+            ActivationControlDeltaProvider::try_from_loaded_table(
+                Arc::clone(&current.session),
+                selected.table().clone(),
+                table,
+            )
+            .await
+            .map_err(DeltaActivationRuntimeAuthoritySnapshotError::Control)?,
+        );
+        if successor.control_relation() != selected {
+            return Err(DeltaActivationRuntimeAuthoritySnapshotError::Control(
+                ActivationControlError::Binding(
+                    "reopened control provider differs from the selected exact horizon".to_owned(),
+                ),
+            ));
+        }
+        let mut installed = self
+            .control
+            .write()
+            .map_err(|_| DeltaActivationRuntimeAuthoritySnapshotError::AuthorityStatePoisoned)?;
+        if installed.control_relation() == selected {
+            return Ok(());
+        }
+        if installed.control_relation() != current_pin {
+            return Err(DeltaActivationRuntimeAuthoritySnapshotError::Control(
+                ActivationControlError::Binding(
+                    "activation authority advanced concurrently to another exact horizon"
+                        .to_owned(),
+                ),
+            ));
+        }
+        *installed = successor;
+        Ok(())
     }
 
     fn observe_fence(&self) -> Result<WriterFence, Arc<str>> {
@@ -1387,13 +1471,12 @@ impl DeltaActivationRuntimeAuthority {
         let active_fence = self
             .observe_fence()
             .map_err(DeltaActivationRuntimeAuthoritySnapshotError::WriterAuthority)?;
-        let readback = self
-            .control
+        let control = self.current_control()?;
+        let readback = control
             .read_workspace(self.workspace_id, active_fence)
             .await
             .map_err(DeltaActivationRuntimeAuthoritySnapshotError::Control)?;
-        let chain = self
-            .control
+        let chain = control
             .reconstruct_workspace_chain(&readback, self.workspace_id, None)
             .await
             .map_err(DeltaActivationRuntimeAuthoritySnapshotError::Control)?;
@@ -1440,6 +1523,8 @@ pub enum DeltaActivationRuntimeAuthoritySnapshotError {
     WriterAuthority(Arc<str>),
     #[error("exact activation-control readback failed: {0}")]
     Control(ActivationControlError),
+    #[error("exact activation-control authority state lock is poisoned")]
+    AuthorityStatePoisoned,
     #[error("selected activation event {0:?} has no reversible table-version vector")]
     SelectedTableVersionsMissing(ActivationEventId),
     #[error(
@@ -1463,7 +1548,8 @@ impl CommandActivationChainPort for DeltaActivationRuntimeAuthority {
         let fence = self
             .observe_fence()
             .map_err(|_| CommandPortError::ContextUnavailable)?;
-        self.control
+        self.current_control()
+            .map_err(|_| CommandPortError::ContextUnavailable)?
             .read_workspace_chain(workspace_id, fence)
             .await
             .map_err(|_| CommandPortError::ContextUnavailable)
@@ -1476,11 +1562,22 @@ impl ActivationAuthorityPort for DeltaActivationRuntimeAuthority {
         &self,
         request: ActivationAuthorityRequest,
     ) -> AuthorityRevalidationOutcome {
+        let control = match self.current_control() {
+            Ok(control) => control,
+            Err(error) => {
+                return AuthorityRevalidationOutcome::Unknown {
+                    diagnostic: activation_authority_state_diagnostic_ref(
+                        &request,
+                        &error.to_string(),
+                    ),
+                };
+            }
+        };
         if request.workspace_id != self.workspace_id {
             return AuthorityRevalidationOutcome::Unknown {
                 diagnostic: activation_authority_diagnostic_ref(
                     &request,
-                    self.control.control_relation(),
+                    control.control_relation(),
                     "activation authority request targets another workspace",
                 ),
             };
@@ -1491,14 +1588,13 @@ impl ActivationAuthorityPort for DeltaActivationRuntimeAuthority {
                 return AuthorityRevalidationOutcome::Unknown {
                     diagnostic: activation_authority_diagnostic_ref(
                         &request,
-                        self.control.control_relation(),
+                        control.control_relation(),
                         &detail,
                     ),
                 };
             }
         };
-        let chain = match self
-            .control
+        let chain = match control
             .read_workspace_chain(self.workspace_id, active_fence)
             .await
         {
@@ -1507,7 +1603,7 @@ impl ActivationAuthorityPort for DeltaActivationRuntimeAuthority {
                 return AuthorityRevalidationOutcome::Unknown {
                     diagnostic: activation_authority_diagnostic_ref(
                         &request,
-                        self.control.control_relation(),
+                        control.control_relation(),
                         &error.to_string(),
                     ),
                 };
@@ -1533,7 +1629,29 @@ impl ActivationEventPort for DeltaActivationRuntimeAuthority {
         &self,
         contract: ActivationAppendContract,
     ) -> ActivationAppendOutcome {
-        self.control.append_and_readback(contract).await
+        let control = match self.current_control() {
+            Ok(control) => control,
+            Err(error) => {
+                return append_unknown(
+                    &contract,
+                    ActivationAppendUnknownReason::CommitOutcomeUnknown,
+                    ActivationDiagnosticStage::ControlReadback,
+                    error.to_string(),
+                );
+            }
+        };
+        let outcome = control.append_and_readback(contract.clone()).await;
+        if let ActivationAppendOutcome::Committed { selection, .. } = &outcome
+            && let Err(error) = self.advance_from_selected_readback(selection).await
+        {
+            return append_unknown(
+                &contract,
+                ActivationAppendUnknownReason::ReadbackUnavailable,
+                ActivationDiagnosticStage::ControlReadback,
+                error.to_string(),
+            );
+        }
+        outcome
     }
 }
 
@@ -1543,7 +1661,37 @@ impl ActivationOperationMarkerPort for DeltaActivationRuntimeAuthority {
         &self,
         request: ActivationOperationMarkerRequest,
     ) -> ActivationOperationMarkerOutcome {
-        self.control.read_operation_marker(request).await
+        let control = match self.current_control() {
+            Ok(control) => control,
+            Err(error) => {
+                return ActivationOperationMarkerOutcome::Unknown {
+                    diagnostic: activation_diagnostic_ref(
+                        request.workspace_id,
+                        request.operation_id,
+                        request.transaction,
+                        &request.control_relation,
+                        ActivationDiagnosticStage::Reconciliation,
+                        error.to_string(),
+                    ),
+                };
+            }
+        };
+        let outcome = control.read_operation_marker(request.clone()).await;
+        if let ActivationOperationMarkerOutcome::Selected { selection, .. } = &outcome
+            && let Err(error) = self.advance_from_selected_readback(selection).await
+        {
+            return ActivationOperationMarkerOutcome::Unknown {
+                diagnostic: activation_diagnostic_ref(
+                    request.workspace_id,
+                    request.operation_id,
+                    request.transaction,
+                    &request.control_relation,
+                    ActivationDiagnosticStage::Reconciliation,
+                    error.to_string(),
+                ),
+            };
+        }
+        outcome
     }
 }
 
@@ -1565,6 +1713,19 @@ fn activation_authority_diagnostic_ref(
     digest.frame(request.execution_fence.lease_id.as_bytes());
     digest.frame(&request.execution_fence.generation.get().to_be_bytes());
     digest.frame(control_relation.fingerprint());
+    digest.frame(detail.as_bytes());
+    DiagnosticRef::from_bytes(digest.finish())
+}
+
+fn activation_authority_state_diagnostic_ref(
+    request: &ActivationAuthorityRequest,
+    detail: &str,
+) -> DiagnosticRef {
+    let mut digest = FramedDigest::new(b"codefabric.activation-authority-state-diagnostic.v1\0");
+    digest.frame(request.workspace_id.as_bytes());
+    digest.frame(request.operation_id.as_bytes());
+    digest.frame(request.execution_fence.lease_id.as_bytes());
+    digest.frame(&request.execution_fence.generation.get().to_be_bytes());
     digest.frame(detail.as_bytes());
     DiagnosticRef::from_bytes(digest.finish())
 }
@@ -3288,7 +3449,6 @@ mod tests {
     use std::fs;
 
     use datafusion::execution::SessionStateBuilder;
-    use deltalake::DeltaTableBuilder;
     use tempfile::TempDir;
     use url::Url;
 
@@ -3846,7 +4006,6 @@ mod tests {
             .unwrap();
         assert!(Arc::ptr_eq(&registered.contract, provider.contract()));
         assert_eq!(sealed.session().state().session_id(), candidate_session_id);
-        let session = Arc::new(sealed.session().state());
         let versions = Arc::clone(selected_epoch.table_version_set());
         let mut semantic = row(21);
         semantic.pins.epoch = epoch_id;
@@ -3864,7 +4023,15 @@ mod tests {
             operation_selection: semantic.commit.operation_selection,
             control_relation: request_control.clone(),
         };
-        let absent = provider.read_operation_marker(request.clone()).await;
+        let authority = DeltaActivationRuntimeAuthority::new(
+            semantic.workspace_id,
+            Arc::clone(&provider),
+            Arc::new(FixedWriterGeneration {
+                workspace_id: semantic.workspace_id,
+                fence: semantic.execution_fence,
+            }),
+        );
+        let absent = authority.read_operation_marker(request.clone()).await;
         assert!(matches!(
             absent,
             ActivationOperationMarkerOutcome::ProvedNotSelected {
@@ -3873,7 +4040,7 @@ mod tests {
             } if unchanged_chain.current_head() == ExpectedHead::Empty
         ));
         let contract = append_contract(semantic, Arc::clone(&versions), request_control.clone());
-        let outcome = provider.append_and_readback(contract).await;
+        let outcome = authority.append_and_readback(contract).await;
         let (event, chain) = match outcome {
             ActivationAppendOutcome::Committed {
                 selection,
@@ -3886,7 +4053,7 @@ mod tests {
         };
         assert_eq!(event.event_id(), semantic.event_id);
         assert_eq!(chain.head_event(), Some(&event));
-        let reconciled_from_predecessor = provider.read_operation_marker(request.clone()).await;
+        let reconciled_from_predecessor = authority.read_operation_marker(request.clone()).await;
         assert!(matches!(
             reconciled_from_predecessor,
             ActivationOperationMarkerOutcome::Selected {
@@ -3899,22 +4066,8 @@ mod tests {
                 && chain_after_readback.head_event() == Some(&event)
         ));
 
-        let committed_pin = ExactDeltaPin::new(&root, 1).unwrap();
-        let committed_table = DeltaTableBuilder::from_url(root.clone())
-            .unwrap()
-            .with_version(1)
-            .load()
-            .await
-            .unwrap();
-        let committed = Arc::new(
-            ActivationControlDeltaProvider::try_from_loaded_table(
-                Arc::clone(&session),
-                committed_pin,
-                committed_table,
-            )
-            .await
-            .unwrap(),
-        );
+        let committed = authority.current_control().unwrap();
+        assert_eq!(committed.control_relation().table().version(), 1);
         assert_eq!(
             committed.control_relation().binding(),
             request_control.binding(),
@@ -3961,14 +4114,6 @@ mod tests {
                 .is_empty()
         );
 
-        let authority = DeltaActivationRuntimeAuthority::new(
-            semantic.workspace_id,
-            Arc::clone(&committed),
-            Arc::new(FixedWriterGeneration {
-                workspace_id: semantic.workspace_id,
-                fence: semantic.execution_fence,
-            }),
-        );
         let startup_snapshot = authority.current_snapshot().await.unwrap();
         assert_eq!(startup_snapshot.chain, chain);
         assert_eq!(startup_snapshot.active_fence, semantic.execution_fence);

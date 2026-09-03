@@ -12,6 +12,7 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use super::activation::FabricEpochPins;
+use super::activation_control_delta::DeltaActivationRuntimeAuthority;
 use super::admission::{AdmissionError, FabricAdmissionRuntime};
 use super::arrow_result_resource::ArrowResultResourceLimits;
 use super::child_session::resource_governance::{EpochResourceCoordinator, EpochResourceError};
@@ -22,7 +23,6 @@ use super::programmatic_epoch::ProgrammaticFabricEpoch;
 use super::published_arrow_result::PublishedArrowResultRegistry;
 use super::relational_query_runtime::{RelationalQueryAuthorization, RelationalQueryRuntime};
 use super::request_owned_relation::RequestOwnedRelationLimits;
-use super::switchable_activation_authority::SwitchableActivationAuthority;
 use crate::identity::{IdentityDomain, IdentityError, encode_public_id};
 use crate::relational_semantic_query::{
     EpochBoundSemanticExecutionCatalog, EpochBoundSemanticIngressCatalog, ProducerClosureProof,
@@ -213,7 +213,7 @@ pub struct ProgrammaticWorkspaceRuntime {
     query_authority: Arc<WorkspaceEpochQueryAuthority>,
     query_runtime: Arc<RelationalQueryRuntime>,
     delta_runtime: Arc<ProgrammaticDeltaRuntime>,
-    activation_authority: Arc<SwitchableActivationAuthority>,
+    activation_authority: Arc<DeltaActivationRuntimeAuthority>,
 }
 
 impl fmt::Debug for ProgrammaticWorkspaceRuntime {
@@ -242,7 +242,7 @@ impl ProgrammaticWorkspaceRuntime {
         query_authority: Arc<WorkspaceEpochQueryAuthority>,
         query_runtime: Arc<RelationalQueryRuntime>,
         delta_runtime: Arc<ProgrammaticDeltaRuntime>,
-        activation_authority: Arc<SwitchableActivationAuthority>,
+        activation_authority: Arc<DeltaActivationRuntimeAuthority>,
     ) -> Result<Self, ProgrammaticWorkspaceCompositionError> {
         let workspace_id = selection.workspace_id();
         let epoch_id = selection.epoch_id();
@@ -274,7 +274,10 @@ impl ProgrammaticWorkspaceRuntime {
         // revalidates protocol, properties, schema, and the new session binding independently.
         // Requiring the predecessor process's session fingerprint here would make lawful restart
         // impossible and turn an execution-observation digest into semantic authority.
-        if activation_authority.current().control_relation().table()
+        let activation_control = activation_authority
+            .current_control()
+            .map_err(|_| ProgrammaticWorkspaceCompositionError::ActivationControlMismatch)?;
+        if activation_control.control_relation().table()
             != selection.control_horizon().control_relation().table()
         {
             return Err(ProgrammaticWorkspaceCompositionError::ActivationControlMismatch);
@@ -339,7 +342,7 @@ impl ProgrammaticWorkspaceRuntime {
     }
 
     #[must_use]
-    pub const fn activation_authority(&self) -> &Arc<SwitchableActivationAuthority> {
+    pub const fn activation_authority(&self) -> &Arc<DeltaActivationRuntimeAuthority> {
         &self.activation_authority
     }
 }

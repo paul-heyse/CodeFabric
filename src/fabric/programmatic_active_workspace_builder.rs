@@ -12,12 +12,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use datafusion::execution::object_store::ObjectStoreUrl;
-use deltalake::DeltaTableBuilder;
 
 use super::activation::ActivationChain;
-use super::activation_control_delta::{
-    ActivationControlDeltaProvider, DeltaActivationRuntimeAuthority,
-};
+use super::activation_control_delta::DeltaActivationRuntimeAuthority;
 use super::admission::FabricAdmissionRuntime;
 use super::arrow_result_resource::ArrowResultResourceLimits;
 use super::child_session::resource_governance::{
@@ -41,8 +38,6 @@ use super::programmatic_workspace::{
 use super::published_arrow_result::PublishedArrowResultRegistry;
 use super::relational_query_runtime::{RelationalQueryAuthorization, RelationalQueryRuntime};
 use super::request_owned_relation::RequestOwnedRelationLimits;
-use super::switchable_activation_authority::SwitchableActivationAuthority;
-use super::writer_lease::DurableWriterGenerationPort;
 use crate::production_query_recipe::ProductionSemanticQueryRecipeInput;
 use crate::relational_semantic_query::{EpochBoundSemanticIngressLimits, SemanticRequestLimits};
 
@@ -193,8 +188,7 @@ pub(crate) struct ProductionActiveWorkspaceBuilder {
     admission: Arc<FabricAdmissionRuntime>,
     published_results: Arc<PublishedArrowResultRegistry>,
     delta_ports: ProgrammaticDeltaRuntimePorts,
-    writer_generations: Arc<dyn DurableWriterGenerationPort>,
-    activation_authority: Arc<SwitchableActivationAuthority>,
+    activation_authority: Arc<DeltaActivationRuntimeAuthority>,
 }
 
 impl ProductionActiveWorkspaceBuilder {
@@ -209,8 +203,7 @@ impl ProductionActiveWorkspaceBuilder {
         admission: Arc<FabricAdmissionRuntime>,
         published_results: Arc<PublishedArrowResultRegistry>,
         delta_ports: ProgrammaticDeltaRuntimePorts,
-        writer_generations: Arc<dyn DurableWriterGenerationPort>,
-        activation_authority: Arc<SwitchableActivationAuthority>,
+        activation_authority: Arc<DeltaActivationRuntimeAuthority>,
     ) -> Self {
         Self {
             release,
@@ -218,7 +211,6 @@ impl ProductionActiveWorkspaceBuilder {
             admission,
             published_results,
             delta_ports,
-            writer_generations,
             activation_authority,
         }
     }
@@ -349,34 +341,13 @@ impl ProductionActiveWorkspaceBuilder {
             .map_err(|_| Self::invalid("delta-runtime"))?,
         );
 
-        let control_pin = selection
-            .control_horizon()
-            .control_relation()
-            .table()
-            .clone();
-        let control_table = DeltaTableBuilder::from_url(control_pin.canonical_root().clone())
-            .map_err(|_| Self::invalid("activation-control-root"))?
-            .with_version(control_pin.version())
-            .load()
-            .await
-            .map_err(|_| Self::invalid("activation-control-exact-open"))?;
-        let control = Arc::new(
-            ActivationControlDeltaProvider::try_from_loaded_table(
-                Arc::new(epoch.context().state()),
-                control_pin,
-                control_table,
-            )
-            .await
-            .map_err(|_| Self::invalid("activation-control-provider"))?,
-        );
-        let exact_activation_authority = Arc::new(DeltaActivationRuntimeAuthority::new(
-            selection.workspace_id(),
-            control,
-            Arc::clone(&self.writer_generations),
-        ));
-        self.activation_authority
-            .install(exact_activation_authority)
-            .map_err(|_| Self::invalid("activation-authority-install"))?;
+        let activation_control = self
+            .activation_authority
+            .current_control()
+            .map_err(|_| Self::invalid("activation-authority-state"))?;
+        if activation_control.control_relation() != selection.control_horizon().control_relation() {
+            return Err(Self::invalid("activation-authority-exact-horizon"));
+        }
         let runtime = Arc::new(
             ProgrammaticWorkspaceRuntime::try_from_selected(
                 self.release.as_ref(),

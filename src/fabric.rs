@@ -114,7 +114,6 @@ pub mod streamed_result_package;
 #[cfg(feature = "daemon")]
 pub mod streamed_result_registry;
 #[cfg(feature = "daemon")]
-pub(crate) mod switchable_activation_authority;
 #[cfg(feature = "daemon")]
 pub mod writer_generation_sqlite;
 #[cfg(feature = "daemon")]

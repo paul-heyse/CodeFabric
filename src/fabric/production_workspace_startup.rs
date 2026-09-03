@@ -93,7 +93,6 @@ use super::proof::{
     ProofDeltaWriteIdentity, persist_proof_relations, provision_proof_relation_histories,
 };
 use super::published_arrow_result::PublishedArrowResultRegistry;
-use super::switchable_activation_authority::SwitchableActivationAuthority;
 use super::writer_generation_sqlite::SqliteWriterGenerationStore;
 use super::writer_lease::WorkspaceWriterLease;
 use crate::cancellation::Cancellation;
@@ -298,7 +297,7 @@ async fn open_activation_authority(
     workspace_id: WorkspaceId,
     generations: Arc<SqliteWriterGenerationStore>,
     assurance_fault: Option<ProductionWorkspaceStartupAssuranceFault>,
-) -> Result<Arc<SwitchableActivationAuthority>, ProductionWorkspaceStartupError> {
+) -> Result<Arc<DeltaActivationRuntimeAuthority>, ProductionWorkspaceStartupError> {
     let control_path = workspace_root.join("activation-control");
     private_directory(&control_path)?;
     let root = Url::from_directory_path(&control_path).map_err(|()| {
@@ -354,9 +353,11 @@ async fn open_activation_authority(
         );
     }
     let provider = Arc::new(provider);
-    Ok(Arc::new(SwitchableActivationAuthority::new(Arc::new(
-        DeltaActivationRuntimeAuthority::new(workspace_id, provider, generations),
-    ))))
+    Ok(Arc::new(DeltaActivationRuntimeAuthority::new(
+        workspace_id,
+        provider,
+        generations,
+    )))
 }
 
 fn native_source_pin(
@@ -943,7 +944,6 @@ pub(crate) async fn start_production_workspace(
             Arc::clone(&admission),
             Arc::clone(&published_results),
             delta_ports,
-            Arc::clone(&generations) as Arc<dyn super::writer_lease::DurableWriterGenerationPort>,
             Arc::clone(&activation),
         ));
 
@@ -993,7 +993,12 @@ pub(crate) async fn start_production_workspace(
             ProgrammaticFabricEpochBuilder::try_new(epoch_id, FabricEpochRuntimeConfig::default())
         }),
     );
-    let control_binding = activation.current().control_relation().binding().clone();
+    let control_binding = activation
+        .current_control()
+        .map_err(|error| step("activation-control-state", error))?
+        .control_relation()
+        .binding()
+        .clone();
     let identity_policy = ActivationReconciliationIdentityPolicy::try_new(
         UnknownCommitReason::ReadbackUnavailable,
         digest32(
@@ -1171,6 +1176,9 @@ pub(crate) async fn start_production_workspace(
                     proof_receipt: fresh.proof_receipt,
                 },
             };
+            let activation_control = activation
+                .current_control()
+                .map_err(|error| step("activation-control-state", error))?;
             let material = ActivationCommandRequestMaterial::new(
                 ActivationCommandRequestKey::new(command),
                 Arc::clone(&fresh.candidate),
@@ -1202,8 +1210,8 @@ pub(crate) async fn start_production_workspace(
                     ],
                 )),
                 ActivationControlRelationPin::new(
-                    activation.current().control_relation().table().clone(),
-                    activation.current().control_relation().binding().clone(),
+                    activation_control.control_relation().table().clone(),
+                    activation_control.control_relation().binding().clone(),
                 ),
             );
             state_store

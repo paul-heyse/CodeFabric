@@ -195,7 +195,7 @@ activation-fault-matrix-check:
 [doc("Hold predecessor leases across activation and keep restart admission closed until reconciliation")]
 [group('gate')]
 fabric-epoch-pinning-check:
-    cargo nextest run --locked --lib -E 'test(/(leases_pin_predecessor_across_closed_atomic_swap|restart_recovery_keeps_admission_closed_until_marker_and_cache_reconciliation|recovery_requires_the_exact_durable_head)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(wp32_ops_gate_leases_pin_predecessor_across_successor_handoff|restart_recovery_keeps_admission_closed_until_marker_and_cache_reconciliation|recovery_requires_the_exact_durable_head)/)' --no-tests=fail
 
 [doc("Navigate docs/library_ref by chapter without reading whole references")]
 [group('environment')]
@@ -396,16 +396,6 @@ public-lifecycle-wire-contract-integrity-check:
 lifecycle-production-vertical-check:
     cargo nextest run --locked --test integration -E 'test(/(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation|wp44_ops_real_supervisor_restarts_daemon_and_joins_owned_endpoints|wp37_neg_codefabricd_rejects_direct_start_without_supervisor_control)/)' --no-tests=fail
 
-[doc("Validate content-addressed cutover events, prepared commands, schema closure, and fencing")]
-[group('test')]
-cutover-event-contract-integrity-check:
-    cargo nextest run --locked --lib -E 'test(/wp41_int_/) | test(/wp41_prod_int_/)' --no-tests=fail
-
-[doc("Execute durable forward-only target authority and physical-zero convergence")]
-[group('test')]
-fenced-authority-cutover-v3-check:
-    cargo nextest run --locked --lib -E 'test(/wp41_beh_/) | test(/wp41_prod_beh_/)' --no-tests=fail
-
 [doc("Reject predecessor physical/config/role revival and supervisor or activation substitution")]
 [group('test')]
 predecessor-restart-revocation-check:
@@ -415,7 +405,8 @@ predecessor-restart-revocation-check:
 [doc("Reconcile every interrupted cutover edge from exact command, Delta, and supervisor readback")]
 [group('test')]
 unknown-cutover-reconciliation-check:
-    cargo nextest run --locked --lib -E 'test(/wp41_ops_/) | test(/wp41_prod_ops_/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(unknown_commit_recovers_only_from_exact_operation_marker_and_chain|commit_persists_the_exact_unknown_ticket_without_recovery|reconcile_uses_marker_recovery_only_and_preserves_evidence)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp44_ops_real_durable_append_acknowledgement_loss_reconciles_exact_readback)' --no-tests=fail
 
 [doc("Prove retired bootstrap, model, ontology, dual-epoch, and candidate authority stays absent")]
 [group('test')]
@@ -629,6 +620,8 @@ fastmcp4-post-purge-surface-check:
 compiled-release-legacy-zero-state-check: feature-architecture-check provider-type-boundary-check generated-type-boundary-check
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_compiled_release_zero_state.py
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/compiled_release_zero_state.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fresh_activation_assurance.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fresh_activation_assurance.py
 
 [doc("Rerun representative daemon, guard, resource, completion, cancellation, and installed-adapter behavior after purge")]
 [group('test')]
@@ -679,6 +672,35 @@ slow_consumer_cancel_restart_operations: fastmcp4-cancellation-recovery-check
 [doc("Exercise generated UDS clients while event and resource consumers remain unread")]
 [group('test')]
 grpc-slow-consumer-check: slow_consumer_cancel_restart_operations
+
+[doc("Read supported host deployment surfaces and fail if a product predecessor exists")]
+[group('gate')]
+deployment-predecessor-census-check:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fresh_activation_assurance.py
+
+[doc("Prove one exact evolving Delta authority is the sole FreshActivation authority")]
+[group('gate')]
+fresh_activation_sole_authority_integrity: deployment-predecessor-census-check compiled-release-legacy-zero-state-check
+    cargo nextest run --locked --lib -E 'test(exact_delta_activation_authority_split)' --no-tests=fail
+
+[doc("Create an empty production root and serve its exact genesis through installed FastMCP")]
+[group('test')]
+empty_root_fresh_activation_semantics:
+    cargo nextest run --locked --test integration -E 'test(/(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation|wp63_beh_real_source_to_installed_fastmcp_is_causal_and_epoch_coherent)/)' --no-tests=fail
+
+[doc("Reject predecessor state, seed, receipt, hash, latest, service, and process routes")]
+[group('gate')]
+predecessor_seed_hash_latest_route_faults: activation-receipt-nonauthority-check predecessor-restart-revocation-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fresh_activation_assurance.py -k 'neg_'
+
+[doc("Prove unknown append, readback, restart, and exact forward-repair operations")]
+[group('test')]
+fresh_activation_reconciliation_operations: fabric-activation-recovery-check fabric-control-recovery-check activation-fault-matrix-check fabric-epoch-pinning-check unknown-cutover-reconciliation-check candidate-free-recovery-check supervisor-restart-join-operations-check
+    cargo nextest run --locked --test integration -E 'test(/(wp44_ops_real_durable_append_acknowledgement_loss_reconciles_exact_readback|wp63_ops_installed_restart_reconstructs_only_exact_activation_authority)/)' --no-tests=fail
+
+[doc("Execute the target-only empty-root FreshActivation, restart, fault, census, and zero-state matrix")]
+[group('gate')]
+compiled-release-fresh-activation-check: fresh_activation_sole_authority_integrity empty_root_fresh_activation_semantics predecessor_seed_hash_latest_route_faults fresh_activation_reconciliation_operations
 
 [doc("Execute application-owned provider job, result, coverage, gap, resource, and admission contracts")]
 [group('test')]
