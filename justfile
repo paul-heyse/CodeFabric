@@ -778,7 +778,7 @@ provider-gap-schema-shortcut-rejection-check:
 [group('test')]
 relation-ipc-provider-operations-check:
     cargo build --locked --manifest-path pyrefly-sidecar/Cargo.toml --bin codefabric-pyrefly-sidecar
-    CODEFABRIC_PYREFLY_SIDECAR_BIN="$CF_ROOT/target/debug/codefabric-pyrefly-sidecar" cargo nextest run --locked --lib -E 'test(/wp34_ops_/)' --no-tests=fail
+    CODEFABRIC_PYREFLY_SIDECAR_BIN="$CF_ROOT/target/debug/codefabric-pyrefly-sidecar" cargo nextest run --locked --lib -E 'test(/(wp34_ops_|rustc_provider_process_lifecycle)/)' --no-tests=fail
     cd pyrefly-sidecar && cargo test --locked wp34_ops_
     cd rustc-extractor && cargo test --locked wp34_ops_
 

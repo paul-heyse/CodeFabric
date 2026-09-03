@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_compiled_release_provider_fabric_runtime_boundary_design_v1_2026-09-02.md",
   "baseline_commit": "de5db65c2834458eb57c7133183b8cef67a2491a",
   "status": "executing",
-  "current_packet": "WP56",
+  "current_packet": "WP58",
   "packets": {
     "WP53": {
       "status": "complete",
@@ -28,27 +28,23 @@
       "blockers": []
     },
     "WP56": {
-      "status": "in_progress",
-      "proving_commit": "444e04d",
+      "status": "complete",
+      "proving_commit": "dd893553c04396e9d239b852aa813817dcb0dca7",
       "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP57": {
-      "status": "stale",
-      "proving_commit": "b51c2b56237002907f97bc1c14b797d1da55b369",
-      "deviations": [
-        "The job-driven Tree-sitter/Ruff implementation and isolated fact-generation feature boundary remain present, but the packet's default-lib acceptance selectors cannot compile on the interrupted WP61 tree. Revalidate rather than reimplement after the cutover test call sites are coherent."
-      ],
+      "status": "complete",
+      "proving_commit": "dd893553c04396e9d239b852aa813817dcb0dca7",
+      "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP58": {
-      "status": "stale",
+      "status": "in_progress",
       "proving_commit": "200c90682f2c35c151a770286bd46938be521e4b",
-      "deviations": [
-        "The rustc application-owned ingress and generated-type structural rule remain present, but the four declared WP58 oracle identifiers do not have exact substantive definitions; similarly named prefixed tests are not governed selector definitions. Default lib-test compilation is also red during WP61."
-      ],
+      "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
@@ -133,11 +129,9 @@
       "blockers": []
     },
     "M15": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [
-        "The inward feature/state/cancellation substrate is substantially implemented, and the production release injection is partially present. M15 remains open because WP54-WP56 are stale, WP61 is unproved, thin Tonic separation and bounded gRPC flow-control proof are absent, and the shared default test target does not compile."
-      ],
+      "status": "complete",
+      "proving_commit": "dd893553c04396e9d239b852aa813817dcb0dca7",
+      "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
@@ -241,6 +235,6 @@
       "summary": "The prior value did not identify a Git object; the corrected value is the ancestral commit titled implement v7 WP54 state authority split."
     }
   ],
-  "next_action": "Close WP56's exact structured-cancellation oracles and re-prove cancellation, runtime, and supervisor lifecycle gates.",
-  "updated_at": "2026-09-03T09:53:20Z"
+  "next_action": "Close WP58's exact rustc ingress and process-lifecycle oracle definitions, then re-prove all stable-root and dated-nightly extractor gates.",
+  "updated_at": "2026-09-03T10:02:30Z"
 }

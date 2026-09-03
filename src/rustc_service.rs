@@ -2757,7 +2757,7 @@ mod tests {
     }
 
     #[test]
-    fn wp34_beh_rustc_generated_type_termination_integrity() {
+    fn rustc_generated_type_termination_integrity() {
         let (validator, mut end) = accepted_stream();
         let mut events = validator.events.clone();
         events.push(event(Event::CompilationEnd(end.clone())));
@@ -2871,7 +2871,7 @@ mod tests {
     }
 
     #[test]
-    fn wp34_neg_rustc_ipc_and_admission_faults() {
+    fn rustc_ipc_and_admission_faults() {
         let (validator, mut end) = accepted_stream();
         end.compiler_exit_status = 1;
         assert_eq!(
@@ -3092,7 +3092,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn wp34_ops_rustc_provider_process_lifecycle() {
+    async fn rustc_provider_process_lifecycle() {
         let harness = lifecycle_harness();
         let mut events = completed_event_stream();
         let Some(ExtractionEvent {
@@ -3224,7 +3224,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn wp34_beh_rustc_provider_application_result_semantics() {
+    async fn rustc_provider_application_result_semantics() {
         let clean = lifecycle_harness();
         let clean_output = execute_test_lifecycle(&clean, completed_event_stream(), false)
             .await
