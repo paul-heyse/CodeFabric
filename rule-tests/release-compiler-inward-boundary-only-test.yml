@@ -3,6 +3,11 @@ valid:
   - |
       use crate::provider_contracts::ProviderJob;
       use arrow_schema::SchemaRef;
+  - |
+      #[cfg(test)]
+      mod tests {
+          use datafusion::prelude::SessionContext;
+      }
 invalid:
   - |
       use datafusion::prelude::SessionContext;

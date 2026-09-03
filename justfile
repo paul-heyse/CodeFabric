@@ -285,7 +285,7 @@ data-fabric-upgrade-check:
 [doc("Prove effective-relation statistics, pushdown truth, and observed runtime evidence")]
 [group('test')]
 provider-statistics-contract-check:
-    cargo nextest run --locked --lib -E 'test(/(wp58_(behavioral|operational)_acceptance|datafusion_55_effective_provider_statistics_contract|exact_statistics_and_structured_scan_survive_governance_wrapper)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(forwards_complete_structured_scan_and_preserves_native_plan|exact_read_preserves_known_delta_row_null_min_and_max_statistics|projection_and_inexact_filter_keep_residual_semantics_and_native_statistics|missing_file_statistics_remain_absent_and_never_become_zero_cardinality|stable_delta_histories_reopen_exactly_and_expose_only_the_current_epoch)/)' --no-tests=fail
 
 [doc("Exercise the fail-closed semantic-provider sandbox escape matrix on the current host")]
 [group('test')]
@@ -387,9 +387,9 @@ programmatic-runtime-lifecycle-check:
 [doc("Prove released lifecycle identity, Protobuf descriptors, UDS peer policy, deadlines, and frame limits")]
 [group('test')]
 public-lifecycle-wire-contract-integrity-check:
-    cargo nextest run --locked --lib -E 'test(/(public_lifecycle_identity_contract_rejects_substitution_and_duplicate_workspaces|negotiated_query_session_binds_workspace_and_host_profile|programmatic_query_contract_identity_is_typed_ordered_and_causal)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(compiled_release_has_one_unsubstitutable_suite_identity|workspace_public_identity_is_strictly_canonical|port_bundle_requires_application_and_every_component_identity|wp44_int_registered_grant_mints_one_bounded_authorized_session|wp44_neg_launch_revocation_requires_exact_grant_and_child_binding)/)' --no-tests=fail
     cargo nextest run --locked --test integration -E 'test(/(wp10_behavioral_acceptance|missing_or_mismatched_identity_is_rejected_before_handler_dispatch|rust_client_deadline_cancels_a_slow_rpc|rust_client_and_server_apply_symmetric_four_mib_limits)/)' --no-tests=fail
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_proto.py codefabric-cpg-mcp/tests/test_settings.py -k 'wp10 or generated_descriptors or python_channel or daemon_scheme'
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest codefabric-cpg-mcp/tests/test_proto.py codefabric-cpg-mcp/tests/test_settings.py
 
 [doc("Exercise the target production binary lifecycle without predecessor serving composition")]
 [group('test')]

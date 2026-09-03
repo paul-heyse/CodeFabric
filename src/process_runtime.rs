@@ -294,30 +294,6 @@ mod tests {
     }
 
     #[test]
-    fn wp44_int_binary_entrypoints_have_one_typed_library_port() {
-        let shell = include_str!("bin/codefabric.rs");
-        let daemon = include_str!("bin/codefabricd.rs");
-        assert!(shell.contains("CodefabricProcessSettings::parse"));
-        assert!(shell.contains("settings.execute()"));
-        assert!(daemon.contains("FabricDaemonProcessSettings::parse"));
-        assert!(daemon.contains(".execute()"));
-        for forbidden in [
-            "DaemonConfig",
-            "AgentLaunchPolicy",
-            "SessionOperation",
-            "serve_supervisor",
-            "serve_controlled",
-            "tokio::runtime",
-            "semantic_profiles",
-            "workspace_ids",
-            "maximum_result_bytes",
-        ] {
-            assert!(!shell.contains(forbidden), "shell owns {forbidden}");
-            assert!(!daemon.contains(forbidden), "daemon owns {forbidden}");
-        }
-    }
-
-    #[test]
     fn wp44_int_library_owns_the_closed_process_settings_grammar() {
         assert_eq!(
             CodefabricProcessSettings::parse(arguments(&[

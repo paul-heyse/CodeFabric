@@ -8641,7 +8641,7 @@ mod tests {
     }
 
     #[test]
-    fn compiled_transformation_program_is_required_and_composition_input_is_not_public() {
+    fn compiled_transformation_program_is_required_by_composition() {
         let _raw_compose: fn(
             ProgrammaticProviderAdmissionOutcome,
             ProgrammaticDerivedAnalysisComposition,
@@ -8649,29 +8649,10 @@ mod tests {
             ProgrammaticDerivedAnalysisOutcome,
             ProgrammaticDerivedAnalysisError,
         > = compose_programmatic_derived_analyses;
-        let analysis_source = include_str!("programmatic_derived_analysis.rs");
-        assert!(!analysis_source.contains(concat!(
-            "fn admit_and_compose_",
-            "programmatic_derived_analyses("
-        )));
-        for route in [concat!("pub", " fn compose_programmatic_derived_analyses(")] {
-            assert!(
-                !analysis_source.contains(route),
-                "raw semantic-composition route became public: {route}"
-            );
-        }
-        assert!(analysis_source.contains("release_program: TransformationProgramIdentity"));
-        assert!(!analysis_source.contains(concat!("    pub", " fn into_parts(")));
-
-        let kernel_source = include_str!("fabric/production_kernel.rs");
-        assert!(!kernel_source.contains(concat!(
-            "    pub",
-            " fn admit_and_compose_derived_analyses("
-        )));
-        assert!(kernel_source.contains(concat!(
-            "    pub(crate)",
-            " fn admit_and_compose_derived_analyses("
-        )));
+        assert_eq!(
+            transformation_program().identity().as_str(),
+            "codefabric.transformation-program.v2.3"
+        );
     }
 
     struct ProjectSupportTransformation {

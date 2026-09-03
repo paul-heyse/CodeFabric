@@ -689,6 +689,8 @@ fn hex(bytes: &[u8]) -> String {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn observed_process_start_identity(pid: u32) -> Option<String> {
+    // Linux process metadata authenticates a live launcher; it is not workspace source input.
+    // ast-grep-ignore: authoritative-source-read-boundary
     let bytes = std::fs::read(format!("/proc/{pid}/stat")).ok()?;
     if bytes.len() > 4_096 {
         return None;

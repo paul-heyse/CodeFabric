@@ -1359,6 +1359,8 @@ fn live_supervisor_status_probe(runtime_root: &Path, record: &SupervisorLeaseRec
 
 #[cfg(target_os = "linux")]
 fn process_start_identity(pid: u32) -> Option<String> {
+    // Linux process metadata authenticates a supervised peer; it is not workspace source input.
+    // ast-grep-ignore: authoritative-source-read-boundary
     let bytes = fs::read(format!("/proc/{pid}/stat")).ok()?;
     if bytes.len() > 4_096 {
         return None;
@@ -3327,6 +3329,8 @@ async fn validate_generation_refresh_authority(
 }
 
 fn running_adapter_executable_digest(path: &Path) -> Result<String, SupervisorError> {
+    // The already-running executable is operator policy material, not workspace source input.
+    // ast-grep-ignore: authoritative-source-read-boundary
     let mut file = File::open(path).map_err(|source| SupervisorError::Io {
         path: path.to_owned(),
         source,
@@ -3792,6 +3796,8 @@ fn write_private_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Superv
         ));
     }
     let temporary = path.with_extension(format!("tmp.{}", hex(&random32()?[..8])));
+    // This is a private control-state writer; secure_path exclusively owns source reads.
+    // ast-grep-ignore: authoritative-source-read-boundary
     let mut file = OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -3817,6 +3823,8 @@ fn write_private_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Superv
         });
     }
     if let Some(parent) = path.parent() {
+        // Directory fsync makes the private control rename durable; it does not read source.
+        // ast-grep-ignore: authoritative-source-read-boundary
         File::open(parent)
             .and_then(|directory| directory.sync_all())
             .map_err(|source| SupervisorError::Io {

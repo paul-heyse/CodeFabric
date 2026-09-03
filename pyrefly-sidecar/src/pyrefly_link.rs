@@ -1570,6 +1570,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    // One end-to-end measurement keeps setup, retained generations, clean equivalence, and the
+    // emitted observation visibly co-located; splitting it would obscure the measured lifetime.
+    #[allow(clippy::too_many_lines)]
     #[test]
     fn wp65_measure_retained_pyrefly() {
         let root = claim_001_temp_root("wp65-retained");
@@ -1659,6 +1662,9 @@ mod tests {
         let p95_index = (ordered.len() * 95).div_ceil(100).saturating_sub(1);
         let elapsed_seconds =
             ((initial_millis + change_files_total_millis) / 1_000.0).max(f64::EPSILON);
+        let output_bytes_per_second =
+            f64::from(u32::try_from(output_bytes).expect("bounded Pyrefly fixture output"))
+                / elapsed_seconds;
         if std::env::var_os("CODEFABRIC_WP65_MEASURE").is_some() {
             println!(
                 "CODEFABRIC_WP65_OBSERVATION={}",
@@ -1672,7 +1678,7 @@ mod tests {
                     "peak_loaded_modules": 1,
                     "output_rows": output_rows,
                     "output_bytes": output_bytes,
-                    "throughput_bytes_per_second": output_bytes as f64 / elapsed_seconds,
+                    "throughput_bytes_per_second": output_bytes_per_second,
                     "final_equal_clean": true,
                 })
             );

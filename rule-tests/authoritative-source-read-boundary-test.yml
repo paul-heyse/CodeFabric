@@ -4,6 +4,13 @@ valid:
       fn read_source(root: &SecureRoot, path: &PlatformPath) -> Result<Vec<u8>, SecurePathError> {
           root.read_file(path)
       }
+  - |
+      #[cfg(test)]
+      mod tests {
+          fn read_fixture(path: &Path) {
+              let _bytes = std::fs::read(path);
+          }
+      }
 invalid:
   - |
       fn read_source(path: &Path) {

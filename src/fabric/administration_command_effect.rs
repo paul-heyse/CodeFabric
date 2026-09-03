@@ -621,7 +621,20 @@ mod tests {
             .requests
             .lock()
             .expect("commit requests lock")[0];
-        assert_eq!(committed.attempt(), resolved);
+        // Preparation deliberately has no transaction authority. Commit must preserve every
+        // immutable attempt field while adding only the reducer-persisted transaction binding.
+        assert_eq!(committed.attempt().command(), resolved.command());
+        assert_eq!(committed.attempt().attempt(), resolved.attempt());
+        assert_eq!(
+            committed.attempt().execution_owner(),
+            resolved.execution_owner()
+        );
+        assert_eq!(committed.attempt().action(), resolved.action());
+        assert_eq!(committed.attempt().request(), resolved.request());
+        assert_eq!(
+            committed.attempt().validated.prepared_transaction(),
+            Some(transaction())
+        );
         assert_eq!(committed.transaction(), transaction());
     }
 
