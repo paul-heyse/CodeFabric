@@ -26,8 +26,9 @@ use crate::fabric::production_kernel::{
     LifecycleAuthority, ProductionLifecyclePhase, WorkspaceSlotRegistry,
 };
 use crate::fabric::query_coordinator::{
-    QueryControlEventPayload, QueryCoordinator, QueryCoordinatorPolicy, QueryExecutionPhase,
-    QueryTerminalState, SqliteQueryCoordinatorJournal,
+    QueryControlEvent, QueryControlEventPayload, QueryCoordinator, QueryCoordinatorPolicy,
+    QueryCoordinatorSnapshot, QueryExecutionPhase, QueryTerminalState,
+    SqliteQueryCoordinatorJournal,
 };
 use crate::fabric::streamed_result_package::{
     ObjectStoreResultSink, PendingResultObjectSet, ResultObjectSink, ResultProvenance,
@@ -317,6 +318,32 @@ impl ProductionRpcInteropControl {
     /// Seed one daemon-minted reference handle through the same registry used by the service.
     pub async fn seed_reference(&self) -> (ReferenceResourceRegistration, Vec<u8>) {
         let content = br#"{"interop_reference":"guide"}"#.to_vec();
+        self.publish_reference(content, "reference:interop-guide", "2.3")
+            .await
+    }
+
+    /// Seed a maximum-sized deterministic reference for real transport flow-control probes.
+    pub async fn seed_bounded_reference(
+        &self,
+        byte_length: usize,
+    ) -> (ReferenceResourceRegistration, Vec<u8>) {
+        assert!(
+            (1..=1024 * 1024).contains(&byte_length),
+            "interop reference must remain within the production registry bound"
+        );
+        let content = (0..byte_length)
+            .map(|offset| u8::try_from(offset % 251).expect("bounded reference byte"))
+            .collect::<Vec<_>>();
+        self.publish_reference(content, "reference:interop-bounded", "2.3-bounded")
+            .await
+    }
+
+    async fn publish_reference(
+        &self,
+        content: Vec<u8>,
+        reference_id: &str,
+        version: &str,
+    ) -> (ReferenceResourceRegistration, Vec<u8>) {
         let now = now_millis();
         let registration = self
             .results
@@ -330,9 +357,9 @@ impl ProductionRpcInteropControl {
                     kind: crate::rpc::generated::codefabric::cpgd::v2::ReferenceKind::Guide
                         .as_str_name()
                         .to_owned(),
-                    version: Some("2.3".to_owned()),
+                    version: Some(version.to_owned()),
                 },
-                reference_id: "reference:interop-guide".to_owned(),
+                reference_id: reference_id.to_owned(),
                 media_type: "application/json".to_owned(),
                 content: content.clone(),
                 issued_at_unix_ms: now,
@@ -341,6 +368,41 @@ impl ProductionRpcInteropControl {
             .await
             .expect("interop reference publication");
         (registration, content)
+    }
+
+    /// Return the enforced durable event bound used by the production coordinator.
+    #[must_use]
+    pub fn maximum_events_per_query(&self) -> usize {
+        self.coordinator.maximum_events_per_query()
+    }
+
+    /// Observe bounded coordinator counters without reaching into transport state.
+    pub async fn coordinator_snapshot(&self) -> QueryCoordinatorSnapshot {
+        self.coordinator.snapshot().await
+    }
+
+    /// Observe the exact public event suffix retained for one interop query.
+    pub async fn query_events(&self, query_id: &str) -> Vec<QueryControlEvent> {
+        self.coordinator
+            .events_after(query_id, 0)
+            .await
+            .expect("interop query events")
+    }
+
+    /// Observe the durable execution phase used to distinguish stream drop from cancellation.
+    pub async fn query_phase(&self, query_id: &str) -> QueryExecutionPhase {
+        self.coordinator
+            .phase(query_id)
+            .await
+            .expect("interop query phase")
+    }
+
+    /// Observe the complete daemon-owned task scope after cancellation or drain.
+    pub async fn owned_task_count(&self) -> usize {
+        self.coordinator
+            .owned_task_count()
+            .await
+            .expect("interop owned task observation")
     }
 
     /// Seal and register one real manifest-last result, append the production ResultReady event,

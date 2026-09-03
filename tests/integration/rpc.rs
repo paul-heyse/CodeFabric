@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use codefabric::fabric::query_coordinator::{QueryExecutionPhase, QueryTerminalState};
 use codefabric::rpc::generated::codefabric::cpgd::v2::cpg_query_service_client::CpgQueryServiceClient;
 use codefabric::rpc::generated::codefabric::cpgd::v2::cpg_query_service_server::{
     CpgQueryService, CpgQueryServiceServer,
@@ -722,6 +723,249 @@ async fn released_uds_transport_operations() {
         cancellation.acknowledgement,
         CancellationAcknowledgement::QueryNotFound as i32
     );
+    server.stop().await;
+}
+
+#[cfg(target_os = "linux")]
+fn resident_set_bytes() -> u64 {
+    fs::read_to_string("/proc/self/status")
+        .expect("Linux process status")
+        .lines()
+        .find_map(|line| {
+            let kib = line.strip_prefix("VmRSS:")?.trim();
+            kib.split_whitespace().next()?.parse::<u64>().ok()
+        })
+        .expect("VmRSS observation")
+        .saturating_mul(1024)
+}
+
+async fn wait_for_owned_task_count(control: &ProductionRpcInteropControl, expected: usize) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let observed = control.owned_task_count().await;
+        if observed == expected {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "owned task count remained {observed}, expected {expected}"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+async fn wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable() {
+    let launch_grant = [0x63; 32];
+    let server = start_production_server("wp63-slow-consumer", launch_grant).await;
+    let mut client = configured_client(channel(&server.socket).await, true);
+    let handshake = client
+        .handshake(production_handshake(
+            launch_grant,
+            "rust-wp63-slow-consumer-client",
+        ))
+        .await
+        .expect("slow-consumer handshake")
+        .into_inner();
+    let authority = handshake.authority.clone().expect("daemon authority");
+    server.control.mark_ready();
+    let steady_owned_tasks = server.control.owned_task_count().await;
+
+    let cancelled = start_production_query(
+        &mut client,
+        &authority,
+        &handshake.session_token,
+        production_submission("request:wp63-unread-watch"),
+        "wp63-unread-watch",
+    )
+    .await;
+    server.control.wait_for_query_count(1).await;
+    let mut held_watch = client
+        .watch_query(authenticated_request(
+            WatchQueryRequest {
+                context: Some(request_context(&authority, "wp63-held-watch")),
+                daemon_query_id: cancelled.daemon_query_id.clone(),
+                cursor: None,
+            },
+            &handshake.session_token,
+        ))
+        .await
+        .expect("open held watch")
+        .into_inner();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let retained = server
+        .control
+        .query_events(&cancelled.daemon_query_id)
+        .await;
+    assert!(
+        retained.len() <= server.control.maximum_events_per_query(),
+        "unread watch exceeded the coordinator's enforced event bound"
+    );
+    let snapshot = server.control.coordinator_snapshot().await;
+    assert!(snapshot.running <= 2 && snapshot.accepted <= 4);
+
+    let cancellation = tokio::time::timeout(
+        Duration::from_millis(500),
+        client.cancel_query(authenticated_request(
+            CancelQueryRequest {
+                context: Some(request_context(&authority, "wp63-cancel-held-watch")),
+                daemon_query_id: cancelled.daemon_query_id.clone(),
+                cancellation_id: "cancel:wp63-held-watch".to_owned(),
+            },
+            &handshake.session_token,
+        )),
+    )
+    .await
+    .expect("reserved cancellation remains prompt beside an unread watch")
+    .expect("cancel unread-watch query")
+    .into_inner();
+    assert_eq!(
+        cancellation.acknowledgement,
+        CancellationAcknowledgement::Accepted as i32
+    );
+
+    let mut sequences = Vec::new();
+    let mut terminal_count = 0;
+    while let Some(event) = held_watch.message().await.expect("held watch event") {
+        let sequence = match event.event.expect("typed watch event") {
+            WireQueryEvent::SnapshotPinned(event) => event.header,
+            WireQueryEvent::Progress(event) => event.header,
+            WireQueryEvent::ResultReady(event) => event.header,
+            WireQueryEvent::Terminal(event) => {
+                terminal_count += 1;
+                assert_eq!(event.state, QueryExecutionState::Cancelled as i32);
+                event.header
+            }
+        }
+        .expect("event header")
+        .sequence;
+        sequences.push(sequence);
+    }
+    assert_eq!(terminal_count, 1, "watch emits exactly one terminal event");
+    assert_eq!(
+        sequences,
+        (1..=u64::try_from(sequences.len()).expect("watch sequence length")).collect::<Vec<_>>()
+    );
+    wait_for_owned_task_count(&server.control, steady_owned_tasks).await;
+
+    let dropped = start_production_query(
+        &mut client,
+        &authority,
+        &handshake.session_token,
+        production_submission("request:wp63-dropped-watch"),
+        "wp63-dropped-watch",
+    )
+    .await;
+    server.control.wait_for_query_count(2).await;
+    let dropped_watch = client
+        .watch_query(authenticated_request(
+            WatchQueryRequest {
+                context: Some(request_context(&authority, "wp63-drop-watch")),
+                daemon_query_id: dropped.daemon_query_id.clone(),
+                cursor: None,
+            },
+            &handshake.session_token,
+        ))
+        .await
+        .expect("open watch that will be dropped")
+        .into_inner();
+    drop(dropped_watch);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        server.control.query_phase(&dropped.daemon_query_id).await,
+        QueryExecutionPhase::Running,
+        "dropping presentation observation must not become logical cancellation"
+    );
+    client
+        .cancel_query(authenticated_request(
+            CancelQueryRequest {
+                context: Some(request_context(&authority, "wp63-clean-dropped-watch")),
+                daemon_query_id: dropped.daemon_query_id,
+                cancellation_id: "cancel:wp63-dropped-watch".to_owned(),
+            },
+            &handshake.session_token,
+        ))
+        .await
+        .expect("explicitly cancel dropped-watch query");
+    wait_for_owned_task_count(&server.control, steady_owned_tasks).await;
+
+    let (reference, expected) = server.control.seed_bounded_reference(1024 * 1024).await;
+    let rss_before = resident_set_bytes();
+    let held_resource = client
+        .read_resource(authenticated_request(
+            ReadResourceRequest {
+                context: Some(request_context(&authority, "wp63-held-resource")),
+                public_handle: reference.public_handle.clone(),
+                selector: Some(ResourceSelector {
+                    selector: Some(WireResourceSelector::Reference(ReferenceReadRequest {
+                        kind: ReferenceKind::Guide as i32,
+                        version: Some("2.3-bounded".to_owned()),
+                    })),
+                }),
+                offset: 0,
+                maximum_bytes: 64 * 1_024,
+            },
+            &handshake.session_token,
+        ))
+        .await
+        .expect("open held resource stream")
+        .into_inner();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let rss_after = resident_set_bytes();
+    assert!(
+        rss_after.saturating_sub(rss_before) <= 64 * 1024 * 1024,
+        "unread one-MiB resource stream consumed an unbounded RSS delta"
+    );
+    let status = tokio::time::timeout(
+        Duration::from_millis(500),
+        client.get_status(authenticated_request(
+            GetStatusRequest {
+                context: Some(request_context(&authority, "wp63-resource-control")),
+                include_diagnostics: false,
+            },
+            &handshake.session_token,
+        )),
+    )
+    .await
+    .expect("reserved control remains prompt beside an unread resource")
+    .expect("status beside held resource");
+    assert_eq!(
+        status
+            .into_inner()
+            .authority
+            .expect("status authority")
+            .session_id,
+        authority.session_id
+    );
+    drop(held_resource);
+
+    let observed = read_production_resource(
+        &mut client,
+        &authority,
+        &handshake.session_token,
+        &reference.public_handle,
+        WireResourceSelector::Reference(ReferenceReadRequest {
+            kind: ReferenceKind::Guide as i32,
+            version: Some("2.3-bounded".to_owned()),
+        }),
+        "wp63-read-retained-resource",
+    )
+    .await;
+    assert_eq!(observed, expected, "watch drop must not release the lease");
+    let released = release_production_resource(
+        &mut client,
+        &authority,
+        &handshake.session_token,
+        &reference.public_handle,
+        "release:wp63-bounded-reference",
+    )
+    .await;
+    assert_eq!(released.state, ReleaseState::Released as i32);
+    assert!(matches!(
+        server.control.query_phase(&cancelled.daemon_query_id).await,
+        QueryExecutionPhase::Terminal(QueryTerminalState::Cancelled)
+    ));
     server.stop().await;
 }
 

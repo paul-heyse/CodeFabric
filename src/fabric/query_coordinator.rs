@@ -1555,8 +1555,8 @@ impl QueryCoordinator {
     }
 
     #[cfg(feature = "daemon")]
-    pub(crate) async fn owned_task_count(&self) -> usize {
-        self.task_scope.live_task_count().await
+    pub(crate) async fn owned_task_count(&self) -> Result<usize, QueryCoordinatorError> {
+        Ok(self.task_scope.live_task_count().await?)
     }
 
     /// Return an immutable bounded event suffix.
@@ -3130,7 +3130,13 @@ mod tests {
             .join_query_tasks(&accepted.query_id, Duration::from_secs(1))
             .await
             .expect("cancelled task joins");
-        assert_eq!(coordinator.owned_task_count().await, 0);
+        assert_eq!(
+            coordinator
+                .owned_task_count()
+                .await
+                .expect("owned task count"),
+            0
+        );
         assert_eq!(
             coordinator.phase(&accepted.query_id).await.unwrap(),
             QueryExecutionPhase::Terminal(QueryTerminalState::Cancelled)
@@ -3470,7 +3476,13 @@ mod tests {
             .drain_owned_tasks(Duration::from_secs(1))
             .await
             .expect("all structured query tasks join");
-        assert_eq!(coordinator.owned_task_count().await, 0);
+        assert_eq!(
+            coordinator
+                .owned_task_count()
+                .await
+                .expect("owned task count"),
+            0
+        );
     }
 
     #[tokio::test]

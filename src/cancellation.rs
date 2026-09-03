@@ -299,15 +299,17 @@ impl StructuredCancellationScope {
         Ok(())
     }
 
-    pub(crate) async fn live_task_count(&self) -> usize {
+    pub(crate) async fn live_task_count(&self) -> Result<usize, StructuredTaskError> {
+        self.reap_finished().await?;
         let prefix = format!("{}/", self.path);
-        self.registry
+        Ok(self
+            .registry
             .lock()
             .await
             .tasks
             .keys()
             .filter(|key| key.starts_with(&prefix))
-            .count()
+            .count())
     }
 
     async fn reap_finished(&self) -> Result<(), StructuredTaskError> {
@@ -429,7 +431,7 @@ mod tests {
         drop(observation);
         assert!(!probe.is_cancelled());
         query.cancel_and_join(Duration::from_secs(1)).await.unwrap();
-        assert_eq!(query.live_task_count().await, 0);
+        assert_eq!(query.live_task_count().await.expect("query task count"), 0);
     }
 
     #[cfg(feature = "daemon")]
@@ -446,7 +448,10 @@ mod tests {
             leaked.cancel_and_join(Duration::from_millis(1)).await,
             Err(StructuredTaskError::CleanupReserveExhausted { .. })
         ));
-        assert_eq!(leaked.live_task_count().await, 0);
+        assert_eq!(
+            leaked.live_task_count().await.expect("leaked task count"),
+            0
+        );
         assert!(matches!(
             leaked.spawn("replacement", async {}).await,
             Err(StructuredTaskError::ScopeClosed(_))
@@ -462,6 +467,6 @@ mod tests {
         tokio::task::yield_now().await;
         root.spawn("second", async {}).await.unwrap();
         root.cancel_and_join(Duration::from_secs(1)).await.unwrap();
-        assert_eq!(root.live_task_count().await, 0);
+        assert_eq!(root.live_task_count().await.expect("root task count"), 0);
     }
 }

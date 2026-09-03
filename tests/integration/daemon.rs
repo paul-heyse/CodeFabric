@@ -9,6 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use arrow::record_batch::RecordBatch;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use codefabric::fabric::activation_control_delta::{
     ActivationControlRowCodec, PersistedActivationControlRow,
 };
@@ -25,6 +26,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde_json::{Value, json};
 
 const PROCESS_DEADLINE: Duration = Duration::from_secs(180);
+const DEFAULT_PRODUCTION_SOURCE: &[u8] = b"def answer(value: int) -> int:\n    return value + 1\n";
 
 struct InstalledProductionStack {
     _root: tempfile::TempDir,
@@ -135,20 +137,24 @@ struct ProductionFixture {
 
 impl ProductionFixture {
     fn new() -> Self {
-        Self::with_activation_startup_fault(None)
+        Self::with_source_and_activation_startup_fault(DEFAULT_PRODUCTION_SOURCE, None)
     }
 
     fn with_activation_startup_fault(fault: Option<&str>) -> Self {
+        Self::with_source_and_activation_startup_fault(DEFAULT_PRODUCTION_SOURCE, fault)
+    }
+
+    fn with_source(source: &[u8]) -> Self {
+        Self::with_source_and_activation_startup_fault(source, None)
+    }
+
+    fn with_source_and_activation_startup_fault(source: &[u8], fault: Option<&str>) -> Self {
         let root = tempfile::tempdir().expect("temporary production root");
         let state = private_directory(&root.path().join("state"));
         let runtime = private_directory(&root.path().join("runtime"));
         let config_root = private_directory(&root.path().join("config"));
         let workspace_root = private_directory(&root.path().join("workspace"));
-        fs::write(
-            workspace_root.join("sample.py"),
-            b"def answer(value: int) -> int:\n    return value + 1\n",
-        )
-        .expect("production Python source");
+        fs::write(workspace_root.join("sample.py"), source).expect("production Python source");
 
         let mut operational =
             OperationalStore::open(&state.join("operational.sqlite3")).expect("operational store");
@@ -860,6 +866,202 @@ fn decoded_activation_control_rows(
                 .expect("exact activation control storage decode")
         })
         .collect()
+}
+
+#[derive(Debug)]
+struct InstalledVerticalObservation {
+    query_rows: u64,
+    epoch_id: String,
+    source_authority: [u8; 32],
+    provider_set: [u8; 32],
+    application_release: [u8; 32],
+    provider_release: [u8; 32],
+    proof_receipt: [u8; 32],
+    relation_ids: BTreeSet<String>,
+    reference_content: Value,
+}
+
+fn installed_vertical_observation(
+    stack: &InstalledProductionStack,
+    source: &[u8],
+    label: &str,
+) -> InstalledVerticalObservation {
+    let fixture = ProductionFixture::with_source(source);
+    fixture.bind_installed_adapter(stack, "policy-one", 0x11);
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let request = semantic_request(
+        &fixture.workspace.public_id(),
+        &format!("request:wp63-{label}"),
+        "Python function declarations",
+    );
+    let scenario = modern_client_scenario(
+        &fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "status", "operation": "call_tool", "name": "get_code_graph_status"},
+            {
+                "id": "reference",
+                "operation": "call_tool",
+                "name": "get_code_graph_reference",
+                "arguments": {"kind": "request-schema"},
+            },
+            {
+                "id": "reference_bytes",
+                "operation": "read_resource",
+                "uri": {"$ref": "reference.structured_content.resource.uri"},
+            },
+            {
+                "id": "query",
+                "operation": "call_tool",
+                "name": "query_code_graph",
+                "arguments": {"request": request, "delivery": "resource"},
+            },
+            {
+                "id": "manifest",
+                "operation": "read_resource",
+                "uri": {"$ref": "query.structured_content.manifest.uri"},
+            },
+            {
+                "id": "page_zero",
+                "operation": "read_resource",
+                "uri": {"$ref": "query.structured_content.pages.0.uri"},
+            },
+        ]),
+    );
+    let scenario = write_modern_client_scenario(&fixture, label, &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &scenario));
+    let status = modern_structured(modern_step(&report, "status"));
+    let query = modern_structured(modern_step(&report, "query"));
+    assert_eq!(
+        status["public_status"]["semantic_release"],
+        "codefabric-relational-data-fabric@2.3.0"
+    );
+    assert_eq!(query["execution_state"], "SUCCEEDED", "{query}");
+    assert!(
+        modern_step(&report, "manifest")
+            .as_array()
+            .is_some_and(|content| !content.is_empty())
+    );
+    assert!(
+        modern_step(&report, "page_zero")
+            .as_array()
+            .is_some_and(|content| !content.is_empty())
+    );
+
+    let persisted = decoded_activation_control_rows(&fixture);
+    assert_eq!(persisted.len(), 1);
+    let row = persisted[0].row();
+    let epoch_id = row
+        .pins
+        .epoch
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(status["active_epoch_id"], format!("epoch:{epoch_id}"));
+    assert_eq!(query["epoch_id"], format!("snapshot:{epoch_id}"));
+    assert!(matches!(row.predecessor_epoch, ExpectedHead::Empty));
+    assert_eq!(
+        row.pins.table_versions,
+        persisted[0].table_versions().reference()
+    );
+
+    let relation_ids = persisted[0]
+        .table_versions()
+        .components()
+        .map(|(relation_id, pin)| {
+            assert_eq!(pin.version(), 1, "fresh relation {relation_id} version");
+            relation_id.to_owned()
+        })
+        .collect::<BTreeSet<_>>();
+    for required in [
+        "provider.tree_sitter.coverage",
+        "provider.ruff.coverage",
+        "runtime.accepted_fact_family",
+        "runtime.unsupported_remainder",
+    ] {
+        assert!(
+            relation_ids.contains(required),
+            "installed candidate omitted coverage/explicit-remainder relation {required}: {relation_ids:?}"
+        );
+    }
+    let proof_root = fixture
+        .fabric_workspace_root()
+        .join("epochs")
+        .join(&epoch_id)
+        .join("proof");
+    assert!(
+        proof_root.is_dir(),
+        "proof relations are not durably published"
+    );
+    assert_no_modern_secret_projection(&report, &fixture);
+    let reference_blob = modern_step(&report, "reference_bytes")[0]["blob"]
+        .as_str()
+        .expect("request-schema resource blob");
+    let reference_document: Value = serde_json::from_slice(
+        &STANDARD
+            .decode(reference_blob)
+            .expect("request-schema resource base64"),
+    )
+    .expect("request-schema resource JSON");
+    let observation = InstalledVerticalObservation {
+        query_rows: query["total_rows"].as_u64().expect("query row count"),
+        epoch_id,
+        source_authority: *row.pins.source_authority.as_bytes(),
+        provider_set: *row.pins.provider_set.as_bytes(),
+        application_release: *row.pins.application_release.as_bytes(),
+        provider_release: *row.pins.provider_release.as_bytes(),
+        proof_receipt: *row.pins.proof_receipt.as_bytes(),
+        relation_ids,
+        reference_content: reference_document["projection"].clone(),
+    };
+    supervisor.stop();
+    observation
+}
+
+fn installed_query_report(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    label: &str,
+    stale_resource_uri: Option<&str>,
+) -> Value {
+    let mut steps = vec![json!({
+        "id": "status",
+        "operation": "call_tool",
+        "name": "get_code_graph_status",
+    })];
+    if let Some(uri) = stale_resource_uri {
+        steps.push(json!({
+            "id": "stale_resource",
+            "operation": "read_resource",
+            "uri": uri,
+            "expect_error": "CLIENT_OPERATION_FAILED",
+        }));
+    }
+    steps.push(json!({
+        "id": "query",
+        "operation": "call_tool",
+        "name": "query_code_graph",
+        "arguments": {
+            "request": semantic_request(
+                &fixture.workspace.public_id(),
+                &format!("request:wp63-restart-{label}"),
+                "Python function declarations",
+            ),
+            "delivery": "resource",
+        },
+    }));
+    steps.push(json!({
+        "id": "manifest",
+        "operation": "read_resource",
+        "uri": {"$ref": "query.structured_content.manifest.uri"},
+    }));
+    let scenario =
+        modern_client_scenario(fixture, stack, "policy-one", json!([]), Value::Array(steps));
+    let scenario = write_modern_client_scenario(fixture, label, &scenario);
+    modern_client_report(&run_modern_client(stack, &scenario))
 }
 
 #[test]
@@ -1771,6 +1973,122 @@ fn wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation() {
     assert_no_modern_secret_projection(&first_report, &fixture);
     assert_no_modern_secret_projection(&second_report, &fixture);
     supervisor.stop();
+}
+
+#[test]
+fn wp63_beh_real_source_to_installed_fastmcp_is_causal_and_epoch_coherent() {
+    const BASELINE: &[u8] = b"def answer(value: int) -> int:\n    return value + 1\n";
+    const MUTATED: &[u8] = b"def answer(value: int) -> int:\n    return value + 1\n\ndef doubled(value: int) -> int:\n    return value * 2\n";
+
+    let stack = InstalledProductionStack::build();
+    let baseline = installed_vertical_observation(&stack, BASELINE, "causal-baseline");
+    let mutated = installed_vertical_observation(&stack, MUTATED, "causal-mutated");
+
+    assert_eq!(baseline.query_rows, 1, "pre-registered baseline clause");
+    assert_eq!(mutated.query_rows, 2, "pre-registered mutation clause");
+    assert_eq!(mutated.query_rows, baseline.query_rows + 1);
+    assert_ne!(baseline.epoch_id, mutated.epoch_id);
+    assert_ne!(baseline.source_authority, mutated.source_authority);
+    assert_ne!(baseline.provider_set, mutated.provider_set);
+    assert_ne!(baseline.proof_receipt, mutated.proof_receipt);
+    assert_eq!(baseline.application_release, mutated.application_release);
+    assert_eq!(baseline.provider_release, mutated.provider_release);
+    assert_eq!(baseline.relation_ids, mutated.relation_ids);
+    assert_eq!(
+        baseline.reference_content, mutated.reference_content,
+        "source mutation changed unrelated request-schema presentation"
+    );
+}
+
+#[test]
+fn wp63_ops_installed_restart_reconstructs_only_exact_activation_authority() {
+    let fixture = ProductionFixture::new();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let mut supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let initial_discovery = supervisor.discovery();
+    let initial_activation = decoded_activation_control_rows(&fixture);
+    let first = installed_query_report(&fixture, &stack, "restart-before", None);
+    let first_status = modern_structured(modern_step(&first, "status"));
+    let first_query = modern_structured(modern_step(&first, "query"));
+    let first_handle = first_query["manifest"]["uri"]
+        .as_str()
+        .expect("first manifest URI")
+        .to_owned();
+    assert_eq!(
+        first_status["active_epoch_id"]
+            .as_str()
+            .and_then(|value| value.strip_prefix("epoch:")),
+        first_query["epoch_id"]
+            .as_str()
+            .and_then(|value| value.strip_prefix("snapshot:"))
+    );
+
+    let daemon_pid = i32::try_from(initial_discovery.daemon_pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+        .expect("initial daemon PID");
+    rustix::process::kill_process(daemon_pid, rustix::process::Signal::KILL)
+        .expect("inject daemon loss");
+    let restarted = supervisor.wait_for_daemon_generation(initial_discovery.daemon_generation + 1);
+    let second = installed_query_report(
+        &fixture,
+        &stack,
+        "restart-reconstructed-daemon",
+        Some(&first_handle),
+    );
+    let second_status = modern_structured(modern_step(&second, "status"));
+    let second_query = modern_structured(modern_step(&second, "query"));
+    assert_eq!(
+        modern_step(&second, "stale_resource")["error_code"],
+        "CLIENT_OPERATION_FAILED",
+        "process-local resource handle survived daemon replacement"
+    );
+    assert_eq!(
+        first_status["active_epoch_id"],
+        second_status["active_epoch_id"]
+    );
+    assert_eq!(first_query["epoch_id"], second_query["epoch_id"]);
+    assert_eq!(first_query["total_rows"], second_query["total_rows"]);
+    assert_ne!(
+        first_status["authority"]["session_id"],
+        second_status["authority"]["session_id"]
+    );
+    assert_eq!(
+        second_status["authority"]["daemon_generation"],
+        restarted.daemon_generation
+    );
+    assert_eq!(
+        decoded_activation_control_rows(&fixture),
+        initial_activation
+    );
+    assert_eq!(activation_control_versions(&fixture).len(), 2);
+
+    supervisor.stop();
+    let replacement = fixture.start_supervisor_with(&stack.codefabric);
+    let replacement_discovery = replacement.discovery();
+    assert_ne!(
+        replacement_discovery.supervisor_generation,
+        initial_discovery.supervisor_generation
+    );
+    let third = installed_query_report(&fixture, &stack, "restart-reconstructed-all", None);
+    let third_status = modern_structured(modern_step(&third, "status"));
+    let third_query = modern_structured(modern_step(&third, "query"));
+    assert_eq!(
+        first_status["active_epoch_id"],
+        third_status["active_epoch_id"]
+    );
+    assert_eq!(first_query["epoch_id"], third_query["epoch_id"]);
+    assert_eq!(first_query["total_rows"], third_query["total_rows"]);
+    assert_eq!(
+        decoded_activation_control_rows(&fixture),
+        initial_activation
+    );
+    assert_eq!(activation_control_versions(&fixture).len(), 2);
+    assert_no_modern_secret_projection(&first, &fixture);
+    assert_no_modern_secret_projection(&second, &fixture);
+    assert_no_modern_secret_projection(&third, &fixture);
+    replacement.stop();
 }
 
 #[test]

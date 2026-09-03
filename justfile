@@ -409,7 +409,8 @@ fenced-authority-cutover-v3-check:
 [doc("Reject predecessor physical/config/role revival and supervisor or activation substitution")]
 [group('test')]
 predecessor-restart-revocation-check:
-    cargo nextest run --locked --lib -E 'test(/wp41_neg_/) | test(/wp41_prod_neg_/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(operational_receipt_nonauthority_faults|clean_restart_rejects_wrong_epoch_and_keeps_admission_closed|restart_recovery_keeps_admission_closed_until_marker_and_cache_reconciliation)/)' --no-tests=fail
+    cargo nextest run --locked --test integration -E 'test(wp63_ops_installed_restart_reconstructs_only_exact_activation_authority)' --no-tests=fail
 
 [doc("Reconcile every interrupted cutover edge from exact command, Delta, and supervisor readback")]
 [group('test')]
@@ -646,6 +647,38 @@ fastmcp4-decommission-zero-state-check: remaining-legacy-zero-state-check
 fastmcp4-package-build-check: root-check extractor-check sidecar-check adapter-wheel-test stable-graph-check features-each proto-repro-check
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_post_purge_assurance.py -k 'ops_'
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_post_purge_assurance.py package
+
+[doc("Prove the installed target uses one compiled release and exact provider/fabric authority")]
+[group('test')]
+installed_target_authority_integrity: compiled-release-legacy-zero-state-check provider-trust-coverage-remainder-check
+    cargo nextest run --locked --test integration -E 'test(/(wp44_beh_real_supervisor_ready_requires_durable_fresh_activation|wp47_int_real_installed_wheel_modern_contract_observation)/)' --no-tests=fail
+
+[doc("Prove a pre-registered source mutation changes only its dependent installed FastMCP result")]
+[group('test')]
+real_source_to_fastmcp_causal_vertical:
+    cargo nextest run --locked --test integration -E 'test(wp63_beh_real_source_to_installed_fastmcp_is_causal_and_epoch_coherent)' --no-tests=fail
+
+[doc("Execute the installed source-to-provider-to-Delta-to-UDS-to-FastMCP causal vertical")]
+[group('test')]
+semantic-release-vertical-check: installed_target_authority_integrity real_source_to_fastmcp_causal_vertical
+
+[doc("Discard process-local state and reconstruct only the exact activation-selected release")]
+[group('test')]
+semantic-release-restart-reconstruction-check: candidate-free-recovery-check predecessor-restart-revocation-check
+    cargo nextest run --locked --test integration -E 'test(/(wp44_ops_real_durable_append_acknowledgement_loss_reconciles_exact_readback|wp63_ops_installed_restart_reconstructs_only_exact_activation_authority)/)' --no-tests=fail
+
+[doc("Fault provider, IPC, proof, Delta, authorization, and clean reconstruction boundaries")]
+[group('test')]
+installed_vertical_fault_and_recovery_matrix: provider-admission-exclusivity-check provider-ipc-contract-integrity-check delta-publication-contract-check fastmcp4-security-negative-check semantic-release-restart-reconstruction-check
+
+[doc("Prove pull-driven UDS streams stay bounded, cancellable, ordered, retained, and joined")]
+[group('test')]
+slow_consumer_cancel_restart_operations: fastmcp4-cancellation-recovery-check
+    cargo nextest run --locked --test integration -E 'test(wp63_ops_generated_uds_slow_consumers_remain_bounded_and_cancellable)' --no-tests=fail
+
+[doc("Exercise generated UDS clients while event and resource consumers remain unread")]
+[group('test')]
+grpc-slow-consumer-check: slow_consumer_cancel_restart_operations
 
 [doc("Execute application-owned provider job, result, coverage, gap, resource, and admission contracts")]
 [group('test')]
