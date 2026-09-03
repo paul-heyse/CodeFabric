@@ -6,6 +6,7 @@ import argparse
 import json
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -337,6 +338,20 @@ def _validate_navigation(root: Path, terminal: dict[str, MasterContract]) -> Non
             )
 
 
+def _validate_relational_design_selection(design: Mapping[str, Any]) -> None:
+    """Require the accepted design-dossier contract and current doctrine authority."""
+
+    if (
+        design.get("artifact") != "design-dossier"
+        or design.get("doctrine_path")
+        != "docs/library_ref/full_data_fabric_design_principles_v2.md"
+        or design.get("status") != "accepted"
+    ):
+        raise AuthoritativeDesignError(
+            "active relational design does not select the accepted v2 doctrine target"
+        )
+
+
 def _validate_active_relational_plan(root: Path) -> str:
     active = _relative(active_plan_path(root), root)
     try:
@@ -351,14 +366,7 @@ def _validate_active_relational_plan(root: Path) -> str:
             f"active plan is not the approved relational successor: {active}"
         )
     design = parse_frontmatter(root / str(plan.get("design_path", "")))
-    if (
-        design.get("principles_path")
-        != "docs/library_ref/full_data_fabric_design_principles_v2.md"
-        or design.get("target_status") != "accepted"
-    ):
-        raise AuthoritativeDesignError(
-            "active relational design does not select the accepted v2 doctrine target"
-        )
+    _validate_relational_design_selection(design)
     return f"active-{plan.get('version')}"
 
 

@@ -13,6 +13,7 @@ from tooling.ci.authoritative_design_conformance import (
     REQUIRED_TAGS,
     AuthoritativeDesignError,
     _legacy_hits,
+    _validate_relational_design_selection,
     validate_authoritative_design,
     validate_master_directory,
 )
@@ -26,6 +27,27 @@ def test_relational_authoritative_design_conformance() -> None:
     assert report["suite_id"] == "codefabric-relational-data-fabric"
     assert report["suite_version"] == "2.3.0"
     assert report["plan_selection"] == "active-v7"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("artifact", "interface-design-review"),
+        ("status", "draft"),
+        ("doctrine_path", "docs/library_ref/full_data_fabric_design_principles.md"),
+    ],
+)
+def test_relational_design_selection_rejects_nonaccepted_authority(
+    field: str, value: str
+) -> None:
+    design = {
+        "artifact": "design-dossier",
+        "status": "accepted",
+        "doctrine_path": "docs/library_ref/full_data_fabric_design_principles_v2.md",
+    }
+    design[field] = value
+    with pytest.raises(AuthoritativeDesignError, match="accepted v2 doctrine"):
+        _validate_relational_design_selection(design)
 
 
 def _write_suite(root: Path) -> Path:

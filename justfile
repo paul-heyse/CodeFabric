@@ -750,6 +750,12 @@ compiled_release_resource_performance_envelope:
 [group('gate')]
 compiled-release-resource-performance-check: fastmcp4-expectation-drift-check compiled_release_resource_performance_envelope
 
+[doc("Derive and execute every v7 packet oracle, retained outcome, and terminal gate at one HEAD")]
+[group('gate')]
+relational-fabric-v7-certification:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_v7_certification.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/v7_certification.py run
+
 [doc("Execute application-owned provider job, result, coverage, gap, resource, and admission contracts")]
 [group('test')]
 provider-job-contract-check:
