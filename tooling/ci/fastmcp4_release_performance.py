@@ -147,7 +147,9 @@ def _validate_expectation(actual: object, expected: object, context: str) -> Non
     _require(actual == expected, "WP65_SEMANTIC_OBSERVATION_DRIFT", context)
 
 
-def _validate_sample(sample: Mapping[str, Any], workload: Workload) -> None:
+def _validate_sample(
+    sample: Mapping[str, Any], workload: Workload, candidate: str
+) -> None:
     expected_keys = {
         "workload_id",
         "phase",
@@ -165,13 +167,16 @@ def _validate_sample(sample: Mapping[str, Any], workload: Workload) -> None:
         "exit_code",
         "observation",
     }
+    expected_command = list(workload.command)
+    if workload.isolated_cargo_target:
+        expected_command.append(f"target/wp65-release/{candidate[:16]}")
     _require(
         set(sample) == expected_keys
         and sample.get("workload_id") == workload.workload_id
         and sample.get("phase") == "measured"
         and sample.get("state_classification") == workload.state_classification
         and sample.get("data_scale") == workload.data_scale
-        and sample.get("command") == list(workload.command)
+        and sample.get("command") == expected_command
         and sample.get("exit_code") == 0,
         "WP65_SAMPLE_BINDING_INVALID",
         workload.workload_id,
@@ -276,7 +281,7 @@ def validate_report_document(report: Mapping[str, Any], method: Method) -> int:
             workload.workload_id,
         )
         for sample in selected:
-            _validate_sample(sample, workload)
+            _validate_sample(sample, workload, candidate)
         _validate_workload_bounds(selected, workload)
         offset += workload.samples
     _require(

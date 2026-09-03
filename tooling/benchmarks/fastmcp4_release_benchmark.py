@@ -35,7 +35,7 @@ DEFAULT_REPORT_PATH = Path(
 METHOD_SCHEMA = "codefabric.compiled-release-performance.method.v2"
 REPORT_SCHEMA = "codefabric.compiled-release-performance.raw-report.v2"
 METHOD_ID = "relational-fabric-v7-final-target-v1"
-METHOD_REVISION = "wp65-preregistered-v2"
+METHOD_REVISION = "wp65-preregistered-v3"
 OBSERVATION_PREFIX = b"CODEFABRIC_WP65_OBSERVATION="
 MAX_CAPTURE_BYTES = 67_108_864
 
@@ -502,18 +502,31 @@ def execute_workload(
     sample_index: int,
     root: Path,
     cargo_target: Path | None,
+    sampling_interval_millis: int,
 ) -> dict[str, Any]:
     environment = os.environ.copy()
     environment["CODEFABRIC_WP65_MEASURE"] = "1"
+    command = workload.command
     if cargo_target is not None:
-        environment["CARGO_TARGET_DIR"] = str(cargo_target)
+        _require(
+            workload.isolated_cargo_target,
+            "WP65_ISOLATED_TARGET_BINDING_INVALID",
+            workload.workload_id,
+        )
+        try:
+            target_argument = cargo_target.relative_to(root).as_posix()
+        except ValueError as error:
+            raise BenchmarkError(
+                "WP65_ISOLATED_TARGET_BINDING_INVALID", str(cargo_target)
+            ) from error
+        command = (*workload.command, target_argument)
     start = time.monotonic_ns()
     peak_rss = 0
     maximum_processes = 0
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
         try:
             process = subprocess.Popen(
-                workload.command,
+                command,
                 cwd=root,
                 env=environment,
                 stdin=subprocess.DEVNULL,
@@ -526,14 +539,19 @@ def execute_workload(
                 "WP65_WORKLOAD_START_FAILED", workload.workload_id
             ) from error
         deadline = time.monotonic() + workload.timeout_seconds
-        while process.poll() is None:
-            rss, count = _tree_resource_sample(process.pid)
-            peak_rss = max(peak_rss, rss)
-            maximum_processes = max(maximum_processes, count)
-            if time.monotonic() >= deadline:
+        try:
+            while process.poll() is None:
+                rss, count = _tree_resource_sample(process.pid)
+                peak_rss = max(peak_rss, rss)
+                maximum_processes = max(maximum_processes, count)
+                if time.monotonic() >= deadline:
+                    _terminate_process_group(process)
+                    _fail("WP65_WORKLOAD_TIMEOUT", workload.workload_id)
+                time.sleep(sampling_interval_millis / 1_000)
+        except BaseException:
+            if process.poll() is None:
                 _terminate_process_group(process)
-                _fail("WP65_WORKLOAD_TIMEOUT", workload.workload_id)
-            time.sleep(0.02)
+            raise
         stop = time.monotonic_ns()
         rss, count = _tree_resource_sample(process.pid)
         peak_rss = max(peak_rss, rss)
@@ -569,7 +587,7 @@ def execute_workload(
         "sample_index": sample_index,
         "state_classification": workload.state_classification,
         "data_scale": workload.data_scale,
-        "command": list(workload.command),
+        "command": list(command),
         "start_monotonic_ns": start,
         "stop_monotonic_ns": stop,
         "elapsed_millis": (stop - start) / 1_000_000,
@@ -582,7 +600,9 @@ def execute_workload(
     }
 
 
-def _structural_run(contract_id: str, recipe: str, root: Path) -> dict[str, Any]:
+def _structural_run(
+    contract_id: str, recipe: str, root: Path, sampling_interval_millis: int
+) -> dict[str, Any]:
     workload = Workload(
         workload_id=f"structural:{contract_id}",
         coverage=(contract_id,),
@@ -604,7 +624,12 @@ def _structural_run(contract_id: str, recipe: str, root: Path) -> dict[str, Any]
         },
     )
     observed = execute_workload(
-        workload, phase="structural", sample_index=0, root=root, cargo_target=None
+        workload,
+        phase="structural",
+        sample_index=0,
+        root=root,
+        cargo_target=None,
+        sampling_interval_millis=sampling_interval_millis,
     )
     return {"contract_id": contract_id, "recipe": recipe, **observed}
 
@@ -727,6 +752,7 @@ def run_method(method: Method, *, root: Path, output: Path) -> dict[str, Any]:
                 sample_index=index,
                 root=root,
                 cargo_target=cargo_target,
+                sampling_interval_millis=method.sampling_interval_millis,
             )
         for index in range(workload.samples):
             samples.append(
@@ -736,6 +762,7 @@ def run_method(method: Method, *, root: Path, output: Path) -> dict[str, Any]:
                     sample_index=index,
                     root=root,
                     cargo_target=cargo_target,
+                    sampling_interval_millis=method.sampling_interval_millis,
                 )
             )
     if release_root is not None:
@@ -749,7 +776,9 @@ def run_method(method: Method, *, root: Path, output: Path) -> dict[str, Any]:
             }
         environment["release_artifacts"] = artifacts
     structural_runs = [
-        _structural_run(contract_id, recipe, root)
+        _structural_run(
+            contract_id, recipe, root, method.sampling_interval_millis
+        )
         for contract_id, recipe in method.structural_contracts
     ]
     report = {

@@ -704,8 +704,8 @@ compiled-release-fresh-activation-check: fresh_activation_sole_authority_integri
 
 # WP65's measurement recipes are intentionally private implementation details of the frozen
 # method. Each selects one real product scenario and emits no synthetic candidate observation.
-_wp65-measure-release-compile:
-    cargo build --locked --release --bin codefabric --bin codefabricd
+_wp65-measure-release-compile target:
+    cargo build --locked --release --target-dir "{{target}}" --bin codefabric --bin codefabricd
 
 _wp65-measure-fresh-activation:
     cargo test --locked --test integration integration::daemon::wp44_beh_real_supervisor_ready_requires_durable_fresh_activation -- --exact --nocapture

@@ -1,7 +1,7 @@
 {
   "schema": "codefabric.compiled-release-performance.method.v2",
   "method_id": "relational-fabric-v7-final-target-v1",
-  "method_revision": "wp65-preregistered-v2",
+  "method_revision": "wp65-preregistered-v3",
   "authority": {
     "plan_path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v7_2026-09-02.md",
     "packet": "WP65",
@@ -15,7 +15,7 @@
   "statistics": {
     "clock": "monotonic_ns",
     "memory_source": "linux-proc-process-tree-rss",
-    "sampling_interval_millis": 20,
+    "sampling_interval_millis": 100,
     "percentile_policy": "nearest-rank",
     "reported_percentiles": [0, 50, 95, 100],
     "uncertainty": "nonparametric-bootstrap-median-and-p95-when-sample-count-at-least-three",
