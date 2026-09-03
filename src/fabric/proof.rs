@@ -27,7 +27,7 @@ use super::derived_producer_closure::{
     ReleaseQueryRequirementClosureRow,
 };
 #[cfg(feature = "daemon")]
-use super::production_kernel::CompiledProofAuthority;
+use crate::semantic_release::{CausalEffect, CompiledProofProgram};
 
 mod delta_history;
 
@@ -450,7 +450,7 @@ pub struct IndependentProofInput<'a> {
 /// used as an expected answer.
 #[cfg(feature = "daemon")]
 pub(crate) fn evaluate_compiled_activation_candidate(
-    _authority: &CompiledProofAuthority,
+    proof_program: &CompiledProofProgram,
     pins: ProofCandidatePins,
 ) -> Result<ProofRelations, ProofError> {
     fn identity32(domain: &[u8], frames: &[&[u8]]) -> [u8; 32] {
@@ -472,9 +472,24 @@ pub(crate) fn evaluate_compiled_activation_candidate(
         value
     }
 
+    let compiled_input = proof_program.construct_input();
+    let (compiled_expectation, expectation_relation, _) = compiled_input
+        .expectations
+        .first()
+        .ok_or(ProofError::InvalidCompiledProgram)?;
+    let (compiled_fault, fault_relation, _) = compiled_input
+        .faults
+        .iter()
+        .find(|(_, _, effect)| *effect == CausalEffect::ChangeProofTerminal)
+        .ok_or(ProofError::InvalidCompiledProgram)?;
+
     let oracle_id = OracleId::new(identity16(
         b"oracle",
-        &[b"activation-candidate-exact-authority"],
+        &[
+            b"activation-candidate-exact-authority",
+            expectation_relation.as_str().as_bytes(),
+            fault_relation.as_str().as_bytes(),
+        ],
     ))
     .expect("domain-separated release identity is nonzero");
     let capability_id = CapabilityId::new(identity16(
@@ -489,12 +504,18 @@ pub(crate) fn evaluate_compiled_activation_candidate(
     .expect("domain-separated release identity is nonzero");
     let expectation_id = ExpectationId::new(identity16(
         b"expectation",
-        &[b"candidate-selection-preserves-exact-authority"],
+        &[
+            b"candidate-selection-preserves-exact-authority",
+            compiled_expectation.as_str().as_bytes(),
+        ],
     ))
     .expect("domain-separated release identity is nonzero");
     let fault_id = CausalFaultId::new(identity16(
         b"causal-fault",
-        &[b"substitute-table-version-vector"],
+        &[
+            b"substitute-table-version-vector",
+            compiled_fault.as_str().as_bytes(),
+        ],
     ))
     .expect("domain-separated release identity is nonzero");
     let violation_id = ViolationId::new(identity16(
@@ -1200,6 +1221,8 @@ impl ProofRelations {
 /// Invalid proof input or Arrow realization.
 #[derive(Debug, Error)]
 pub enum ProofError {
+    #[error("compiled proof program omits its independent expectation or terminal causal fault")]
+    InvalidCompiledProgram,
     #[error("proof input resource limit exceeded: {0}")]
     ResourceLimit(&'static str),
     #[error("exact candidate pin uses the all-zero sentinel")]

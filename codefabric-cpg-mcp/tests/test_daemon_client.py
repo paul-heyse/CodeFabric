@@ -190,6 +190,7 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
             )
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, "secret daemon prose")
         public_value: dict[str, object] = {
+            "semantic_release": "codefabric-relational-data-fabric@2.3.0",
             "accepted_queries": 1,
             "active_epoch_id": "epoch:one",
             "lifecycle": "READY",

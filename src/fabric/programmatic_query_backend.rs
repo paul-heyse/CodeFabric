@@ -1567,7 +1567,7 @@ mod tests {
         policy: [u8; 32],
         snapshot: [u8; 32],
     ) -> Result<ProgrammaticSemanticQueryPorts, ProgrammaticSemanticQueryBackendError> {
-        let release = super::super::production_kernel::CompiledSemanticRelease::current();
+        let release = super::super::production_kernel::compile_test_semantic_release();
         ProgrammaticSemanticQueryPorts::try_new(
             &release,
             Arc::new(IngressProbe(ingress)),
@@ -1579,7 +1579,7 @@ mod tests {
 
     #[test]
     fn port_bundle_requires_application_and_every_component_identity() {
-        let release = super::super::production_kernel::CompiledSemanticRelease::current();
+        let release = super::super::production_kernel::compile_test_semantic_release();
         let release_pin = compiled_query_release_pin(&release);
         for (expected, pins) in [
             ("semantic ingress", ([0; 32], [2; 32], [3; 32])),
@@ -1627,7 +1627,7 @@ mod tests {
             1024 * 1024,
         )
         .unwrap();
-        let release = Arc::new(super::super::production_kernel::CompiledSemanticRelease::current());
+        let release = Arc::new(super::super::production_kernel::compile_test_semantic_release());
         let backend = ProgrammaticSemanticQueryBackend::new(
             release,
             Arc::new(WorkspaceSlotRegistry::new()),

@@ -1,4 +1,4 @@
-"""Execute the preregistered WP50 FastMCP 4 release benchmark.
+"""Execute the preregistered WP65 FastMCP 4 release benchmark.
 
 The runner is deliberately candidate-neutral.  The frozen JSON fixture owns
 the cases, order, statistics, resource bounds, and budgets; probe processes
@@ -30,19 +30,18 @@ from typing import Any, NoReturn
 
 ROOT = Path(__file__).resolve().parents[2]
 METHOD_PATH = Path("tests/fixtures/fastmcp4_performance/workloads.json")
-REGISTERED_METHOD_PATH = Path(
-    "contracts/acceptance/relational-fabric-v5/performance-method.yaml"
-)
 
-METHOD_SCHEMA = "codefabric.fastmcp4-release-performance.method.v1"
-RAW_REPORT_SCHEMA = "codefabric.fastmcp4-release-performance.raw-report.v1"
+METHOD_SCHEMA = "codefabric.compiled-release-performance.method.v1"
+RAW_REPORT_SCHEMA = "codefabric.compiled-release-performance.raw-report.v1"
 SAMPLE_REQUEST_SCHEMA = "codefabric.fastmcp4-release-performance.sample-request.v1"
 SAMPLE_RESULT_SCHEMA = "codefabric.fastmcp4-release-performance.sample-result.v1"
 METHOD_ID = "fastmcp4-local-stdio-v1"
-METHOD_REVISION = "wp50-r1"
-REGISTERED_METHOD_SHA256 = (
-    "ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df"
+METHOD_REVISION = "wp65-v1"
+METHOD_PLAN = (
+    "docs/plans/"
+    "codefabric_execution_proved_relational_data_fabric_implementation_plan_v7_2026-09-02.md"
 )
+METHOD_SUITE = "codefabric-relational-data-fabric@2.3.0"
 EXPECTED_WORKLOAD_IDS = (
     "startup_to_protocol_ready",
     "idle_and_active_rss",
@@ -87,13 +86,13 @@ def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            _fail("WP50_JSON_DUPLICATE_MEMBER", key)
+            _fail("WP65_JSON_DUPLICATE_MEMBER", key)
         result[key] = value
     return result
 
 
 def _reject_nonfinite(value: str) -> NoReturn:
-    _fail("WP50_JSON_NONFINITE", value)
+    _fail("WP65_JSON_NONFINITE", value)
 
 
 def _load_json(path: Path, *, maximum_bytes: int = MAX_METHOD_BYTES) -> dict[str, Any]:
@@ -101,7 +100,7 @@ def _load_json(path: Path, *, maximum_bytes: int = MAX_METHOD_BYTES) -> dict[str
         metadata = path.stat()
         _require(
             path.is_file() and metadata.st_size <= maximum_bytes,
-            "WP50_JSON_SIZE_INVALID",
+            "WP65_JSON_SIZE_INVALID",
             str(path),
         )
         value = json.loads(
@@ -112,8 +111,8 @@ def _load_json(path: Path, *, maximum_bytes: int = MAX_METHOD_BYTES) -> dict[str
     except BenchmarkError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise BenchmarkError("WP50_JSON_INVALID", str(path)) from error
-    _require(isinstance(value, dict), "WP50_JSON_ROOT_INVALID", str(path))
+        raise BenchmarkError("WP65_JSON_INVALID", str(path)) from error
+    _require(isinstance(value, dict), "WP65_JSON_ROOT_INVALID", str(path))
     return value
 
 
@@ -129,7 +128,7 @@ def canonical_json(value: object) -> bytes:
             sort_keys=True,
         ).encode("utf-8")
     except (TypeError, ValueError) as error:
-        raise BenchmarkError("WP50_JSON_VALUE_INVALID", "non-JSON value") from error
+        raise BenchmarkError("WP65_JSON_VALUE_INVALID", "non-JSON value") from error
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -140,11 +139,11 @@ def sha256_file(path: Path) -> str:
     try:
         return sha256_bytes(path.read_bytes())
     except OSError as error:
-        raise BenchmarkError("WP50_INPUT_UNREADABLE", str(path)) from error
+        raise BenchmarkError("WP65_INPUT_UNREADABLE", str(path)) from error
 
 
 def _mapping(value: object, context: str) -> Mapping[str, Any]:
-    _require(isinstance(value, Mapping), "WP50_METHOD_SCHEMA_INVALID", context)
+    _require(isinstance(value, Mapping), "WP65_METHOD_SCHEMA_INVALID", context)
     assert isinstance(value, Mapping)
     return value
 
@@ -154,7 +153,7 @@ def _string_list(value: object, context: str) -> list[str]:
         isinstance(value, list)
         and bool(value)
         and all(isinstance(item, str) and item for item in value),
-        "WP50_METHOD_SCHEMA_INVALID",
+        "WP65_METHOD_SCHEMA_INVALID",
         context,
     )
     assert isinstance(value, list)
@@ -164,7 +163,7 @@ def _string_list(value: object, context: str) -> list[str]:
 def _integer(value: object, context: str, *, minimum: int = 0) -> int:
     _require(
         isinstance(value, int) and not isinstance(value, bool) and value >= minimum,
-        "WP50_METHOD_SCHEMA_INVALID",
+        "WP65_METHOD_SCHEMA_INVALID",
         context,
     )
     assert isinstance(value, int)
@@ -172,7 +171,7 @@ def _integer(value: object, context: str, *, minimum: int = 0) -> int:
 
 
 def _closed(value: Mapping[str, Any], expected: set[str], context: str) -> None:
-    _require(set(value) == expected, "WP50_METHOD_SCHEMA_INVALID", context)
+    _require(set(value) == expected, "WP65_METHOD_SCHEMA_INVALID", context)
 
 
 @dataclass(frozen=True)
@@ -220,24 +219,19 @@ def _validate_method_document(document: Mapping[str, Any], root: Path) -> Method
         document.get("schema") == METHOD_SCHEMA
         and document.get("method_id") == METHOD_ID
         and document.get("method_revision") == METHOD_REVISION,
-        "WP50_METHOD_IDENTITY_DRIFT",
+        "WP65_METHOD_IDENTITY_DRIFT",
         "method identity",
     )
     authority = _mapping(document.get("authority"), "authority")
     _require(
-        authority.get("registered_method_path") == str(REGISTERED_METHOD_PATH)
-        and authority.get("registered_method_sha256") == REGISTERED_METHOD_SHA256
+        authority.get("plan_path") == METHOD_PLAN
+        and authority.get("packet") == "WP65"
+        and authority.get("suite") == METHOD_SUITE
         and authority.get("registered_before_candidate_results") is True
         and authority.get("candidate_results_used") is False
         and authority.get("local_relaxation_permitted") is False,
-        "WP50_METHOD_AUTHORITY_DRIFT",
+        "WP65_METHOD_AUTHORITY_DRIFT",
         "preregistration",
-    )
-    registered = root / REGISTERED_METHOD_PATH
-    _require(
-        sha256_file(registered) == REGISTERED_METHOD_SHA256,
-        "WP50_REGISTERED_METHOD_DRIFT",
-        str(registered),
     )
 
     statistics_value = _mapping(document.get("statistics"), "statistics")
@@ -261,7 +255,7 @@ def _validate_method_document(document: Mapping[str, Any], root: Path) -> Method
         and ordering.get("name")
         == "deterministic-randomized-interleaved-candidate-control-blocks"
         and ordering.get("arms") == list(ARMS),
-        "WP50_STATISTICAL_METHOD_DRIFT",
+        "WP65_STATISTICAL_METHOD_DRIFT",
         "statistics",
     )
 
@@ -280,12 +274,12 @@ def _validate_method_document(document: Mapping[str, Any], root: Path) -> Method
         and topology.get("eight_agent_ceiling_interpretation")
         == "one-total-topology-ceiling-not-a-per-process-or-per-agent-ceiling"
         and topology.get("concurrency_levels") == [1, 2, 4, 8],
-        "WP50_COMPARISON_METHOD_DRIFT",
+        "WP65_COMPARISON_METHOD_DRIFT",
         "comparison/topology",
     )
 
     raw_workloads = document.get("workloads")
-    _require(isinstance(raw_workloads, list), "WP50_METHOD_SCHEMA_INVALID", "workloads")
+    _require(isinstance(raw_workloads, list), "WP65_METHOD_SCHEMA_INVALID", "workloads")
     assert isinstance(raw_workloads, list)
     workloads: list[Workload] = []
     for index, raw in enumerate(raw_workloads):
@@ -304,7 +298,7 @@ def _validate_method_document(document: Mapping[str, Any], root: Path) -> Method
         )
         workload_id = value.get("workload_id")
         _require(
-            isinstance(workload_id, str), "WP50_METHOD_SCHEMA_INVALID", "workload id"
+            isinstance(workload_id, str), "WP65_METHOD_SCHEMA_INVALID", "workload id"
         )
         levels_raw = value.get("concurrency_levels")
         _require(
@@ -316,7 +310,7 @@ def _validate_method_document(document: Mapping[str, Any], root: Path) -> Method
                 and level in {1, 2, 4, 8}
                 for level in levels_raw
             ),
-            "WP50_CONCURRENCY_METHOD_DRIFT",
+            "WP65_CONCURRENCY_METHOD_DRIFT",
             str(workload_id),
         )
         budgets = _mapping(value.get("budgets"), f"{workload_id}.budgets")
@@ -329,7 +323,7 @@ def _validate_method_document(document: Mapping[str, Any], root: Path) -> Method
                 and item >= 0
                 for item in budgets.values()
             ),
-            "WP50_BUDGET_METHOD_DRIFT",
+            "WP65_BUDGET_METHOD_DRIFT",
             str(workload_id),
         )
         control_kind = value.get("control_kind")
@@ -339,7 +333,7 @@ def _validate_method_document(document: Mapping[str, Any], root: Path) -> Method
                 "minimal-fastmcp4-stdio-control-v1",
                 "same-candidate-direct-daemon-rpc-v1",
             },
-            "WP50_CONTROL_METHOD_DRIFT",
+            "WP65_CONTROL_METHOD_DRIFT",
             str(workload_id),
         )
         assert isinstance(workload_id, str)
@@ -358,7 +352,7 @@ def _validate_method_document(document: Mapping[str, Any], root: Path) -> Method
         )
     _require(
         tuple(item.workload_id for item in workloads) == EXPECTED_WORKLOAD_IDS,
-        "WP50_WORKLOAD_CENSUS_DRIFT",
+        "WP65_WORKLOAD_CENSUS_DRIFT",
         "workload order/census",
     )
     _require(
@@ -366,7 +360,7 @@ def _validate_method_document(document: Mapping[str, Any], root: Path) -> Method
             item for item in workloads if item.workload_id.startswith("n_agent")
         ).concurrency_levels
         == (1, 2, 4, 8),
-        "WP50_CONCURRENCY_METHOD_DRIFT",
+        "WP65_CONCURRENCY_METHOD_DRIFT",
         "N-agent levels",
     )
     return Method(
@@ -399,12 +393,12 @@ def load_method(root: Path = ROOT, path: Path = METHOD_PATH) -> Method:
 def nearest_rank(values: Sequence[float], percentile: float) -> float:
     """Return the frozen one-based nearest-rank percentile."""
 
-    _require(bool(values), "WP50_EMPTY_DISTRIBUTION", "nearest rank")
-    _require(0 <= percentile <= 1, "WP50_PERCENTILE_INVALID", str(percentile))
+    _require(bool(values), "WP65_EMPTY_DISTRIBUTION", "nearest rank")
+    _require(0 <= percentile <= 1, "WP65_PERCENTILE_INVALID", str(percentile))
     ordered = sorted(float(value) for value in values)
     _require(
         all(math.isfinite(value) for value in ordered),
-        "WP50_NONFINITE_SAMPLE",
+        "WP65_NONFINITE_SAMPLE",
         "nearest rank",
     )
     if percentile == 0:
@@ -418,7 +412,7 @@ def _statistic(values: Sequence[float], name: str) -> float:
         return float(statistics.median(values))
     if name == "p95":
         return nearest_rank(values, 0.95)
-    _fail("WP50_STATISTIC_INVALID", name)
+    _fail("WP65_STATISTIC_INVALID", name)
 
 
 def _derived_seed(base_seed: int, identity: str) -> int:
@@ -436,9 +430,9 @@ def bootstrap_ci(
 ) -> tuple[float, float]:
     """Return the deterministic percentile bootstrap interval."""
 
-    _require(bool(values), "WP50_EMPTY_DISTRIBUTION", statistic)
-    _require(resamples >= 100, "WP50_BOOTSTRAP_INVALID", "resamples")
-    _require(1 <= confidence_percent < 100, "WP50_BOOTSTRAP_INVALID", "confidence")
+    _require(bool(values), "WP65_EMPTY_DISTRIBUTION", statistic)
+    _require(resamples >= 100, "WP65_BOOTSTRAP_INVALID", "resamples")
+    _require(1 <= confidence_percent < 100, "WP65_BOOTSTRAP_INVALID", "confidence")
     source = [float(value) for value in values]
     rng = random.Random(seed)
     estimates = [
@@ -455,7 +449,7 @@ def bootstrap_ci(
 def distribution_summary(
     values: Sequence[float], method: Method, identity: str
 ) -> dict[str, Any]:
-    _require(len(values) == method.samples, "WP50_SAMPLE_COUNT_INVALID", identity)
+    _require(len(values) == method.samples, "WP65_SAMPLE_COUNT_INVALID", identity)
     normalized = [float(value) for value in values]
     return {
         "count": len(normalized),
@@ -524,14 +518,14 @@ def schedule_sha256(schedule: Sequence[Mapping[str, Any]]) -> str:
 def process_rss_bytes(pid: int) -> tuple[str, int]:
     """Read one process's resident set from an operating-system interface."""
 
-    _require(pid > 0, "WP50_RSS_PID_INVALID", str(pid))
+    _require(pid > 0, "WP65_RSS_PID_INVALID", str(pid))
     statm = Path(f"/proc/{pid}/statm")
     if statm.is_file():
         try:
             resident_pages = int(statm.read_text(encoding="ascii").split()[1])
             page_bytes = int(os.sysconf("SC_PAGE_SIZE"))
         except (OSError, ValueError, IndexError) as error:
-            raise BenchmarkError("WP50_RSS_READ_FAILED", str(pid)) from error
+            raise BenchmarkError("WP65_RSS_READ_FAILED", str(pid)) from error
         return "linux-proc-statm", resident_pages * page_bytes
     try:
         result = subprocess.run(
@@ -543,7 +537,7 @@ def process_rss_bytes(pid: int) -> tuple[str, int]:
         )
         kibibytes = int(result.stdout.strip())
     except (OSError, ValueError, subprocess.SubprocessError) as error:
-        raise BenchmarkError("WP50_RSS_READ_FAILED", str(pid)) from error
+        raise BenchmarkError("WP65_RSS_READ_FAILED", str(pid)) from error
     return "posix-ps-rss-kib", kibibytes * 1024
 
 
@@ -553,7 +547,7 @@ def _numeric(value: object, context: str) -> float:
         and not isinstance(value, bool)
         and math.isfinite(float(value))
         and value >= 0,
-        "WP50_SAMPLE_MEASUREMENT_INVALID",
+        "WP65_SAMPLE_MEASUREMENT_INVALID",
         context,
     )
     return float(value)
@@ -575,7 +569,7 @@ def validate_sample(
 ) -> dict[str, Any]:
     _require(
         sample.get("schema") == SAMPLE_RESULT_SCHEMA,
-        "WP50_SAMPLE_SCHEMA_INVALID",
+        "WP65_SAMPLE_SCHEMA_INVALID",
         "schema",
     )
     for field in (
@@ -590,14 +584,14 @@ def validate_sample(
     ):
         _require(
             sample.get(field) == request.get(field),
-            "WP50_SAMPLE_BINDING_INVALID",
+            "WP65_SAMPLE_BINDING_INVALID",
             field,
         )
     _require(
         sample.get("status") == "passed"
         and sample.get("skipped") is False
         and sample.get("errors") == [],
-        "WP50_SAMPLE_NOT_SUCCESSFUL",
+        "WP65_SAMPLE_NOT_SUCCESSFUL",
         str(_sample_key(sample)),
     )
     timing = _mapping(sample.get("timing"), "sample timing")
@@ -605,13 +599,13 @@ def validate_sample(
     stop = _integer(timing.get("stop_monotonic_ns"), "stop monotonic", minimum=1)
     _require(
         timing.get("clock") == "monotonic_ns" and stop >= start,
-        "WP50_SAMPLE_TIMING_INVALID",
+        "WP65_SAMPLE_TIMING_INVALID",
         str(_sample_key(sample)),
     )
     latency_ms = _numeric(timing.get("elapsed_ms"), "elapsed_ms")
     _require(
         math.isclose(latency_ms, (stop - start) / 1_000_000, rel_tol=0, abs_tol=1e-9),
-        "WP50_SAMPLE_TIMING_INVALID",
+        "WP65_SAMPLE_TIMING_INVALID",
         "elapsed does not derive from monotonic endpoints",
     )
 
@@ -621,7 +615,7 @@ def validate_sample(
         rss.get("source") in OS_RSS_SOURCES
         and isinstance(processes, list)
         and bool(processes),
-        "WP50_SAMPLE_RSS_INVALID",
+        "WP65_SAMPLE_RSS_INVALID",
         str(_sample_key(sample)),
     )
     assert isinstance(processes, list)
@@ -635,7 +629,7 @@ def validate_sample(
         rss_bytes = _integer(row.get("rss_bytes"), "rss bytes", minimum=1)
         _require(
             pid not in seen_pids and isinstance(role, str) and bool(role),
-            "WP50_SAMPLE_RSS_INVALID",
+            "WP65_SAMPLE_RSS_INVALID",
             "duplicate pid or empty role",
         )
         seen_pids.add(pid)
@@ -644,7 +638,7 @@ def validate_sample(
             adapter_values.append(rss_bytes)
     _require(
         rss.get("topology_rss_bytes") == total,
-        "WP50_SAMPLE_RSS_INVALID",
+        "WP65_SAMPLE_RSS_INVALID",
         "topology RSS is not the unique-process sum",
     )
 
@@ -653,7 +647,7 @@ def validate_sample(
     _require(
         isinstance(required_metrics, list)
         and set(measurements) == set(required_metrics),
-        "WP50_SAMPLE_METRIC_CENSUS_INVALID",
+        "WP65_SAMPLE_METRIC_CENSUS_INVALID",
         str(_sample_key(sample)),
     )
     for metric, value in measurements.items():
@@ -663,20 +657,20 @@ def validate_sample(
             math.isclose(
                 float(measurements["latency_ms"]), latency_ms, rel_tol=0, abs_tol=1e-9
             ),
-            "WP50_SAMPLE_TIMING_INVALID",
+            "WP65_SAMPLE_TIMING_INVALID",
             "latency metric differs from monotonic timing",
         )
     if "topology_rss_bytes" in measurements:
         _require(
             measurements["topology_rss_bytes"] == total,
-            "WP50_SAMPLE_RSS_INVALID",
+            "WP65_SAMPLE_RSS_INVALID",
             "topology metric differs from OS snapshot",
         )
     if "adapter_rss_bytes" in measurements:
         _require(
             bool(adapter_values)
             and measurements["adapter_rss_bytes"] == max(adapter_values),
-            "WP50_SAMPLE_RSS_INVALID",
+            "WP65_SAMPLE_RSS_INVALID",
             "adapter metric is not maximum per-adapter OS RSS",
         )
     canonical_json(sample.get("semantic_observation"))
@@ -744,28 +738,28 @@ def validate_samples(
     schedule = build_schedule(method)
     _require(
         len(samples) == len(schedule),
-        "WP50_SAMPLE_COUNT_INVALID",
+        "WP65_SAMPLE_COUNT_INVALID",
         f"expected {len(schedule)}, observed {len(samples)}",
     )
     checked = [
         validate_sample(sample, request) for sample, request in zip(samples, schedule)
     ]
     keys = [_sample_key(item) for item in checked]
-    _require(len(keys) == len(set(keys)), "WP50_SAMPLE_DUPLICATE", "sample key")
+    _require(len(keys) == len(set(keys)), "WP65_SAMPLE_DUPLICATE", "sample key")
     semantic_equal = True
     for index in range(0, len(checked), 2):
         first, second = checked[index : index + 2]
         _require(
             first["arm"] != second["arm"]
             and _sample_key(first)[:-1] == _sample_key(second)[:-1],
-            "WP50_INTERLEAVING_INVALID",
+            "WP65_INTERLEAVING_INVALID",
             str(index),
         )
         if canonical_json(first.get("semantic_observation")) != canonical_json(
             second.get("semantic_observation")
         ):
             semantic_equal = False
-    _require(semantic_equal, "WP50_SEMANTIC_DIFFERENTIAL", "candidate/control output")
+    _require(semantic_equal, "WP65_SEMANTIC_DIFFERENTIAL", "candidate/control output")
     return checked, semantic_equal
 
 
@@ -785,7 +779,6 @@ def build_report(
         "method_id": METHOD_ID,
         "method_revision": METHOD_REVISION,
         "method_sha256": method.digest,
-        "registered_method_sha256": REGISTERED_METHOD_SHA256,
         "candidate_commit": candidate_commit,
         "candidate_tree": candidate_tree,
         "environment": dict(environment),
@@ -808,9 +801,8 @@ def validate_report_document(report: Mapping[str, Any], method: Method) -> int:
         report.get("schema") == RAW_REPORT_SCHEMA
         and report.get("method_id") == METHOD_ID
         and report.get("method_revision") == METHOD_REVISION
-        and report.get("method_sha256") == method.digest
-        and report.get("registered_method_sha256") == REGISTERED_METHOD_SHA256,
-        "WP50_REPORT_METHOD_DRIFT",
+        and report.get("method_sha256") == method.digest,
+        "WP65_REPORT_METHOD_DRIFT",
         "report method",
     )
     _require(
@@ -818,7 +810,7 @@ def validate_report_document(report: Mapping[str, Any], method: Method) -> int:
         and HEX40.fullmatch(str(report["candidate_commit"])) is not None
         and isinstance(report.get("candidate_tree"), str)
         and HEX40.fullmatch(str(report["candidate_tree"])) is not None,
-        "WP50_REPORT_CANDIDATE_INVALID",
+        "WP65_REPORT_CANDIDATE_INVALID",
         "candidate binding",
     )
     _require(
@@ -830,16 +822,16 @@ def validate_report_document(report: Mapping[str, Any], method: Method) -> int:
         and report.get("skipped_samples") == 0
         and report.get("failed_samples") == 0
         and report.get("semantic_equality") is True,
-        "WP50_REPORT_COMPLETENESS_INVALID",
+        "WP65_REPORT_COMPLETENESS_INVALID",
         "sample policy",
     )
     raw_samples = report.get("samples")
-    _require(isinstance(raw_samples, list), "WP50_SAMPLE_COUNT_INVALID", "samples")
+    _require(isinstance(raw_samples, list), "WP65_SAMPLE_COUNT_INVALID", "samples")
     assert isinstance(raw_samples, list)
     checked, _ = validate_samples(raw_samples, method)
     _require(
         report.get("distribution_summary") == _summaries(checked, method),
-        "WP50_DISTRIBUTION_SUMMARY_DRIFT",
+        "WP65_DISTRIBUTION_SUMMARY_DRIFT",
         "summary does not derive from raw samples",
     )
     _mapping(report.get("environment"), "environment")
@@ -848,13 +840,13 @@ def validate_report_document(report: Mapping[str, Any], method: Method) -> int:
 
 
 def _probe_command(value: Sequence[str], context: str) -> tuple[str, ...]:
-    _require(bool(value), "WP50_PROBE_COMMAND_INVALID", context)
+    _require(bool(value), "WP65_PROBE_COMMAND_INVALID", context)
     executable = Path(value[0])
     _require(
         executable.is_absolute()
         and executable.is_file()
         and os.access(executable, os.X_OK),
-        "WP50_PROBE_COMMAND_INVALID",
+        "WP65_PROBE_COMMAND_INVALID",
         context,
     )
     return tuple(value)
@@ -885,7 +877,7 @@ def execute_probe(
             )
         except (OSError, subprocess.TimeoutExpired) as error:
             raise BenchmarkError(
-                "WP50_PROBE_EXECUTION_FAILED", str(request["schedule_index"])
+                "WP65_PROBE_EXECUTION_FAILED", str(request["schedule_index"])
             ) from error
         stdout_size = stdout.tell()
         stderr_size = stderr.tell()
@@ -893,7 +885,7 @@ def execute_probe(
             completed.returncode == 0
             and stdout_size <= MAX_PROBE_STDOUT_BYTES
             and stderr_size <= MAX_PROBE_STDERR_BYTES,
-            "WP50_PROBE_EXECUTION_FAILED",
+            "WP65_PROBE_EXECUTION_FAILED",
             str(request["schedule_index"]),
         )
         stdout.seek(0)
@@ -905,9 +897,9 @@ def execute_probe(
             )
         except (UnicodeError, json.JSONDecodeError) as error:
             raise BenchmarkError(
-                "WP50_PROBE_RESULT_INVALID", str(request["schedule_index"])
+                "WP65_PROBE_RESULT_INVALID", str(request["schedule_index"])
             ) from error
-    _require(isinstance(result, Mapping), "WP50_PROBE_RESULT_INVALID", "root")
+    _require(isinstance(result, Mapping), "WP65_PROBE_RESULT_INVALID", "root")
     assert isinstance(result, Mapping)
     return result
 
@@ -954,7 +946,7 @@ def _git(root: Path, *arguments: str) -> str:
             timeout=30,
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError) as error:
-        raise BenchmarkError("WP50_GIT_QUERY_FAILED", " ".join(arguments)) from error
+        raise BenchmarkError("WP65_GIT_QUERY_FAILED", " ".join(arguments)) from error
 
 
 def environment_record(
@@ -1002,7 +994,7 @@ def environment_record(
         try:
             return version(package)
         except PackageNotFoundError as error:
-            raise BenchmarkError("WP50_PACKAGE_IDENTITY_MISSING", package) from error
+            raise BenchmarkError("WP65_PACKAGE_IDENTITY_MISSING", package) from error
 
     status = _git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
     head = _git(root, "rev-parse", "HEAD")
@@ -1056,7 +1048,7 @@ def _write_exclusive(path: Path, value: Mapping[str, Any]) -> None:
         with os.fdopen(descriptor, "wb") as output:
             output.write(payload)
     except OSError as error:
-        raise BenchmarkError("WP50_OUTPUT_NOT_EXCLUSIVE", str(path)) from error
+        raise BenchmarkError("WP65_OUTPUT_NOT_EXCLUSIVE", str(path)) from error
 
 
 def _parser() -> argparse.ArgumentParser:

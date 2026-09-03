@@ -1806,7 +1806,7 @@ maintenance_schedule = "daily-idle"
         .unwrap();
         let startup = ProductionStartupCoordinator::new(
             config.clone(),
-            Arc::new(CompiledSemanticRelease::current()),
+            Arc::new(crate::fabric::production_kernel::compile_test_semantic_release()),
         );
         let lifecycle = Arc::clone(&startup.lifecycle);
         let workspace_slots = Arc::clone(&startup.workspace_slots);
@@ -1857,7 +1857,7 @@ maintenance_schedule = "daily-idle"
 
         let mut startup = ProductionStartupCoordinator::new(
             config.clone(),
-            Arc::new(CompiledSemanticRelease::current()),
+            Arc::new(crate::fabric::production_kernel::compile_test_semantic_release()),
         )
         .acquire_daemon_lease()
         .unwrap()

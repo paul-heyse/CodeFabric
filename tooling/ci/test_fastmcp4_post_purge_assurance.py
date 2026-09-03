@@ -1,4 +1,4 @@
-"""Fault-seeded tests for the WP49 live-surface purge census."""
+"""Fault-seeded tests for the WP62 live-surface purge census."""
 
 from __future__ import annotations
 
@@ -144,7 +144,7 @@ def test_int_unparsed_python_is_rejected(tmp_path: Path) -> None:
     _write(root, "tooling/ci/broken.py", "def broken(:\n")
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_coverage(root)
-    assert failure.value.code == "RFV5_PURGE_UNPARSED"
+    assert failure.value.code == "CFV7_PURGE_UNPARSED"
 
 
 def test_beh_retained_package_contract_is_exact(tmp_path: Path) -> None:
@@ -165,7 +165,7 @@ def test_beh_extra_binary_is_rejected(tmp_path: Path) -> None:
     _write(root, "src/bin/schema_generator.rs", "fn main() {}\n")
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_package_contract(root)
-    assert failure.value.code == "RFV5_PURGE_BINARY_SURFACE"
+    assert failure.value.code == "CFV7_PURGE_BINARY_SURFACE"
 
 
 @pytest.mark.parametrize(
@@ -186,7 +186,7 @@ def test_beh_extra_generated_surface_is_rejected(
     _write(root, relative, contents)
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_package_contract(root)
-    assert failure.value.code == "RFV5_PURGE_GENERATED_BINDING"
+    assert failure.value.code == "CFV7_PURGE_GENERATED_BINDING"
 
 
 def test_beh_missing_production_descriptor_is_rejected(tmp_path: Path) -> None:
@@ -194,7 +194,7 @@ def test_beh_missing_production_descriptor_is_rejected(tmp_path: Path) -> None:
     (root / "tooling/proto/production-descriptor.pb").unlink()
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_package_contract(root)
-    assert failure.value.code == "RFV5_PURGE_GENERATED_BINDING"
+    assert failure.value.code == "CFV7_PURGE_GENERATED_BINDING"
 
 
 def test_beh_direct_dependency_drift_is_rejected(tmp_path: Path) -> None:
@@ -209,7 +209,7 @@ def test_beh_direct_dependency_drift_is_rejected(tmp_path: Path) -> None:
     )
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_package_contract(root)
-    assert failure.value.code == "RFV5_PURGE_PACKAGE_INVALID"
+    assert failure.value.code == "CFV7_PURGE_PACKAGE_INVALID"
 
 
 @pytest.mark.parametrize(("category", "token"), sorted(RETIRED_TOKENS.items()))
@@ -220,7 +220,7 @@ def test_neg_every_retired_token_class_is_detected(
     _write(root, "tooling/ci/seed.py", f"# {category}: {token}\n")
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_zero_state(root)
-    assert failure.value.code == "RFV5_PURGE_RETIRED_TOKEN"
+    assert failure.value.code == "CFV7_PURGE_RETIRED_TOKEN"
 
 
 def test_neg_transitive_fastmcp_lock_entries_are_not_application_adoption(
@@ -261,7 +261,7 @@ def test_neg_retired_token_guard_recipe_is_classified_without_hiding_others(
     )
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_zero_state(root)
-    assert failure.value.code == "RFV5_PURGE_RETIRED_TOKEN"
+    assert failure.value.code == "CFV7_PURGE_RETIRED_TOKEN"
 
 
 @pytest.mark.parametrize("path", sorted(CURRENT_NEGATIVE_ASSURANCE_PATHS))
@@ -303,7 +303,7 @@ def test_neg_every_forbidden_path_class_is_detected(
         (root / path).mkdir(parents=True, exist_ok=True)
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_zero_state(root)
-    assert failure.value.code == "RFV5_PURGE_FORBIDDEN_PATH"
+    assert failure.value.code == "CFV7_PURGE_FORBIDDEN_PATH"
 
 
 @pytest.mark.parametrize("recipe", sorted(RETIRED_RECIPE_NAMES))
@@ -312,7 +312,7 @@ def test_neg_every_retired_recipe_is_detected(tmp_path: Path, recipe: str) -> No
     _write(root, "justfile", f"{recipe}:\n    true\n")
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_zero_state(root)
-    assert failure.value.code == "RFV5_PURGE_RETIRED_RECIPE"
+    assert failure.value.code == "CFV7_PURGE_RETIRED_RECIPE"
 
 
 def test_ops_live_directory_symlink_is_not_silently_skipped(tmp_path: Path) -> None:
@@ -322,10 +322,41 @@ def test_ops_live_directory_symlink_is_not_silently_skipped(tmp_path: Path) -> N
     os.symlink(target, root / "src/substituted")
     with pytest.raises(PostPurgeAssuranceError) as failure:
         validate_coverage(root)
-    assert failure.value.code == "RFV5_PURGE_SYMLINK_CANDIDATE"
+    assert failure.value.code == "CFV7_PURGE_SYMLINK_CANDIDATE"
 
 
 def test_ops_clean_minimal_target_has_zero_retired_matches(tmp_path: Path) -> None:
     report = validate_zero_state(_minimal_root(tmp_path))
     assert report["live_matches"] == 0
     assert int(report["retired_token_classes"]) == len(RETIRED_TOKENS)
+
+
+def test_purged_target_feature_and_type_integrity() -> None:
+    coverage = validate_coverage(ROOT)
+    zero_state = validate_zero_state(ROOT)
+    cargo = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    assert int(coverage["live_files"]) > 0
+    assert zero_state["live_matches"] == 0
+    assert "repository-input = [" in cargo and "operational-state = [" in cargo
+
+
+def test_post_purge_target_behavior() -> None:
+    package = validate_package_contract(ROOT)
+    server = (ROOT / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/server.py").read_text(
+        encoding="utf-8"
+    )
+    daemon_client = (
+        ROOT / "codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/client.py"
+    ).read_text(encoding="utf-8")
+    assert package["runtime_dependencies"] == len(EXPECTED_RUNTIME_DEPENDENCIES)
+    assert "FastMCP(" in server
+    assert "class DaemonPort(Protocol)" in daemon_client
+
+
+def test_post_purge_package_feature_operations() -> None:
+    coverage = validate_coverage(ROOT)
+    package = validate_package_contract(ROOT)
+    assert coverage["unreadable"] == coverage["unparsed"] == 0
+    assert package["operational_binaries"] == 2
+    assert package["proto_files"] == package["rust_generated_bindings"] == 4
+    assert package["python_generated_bindings"] == 4

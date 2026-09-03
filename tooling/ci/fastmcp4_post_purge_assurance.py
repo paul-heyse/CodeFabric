@@ -1,4 +1,4 @@
-"""Derive the WP49 FastMCP 4 post-purge live-surface census.
+"""Derive the WP62 FastMCP 4 post-purge live-surface census.
 
 History and frozen acceptance data are intentionally outside this scan.  The
 validator covers every live source, package, recipe, workflow, service, rule,
@@ -191,8 +191,6 @@ ORACLE_SELF_PATHS = {
     Path("tooling/ci/test_fastmcp4_post_purge_assurance.py"),
 }
 CURRENT_NEGATIVE_ASSURANCE_PATHS = {
-    Path("tooling/ci/fastmcp4_production_evidence.py"),
-    Path("tooling/ci/test_fastmcp4_production_evidence.py"),
     Path("tooling/ci/remaining_legacy_zero_state.py"),
 }
 RETIRED_TOKEN_NEGATIVE_RECIPES = {"fastmcp4-adapter-authority-zero-state-check"}
@@ -225,10 +223,10 @@ def _load_toml(path: Path) -> Mapping[str, object]:
         value = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
         raise PostPurgeAssuranceError(
-            "RFV5_PURGE_UNREADABLE", f"{path}: {error}"
+            "CFV7_PURGE_UNREADABLE", f"{path}: {error}"
         ) from error
     _require(
-        isinstance(value, Mapping), "RFV5_PURGE_UNPARSED", f"{path} is not a TOML table"
+        isinstance(value, Mapping), "CFV7_PURGE_UNPARSED", f"{path} is not a TOML table"
     )
     return value
 
@@ -238,7 +236,7 @@ def _validate_live_symlink(root: Path, path: Path) -> None:
     expected = ALLOWED_LIVE_SYMLINKS.get(relative)
     if expected is None:
         raise PostPurgeAssuranceError(
-            "RFV5_PURGE_SYMLINK_CANDIDATE",
+            "CFV7_PURGE_SYMLINK_CANDIDATE",
             f"live scan root contains unclassified symlink: {relative}",
         )
     try:
@@ -246,12 +244,12 @@ def _validate_live_symlink(root: Path, path: Path) -> None:
         expected_target = (root / expected).resolve(strict=True)
     except OSError as error:
         raise PostPurgeAssuranceError(
-            "RFV5_PURGE_SYMLINK_CANDIDATE",
+            "CFV7_PURGE_SYMLINK_CANDIDATE",
             f"classified live symlink is dangling: {relative}",
         ) from error
     _require(
         observed_target == expected_target,
-        "RFV5_PURGE_SYMLINK_CANDIDATE",
+        "CFV7_PURGE_SYMLINK_CANDIDATE",
         f"classified live symlink target differs: {relative}",
     )
 
@@ -264,7 +262,7 @@ def _iter_live_files(root: Path) -> tuple[list[Path], list[str], list[str]]:
         candidate = root / relative_root
         _require(
             candidate.exists(),
-            "RFV5_PURGE_COVERAGE_MISSING",
+            "CFV7_PURGE_COVERAGE_MISSING",
             f"live root is absent: {relative_root}",
         )
         if candidate.is_file():
@@ -298,7 +296,7 @@ def _read_live_text(root: Path, path: Path) -> str:
         return (root / path).read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise PostPurgeAssuranceError(
-            "RFV5_PURGE_UNREADABLE", f"{path}: {error}"
+            "CFV7_PURGE_UNREADABLE", f"{path}: {error}"
         ) from error
 
 
@@ -315,7 +313,7 @@ def validate_coverage(root: Path = ROOT) -> Mapping[str, object]:
                 ast.parse(text, filename=str(path))
             except SyntaxError as error:
                 raise PostPurgeAssuranceError(
-                    "RFV5_PURGE_UNPARSED", f"{path}: {error}"
+                    "CFV7_PURGE_UNPARSED", f"{path}: {error}"
                 ) from error
             parsed_python += 1
         elif path.suffix == ".toml":
@@ -323,7 +321,7 @@ def validate_coverage(root: Path = ROOT) -> Mapping[str, object]:
             parsed_toml += 1
     _require(
         bool(files) and parsed_python > 0 and parsed_toml > 0,
-        "RFV5_PURGE_ZERO_SELECTION",
+        "CFV7_PURGE_ZERO_SELECTION",
         "live coverage selected no meaningful candidates",
     )
     return {
@@ -401,7 +399,7 @@ def validate_zero_state(root: Path = ROOT) -> Mapping[str, object]:
     )
     _require(
         not present_forbidden,
-        "RFV5_PURGE_FORBIDDEN_PATH",
+        "CFV7_PURGE_FORBIDDEN_PATH",
         f"retired live paths remain: {present_forbidden}",
     )
 
@@ -421,7 +419,7 @@ def validate_zero_state(root: Path = ROOT) -> Mapping[str, object]:
                 matches.append(f"{category}:{path}")
     _require(
         not matches,
-        "RFV5_PURGE_RETIRED_TOKEN",
+        "CFV7_PURGE_RETIRED_TOKEN",
         "retired live tokens remain: " + ", ".join(matches),
     )
 
@@ -430,7 +428,7 @@ def validate_zero_state(root: Path = ROOT) -> Mapping[str, object]:
     retired_recipes = sorted(live_recipes & RETIRED_RECIPE_NAMES)
     _require(
         not retired_recipes,
-        "RFV5_PURGE_RETIRED_RECIPE",
+        "CFV7_PURGE_RETIRED_RECIPE",
         f"retired recipes remain live: {retired_recipes}",
     )
     return {
@@ -444,7 +442,7 @@ def validate_zero_state(root: Path = ROOT) -> Mapping[str, object]:
 def _string_list(value: object, context: str) -> list[str]:
     _require(
         isinstance(value, list) and all(isinstance(item, str) for item in value),
-        "RFV5_PURGE_PACKAGE_INVALID",
+        "CFV7_PURGE_PACKAGE_INVALID",
         f"{context} must be a string list",
     )
     assert isinstance(value, list)
@@ -458,7 +456,7 @@ def validate_package_contract(root: Path = ROOT) -> Mapping[str, object]:
     project = pyproject.get("project")
     _require(
         isinstance(project, Mapping),
-        "RFV5_PURGE_PACKAGE_INVALID",
+        "CFV7_PURGE_PACKAGE_INVALID",
         "Python project table is absent",
     )
     assert isinstance(project, Mapping)
@@ -467,7 +465,7 @@ def validate_package_contract(root: Path = ROOT) -> Mapping[str, object]:
     )
     _require(
         dependencies == EXPECTED_RUNTIME_DEPENDENCIES,
-        "RFV5_PURGE_PACKAGE_INVALID",
+        "CFV7_PURGE_PACKAGE_INVALID",
         f"runtime dependency closure differs: {dependencies}",
     )
 
@@ -475,14 +473,14 @@ def validate_package_contract(root: Path = ROOT) -> Mapping[str, object]:
     bins = cargo.get("bin")
     _require(
         isinstance(bins, list),
-        "RFV5_PURGE_PACKAGE_INVALID",
+        "CFV7_PURGE_PACKAGE_INVALID",
         "Cargo bin inventory is absent",
     )
     observed_bins: dict[str, tuple[str, tuple[str, ...]]] = {}
     for row in bins:
         _require(
             isinstance(row, Mapping),
-            "RFV5_PURGE_PACKAGE_INVALID",
+            "CFV7_PURGE_PACKAGE_INVALID",
             "Cargo bin row is malformed",
         )
         assert isinstance(row, Mapping)
@@ -494,14 +492,14 @@ def validate_package_contract(root: Path = ROOT) -> Mapping[str, object]:
         observed_bins[name] = (path, required)
     _require(
         observed_bins == EXPECTED_ROOT_BINS,
-        "RFV5_PURGE_PACKAGE_INVALID",
+        "CFV7_PURGE_PACKAGE_INVALID",
         f"Cargo bin inventory differs: {observed_bins}",
     )
 
     bin_files = {path.name for path in (root / "src/bin").glob("*.rs")}
     _require(
         bin_files == EXPECTED_OPERATIONAL_BIN_FILES,
-        "RFV5_PURGE_BINARY_SURFACE",
+        "CFV7_PURGE_BINARY_SURFACE",
         f"operational binary files differ: {sorted(bin_files)}",
     )
     supervisor = _read_live_text(root, Path("src/bin/codefabric.rs"))
@@ -509,27 +507,27 @@ def validate_package_contract(root: Path = ROOT) -> Mapping[str, object]:
     _require(
         "CodefabricProcessSettings::parse" in supervisor
         and "FabricDaemonProcessSettings::parse" in daemon,
-        "RFV5_PURGE_BINARY_SURFACE",
+        "CFV7_PURGE_BINARY_SURFACE",
         "operational binaries do not delegate to typed library settings",
     )
     _require(
         not re.search(
             r"(?i)schema|registry|ontology|datafusion|deltalake", supervisor + daemon
         ),
-        "RFV5_PURGE_BINARY_SURFACE",
+        "CFV7_PURGE_BINARY_SURFACE",
         "semantic generation/execution leaked into thin binaries",
     )
 
     proto_files = {path.name for path in (root / "contracts/rpc").glob("*.proto")}
     _require(
         proto_files == EXPECTED_PROTO_FILES,
-        "RFV5_PURGE_GENERATED_BINDING",
+        "CFV7_PURGE_GENERATED_BINDING",
         f"Protobuf source inventory differs: {proto_files}",
     )
     descriptor = root / "tooling/proto/production-descriptor.pb"
     _require(
         descriptor.is_file() and descriptor.stat().st_size > 0,
-        "RFV5_PURGE_GENERATED_BINDING",
+        "CFV7_PURGE_GENERATED_BINDING",
         "production descriptor set is absent or empty",
     )
     rust_generated = {
@@ -537,7 +535,7 @@ def validate_package_contract(root: Path = ROOT) -> Mapping[str, object]:
     }
     _require(
         rust_generated == EXPECTED_RUST_BINDINGS,
-        "RFV5_PURGE_GENERATED_BINDING",
+        "CFV7_PURGE_GENERATED_BINDING",
         f"Rust generated binding inventory differs: {rust_generated}",
     )
     python_generated = (
@@ -548,7 +546,7 @@ def validate_package_contract(root: Path = ROOT) -> Mapping[str, object]:
     }
     _require(
         python_bindings == EXPECTED_PYTHON_BINDINGS,
-        "RFV5_PURGE_GENERATED_BINDING",
+        "CFV7_PURGE_GENERATED_BINDING",
         f"Python generated binding inventory differs: {python_bindings}",
     )
     return {
@@ -586,7 +584,7 @@ def _report(command: str, root: Path) -> Mapping[str, object]:
         selected = validate_all(root)
         count = sum(int(value) for value in selected["package"].values())
     _require(
-        count > 0, "RFV5_PURGE_ZERO_SELECTION", f"{command} selected no candidates"
+        count > 0, "CFV7_PURGE_ZERO_SELECTION", f"{command} selected no candidates"
     )
     return {
         "status": "passed",
@@ -610,7 +608,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.dumps(
                 {
                     "status": "failed",
-                    "code": getattr(error, "code", "RFV5_PURGE_UNREADABLE"),
+                    "code": getattr(error, "code", "CFV7_PURGE_UNREADABLE"),
                     "message": str(error),
                 },
                 sort_keys=True,

@@ -56,80 +56,22 @@ use crate::workspace_registry::WorkspaceRecord;
 
 pub use crate::semantic_release::CompiledSemanticRelease;
 
-/// Capability proving that a provider recipe came from the compiled release.
+/// Compile an explicit production-shaped fixture release for unit tests.
 ///
-/// The field is private so no sibling module can manufacture this authority. Operational provider
-/// runs and source pins remain variable inputs, but schemas, relation descriptors, field roles,
-/// coverage semantics, and admission programs require this token.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CompiledProviderAuthority(());
-
-/// Capability proving that transformation and analysis programs came from the compiled release.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CompiledTransformationAuthority(());
-
-/// Capability proving that the eight query programs came from the compiled release.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CompiledQueryAuthority(());
-
-/// Capability proving that proof programs and producer closure came from the compiled release.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CompiledProofAuthority(());
-
-/// Capability proving that policy and reduced-child construction came from the compiled release.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CompiledPolicyAuthority(());
-
-static PROVIDER_AUTHORITY: CompiledProviderAuthority = CompiledProviderAuthority(());
-static TRANSFORMATION_AUTHORITY: CompiledTransformationAuthority =
-    CompiledTransformationAuthority(());
-static QUERY_AUTHORITY: CompiledQueryAuthority = CompiledQueryAuthority(());
-static PROOF_AUTHORITY: CompiledProofAuthority = CompiledProofAuthority(());
-static POLICY_AUTHORITY: CompiledPolicyAuthority = CompiledPolicyAuthority(());
+/// Production code has no global release lookup: daemon startup compiles once and injects one
+/// `Arc<CompiledSemanticRelease>`. Tests call this helper explicitly so construction remains
+/// visible at each fixture boundary rather than masquerading as process-global authority.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn compile_test_semantic_release() -> CompiledSemanticRelease {
+    crate::semantic_release::compile_current_v23_release(
+        crate::production_provider_recipe::current_v23_provider_program_definition()
+            .expect("the production provider definition must compile in tests"),
+    )
+    .expect("the closed production semantic release must compile in tests")
+}
 
 impl CompiledSemanticRelease {
-    /// Unit-test convenience for compiling the one closed production definition. Production code
-    /// has no global release lookup and receives one fallibly compiled `Arc` from daemon startup.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn current() -> Self {
-        crate::semantic_release::compile_current_v23_release(
-            crate::production_provider_recipe::current_v23_provider_program_definition()
-                .expect("the production provider definition must compile in tests"),
-        )
-        .expect("the closed production semantic release must compile in tests")
-    }
-
-    #[must_use]
-    pub(crate) fn provider_authority(&self) -> &CompiledProviderAuthority {
-        let _ = self.providers().relation_count();
-        &PROVIDER_AUTHORITY
-    }
-
-    #[must_use]
-    pub(crate) fn transformation_authority(&self) -> &CompiledTransformationAuthority {
-        let _ = self.transformations().len();
-        &TRANSFORMATION_AUTHORITY
-    }
-
-    #[must_use]
-    pub(crate) fn query_authority(&self) -> &CompiledQueryAuthority {
-        let _ = self.queries().len();
-        &QUERY_AUTHORITY
-    }
-
-    #[must_use]
-    pub(crate) fn proof_authority(&self) -> &CompiledProofAuthority {
-        let _ = self.proof().construct_input();
-        &PROOF_AUTHORITY
-    }
-
-    #[must_use]
-    pub(crate) fn policy_authority(&self) -> &CompiledPolicyAuthority {
-        let _ = self.policy();
-        &POLICY_AUTHORITY
-    }
-
     /// Admit one operational provider-run set through the sole compiled descriptor release.
     ///
     /// Source/context pins and requested-unit counts remain explicit operational inputs. Relation
@@ -145,7 +87,7 @@ impl CompiledSemanticRelease {
         authority: ProductionProviderAuthority,
         runs: ProductionProviderRuns<'_>,
     ) -> Result<ProgrammaticProviderAdmissionOutcome, ProductionProviderRecipeError> {
-        admit_production_provider_relations(self.provider_authority(), builder, authority, runs)
+        admit_production_provider_relations(self.providers(), builder, authority, runs)
     }
 
     /// Admit operational provider runs and install one release-owned derived-analysis program.
@@ -164,9 +106,9 @@ impl CompiledSemanticRelease {
         runs: ExactProgrammaticProviderRuns<'_>,
     ) -> Result<ReleasedProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
         admit_and_compose_released_programmatic_derived_analyses(
-            self.transformation_authority(),
-            self.proof_authority(),
-            self.query_authority(),
+            self.transformations(),
+            self.proof(),
+            self.queries(),
             builder,
             runs,
         )
@@ -181,10 +123,10 @@ impl CompiledSemanticRelease {
     ) -> Result<ReleasedProgrammaticDerivedAnalysisOutcome, ProductionProviderCompositionError>
     {
         admit_and_compose_production_relations(
-            self.provider_authority(),
-            self.transformation_authority(),
-            self.proof_authority(),
-            self.query_authority(),
+            self.providers(),
+            self.transformations(),
+            self.proof(),
+            self.queries(),
             builder,
             authority,
             runs,
@@ -275,7 +217,7 @@ impl CompiledSemanticRelease {
         &self,
         pins: ProofCandidatePins,
     ) -> Result<ProofRelations, ProofError> {
-        super::proof::evaluate_compiled_activation_candidate(self.proof_authority(), pins)
+        super::proof::evaluate_compiled_activation_candidate(self.proof(), pins)
     }
 
     /// Compose the exact ingress, authorization, and snapshot ports for one compiled query recipe.
@@ -1180,7 +1122,7 @@ mod tests {
 
     #[test]
     fn compiled_release_has_one_unsubstitutable_suite_identity() {
-        let release = CompiledSemanticRelease::current();
+        let release = crate::fabric::production_kernel::compile_test_semantic_release();
         assert_eq!(
             release.suite().as_str(),
             "codefabric-relational-data-fabric@2.3.0"

@@ -252,9 +252,11 @@ provider-contracts = ["contract-models", "dep:arrow-array", "dep:arrow-schema", 
 release-compiler = ["provider-contracts"]
 fact-generation = ["provider-contracts", "dep:tree-sitter", "dep:ruff_python_parser", "..."]
 data-fabric = ["provider-contracts", "dep:arrow", "...", "dep:datafusion", "dep:deltalake", "..."]
+repository-input = ["contract-models", "dep:gix", "dep:rustix", "dep:url"]
+operational-state = ["contract-models", "dep:rusqlite", "dep:rustix", "dep:url"]
 rpc = ["dep:prost", "dep:tokio", "dep:tonic", "dep:tonic-prost"]
-repository-state = ["dep:gix", "dep:rusqlite", "dep:rustix", "dep:url"]
-compatibility-probes = ["canonical-json", "data-fabric", "repository-state", "rpc"]
+semantic-release = ["release-compiler", "fact-generation", "data-fabric"]
+compatibility-probes = ["canonical-json", "data-fabric", "repository-input", "operational-state", "rpc"]
 local-workstation = ["daemon", "compatibility-probes"]
 s3-storage = ["data-fabric", "deltalake/s3"]
 ```

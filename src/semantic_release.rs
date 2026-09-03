@@ -107,6 +107,23 @@ impl SemanticQueryForm {
         Self::SummarizeObjectiveFacts,
         Self::RetrieveSourceAndSyntaxContext,
     ];
+
+    /// Return the categorical identity of this released executable program.
+    #[must_use]
+    pub const fn program_identity(self) -> &'static str {
+        match self {
+            Self::FindCodeEntities => "program.semantic-query.find-code-entities.v3",
+            Self::RetrieveFactsAboutCode => "program.semantic-query.retrieve-facts-about-code.v3",
+            Self::FollowCodeRelationships => "program.semantic-query.follow-code-relationships.v3",
+            Self::FindConnectingFactPaths => "program.semantic-query.find-connecting-fact-paths.v3",
+            Self::MatchCodeFactPattern => "program.semantic-query.match-code-fact-pattern.v3",
+            Self::CombineResultSets => "program.semantic-query.combine-result-sets.v3",
+            Self::SummarizeObjectiveFacts => "program.semantic-query.summarize-objective-facts.v3",
+            Self::RetrieveSourceAndSyntaxContext => {
+                "program.semantic-query.retrieve-source-syntax-context.v3"
+            }
+        }
+    }
 }
 
 /// Native relational operator selected by a compiled transformation program.
@@ -688,6 +705,12 @@ pub struct CompiledTransformationPlan {
 }
 
 impl CompiledTransformationProgram {
+    /// Return this program's categorical identity for provenance and cross-boundary matching.
+    #[must_use]
+    pub fn identity(&self) -> &TransformationProgramIdentity {
+        &self.identity
+    }
+
     /// Compile one exact transformation plan from the release-owned graph.
     ///
     /// # Errors
@@ -1287,10 +1310,9 @@ pub(crate) fn compile_current_v23_release(
         .collect::<Vec<_>>();
     let queries = SemanticQueryForm::ALL
         .into_iter()
-        .enumerate()
-        .map(|(ordinal, form)| {
+        .map(|form| {
             QueryDefinition::try_new(
-                QueryIdentity::try_new(format!("codefabric.query.v2.3.{ordinal}"))?,
+                QueryIdentity::try_new(form.program_identity())?,
                 form,
                 admitted_relations.clone(),
                 1_000_000,
@@ -1717,7 +1739,7 @@ mod tests {
     #[test]
     fn compiled_release_forgery_and_conflation_faults() {
         let mut stale = fixture_definition();
-        stale.suite = SuiteIdentity::try_new("codefabric-relational-data-fabric@2.2.0").unwrap();
+        stale.suite = SuiteIdentity::try_new("codefabric-relational-data-fabric@2.1.0").unwrap();
         assert_eq!(
             CompiledSemanticRelease::compile(stale).unwrap_err(),
             SemanticReleaseError::StaleSuiteIdentity

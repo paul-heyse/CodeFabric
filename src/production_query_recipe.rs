@@ -19,7 +19,7 @@ use datafusion::common::TableReference;
 use crate::fabric::derived_producer_closure::{
     DerivedProducerClosureExecution, FamilyClosureFields, ProducerClosureCompilationDependency,
 };
-use crate::fabric::production_kernel::{CompiledQueryAuthority, CompiledSemanticRelease};
+use crate::fabric::production_kernel::CompiledSemanticRelease;
 use crate::fabric::programmatic_epoch::ProgrammaticFabricEpoch;
 use crate::fabric::programmatic_ingress_port::ProgrammaticFormIngressField;
 use crate::fabric::programmatic_schema::ProgrammaticRelationId;
@@ -46,9 +46,10 @@ use crate::relational_semantic_query::{
 };
 use crate::schema_contract::SchemaRole;
 use crate::semantic_query_contract::{COMPILED_V2_0_SCOPE_DEFINITIONS, ResultRole};
+use crate::semantic_release::{CompiledQueryProgram, SemanticQueryForm};
 
 const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
-    "codefabric.semantic-query.release.v2.2.0:datafusion=55.0.0:arrow=59.2.0";
+    "codefabric.semantic-query.release.v2.3.0:datafusion=55.0.0:arrow=59.2.0";
 const RELEASE_FACTUAL_SEMANTIC_CLASS_ID: &str = "semantic.fact.v2";
 const RELEASE_SELECTION_MAXIMUM_VALUES: usize = 64;
 
@@ -505,7 +506,7 @@ fn compiled_released_form_programs(
 /// query authority prevents a caller from substituting a form or family edge, while the returned
 /// rows remain ordinary typed values that DataFusion later executes and proves.
 pub(crate) fn released_query_family_requirements(
-    _authority: &CompiledQueryAuthority,
+    query_program: &CompiledQueryProgram,
 ) -> Result<Vec<(Arc<str>, Arc<str>)>, ProductionQueryRecipeError> {
     const REQUIREMENTS: [(ReleasedSemanticForm, &str); 8] = [
         (
@@ -541,38 +542,55 @@ pub(crate) fn released_query_family_requirements(
             "fact-family.source-context",
         ),
     ];
-    Ok(REQUIREMENTS
+    REQUIREMENTS
         .into_iter()
         .map(|(form, family)| {
-            (
-                Arc::from(released_program_binding_id(form)),
-                Arc::from(family),
-            )
+            let plan = query_program.compile(compiled_query_form(form))?;
+            let expected_identity = released_program_binding_id(form);
+            if plan.identity.as_str() != expected_identity || plan.required_relations.is_empty() {
+                return Err(ProductionQueryRecipeError::CompiledReleaseQueryMismatch { form });
+            }
+            Ok((Arc::from(plan.identity.as_str()), Arc::from(family)))
         })
-        .collect())
+        .collect()
+}
+
+const fn compiled_query_form(form: ReleasedSemanticForm) -> SemanticQueryForm {
+    match form {
+        ReleasedSemanticForm::FindCodeEntities => SemanticQueryForm::FindCodeEntities,
+        ReleasedSemanticForm::RetrieveFactsAboutCode => SemanticQueryForm::RetrieveFactsAboutCode,
+        ReleasedSemanticForm::FollowCodeRelationships => SemanticQueryForm::FollowCodeRelationships,
+        ReleasedSemanticForm::FindConnectingFactPaths => SemanticQueryForm::FindConnectingFactPaths,
+        ReleasedSemanticForm::MatchCodeFactPattern => SemanticQueryForm::MatchCodeFactPattern,
+        ReleasedSemanticForm::CombineResultSets => SemanticQueryForm::CombineResultSets,
+        ReleasedSemanticForm::SummarizeObjectiveFacts => SemanticQueryForm::SummarizeObjectiveFacts,
+        ReleasedSemanticForm::RetrieveSourceAndSyntaxContext => {
+            SemanticQueryForm::RetrieveSourceAndSyntaxContext
+        }
+    }
 }
 
 const fn released_program_binding_id(form: ReleasedSemanticForm) -> &'static str {
     match form {
-        ReleasedSemanticForm::FindCodeEntities => "program.semantic-query.find-code-entities.v2",
+        ReleasedSemanticForm::FindCodeEntities => "program.semantic-query.find-code-entities.v3",
         ReleasedSemanticForm::RetrieveFactsAboutCode => {
-            "program.semantic-query.retrieve-facts-about-code.v2"
+            "program.semantic-query.retrieve-facts-about-code.v3"
         }
         ReleasedSemanticForm::FollowCodeRelationships => {
-            "program.semantic-query.follow-code-relationships.v2"
+            "program.semantic-query.follow-code-relationships.v3"
         }
         ReleasedSemanticForm::FindConnectingFactPaths => {
-            "program.semantic-query.find-connecting-fact-paths.v2"
+            "program.semantic-query.find-connecting-fact-paths.v3"
         }
         ReleasedSemanticForm::MatchCodeFactPattern => {
-            "program.semantic-query.match-code-fact-pattern.v2"
+            "program.semantic-query.match-code-fact-pattern.v3"
         }
-        ReleasedSemanticForm::CombineResultSets => "program.semantic-query.combine-result-sets.v2",
+        ReleasedSemanticForm::CombineResultSets => "program.semantic-query.combine-result-sets.v3",
         ReleasedSemanticForm::SummarizeObjectiveFacts => {
-            "program.semantic-query.summarize-objective-facts.v2"
+            "program.semantic-query.summarize-objective-facts.v3"
         }
         ReleasedSemanticForm::RetrieveSourceAndSyntaxContext => {
-            "program.semantic-query.retrieve-source-syntax-context.v2"
+            "program.semantic-query.retrieve-source-syntax-context.v3"
         }
     }
 }
@@ -916,6 +934,10 @@ fn release_field_id(value: &str) -> Result<FieldId, ProductionQueryRecipeError> 
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProductionQueryRecipeError {
+    #[error("compiled release query program differs from the executable recipe for {form:?}")]
+    CompiledReleaseQueryMismatch { form: ReleasedSemanticForm },
+    #[error(transparent)]
+    SemanticRelease(#[from] crate::semantic_release::SemanticReleaseError),
     #[error("required {0} pin is absent")]
     MissingPin(&'static str),
     #[error("invalid {kind} identity {value:?}")]
@@ -2380,7 +2402,6 @@ mod tests {
     use crate::fabric::epoch_runtime::{
         FABRIC_CATALOG, FabricEpochId, FabricEpochRuntimeConfig, FabricSchemaRole,
     };
-    use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
     use crate::fabric::programmatic_schema::ProviderInput;
     use crate::schema_contract::{FieldIndexMapping, SchemaContract};
@@ -2504,7 +2525,7 @@ mod tests {
         epoch: &ProgrammaticFabricEpoch,
         input: ProductionSemanticQueryRecipeInput,
     ) -> Result<ProductionSemanticQueryRecipe, ProductionQueryRecipeError> {
-        let release = CompiledSemanticRelease::current();
+        let release = crate::fabric::production_kernel::compile_test_semantic_release();
         ProductionSemanticQueryRecipe::assemble(&release, epoch, input, closure())
     }
 
@@ -2601,7 +2622,7 @@ mod tests {
         let policy_pin = [0x12; 32];
         let recipe = assemble(&epoch, input([0x11; 32], policy_pin, limits()))
             .expect("compiled query recipe");
-        let release = CompiledSemanticRelease::current();
+        let release = crate::fabric::production_kernel::compile_test_semantic_release();
         let ports = release
             .compose_semantic_query_ports(
                 &recipe,

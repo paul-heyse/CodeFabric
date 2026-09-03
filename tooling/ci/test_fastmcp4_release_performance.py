@@ -1,4 +1,4 @@
-"""Deterministic falsification tests for the frozen WP50 method and evidence."""
+"""Deterministic falsification tests for the frozen WP65 method and evidence."""
 
 from __future__ import annotations
 
@@ -196,7 +196,7 @@ def test_ops_structural_faults_fail_without_timing_noise(
     report["structural_observation"][field] = bad_value
     with pytest.raises(ReleasePerformanceError) as captured:
         validate_structural_observation(report, method)
-    assert captured.value.code == "WP50_STRUCTURAL_RESOURCE_FAULT"
+    assert captured.value.code == "WP65_STRUCTURAL_RESOURCE_FAULT"
 
 
 def test_ops_missing_skipped_and_semantically_different_samples_fail_closed() -> None:
@@ -205,20 +205,20 @@ def test_ops_missing_skipped_and_semantically_different_samples_fail_closed() ->
     samples = [_sample(request) for request in schedule]
     with pytest.raises(BenchmarkError) as missing:
         validate_samples(samples[:-1], method)
-    assert missing.value.code == "WP50_SAMPLE_COUNT_INVALID"
+    assert missing.value.code == "WP65_SAMPLE_COUNT_INVALID"
 
     skipped = copy.deepcopy(samples)
     skipped[0]["skipped"] = True
     skipped[0]["status"] = "skipped"
     with pytest.raises(BenchmarkError) as skipped_error:
         validate_samples(skipped, method)
-    assert skipped_error.value.code == "WP50_SAMPLE_NOT_SUCCESSFUL"
+    assert skipped_error.value.code == "WP65_SAMPLE_NOT_SUCCESSFUL"
 
     different = copy.deepcopy(samples)
     different[1]["semantic_observation"]["fabricated"] = True
     with pytest.raises(BenchmarkError) as semantic:
         validate_samples(different, method)
-    assert semantic.value.code == "WP50_SEMANTIC_DIFFERENTIAL"
+    assert semantic.value.code == "WP65_SEMANTIC_DIFFERENTIAL"
 
 
 def test_neg_history_independence_rejects_a_predecessor_binding() -> None:
@@ -228,4 +228,4 @@ def test_neg_history_independence_rejects_a_predecessor_binding() -> None:
     bindings[0]["path"] = "contracts/acceptance/relational-fabric-v3/evidence.json"
     with pytest.raises(ReleasePerformanceError) as captured:
         validate_history_independence(report, method, bindings)
-    assert captured.value.code == "WP50_HISTORY_DEPENDENCY"
+    assert captured.value.code == "WP65_HISTORY_DEPENDENCY"

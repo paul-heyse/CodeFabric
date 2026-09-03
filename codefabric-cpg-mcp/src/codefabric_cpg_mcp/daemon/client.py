@@ -504,6 +504,7 @@ class ReferenceCompletion(_PortModel):
 class PublicDaemonStatus(_PortModel):
     """Closed status document accepted from the daemon's canonical JSON projection."""
 
+    semantic_release: NonEmptyString
     lifecycle: Literal["BOOTSTRAPPING", "READY", "DRAINING", "FAILED_CLOSED"]
     lifecycle_sequence: NonNegativeInt
     active_epoch_id: str | None = None

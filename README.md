@@ -35,8 +35,9 @@ floor and has no native-extension build surface or root Python package. Its defa
 implementation and AWS SDK; `s3-storage` enables them explicitly. The pinned Delta
 kernel still compiles latent `object_store` cloud features, which the graph and advisory
 policy checks report rather than concealing. Narrow `canonical-json`, `contract-models`,
-`proto-tooling`, `rpc`, `repository-state`, `fact-generation`, and `data-fabric`
-features keep focused tools from compiling unrelated production subsystems.
+`proto-tooling`, `rpc`, `repository-input`, `operational-state`, `fact-generation`,
+`data-fabric`, and `semantic-release` features keep focused tools from compiling
+unrelated production subsystems.
 
 The additional Cargo roots are not a Cargo workspace. Their separate toolchains and
 dependency isolation are build-domain requirements, not semantic source organization.

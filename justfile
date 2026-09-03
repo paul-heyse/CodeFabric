@@ -504,30 +504,6 @@ activation-receipt-nonauthority-check:
 candidate-free-recovery-check:
     cargo nextest run --locked --lib -E 'test(/(wp32_ops_|state_capability_reconstruction_operations)/)' --no-tests=fail
 
-[doc("Bind the independently authored FastMCP 4 expectations to active v5 and terminal suite 2.3")]
-[group('test')]
-fastmcp4-successor-authority-integrity-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_successor_expectations.py -k 'int_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_successor_expectations.py successor-authority-integrity
-
-[doc("Require independent acceptance of every controlled FastMCP 4 successor expectation")]
-[group('test')]
-fastmcp4-independent-expectation-review-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_successor_expectations.py -k 'beh_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_successor_expectations.py independent-expectation-review
-
-[doc("Prove FastMCP 4 causal and rejection fixtures are independent and discriminating")]
-[group('test')]
-fastmcp4-negative-fixture-independence-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_successor_expectations.py -k 'neg_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_successor_expectations.py negative-fixture-independence
-
-[doc("Fail closed when a frozen FastMCP 4 input, selector, or performance method drifts")]
-[group('test')]
-fastmcp4-expectation-drift-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_successor_expectations.py -k 'ops_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_successor_expectations.py expectation-drift
-
 [doc("Compile-probe typed launch settings, authenticated control, private sockets, and replacement-safe cleanup")]
 [group('test')]
 supervisor-launch-platform-check:
@@ -641,35 +617,17 @@ fastmcp4-security-negative-check:
 fastmcp4-cancellation-recovery-check:
     cargo nextest run --locked --test integration -E 'test(wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation)' --no-tests=fail
 
-[doc("Validate the append-only FastMCP 4 evidence transaction and every frozen binding")]
-[group('test')]
-fastmcp4-production-evidence-integrity-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_production_evidence.py -k 'int_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_production_evidence.py integrity
-
-[doc("Validate independently expected FastMCP 4 behavior through the real installed topology")]
-[group('test')]
-fastmcp4-production-behavior-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_production_evidence.py -k 'beh_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_production_evidence.py behavior
-
-[doc("Prove one independently discriminating causal fault at every claimed successor layer")]
-[group('test')]
-fastmcp4-causal-fault-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_production_evidence.py -k 'neg_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_production_evidence.py causal-faults
-
-[doc("Validate clean build, wheel, runtime, mutation, and restart reconstruction evidence")]
-[group('test')]
-fastmcp4-clean-reconstruction-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_production_evidence.py -k 'ops_'
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_production_evidence.py clean-reconstruction
-
 [doc("Validate complete live-surface coverage and the exact retained FastMCP 4 target")]
 [group('gate')]
 fastmcp4-post-purge-surface-check:
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_fastmcp4_post_purge_assurance.py -k 'int_'
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_post_purge_assurance.py surface
+
+[doc("Reject every displaced compiled-release, marker, profile, feature, and v5 live-tooling class")]
+[group('gate')]
+compiled-release-legacy-zero-state-check: feature-architecture-check provider-type-boundary-check generated-type-boundary-check
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_compiled_release_zero_state.py
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/compiled_release_zero_state.py
 
 [doc("Rerun representative daemon, guard, resource, completion, cancellation, and installed-adapter behavior after purge")]
 [group('test')]
@@ -1080,7 +1038,7 @@ model-zero-state-check:
 
 [doc("Run structural, artifact, provenance, compatibility, and zero-state governance")]
 [group('gate')]
-governance: tool-version-contract-check governance-scan authoritative-design-conformance-check proto-check model-zero-state-check remaining-legacy-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check fastmcp4-successor-authority-integrity-check fastmcp4-independent-expectation-review-check fastmcp4-negative-fixture-independence-check fastmcp4-expectation-drift-check oracle-substance-check plan-dependency-check
+governance: tool-version-contract-check governance-scan authoritative-design-conformance-check proto-check model-zero-state-check remaining-legacy-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check oracle-substance-check plan-dependency-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]

@@ -4502,7 +4502,7 @@ mod tests {
     ) {
         let (sessions, session) = test_session().await;
         let service = ProductionQueryService::try_new(
-            Arc::new(CompiledSemanticRelease::current()),
+            Arc::new(crate::fabric::production_kernel::compile_test_semantic_release()),
             Arc::new(ThreeRoundBackend::default()),
             Arc::new(LifecycleAuthority::new()),
             Arc::new(WorkspaceSlotRegistry::new()),
@@ -4522,7 +4522,7 @@ mod tests {
     #[tokio::test]
     async fn injected_release_runtime_boundary_integrity() {
         let temp = tempfile::tempdir().unwrap();
-        let release = Arc::new(CompiledSemanticRelease::current());
+        let release = Arc::new(crate::fabric::production_kernel::compile_test_semantic_release());
         let (sessions, _session) = test_session().await;
         let service = ProductionQueryService::try_new(
             Arc::clone(&release),
@@ -4550,7 +4550,7 @@ mod tests {
     #[tokio::test]
     async fn single_release_consumer_composition() {
         let temp = tempfile::tempdir().unwrap();
-        let release = Arc::new(CompiledSemanticRelease::current());
+        let release = Arc::new(crate::fabric::production_kernel::compile_test_semantic_release());
         let release_pin =
             crate::fabric::programmatic_query_backend::compiled_query_release_pin(&release);
         let backend = Arc::new(ThreeRoundBackend {
@@ -4582,7 +4582,7 @@ mod tests {
 
     #[tokio::test]
     async fn grpc_flow_control_and_release_mismatch_faults() {
-        let release = Arc::new(CompiledSemanticRelease::current());
+        let release = Arc::new(crate::fabric::production_kernel::compile_test_semantic_release());
         let expected =
             crate::fabric::programmatic_query_backend::compiled_query_release_pin(&release);
         let mismatch = Arc::new(ThreeRoundBackend {

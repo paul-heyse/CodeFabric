@@ -18,6 +18,7 @@ from .json import JsonValue as CanonicalJsonValue
 from .json import canonicalize_value, checksum
 
 Checksum = Annotated[str, StringConstraints(pattern=r"^b3:[0-9a-f]{64}$")]
+NonEmptyString = Annotated[str, StringConstraints(min_length=1, max_length=512)]
 NonNegativeInt = Annotated[int, Field(ge=0)]
 PositiveInt = Annotated[int, Field(gt=0)]
 type JsonObject = dict[str, JsonValue]
@@ -101,6 +102,7 @@ class SafeErrorProjection(StrictWireModel):
 class PublicStatusProjection(StrictWireModel):
     """Closed allowlist for the daemon's canonical public status document."""
 
+    semantic_release: NonEmptyString
     lifecycle: Literal["BOOTSTRAPPING", "READY", "DRAINING", "FAILED_CLOSED"]
     lifecycle_sequence: NonNegativeInt
     active_epoch_id: str | None = None

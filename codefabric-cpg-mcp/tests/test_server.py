@@ -153,6 +153,7 @@ class FakeDaemonPort:
             running_queries=0,
             queued_queries=0,
             public_status=PublicDaemonStatus(
+                semantic_release="codefabric-relational-data-fabric@2.3.0",
                 lifecycle="READY",
                 lifecycle_sequence=3,
                 active_epoch_id="epoch:one",

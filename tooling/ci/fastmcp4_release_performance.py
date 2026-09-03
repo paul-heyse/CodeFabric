@@ -1,7 +1,7 @@
-"""Validate and record target-only WP50 release/performance evidence.
+"""Validate and record target-only WP65 release/performance evidence.
 
 The evidence transaction is append-only, binds one candidate commit and tree,
-and admits only current v5 target inputs.  Raw benchmark samples remain the
+and admits only current v7 target inputs.  Raw benchmark samples remain the
 authority for statistics; summaries, budget verdicts, and entry hashes are
 recomputed.  No predecessor comparator, historical result, or cache state is
 accepted as release evidence.
@@ -26,7 +26,6 @@ from typing import Any, NoReturn
 
 from tooling.benchmarks.fastmcp4_release_benchmark import (
     METHOD_PATH,
-    REGISTERED_METHOD_PATH,
     BenchmarkError,
     Method,
     Workload,
@@ -43,16 +42,16 @@ CONTROL_PATH = Path("tooling/benchmarks/fastmcp4_minimal_control.py")
 VALIDATOR_PATH = Path("tooling/ci/fastmcp4_release_performance.py")
 VALIDATOR_TEST_PATH = Path("tooling/ci/test_fastmcp4_release_performance.py")
 DEFAULT_RAW_REPORT_PATH = Path(
-    "contracts/evidence/relational-fabric-v5/wp50-raw-performance-v1.json"
+    "contracts/evidence/relational-fabric-v7/wp65-raw-performance-v1.json"
 )
 DEFAULT_TRANSACTION_PATH = Path(
-    "contracts/evidence/relational-fabric-v5/wp50-release-performance-v1.jsonl"
+    "contracts/evidence/relational-fabric-v7/wp65-release-performance-v1.jsonl"
 )
 DEFAULT_REVIEW_PATH = Path(
-    "contracts/evidence/relational-fabric-v5/wp50-release-performance-review-v1.json"
+    "contracts/evidence/relational-fabric-v7/wp65-release-performance-review-v1.json"
 )
 
-TRANSACTION_ID = "relational-fabric-v5-wp50-release-performance-r1"
+TRANSACTION_ID = "relational-fabric-v7-wp65-release-performance-r1"
 ENTRY_SCHEMA = "codefabric.fastmcp4-release-performance.entry.v1"
 REVIEW_SCHEMA = "codefabric.fastmcp4-release-performance.review.v1"
 ENTRY_KINDS = (
@@ -65,7 +64,6 @@ ENTRY_KINDS = (
 )
 INPUT_PATHS = (
     METHOD_PATH,
-    REGISTERED_METHOD_PATH,
     BENCHMARK_PATH,
     CONTROL_PATH,
     VALIDATOR_PATH,
@@ -80,34 +78,22 @@ INPUT_PATHS = (
     ),
     Path(
         "docs/plans/"
-        "codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md"
+        "codefabric_execution_proved_relational_data_fabric_implementation_plan_v7_2026-09-02.md"
     ),
 )
 REQUIRED_RELEASE_RECIPES = (
-    "root-check",
-    "root-test",
-    "features-each",
-    "extractor-ci-fast",
-    "sidecar-ci-fast",
-    "adapter-ci-fast",
-    "proto-check",
-    "stable-graph-check",
-    "governance-scan",
-    "fastmcp4-live-surface-integrity-check",
-    "fastmcp4-post-purge-behavior-check",
+    "semantic-release-vertical-check",
+    "compiled-release-fresh-activation-check",
+    "grpc-slow-consumer-check",
+    "feature-architecture-check",
+    "cancellation-tree-check",
+    "compiled-release-legacy-zero-state-check",
+    "fastmcp4-retained-target-behavior-check",
     "fastmcp4-decommission-zero-state-check",
     "fastmcp4-package-build-check",
 )
-FORBIDDEN_INPUT_COMPONENTS = frozenset(
-    {
-        "relational-fabric-v3",
-        "relational-fabric-v4",
-        "data_fabric_upgrade",
-        "successor_evidence_contracts_v4.py",
-        "successor_evidence_issuance_v4.py",
-        "relational_fabric_release.py",
-        "data_fabric_revision_benchmark.rs",
-    }
+HISTORICAL_INPUT = re.compile(
+    r"(?:relational-fabric-v[1-6](?:/|-)|implementation_plan_v[1-6]_)"
 )
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -137,13 +123,13 @@ def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            _fail("WP50_JSON_DUPLICATE_MEMBER", key)
+            _fail("WP65_JSON_DUPLICATE_MEMBER", key)
         result[key] = value
     return result
 
 
 def _reject_nonfinite(value: str) -> NoReturn:
-    _fail("WP50_JSON_NONFINITE", value)
+    _fail("WP65_JSON_NONFINITE", value)
 
 
 def _load_json(path: Path, *, maximum_bytes: int = MAX_JSON_BYTES) -> dict[str, Any]:
@@ -151,7 +137,7 @@ def _load_json(path: Path, *, maximum_bytes: int = MAX_JSON_BYTES) -> dict[str, 
         metadata = path.stat()
         _require(
             path.is_file() and metadata.st_size <= maximum_bytes,
-            "WP50_JSON_SIZE_INVALID",
+            "WP65_JSON_SIZE_INVALID",
             str(path),
         )
         value = json.loads(
@@ -162,8 +148,8 @@ def _load_json(path: Path, *, maximum_bytes: int = MAX_JSON_BYTES) -> dict[str, 
     except ReleasePerformanceError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise ReleasePerformanceError("WP50_JSON_INVALID", str(path)) from error
-    _require(isinstance(value, dict), "WP50_JSON_ROOT_INVALID", str(path))
+        raise ReleasePerformanceError("WP65_JSON_INVALID", str(path)) from error
+    _require(isinstance(value, dict), "WP65_JSON_ROOT_INVALID", str(path))
     return value
 
 
@@ -172,17 +158,17 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
         metadata = path.stat()
         _require(
             path.is_file() and metadata.st_size <= MAX_JSON_BYTES,
-            "WP50_JSON_SIZE_INVALID",
+            "WP65_JSON_SIZE_INVALID",
             str(path),
         )
         lines = path.read_text(encoding="utf-8").splitlines()
     except ReleasePerformanceError:
         raise
     except (OSError, UnicodeError) as error:
-        raise ReleasePerformanceError("WP50_JSON_INVALID", str(path)) from error
+        raise ReleasePerformanceError("WP65_JSON_INVALID", str(path)) from error
     _require(
         bool(lines) and all(line.strip() for line in lines),
-        "WP50_TRANSACTION_INVALID",
+        "WP65_TRANSACTION_INVALID",
         "lines",
     )
     entries: list[dict[str, Any]] = []
@@ -195,21 +181,21 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
             )
         except (json.JSONDecodeError, ReleasePerformanceError) as error:
             raise ReleasePerformanceError(
-                "WP50_JSON_INVALID", f"line {index}"
+                "WP65_JSON_INVALID", f"line {index}"
             ) from error
-        _require(isinstance(value, dict), "WP50_TRANSACTION_INVALID", f"line {index}")
+        _require(isinstance(value, dict), "WP65_TRANSACTION_INVALID", f"line {index}")
         entries.append(value)
     return entries
 
 
 def _mapping(value: object, context: str) -> Mapping[str, Any]:
-    _require(isinstance(value, Mapping), "WP50_EVIDENCE_SCHEMA_INVALID", context)
+    _require(isinstance(value, Mapping), "WP65_EVIDENCE_SCHEMA_INVALID", context)
     assert isinstance(value, Mapping)
     return value
 
 
 def _rows(value: object, context: str) -> list[Mapping[str, Any]]:
-    _require(isinstance(value, list), "WP50_EVIDENCE_SCHEMA_INVALID", context)
+    _require(isinstance(value, list), "WP65_EVIDENCE_SCHEMA_INVALID", context)
     assert isinstance(value, list)
     return [_mapping(item, f"{context}[{index}]") for index, item in enumerate(value)]
 
@@ -238,7 +224,7 @@ def _append(
 ) -> None:
     _require(
         len(entries) < len(ENTRY_KINDS) and kind == ENTRY_KINDS[len(entries)],
-        "WP50_TRANSACTION_ORDER_INVALID",
+        "WP65_TRANSACTION_ORDER_INVALID",
         kind,
     )
     previous = str(entries[-1]["entry_sha256"]) if entries else None
@@ -251,7 +237,7 @@ def validate_chain(
     expected = ENTRY_KINDS if require_review else ENTRY_KINDS[:-1]
     _require(
         len(entries) == len(expected),
-        "WP50_TRANSACTION_ENTRY_COUNT_INVALID",
+        "WP65_TRANSACTION_ENTRY_COUNT_INVALID",
         str(len(entries)),
     )
     previous: str | None = None
@@ -262,7 +248,7 @@ def validate_chain(
             and entry.get("sequence") == sequence
             and entry.get("kind") == kind
             and entry.get("previous_entry_sha256") == previous,
-            "WP50_TRANSACTION_CHAIN_INVALID",
+            "WP65_TRANSACTION_CHAIN_INVALID",
             kind,
         )
         actual = entry.get("entry_sha256")
@@ -271,7 +257,7 @@ def validate_chain(
             isinstance(actual, str)
             and SHA256.fullmatch(actual) is not None
             and actual == _canonical_sha256(unsigned),
-            "WP50_TRANSACTION_CHAIN_INVALID",
+            "WP65_TRANSACTION_CHAIN_INVALID",
             f"{kind} digest",
         )
         _mapping(entry.get("payload"), f"{kind}.payload")
@@ -292,7 +278,7 @@ def _git(root: Path, *arguments: str) -> str:
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError) as error:
         raise ReleasePerformanceError(
-            "WP50_GIT_QUERY_FAILED", " ".join(arguments)
+            "WP65_GIT_QUERY_FAILED", " ".join(arguments)
         ) from error
 
 
@@ -301,14 +287,14 @@ def _input_bindings(root: Path, candidate: str) -> list[dict[str, str]]:
     for path in INPUT_PATHS:
         path_text = path.as_posix()
         _require(
-            not any(component in path_text for component in FORBIDDEN_INPUT_COMPONENTS),
-            "WP50_HISTORY_DEPENDENCY",
+            HISTORICAL_INPUT.search(path_text) is None,
+            "WP65_HISTORY_DEPENDENCY",
             path_text,
         )
         blob = _git(root, "rev-parse", f"{candidate}:{path_text}")
         _require(
             SHA256.fullmatch(sha256_file(root / path)) is not None,
-            "WP50_INPUT_UNREADABLE",
+            "WP65_INPUT_UNREADABLE",
             path_text,
         )
         bindings.append(
@@ -326,18 +312,18 @@ def _validate_candidate(
 ) -> None:
     _require(
         HEX40.fullmatch(candidate) is not None and HEX40.fullmatch(tree) is not None,
-        "WP50_CANDIDATE_BINDING_INVALID",
+        "WP65_CANDIDATE_BINDING_INVALID",
         "candidate/tree syntax",
     )
     _require(
         _git(root, "rev-parse", f"{candidate}^{{tree}}") == tree,
-        "WP50_CANDIDATE_BINDING_INVALID",
+        "WP65_CANDIDATE_BINDING_INVALID",
         "tree does not belong to candidate",
     )
     if check_head:
         _require(
             _git(root, "rev-parse", "HEAD") == candidate,
-            "WP50_CANDIDATE_BINDING_INVALID",
+            "WP65_CANDIDATE_BINDING_INVALID",
             "candidate is not HEAD",
         )
 
@@ -353,7 +339,7 @@ def validate_environment(report: Mapping[str, Any], method: Method) -> None:
         isinstance(required_fields, list)
         and set(environment) == set(required_fields)
         and all(environment.get(field) not in {None, ""} for field in required_fields),
-        "WP50_ENVIRONMENT_INCOMPLETE",
+        "WP65_ENVIRONMENT_INCOMPLETE",
         "environment fields",
     )
     _require(
@@ -370,7 +356,7 @@ def validate_environment(report: Mapping[str, Any], method: Method) -> None:
                 "supervisor_executable_sha256",
             )
         ),
-        "WP50_ENVIRONMENT_IDENTITY_INVALID",
+        "WP65_ENVIRONMENT_IDENTITY_INVALID",
         "environment identity/version",
     )
 
@@ -393,18 +379,18 @@ def _metric_summary(
         ]
     except (KeyError, TypeError) as error:
         raise ReleasePerformanceError(
-            "WP50_DISTRIBUTION_SUMMARY_DRIFT",
+            "WP65_DISTRIBUTION_SUMMARY_DRIFT",
             f"{workload}/{case}/{concurrency}/{group}/{metric}",
         ) from error
     return _mapping(value, "metric summary")
 
 
 def _assert_upper(value: float, bound: float, context: str) -> None:
-    _require(value <= bound, "WP50_PERFORMANCE_BUDGET_EXCEEDED", context)
+    _require(value <= bound, "WP65_PERFORMANCE_BUDGET_EXCEEDED", context)
 
 
 def _assert_lower(value: float, bound: float, context: str) -> None:
-    _require(value >= bound, "WP50_PERFORMANCE_BUDGET_EXCEEDED", context)
+    _require(value >= bound, "WP65_PERFORMANCE_BUDGET_EXCEEDED", context)
 
 
 def _candidate_samples(
@@ -685,7 +671,7 @@ def validate_budgets(report: Mapping[str, Any], method: Method) -> int:
     agent_case = agents.cases[0]
     _require(
         agents.concurrency_levels == (1, 2, 4, 8),
-        "WP50_CONCURRENCY_METHOD_DRIFT",
+        "WP65_CONCURRENCY_METHOD_DRIFT",
         "agent concurrency levels",
     )
     for concurrency in agents.concurrency_levels:
@@ -724,20 +710,20 @@ def validate_structural_observation(report: Mapping[str, Any], method: Method) -
     observed = _mapping(report.get("structural_observation"), "structural observation")
     bounds = _mapping(method.document.get("structural_bounds"), "structural bounds")
     _require(
-        set(observed) == set(bounds), "WP50_STRUCTURAL_OBSERVATION_INCOMPLETE", "fields"
+        set(observed) == set(bounds), "WP65_STRUCTURAL_OBSERVATION_INCOMPLETE", "fields"
     )
     checked = 0
     for field, bound in bounds.items():
         actual = observed.get(field)
         if field.endswith("_required"):
-            _require(actual is bound is True, "WP50_STRUCTURAL_RESOURCE_FAULT", field)
+            _require(actual is bound is True, "WP65_STRUCTURAL_RESOURCE_FAULT", field)
         else:
             _require(
                 isinstance(actual, int | float)
                 and not isinstance(actual, bool)
                 and math.isfinite(float(actual))
                 and actual <= bound,
-                "WP50_STRUCTURAL_RESOURCE_FAULT",
+                "WP65_STRUCTURAL_RESOURCE_FAULT",
                 field,
             )
         checked += 1
@@ -752,13 +738,9 @@ def validate_history_independence(
         comparison.get("predecessor_comparison_permitted") is False
         and {str(row.get("path")) for row in bindings}
         == {path.as_posix() for path in INPUT_PATHS}
-        and not any(
-            forbidden in str(row.get("path"))
-            for row in bindings
-            for forbidden in FORBIDDEN_INPUT_COMPONENTS
-        )
+        and not any(HISTORICAL_INPUT.search(str(row.get("path"))) for row in bindings)
         and report.get("outlier_policy") == "report-all-no-post-hoc-removal",
-        "WP50_HISTORY_DEPENDENCY",
+        "WP65_HISTORY_DEPENDENCY",
         "target-only input closure",
     )
     return len(bindings)
@@ -796,14 +778,14 @@ def _execute_release_recipe(root: Path, recipe: str) -> ReleaseRun:
             )
         except OSError as error:
             raise ReleasePerformanceError(
-                "WP50_RELEASE_RECIPE_FAILED", recipe
+                "WP65_RELEASE_RECIPE_FAILED", recipe
             ) from error
         stdout_size = stdout.tell()
         stderr_size = stderr.tell()
         _require(
             stdout_size <= MAX_RELEASE_STDOUT_BYTES
             and stderr_size <= MAX_RELEASE_STDERR_BYTES,
-            "WP50_RELEASE_RECIPE_OUTPUT_UNBOUNDED",
+            "WP65_RELEASE_RECIPE_OUTPUT_UNBOUNDED",
             recipe,
         )
         stdout.seek(0)
@@ -824,7 +806,7 @@ def validate_release_matrix(value: object) -> int:
     rows = _rows(value, "release matrix")
     _require(
         [row.get("recipe") for row in rows] == list(REQUIRED_RELEASE_RECIPES),
-        "WP50_RELEASE_MATRIX_INCOMPLETE",
+        "WP65_RELEASE_MATRIX_INCOMPLETE",
         "recipe order/census",
     )
     for row in rows:
@@ -836,7 +818,7 @@ def validate_release_matrix(value: object) -> int:
             and SHA256.fullmatch(str(row["stderr_sha256"])) is not None
             and isinstance(row.get("stdout_bytes"), int)
             and isinstance(row.get("stderr_bytes"), int),
-            "WP50_RELEASE_RECIPE_FAILED",
+            "WP65_RELEASE_RECIPE_FAILED",
             str(row.get("recipe")),
         )
     return len(rows)
@@ -854,7 +836,6 @@ def _opened_payload(
         "candidate_commit": candidate,
         "candidate_tree": tree,
         "method_sha256": method.digest,
-        "registered_method_sha256": sha256_file(root / REGISTERED_METHOD_PATH),
         "raw_report_path": report_path.as_posix(),
         "raw_report_sha256": sha256_file(root / report_path),
         "input_bindings": bindings,
@@ -870,7 +851,7 @@ def _write_entries_exclusive(path: Path, entries: Sequence[Mapping[str, Any]]) -
             output.write(payload)
     except OSError as error:
         raise ReleasePerformanceError(
-            "WP50_TRANSACTION_ALREADY_EXISTS", str(path)
+            "WP65_TRANSACTION_ALREADY_EXISTS", str(path)
         ) from error
 
 
@@ -961,7 +942,7 @@ def append_independent_review(
         and review.get("reviewer_is_benchmark_operator") is False
         and review.get("verdict") == "accepted"
         and review.get("findings") == [],
-        "WP50_INDEPENDENT_REVIEW_INVALID",
+        "WP65_INDEPENDENT_REVIEW_INVALID",
         str(review_path),
     )
     payload = {
@@ -978,7 +959,7 @@ def append_independent_review(
             output.write(canonical_json(new_entry) + b"\n")
     except OSError as error:
         raise ReleasePerformanceError(
-            "WP50_TRANSACTION_APPEND_FAILED", str(path)
+            "WP65_TRANSACTION_APPEND_FAILED", str(path)
         ) from error
     return str(new_entry["entry_sha256"])
 
@@ -998,7 +979,7 @@ def validate_transaction(
     report_path = Path(str(opened.get("raw_report_path")))
     _require(
         sha256_file(root / report_path) == opened.get("raw_report_sha256"),
-        "WP50_RAW_REPORT_DRIFT",
+        "WP65_RAW_REPORT_DRIFT",
         str(report_path),
     )
     method = load_method(root)
@@ -1008,13 +989,13 @@ def validate_transaction(
     _require(
         report.get("candidate_commit") == candidate
         and report.get("candidate_tree") == tree,
-        "WP50_CANDIDATE_BINDING_INVALID",
+        "WP65_CANDIDATE_BINDING_INVALID",
         "raw report",
     )
     bindings = _rows(opened.get("input_bindings"), "input bindings")
     expected_bindings = _input_bindings(root, candidate)
     _require(
-        bindings == expected_bindings, "WP50_INPUT_BINDING_DRIFT", "candidate inputs"
+        bindings == expected_bindings, "WP65_INPUT_BINDING_DRIFT", "candidate inputs"
     )
     validate_release_matrix(
         _mapping(entries[1].get("payload"), "release payload").get("runs")
@@ -1029,7 +1010,7 @@ def validate_transaction(
         and performance.get("samples_deleted_after_observation") == 0
         and performance.get("aggregate_memory_interpretation")
         == "total-topology-one-gibibyte",
-        "WP50_PERFORMANCE_VERDICT_INVALID",
+        "WP65_PERFORMANCE_VERDICT_INVALID",
         "performance entry",
     )
     review = _mapping(entries[5].get("payload"), "review entry")
@@ -1040,7 +1021,7 @@ def validate_transaction(
         and review_document.get("verdict") == "accepted"
         and review_document.get("reviewed_through_entry_sha256")
         == entries[4].get("entry_sha256"),
-        "WP50_INDEPENDENT_REVIEW_INVALID",
+        "WP65_INDEPENDENT_REVIEW_INVALID",
         str(review_path),
     )
     return len(_rows(report.get("samples"), "samples"))
@@ -1105,7 +1086,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
     except (ReleasePerformanceError, BenchmarkError) as error:
-        code = getattr(error, "code", "WP50_VALIDATION_FAILED")
+        code = getattr(error, "code", "WP65_VALIDATION_FAILED")
         print(f"{code}: {error}", file=sys.stderr)
         return 1
 

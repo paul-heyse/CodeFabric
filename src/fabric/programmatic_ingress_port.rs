@@ -3069,7 +3069,7 @@ mod tests {
     }
 
     fn port() -> ApplicationOwnedSemanticIngressPort {
-        let release = super::super::production_kernel::CompiledSemanticRelease::current();
+        let release = super::super::production_kernel::compile_test_semantic_release();
         ApplicationOwnedSemanticIngressPort::try_compiled_v2_0(&release, limits())
             .expect("complete compiled 2.0 mapping")
     }
@@ -3663,7 +3663,7 @@ mod tests {
 
         let constructor: ProductionConstructor =
             ApplicationOwnedSemanticIngressPort::try_compiled_v2_0;
-        let release = super::super::production_kernel::CompiledSemanticRelease::current();
+        let release = super::super::production_kernel::compile_test_semantic_release();
         let port = constructor(&release, limits()).expect("compiled v2 mapping");
         assert_eq!(port.authority_pin(), compiled_query_release_pin(&release));
         assert_ne!(port.authority_pin(), [0; 32]);

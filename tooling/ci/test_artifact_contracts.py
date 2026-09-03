@@ -20,7 +20,7 @@ from tooling.ci.artifact_contracts import (
     _accepted_gate_substitutions,
     _accepted_input_evolution_paths,
     _activation_working_tree_digest,
-    _successor_evidence_claim_count,
+    _relational_evidence_claim_count,
     activate_plan,
     active_plan_path,
     check_tracked_target_zero_state,
@@ -262,32 +262,10 @@ def test_active_program_structural_acceptance() -> None:
     assert report["declared_input_count"] == len(declared_inputs(DEFAULT_PLAN))
 
 
-def test_v5_artifact_contract_uses_only_v5_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from types import SimpleNamespace
-
-    from tooling.ci import fastmcp4_successor_expectations
-
-    expected_claims = tuple(sorted(fastmcp4_successor_expectations.REQUIRED_FAMILIES))
-    monkeypatch.setattr(
-        fastmcp4_successor_expectations,
-        "validate_issuance",
-        lambda _root, *, require_review: SimpleNamespace(
-            expectations=expected_claims if require_review else ()
-        ),
-    )
-    plan = parse_frontmatter(
-        ROOT
-        / "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v5_2026-09-01.md"
-    )
-    assert _successor_evidence_claim_count(ROOT, plan) == len(expected_claims)
-
-
-@pytest.mark.parametrize("version", ("v3", "v4"))
+@pytest.mark.parametrize("version", ("v3", "v4", "v5", "v6"))
 def test_retired_relational_plan_has_no_live_evidence_validator(version: str) -> None:
     with pytest.raises(ArtifactContractError, match="no evidence validator"):
-        _successor_evidence_claim_count(
+        _relational_evidence_claim_count(
             ROOT,
             {
                 "plan_id": "codefabric-execution-proved-relational-data-fabric",
@@ -298,7 +276,7 @@ def test_retired_relational_plan_has_no_live_evidence_validator(version: str) ->
 
 def test_v7_uses_only_executable_plan_oracles() -> None:
     assert (
-        _successor_evidence_claim_count(
+        _relational_evidence_claim_count(
             ROOT,
             {
                 "plan_id": "codefabric-execution-proved-relational-data-fabric",
@@ -309,9 +287,9 @@ def test_v7_uses_only_executable_plan_oracles() -> None:
     )
 
 
-def test_non_relational_plan_has_no_implicit_successor_evidence() -> None:
+def test_non_relational_plan_has_no_implicit_relational_evidence() -> None:
     assert (
-        _successor_evidence_claim_count(ROOT, {"plan_id": "fixture", "version": "v1"})
+        _relational_evidence_claim_count(ROOT, {"plan_id": "fixture", "version": "v1"})
         == 0
     )
 

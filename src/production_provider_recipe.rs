@@ -1,4 +1,4 @@
-//! Production construction of the exact CodeFabric v2.2 provider-admission transaction.
+//! Production construction of the exact CodeFabric v2.3 provider-admission transaction.
 //!
 //! The relation census, Arrow schemas, authority roles, coverage routing, and upstream API
 //! surfaces in this module are compiled Rust over the exact provider enums. No serialized model,
@@ -14,10 +14,6 @@ use arrow_schema::{FieldRef, SchemaRef};
 use thiserror::Error;
 
 use crate::fabric::epoch_runtime::FabricSchemaRole;
-use crate::fabric::production_kernel::{
-    CompiledProofAuthority, CompiledProviderAuthority, CompiledQueryAuthority,
-    CompiledTransformationAuthority,
-};
 use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
 use crate::programmatic_derived_analysis::{
     ProgrammaticDerivedAnalysisError, ReleasedProgrammaticDerivedAnalysisOutcome,
@@ -60,11 +56,12 @@ use crate::rustc_relation_schema::{
 use crate::rustc_service::TrustQualifiedRustcCompilation;
 use crate::schema_contract::canonical_arrow_schema_fingerprint;
 use crate::semantic_release::{
-    ProviderFamilyProgramDefinition, ProviderLaneProgramDefinition, ProviderProgramDefinition,
-    SemanticReleaseError,
+    CompiledProofProgram, CompiledProviderProgram, CompiledQueryProgram,
+    CompiledTransformationProgram, ProviderFamilyProgramDefinition, ProviderLaneProgramDefinition,
+    ProviderProgramDefinition, SemanticReleaseError,
 };
 
-const RECIPE_RELEASE: &str = "codefabric-provider-admission-v2.2.0";
+const RECIPE_RELEASE: &str = "codefabric-provider-admission-v2.3.0";
 
 /// Independently supplied authority for one provider lane and its requested semantic scope.
 ///
@@ -210,6 +207,8 @@ pub enum ProductionProviderRecipeError {
     },
     #[error(transparent)]
     Admission(#[from] ProviderAdmissionError),
+    #[error(transparent)]
+    Release(#[from] SemanticReleaseError),
 }
 
 /// Closed failure from the one provider-admission plus release-derived composition transaction.
@@ -234,24 +233,24 @@ pub enum ProductionProviderCompositionError {
 /// compiled-authority capability is semantic; source/context pins and request counts remain
 /// operational inputs.
 pub(crate) fn admit_production_provider_relations(
-    compiled_authority: &CompiledProviderAuthority,
+    provider_program: &CompiledProviderProgram,
     builder: ProgrammaticFabricEpochBuilder,
     authority: ProductionProviderAuthority,
     runs: ProductionProviderRuns<'_>,
 ) -> Result<ProgrammaticProviderAdmissionOutcome, ProductionProviderRecipeError> {
     let tree_sitter_plan = native_syntax_plan(
-        compiled_authority,
+        provider_program,
         ProviderNativeLane::TreeSitter,
         authority.native_syntax,
     )?;
     let ruff_plan = native_syntax_plan(
-        compiled_authority,
+        provider_program,
         ProviderNativeLane::Ruff,
         authority.native_syntax,
     )?;
-    let pyrefly_plan = pyrefly_plan(compiled_authority, authority.pyrefly)?;
+    let pyrefly_plan = pyrefly_plan(provider_program, authority.pyrefly)?;
     let rustc_plan = rustc_plan(
-        compiled_authority,
+        provider_program,
         authority.rustc,
         authority.rustc_owner_units,
     )?;
@@ -277,27 +276,27 @@ pub(crate) fn admit_production_provider_relations(
 /// source/provider DTOs and exact lane authority; every schema, coverage route, transformation,
 /// remainder, producer, proof, and query-family declaration comes from compiled capabilities.
 pub(crate) fn admit_and_compose_production_relations(
-    provider_authority: &CompiledProviderAuthority,
-    transformation_authority: &CompiledTransformationAuthority,
-    proof_authority: &CompiledProofAuthority,
-    query_authority: &CompiledQueryAuthority,
+    provider_program: &CompiledProviderProgram,
+    transformation_program: &CompiledTransformationProgram,
+    proof_program: &CompiledProofProgram,
+    query_program: &CompiledQueryProgram,
     builder: ProgrammaticFabricEpochBuilder,
     authority: ProductionProviderAuthority,
     runs: ProductionProviderRuns<'_>,
 ) -> Result<ReleasedProgrammaticDerivedAnalysisOutcome, ProductionProviderCompositionError> {
     let tree_sitter_plan = native_syntax_plan(
-        provider_authority,
+        provider_program,
         ProviderNativeLane::TreeSitter,
         authority.native_syntax,
     )?;
     let ruff_plan = native_syntax_plan(
-        provider_authority,
+        provider_program,
         ProviderNativeLane::Ruff,
         authority.native_syntax,
     )?;
-    let pyrefly_plan = pyrefly_plan(provider_authority, authority.pyrefly)?;
+    let pyrefly_plan = pyrefly_plan(provider_program, authority.pyrefly)?;
     let rustc_plan = rustc_plan(
-        provider_authority,
+        provider_program,
         authority.rustc,
         authority.rustc_owner_units,
     )?;
@@ -312,15 +311,15 @@ pub(crate) fn admit_and_compose_production_relations(
     )
     .map_err(ProductionProviderRecipeError::from)?;
     Ok(admit_and_compose_released_programmatic_derived_analyses(
-        transformation_authority,
-        proof_authority,
-        query_authority,
+        transformation_program,
+        proof_program,
+        query_program,
         builder,
         exact,
     )?)
 }
 
-/// Closed provider-relation identity compiled into the v2.2 semantic release.
+/// Closed provider-relation identity compiled into the v2.3 semantic release.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderRelation {
     NativeSyntax(NativeSyntaxRelation),
@@ -502,10 +501,7 @@ impl ProviderRelation {
 }
 
 impl ProviderRelationDescriptor {
-    fn try_new(
-        _compiled_authority: &CompiledProviderAuthority,
-        relation: ProviderRelation,
-    ) -> Result<Self, ProductionProviderRecipeError> {
+    fn try_new(relation: ProviderRelation) -> Result<Self, ProductionProviderRecipeError> {
         let relation_identity = relation.relation_identity();
         let schema = relation.schema();
         let fields = relation_fields(relation, &schema)?;
@@ -538,7 +534,7 @@ impl ProviderFieldDescriptor {
 }
 
 fn native_syntax_plan(
-    compiled_authority: &CompiledProviderAuthority,
+    provider_program: &CompiledProviderProgram,
     lane: ProviderNativeLane,
     authority: ExactProviderLaneAuthority,
 ) -> Result<ProviderAdmissionPlan, ProductionProviderRecipeError> {
@@ -547,10 +543,7 @@ fn native_syntax_plan(
         .filter(|relation| native_lane(*relation) == lane)
         .map(|relation| {
             Ok((
-                ProviderRelationDescriptor::try_new(
-                    compiled_authority,
-                    ProviderRelation::NativeSyntax(relation),
-                )?,
+                ProviderRelationDescriptor::try_new(ProviderRelation::NativeSyntax(relation))?,
                 authority.requested_units,
             ))
         })
@@ -572,11 +565,12 @@ fn native_syntax_plan(
             unreachable!("native syntax plan only receives its two in-process lanes")
         }
     };
+    validate_compiled_provider_lane(provider_program, release_lane(lane), &relations)?;
     build_plan(provider_kind, release, lane, authority, relations)
 }
 
 fn pyrefly_plan(
-    compiled_authority: &CompiledProviderAuthority,
+    provider_program: &CompiledProviderProgram,
     authority: ExactProviderLaneAuthority,
 ) -> Result<ProviderAdmissionPlan, ProductionProviderRecipeError> {
     let release_schema = PyreflyRelation::ModuleContext.schema();
@@ -600,14 +594,12 @@ fn pyrefly_plan(
         .into_iter()
         .map(|relation| {
             Ok((
-                ProviderRelationDescriptor::try_new(
-                    compiled_authority,
-                    ProviderRelation::Pyrefly(relation),
-                )?,
+                ProviderRelationDescriptor::try_new(ProviderRelation::Pyrefly(relation))?,
                 authority.requested_units,
             ))
         })
         .collect::<Result<Vec<_>, ProductionProviderRecipeError>>()?;
+    validate_compiled_provider_lane(provider_program, ReleaseProviderLane::Pyrefly, &relations)?;
     build_plan(
         "pyrefly",
         format!("pyrefly={provider_release};source={provider_revision};protocol={protocol}"),
@@ -618,7 +610,7 @@ fn pyrefly_plan(
 }
 
 fn rustc_plan(
-    compiled_authority: &CompiledProviderAuthority,
+    provider_program: &CompiledProviderProgram,
     authority: ExactProviderLaneAuthority,
     owner_units: NonZeroU64,
 ) -> Result<ProviderAdmissionPlan, ProductionProviderRecipeError> {
@@ -637,14 +629,12 @@ fn rustc_plan(
                 owner_units
             };
             Ok((
-                ProviderRelationDescriptor::try_new(
-                    compiled_authority,
-                    ProviderRelation::Rustc(relation),
-                )?,
+                ProviderRelationDescriptor::try_new(ProviderRelation::Rustc(relation))?,
                 requested_units,
             ))
         })
         .collect::<Result<Vec<_>, ProductionProviderRecipeError>>()?;
+    validate_compiled_provider_lane(provider_program, ReleaseProviderLane::Rustc, &relations)?;
     build_plan(
         "rustc-public-mir",
         format!(
@@ -654,6 +644,42 @@ fn rustc_plan(
         authority,
         relations,
     )
+}
+
+const fn release_lane(lane: ProviderNativeLane) -> ReleaseProviderLane {
+    match lane {
+        ProviderNativeLane::TreeSitter => ReleaseProviderLane::TreeSitter,
+        ProviderNativeLane::Ruff => ReleaseProviderLane::Ruff,
+        ProviderNativeLane::Pyrefly => ReleaseProviderLane::Pyrefly,
+        ProviderNativeLane::Rustc => ReleaseProviderLane::Rustc,
+    }
+}
+
+fn validate_compiled_provider_lane(
+    provider_program: &CompiledProviderProgram,
+    lane: ReleaseProviderLane,
+    relations: &[(ProviderRelationDescriptor, NonZeroU64)],
+) -> Result<(), ProductionProviderRecipeError> {
+    let expected = relations
+        .iter()
+        .map(|(descriptor, _)| {
+            format!(
+                "codefabric.provider-family.v2.3.{}",
+                descriptor.relation_identity
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let observed = provider_program
+        .families(lane)?
+        .into_iter()
+        .map(|family| family.as_str().to_owned())
+        .collect::<std::collections::BTreeSet<_>>();
+    if observed != expected {
+        return Err(ProductionProviderRecipeError::InvalidAuthority(
+            "compiled provider program family inventory differs from the executable recipe",
+        ));
+    }
+    Ok(())
 }
 
 fn build_plan(
@@ -2234,7 +2260,6 @@ mod tests {
 
     use super::*;
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig};
-    use crate::fabric::production_kernel::CompiledSemanticRelease;
     use crate::provider_admission::{
         ProviderAdmissionUnknownCause, ProviderLaneGap, ProviderRegistrationDisposition,
     };
@@ -2284,10 +2309,10 @@ mod tests {
 
     #[tokio::test]
     async fn wp34_beh_real_tree_sitter_and_ruff_admit_while_missing_external_lanes_stay_unknown() {
-        let release = CompiledSemanticRelease::current();
+        let release = crate::fabric::production_kernel::compile_test_semantic_release();
         let native = vec![real_native_run()];
         let outcome = admit_production_provider_relations(
-            release.provider_authority(),
+            release.providers(),
             ProgrammaticFabricEpochBuilder::try_new(
                 FabricEpochId::from_bytes([0x81; 16]),
                 FabricEpochRuntimeConfig::default(),
@@ -2348,24 +2373,24 @@ mod tests {
 
     #[test]
     fn wp34_int_compiled_relation_census_and_schema_contracts_are_exhaustive() {
-        let release = CompiledSemanticRelease::current();
-        let compiled_authority = release.provider_authority();
+        let release = crate::fabric::production_kernel::compile_test_semantic_release();
+        let provider_program = release.providers();
         let authority = authority();
         let tree = native_syntax_plan(
-            compiled_authority,
+            provider_program,
             ProviderNativeLane::TreeSitter,
             authority.native_syntax,
         )
         .unwrap();
         let ruff = native_syntax_plan(
-            compiled_authority,
+            provider_program,
             ProviderNativeLane::Ruff,
             authority.native_syntax,
         )
         .unwrap();
-        let pyrefly = pyrefly_plan(compiled_authority, authority.pyrefly).unwrap();
+        let pyrefly = pyrefly_plan(provider_program, authority.pyrefly).unwrap();
         let rustc = rustc_plan(
-            compiled_authority,
+            provider_program,
             authority.rustc,
             authority.rustc_owner_units,
         )
@@ -2538,12 +2563,12 @@ mod tests {
 
     #[test]
     fn wp34_neg_provider_gap_schema_shortcuts_and_provider_local_identity_are_rejected() {
-        let release = CompiledSemanticRelease::current();
-        let compiled_authority = release.provider_authority();
+        let release = crate::fabric::production_kernel::compile_test_semantic_release();
+        let provider_program = release.providers();
         let exact_authority = authority();
 
         let mut ruff = native_syntax_plan(
-            compiled_authority,
+            provider_program,
             ProviderNativeLane::Ruff,
             exact_authority.native_syntax,
         )
@@ -2570,7 +2595,7 @@ mod tests {
         );
 
         let mut tree = native_syntax_plan(
-            compiled_authority,
+            provider_program,
             ProviderNativeLane::TreeSitter,
             exact_authority.native_syntax,
         )
@@ -2644,23 +2669,23 @@ mod tests {
     }
 
     #[test]
-    fn compiled_provider_authority_denies_caller_authored_provider_admission() {
-        type AuthorityGatedAdmission<'a> =
+    fn compiled_provider_program_denies_caller_authored_provider_admission() {
+        type ProgramGatedAdmission<'a> =
             fn(
-                &CompiledProviderAuthority,
+                &CompiledProviderProgram,
                 ProgrammaticFabricEpochBuilder,
                 ProductionProviderAuthority,
                 ProductionProviderRuns<'a>,
             )
                 -> Result<ProgrammaticProviderAdmissionOutcome, ProductionProviderRecipeError>;
 
-        let _closed_constructor: AuthorityGatedAdmission<'_> = admit_production_provider_relations;
-        let release = CompiledSemanticRelease::current();
+        let _closed_constructor: ProgramGatedAdmission<'_> = admit_production_provider_relations;
+        let release = crate::fabric::production_kernel::compile_test_semantic_release();
         let variable_operational_scope =
             ExactProviderLaneAuthority::try_new(SourcePin([0x91; 32]), ContextPin([0x92; 32]), 7)
                 .unwrap();
         let plan = native_syntax_plan(
-            release.provider_authority(),
+            release.providers(),
             ProviderNativeLane::TreeSitter,
             variable_operational_scope,
         )

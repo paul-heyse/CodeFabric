@@ -1,10 +1,11 @@
 {
-  "schema": "codefabric.fastmcp4-release-performance.method.v1",
+  "schema": "codefabric.compiled-release-performance.method.v1",
   "method_id": "fastmcp4-local-stdio-v1",
-  "method_revision": "wp50-r1",
+  "method_revision": "wp65-v1",
   "authority": {
-    "registered_method_path": "contracts/acceptance/relational-fabric-v5/performance-method.yaml",
-    "registered_method_sha256": "ceb48efae08732a452bbbafa9642f1130eb81cffefcd4e7b2869925d2be5c6df",
+    "plan_path": "docs/plans/codefabric_execution_proved_relational_data_fabric_implementation_plan_v7_2026-09-02.md",
+    "packet": "WP65",
+    "suite": "codefabric-relational-data-fabric@2.3.0",
     "registered_before_candidate_results": true,
     "candidate_results_used": false,
     "local_relaxation_permitted": false,

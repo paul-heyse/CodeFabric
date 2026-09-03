@@ -941,44 +941,25 @@ def validate_artifacts(
         if isinstance(value, str):
             validate_review(root, root / value)
             reviews.append(value)
-    successor_claim_count = _successor_evidence_claim_count(root, plan)
+    relational_evidence_claim_count = _relational_evidence_claim_count(root, plan)
     return {
         "plan": expected_plan_path,
         "state": _relative(state_path, root),
         "reviews": reviews,
         "declared_input_count": len(declared_inputs(plan_path)),
         "packet_count": len(plan["ids"]["packets"]),
-        "successor_evidence_claim_count": successor_claim_count,
+        "relational_evidence_claim_count": relational_evidence_claim_count,
     }
 
 
-def _successor_evidence_claim_count(root: Path, plan: Mapping[str, Any]) -> int:
-    """Validate the sole live evidence transaction owned by the selected plan.
-
-    The active-plan pointer is the authority for which successor transaction is
-    live.  Retired plan versions remain immutable history, but their validators
-    are physically absent from the current governance path after the v5 cutover.
-    """
+def _relational_evidence_claim_count(root: Path, plan: Mapping[str, Any]) -> int:
+    """Reject retired evidence executors and report v7's executable-oracle model."""
 
     if plan.get("plan_id") != "codefabric-execution-proved-relational-data-fabric":
         return 0
     version = plan.get("version")
-    if version == "v5":
-        from tooling.ci import fastmcp4_successor_expectations
-
-        try:
-            return len(
-                fastmcp4_successor_expectations.validate_issuance(
-                    root, require_review=True
-                ).expectations
-            )
-        except fastmcp4_successor_expectations.ExpectationReleaseError as error:
-            raise ArtifactContractError(
-                f"v5 FastMCP 4 expectation release {error.code}: {error}"
-            ) from error
     if version == "v7":
-        # V7 replaces the hand-issued successor-evidence transaction with the
-        # named executable oracles carried by each dependency-closed packet.
+        # V7 uses the named executable oracles carried by dependency-closed packets.
         return 0
     raise ArtifactContractError(
         f"selected relational-fabric plan has no evidence validator: {version!r}"

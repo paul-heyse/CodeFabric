@@ -2279,7 +2279,7 @@ mod tests {
                 ])),
             ],
             HashMap::from([
-                ("release".to_owned(), "2.2.0".to_owned()),
+                ("release".to_owned(), "2.3.0".to_owned()),
                 ("relation".to_owned(), "facts.values".to_owned()),
             ]),
         ));
@@ -2292,7 +2292,7 @@ mod tests {
             ],
             HashMap::from([
                 ("relation".to_owned(), "facts.values".to_owned()),
-                ("release".to_owned(), "2.2.0".to_owned()),
+                ("release".to_owned(), "2.3.0".to_owned()),
             ]),
         ));
         let nullable = Arc::new(Schema::new_with_metadata(
