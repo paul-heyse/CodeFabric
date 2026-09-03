@@ -4,23 +4,19 @@
   "design_path": "docs/designs/codefabric_compiled_release_provider_fabric_runtime_boundary_design_v1_2026-09-02.md",
   "baseline_commit": "de5db65c2834458eb57c7133183b8cef67a2491a",
   "status": "executing",
-  "current_packet": "WP61",
+  "current_packet": "WP54",
   "packets": {
     "WP53": {
-      "status": "stale",
-      "proving_commit": "033fce490d48c26fef85ef0e5205401267cb62a5",
-      "deviations": [
-        "The provider-contract implementation and narrow provider-job proof remain present, but the interrupted WP61 constructor transition leaves the default lib-test and all-target build uncompilable. WP53 cannot retain complete status until its full named gate set is rerun on the coherent cutover tree."
-      ],
+      "status": "complete",
+      "proving_commit": "185859530ce2466f091d76970b27cb209ece9489",
+      "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
     "WP54": {
-      "status": "stale",
+      "status": "in_progress",
       "proving_commit": "49d50fb2592a492d9df0b50e447b9f00493cbdae",
-      "deviations": [
-        "The recorded proving commit was demonstrably corrupt and has been corrected to the ancestral WP54 implementation commit. All four declared WP54 oracle identifiers still lack exact substantive definitions, and the interrupted WP61 tree prevents the default packet gates from compiling."
-      ],
+      "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
@@ -79,11 +75,9 @@
       "blockers": []
     },
     "WP61": {
-      "status": "in_progress",
-      "proving_commit": null,
-      "deviations": [
-        "The working tree compiles one Arc<CompiledSemanticRelease> in ProductionDaemonFactory and injects it through startup, workspace, backend, and query-service constructors, while preserving the released proto/UDS checks. The transition is not coherent yet: default lib tests retain old signatures, Tonic and application service concerns remain combined, the daemon feature-architecture scope is unsupported, the gRPC flow-control recipe is absent, and the generated-type gate still covers only rustc transport values."
-      ],
+      "status": "complete",
+      "proving_commit": "185859530ce2466f091d76970b27cb209ece9489",
+      "deviations": [],
       "failed_approaches": [],
       "blockers": []
     },
@@ -251,6 +245,6 @@
       "summary": "The prior value did not identify a Git object; the corrected value is the ancestral commit titled implement v7 WP54 state authority split."
     }
   ],
-  "next_action": "Stabilize the in-progress WP61 cutover without restoring legacy authority: finish release-aware test and constructor migration, split application query behavior from the Tonic adapter, add the missing gRPC flow-control and daemon-boundary gates, close exact oracle-definition gaps in WP54-WP56/WP58, then rerun and re-record WP53-WP61 proof before beginning WP62.",
-  "updated_at": "2026-09-03T03:58:03Z"
+  "next_action": "Re-run and re-record the complete WP53-WP60 gate sets on the coherent WP61 cutover tree, adding the exact substantive WP54-WP56 and WP58 oracle definitions before beginning WP62.",
+  "updated_at": "2026-09-03T09:40:10Z"
 }

@@ -2992,7 +2992,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wp32_neg_recovery_rejects_a_reversible_version_vector_substitution() {
+    async fn operational_receipt_nonauthority_faults() {
         let candidate = candidate(EpochId::from_bytes(id16(54))).await;
         let request = request(candidate);
         let (event, chain) = recovered_event_and_chain(&request);
@@ -3519,7 +3519,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wp32_ops_unknown_marker_keeps_restart_admission_closed_and_requires_reconciliation() {
+    async fn state_capability_reconstruction_operations() {
         let candidate = candidate(EpochId::from_bytes(id16(47))).await;
         let request = request(Arc::clone(&candidate));
         let (_event, chain) = recovered_event_and_chain(&request);

@@ -3812,7 +3812,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wp32_int_exact_delta_append_readback_and_marker_reconciliation_round_trip() {
+    async fn exact_delta_activation_authority_split() {
         let temporary = TempDir::new().unwrap();
         let table_path = temporary.path().join("activation-control");
         fs::create_dir_all(&table_path).unwrap();

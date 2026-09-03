@@ -234,3 +234,27 @@ def test_daemon_s3_dependency_fault_is_rejected() -> None:
     )
     with pytest.raises(FeatureArchitectureError, match="forbidden=.*aws-sdk-s3"):
         _validate_metadata(metadata, "daemon")
+
+
+def test_state_authority_feature_graph_integrity() -> None:
+    for scope in ("repository-input", "operational-state"):
+        contract = CONTRACTS[scope]
+        _validate_manifest(
+            {"features": {scope: sorted(contract.manifest_items)}}, scope
+        )
+        report = _validate_metadata(_contract_metadata(scope), scope)
+        assert report["scope"] == scope
+        assert set(report["required_packages"]) == contract.required_packages
+    assert "rusqlite" in CONTRACTS["operational-state"].required_packages
+    assert "rusqlite" in CONTRACTS["repository-input"].forbidden_packages
+
+
+def test_generic_fabric_dependency_boundary_integrity() -> None:
+    contract = CONTRACTS["data-fabric"]
+    _validate_manifest(
+        {"features": {"data-fabric": sorted(contract.manifest_items)}}, "data-fabric"
+    )
+    report = _validate_metadata(_contract_metadata("data-fabric"), "data-fabric")
+    assert report["scope"] == "data-fabric"
+    assert {"gix", "rusqlite", "tonic"} <= contract.forbidden_packages
+    assert not ({"gix", "rusqlite", "tonic"} & set(report["required_packages"]))

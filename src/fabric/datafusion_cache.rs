@@ -1605,7 +1605,7 @@ mod tests {
     }
 
     #[test]
-    fn native_datafusion_cache_enforces_entry_and_byte_bounds_with_lru_eviction() {
+    fn datafusion_stream_cache_resource_operations() {
         let cache = DualBoundDataFusionCache::<TestNativeCacheKey, TestNativeCacheValue>::new(
             "test-native-cache",
             2,

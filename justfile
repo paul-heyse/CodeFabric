@@ -472,17 +472,17 @@ caller-defined-semantic-authority-denial-check:
 [doc("Exercise entry bounds, deterministic cache-pressure accounting, TTL refresh, resources, and fresh execution")]
 [group('test')]
 datafusion-cache-resource-operations-check:
-    cargo nextest run --locked --lib -E 'test(/(native_datafusion_cache_enforces_entry_and_byte_bounds_with_lru_eviction|object_list_ttl_is_a_refresh_bound_not_validity_or_authority|proof_execution_enforces_row_and_memory_resource_bounds|relational_program_executes_only_through_authorized_child_inputs|logical_plan_cache_bypasses_oversized_entries_without_changing_semantics)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(datafusion_stream_cache_resource_operations|object_list_ttl_is_a_refresh_bound_not_validity_or_authority|proof_execution_enforces_row_and_memory_resource_bounds|relational_program_executes_only_through_authorized_child_inputs|logical_plan_cache_bypasses_oversized_entries_without_changing_semantics)/)' --no-tests=fail
 
 [doc("Prove Delta history creation, transaction identity, exact proof rows, and activation readback integrity")]
 [group('test')]
 delta-durability-protocol-integrity-check:
-    cargo nextest run --locked --lib -E 'test(/wp32_int_/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(wp32_int_|exact_delta_activation_authority_split)/)' --no-tests=fail
 
 [doc("Prove partial-publication invisibility, exact activation, pinned reopen, competing-writer rejection, and unknown-outcome reconciliation")]
 [group('test')]
 delta-publication-contract-check:
-    cargo nextest run --locked --lib -E 'test(/(fault_matrix_never_promotes_partial_progress_to_success|wp32_int_exact_delta_append_readback_and_marker_reconciliation_round_trip|semantic_read_stays_on_an_older_exact_version_after_a_newer_commit_exists|restart_readback_uses_the_loaded_exact_commit_after_the_head_advances|concurrent_advance_is_a_typed_conflict_and_never_retries|conflict_and_unknown_outcomes_both_require_durable_reconciliation)/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(fault_matrix_never_promotes_partial_progress_to_success|exact_delta_activation_authority_split|semantic_read_stays_on_an_older_exact_version_after_a_newer_commit_exists|restart_readback_uses_the_loaded_exact_commit_after_the_head_advances|concurrent_advance_is_a_typed_conflict_and_never_retries|conflict_and_unknown_outcomes_both_require_durable_reconciliation)/)' --no-tests=fail
 
 [doc("Reconstruct the activation-selected exact Delta versions and decoded rows, including an older selected version")]
 [group('test')]
@@ -497,12 +497,12 @@ delta-exact-reconstruction-v3-check:
 [doc("Reject receipt, cache, predecessor-schema, and reversible-vector substitution as activation authority")]
 [group('test')]
 activation-receipt-nonauthority-check:
-    cargo nextest run --locked --lib -E 'test(/wp32_neg_/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(wp32_neg_|operational_receipt_nonauthority_faults)/)' --no-tests=fail
 
 [doc("Recover admission-closed from durable Delta evidence without a process-local candidate")]
 [group('test')]
 candidate-free-recovery-check:
-    cargo nextest run --locked --lib -E 'test(/wp32_ops_/)' --no-tests=fail
+    cargo nextest run --locked --lib -E 'test(/(wp32_ops_|state_capability_reconstruction_operations)/)' --no-tests=fail
 
 [doc("Bind the independently authored FastMCP 4 expectations to active v5 and terminal suite 2.3")]
 [group('test')]
