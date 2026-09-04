@@ -4,21 +4,27 @@
   "design_path": "docs/designs/codefabric_real_time_cpg_planning_contracts_design_v1_2026-09-04.md",
   "baseline_commit": "df1c50c684a5e005c4b76ada9cd19d8030d9d7dd",
   "status": "executing",
-  "current_packet": "WP77",
+  "current_packet": "WP78",
   "packets": {
     "WP77": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "7ca5407a128c6384b33eba7e1f49b8382853d8a6",
       "deviations": [
-        "Integrate carefully with the pre-existing provider/admission/derived-analysis edits; preserve unrelated work. The execution preflight snapshot is recoverable under /tmp/codefabric-rt-cpg-exec-jbqlfs and no inherited completion is assumed."
+        "Integrate carefully with the pre-existing provider/admission/derived-analysis edits; preserve unrelated work. The execution preflight snapshot is recoverable under /tmp/codefabric-rt-cpg-exec-jbqlfs and no inherited completion is assumed.",
+        "The seven required Python analysis implementations are deliberately unavailable until WP84/WP85. Immutable target fixtures and successful required-gap validation establish truthful interim capability, not selected-profile conformance. Existing activation pin-proof fault synthesis remains a later proof-realization obligation; no semantic end-to-end certification is claimed here."
       ],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "Direct repo-shell.sh invocation takes one command string, not an argv vector. Passing rustfmt and separate arguments silently ran rustfmt without file targets; use repo-shell.sh -c with a quoted full command and verify through just root-fmt."
+      ],
       "blockers": []
     },
     "WP78": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Current-tree closure includes inventory.rs, production_workspace_startup.rs, source_image.rs, Pyrefly job/wire consumers and the Rust compilation-context boundary. Startup currently bypasses effective discovery and drops capture outcomes; workspace/file identity and canonical context ID/fingerprint are conflated in provider jobs. Preserve the pre-existing source-image and service edits while closing these immediate consumers.",
+        "Use disjoint source-bundle and effective-context implementation branches; the primary owns shared provider/support contracts, startup/job/transport integration, recipe/generated registration, merged validation and packet completion. No watcher or full provider-extraction completion is inferred from these prerequisites."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -335,6 +341,6 @@
   "plan_deviations": [
     "Approval/activation uses v2 with unchanged WP77-WP106 scope, IDs and dependency/proof contracts: v1 lacked the activation validator's mandatory whole-worktree digest mode. V1 and design inputs are retained unchanged; the user authorized the entire v1 implementation."
   ],
-  "next_action": "WP77: run source/contract preflight, replace unsupported Python CFG/dataflow complete claims with precise required-family gaps, admit independent release expectations, and install fail-closed packet/milestone/decommission/certification dispatch. Re-run packet-local gates before any proving commit/completion.",
-  "updated_at": "2026-09-04T21:42:06.651Z"
+  "next_action": "WP78: close authorized full inventory/capture membership and caller fences (including empty/pending/dispositions), reuse effective Python discovery and add typed Rust context inputs, separate canonical workspace/file/context IDs from fingerprints in prepared jobs, carry positive/negative/unknown support and full-inventory versus changed-work through immediate consumers. Implement all four WP78 oracles and run packet-local gates before proof/completion.",
+  "updated_at": "2026-09-04T22:29:00Z"
 }
