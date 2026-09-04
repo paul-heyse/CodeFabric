@@ -342,5 +342,5 @@
     "Approval/activation uses v2 with unchanged WP77-WP106 scope, IDs and dependency/proof contracts: v1 lacked the activation validator's mandatory whole-worktree digest mode. V1 and design inputs are retained unchanged; the user authorized the entire v1 implementation."
   ],
   "next_action": "WP78: close authorized full inventory/capture membership and caller fences (including empty/pending/dispositions), reuse effective Python discovery and add typed Rust context inputs, separate canonical workspace/file/context IDs from fingerprints in prepared jobs, carry positive/negative/unknown support and full-inventory versus changed-work through immediate consumers. Implement all four WP78 oracles and run packet-local gates before proof/completion.",
-  "updated_at": "2026-09-04T22:29:00Z"
+  "updated_at": "2026-09-04T22:21:14Z"
 }
