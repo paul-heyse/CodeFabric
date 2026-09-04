@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_real_time_cpg_planning_contracts_design_v1_2026-09-04.md",
   "baseline_commit": "df1c50c684a5e005c4b76ada9cd19d8030d9d7dd",
   "status": "executing",
-  "current_packet": "WP78",
+  "current_packet": "WP79",
   "packets": {
     "WP77": {
       "status": "complete",
@@ -19,19 +19,30 @@
       "blockers": []
     },
     "WP78": {
-      "status": "in_progress",
-      "proving_commit": null,
+      "status": "complete",
+      "proving_commit": "0dd1fe19568164fc63da5bba8db9df789df274f7",
       "deviations": [
-        "Current-tree closure includes inventory.rs, production_workspace_startup.rs, source_image.rs, Pyrefly job/wire consumers and the Rust compilation-context boundary. Startup currently bypasses effective discovery and drops capture outcomes; workspace/file identity and canonical context ID/fingerprint are conflated in provider jobs. Preserve the pre-existing source-image and service edits while closing these immediate consumers.",
-        "Use disjoint source-bundle and effective-context implementation branches; the primary owns shared provider/support contracts, startup/job/transport integration, recipe/generated registration, merged validation and packet completion. No watcher or full provider-extraction completion is inferred from these prerequisites."
+        "The preflight expanded closure to inventory, fresh startup, source images, Pyrefly job/wire consumers and the Rust compilation-context boundary. It found bypassed effective discovery, dropped capture outcomes and conflated workspace/file and canonical context/fingerprint identities. Preserve the pre-existing source-image and service edits while closing these immediate consumers.",
+        "Use disjoint source-bundle and effective-context implementation branches; the primary owns shared provider/support contracts, startup/job/transport integration, recipe/generated registration, merged validation and packet completion. No watcher or full provider-extraction completion is inferred from these prerequisites.",
+        "The complete source and shared support contract now binds a separate canonical context ID, manifest fingerprint, and effective invocation-input identity. Producer identity includes the behavior-bearing program, build and policy. Common dependencies are shared once per run rather than cloned into every family/owner partition; provider result admission charges their memory and validates negative search authority.",
+        "Fresh startup uses one logical operational writer and an independent query-only reader for live generation fences, with a second descriptor-relative inventory census until WP88 supplies watcher sequence tokens. Uncaptured configuration candidates remain incomplete support. Native syntax consumes discovered version and qualified module mapping; configured external checker construction and complete two-language/empty lane composition remain WP81-WP83 obligations, never current completeness claims.",
+        "Selected Pyrefly preparation rejects unproved bundle/root authority before allocating a semantic context. The pinned Query API also ignores ConfigFile runtime selection and constructs handles from private default SysInfo; nondefault version/platform selection is explicitly unavailable until WP81 supplies an effective Handle/State seam. Test-only containment or protocol fixture authority is not a production bypass.",
+        "Input/support observations are installed as typed Arrow relations in the actual candidate before sealing. Source lease observations are batch-scoped, and durable lease ownership is retained or released even if subsequent metrics or member admission fail. CPG withdrawal keys remain distinct from the private checker's actual removal census."
       ],
-      "failed_approaches": [],
+      "failed_approaches": [
+        "Opening a second OperationalStore for a source fence is invalid because it requests another logical writer. Use the existing writer's independent reader factory and current_source_generation_from_reader instead; fixture writers must release ownership before startup acquires it.",
+        "Provider support represents the workspace search root with empty path bytes, whereas context discovery uses dot. Normalize at that boundary; copying dot directly fails the relative-path contract. Never represent a binary or otherwise uncaptured existing configuration as a proved absent lookup.",
+        "Adding a native Arrow header field requires updating the behavior-bearing descriptor's explicit field-role classification, not only its schema. The production candidate seal rejects an otherwise valid field that has no compiled role.",
+        "A post-acquisition metrics read can fail after the lease is committed and hide the ownership token from cleanup. Observe before acquisition, derive counts from committed lease-state deltas, and attempt all batch releases before reporting a metrics failure."
+      ],
       "blockers": []
     },
     "WP79": {
-      "status": "not_started",
+      "status": "in_progress",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Preflight expands immediate closure from the named resource/task files to fresh and reconstructed candidate builders, selected workspace composition, activation control sessions, provider/source buffers, graph execution, result packaging and retained caches. Existing per-epoch pool and scheduler constructors multiply budgets, and activation currently gets a default runtime. Preserve fairness, authorization-isolated catalogs, reserved control capacity and lawful existing leases; no process-RSS guarantee follows from DataFusion accounting alone."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -45,7 +56,9 @@
     "WP81": {
       "status": "not_started",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "WP78 established that pinned Query constructs private default SysInfo and cannot consume selected runtime or source_db. WP81 must use the public retained State/Transaction and selected Handle boundary or reopen the exact provider API decision. Bulk Query type/callee extraction is private, so preserving those capabilities requires an explicit adapter design. Actual bundled content is publicly enumerable; dependency roots must precede typeshed as declared, and ambient PYREFLY_STDLIB_SEARCH_PATH must be controlled."
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -341,6 +354,6 @@
   "plan_deviations": [
     "Approval/activation uses v2 with unchanged WP77-WP106 scope, IDs and dependency/proof contracts: v1 lacked the activation validator's mandatory whole-worktree digest mode. V1 and design inputs are retained unchanged; the user authorized the entire v1 implementation."
   ],
-  "next_action": "WP78: close authorized full inventory/capture membership and caller fences (including empty/pending/dispositions), reuse effective Python discovery and add typed Rust context inputs, separate canonical workspace/file/context IDs from fingerprints in prepared jobs, carry positive/negative/unknown support and full-inventory versus changed-work through immediate consumers. Implement all four WP78 oracles and run packet-local gates before proof/completion.",
-  "updated_at": "2026-09-04T22:21:14Z"
+  "next_action": "WP79: implement the common process/workspace resource and joined-operation ownership contracts, wire all immediate runtime constructors and material allocation consumers, then run packet and M18 evidence before releasing independent provider lanes. Preflight and preservation snapshots are under /tmp/codefabric-rt-cpg-exec-jbqlfs; do not stage unrelated baseline edits. WP81 must resolve the selected State/Handle bulk-extraction seam, not revive Query default configuration as authority.",
+  "updated_at": "2026-09-04T23:55:11Z"
 }
