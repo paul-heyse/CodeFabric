@@ -5929,7 +5929,7 @@ fn python_flow_event_identity_udf() -> Arc<ScalarUDF> {
         vec![
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(32),
-            DataType::FixedSizeBinary(32),
+            DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
             DataType::UInt64,
@@ -5942,7 +5942,7 @@ fn python_flow_event_identity_udf() -> Arc<ScalarUDF> {
             let arrays = ColumnarValue::values_to_arrays(values)?;
             let epoch = fixed_array(&arrays[0], 16, "fabric_epoch_id")?;
             let source = fixed_array(&arrays[1], 32, "source_pin")?;
-            let context = fixed_array(&arrays[2], 32, "analysis_context_id")?;
+            let context = fixed_array(&arrays[2], 16, "analysis_context_id")?;
             let owner = fixed_array(&arrays[3], 16, "owner_id")?;
             let occurrence = fixed_array(&arrays[4], 16, "occurrence_id")?;
             let start = u64_array(&arrays[5], "start_byte")?;
@@ -5981,7 +5981,7 @@ fn python_flow_location_identity_udf() -> Arc<ScalarUDF> {
         vec![
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(32),
-            DataType::FixedSizeBinary(32),
+            DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
             DataType::Utf8,
@@ -5992,7 +5992,7 @@ fn python_flow_location_identity_udf() -> Arc<ScalarUDF> {
             let arrays = ColumnarValue::values_to_arrays(values)?;
             let epoch = fixed_array(&arrays[0], 16, "fabric_epoch_id")?;
             let source = fixed_array(&arrays[1], 32, "source_pin")?;
-            let context = fixed_array(&arrays[2], 32, "analysis_context_id")?;
+            let context = fixed_array(&arrays[2], 16, "analysis_context_id")?;
             let owner = fixed_array(&arrays[3], 16, "owner_id")?;
             let scope = fixed_array(&arrays[4], 16, "scope_id")?;
             let name = string_array(&arrays[5], "binding_name")?;
@@ -6028,7 +6028,7 @@ fn python_flow_relation_identity_udf() -> Arc<ScalarUDF> {
         vec![
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(32),
-            DataType::FixedSizeBinary(32),
+            DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
@@ -6041,7 +6041,7 @@ fn python_flow_relation_identity_udf() -> Arc<ScalarUDF> {
             let arrays = ColumnarValue::values_to_arrays(values)?;
             let epoch = fixed_array(&arrays[0], 16, "fabric_epoch_id")?;
             let source = fixed_array(&arrays[1], 32, "source_pin")?;
-            let context = fixed_array(&arrays[2], 32, "analysis_context_id")?;
+            let context = fixed_array(&arrays[2], 16, "analysis_context_id")?;
             let owner = fixed_array(&arrays[3], 16, "owner_id")?;
             let predecessor = fixed_array(&arrays[4], 16, "predecessor_id")?;
             let successor = fixed_array(&arrays[5], 16, "successor_id")?;
@@ -6081,7 +6081,7 @@ fn python_cfg_node_identity_udf() -> Arc<ScalarUDF> {
         vec![
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(32),
-            DataType::FixedSizeBinary(32),
+            DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
             DataType::UInt64,
             DataType::UInt64,
@@ -6093,7 +6093,7 @@ fn python_cfg_node_identity_udf() -> Arc<ScalarUDF> {
             let arrays = ColumnarValue::values_to_arrays(values)?;
             let epoch = fixed_array(&arrays[0], 16, "fabric_epoch_id")?;
             let source = fixed_array(&arrays[1], 32, "content_digest")?;
-            let context = fixed_array(&arrays[2], 32, "analysis_context_id")?;
+            let context = fixed_array(&arrays[2], 16, "analysis_context_id")?;
             let owner = fixed_array(&arrays[3], 16, "file_id")?;
             let start = u64_array(&arrays[4], "start_byte")?;
             let end = u64_array(&arrays[5], "end_byte")?;
@@ -6131,7 +6131,7 @@ fn python_cfg_edge_identity_udf() -> Arc<ScalarUDF> {
         vec![
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(32),
-            DataType::FixedSizeBinary(32),
+            DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
@@ -6143,7 +6143,7 @@ fn python_cfg_edge_identity_udf() -> Arc<ScalarUDF> {
             let arrays = ColumnarValue::values_to_arrays(values)?;
             let epoch = fixed_array(&arrays[0], 16, "fabric_epoch_id")?;
             let source = fixed_array(&arrays[1], 32, "content_digest")?;
-            let context = fixed_array(&arrays[2], 32, "analysis_context_id")?;
+            let context = fixed_array(&arrays[2], 16, "analysis_context_id")?;
             let owner = fixed_array(&arrays[3], 16, "file_id")?;
             let source_node = fixed_array(&arrays[4], 16, "source_node_id")?;
             let target_node = fixed_array(&arrays[5], 16, "target_node_id")?;

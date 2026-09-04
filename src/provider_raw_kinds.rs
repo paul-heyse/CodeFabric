@@ -93,7 +93,7 @@ pub const TREE_SITTER_RUST_GRAMMAR: ProviderGrammarInventory = ProviderGrammarIn
 
 pub const RUFF_PYTHON_FRONTEND: RuffPythonInventory = RuffPythonInventory {
     catalog_id: "ruff-python-0-0-7",
-    provider_version: "ruff-python-ast=0.0.7;ruff-python-parser=0.0.7;python-target=3.14",
+    provider_version: "ruff-python-ast=0.0.7;ruff-python-parser=0.0.7",
     runtime_inventory_fingerprint: "b3:22a84ab2f2d25a2e94ceb9639458bc3a8178461d5047152aade06f4d63ebf65d",
 };
 

@@ -86,6 +86,8 @@ pub struct PyreflyWorkspaceInput {
     pub context_manifest: Vec<u8>,
     pub source_snapshot_lease_id: String,
     pub modules: Vec<PyreflyModuleInput>,
+    /// Scheduling hints selected from the job's changed paths; `modules` remains complete.
+    pub changed_module_ids: Vec<String>,
 }
 
 /// Transport-local request derived exclusively from a provider job plus operational source input.
@@ -101,6 +103,8 @@ struct PyreflyRunRequest {
     source_snapshot_lease_id: String,
     source_manifest_digest: String,
     modules: Vec<PyreflyModuleInput>,
+    changed_module_ids: Vec<String>,
+    expected_removed_module_ids: Vec<String>,
     requested_capability_codes: Vec<u32>,
     deadline_unix_ms: i64,
     sandbox_profile_digest: String,
@@ -154,6 +158,7 @@ pub struct AcceptedPyreflyRun {
     pub capability_codes: Vec<u32>,
     pub overall_digest: String,
     pub rechecked_module_ids: Vec<String>,
+    pub removed_module_ids: Vec<String>,
     pub sandbox_profile_digest: String,
     pub trust_profile: String,
 }
@@ -177,6 +182,8 @@ pub enum PyreflyServiceError {
     ProcessTermination(String),
     #[error("the exact untrusted Pyrefly containment profile is unavailable")]
     TrustUnavailable,
+    #[error("selected Pyrefly context inputs lack proved bundle or root authority")]
+    PreparationUnavailable,
     #[error("Pyrefly source read failed at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -193,6 +200,7 @@ pub enum PyreflyRunGap {
     TimedOut,
     ProcessFailure,
     TrustUnavailable,
+    PreparationUnavailable,
 }
 
 impl PyreflyServiceError {
@@ -204,12 +212,23 @@ impl PyreflyServiceError {
             Self::TimedOut => Some(PyreflyRunGap::TimedOut),
             Self::ProcessTermination(_) | Self::Transport(_) => Some(PyreflyRunGap::ProcessFailure),
             Self::TrustUnavailable => Some(PyreflyRunGap::TrustUnavailable),
+            Self::PreparationUnavailable => Some(PyreflyRunGap::PreparationUnavailable),
             Self::Invalid(_)
             | Self::Protocol(_)
             | Self::Arrow(_)
             | Self::Io { .. }
             | Self::Contract(_) => None,
         }
+    }
+}
+
+fn context_open_error(status: tonic::Status) -> PyreflyServiceError {
+    if status.code() == tonic::Code::FailedPrecondition
+        && status.details() == b"codefabric.pyrefly.preparation-unavailable.v1"
+    {
+        PyreflyServiceError::PreparationUnavailable
+    } else {
+        PyreflyServiceError::Protocol(status.to_string())
     }
 }
 
@@ -225,6 +244,40 @@ impl PyreflyProviderRunResult {
         job: &ProviderJob,
         accepted: AcceptedPyreflyRun,
     ) -> Result<Self, PyreflyServiceError> {
+        let crate::provider_contracts::ProviderSourceSelection::Inventory(inventory) =
+            job.source().selection()
+        else {
+            return Err(PyreflyServiceError::Invalid(
+                "Pyrefly result requires a complete selected inventory".to_owned(),
+            ));
+        };
+        let expected_files = inventory.selected_files().collect::<BTreeMap<_, _>>();
+        let actual_files = accepted
+            .modules
+            .iter()
+            .map(|module| module.canonical_file_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        if accepted.provider_run_id != job.run().identity().as_str()
+            || accepted.canonical_workspace_id != job.source().workspace_id()
+            || accepted.canonical_analysis_context_id != job.context().analysis_context_id()
+            || accepted.analysis_context_id != job.context().identity().as_str()
+            || accepted.source_generation != job.source().generation()
+            || actual_files.len() != accepted.modules.len()
+            || actual_files.iter().ne(expected_files.keys())
+            || accepted.modules.iter().any(|module| {
+                expected_files
+                    .get(&module.canonical_file_id)
+                    .is_none_or(|digest| blake3::hash(&module.source_bytes).as_bytes() != digest)
+                    || job
+                        .context()
+                        .module_for_file(module.canonical_file_id)
+                        .is_none_or(|binding| binding.qualified_name != module.module_name)
+            })
+        {
+            return Err(PyreflyServiceError::Invalid(
+                "Pyrefly accepted source/context/run pins differ from the exact job".to_owned(),
+            ));
+        }
         let module_count = u64::try_from(accepted.modules.len()).unwrap_or(u64::MAX);
         let requested_modules = accepted
             .modules
@@ -254,7 +307,7 @@ impl PyreflyProviderRunResult {
                 ));
             }
             let relation = pyrefly_relation_for_job(request.relation().as_str())?;
-            let batches = accepted
+            let mut batches = accepted
                 .modules
                 .iter()
                 .map(|module| {
@@ -271,6 +324,10 @@ impl PyreflyProviderRunResult {
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            if batches.is_empty() {
+                // A proved empty selected universe still returns the requested Arrow schema.
+                batches.push(RecordBatch::new_empty(Arc::clone(request.schema())));
+            }
             relations.push(ProviderRelationOutput::try_new(
                 request.relation().clone(),
                 request.schema_identity().clone(),
@@ -287,6 +344,7 @@ impl PyreflyProviderRunResult {
         let result = ProviderRunResult::try_from_job(
             job,
             ProviderRunEvidenceSpec {
+                support: crate::provider_contracts::ProviderRunSupport::conservative(job),
                 relations,
                 coverage,
                 gaps: Vec::new(),
@@ -339,6 +397,7 @@ impl PyreflyProviderRunResult {
         let result = ProviderRunResult::try_from_job(
             job,
             ProviderRunEvidenceSpec {
+                support: crate::provider_contracts::ProviderRunSupport::conservative(job),
                 relations: Vec::new(),
                 coverage,
                 gaps,
@@ -378,6 +437,22 @@ struct PyreflyContextCompatibility {
     sandbox_profile_digest: String,
 }
 
+/// Provider-local checker state is not the durable CPG replacement predecessor.
+fn checker_removals(
+    previous: &std::collections::BTreeSet<String>,
+    current: &[PyreflyModuleInput],
+) -> Vec<String> {
+    let current = current
+        .iter()
+        .map(|module| module.module_id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    previous
+        .iter()
+        .filter(|module| !current.contains(module.as_str()))
+        .cloned()
+        .collect()
+}
+
 /// One contained, supervisor-owned Pyrefly process for a compatible workspace/context.
 ///
 /// The process-group child has no public constructor and therefore cannot be substituted with an
@@ -396,6 +471,8 @@ pub(crate) struct SupervisedPyreflyWorkspace {
     compatibility: Option<PyreflyContextCompatibility>,
     context_handle: Option<String>,
     completed_generations: u64,
+    // None means a failed/cancelled run may have changed private checker state.
+    local_module_inventory: Option<std::collections::BTreeSet<String>>,
 }
 
 impl SupervisedPyreflyWorkspace {
@@ -429,6 +506,7 @@ impl SupervisedPyreflyWorkspace {
             compatibility: None,
             context_handle: None,
             completed_generations: 0,
+            local_module_inventory: Some(std::collections::BTreeSet::new()),
         })
     }
 
@@ -479,7 +557,9 @@ impl SupervisedPyreflyWorkspace {
         client: &mut WireClient<Channel>,
         compatibility: &PyreflyContextCompatibility,
     ) -> Result<(), PyreflyServiceError> {
-        if self.compatibility.as_ref() == Some(compatibility) {
+        if self.compatibility.as_ref() == Some(compatibility)
+            && self.local_module_inventory.is_some()
+        {
             return Ok(());
         }
         if let Some(context_handle) = self.context_handle.take() {
@@ -499,6 +579,7 @@ impl SupervisedPyreflyWorkspace {
             }
         }
         self.compatibility = None;
+        self.local_module_inventory = Some(std::collections::BTreeSet::new());
         Ok(())
     }
 
@@ -532,6 +613,7 @@ impl SupervisedPyreflyWorkspace {
         self.client = None;
         self.compatibility = None;
         self.context_handle = None;
+        self.local_module_inventory = None;
         self.force_join().await
     }
 
@@ -724,16 +806,24 @@ fn request_from_job(
     maximum_wall_time: Duration,
 ) -> Result<PyreflyRunRequest, PyreflyServiceError> {
     validate_pyrefly_job(job)?;
+    if input.modules.len() > MAX_MODULES_PER_RUN
+        || input.changed_module_ids.len() > MAX_MODULES_PER_RUN
+        || input.context_manifest.len() as u64 > job.ceilings().max_input_bytes()
+    {
+        return Err(PyreflyServiceError::Invalid(
+            "Pyrefly immutable inputs exceed the admitted preflight bounds".to_owned(),
+        ));
+    }
     let context_manifest_digest = b3(&input.context_manifest);
     let expected_context_digest = encoded_digest(job.context().semantic_environment_id());
     let module_count = u64::try_from(input.modules.len()).unwrap_or(u64::MAX);
+    let changed_module_ids = validate_complete_workspace_input(job, input)?;
     if input.workspace_id.is_empty()
         || input.canonical_workspace_id == [0; 16]
-        || input.canonical_workspace_id != job.source().file_id()
+        || input.canonical_workspace_id != job.source().workspace_id()
         || input.context_manifest.is_empty()
         || context_manifest_digest != expected_context_digest
         || input.source_snapshot_lease_id.is_empty()
-        || input.modules.is_empty()
         || input.modules.len() > MAX_MODULES_PER_RUN
         || job
             .requests()
@@ -750,8 +840,7 @@ fn request_from_job(
     let effective_remaining = remaining.min(maximum_wall_time);
     let deadline_unix_ms = now_unix_millis()
         .saturating_add(i64::try_from(effective_remaining.as_millis()).unwrap_or(i64::MAX));
-    let mut canonical_analysis_context_id = [0_u8; 16];
-    canonical_analysis_context_id.copy_from_slice(&job.context().analysis_context_id()[..16]);
+    let canonical_analysis_context_id = job.context().analysis_context_id();
     let requested_capability_codes = job
         .requests()
         .iter()
@@ -770,11 +859,88 @@ fn request_from_job(
         source_snapshot_lease_id: input.source_snapshot_lease_id.clone(),
         source_manifest_digest: encoded_digest(job.source().content_digest()),
         modules: input.modules.clone(),
+        changed_module_ids,
+        // Filled from the exact retained checker census at dispatch, never CPG withdrawals.
+        expected_removed_module_ids: Vec::new(),
         requested_capability_codes,
         deadline_unix_ms,
         sandbox_profile_digest: sandbox_profile_digest.to_owned(),
         output_schema_bundle_digest: schema_bundle_digest(),
     })
+}
+
+fn validate_complete_workspace_input(
+    job: &ProviderJob,
+    input: &PyreflyWorkspaceInput,
+) -> Result<Vec<String>, PyreflyServiceError> {
+    use crate::identity::{IdentityDomain, decode_public_id, encode_public_id};
+    use crate::provider_contracts::{ProviderInputDisposition, ProviderSourceSelection};
+    let invalid = || {
+        PyreflyServiceError::Invalid(
+            "Pyrefly modules or changed work do not close the exact selected inventory".to_owned(),
+        )
+    };
+    let ProviderSourceSelection::Inventory(inventory) = job.source().selection() else {
+        return Err(invalid());
+    };
+    let expected = inventory
+        .members()
+        .iter()
+        .filter_map(|member| match member.disposition {
+            ProviderInputDisposition::Captured {
+                file_id, digest, ..
+            } if member.selected_for_provider => {
+                Some((file_id, (digest, member.relative_path.as_slice())))
+            }
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut actual = BTreeMap::new();
+    for module in &input.modules {
+        let file_id = decode_public_id(IdentityDomain::SourceFile, None, &module.file_id)
+            .map_err(|_| invalid())?;
+        let binding = job.context().module_for_file(file_id).ok_or_else(invalid)?;
+        // This opaque transport module handle is the source-file ID, not a semantic module ID.
+        if module.module_id != module.file_id
+            || module.module_name != binding.qualified_name
+            || actual.insert(file_id, &module.content_digest).is_some()
+            || expected.get(&file_id).is_none_or(|(digest, path)| {
+                module.content_digest != encoded_digest(*digest) || binding.relative_path != *path
+            })
+        {
+            return Err(invalid());
+        }
+    }
+    if actual.keys().ne(expected.keys()) {
+        return Err(invalid());
+    }
+    let changed = inventory
+        .members()
+        .iter()
+        .filter(|member| {
+            member.selected_for_provider
+                && inventory
+                    .changed_paths()
+                    .binary_search(&member.relative_path)
+                    .is_ok()
+        })
+        .filter_map(|member| match member.disposition {
+            ProviderInputDisposition::Captured { file_id, .. } => Some(file_id),
+            _ => None,
+        })
+        .map(|file_id| {
+            encode_public_id(IdentityDomain::SourceFile, None, file_id).map_err(|_| invalid())
+        })
+        .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
+    let supplied = input
+        .changed_module_ids
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    if supplied.len() != input.changed_module_ids.len() || changed != supplied {
+        return Err(invalid());
+    }
+    Ok(changed.into_iter().collect())
 }
 
 fn context_compatibility(
@@ -1000,7 +1166,7 @@ pub(crate) async fn analyze_pyrefly_uds(
     job: &ProviderJob,
     input: &PyreflyWorkspaceInput,
 ) -> Result<PyreflyProviderRunResult, PyreflyServiceError> {
-    let request = request_from_job(
+    let mut request = request_from_job(
         job,
         input,
         &process.sandbox_profile_digest,
@@ -1058,6 +1224,16 @@ pub(crate) async fn analyze_pyrefly_uds(
         };
     }
     let context_handle = expected_context_handle(&request);
+    request.expected_removed_module_ids = checker_removals(
+        process.local_module_inventory.as_ref().ok_or_else(|| {
+            PyreflyServiceError::Protocol(
+                "checker census was not reset after incompatible context closure".to_owned(),
+            )
+        })?,
+        &request.modules,
+    );
+    // A cancelled or failed run cannot leave guessed provider-local reuse authority.
+    process.local_module_inventory = None;
     process.compatibility = Some(compatibility);
     process.context_handle = Some(context_handle.clone());
     process.analysis_started.store(false, Ordering::Release);
@@ -1151,8 +1327,16 @@ pub(crate) async fn analyze_pyrefly_uds(
                     "Pyrefly sidecar returned a different native context handle",
                 );
             }
+            let result = PyreflyProviderRunResult::try_new(job, accepted)?;
+            process.local_module_inventory = Some(
+                request
+                    .modules
+                    .iter()
+                    .map(|module| module.module_id.clone())
+                    .collect(),
+            );
             process.completed_generations = process.completed_generations.saturating_add(1);
-            PyreflyProviderRunResult::try_new(job, accepted)
+            Ok(result)
         }
         Err(PyreflyServiceError::Cancelled) => {
             process.invalidate_and_join().await?;
@@ -1176,6 +1360,14 @@ pub(crate) async fn analyze_pyrefly_uds(
                 job,
                 ProviderUnknownCause::ProviderFailure,
                 "Pyrefly workspace sidecar failed before a valid terminal",
+            )
+        }
+        Err(PyreflyServiceError::PreparationUnavailable) => {
+            process.invalidate_and_join().await?;
+            PyreflyProviderRunResult::gap(
+                job,
+                ProviderUnknownCause::Unsupported,
+                "Selected Pyrefly context lacks proved bundle or root authority",
             )
         }
         Err(PyreflyServiceError::TrustUnavailable) => {
@@ -1209,8 +1401,7 @@ async fn analyze_pyrefly_uds_inner(
     cancellation_requested: Arc<AtomicBool>,
     analysis_started: Option<Arc<AtomicBool>>,
 ) -> Result<AcceptedPyreflyRun, PyreflyServiceError> {
-    if request.modules.is_empty()
-        || request.modules.len() > MAX_MODULES_PER_RUN
+    if request.modules.len() > MAX_MODULES_PER_RUN
         || request.provider_run_id.is_empty()
         || request.workspace_id.is_empty()
         || request.analysis_context_id.is_empty()
@@ -1269,7 +1460,7 @@ async fn analyze_pyrefly_uds_inner(
             sandbox_profile_digest: request.sandbox_profile_digest.clone(),
         })
         .await
-        .map_err(|error| PyreflyServiceError::Protocol(error.to_string()))?
+        .map_err(context_open_error)?
         .into_inner();
     if opened.context_handle.is_empty()
         || opened.context_manifest_digest != context_digest
@@ -1295,6 +1486,8 @@ async fn analyze_pyrefly_uds_inner(
         .collect();
     let start = AnalyzeCommand {
         command: Some(Command::Start(AnalyzeModulesRequest {
+            complete_inventory: true,
+            changed_module_ids: request.changed_module_ids.clone(),
             provider_run_id: request.provider_run_id.clone(),
             workspace_id: request.workspace_id.clone(),
             analysis_context_id: request.analysis_context_id.clone(),
@@ -1746,9 +1939,14 @@ async fn analyze_pyrefly_uds_inner(
                     pending.take();
                 }
                 let success_outcomes = event.capability_outcomes.iter().all(|outcome| {
-                    outcome.owner_capability_state_code == 40
-                        && outcome.completeness_state_code == 20
-                        && outcome.reason_code == "PYREFLY_QUERY_SLICE_PARTIAL"
+                    (request.modules.is_empty()
+                        && outcome.owner_capability_state_code == 10
+                        && outcome.completeness_state_code == 10
+                        && outcome.reason_code == "PYREFLY_EMPTY_SELECTED_INVENTORY")
+                        || (!request.modules.is_empty()
+                            && outcome.owner_capability_state_code == 40
+                            && outcome.completeness_state_code == 20
+                            && outcome.reason_code == "PYREFLY_QUERY_SLICE_PARTIAL")
                 });
                 let cancelled_outcomes = event.capability_outcomes.iter().all(|outcome| {
                     outcome.owner_capability_state_code == 30
@@ -1763,6 +1961,8 @@ async fn analyze_pyrefly_uds_inner(
                     || event.ordered_module_digests != ordered_module_digests
                     || event.overall_digest != expected_overall_digest
                     || !rechecked_scope_valid
+                    || (!accepted_cancellation
+                        && event.removed_module_ids != request.expected_removed_module_ids)
                     || event.sandbox_profile_digest != request.sandbox_profile_digest
                     || event.trust_profile != TRUST_PROFILE
                     || !((terminal_state == WireProviderRunState::Succeeded && success_outcomes)
@@ -1781,6 +1981,7 @@ async fn analyze_pyrefly_uds_inner(
                         .collect::<Vec<_>>(),
                     event.overall_digest,
                     event.rechecked_module_ids,
+                    event.removed_module_ids,
                     event.sandbox_profile_digest,
                     event.trust_profile,
                 ));
@@ -1814,6 +2015,7 @@ async fn analyze_pyrefly_uds_inner(
         capability_codes,
         overall_digest,
         rechecked_module_ids,
+        removed_module_ids,
         sandbox_profile_digest,
         trust_profile,
     ) = terminal
@@ -1844,6 +2046,7 @@ async fn analyze_pyrefly_uds_inner(
         capability_codes,
         overall_digest,
         rechecked_module_ids,
+        removed_module_ids,
         sandbox_profile_digest,
         trust_profile,
     })
@@ -1862,6 +2065,37 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
+
+    #[test]
+    fn pyrefly_preparation_unavailable_has_an_exact_typed_status() {
+        let detail = b"codefabric.pyrefly.preparation-unavailable.v1";
+        let status = Status::with_details(
+            tonic::Code::FailedPrecondition,
+            "missing captured bundle",
+            prost::bytes::Bytes::from_static(detail),
+        );
+        let error = context_open_error(status);
+        assert!(matches!(error, PyreflyServiceError::PreparationUnavailable));
+        assert_eq!(error.run_gap(), Some(PyreflyRunGap::PreparationUnavailable));
+        for status in [
+            Status::failed_precondition("codefabric.pyrefly.preparation-unavailable.v1"),
+            Status::with_details(
+                tonic::Code::Internal,
+                "missing captured bundle",
+                prost::bytes::Bytes::from_static(detail),
+            ),
+            Status::with_details(
+                tonic::Code::FailedPrecondition,
+                "missing captured bundle",
+                prost::bytes::Bytes::from_static(b"unknown-detail"),
+            ),
+        ] {
+            assert!(matches!(
+                context_open_error(status),
+                PyreflyServiceError::Protocol(_)
+            ));
+        }
+    }
     use crate::provider_contracts::{
         CancellationHandle, CancellationProbe, ContextIdentity, ProviderBuildIdentity,
         ProviderContextBinding, ProviderFamilyIdentity, ProviderFamilyRequest, ProviderIdentity,
@@ -1893,6 +2127,57 @@ mod tests {
         generation: u64,
         run_marker: u8,
     ) -> (ProviderJob, CancellationHandle) {
+        let inventory = crate::provider_contracts::ProviderSourceInventory::try_new(
+            [1; 16],
+            generation,
+            [2; 32],
+            &[b"module.py".to_vec()],
+            vec![crate::provider_contracts::ProviderInventoryMember {
+                relative_path: b"module.py".to_vec(),
+                disposition: crate::provider_contracts::ProviderInputDisposition::Captured {
+                    file_id: [4; 16],
+                    digest: *blake3::hash(b"value: int = 1\n").as_bytes(),
+                    byte_length: 15,
+                },
+                selected_for_provider: true,
+            }],
+            vec![b"module.py".to_vec()],
+            None,
+        )
+        .unwrap();
+        test_inventory_job(context_manifest, run_marker, inventory)
+    }
+
+    fn test_inventory_job(
+        context_manifest: &[u8],
+        run_marker: u8,
+        inventory: crate::provider_contracts::ProviderSourceInventory,
+    ) -> (ProviderJob, CancellationHandle) {
+        let generation = inventory.source_generation();
+        let requested_units = u64::try_from(inventory.selected_files().count()).unwrap();
+        let modules = inventory
+            .members()
+            .iter()
+            .filter(|member| member.selected_for_provider)
+            .map(|member| {
+                let crate::provider_contracts::ProviderInputDisposition::Captured {
+                    file_id, ..
+                } = member.disposition
+                else {
+                    unreachable!()
+                };
+                crate::provider_contracts::ProviderModuleBinding {
+                    file_id,
+                    qualified_name: Path::new(std::str::from_utf8(&member.relative_path).unwrap())
+                        .file_stem()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_owned(),
+                    relative_path: member.relative_path.clone(),
+                }
+            })
+            .collect();
         let (cancellation, probe) = CancellationProbe::pair(1).unwrap();
         let requests = PyreflyRelation::ALL
             .into_iter()
@@ -1911,7 +2196,7 @@ mod tests {
                     .unwrap(),
                     relation.schema(),
                     ProviderScopeIdentity::try_new("workspace:test").unwrap(),
-                    1,
+                    requested_units,
                 )
                 .unwrap()
             })
@@ -1937,18 +2222,18 @@ mod tests {
             suite: SuiteIdentity::try_new("codefabric-relational-data-fabric@2.3").unwrap(),
             provider: ProviderIdentity::try_new("pyrefly-python").unwrap(),
             protocol: ProviderProtocolIdentity::try_new("codefabric.pyrefly.provider.v1").unwrap(),
-            source: ProviderSourceBinding::try_new(
+            source: ProviderSourceBinding::from_inventory(
                 SourceIdentity::try_new(format!("source:{generation}")).unwrap(),
-                [1; 16],
-                generation,
-                [2; 32],
-            )
-            .unwrap(),
+                inventory,
+            ),
             context: ProviderContextBinding::try_new(
                 ContextIdentity::try_new("context:test").unwrap(),
+                [3; 16],
                 [3; 32],
                 *blake3::hash(context_manifest).as_bytes(),
             )
+            .unwrap()
+            .with_modules(modules)
             .unwrap(),
             run: ProviderRunBinding::try_new(
                 ProviderRunIdentity::try_new(format!("run:{run_marker}")).unwrap(),
@@ -1984,8 +2269,21 @@ mod tests {
             canonical_workspace_id: [1; 16],
             context_manifest: context_manifest.to_vec(),
             source_snapshot_lease_id: "lease:test".to_owned(),
+            changed_module_ids: vec![
+                crate::identity::encode_public_id(
+                    crate::identity::IdentityDomain::SourceFile,
+                    None,
+                    [4; 16],
+                )
+                .unwrap(),
+            ],
             modules: vec![PyreflyModuleInput {
-                module_id: "module:test".to_owned(),
+                module_id: crate::identity::encode_public_id(
+                    crate::identity::IdentityDomain::SourceFile,
+                    None,
+                    [4; 16],
+                )
+                .unwrap(),
                 module_name: "module".to_owned(),
                 file_id: crate::identity::encode_public_id(
                     crate::identity::IdentityDomain::SourceFile,
@@ -2123,6 +2421,7 @@ mod tests {
                     MalformedMode::MissingModuleEnd => {
                         events.push(AnalyzeEvent {
                             event: Some(MockEvent::RunTerminal(RunTerminal {
+                                removed_module_ids: Vec::new(),
                                 header: Some(header(3, start.source_generation)),
                                 ordered_module_digests: Vec::new(),
                                 capability_outcomes: start
@@ -2234,6 +2533,8 @@ mod tests {
         let source = root.join("module.py");
         std::fs::write(&source, b"value: int = 1\n").unwrap();
         PyreflyRunRequest {
+            changed_module_ids: vec!["module-malformed".to_owned()],
+            expected_removed_module_ids: Vec::new(),
             provider_run_id: "11111111111111111111111111111111".to_owned(),
             workspace_id: crate::identity::encode_public_id(
                 crate::identity::IdentityDomain::Workspace,
@@ -2378,6 +2679,107 @@ mod tests {
         assert!(status.success());
         child.0 = None;
         assert!(!socket.exists(), "joined sidecar must remove its UDS");
+    }
+
+    #[test]
+    fn pyrefly_complete_inventory_and_empty_withdrawal_contract() {
+        use crate::provider_contracts::{
+            ProviderPartitionAction, ProviderSourceInventory, ProviderSourceSelection,
+            admit_provider_result,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let manifest = b"{\"python\":\"3.14\"}";
+        let (job, _owner) = test_job(manifest, 7, 7);
+        let input = test_workspace_input(root.path(), manifest);
+        let sandbox = format!("sha256:{}", "11".repeat(32));
+        let request = request_from_job(&job, &input, &sandbox, Duration::from_secs(30)).unwrap();
+        assert_eq!(request.canonical_analysis_context_id, [3; 16]);
+        assert_eq!(request.changed_module_ids.len(), 1);
+        let previous_checker_modules = request
+            .modules
+            .iter()
+            .map(|module| module.module_id.clone())
+            .collect();
+        assert!(checker_removals(&previous_checker_modules, &request.modules).is_empty());
+        let mut invalid = input.clone();
+        invalid.modules.clear();
+        assert!(request_from_job(&job, &invalid, &sandbox, Duration::from_secs(30)).is_err());
+        let mut invalid = input.clone();
+        invalid.changed_module_ids.clear();
+        assert!(request_from_job(&job, &invalid, &sandbox, Duration::from_secs(30)).is_err());
+        invalid = input.clone();
+        invalid.modules[0].module_name = "wrong.qualified.name".to_owned();
+        assert!(request_from_job(&job, &invalid, &sandbox, Duration::from_secs(30)).is_err());
+        invalid = input.clone();
+        invalid.canonical_workspace_id = [4; 16];
+        assert!(request_from_job(&job, &invalid, &sandbox, Duration::from_secs(30)).is_err());
+
+        let ProviderSourceSelection::Inventory(previous) = job.source().selection() else {
+            unreachable!()
+        };
+        let empty = ProviderSourceInventory::try_new(
+            [1; 16],
+            8,
+            [8; 32],
+            &[],
+            vec![],
+            vec![],
+            Some(previous),
+        )
+        .unwrap();
+        let (deleted, _deleted_owner) = test_inventory_job(manifest, 8, empty);
+        let mut input = input;
+        input.modules.clear();
+        input.changed_module_ids.clear();
+        let request =
+            request_from_job(&deleted, &input, &sandbox, Duration::from_secs(30)).unwrap();
+        assert!(request.modules.is_empty());
+        assert!(
+            request.expected_removed_module_ids.is_empty(),
+            "a fresh checker has no local removals even though CPG partitions must withdraw"
+        );
+        assert_eq!(
+            checker_removals(&previous_checker_modules, &request.modules).len(),
+            1
+        );
+        let accepted = AcceptedPyreflyRun {
+            provider_run_id: request.provider_run_id,
+            workspace_id: request.workspace_id,
+            analysis_context_id: request.analysis_context_id,
+            canonical_workspace_id: request.canonical_workspace_id,
+            canonical_analysis_context_id: request.canonical_analysis_context_id,
+            source_generation: request.source_generation,
+            modules: vec![],
+            capability_codes: request.requested_capability_codes,
+            overall_digest: b3(b""),
+            rechecked_module_ids: vec![],
+            removed_module_ids: request.expected_removed_module_ids,
+            sandbox_profile_digest: sandbox,
+            trust_profile: TRUST_PROFILE.to_owned(),
+        };
+        let mut wrong_context = accepted.clone();
+        wrong_context.canonical_analysis_context_id = [99; 16];
+        assert!(PyreflyProviderRunResult::try_new(&deleted, wrong_context).is_err());
+        let empty_result = PyreflyProviderRunResult::try_new(&deleted, accepted).unwrap();
+        assert_eq!(
+            empty_result.result().relations().len(),
+            PyreflyRelation::ALL.len()
+        );
+        assert!(empty_result.result().relations().iter().all(|relation| {
+            relation.batches().iter().all(|batch| batch.num_rows() == 0)
+                && !relation.batches().is_empty()
+        }));
+        let admitted = admit_provider_result(deleted, empty_result.result().clone()).unwrap();
+        assert_eq!(
+            admitted
+                .result()
+                .support()
+                .partitions
+                .iter()
+                .filter(|support| support.partition.action == ProviderPartitionAction::Withdraw)
+                .count(),
+            PyreflyRelation::ALL.len()
+        );
     }
 
     #[test]

@@ -85,8 +85,9 @@ fn job(
         suite: SuiteIdentity::try_new("codefabric-relational-data-fabric@2.3.0").unwrap(),
         provider: ProviderIdentity::try_new(provider).unwrap(),
         protocol: ProviderProtocolIdentity::try_new("in-process-arrow@1").unwrap(),
-        source: ProviderSourceBinding::try_new(
+        source: ProviderSourceBinding::try_file(
             SourceIdentity::try_new("integration.source").unwrap(),
+            [6; 16],
             source.file_id,
             source.source_generation,
             source.content_digest,
@@ -135,9 +136,20 @@ fn isolated_fact_generation_executes_provider_jobs_to_arrow() {
     .unwrap();
     let context = ProviderContextBinding::try_new(
         ContextIdentity::try_new("integration.context").unwrap(),
+        [9; 16],
         [9; 32],
         [10; 32],
     )
+    .unwrap()
+    .with_python_version(3, 14)
+    .unwrap()
+    .with_modules(vec![
+        codefabric::provider_contracts::ProviderModuleBinding {
+            file_id: source.file_id,
+            qualified_name: "integration.module".to_owned(),
+            relative_path: b"integration/module.py".to_vec(),
+        },
+    ])
     .unwrap();
     let tree_job = job(ProviderLane::TreeSitter, &source, &context, 17);
     let ruff_job = job(ProviderLane::Ruff, &source, &context, 18);

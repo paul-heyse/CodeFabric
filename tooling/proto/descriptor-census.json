@@ -7545,6 +7545,32 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "completeInventory",
+              "label": "LABEL_OPTIONAL",
+              "name": "complete_inventory",
+              "number": 17,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BOOL",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "changedModuleIds",
+              "label": "LABEL_REPEATED",
+              "name": "changed_module_ids",
+              "number": 18,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.pyrefly.v1.AnalyzeModulesRequest",
@@ -8602,6 +8628,19 @@
               "label": "LABEL_OPTIONAL",
               "name": "trust_profile",
               "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "removedModuleIds",
+              "label": "LABEL_REPEATED",
+              "name": "removed_module_ids",
+              "number": 9,
               "oneof": null,
               "options": {},
               "proto3_optional": false,

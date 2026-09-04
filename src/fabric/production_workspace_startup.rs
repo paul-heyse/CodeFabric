@@ -95,30 +95,27 @@ use super::proof::{
 use super::published_arrow_result::PublishedArrowResultRegistry;
 use super::writer_generation_sqlite::SqliteWriterGenerationStore;
 use super::writer_lease::WorkspaceWriterLease;
-use crate::cancellation::Cancellation;
-use crate::inventory::{InclusionState, InventoryLimits, InventoryWalker};
 use crate::operational_store::OperationalStore;
 use crate::production_provider_recipe::{
     ExactProviderLaneAuthority, ProductionProviderAuthority, ProductionProviderRuns,
 };
 use crate::provider_admission::{ExactProviderLaneRuns, ProviderLaneGap};
 use crate::provider_contracts::{
-    CancellationProbe, ContextIdentity, ProviderContextBinding, ProviderContractError,
-    ProviderLane, ProviderResourceCeilingSpec, ProviderResourceCeilings, ProviderRunBinding,
-    ProviderRunIdentity, ProviderScopeIdentity, ProviderSourceBinding, SourceIdentity,
+    CancellationProbe, ProviderContractError, ProviderLane, ProviderResourceCeilingSpec,
+    ProviderResourceCeilings, ProviderRunBinding, ProviderRunIdentity, ProviderScopeIdentity,
+    ProviderSourceBinding, SourceIdentity,
 };
 use crate::provider_native_syntax::{
     ExactPythonSyntaxRunner, InProcessProviderJobs, ProviderNativeSourceImage,
     ProviderNativeSyntaxRun, PythonModuleInput,
 };
 use crate::relation_ipc::{ContextPin, SourcePin};
-use crate::secure_path::{PlatformPath, open_workspace_root};
 use crate::semantic_release::ProviderJobInput;
-use crate::source_image::{
-    CaptureOutcome, CaptureRequest, SourceBlobHolderKind, SourceCapturePolicy, SourceImageStore,
-    SourceLanguage, advance_source_generation, current_source_generation,
-};
+use crate::source_image::{SourceLanguage, advance_source_generation, current_source_generation};
 use crate::workspace_registry::WorkspaceRecord;
+
+mod input_observations;
+mod inputs;
 
 /// Joined owner retained by the daemon after one workspace reaches queryable authority.
 pub(crate) struct ProductionWorkspaceStartup {
@@ -455,82 +452,45 @@ async fn build_fresh_candidate(
         generation = advance_source_generation(&mut store, record.workspace_id, 0)
             .map_err(|error| step("source-generation-genesis", error))?;
     }
-    let root = open_workspace_root(&mut store, record.workspace_id)
-        .map_err(|error| step("workspace-root-open", error))?;
-    let inventory = InventoryWalker::new(InventoryLimits::default())
-        .walk_and_persist(&root, &mut store, generation, &Cancellation::default())
-        .map_err(|error| step("source-inventory", error))?;
+    drop(store);
+    let prepared_inputs =
+        inputs::capture_inputs(&workspace_root, operational_database, record, generation)?;
+    let inventory_digest = prepared_inputs.inventory.identity();
+    let context_product = inputs::discover_python_inputs(&prepared_inputs, record)?;
+    let prepared_context = inputs::provider_context(&context_product)?;
     let source_images = SourceImageSetRef::from_bytes(digest32(
         b"codefabric.source-image-set.v1\0",
         &[
             &record.workspace_id,
             &generation.to_be_bytes(),
-            &inventory.digest,
+            &inventory_digest,
         ],
     ));
-    let analysis_context = digest32(
-        b"codefabric.native-analysis-context.v1\0",
-        &[&record.context_fingerprint, &inventory.digest],
-    );
-    let semantic_environment = digest32(
-        b"codefabric.native-semantic-environment.v1\0",
-        &[
-            release.suite().as_str().as_bytes(),
-            &record.authorization_fingerprint,
-        ],
-    );
-    let mut image_store = SourceImageStore::open(
-        &workspace_root.join("source-blobs"),
-        SourceCapturePolicy::default(),
-    )
-    .map_err(|error| step("source-image-store", error))?;
+    let analysis_context = prepared_context.context_fingerprint();
+    let semantic_environment = prepared_context.semantic_environment_id();
     let mut sources = Vec::new();
     let mut module_paths = Vec::new();
-    for item in inventory.records.iter().filter(|item| {
-        item.language == Some("python") && item.inclusion == InclusionState::Included
-    }) {
-        let holder_id = digest16(
-            b"codefabric.provider-source-holder.v1\0",
-            &[
-                &item.path.raw_relative_path_bytes,
-                &generation.to_be_bytes(),
-            ],
+    for image in prepared_inputs
+        .capture()?
+        .images()
+        .iter()
+        .filter(|image| image.language == SourceLanguage::Python)
+    {
+        sources.push(
+            ProviderNativeSourceImage::try_from(image)
+                .map_err(|error| step("provider-source-image", error))?,
         );
-        let path = PlatformPath::from_raw_relative_bytes(
-            item.path.platform_code,
-            item.path.raw_relative_path_bytes.clone(),
-        )
-        .map_err(|error| step("source-path", error))?;
-        let request = CaptureRequest {
-            workspace_id: record.workspace_id,
-            source_generation: generation,
-            change_token: generation,
-            path,
-            language: SourceLanguage::Python,
-            holder_kind: SourceBlobHolderKind::ProviderRun,
-            holder_id,
-        };
-        if let CaptureOutcome::Published(image) = image_store
-            .capture(&mut store, &request)
-            .map_err(|error| step("source-image-capture", error))?
-        {
-            sources.push(
-                ProviderNativeSourceImage::try_from(image.as_ref())
-                    .map_err(|error| step("provider-source-image", error))?,
-            );
-            module_paths.push(PathBuf::from(OsString::from_vec(
-                item.path.raw_relative_path_bytes.clone(),
-            )));
-        }
+        module_paths.push(PathBuf::from(OsString::from_vec(
+            image.path.raw_relative_path_bytes.clone(),
+        )));
     }
-    drop(store);
 
     let epoch_id = EpochId::from_bytes(digest16(
         b"codefabric.fresh-activation.epoch.v1\0",
         &[
             &record.workspace_id,
             &generation.to_be_bytes(),
-            &inventory.digest,
+            &inventory_digest,
         ],
     ));
     let builder =
@@ -539,39 +499,42 @@ async fn build_fresh_candidate(
     let mut runner =
         ExactPythonSyntaxRunner::new().map_err(|error| step("native-provider-open", error))?;
     let mut native_runs = Vec::with_capacity(sources.len());
+    let mut admitted_runs = Vec::with_capacity(sources.len().saturating_mul(2));
     for (index, (source, module_path)) in sources.iter().zip(&module_paths).enumerate() {
         let revision =
             u64::try_from(index + 1).map_err(|error| step("native-provider-revision", error))?;
         let tree_run = digest16(
             b"codefabric.tree-sitter-provider-run.v1\0",
-            &[&source.file_id, &revision.to_be_bytes()],
+            &[
+                &source.file_id,
+                &revision.to_be_bytes(),
+                &inventory_digest,
+                &prepared_context.effective_input_identity(),
+            ],
         );
         let ruff_run = digest16(
             b"codefabric.ruff-provider-run.v1\0",
-            &[&source.file_id, &revision.to_be_bytes()],
+            &[
+                &source.file_id,
+                &revision.to_be_bytes(),
+                &inventory_digest,
+                &prepared_context.effective_input_identity(),
+            ],
         );
-        let source_binding = ProviderSourceBinding::try_new(
+        let source_binding = ProviderSourceBinding::try_file(
             SourceIdentity::try_new(format!(
                 "codefabric.source.{}.{}",
                 lower_hex(&source.file_id),
                 source.source_generation
             ))
             .map_err(|error| step("provider-source-identity", error))?,
+            record.workspace_id,
             source.file_id,
             source.source_generation,
             source.content_digest,
         )
         .map_err(|error| step("provider-source-binding", error))?;
-        let context_binding = ProviderContextBinding::try_new(
-            ContextIdentity::try_new(format!(
-                "codefabric.context.{}",
-                lower_hex(&analysis_context)
-            ))
-            .map_err(|error| step("provider-context-identity", error))?,
-            analysis_context,
-            semantic_environment,
-        )
-        .map_err(|error| step("provider-context-binding", error))?;
+        let context_binding = prepared_context.clone();
         let scope = ProviderScopeIdentity::try_new(format!(
             "codefabric.source-scope.{}",
             lower_hex(&source.file_id)
@@ -648,33 +611,45 @@ async fn build_fresh_candidate(
             .map_err(|error| step("ruff-job", error))?;
         let jobs = InProcessProviderJobs::try_new(tree_prepared.job(), ruff_prepared.job())
             .map_err(|error| step("in-process-provider-jobs", error))?;
-        let module_name = format!("codefabric_source_{}", lower_hex(&source.file_id));
+        let module_name = &prepared_context
+            .module_for_file(source.file_id)
+            .ok_or_else(|| {
+                step(
+                    "effective-module-map",
+                    "selected source has no qualified module mapping",
+                )
+            })?
+            .qualified_name;
         let run = runner
             .run_full(
                 jobs,
                 revision,
                 source,
                 PythonModuleInput {
-                    module_name: &module_name,
+                    module_name,
                     module_path,
                 },
             )
             .map_err(|error| step("native-provider-run", error))?;
-        release
-            .providers()
-            .admit(tree_prepared, run.tree_sitter_result().clone())
-            .map_err(|error| step("tree-sitter-admission", error))?;
-        release
-            .providers()
-            .admit(ruff_prepared, run.ruff_result().clone())
-            .map_err(|error| step("ruff-admission", error))?;
+        admitted_runs.push(
+            release
+                .providers()
+                .admit(tree_prepared, run.tree_sitter_result().clone())
+                .map_err(|error| step("tree-sitter-admission", error))?,
+        );
+        admitted_runs.push(
+            release
+                .providers()
+                .admit(ruff_prepared, run.ruff_result().clone())
+                .map_err(|error| step("ruff-admission", error))?,
+        );
         native_runs.push(run);
     }
     let native_pin = native_source_pin(&native_runs, &sources);
     let requested_native = u64::try_from(native_runs.len()).unwrap_or(u64::MAX).max(1);
     let external_source_pin = SourcePin(digest32(
         b"codefabric.external-provider-source.v1\0",
-        &[&record.workspace_id, &inventory.digest],
+        &[&record.workspace_id, &inventory_digest],
     ));
     let external_context_pin = ContextPin(digest32(
         b"codefabric.external-provider-context.v1\0",
@@ -711,7 +686,14 @@ async fn build_fresh_candidate(
         )
         .map_err(|error| step("provider-derived-composition", error))?;
     let (derived, _) = outcome.into_parts();
-    let (builder, _, _) = derived.into_parts();
+    let (mut builder, _, _) = derived.into_parts();
+    input_observations::install_input_observations(
+        &mut builder,
+        &prepared_inputs.inventory,
+        &admitted_runs,
+    )?;
+    // Registered batches own their buffers; source leases are no longer needed after providers join.
+    prepared_inputs.release()?;
     let observation_root = workspace_root
         .join("epochs")
         .join(lower_hex(epoch_id.as_bytes()))
@@ -723,7 +705,7 @@ async fn build_fresh_candidate(
         .map_err(|error| step("observation-history-provision", error))?;
     let activation_operation = OperationId::from_bytes(digest16(
         b"codefabric.fresh-activation.operation.v1\0",
-        &[epoch_id.as_bytes(), &inventory.digest],
+        &[epoch_id.as_bytes(), &inventory_digest],
     ));
     let transaction = TransactionRef::from_bytes(digest32(
         b"codefabric.fresh-activation.transaction.v1\0",
@@ -771,7 +753,7 @@ async fn build_fresh_candidate(
     ));
     let application_release =
         ApplicationReleaseRef::from_bytes(compiled_query_release_pin(release));
-    let source_authority = SourceAuthorityRef::from_bytes(inventory.digest);
+    let source_authority = SourceAuthorityRef::from_bytes(inventory_digest);
     let provider_release = ProviderReleaseRef::from_bytes(digest32(
         b"codefabric.provider-release.v1\0",
         &[release.suite().as_str().as_bytes()],

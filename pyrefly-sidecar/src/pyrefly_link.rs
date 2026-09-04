@@ -12,7 +12,6 @@ use arrow_array::{ArrayRef, BooleanArray, RecordBatch, StringArray, UInt64Array}
 use arrow_ipc::MetadataVersion;
 use arrow_ipc::writer::{IpcWriteOptions, StreamWriter};
 use pyrefly::query::{IndexedTypeShapeKind, Query, TypeShapeTrait, TypeTableResponseData};
-use pyrefly_config::config::{ConfigFile, ConfigSource};
 use pyrefly_config::finder::ConfigFinder;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
@@ -26,6 +25,9 @@ mod relation_schema;
 
 use relation_schema::{PYREFLY_RELEASE, PYREFLY_REVISION};
 pub(crate) use relation_schema::{PyreflyRelation, schema_bundle_digest, schema_digests};
+
+pub(crate) mod preparation;
+use preparation::SelectedPyreflyPreparation;
 
 const MAX_RELATION_ROWS: usize = 1_000_000;
 const MAX_RELATION_IPC_BYTES: usize = 16 * 1024 * 1024;
@@ -52,6 +54,53 @@ pub(crate) struct ModuleInput {
     pub source_digest: String,
 }
 
+/// Complete selected modules, distinct from optional changed-work hints.
+pub(crate) struct CompleteModuleInventory {
+    modules: Vec<ModuleInput>,
+}
+
+impl CompleteModuleInventory {
+    pub(crate) fn try_new(
+        modules: Vec<ModuleInput>,
+        changed_module_ids: &[String],
+    ) -> Result<Self, String> {
+        Self::validate_scope(
+            modules
+                .iter()
+                .map(|module| (module.module_id.as_str(), module.module_name.as_str())),
+            changed_module_ids,
+        )?;
+        // Query does not expose a sound affected set. Until that seam is proved, validated
+        // hints never narrow the conservative full selected-module recomputation.
+        Ok(Self { modules })
+    }
+
+    pub(crate) fn validate_scope<'a>(
+        modules: impl IntoIterator<Item = (&'a str, &'a str)>,
+        changed_module_ids: &[String],
+    ) -> Result<(), String> {
+        let mut ids = BTreeSet::new();
+        let mut names = BTreeSet::new();
+        for (id, name) in modules {
+            if id.is_empty() || name.is_empty() || !ids.insert(id) || !names.insert(name) {
+                return Err(
+                    "Pyrefly complete inventory contains empty or duplicate identities".to_owned(),
+                );
+            }
+        }
+        let mut changed = BTreeSet::new();
+        for id in changed_module_ids {
+            if !ids.contains(id.as_str()) || !changed.insert(id.as_str()) {
+                return Err(
+                    "Pyrefly changed work is not a unique subset of the complete inventory"
+                        .to_owned(),
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct AnalysisRunIdentity {
     pub provider_run_id: String,
@@ -62,6 +111,7 @@ pub(crate) struct AnalysisRunIdentity {
 
 pub(crate) struct ContextAnalysis {
     pub modules: Vec<ModuleAnalysis>,
+    pub removed_module_ids: Vec<String>,
     /// Query 1.2.0 does not expose the actual affected/rechecked set.
     pub proven_rechecked_module_ids: Vec<String>,
 }
@@ -73,12 +123,14 @@ struct ProviderView {
 struct LoadedModule {
     module_id: String,
     source_digest: String,
+    provider_path: PathBuf,
 }
 
 /// One long-lived Pyrefly state per negotiated analysis context.
 pub(crate) struct SemanticContext {
     view: ProviderView,
     query: Query,
+    preparation: SelectedPyreflyPreparation,
     loaded: BTreeMap<String, LoadedModule>,
     completed_generations: u64,
     peak_loaded_modules: usize,
@@ -178,6 +230,7 @@ struct CoverageRow {
     unknown: bool,
 }
 
+#[cfg(test)]
 fn provider_module_path(root: &Path, module_name: &str) -> Result<PathBuf, String> {
     let components = module_name.split('.').collect::<Vec<_>>();
     if components.is_empty()
@@ -258,18 +311,16 @@ fn normalize_diagnostic(text: &str, source_path: &Path, module_id: &str) -> Stri
 }
 
 pub(crate) fn query_surface_smoke() -> usize {
-    let mut config = ConfigFile::default();
-    config.python_environment.set_empty_to_default();
-    config.configure();
-    let query = Query::new(
-        ConfigFinder::new_constant(ArcId::new(config)),
-        ThreadCount::Inline,
-    );
-    size_of_val(&query)
+    // Linkage/shape only; this is not permission to create a default semantic context.
+    size_of::<Query>()
 }
 
 impl SemanticContext {
-    pub(crate) fn new(state_root: &Path, context_key: &str) -> Result<Self, String> {
+    pub(crate) fn new(
+        state_root: &Path,
+        context_key: &str,
+        preparation: SelectedPyreflyPreparation,
+    ) -> Result<Self, String> {
         if !state_root.is_absolute() || context_key.is_empty() {
             return Err("Pyrefly context state root or key is invalid".to_owned());
         }
@@ -282,36 +333,34 @@ impl SemanticContext {
         }
         std::fs::create_dir(&root)
             .map_err(|error| format!("create Pyrefly provider view: {error}"))?;
-        let mut config = ConfigFile {
-            source: ConfigSource::File(root.join(ConfigFile::PYREFLY_FILE_NAME)),
-            enable_fallback_search_path: true,
-            ..ConfigFile::default()
-        };
-        config.python_environment.set_empty_to_default();
-        config.interpreters.skip_interpreter_query = true;
-        config.configure();
-        let query = Query::new(
-            ConfigFinder::new_constant(ArcId::new(config)),
-            ThreadCount::Inline,
-        );
+        let view = ProviderView { root };
+        let query = query_for_root(&view.root, &preparation)?;
         Ok(Self {
-            view: ProviderView { root },
+            view,
             query,
+            preparation,
             loaded: BTreeMap::new(),
             completed_generations: 0,
             peak_loaded_modules: 0,
         })
     }
 
+    #[cfg(test)]
+    fn test_only_fixture(state_root: &Path, context_key: &str) -> Result<Self, String> {
+        Self::new(
+            state_root,
+            context_key,
+            SelectedPyreflyPreparation::test_only_protocol_fixture(),
+        )
+    }
+
     #[allow(clippy::too_many_lines)] // Native incremental change classification and exact result projection stay adjacent.
     pub(crate) fn analyze_modules(
         &mut self,
         run: &AnalysisRunIdentity,
-        modules: &[ModuleInput],
+        inventory: &CompleteModuleInventory,
     ) -> Result<ContextAnalysis, String> {
-        if modules.is_empty() {
-            return Err("Pyrefly analysis requires at least one module".to_owned());
-        }
+        let modules = &inventory.modules;
         parse_digest(&run.semantic_environment_digest)?;
         if run.provider_run_id.is_empty() || run.analysis_context_id.is_empty() {
             return Err("Pyrefly run identity is incomplete".to_owned());
@@ -329,6 +378,12 @@ impl SemanticContext {
             );
         }
 
+        // Resolve the complete selected module map before any retained-state mutation.
+        let provider_paths = modules
+            .iter()
+            .map(|module| self.preparation.module_path(&self.view.root, module))
+            .collect::<Result<Vec<_>, _>>()?;
+
         let requested_names = modules
             .iter()
             .map(|module| module.module_name.as_str())
@@ -340,26 +395,36 @@ impl SemanticContext {
             .cloned()
             .collect::<Vec<_>>();
         let mut removed = Vec::with_capacity(removed_names.len());
+        let mut removed_module_ids = Vec::with_capacity(removed_names.len());
         for name in removed_names {
-            let target = provider_module_path(&self.view.root, &name)?;
+            let target = self.loaded.get(&name).unwrap().provider_path.clone();
             match std::fs::remove_file(&target) {
                 Ok(()) => removed.push(target),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(format!("remove stale Pyrefly provider source: {error}")),
             }
-            self.loaded.remove(&name);
+            if let Some(module) = self.loaded.remove(&name) {
+                removed_module_ids.push(module.module_id);
+            }
+        }
+        removed_module_ids.sort();
+        if !removed_module_ids.is_empty() {
+            // Query::change_files re-adds every private retained handle and exposes no
+            // remove-files method. Retire that exact checker state, including its cache,
+            // before installing the remaining full inventory. Do not resurrect deleted names.
+            self.query = query_for_root(&self.view.root, &self.preparation)?;
         }
 
         let mut created = Vec::new();
         let mut modified = Vec::new();
         let mut resolved = Vec::with_capacity(modules.len());
-        let mut provider_paths = Vec::with_capacity(modules.len());
-        for module in modules {
-            let target = provider_module_path(&self.view.root, &module.module_name)?;
+        for (module, target) in modules.iter().zip(&provider_paths) {
             let bytes = std::fs::read(&module.source_path)
                 .map_err(|error| format!("read admitted Pyrefly source: {error}"))?;
             match self.loaded.get(&module.module_name) {
-                Some(loaded) if loaded.module_id != module.module_id => {
+                Some(loaded)
+                    if loaded.module_id != module.module_id || loaded.provider_path != *target =>
+                {
                     return Err(format!(
                         "Pyrefly module identity changed for {}",
                         module.module_name
@@ -367,11 +432,11 @@ impl SemanticContext {
                 }
                 Some(loaded) if loaded.source_digest == module.source_digest => {}
                 Some(_) => {
-                    write_provider_source(&target, &bytes)?;
+                    write_provider_source(target, &bytes)?;
                     modified.push(target.clone());
                 }
                 None => {
-                    write_provider_source(&target, &bytes)?;
+                    write_provider_source(target, &bytes)?;
                     created.push(target.clone());
                 }
             }
@@ -380,13 +445,13 @@ impl SemanticContext {
                 LoadedModule {
                     module_id: module.module_id.clone(),
                     source_digest: module.source_digest.clone(),
+                    provider_path: target.clone(),
                 },
             );
             resolved.push((
                 ModuleName::from_str(&module.module_name),
                 ModulePath::filesystem(target.clone()),
             ));
-            provider_paths.push(target);
         }
 
         let events = CategorizedEvents {
@@ -422,6 +487,7 @@ impl SemanticContext {
         self.peak_loaded_modules = self.peak_loaded_modules.max(self.loaded.len());
         Ok(ContextAnalysis {
             modules: analyses,
+            removed_module_ids,
             // `change_files` and `add_files` do not return the actual affected set. Returning
             // requested modules here would falsely claim recheck evidence.
             proven_rechecked_module_ids: Vec::new(),
@@ -436,6 +502,14 @@ impl SemanticContext {
             self.peak_loaded_modules,
         )
     }
+}
+
+fn query_for_root(root: &Path, preparation: &SelectedPyreflyPreparation) -> Result<Query, String> {
+    let config = preparation.config_for_root(root)?;
+    Ok(Query::new(
+        ConfigFinder::new_constant(ArcId::new(config)),
+        ThreadCount::Inline,
+    ))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1273,6 +1347,278 @@ mod tests {
     const WP33_FIXTURES: &str =
         include_str!("../../contracts/acceptance/relational-fabric-v3/negative-fixtures.jsonl");
 
+    fn complete<const N: usize>(modules: [ModuleInput; N]) -> CompleteModuleInventory {
+        CompleteModuleInventory::try_new(modules.into(), &[]).unwrap()
+    }
+
+    fn inventory_module(root: &Path, name: &str, source: &[u8]) -> ModuleInput {
+        let source_path = root.join(format!("admitted_{name}.py"));
+        std::fs::write(&source_path, source).unwrap();
+        ModuleInput {
+            module_id: format!("module:{name}"),
+            module_name: name.to_owned(),
+            file_id: format!("file:{name}"),
+            source_path,
+            source_digest: b3(source),
+        }
+    }
+
+    fn inventory_run(generation: u64) -> AnalysisRunIdentity {
+        AnalysisRunIdentity {
+            provider_run_id: format!("run:inventory:{generation}"),
+            analysis_context_id: "context:inventory".to_owned(),
+            semantic_environment_digest: b3(b"environment:inventory"),
+            source_generation: generation,
+        }
+    }
+
+    fn inventory_call_targets(module: &ModuleAnalysis) -> Vec<String> {
+        let relation = module
+            .relations
+            .iter()
+            .find(|relation| relation.relation == PyreflyRelation::CallTarget)
+            .unwrap();
+        let reader = StreamReader::try_new(Cursor::new(&relation.arrow_ipc), None).unwrap();
+        reader
+            .flat_map(|batch| {
+                let batch = batch.unwrap();
+                let targets = batch
+                    .column_by_name("qualified_target")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                targets
+                    .iter()
+                    .map(|value| value.unwrap().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    fn selected_fixture_manifest(version: &str, platform: &str) -> serde_json::Value {
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&preparation::test_manifest(version, platform)).unwrap();
+        manifest["root_bindings"] =
+            serde_json::json!([{"root_id": "workspace", "relative_path": b"src".as_slice()}]);
+        manifest["module_map"] = serde_json::json!([{
+            "module_name": "main", "file_id": "file:main", "relative_path": b"src/main.py".as_slice(),
+            "root_id": "workspace", "is_stub": false, "is_package": false
+        }]);
+        manifest
+    }
+
+    #[test]
+    fn selected_python_runtime_rejects_unsupported_and_retains_explicit_selection() {
+        let source = b"import sys\ndef previous() -> int:\n    return 1\ndef current_linux() -> str:\n    return 'linux'\ndef current_darwin() -> bool:\n    return True\nif sys.version_info < (3, 14):\n    selected = previous\nelif sys.platform == 'darwin':\n    selected = current_darwin\nelse:\n    selected = current_linux\nvalue = selected()\n";
+        for (version, platform, expected) in [
+            ("3.13", "linux", "main.previous"),
+            ("3.14", "linux", "main.current_linux"),
+            ("3.13", "darwin", "main.previous"),
+            ("3.14", "darwin", "main.current_darwin"),
+        ] {
+            let root = claim_001_temp_root(&format!("selected-{version}-{platform}"));
+            std::fs::create_dir_all(&root).unwrap();
+            let manifest = selected_fixture_manifest(version, platform);
+            let preparation = SelectedPyreflyPreparation::test_only_from_manifest(
+                &serde_json::to_vec(&manifest).unwrap(),
+            );
+            if version != "3.13" || platform != "linux" {
+                assert!(
+                    matches!(preparation, Err(preparation::PreparationError::Unavailable(ref reasons)) if reasons.contains(&preparation::PreparationRemainder::QueryRuntimeSelectionUnavailable))
+                );
+                assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+                std::fs::remove_dir_all(root).unwrap();
+                continue;
+            }
+            let preparation = preparation.unwrap();
+            let mut context = SemanticContext::new(&root, "selected-context", preparation).unwrap();
+            let module = inventory_module(&root, "main", source);
+            let first = context
+                .analyze_modules(&inventory_run(1), &complete([module.clone()]))
+                .unwrap();
+            assert_eq!(inventory_call_targets(&first.modules[0]), [expected]);
+            assert!(context.view.root.join("src/main.py").is_file());
+            assert!(!context.view.root.join("main.py").exists());
+            let deleted = context
+                .analyze_modules(&inventory_run(2), &complete([]))
+                .unwrap();
+            assert_eq!(deleted.removed_module_ids, ["module:main"]);
+            let recreated = context
+                .analyze_modules(&inventory_run(3), &complete([module]))
+                .unwrap();
+            assert_eq!(inventory_call_targets(&recreated.modules[0]), [expected]);
+            drop(context);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn selected_ordered_source_roots_causally_choose_import_resolution() {
+        for (first, second, expected) in [
+            ("first", "second", "helper.first_choice"),
+            ("second", "first", "helper.second_choice"),
+        ] {
+            let root = claim_001_temp_root(&format!("selected-roots-{first}"));
+            std::fs::create_dir_all(&root).unwrap();
+            let mut manifest = selected_fixture_manifest("3.13", "linux");
+            manifest["source_roots"] = serde_json::json!([first, second]);
+            manifest["root_bindings"].as_array_mut().unwrap().extend([
+                serde_json::json!({"root_id": "first", "relative_path": b"first".as_slice()}),
+                serde_json::json!({"root_id": "second", "relative_path": b"second".as_slice()}),
+            ]);
+            let preparation = SelectedPyreflyPreparation::test_only_from_manifest(
+                &serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+            let mut context = SemanticContext::new(&root, "selected-roots", preparation).unwrap();
+            // Explicit test authority supplies the root content; production root leases
+            // remain unavailable until the retained source installation packet.
+            std::fs::write(
+                context.view.root.join("first/helper.py"),
+                b"def first_choice() -> int:\n    return 1\nselected = first_choice\n",
+            )
+            .unwrap();
+            std::fs::write(
+                context.view.root.join("second/helper.py"),
+                b"def second_choice() -> str:\n    return 'x'\nselected = second_choice\n",
+            )
+            .unwrap();
+            let result = context
+                .analyze_modules(
+                    &inventory_run(1),
+                    &complete([inventory_module(
+                        &root,
+                        "main",
+                        b"from helper import selected\nvalue = selected()\n",
+                    )]),
+                )
+                .unwrap();
+            assert_eq!(inventory_call_targets(&result.modules[0]), [expected]);
+            drop(context);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn pyrefly_complete_inventory_preserves_unchanged_modules() {
+        let root = claim_001_temp_root("complete-inventory");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut context = SemanticContext::test_only_fixture(&root, "complete-inventory").unwrap();
+        let before = b"def first() -> int:\n    return 1\ndef second() -> str:\n    return 'x'\nvalue = first()\n";
+        let after = b"def first() -> int:\n    return 1\ndef second() -> str:\n    return 'x'\nvalue = second()\n";
+        let unchanged = b"def keep() -> bool:\n    return True\nvalue = keep()\n";
+        let first = inventory_module(&root, "a", before);
+        let second = inventory_module(&root, "b", unchanged);
+        let baseline = context
+            .analyze_modules(&inventory_run(1), &complete([first, second.clone()]))
+            .unwrap();
+        assert_eq!(inventory_call_targets(&baseline.modules[0]), ["a.first"]);
+        assert_eq!(inventory_call_targets(&baseline.modules[1]), ["b.keep"]);
+        let changed = CompleteModuleInventory::try_new(
+            vec![inventory_module(&root, "a", after), second],
+            &["module:a".to_owned()],
+        )
+        .unwrap();
+        let result = context
+            .analyze_modules(&inventory_run(2), &changed)
+            .unwrap();
+        assert_eq!(result.modules.len(), 2);
+        assert_eq!(inventory_call_targets(&result.modules[0]), ["a.second"]);
+        assert_eq!(inventory_call_targets(&result.modules[1]), ["b.keep"]);
+        assert!(result.removed_module_ids.is_empty());
+        assert!(
+            result.proven_rechecked_module_ids.is_empty(),
+            "requested modules are not actual affected-set evidence"
+        );
+        assert_eq!(
+            context
+                .loaded
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert_eq!(
+            std::fs::read(provider_module_path(&context.view.root, "b").unwrap()).unwrap(),
+            unchanged
+        );
+        assert_eq!(context.lifecycle_observation(), (2, 2, 2));
+        drop(context);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pyrefly_complete_inventory_deletes_last_and_recreates_without_stale_handles() {
+        let root = claim_001_temp_root("empty-inventory");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut context = SemanticContext::test_only_fixture(&root, "empty-inventory").unwrap();
+        let first = inventory_module(
+            &root,
+            "gone",
+            b"def old() -> int:\n    return 1\nvalue = old()\n",
+        );
+        let baseline = context
+            .analyze_modules(&inventory_run(1), &complete([first]))
+            .unwrap();
+        assert_eq!(inventory_call_targets(&baseline.modules[0]), ["gone.old"]);
+        let empty = context
+            .analyze_modules(&inventory_run(2), &complete([]))
+            .unwrap();
+        assert!(empty.modules.is_empty());
+        assert_eq!(empty.removed_module_ids, ["module:gone"]);
+        assert!(empty.proven_rechecked_module_ids.is_empty());
+        assert!(context.loaded.is_empty());
+        assert!(
+            !provider_module_path(&context.view.root, "gone")
+                .unwrap()
+                .exists()
+        );
+        let again = context
+            .analyze_modules(&inventory_run(3), &complete([]))
+            .unwrap();
+        assert!(again.modules.is_empty());
+        assert!(again.removed_module_ids.is_empty());
+        let recreated = inventory_module(
+            &root,
+            "gone",
+            b"def fresh() -> str:\n    return 'new'\nvalue = fresh()\n",
+        );
+        let recreated = context
+            .analyze_modules(&inventory_run(4), &complete([recreated]))
+            .unwrap();
+        assert_eq!(
+            inventory_call_targets(&recreated.modules[0]),
+            ["gone.fresh"]
+        );
+        assert!(recreated.removed_module_ids.is_empty());
+        assert_eq!(context.lifecycle_observation(), (4, 1, 1));
+        drop(context);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pyrefly_complete_inventory_rejects_duplicate_and_missing_changed_scope() {
+        let root = claim_001_temp_root("invalid-inventory");
+        std::fs::create_dir_all(&root).unwrap();
+        let module = inventory_module(&root, "a", b"pass\n");
+        assert!(
+            CompleteModuleInventory::try_new(vec![module.clone(), module.clone()], &[]).is_err()
+        );
+        assert!(
+            CompleteModuleInventory::try_new(vec![module.clone()], &["absent".to_owned()]).is_err()
+        );
+        assert!(
+            CompleteModuleInventory::try_new(
+                vec![module],
+                &["module:a".to_owned(), "module:a".to_owned()]
+            )
+            .is_err()
+        );
+        assert!(CompleteModuleInventory::try_new(vec![], &["module:a".to_owned()]).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     fn claim_001() -> Value {
         WP33_EXPECTATIONS
             .lines()
@@ -1342,7 +1688,7 @@ mod tests {
                 .to_owned(),
         };
         let analysis = context
-            .analyze_modules(&run, &[module])
+            .analyze_modules(&run, &complete([module]))
             .expect("execute production Pyrefly query surface");
         let relation = analysis.modules[0]
             .relations
@@ -1430,7 +1776,7 @@ mod tests {
             .expect("Claim 001 requested source image")
     }
 
-    fn claim_001_temp_root(suffix: &str) -> PathBuf {
+    pub(super) fn claim_001_temp_root(suffix: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "codefabric-wp38-claim-001-{suffix}-{}",
             std::process::id()
@@ -1453,7 +1799,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("create Claim 001 positive root");
         let admitted_path = root.join("admitted.py");
-        let mut context = SemanticContext::new(&root, "wp38-claim-001-positive")
+        let mut context = SemanticContext::test_only_fixture(&root, "wp38-claim-001-positive")
             .expect("create production Pyrefly context");
         let batch = analyze_claim_001_source(&mut context, &admitted_path, source, request);
 
@@ -1482,7 +1828,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("create Claim 001 causal root");
         let admitted_path = root.join("admitted.py");
-        let mut context = SemanticContext::new(&root, "wp38-claim-001-causal")
+        let mut context = SemanticContext::test_only_fixture(&root, "wp38-claim-001-causal")
             .expect("create production Pyrefly context");
         let baseline = analyze_claim_001_source(&mut context, &admitted_path, before, request);
         let changed = analyze_claim_001_source(&mut context, &admitted_path, after, request);
@@ -1530,13 +1876,14 @@ mod tests {
         };
 
         std::fs::write(&source_path, before).unwrap();
-        let mut incremental = SemanticContext::new(&root, "incremental-context").unwrap();
+        let mut incremental =
+            SemanticContext::test_only_fixture(&root, "incremental-context").unwrap();
         let baseline = incremental
-            .analyze_modules(&run_for(1), &[module_for(before)])
+            .analyze_modules(&run_for(1), &complete([module_for(before)]))
             .unwrap();
         std::fs::write(&source_path, after).unwrap();
         let changed = incremental
-            .analyze_modules(&run_for(2), &[module_for(after)])
+            .analyze_modules(&run_for(2), &complete([module_for(after)]))
             .unwrap();
         assert_ne!(
             baseline.modules[0].module_digest,
@@ -1544,9 +1891,10 @@ mod tests {
         );
         assert_eq!(incremental.lifecycle_observation(), (2, 1, 1));
 
-        let mut clean = SemanticContext::new(&root, "clean-equivalent-context").unwrap();
+        let mut clean =
+            SemanticContext::test_only_fixture(&root, "clean-equivalent-context").unwrap();
         let clean_changed = clean
-            .analyze_modules(&run_for(2), &[module_for(after)])
+            .analyze_modules(&run_for(2), &complete([module_for(after)]))
             .unwrap();
         assert_eq!(
             changed.modules[0].module_digest,
@@ -1607,10 +1955,11 @@ mod tests {
 
         let first = source_for(1);
         std::fs::write(&source_path, &first).unwrap();
-        let mut retained = SemanticContext::new(&root, "wp65-retained-context").unwrap();
+        let mut retained =
+            SemanticContext::test_only_fixture(&root, "wp65-retained-context").unwrap();
         let initial_started = std::time::Instant::now();
         retained
-            .analyze_modules(&run_for(1), &[module_for(&first)])
+            .analyze_modules(&run_for(1), &complete([module_for(&first)]))
             .unwrap();
         let initial_millis = initial_started.elapsed().as_secs_f64() * 1_000.0;
 
@@ -1622,16 +1971,16 @@ mod tests {
             std::fs::write(&source_path, &source).unwrap();
             let started = std::time::Instant::now();
             let analysis = retained
-                .analyze_modules(&run_for(generation), &[module_for(&source)])
+                .analyze_modules(&run_for(generation), &complete([module_for(&source)]))
                 .unwrap();
             change_files_millis.push(started.elapsed().as_secs_f64() * 1_000.0);
             final_analysis = Some(analysis);
             final_source = source;
         }
         let final_analysis = final_analysis.unwrap();
-        let mut clean = SemanticContext::new(&root, "wp65-clean-context").unwrap();
+        let mut clean = SemanticContext::test_only_fixture(&root, "wp65-clean-context").unwrap();
         let clean_analysis = clean
-            .analyze_modules(&run_for(9), &[module_for(&final_source)])
+            .analyze_modules(&run_for(9), &complete([module_for(&final_source)]))
             .unwrap();
         assert_eq!(
             final_analysis.modules[0]
@@ -1724,8 +2073,8 @@ mod tests {
             source_path,
             source_digest: b3(source),
         };
-        let mut context = SemanticContext::new(&root, "fixture-context").unwrap();
-        let result = context.analyze_modules(&run, &[module]).unwrap();
+        let mut context = SemanticContext::test_only_fixture(&root, "fixture-context").unwrap();
+        let result = context.analyze_modules(&run, &complete([module])).unwrap();
         assert!(result.proven_rechecked_module_ids.is_empty());
         let module = &result.modules[0];
         assert_eq!(module.relations.len(), PyreflyRelation::ALL.len());

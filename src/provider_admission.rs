@@ -303,10 +303,14 @@ impl AcceptedProviderRelationSet {
         })?;
         let context_pin =
             context_pin.ok_or_else(|| ProviderAdmissionError::MissingObservedPin {
-                pin: "analysis_context_id",
+                pin: "context_fingerprint",
                 provider: "Tree-sitter/Ruff",
             })?;
-        Self::try_new(SourcePin(source_pin), ContextPin(context_pin), observed)
+        Self::try_new(
+            SourcePin(source_pin),
+            ContextPin(context_pin.fingerprint),
+            observed,
+        )
     }
 
     /// Validate and project the exact WP09 accepted Pyrefly relation streams. Batches for the
@@ -967,36 +971,52 @@ const fn syntax_lane(relation: NativeSyntaxRelation) -> ProviderNativeLane {
     }
 }
 
+/// Canonical identity and exact context authority have different widths and meanings.
+/// Identity, fingerprints and language target agree across every row, not only the run relation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct NativeSyntaxContextAuthority {
+    canonical_id: [u8; 16],
+    fingerprint: [u8; 32],
+    semantic_environment: [u8; 32],
+    python_version: (u16, u16),
+}
+
 fn validate_syntax_batch(
     relation: NativeSyntaxRelation,
     lane: ProviderNativeLane,
     batch: &RecordBatch,
     source_pin: &mut Option<[u8; 32]>,
-    context_pin: &mut Option<[u8; 32]>,
+    context_pin: &mut Option<NativeSyntaxContextAuthority>,
 ) -> Result<(), ProviderAdmissionError> {
     let relation_name = relation.as_str();
-    if batch
-        .schema_ref()
-        .metadata()
-        .get("codefabric.relation")
-        .map(String::as_str)
-        != Some(relation_name)
-    {
+    if batch.schema_ref() != &relation.schema() {
         return Err(ProviderAdmissionError::InvalidObservedRelation {
             relation: relation_name.to_owned(),
-            detail: "schema relation identity differs".into(),
+            detail: "schema differs from the exact native adapter release".into(),
         });
     }
 
     let provider_ids = utf8_column(batch, "provider_id", relation_name)?;
     let provider_releases = utf8_column(batch, "provider_release", relation_name)?;
     let content_digests = fixed32_column(batch, "content_digest", relation_name)?;
-    let context_ids = fixed32_column(batch, "analysis_context_id", relation_name)?;
+    let context_ids = fixed16_column(batch, "analysis_context_id", relation_name)?;
+    let context_fingerprints = fixed32_column(batch, "context_fingerprint", relation_name)?;
     // This column is required even when this particular fact relation has zero rows. Its type
     // makes the exact provider-context contract executable without inventing an empty-row
     // capability. Fabric-epoch identity is assigned only after the provider transaction admits.
-    let _semantic_environment_ids =
-        fixed32_column(batch, "semantic_environment_id", relation_name)?;
+    let semantic_environment_ids = fixed32_column(batch, "semantic_environment_id", relation_name)?;
+    let python_major = typed_column::<arrow_array::UInt16Array>(
+        batch,
+        "python_target_major",
+        relation_name,
+        "UInt16",
+    )?;
+    let python_minor = typed_column::<arrow_array::UInt16Array>(
+        batch,
+        "python_target_minor",
+        relation_name,
+        "UInt16",
+    )?;
 
     let (expected_provider, expected_release) = match lane {
         ProviderNativeLane::TreeSitter => (
@@ -1008,7 +1028,7 @@ fn validate_syntax_batch(
         ProviderNativeLane::Ruff => (
             "ruff-python".to_owned(),
             format!(
-                "ruff-python-ast={RUFF_COMPONENT_RELEASE};ruff-python-parser={RUFF_COMPONENT_RELEASE};python-target=3.14"
+                "ruff-python-ast={RUFF_COMPONENT_RELEASE};ruff-python-parser={RUFF_COMPONENT_RELEASE}"
             ),
         ),
         ProviderNativeLane::Pyrefly | ProviderNativeLane::Rustc => {
@@ -1016,6 +1036,16 @@ fn validate_syntax_batch(
         }
     };
     for row in 0..batch.num_rows() {
+        if python_major.is_null(row)
+            || python_minor.is_null(row)
+            || python_major.value(row) != 3
+            || !(7..=15).contains(&python_minor.value(row))
+        {
+            return Err(ProviderAdmissionError::InvalidObservedRelation {
+                relation: relation_name.to_owned(),
+                detail: "Python language target is absent or unsupported".into(),
+            });
+        }
         if provider_ids.is_null(row)
             || provider_releases.is_null(row)
             || provider_ids.value(row) != expected_provider
@@ -1033,13 +1063,35 @@ fn validate_syntax_batch(
             relation_name,
             "content_digest",
         )?;
-        observe_fixed32(
-            context_pin,
-            context_ids,
-            row,
-            relation_name,
-            "analysis_context_id",
+        let context = NativeSyntaxContextAuthority {
+            python_version: (python_major.value(row), python_minor.value(row)),
+            canonical_id: fixed16_value(context_ids, row, relation_name, "analysis_context_id")?,
+            fingerprint: fixed32_value(
+                context_fingerprints,
+                row,
+                relation_name,
+                "context_fingerprint",
+            )?,
+            semantic_environment: fixed32_value(
+                semantic_environment_ids,
+                row,
+                relation_name,
+                "semantic_environment_id",
+            )?,
+        };
+        require_nonzero(context.canonical_id, "native syntax canonical context")?;
+        require_nonzero(context.fingerprint, "native syntax context fingerprint")?;
+        require_nonzero(
+            context.semantic_environment,
+            "native syntax semantic environment",
         )?;
+        if context_pin.is_some_and(|expected| expected != context) {
+            return Err(ProviderAdmissionError::InvalidObservedRelation {
+                relation: relation_name.to_owned(),
+                detail: "canonical context, fingerprint, semantic environment, or language target differs across the accepted provider run".into(),
+            });
+        }
+        *context_pin = Some(context);
     }
     Ok(())
 }
@@ -1479,7 +1531,9 @@ struct NativeSyntaxPartitionAuthority {
     file_id: [u8; 16],
     source_generation: u64,
     content_digest: [u8; 32],
-    analysis_context_id: [u8; 32],
+    analysis_context_id: [u8; 16],
+    context_fingerprint: [u8; 32],
+    python_version: (u16, u16),
     semantic_environment_id: [u8; 32],
     tree_sitter_run_id: [u8; 16],
     ruff_run_id: [u8; 16],
@@ -1536,6 +1590,8 @@ fn aggregate_native_syntax_runs(
     let first = authorities[0];
     if authorities.iter().any(|authority| {
         authority.analysis_context_id != first.analysis_context_id
+            || authority.context_fingerprint != first.context_fingerprint
+            || authority.python_version != first.python_version
             || authority.semantic_environment_id != first.semantic_environment_id
     }) {
         return Err(
@@ -1555,7 +1611,7 @@ fn aggregate_native_syntax_runs(
     merge_provider_relation_sets(
         &relation_sets,
         source_pin,
-        ContextPin(first.analysis_context_id),
+        ContextPin(first.context_fingerprint),
     )
 }
 
@@ -1568,6 +1624,8 @@ fn native_syntax_partition_authority(
         || tree.source_generation != ruff.source_generation
         || tree.content_digest != ruff.content_digest
         || tree.analysis_context_id != ruff.analysis_context_id
+        || tree.context_fingerprint != ruff.context_fingerprint
+        || tree.python_version != ruff.python_version
         || tree.semantic_environment_id != ruff.semantic_environment_id
     {
         return Err(
@@ -1581,6 +1639,8 @@ fn native_syntax_partition_authority(
         source_generation: tree.source_generation,
         content_digest: tree.content_digest,
         analysis_context_id: tree.analysis_context_id,
+        context_fingerprint: tree.context_fingerprint,
+        python_version: tree.python_version,
         semantic_environment_id: tree.semantic_environment_id,
         tree_sitter_run_id: tree.provider_run_id,
         ruff_run_id: ruff.provider_run_id,
@@ -1593,7 +1653,9 @@ struct SyntaxRunAuthority {
     file_id: [u8; 16],
     source_generation: u64,
     content_digest: [u8; 32],
-    analysis_context_id: [u8; 32],
+    analysis_context_id: [u8; 16],
+    context_fingerprint: [u8; 32],
+    python_version: (u16, u16),
     semantic_environment_id: [u8; 32],
 }
 
@@ -1617,7 +1679,30 @@ fn syntax_run_authority(batch: &RecordBatch) -> Result<SyntaxRunAuthority, Provi
             detail: "source_generation is null or uses the zero sentinel".to_owned(),
         });
     }
+    let python_major = typed_column::<arrow_array::UInt16Array>(
+        batch,
+        "python_target_major",
+        &relation,
+        "UInt16",
+    )?;
+    let python_minor = typed_column::<arrow_array::UInt16Array>(
+        batch,
+        "python_target_minor",
+        &relation,
+        "UInt16",
+    )?;
+    if python_major.is_null(0)
+        || python_minor.is_null(0)
+        || python_major.value(0) != 3
+        || !(7..=15).contains(&python_minor.value(0))
+    {
+        return Err(ProviderAdmissionError::InvalidObservedRelation {
+            relation,
+            detail: "Python language target is absent or unsupported".into(),
+        });
+    }
     let authority = SyntaxRunAuthority {
+        python_version: (python_major.value(0), python_minor.value(0)),
         provider_run_id: fixed16_value(
             fixed16_column(batch, "provider_run_id", &relation)?,
             0,
@@ -1637,11 +1722,17 @@ fn syntax_run_authority(batch: &RecordBatch) -> Result<SyntaxRunAuthority, Provi
             &relation,
             "content_digest",
         )?,
-        analysis_context_id: fixed32_value(
-            fixed32_column(batch, "analysis_context_id", &relation)?,
+        analysis_context_id: fixed16_value(
+            fixed16_column(batch, "analysis_context_id", &relation)?,
             0,
             &relation,
             "analysis_context_id",
+        )?,
+        context_fingerprint: fixed32_value(
+            fixed32_column(batch, "context_fingerprint", &relation)?,
+            0,
+            &relation,
+            "context_fingerprint",
         )?,
         semantic_environment_id: fixed32_value(
             fixed32_column(batch, "semantic_environment_id", &relation)?,
@@ -1654,6 +1745,10 @@ fn syntax_run_authority(batch: &RecordBatch) -> Result<SyntaxRunAuthority, Provi
     require_nonzero(authority.file_id, "native syntax file")?;
     require_nonzero(authority.content_digest, "native syntax content")?;
     require_nonzero(authority.analysis_context_id, "native syntax context")?;
+    require_nonzero(
+        authority.context_fingerprint,
+        "native syntax context fingerprint",
+    )?;
     require_nonzero(
         authority.semantic_environment_id,
         "native syntax semantic environment",
@@ -3195,6 +3290,108 @@ pub(crate) mod tests {
         run_fixture(source_text, 7, marker)
     }
 
+    fn replace_native_context_column(batch: &RecordBatch, name: &str, marker: u8) -> RecordBatch {
+        let index = batch.schema_ref().index_of(name).unwrap();
+        let DataType::FixedSizeBinary(width) = batch.schema_ref().field(index).data_type() else {
+            panic!("context fields have a fixed binary width")
+        };
+        let mut builder = FixedSizeBinaryBuilder::with_capacity(batch.num_rows(), *width);
+        for _ in 0..batch.num_rows() {
+            builder
+                .append_value(vec![marker; usize::try_from(*width).unwrap()])
+                .unwrap();
+        }
+        let mut columns = batch.columns().to_vec();
+        columns[index] = Arc::new(builder.finish());
+        RecordBatch::try_new(batch.schema(), columns).unwrap()
+    }
+
+    #[test]
+    fn native_context_admission_pins_fingerprint_not_canonical_identity() {
+        let run = exact_native_syntax_run(21, "value = 1\n");
+        let admitted = AcceptedProviderRelationSet::from_native_syntax(&run).unwrap();
+        assert_eq!(admitted.context_pin(), ContextPin([3; 32]));
+        let authority = native_syntax_partition_authority(&run).unwrap();
+        assert_eq!(authority.analysis_context_id, [5; 16]);
+        assert_eq!(authority.context_fingerprint, [3; 32]);
+        assert_ne!(
+            authority.analysis_context_id,
+            authority.context_fingerprint[..16]
+        );
+
+        for relation in NativeSyntaxRelation::ALL {
+            let batch = run.relation(relation);
+            let mut reader = StreamReader::try_new(Cursor::new(ipc_batch(batch)), None).unwrap();
+            assert_eq!(reader.schema(), relation.schema());
+            assert_eq!(reader.next().unwrap().unwrap(), *batch);
+            assert!(reader.next().is_none());
+        }
+    }
+
+    #[test]
+    fn native_context_admission_rejects_fact_and_partition_context_swaps() {
+        for field in [
+            "analysis_context_id",
+            "context_fingerprint",
+            "semantic_environment_id",
+        ] {
+            let mut mixed_row = exact_native_syntax_run(21, "value = 1\n");
+            let relation = NativeSyntaxRelation::RuffToken;
+            let changed = replace_native_context_column(mixed_row.relation(relation), field, 99);
+            assert!(changed.num_rows() > 0);
+            mixed_row.relations.insert(relation, changed);
+            assert!(matches!(
+                AcceptedProviderRelationSet::from_native_syntax(&mixed_row),
+                Err(ProviderAdmissionError::InvalidObservedRelation { .. }),
+            ));
+
+            let first = exact_native_syntax_run(21, "value = 1\n");
+            let mut second = exact_native_syntax_run(22, "other = 2\n");
+            for batch in second.relations.values_mut() {
+                *batch = replace_native_context_column(batch, field, 99);
+            }
+            // A coherent second run can be admitted alone, but not merged into a context
+            // with a different canonical ID, manifest fingerprint, or effective environment.
+            AcceptedProviderRelationSet::from_native_syntax(&second).unwrap();
+            assert!(matches!(
+                aggregate_native_syntax_runs(
+                    &[first, second],
+                    SourcePin([1; 32]),
+                    ContextPin([2; 32]),
+                ),
+                Err(ProviderAdmissionError::InconsistentProviderWorkspaceAuthority { .. }),
+            ));
+        }
+    }
+
+    #[test]
+    fn native_context_admission_rejects_legacy_width_even_for_empty_relations() {
+        let mut run = exact_native_syntax_run(21, "value = 1\n");
+        let relation = NativeSyntaxRelation::RuffComment;
+        let batch = run.relation(relation);
+        assert_eq!(batch.num_rows(), 0);
+        let context_index = batch.schema_ref().index_of("analysis_context_id").unwrap();
+        let mut fields = batch
+            .schema_ref()
+            .fields()
+            .iter()
+            .map(|field| (**field).clone())
+            .collect::<Vec<_>>();
+        fields[context_index] = fields[context_index]
+            .clone()
+            .with_data_type(DataType::FixedSizeBinary(32));
+        let schema = Arc::new(Schema::new_with_metadata(
+            fields,
+            batch.schema_ref().metadata().clone(),
+        ));
+        run.relations
+            .insert(relation, RecordBatch::new_empty(schema));
+        assert!(matches!(
+            AcceptedProviderRelationSet::from_native_syntax(&run),
+            Err(ProviderAdmissionError::InvalidObservedRelation { .. }),
+        ));
+    }
+
     fn fixed_value(width: i32, value: &[u8]) -> ArrayRef {
         let mut builder = FixedSizeBinaryBuilder::with_capacity(1, width);
         builder.append_value(value).unwrap();
@@ -3281,6 +3478,7 @@ pub(crate) mod tests {
             })
             .collect::<Vec<_>>();
         AcceptedPyreflyRun {
+            removed_module_ids: Vec::new(),
             provider_run_id,
             workspace_id: "workspace:provider-admission".to_owned(),
             analysis_context_id: "context:pyrefly-workspace".to_owned(),

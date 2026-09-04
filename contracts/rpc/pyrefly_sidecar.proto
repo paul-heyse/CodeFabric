@@ -94,6 +94,11 @@ message AnalyzeModulesRequest {
   string sandbox_profile_digest = 14;
   string trust_profile = 15;
   string resource_profile_id = 16;
+  // Modules is the complete selected inventory, including unchanged retained modules.
+  // The default false value rejects legacy or dirty-subset-only requests.
+  bool complete_inventory = 17;
+  // Scheduling hints only; each unique ID must belong to modules. Never a replacement list.
+  repeated string changed_module_ids = 18;
 }
 
 message AnalyzeCommand {
@@ -159,6 +164,8 @@ message RunTerminal {
   repeated string rechecked_module_ids = 6;
   string sandbox_profile_digest = 7;
   string trust_profile = 8;
+  // Actual retired members of the preceding complete inventory, ordered by module ID.
+  repeated string removed_module_ids = 9;
 }
 
 message AnalyzeEvent {

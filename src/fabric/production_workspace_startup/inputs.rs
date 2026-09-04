@@ -1,0 +1,539 @@
+//! Complete captured inputs and effective contexts for fresh production preparation.
+
+use std::collections::BTreeSet;
+use std::path::Path;
+
+use crate::analysis_context::{
+    ContextLookupObservation, ContextSearchRoot, ContextSearchScope, ContextSearchUniverse,
+};
+use crate::cancellation::Cancellation;
+use crate::identity::{IdentityDomain, decode_public_id, encode_public_id};
+use crate::inventory::{InventoryLimits, InventoryWalker};
+use crate::operational_store::OperationalStore;
+use crate::provider_contracts::{
+    ContextIdentity, ProviderContextBinding, ProviderInputDisposition, ProviderInventoryMember,
+    ProviderLookupKey, ProviderLookupOutcome, ProviderModuleBinding, ProviderSearchScope,
+    ProviderSourceInventory, ProviderSupportDependency,
+};
+use crate::python_context::{
+    PythonAuthorizedRoot, PythonContextDiscoveryProduct, PythonContextDiscoveryRequest,
+    PythonDeploymentProfile, PythonDiscoveryFile, PythonRegisteredInputs, discover_python_context,
+};
+use crate::secure_path::open_workspace_root;
+use crate::source_image::{
+    InventoryCaptureBundle, InventoryCaptureDisposition, SourceBlobHolderKind, SourceCapturePolicy,
+    SourceImageStore, SourceInventoryCapturePolicy, SourceLanguage, SourceSelection,
+    current_source_generation_from_reader,
+};
+use crate::workspace_registry::WorkspaceRecord;
+
+use super::{ProductionWorkspaceStartupError, step};
+
+/// Leases survive provider joins, and every early failure releases only this capture's holders.
+pub(super) struct PreparedSourceInputs {
+    store: OperationalStore,
+    image_store: SourceImageStore,
+    capture: Option<InventoryCaptureBundle>,
+    pub inventory: ProviderSourceInventory,
+}
+
+impl PreparedSourceInputs {
+    pub fn capture(&self) -> Result<&InventoryCaptureBundle, ProductionWorkspaceStartupError> {
+        self.capture
+            .as_ref()
+            .ok_or_else(|| step("source-capture-ownership", "capture already released"))
+    }
+
+    pub fn release(mut self) -> Result<(), ProductionWorkspaceStartupError> {
+        if let Some(bundle) = self.capture.take() {
+            self.image_store
+                .release_inventory_capture(&mut self.store, bundle)
+                .map_err(|error| step("provider-source-release", error))?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PreparedSourceInputs {
+    fn drop(&mut self) {
+        if let Some(bundle) = self.capture.take() {
+            // Failure paths cannot publish; lease expiry remains the bounded recovery fallback.
+            let _ = self
+                .image_store
+                .release_inventory_capture(&mut self.store, bundle);
+        }
+    }
+}
+
+pub(super) fn capture_inputs(
+    workspace_root: &Path,
+    operational_database: &Path,
+    record: &WorkspaceRecord,
+    generation: u64,
+) -> Result<PreparedSourceInputs, ProductionWorkspaceStartupError> {
+    let mut store = OperationalStore::open(operational_database)
+        .map_err(|error| step("source-store-open", error))?;
+    let fence_reader = store
+        .reader_factory()
+        .open()
+        .map_err(|error| step("source-fence-reader", error))?;
+    let observe = || current_source_generation_from_reader(&fence_reader, record.workspace_id).ok();
+    let root = open_workspace_root(&mut store, record.workspace_id)
+        .map_err(|error| step("source-root", error))?;
+    let cancellation = Cancellation::default();
+    let inventory = InventoryWalker::new(InventoryLimits::default())
+        .walk_selected_with_fence(
+            &root,
+            &mut store,
+            generation,
+            generation,
+            &cancellation,
+            observe,
+        )
+        .map_err(|error| step("complete-source-inventory", error))?;
+    let mut image_store = SourceImageStore::open(
+        &workspace_root.join("source-blobs"),
+        SourceCapturePolicy::default(),
+    )
+    .map_err(|error| step("source-image-store", error))?;
+    let capture = image_store
+        .capture_inventory_with_fence(
+            &mut store,
+            &inventory,
+            SourceInventoryCapturePolicy {
+                maximum_total_bytes: 64 * 1024 * 1024,
+                holder_kind: SourceBlobHolderKind::ProviderRun,
+            },
+            &cancellation,
+            |member| {
+                SourceSelection::Capture(match member.language {
+                    Some("python") => SourceLanguage::Python,
+                    Some("rust") => SourceLanguage::Rust,
+                    _ => SourceLanguage::Other,
+                })
+            },
+            observe,
+        )
+        .map_err(|error| step("complete-source-capture", error))?;
+    // Construct ownership before any later fallible operation so all error paths release leases.
+    let input_inventory = match provider_inventory(&capture) {
+        Ok(inventory) => inventory,
+        Err(error) => {
+            image_store
+                .release_inventory_capture(&mut store, capture)
+                .map_err(|release| step("failed-source-capture-release", release))?;
+            return Err(error);
+        }
+    };
+    let mut owned = PreparedSourceInputs {
+        store,
+        image_store,
+        capture: Some(capture),
+        inventory: input_inventory,
+    };
+    owned
+        .capture()?
+        .require_closed()
+        .map_err(|error| step("source-capture-pending", error))?;
+    // Until WP88 installs watcher sequence tokens, a second descriptor-relative full census
+    // detects edits/creation/deletion during this startup boundary, not a constant fence closure.
+    let checked = InventoryWalker::new(InventoryLimits::default())
+        .walk_selected_with_fence(
+            &root,
+            &mut owned.store,
+            generation,
+            generation,
+            &cancellation,
+            observe,
+        )
+        .map_err(|error| step("source-capture-reconciliation", error))?;
+    if checked.inventory().digest != inventory.inventory().digest {
+        return Err(step(
+            "source-capture-reconciliation",
+            "source inventory changed during capture",
+        ));
+    }
+    Ok(owned)
+}
+
+fn provider_inventory(
+    capture: &InventoryCaptureBundle,
+) -> Result<ProviderSourceInventory, ProductionWorkspaceStartupError> {
+    capture
+        .require_closed()
+        .map_err(|error| step("source-disposition-closure", error))?;
+    let inventory = capture.inventory().inventory();
+    let paths = inventory
+        .records
+        .iter()
+        .map(|record| record.path.raw_relative_path_bytes.clone())
+        .collect::<Vec<_>>();
+    let members = capture
+        .dispositions()
+        .iter()
+        .map(|entry| {
+            let (disposition, selected_for_provider) = match entry.disposition() {
+                InventoryCaptureDisposition::Captured { image_index } => {
+                    let image = capture.images().get(image_index).ok_or_else(|| {
+                        step("source-disposition-index", "missing captured image")
+                    })?;
+                    (
+                        ProviderInputDisposition::Captured {
+                            file_id: image.file_id,
+                            digest: image.digest,
+                            byte_length: image.byte_length,
+                        },
+                        image.language == SourceLanguage::Python,
+                    )
+                }
+                InventoryCaptureDisposition::Pending | InventoryCaptureDisposition::Deferred => {
+                    return Err(step("source-disposition-pending", "source is still dirty"));
+                }
+                InventoryCaptureDisposition::Unreadable => {
+                    (ProviderInputDisposition::Unreadable, false)
+                }
+                InventoryCaptureDisposition::Unsupported => {
+                    (ProviderInputDisposition::Unsupported, false)
+                }
+                InventoryCaptureDisposition::UnsupportedEncoding => {
+                    (ProviderInputDisposition::UnsupportedEncoding, false)
+                }
+                InventoryCaptureDisposition::Oversized => {
+                    (ProviderInputDisposition::ExcludedSizeLimit, false)
+                }
+                InventoryCaptureDisposition::Binary => (ProviderInputDisposition::Binary, false),
+                InventoryCaptureDisposition::Generated => {
+                    (ProviderInputDisposition::Generated, false)
+                }
+                InventoryCaptureDisposition::Vendored => {
+                    (ProviderInputDisposition::Vendored, false)
+                }
+                InventoryCaptureDisposition::Excluded => {
+                    (ProviderInputDisposition::ExcludedPolicy, false)
+                }
+            };
+            Ok(ProviderInventoryMember {
+                relative_path: entry.path().raw_relative_path_bytes.clone(),
+                disposition,
+                selected_for_provider,
+            })
+        })
+        .collect::<Result<Vec<_>, ProductionWorkspaceStartupError>>()?;
+    ProviderSourceInventory::try_new(
+        inventory.workspace_id,
+        inventory.source_generation,
+        inventory.digest,
+        &paths,
+        members,
+        paths.clone(),
+        None,
+    )
+    .map_err(|error| step("provider-input-inventory", error))
+}
+
+pub(super) fn discover_python_inputs(
+    inputs: &PreparedSourceInputs,
+    record: &WorkspaceRecord,
+) -> Result<PythonContextDiscoveryProduct, ProductionWorkspaceStartupError> {
+    let capture = inputs.capture()?;
+    let mut files = Vec::new();
+    let mut roots = BTreeSet::from([".".to_owned()]);
+    for image in capture.images() {
+        let Ok(path) = std::str::from_utf8(&image.path.raw_relative_path_bytes) else {
+            continue;
+        };
+        let mut parent = Path::new(path).parent();
+        while let Some(path) = parent {
+            if !path.as_os_str().is_empty() {
+                roots.insert(path.to_string_lossy().into_owned());
+            }
+            parent = path.parent();
+        }
+        files.push(PythonDiscoveryFile {
+            file_id: encode_public_id(IdentityDomain::SourceFile, None, image.file_id)
+                .map_err(|error| step("context-file-id", error))?,
+            relative_path: path.to_owned(),
+            display_path: path.to_owned(),
+            digest: image.digest,
+            contents: image.bytes.to_vec(),
+        });
+    }
+    let root_id = "workspace-root".to_owned();
+    let scope = ContextSearchScope {
+        namespace: b".".to_vec(),
+        ordered_roots: vec![ContextSearchRoot {
+            root_id: root_id.clone(),
+            relative_path: b".".to_vec(),
+        }],
+        policy_identity: record.authorization_fingerprint,
+        universe: if capture.dispositions().iter().any(|entry| {
+            !matches!(
+                entry.disposition(),
+                InventoryCaptureDisposition::Captured { .. }
+            )
+        }) {
+            ContextSearchUniverse::Incomplete {
+                observed_identity: inputs.inventory.identity(),
+            }
+        } else {
+            ContextSearchUniverse::Closed {
+                inventory_identity: inputs.inventory.identity(),
+            }
+        },
+    };
+    let request = PythonContextDiscoveryRequest {
+        workspace_id: encode_public_id(IdentityDomain::Workspace, None, record.workspace_id)
+            .map_err(|error| step("context-workspace-id", error))?,
+        source_generation: inputs.inventory.source_generation(),
+        project_root_path: ".".to_owned(),
+        project_root_id: root_id.clone(),
+        platform_tag: match std::env::consts::OS {
+            "macos" => "darwin",
+            "windows" => "win32",
+            other => other,
+        }
+        .to_owned(),
+        files,
+        workspace_profile: None,
+        registered: PythonRegisteredInputs {
+            authorized_roots: roots
+                .into_iter()
+                .map(|path| PythonAuthorizedRoot {
+                    path_id: if path == "." {
+                        root_id.clone()
+                    } else {
+                        format!("workspace-root/{path}")
+                    },
+                    relative_path: path,
+                })
+                .collect(),
+            ..PythonRegisteredInputs::default()
+        },
+        // A release-selected syntax profile, not a host interpreter or checker default.
+        deployment: PythonDeploymentProfile {
+            supported_python_versions: (7..=15).map(|minor| format!("3.{minor}")).collect(),
+            default_python_version: "3.14".to_owned(),
+        },
+        typeshed_bundle_digest: None,
+        pyrefly_bundle_digest: None,
+        ruff_bundle_digest: *blake3::hash(
+            crate::provider_raw_kinds::RUFF_PYTHON_FRONTEND
+                .provider_version
+                .as_bytes(),
+        )
+        .as_bytes(),
+        provider_bundle_version: "codefabric-python-syntax-v2".to_owned(),
+        search_scope: scope,
+    };
+    discover_python_context(&request).map_err(|error| step("effective-python-context", error))
+}
+
+pub(super) fn provider_context(
+    product: &PythonContextDiscoveryProduct,
+) -> Result<ProviderContextBinding, ProductionWorkspaceStartupError> {
+    let settings = product
+        .effective_settings()
+        .map_err(|error| step("python-effective-settings", error))?;
+    let fingerprint = product
+        .context
+        .fingerprint_bytes()
+        .map_err(|error| step("context-fingerprint", error))?;
+    let canonical_id = decode_public_id(
+        IdentityDomain::AnalysisContext,
+        None,
+        &product.context.analysis_context_id,
+    )
+    .map_err(|error| step("canonical-analysis-context", error))?;
+    let dependencies = product
+        .configuration_dependencies
+        .lookup_evidence
+        .iter()
+        .map(|lookup| {
+            lookup
+                .validate()
+                .map_err(|error| step("context-support", error))?;
+            let revision = match lookup.scope.universe {
+                ContextSearchUniverse::Closed { inventory_identity } => inventory_identity,
+                ContextSearchUniverse::Incomplete { observed_identity } => observed_identity,
+            };
+            let outcome = match &lookup.observation {
+                ContextLookupObservation::Present { file_id, digest } => {
+                    ProviderLookupOutcome::Consumed {
+                        revision: *digest,
+                        candidates: vec![
+                            decode_public_id(IdentityDomain::SourceFile, None, file_id)
+                                .map_err(|error| step("context-support-file", error))?,
+                        ],
+                    }
+                }
+                ContextLookupObservation::Absent => ProviderLookupOutcome::Absent {
+                    closed_universe: revision,
+                },
+                ContextLookupObservation::Incomplete => ProviderLookupOutcome::Incomplete {
+                    observed_universe: revision,
+                },
+            };
+            Ok(ProviderSupportDependency {
+                key: ProviderLookupKey::Configuration {
+                    relative_path: lookup.relative_path.clone(),
+                },
+                scope: ProviderSearchScope {
+                    namespace: lookup.scope.namespace.clone(),
+                    ordered_roots: lookup
+                        .scope
+                        .ordered_roots
+                        .iter()
+                        .map(|root| {
+                            if root.relative_path == b"." {
+                                Vec::new()
+                            } else {
+                                root.relative_path.clone()
+                            }
+                        })
+                        .collect(),
+                    policy_identity: lookup.scope.policy_identity,
+                    effective_context: fingerprint,
+                },
+                outcome,
+            })
+        })
+        .collect::<Result<Vec<_>, ProductionWorkspaceStartupError>>()?;
+    let modules = settings
+        .module_map
+        .iter()
+        .map(|module| {
+            Ok(ProviderModuleBinding {
+                file_id: decode_public_id(IdentityDomain::SourceFile, None, &module.file_id)
+                    .map_err(|error| step("context-module-file", error))?,
+                qualified_name: module.module_name.clone(),
+                relative_path: module.relative_path.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, ProductionWorkspaceStartupError>>()?;
+    ProviderContextBinding::try_new(
+        ContextIdentity::try_new(product.context.analysis_context_id.clone())
+            .map_err(|error| step("context-identity", error))?,
+        canonical_id,
+        fingerprint,
+        fingerprint,
+    )
+    .and_then(|context| {
+        context.with_python_version(
+            settings.language_version.major,
+            settings.language_version.minor,
+        )
+    })
+    .and_then(|context| context.with_modules(modules))
+    .and_then(|context| context.with_support_obligations(dependencies))
+    .map_err(|error| step("provider-effective-context", error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source_image::advance_source_generation;
+    use crate::workspace_registry::{WorkspaceRegistry, WorkspaceSourceRegistration};
+
+    #[test]
+    fn fresh_capture_context_configuration_is_a_causal_job_input() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_root = directory.path().join("workspace");
+        std::fs::create_dir(&source_root).unwrap();
+        std::fs::write(source_root.join("module.py"), b"value = 1\n").unwrap();
+        let database = directory.path().join("state.sqlite3");
+        let mut store = OperationalStore::open(&database).unwrap();
+        let record = WorkspaceRegistry::new(&mut store)
+            .add(&source_root, WorkspaceSourceRegistration::Directory)
+            .unwrap();
+        let fabric_root = directory.path().join("fabric");
+        drop(store);
+        let first = capture_inputs(&fabric_root, &database, &record, 0).unwrap();
+        let initial_product = discover_python_inputs(&first, &record).unwrap();
+        let initial = provider_context(&initial_product).unwrap();
+        assert_eq!(initial.python_version(), Some((3, 14)));
+        let (file_id, digest) = first.inventory.selected_files().next().unwrap();
+        assert_eq!(
+            initial.module_for_file(file_id).unwrap().qualified_name,
+            "module"
+        );
+        assert!(
+            initial
+                .support_obligations()
+                .iter()
+                .any(|dependency| matches!(
+                    dependency.outcome,
+                    ProviderLookupOutcome::Absent { .. }
+                ))
+        );
+        first.release().unwrap();
+
+        std::fs::write(
+            source_root.join("pyrefly.toml"),
+            b"python-version = '3.12'\n",
+        )
+        .unwrap();
+        let mut store = OperationalStore::open(&database).unwrap();
+        advance_source_generation(&mut store, record.workspace_id, 0).unwrap();
+        drop(store);
+        let second = capture_inputs(&fabric_root, &database, &record, 1).unwrap();
+        let selected_product = discover_python_inputs(&second, &record).unwrap();
+        let selected = provider_context(&selected_product).unwrap();
+        assert_eq!(
+            second.inventory.selected_files().next(),
+            Some((file_id, digest))
+        );
+        assert_eq!(selected.python_version(), Some((3, 12)));
+        assert_ne!(
+            initial.analysis_context_id(),
+            selected.analysis_context_id()
+        );
+        assert_ne!(
+            initial.effective_input_identity(),
+            selected.effective_input_identity()
+        );
+        assert!(selected.support_obligations().iter().any(|dependency|
+            matches!(&dependency.key, ProviderLookupKey::Configuration { relative_path } if relative_path == b"pyrefly.toml")
+                && matches!(dependency.outcome, ProviderLookupOutcome::Consumed { .. })));
+        second.release().unwrap();
+    }
+
+    #[test]
+    fn fresh_capture_binary_configuration_is_unknown_not_absent() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_root = directory.path().join("workspace");
+        std::fs::create_dir(&source_root).unwrap();
+        std::fs::write(source_root.join("pyrefly.toml"), b"\0binary").unwrap();
+        let database = directory.path().join("state.sqlite3");
+        let mut store = OperationalStore::open(&database).unwrap();
+        let record = WorkspaceRegistry::new(&mut store)
+            .add(&source_root, WorkspaceSourceRegistration::Directory)
+            .unwrap();
+        drop(store);
+        let captured =
+            capture_inputs(&directory.path().join("fabric"), &database, &record, 0).unwrap();
+        assert_eq!(captured.inventory.selected_files().count(), 0);
+        assert!(
+            captured
+                .inventory
+                .members()
+                .iter()
+                .any(|member| member.relative_path == b"pyrefly.toml"
+                    && member.disposition == ProviderInputDisposition::Binary)
+        );
+        let product = discover_python_inputs(&captured, &record).unwrap();
+        let context = provider_context(&product).unwrap();
+        assert!(context.support_obligations().iter().any(|dependency|
+            matches!(&dependency.key, ProviderLookupKey::Configuration { relative_path } if relative_path == b"pyrefly.toml")
+                && matches!(dependency.outcome, ProviderLookupOutcome::Incomplete { .. })));
+        assert!(
+            !context
+                .support_obligations()
+                .iter()
+                .any(|dependency| matches!(
+                    dependency.outcome,
+                    ProviderLookupOutcome::Absent { .. }
+                ))
+        );
+        captured.release().unwrap();
+    }
+}

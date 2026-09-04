@@ -1013,8 +1013,9 @@ mod job_tests {
             suite: SuiteIdentity::try_new("codefabric-relational-data-fabric@2.3.0").unwrap(),
             provider: ProviderIdentity::try_new("tree-sitter-python").unwrap(),
             protocol: ProviderProtocolIdentity::try_new("in-process-arrow@1").unwrap(),
-            source: ProviderSourceBinding::try_new(
+            source: ProviderSourceBinding::try_file(
                 SourceIdentity::try_new("source-1").unwrap(),
+                [6; 16],
                 [1; 16],
                 1,
                 [2; 32],
@@ -1022,6 +1023,7 @@ mod job_tests {
             .unwrap(),
             context: ProviderContextBinding::try_new(
                 ContextIdentity::try_new("context-1").unwrap(),
+                [3; 16],
                 [3; 32],
                 [4; 32],
             )

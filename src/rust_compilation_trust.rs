@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::fs::File;
 use std::io::{Read as _, Write as _};
-use std::os::unix::ffi::OsStrExt as _;
+use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -22,6 +22,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 
+use crate::analysis_context::rust_context::{RustContextDiscoveryProduct, RustContextRemainder};
+use crate::analysis_context::{RustCompilationSettings, RustTargetKind};
 use crate::provider_sandbox::{
     GeneratedSandboxProfile, ProviderLaunchRequest, ProviderProcessGroupChild,
     ProviderProcessLimits, ProviderSandboxLaunchMaterial, ProviderSandboxLauncher,
@@ -502,13 +504,251 @@ impl RustCompilationContextPins {
     }
 }
 
-/// Typed Cargo selection. No free-form compiler/Cargo flags cross this trust boundary.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+/// Inputs still required before selected settings may authorize a compiler process.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RustCompilationPreparationRemainder {
+    Context(RustContextRemainder),
+    SysrootMappingRequired,
+    UnsupportedBuildEnvironment,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RustPreparationAuthority {
+    Unresolved(Box<RustContextDiscoveryProduct>),
+    /// Independent containment/protocol tests do not certify Cargo semantic resolution.
+    #[cfg(test)]
+    ContainmentFixture,
+}
+
+/// Immutable selected invocation preparation, not evidence that Cargo metadata or MIR exists.
+///
+/// Production construction requires validated discovery and preserves its unresolved authority.
+/// WP82 must install the independent Cargo unit/dependency/build evidence before launch can be
+/// enabled. No deserializer or public field can manufacture a resolved preparation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SelectedRustCompilationPreparation {
+    manifest_relative_path: PathBuf,
+    cargo_selection_arguments: Vec<String>,
+    selected_environment: BTreeMap<String, String>,
+    remainders: Vec<RustCompilationPreparationRemainder>,
+    authority: RustPreparationAuthority,
+}
+
+impl SelectedRustCompilationPreparation {
+    /// Prepare the actual selected Cargo arguments and encoded compiler options.
+    ///
+    /// # Errors
+    /// Rejects changed discovery identity, malformed selection tokens or unrepresentable flags.
+    pub fn from_discovered(
+        product: &RustContextDiscoveryProduct,
+    ) -> Result<Self, RustCompilationTrustError> {
+        product
+            .validate()
+            .map_err(|_| RustCompilationTrustError::SelectedContextMismatch)?;
+        let settings = &product.settings;
+        let arguments = selected_cargo_arguments(settings)?;
+        let mut compiler_arguments = settings.configured_rustflags.clone().unwrap_or_default();
+        for cfg in &settings.cfgs {
+            if cfg.name.is_empty()
+                || !cfg
+                    .name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                || cfg.name.as_bytes()[0].is_ascii_digit()
+                || cfg
+                    .value
+                    .as_ref()
+                    .is_some_and(|value| value.chars().any(char::is_control))
+            {
+                return Err(RustCompilationTrustError::InvalidInvocationToken);
+            }
+            let value = cfg.value.as_ref().map_or_else(
+                || Ok(cfg.name.clone()),
+                |value| serde_json::to_string(value).map(|value| format!("{}={value}", cfg.name)),
+            )?;
+            compiler_arguments.extend(["--cfg".to_owned(), value]);
+        }
+        if compiler_arguments.len() > 4_096
+            || compiler_arguments
+                .iter()
+                .any(|argument| argument.len() > 16_384 || argument.chars().any(char::is_control))
+        {
+            return Err(RustCompilationTrustError::InvalidInvocationToken);
+        }
+        let mut remainders = product
+            .remainders
+            .iter()
+            .copied()
+            .map(RustCompilationPreparationRemainder::Context)
+            .collect::<Vec<_>>();
+        for (missing, reason) in [
+            (
+                settings.dependency_inputs.is_none(),
+                RustContextRemainder::DependencyResolutionRequired,
+            ),
+            (
+                settings.build_inputs.is_none(),
+                RustContextRemainder::BuildInputsRequired,
+            ),
+            (
+                settings.configured_rustflags.is_none(),
+                RustContextRemainder::UnsupportedCargoConfiguration,
+            ),
+        ] {
+            let reason = RustCompilationPreparationRemainder::Context(reason);
+            if missing && !remainders.contains(&reason) {
+                remainders.push(reason);
+            }
+        }
+        // Discovery pins a sysroot artifact, but does not map its authorized contained path.
+        remainders.push(RustCompilationPreparationRemainder::SysrootMappingRequired);
+        if settings
+            .environment
+            .iter()
+            .any(|entry| !matches!(entry.name.as_str(), "RUSTFLAGS" | "CARGO_ENCODED_RUSTFLAGS"))
+        {
+            remainders.push(RustCompilationPreparationRemainder::UnsupportedBuildEnvironment);
+        }
+        let selected_environment = BTreeMap::from([(
+            "CARGO_ENCODED_RUSTFLAGS".to_owned(),
+            compiler_arguments.join("\u{1f}"),
+        )]);
+        validate_environment_variables(&selected_environment)?;
+        Ok(Self {
+            manifest_relative_path: std::ffi::OsString::from_vec(settings.manifest_path.clone())
+                .into(),
+            cargo_selection_arguments: arguments,
+            selected_environment,
+            remainders,
+            authority: RustPreparationAuthority::Unresolved(Box::new(product.clone())),
+        })
+    }
+
+    #[must_use]
+    pub fn cargo_selection_arguments(&self) -> &[String] {
+        &self.cargo_selection_arguments
+    }
+
+    #[must_use]
+    pub fn selected_environment(&self) -> &BTreeMap<String, String> {
+        &self.selected_environment
+    }
+
+    #[must_use]
+    pub fn remainders(&self) -> &[RustCompilationPreparationRemainder] {
+        &self.remainders
+    }
+
+    fn require_available(
+        &self,
+        request: &RustCompilationContextPins,
+        inputs: &RustCompilationInputs,
+    ) -> Result<(), RustCompilationTrustError> {
+        match &self.authority {
+            RustPreparationAuthority::Unresolved(product) => {
+                if product.context.workspace_id != request.workspace_id
+                    || product.context.analysis_context_id != request.analysis_context_id
+                    || product.context.context_fingerprint != request.context_manifest_digest
+                    || product.source_generation != request.source_generation
+                    || product.settings.toolchain.release != inputs.exact_toolchain_release
+                    || crate::integrity::frame_digest(product.settings.toolchain.artifact_digest)
+                        != inputs.toolchain_digest
+                {
+                    return Err(RustCompilationTrustError::SelectedContextMismatch);
+                }
+                Err(RustCompilationTrustError::PreparationUnavailable(
+                    self.remainders.clone(),
+                ))
+            }
+            #[cfg(test)]
+            RustPreparationAuthority::ContainmentFixture => Ok(()),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_only_containment_fixture(
+        manifest_relative_path: PathBuf,
+        package: &str,
+        features: &[&str],
+    ) -> Self {
+        let mut arguments = vec![
+            "--package".to_owned(),
+            package.to_owned(),
+            "--all-targets".to_owned(),
+        ];
+        if !features.is_empty() {
+            arguments.extend(["--features".to_owned(), features.join(",")]);
+        }
+        Self {
+            manifest_relative_path,
+            cargo_selection_arguments: arguments,
+            selected_environment: BTreeMap::new(),
+            remainders: Vec::new(),
+            authority: RustPreparationAuthority::ContainmentFixture,
+        }
+    }
+}
+
+fn selected_cargo_arguments(
+    settings: &RustCompilationSettings,
+) -> Result<Vec<String>, RustCompilationTrustError> {
+    for token in [
+        settings.package_name.as_str(),
+        settings.target.name.as_str(),
+        settings.target_triple.as_str(),
+        settings.profile.as_str(),
+    ] {
+        validate_cargo_token(token)?;
+        // Cargo glob patterns must not widen a single selected package/target.
+        if token.contains('?') {
+            return Err(RustCompilationTrustError::InvalidInvocationToken);
+        }
+    }
+    let mut arguments = vec!["--package".to_owned(), settings.package_name.clone()];
+    if settings.requested_features.len() > 1_024 {
+        return Err(RustCompilationTrustError::InvalidInvocationToken);
+    }
+    let mut features = BTreeSet::new();
+    for feature in &settings.requested_features {
+        validate_cargo_token(feature)?;
+        if !features.insert(feature.as_str()) {
+            return Err(RustCompilationTrustError::DuplicateInvocationToken);
+        }
+    }
+    if !features.is_empty() {
+        arguments.extend([
+            "--features".to_owned(),
+            features.into_iter().collect::<Vec<_>>().join(","),
+        ]);
+    }
+    if !settings.default_features {
+        arguments.push("--no-default-features".to_owned());
+    }
+    let (flag, named) = match settings.target.kind {
+        RustTargetKind::Library | RustTargetKind::ProcMacro => ("--lib", false),
+        RustTargetKind::Binary => ("--bin", true),
+        RustTargetKind::Example => ("--example", true),
+        RustTargetKind::Test => ("--test", true),
+        RustTargetKind::Benchmark => ("--bench", true),
+    };
+    arguments.push(flag.to_owned());
+    if named {
+        arguments.push(settings.target.name.clone());
+    }
+    arguments.extend([
+        "--target".to_owned(),
+        settings.target_triple.clone(),
+        "--profile".to_owned(),
+        settings.profile.clone(),
+    ]);
+    Ok(arguments)
+}
+
+/// Typed selected preparation and run pins. Independent handpicked Cargo flags cannot bypass
+/// effective-context preparation; captured compiler flags never cross a shell boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RustCompilationRunRequest {
-    pub manifest_relative_path: PathBuf,
-    pub package_names: Vec<String>,
-    pub feature_names: Vec<String>,
-    pub all_targets: bool,
+    pub preparation: SelectedRustCompilationPreparation,
     pub build_scripts_present: bool,
     pub procedural_macros_present: bool,
     pub context: RustCompilationContextPins,
@@ -517,8 +757,9 @@ pub struct RustCompilationRunRequest {
 impl RustCompilationRunRequest {
     fn validate(&self, workspace_view: &Path) -> Result<PathBuf, RustCompilationTrustError> {
         self.context.validate()?;
-        validate_relative_path(&self.manifest_relative_path)?;
+        validate_relative_path(&self.preparation.manifest_relative_path)?;
         if self
+            .preparation
             .manifest_relative_path
             .file_name()
             .and_then(|value| value.to_str())
@@ -526,27 +767,10 @@ impl RustCompilationRunRequest {
         {
             return Err(RustCompilationTrustError::InvalidManifestPath);
         }
-        let manifest = workspace_view.join(&self.manifest_relative_path);
+        let manifest = workspace_view.join(&self.preparation.manifest_relative_path);
         let manifest = canonical_unaliased_file(&manifest)?;
         if !manifest.starts_with(workspace_view) {
             return Err(RustCompilationTrustError::PathEscape);
-        }
-        if self.package_names.len() > 256 || self.feature_names.len() > 1_024 {
-            return Err(RustCompilationTrustError::InvalidInvocationToken);
-        }
-        let mut packages = BTreeSet::new();
-        for package in &self.package_names {
-            validate_cargo_token(package)?;
-            if !packages.insert(package) {
-                return Err(RustCompilationTrustError::DuplicateInvocationToken);
-            }
-        }
-        let mut features = BTreeSet::new();
-        for feature in &self.feature_names {
-            validate_cargo_token(feature)?;
-            if !features.insert(feature) {
-                return Err(RustCompilationTrustError::DuplicateInvocationToken);
-            }
         }
         Ok(manifest)
     }
@@ -694,6 +918,7 @@ impl RustCompilationEnvironment {
         // A fixed locale avoids diagnostic-dependent behavior without inheriting host locale
         // modules, proxies, credential stores, or agent sockets.
         variables.insert("LC_ALL".into(), "C".into());
+        variables.extend(request.preparation.selected_environment.clone());
         validate_environment_variables(&variables)?;
         let environment_digest = canonical_digest(&variables)?;
         Ok(Self {
@@ -1102,6 +1327,9 @@ pub fn compile_rust_compilation_launch_plan(
     trusted_local_authorization: Option<&TrustedLocalAuthorization>,
 ) -> Result<RustCompilationLaunchPlan, RustCompilationTrustError> {
     let policy_digest = policy.digest()?;
+    request
+        .preparation
+        .require_available(&request.context, inputs)?;
     inputs.revalidate()?;
     paths.revalidate()?;
     let manifest = request.validate(&inputs.workspace_view)?;
@@ -1163,26 +1391,17 @@ pub fn compile_rust_compilation_launch_plan(
         .strip_prefix(&inputs.workspace_view)
         .map_err(|_| RustCompilationTrustError::PathEscape)?;
     let contained_manifest = layout.workspace_view.join(relative_manifest);
-    let mut package_names = request.package_names.clone();
-    package_names.sort();
-    let mut feature_names = request.feature_names.clone();
-    feature_names.sort();
     let mut contained_arguments = vec![
         "check".into(),
         "--locked".into(),
         "--offline".into(),
         "--manifest-path".into(),
-        contained_manifest.display().to_string(),
+        contained_manifest
+            .to_str()
+            .ok_or(RustCompilationTrustError::UnrepresentableInvocationPath)?
+            .to_owned(),
     ];
-    for package in package_names {
-        contained_arguments.extend(["--package".into(), package]);
-    }
-    if !feature_names.is_empty() {
-        contained_arguments.extend(["--features".into(), feature_names.join(",")]);
-    }
-    if request.all_targets {
-        contained_arguments.push("--all-targets".into());
-    }
+    contained_arguments.extend(request.preparation.cargo_selection_arguments.clone());
     let environment =
         RustCompilationEnvironment::build(inputs, paths, request, sandbox_profile.mechanism)?;
     let path_contract_digest = canonical_digest(&(inputs, paths))?;
@@ -2594,6 +2813,10 @@ pub fn issue_rust_compilation_admission_proof(
 
 #[derive(Debug, Error)]
 pub enum RustCompilationTrustError {
+    #[error("selected Rust context differs from exact compilation inputs")]
+    SelectedContextMismatch,
+    #[error("selected Rust compilation preparation is unavailable: {0:?}")]
+    PreparationUnavailable(Vec<RustCompilationPreparationRemainder>),
     #[error("Rust compilation resource limits are invalid or effectively unbounded")]
     InvalidResourceLimits,
     #[error("Rust compilation trust policy is not closed")]
@@ -2618,6 +2841,8 @@ pub enum RustCompilationTrustError {
     PathEscape,
     #[error("manifest path must be a relative Cargo.toml path")]
     InvalidManifestPath,
+    #[error("contained path cannot be represented exactly in the compiler invocation")]
+    UnrepresentableInvocationPath,
     #[error("identifier is malformed: {0}")]
     InvalidIdentifier(&'static str),
     #[error("digest is malformed")]
@@ -2820,7 +3045,8 @@ fn validate_digest(value: &str) -> Result<(), RustCompilationTrustError> {
 fn validate_environment_variables(
     variables: &BTreeMap<String, String>,
 ) -> Result<(), RustCompilationTrustError> {
-    const ALLOWED: [&str; 24] = [
+    const ALLOWED: [&str; 25] = [
+        "CARGO_ENCODED_RUSTFLAGS",
         "PATH",
         "HOME",
         "TMPDIR",
@@ -2972,6 +3198,257 @@ mod tests {
         format!("b3:{}", format!("{byte:02x}").repeat(32))
     }
 
+    fn selected_context_request(
+        harness: &Harness,
+    ) -> crate::analysis_context::rust_context::RustContextDiscoveryRequest {
+        use crate::analysis_context::rust_context::{
+            RustContextDiscoveryRequest, RustContextSelection,
+        };
+        use crate::analysis_context::{
+            ContextArtifactInput, ContextFileInput, ContextSearchRoot, ContextSearchScope,
+            ContextSearchUniverse, RustCfgSetting, RustTargetSettings, RustToolchainSettings,
+        };
+        let workspace = &harness.inputs.workspace_view;
+        fs::create_dir_all(workspace.join("src")).unwrap();
+        fs::create_dir_all(workspace.join(".cargo")).unwrap();
+        fs::write(workspace.join("Cargo.toml"), b"[package]\nname='fixture'\nversion='0.0.0'\nedition='2024'\n[features]\nsemantic=[]\n").unwrap();
+        fs::write(
+            workspace.join("src/lib.rs"),
+            b"pub fn value() -> u32 { 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join(".cargo/config.toml"),
+            b"[build]\nrustflags=['--cfg','captured_config']\n",
+        )
+        .unwrap();
+        let files = ["Cargo.toml", "src/lib.rs", ".cargo/config.toml"]
+            .into_iter()
+            .map(|path| {
+                let contents = fs::read(workspace.join(path)).unwrap();
+                ContextFileInput {
+                    file_id: format!("file:{path}"),
+                    relative_path: path.as_bytes().to_vec(),
+                    digest: crate::integrity::digest_bytes(&contents),
+                    contents,
+                }
+            })
+            .collect();
+        RustContextDiscoveryRequest {
+            workspace_id: crate::identity::encode_public_id(
+                crate::identity::IdentityDomain::Workspace,
+                None,
+                [1; 16],
+            )
+            .unwrap(),
+            source_generation: 7,
+            provider_bundle_version: "rust-fixture-provider".to_owned(),
+            files,
+            search_scope: ContextSearchScope {
+                namespace: b".".to_vec(),
+                ordered_roots: vec![ContextSearchRoot {
+                    root_id: "root".to_owned(),
+                    relative_path: b".".to_vec(),
+                }],
+                policy_identity: [6; 32],
+                universe: ContextSearchUniverse::Closed {
+                    inventory_identity: [7; 32],
+                },
+            },
+            selection: RustContextSelection {
+                target: Some(RustTargetSettings {
+                    name: "fixture".to_owned(),
+                    kind: RustTargetKind::Library,
+                    crate_root: b"src/lib.rs".to_vec(),
+                }),
+                requested_features: vec!["semantic".to_owned()],
+                default_features: false,
+                cfgs: vec![RustCfgSetting {
+                    name: "selected_mode".to_owned(),
+                    value: Some("checked".to_owned()),
+                }],
+                target_triple: Some("x86_64-unknown-linux-gnu".to_owned()),
+                profile: Some("dev".to_owned()),
+                toolchain: Some(RustToolchainSettings {
+                    release: harness.inputs.exact_toolchain_release.clone(),
+                    commit_hash: "fixture-compiler-commit".to_owned(),
+                    artifact_digest: [3; 32],
+                }),
+                sysroot: Some(ContextArtifactInput {
+                    file_id: "sysroot:selected".to_owned(),
+                    digest: [8; 32],
+                }),
+                ..RustContextSelection::default()
+            },
+        }
+    }
+
+    fn discover_selected(
+        request: &crate::analysis_context::rust_context::RustContextDiscoveryRequest,
+    ) -> Box<RustContextDiscoveryProduct> {
+        let crate::analysis_context::rust_context::RustContextDiscoveryOutcome::Prepared(product) =
+            crate::analysis_context::rust_context::discover_rust_context(request).unwrap()
+        else {
+            panic!("expected explicit selected context preparation")
+        };
+        product
+    }
+
+    fn bind_selected_context(harness: &mut Harness, product: &RustContextDiscoveryProduct) {
+        harness.request.context.workspace_id = product.context.workspace_id.clone();
+        harness.request.context.analysis_context_id = product.context.analysis_context_id.clone();
+        harness.request.context.context_manifest_digest =
+            product.context.context_fingerprint.clone();
+        harness.request.context.source_generation = product.source_generation;
+        harness.request.preparation =
+            SelectedRustCompilationPreparation::from_discovered(product).unwrap();
+    }
+
+    #[test]
+    fn rust_selected_settings_causally_prepare_contained_arguments_and_environment() {
+        let mut harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
+        let mut request = selected_context_request(&harness);
+        let before = discover_selected(&request);
+        bind_selected_context(&mut harness, &before);
+        assert_eq!(
+            harness.request.preparation.cargo_selection_arguments(),
+            [
+                "--package",
+                "fixture",
+                "--features",
+                "semantic",
+                "--no-default-features",
+                "--lib",
+                "--target",
+                "x86_64-unknown-linux-gnu",
+                "--profile",
+                "dev"
+            ]
+        );
+        assert_eq!(
+            harness.request.preparation.selected_environment()["CARGO_ENCODED_RUSTFLAGS"],
+            "--cfg\u{1f}captured_config\u{1f}--cfg\u{1f}selected_mode=\"checked\""
+        );
+        let source = fs::read(harness.inputs.workspace_view.join("src/lib.rs")).unwrap();
+        request.selection.target.as_mut().unwrap().kind = RustTargetKind::Binary;
+        request.selection.target.as_mut().unwrap().name = "selected-bin".to_owned();
+        request.selection.default_features = true;
+        request.selection.requested_features = vec!["alternate".to_owned()];
+        request.selection.target_triple = Some("aarch64-unknown-linux-gnu".to_owned());
+        request.selection.profile = Some("release".to_owned());
+        request.selection.cfgs[0].value = Some("changed".to_owned());
+        let changed = discover_selected(&request);
+        assert_ne!(
+            changed.context.context_fingerprint,
+            before.context.context_fingerprint
+        );
+        bind_selected_context(&mut harness, &changed);
+        // This explicit test authority permits inspecting the ordinary containment compiler.
+        // It does not run Cargo or claim target resolution/build success.
+        harness.request.preparation.authority = RustPreparationAuthority::ContainmentFixture;
+        let plan = compile_untrusted(&harness);
+        assert_eq!(
+            &plan.contained_arguments[5..],
+            [
+                "--package",
+                "fixture",
+                "--features",
+                "alternate",
+                "--bin",
+                "selected-bin",
+                "--target",
+                "aarch64-unknown-linux-gnu",
+                "--profile",
+                "release"
+            ]
+        );
+        assert_eq!(
+            plan.environment.variables["CARGO_ENCODED_RUSTFLAGS"],
+            "--cfg\u{1f}captured_config\u{1f}--cfg\u{1f}selected_mode=\"changed\""
+        );
+        assert_eq!(
+            source,
+            fs::read(harness.inputs.workspace_view.join("src/lib.rs")).unwrap()
+        );
+        plan.verify_digest().unwrap();
+    }
+
+    #[test]
+    fn rust_selected_preparation_cannot_erase_missing_resolution_or_toolchain_evidence() {
+        let mut harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
+        let request = selected_context_request(&harness);
+        let product = discover_selected(&request);
+        bind_selected_context(&mut harness, &product);
+        let error = compile_rust_compilation_launch_plan(
+            &untrusted_policy(),
+            &harness.capabilities,
+            &harness.profile,
+            &harness.inputs,
+            &harness.paths,
+            &harness.request,
+            None,
+        )
+        .unwrap_err();
+        let RustCompilationTrustError::PreparationUnavailable(reasons) = error else {
+            panic!("missing metadata cannot authorize a launch")
+        };
+        for reason in [
+            RustContextRemainder::CargoMetadataRequired,
+            RustContextRemainder::DependencyResolutionRequired,
+            RustContextRemainder::BuildInputsRequired,
+        ] {
+            assert!(reasons.contains(&RustCompilationPreparationRemainder::Context(reason)));
+        }
+        assert!(reasons.contains(&RustCompilationPreparationRemainder::SysrootMappingRequired));
+        assert!(!harness.paths.extractor_socket_path.exists());
+        assert!(!harness.paths.stdout_path.exists());
+        harness.inputs.toolchain_digest = digest(99);
+        assert!(matches!(
+            compile_rust_compilation_launch_plan(
+                &untrusted_policy(),
+                &harness.capabilities,
+                &harness.profile,
+                &harness.inputs,
+                &harness.paths,
+                &harness.request,
+                None
+            ),
+            Err(RustCompilationTrustError::SelectedContextMismatch)
+        ));
+        let mut forged = *product;
+        forged.remainders.clear();
+        assert!(SelectedRustCompilationPreparation::from_discovered(&forged).is_err());
+    }
+
+    #[test]
+    fn rust_selected_preparation_rejects_widening_tokens_and_preserves_unsupported_environment() {
+        let harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
+        let mut request = selected_context_request(&harness);
+        for hostile in ["--all-targets", "fixture?", "fixture*"] {
+            request.selection.target.as_mut().unwrap().name = hostile.to_owned();
+            assert!(matches!(
+                SelectedRustCompilationPreparation::from_discovered(&discover_selected(&request)),
+                Err(RustCompilationTrustError::InvalidInvocationToken)
+            ));
+        }
+        request.selection.target.as_mut().unwrap().name = "fixture".to_owned();
+        request
+            .selection
+            .environment
+            .push(crate::analysis_context::RustEnvironmentSetting {
+                name: "BUILD_MODE".to_owned(),
+                value: "selected".to_owned(),
+            });
+        let product = discover_selected(&request);
+        let prepared = SelectedRustCompilationPreparation::from_discovered(&product).unwrap();
+        assert!(
+            prepared
+                .remainders()
+                .contains(&RustCompilationPreparationRemainder::UnsupportedBuildEnvironment)
+        );
+        assert!(!prepared.selected_environment().contains_key("BUILD_MODE"));
+    }
+
     fn limits() -> RustCompilationResourceLimits {
         RustCompilationResourceLimits {
             wall_time_millis: 30_000,
@@ -3114,10 +3591,11 @@ mod tests {
         .unwrap();
         let paths = RustCompilationPrivatePaths::prepare(&private_parent, "run-1").unwrap();
         let request = RustCompilationRunRequest {
-            manifest_relative_path: "Cargo.toml".into(),
-            package_names: vec!["fixture".into()],
-            feature_names: vec!["semantic".into()],
-            all_targets: true,
+            preparation: SelectedRustCompilationPreparation::test_only_containment_fixture(
+                "Cargo.toml".into(),
+                "fixture",
+                &["semantic"],
+            ),
             build_scripts_present: true,
             procedural_macros_present: true,
             context: RustCompilationContextPins {
@@ -3598,7 +4076,7 @@ mod tests {
     #[test]
     fn hostile_manifest_tokens_and_executable_extensions_fail_before_launch() {
         let mut harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
-        harness.request.manifest_relative_path = "../Cargo.toml".into();
+        harness.request.preparation.manifest_relative_path = "../Cargo.toml".into();
         assert!(matches!(
             compile_rust_compilation_launch_plan(
                 &untrusted_policy(),
@@ -3613,23 +4091,15 @@ mod tests {
             RustCompilationTrustError::PathEscape
         ));
 
-        harness.request.manifest_relative_path = "Cargo.toml".into();
-        harness.request.package_names = vec!["--target-dir=/tmp/escape".into()];
-        assert!(matches!(
-            compile_rust_compilation_launch_plan(
-                &untrusted_policy(),
-                &harness.capabilities,
-                &harness.profile,
-                &harness.inputs,
-                &harness.paths,
-                &harness.request,
-                None,
-            )
-            .unwrap_err(),
-            RustCompilationTrustError::InvalidInvocationToken
-        ));
+        harness.request.preparation.manifest_relative_path = "Cargo.toml".into();
+        assert!(validate_cargo_token("--target-dir=/tmp/escape").is_err());
 
-        harness.request.package_names = vec!["fixture".into()];
+        harness.request.preparation =
+            SelectedRustCompilationPreparation::test_only_containment_fixture(
+                "Cargo.toml".into(),
+                "fixture",
+                &["semantic"],
+            );
         let reject = RustCompilationTrustPolicy::untrusted_sandboxed_v1(
             limits(),
             RustExecutableExtensionPolicy::RejectWorkspaceWhenPresent,

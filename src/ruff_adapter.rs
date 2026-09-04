@@ -634,6 +634,23 @@ impl RuffAdapter {
         tree_sitter: &TreeSitterSnapshot,
     ) -> Result<RuffSnapshot, RuffAdapterError> {
         let limits = RuffLimits::from_job(job)?;
+        let (major, minor) = job.context().python_version().ok_or_else(|| {
+            RuffAdapterError::ProjectionInvariant(
+                "Python language version is absent from the effective provider context".into(),
+            )
+        })?;
+        let target_version = PythonVersion {
+            major: u8::try_from(major).map_err(|_| {
+                RuffAdapterError::ProjectionInvariant(
+                    "Python major version is outside the provider representation".into(),
+                )
+            })?,
+            minor: u8::try_from(minor).map_err(|_| {
+                RuffAdapterError::ProjectionInvariant(
+                    "Python minor version is outside the provider representation".into(),
+                )
+            })?,
+        };
         let cancellation = job.cancellation();
         if self
             .retained
@@ -667,7 +684,7 @@ impl RuffAdapter {
         let parse_started = Instant::now();
         let Some(parsed) = parse_unchecked(
             &text.text,
-            ParseOptions::from(PySourceType::Python).with_target_version(PythonVersion::PY314),
+            ParseOptions::from(PySourceType::Python).with_target_version(target_version),
         )
         .try_into_module() else {
             return self.reject(RuffAdapterError::ProjectionInvariant(
@@ -1959,8 +1976,9 @@ mod job_tests {
             suite: SuiteIdentity::try_new("codefabric-relational-data-fabric@2.3.0").unwrap(),
             provider: ProviderIdentity::try_new(provider).unwrap(),
             protocol: ProviderProtocolIdentity::try_new("in-process-arrow@1").unwrap(),
-            source: ProviderSourceBinding::try_new(
+            source: ProviderSourceBinding::try_file(
                 SourceIdentity::try_new("source-1").unwrap(),
+                [6; 16],
                 [1; 16],
                 1,
                 [2; 32],
@@ -1968,9 +1986,12 @@ mod job_tests {
             .unwrap(),
             context: ProviderContextBinding::try_new(
                 ContextIdentity::try_new("context-1").unwrap(),
+                [3; 16],
                 [3; 32],
                 [4; 32],
             )
+            .unwrap()
+            .with_python_version(3, 14)
             .unwrap(),
             run: ProviderRunBinding::try_new(
                 ProviderRunIdentity::try_new(format!("{provider}.run-1")).unwrap(),

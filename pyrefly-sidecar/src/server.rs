@@ -29,6 +29,9 @@ use crate::protocol::generated::codefabric::pyrefly::v1::{
     OpenContextResponse, RelationIpcFrameEvent, RunAccepted, RunProgress, RunTerminal,
     ShutdownRequest, ShutdownResponse,
 };
+use crate::pyrefly_link::preparation::{
+    PreparationError, SelectedPyreflyPreparation, UNAVAILABLE_DETAILS,
+};
 use crate::relation_ipc_contract::{RelationWireIdentity, relation_wire_identity};
 use crate::relation_ipc_proto::{
     RelationCoverage, decode_flow_control_ack, encode_relation_frames,
@@ -122,6 +125,8 @@ struct Service {
     state_root: Arc<PathBuf>,
     sandbox_profile_digest: Arc<String>,
     shutdown: Arc<tokio::sync::watch::Sender<bool>>,
+    #[cfg(test)]
+    test_only_preparation_authority: bool,
 }
 
 impl Service {
@@ -141,6 +146,8 @@ impl Service {
             state_root: Arc::new(state_root.to_owned()),
             sandbox_profile_digest: Arc::new(sandbox_profile_digest.to_owned()),
             shutdown: Arc::new(shutdown),
+            #[cfg(test)]
+            test_only_preparation_authority: false,
         })
     }
 
@@ -432,22 +439,30 @@ fn capability_outcomes(
     start: &crate::protocol::generated::codefabric::pyrefly::v1::AnalyzeModulesRequest,
     state: ProviderRunState,
 ) -> Vec<CapabilityOutcome> {
+    let complete_empty = state == ProviderRunState::Succeeded
+        && start.complete_inventory
+        && start.modules.is_empty();
     start
         .requested_capability_codes
         .iter()
         .map(|capability_code| CapabilityOutcome {
             capability_code: *capability_code,
-            owner_capability_state_code: if state == ProviderRunState::Succeeded {
+            owner_capability_state_code: if complete_empty {
+                10
+            } else if state == ProviderRunState::Succeeded {
                 40
             } else {
                 30
             },
-            completeness_state_code: if state == ProviderRunState::Succeeded {
+            completeness_state_code: if complete_empty {
+                10
+            } else if state == ProviderRunState::Succeeded {
                 20
             } else {
                 40
             },
             reason_code: match state {
+                ProviderRunState::Succeeded if complete_empty => "PYREFLY_EMPTY_SELECTED_INVENTORY",
                 ProviderRunState::Succeeded => "PYREFLY_QUERY_SLICE_PARTIAL",
                 ProviderRunState::Superseded => "PYREFLY_SUPERSEDED",
                 ProviderRunState::Cancelled => "PYREFLY_CANCELLED",
@@ -456,6 +471,24 @@ fn capability_outcomes(
             .to_owned(),
         })
         .collect()
+}
+
+fn validate_complete_inventory(
+    start: &crate::protocol::generated::codefabric::pyrefly::v1::AnalyzeModulesRequest,
+) -> Result<(), Status> {
+    if !start.complete_inventory {
+        return Err(Status::failed_precondition(
+            "Pyrefly requires an explicit complete selected module inventory",
+        ));
+    }
+    crate::pyrefly_link::CompleteModuleInventory::validate_scope(
+        start
+            .modules
+            .iter()
+            .map(|module| (module.module_id.as_str(), module.module_name.as_str())),
+        &start.changed_module_ids,
+    )
+    .map_err(Status::invalid_argument)
 }
 
 fn header(
@@ -559,6 +592,24 @@ impl PyreflySidecar for Service {
                 "Pyrefly context identity, manifest, or lease differs",
             ));
         }
+        let preparation =
+            SelectedPyreflyPreparation::from_manifest(&request.immutable_context_manifest);
+        #[cfg(test)]
+        let preparation = if self.test_only_preparation_authority {
+            SelectedPyreflyPreparation::test_only_from_manifest(&request.immutable_context_manifest)
+        } else {
+            preparation
+        };
+        let preparation = preparation.map_err(|error| match error {
+            PreparationError::InvalidManifest(reason) => Status::invalid_argument(format!(
+                "Pyrefly selected context manifest is invalid: {reason}"
+            )),
+            PreparationError::Unavailable(reasons) => Status::with_details(
+                tonic::Code::FailedPrecondition,
+                format!("Pyrefly selected context preparation unavailable: {reasons:?}"),
+                prost::bytes::Bytes::from_static(UNAVAILABLE_DETAILS),
+            ),
+        })?;
         let handle = format!(
             "pyrefly-context:{}",
             &b3(&[
@@ -593,8 +644,9 @@ impl PyreflySidecar for Service {
                 ));
             }
             let semantic_root = self.state_root.join("contexts");
-            let semantic = crate::pyrefly_link::SemanticContext::new(&semantic_root, &handle)
-                .map_err(Status::internal)?;
+            let semantic =
+                crate::pyrefly_link::SemanticContext::new(&semantic_root, &handle, preparation)
+                    .map_err(Status::internal)?;
             contexts.insert(
                 handle.clone(),
                 Arc::new(OpenContext {
@@ -633,6 +685,7 @@ impl PyreflySidecar for Service {
                 "Pyrefly analysis stream must begin with start",
             ));
         };
+        validate_complete_inventory(&start)?;
         let context = self
             .contexts
             .lock()
@@ -668,7 +721,6 @@ impl PyreflySidecar for Service {
             || start.sandbox_profile_digest != *self.sandbox_profile_digest
             || start.trust_profile != TRUST_PROFILE
             || start.resource_profile_id != RESOURCE_PROFILE_ID
-            || start.modules.is_empty()
             || start.modules.len() > MAX_MODULES_PER_RUN
             || declared_source_bytes.is_none_or(|total| total > MAX_SOURCE_BYTES_PER_RUN)
         {
@@ -756,6 +808,16 @@ impl PyreflySidecar for Service {
                     return;
                 }
             };
+            let inventory = match crate::pyrefly_link::CompleteModuleInventory::try_new(
+                inputs,
+                &start.changed_module_ids,
+            ) {
+                Ok(inventory) => inventory,
+                Err(error) => {
+                    let _ = sender.send(Err(Status::invalid_argument(error))).await;
+                    return;
+                }
+            };
             let run_identity = crate::pyrefly_link::AnalysisRunIdentity {
                 provider_run_id: start.provider_run_id.clone(),
                 analysis_context_id: start.analysis_context_id.clone(),
@@ -781,7 +843,7 @@ impl PyreflySidecar for Service {
                     .semantic
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .analyze_modules(&run_identity, &inputs)
+                    .analyze_modules(&run_identity, &inventory)
             })
             .await
             {
@@ -832,6 +894,7 @@ impl PyreflySidecar for Service {
                             overall_digest: b3(&[]),
                             terminal_state: state as i32,
                             rechecked_module_ids: analysis.proven_rechecked_module_ids,
+                            removed_module_ids: analysis.removed_module_ids,
                             sandbox_profile_digest: sandbox_profile_digest.as_str().to_owned(),
                             trust_profile: TRUST_PROFILE.to_owned(),
                         })),
@@ -840,6 +903,7 @@ impl PyreflySidecar for Service {
                 return;
             }
             let rechecked_module_ids = analysis.proven_rechecked_module_ids;
+            let removed_module_ids = analysis.removed_module_ids;
             let mut sequence = 1_u64;
             let mut module_digests = Vec::new();
             let mut interrupted = None;
@@ -1017,6 +1081,7 @@ impl PyreflySidecar for Service {
                             overall_digest,
                             terminal_state: state as i32,
                             rechecked_module_ids,
+                            removed_module_ids,
                             sandbox_profile_digest: sandbox_profile_digest.as_str().to_owned(),
                             trust_profile: TRUST_PROFILE.to_owned(),
                         })),
@@ -1045,6 +1110,7 @@ impl PyreflySidecar for Service {
                         overall_digest,
                         terminal_state: ProviderRunState::Succeeded as i32,
                         rechecked_module_ids,
+                        removed_module_ids,
                         sandbox_profile_digest: sandbox_profile_digest.as_str().to_owned(),
                         trust_profile: TRUST_PROFILE.to_owned(),
                     })),
@@ -1195,9 +1261,82 @@ pub(crate) fn serve(socket: &Path, sandbox_profile_digest: &str) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prost::Message as _;
 
     const TEST_SANDBOX_PROFILE_DIGEST: &str =
         "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+
+    #[test]
+    fn pyrefly_complete_inventory_wire_contract_rejects_missing_marker_and_dirty_only_scope() {
+        use crate::protocol::generated::codefabric::pyrefly::v1::{
+            AnalyzeModulesRequest, ModuleRequest,
+        };
+        let mut request = AnalyzeModulesRequest {
+            modules: vec![
+                ModuleRequest {
+                    module_id: "a".to_owned(),
+                    module_name: "a".to_owned(),
+                    ..ModuleRequest::default()
+                },
+                ModuleRequest {
+                    module_id: "b".to_owned(),
+                    module_name: "b".to_owned(),
+                    ..ModuleRequest::default()
+                },
+            ],
+            changed_module_ids: vec!["a".to_owned()],
+            ..AnalyzeModulesRequest::default()
+        };
+        let decoded = AnalyzeModulesRequest::decode(request.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(
+            validate_complete_inventory(&decoded).unwrap_err().code(),
+            tonic::Code::FailedPrecondition
+        );
+        request.complete_inventory = true;
+        let decoded = AnalyzeModulesRequest::decode(request.encode_to_vec().as_slice()).unwrap();
+        validate_complete_inventory(&decoded).unwrap();
+        assert_eq!(decoded.modules.len(), 2);
+        assert_eq!(decoded.changed_module_ids, ["a"]);
+        request.changed_module_ids = vec!["absent".to_owned()];
+        assert_eq!(
+            validate_complete_inventory(&request).unwrap_err().code(),
+            tonic::Code::InvalidArgument
+        );
+        request.changed_module_ids = vec!["a".to_owned(), "a".to_owned()];
+        assert!(validate_complete_inventory(&request).is_err());
+        request.changed_module_ids.clear();
+        request.modules[1].module_name = "a".to_owned();
+        assert!(validate_complete_inventory(&request).is_err());
+        request.modules.clear();
+        validate_complete_inventory(&request).unwrap();
+        request.changed_module_ids = vec!["a".to_owned()];
+        assert!(validate_complete_inventory(&request).is_err());
+    }
+
+    #[test]
+    fn pyrefly_empty_selected_inventory_has_truthful_zero_scope_capability() {
+        use crate::protocol::generated::codefabric::pyrefly::v1::AnalyzeModulesRequest;
+        let request = AnalyzeModulesRequest {
+            complete_inventory: true,
+            requested_capability_codes: vec![10, 20],
+            ..AnalyzeModulesRequest::default()
+        };
+        let outcomes = capability_outcomes(&request, ProviderRunState::Succeeded);
+        assert_eq!(outcomes.len(), 2);
+        assert!(
+            outcomes
+                .iter()
+                .all(|outcome| outcome.owner_capability_state_code == 10
+                    && outcome.completeness_state_code == 10
+                    && outcome.reason_code == "PYREFLY_EMPTY_SELECTED_INVENTORY")
+        );
+        assert!(
+            capability_outcomes(&request, ProviderRunState::Cancelled)
+                .iter()
+                .all(|outcome| outcome.reason_code == "PYREFLY_CANCELLED"
+                    && outcome.completeness_state_code == 40)
+        );
+    }
 
     fn hello() -> Hello {
         Hello {
@@ -1304,7 +1443,7 @@ mod tests {
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&state_root);
-        let service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
+        let mut service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
         let shutdown = service.shutdown_receiver();
 
         let mut mismatch = hello();
@@ -1331,7 +1470,7 @@ mod tests {
             crate::pyrefly_link::schema_digests()
         );
 
-        let manifest = b"{\"python\":\"3.14\"}".to_vec();
+        let manifest = crate::pyrefly_link::preparation::test_manifest("3.13", "linux");
         let manifest_digest = b3(&manifest);
         let open = |generation| OpenContextRequest {
             workspace_id: "workspace-protocol".to_owned(),
@@ -1351,6 +1490,31 @@ mod tests {
             maximum_memory_mib: MAX_MEMORY_MIB,
             sandbox_profile_digest: TEST_SANDBOX_PROFILE_DIGEST.to_owned(),
         };
+        let unavailable = service
+            .open_context(Request::new(open(2)))
+            .await
+            .unwrap_err();
+        assert_eq!(unavailable.code(), tonic::Code::FailedPrecondition);
+        assert_eq!(
+            unavailable.details(),
+            crate::pyrefly_link::preparation::UNAVAILABLE_DETAILS
+        );
+        assert!(service.contexts.lock().unwrap().is_empty());
+        assert!(!state_root.join("contexts").exists());
+        let mut malformed = open(2);
+        malformed.immutable_context_manifest = b"{\"python\":\"3.14\"}".to_vec();
+        malformed.context_manifest_digest = b3(&malformed.immutable_context_manifest);
+        let invalid = service
+            .open_context(Request::new(malformed))
+            .await
+            .unwrap_err();
+        assert_eq!(invalid.code(), tonic::Code::InvalidArgument);
+        assert!(invalid.details().is_empty());
+        assert!(service.contexts.lock().unwrap().is_empty());
+        assert!(!state_root.join("contexts").exists());
+        // This explicit unit-fixture authority is absent from the deployed sidecar.
+        // Containment/protocol checks below do not prove real bundle installation.
+        service.test_only_preparation_authority = true;
         let opened = service
             .open_context(Request::new(open(2)))
             .await

@@ -1584,8 +1584,9 @@ mod tests {
     }
 
     fn source_binding() -> ProviderSourceBinding {
-        ProviderSourceBinding::try_new(
+        ProviderSourceBinding::try_file(
             SourceIdentity::try_new("source-1").unwrap(),
+            [6; 16],
             [1; 16],
             1,
             [2; 32],
@@ -1596,6 +1597,7 @@ mod tests {
     fn context_binding() -> ProviderContextBinding {
         ProviderContextBinding::try_new(
             ContextIdentity::try_new("context-1").unwrap(),
+            [3; 16],
             [3; 32],
             [4; 32],
         )
@@ -1837,7 +1839,7 @@ mod tests {
             )
             .unwrap();
         prepared.provider_program = ProviderProgramIdentity::try_new("forged-program").unwrap();
-        let result = tree_sitter_result();
+        let result = tree_sitter_result(prepared.job());
         assert_eq!(
             release.providers().admit(prepared, result).unwrap_err(),
             SemanticReleaseError::ForgedProviderJob
@@ -1945,10 +1947,8 @@ mod tests {
                 },
             )
             .unwrap();
-        let admitted = release
-            .providers()
-            .admit(prepared, tree_sitter_result())
-            .unwrap();
+        let result = tree_sitter_result(prepared.job());
+        let admitted = release.providers().admit(prepared, result).unwrap();
         let raw = &admitted.result().relations()[0];
 
         let transformation = release.transformations().compile(&target).unwrap();
@@ -2016,14 +2016,12 @@ mod tests {
                 },
             )
             .unwrap();
-        let admitted = release
-            .providers()
-            .admit(prepared, tree_sitter_result())
-            .unwrap();
+        let result = tree_sitter_result(prepared.job());
+        let admitted = release.providers().admit(prepared, result).unwrap();
         assert_eq!(admitted.observation().emitted_relations, 1);
     }
 
-    fn tree_sitter_result() -> ProviderRunResult {
+    fn tree_sitter_result(job: &ProviderJob) -> ProviderRunResult {
         let schema = schema();
         let batch = RecordBatch::try_new(
             Arc::clone(&schema),
@@ -2031,6 +2029,7 @@ mod tests {
         )
         .unwrap();
         ProviderRunResult::try_new(ProviderRunResultSpec {
+            support: crate::provider_contracts::ProviderRunSupport::conservative(job),
             suite: current_suite_identity().unwrap(),
             provider: ProviderIdentity::try_new("tree-sitter").unwrap(),
             protocol: ProviderProtocolIdentity::try_new("tree-sitter.protocol.v1").unwrap(),

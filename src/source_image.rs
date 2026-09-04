@@ -28,6 +28,12 @@ use crate::secure_path::{
 };
 use crate::workspace_registry::{WorkspaceRegistry, WorkspaceRegistryError};
 
+mod inventory_capture;
+pub use inventory_capture::{
+    InventoryCaptureBundle, InventoryCaptureDisposition, InventoryCaptureEntry,
+    SourceInventoryCapturePolicy, SourceSelection,
+};
+
 /// Default maximum for ordinary source files (16 MiB).
 pub const ORDINARY_SOURCE_MAXIMUM_BYTES: u64 = 16 * 1024 * 1024;
 /// Maximum enabled only by explicit policy (64 MiB).
@@ -206,7 +212,6 @@ pub struct ProviderWorkspaceView {
     pub manifest_path: PathBuf,
     pub manifest_digest: [u8; 32],
     pub dependency_manifest_digest: [u8; 32],
-    pub sandbox_profile_digest: String,
     pub entries: Vec<ProviderWorkspaceManifestEntry>,
 }
 
@@ -215,7 +220,6 @@ struct ProviderWorkspaceManifest<'a> {
     version: &'static str,
     workspace_id: String,
     source_generation: u64,
-    sandbox_profile_digest: &'a str,
     dependency_manifest_digest: String,
     entries: &'a [ProviderWorkspaceManifestEntry],
 }
@@ -230,18 +234,14 @@ struct ProviderWorkspaceManifest<'a> {
 pub fn publish_provider_workspace_view(
     state_root: &Path,
     run_key: &str,
+    workspace_id: [u8; 16],
+    source_generation: u64,
     images: &[&SourceImage],
     dependencies: &DependencyInputBundle,
-    sandbox_profile_digest: &str,
 ) -> Result<ProviderWorkspaceView, SourceImageError> {
-    let first = images
-        .first()
-        .ok_or(SourceImageError::ProviderWorkspaceView)?;
-    if run_key.is_empty() || !valid_provider_profile_digest(sandbox_profile_digest) {
+    if run_key.is_empty() {
         return Err(SourceImageError::ProviderWorkspaceView);
     }
-    let workspace_id = first.workspace_id;
-    let source_generation = first.source_generation;
     let mut entries = images
         .iter()
         .map(|image| {
@@ -287,10 +287,9 @@ pub fn publish_provider_workspace_view(
         .collect::<Vec<_>>();
     let workspace_id_text = encode_public_id(IdentityDomain::Workspace, None, workspace_id)?;
     let manifest = ProviderWorkspaceManifest {
-        version: "1.0",
+        version: "2.0",
         workspace_id: workspace_id_text,
         source_generation,
-        sandbox_profile_digest,
         dependency_manifest_digest: format!("b3:{}", digest_name(&dependencies.manifest_digest)),
         entries: &manifest_entries,
     };
@@ -395,21 +394,8 @@ pub fn publish_provider_workspace_view(
         manifest_path,
         manifest_digest,
         dependency_manifest_digest: dependencies.manifest_digest,
-        sandbox_profile_digest: sandbox_profile_digest.into(),
         entries: manifest_entries,
     })
-}
-
-fn valid_provider_profile_digest(value: &str) -> bool {
-    value
-        .strip_prefix("sha256:")
-        .or_else(|| value.strip_prefix("b3:"))
-        .is_some_and(|payload| {
-            payload.len() == 64
-                && payload
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-        })
 }
 
 /// Explicit capability evidence for a source image that cannot be admitted.
@@ -499,6 +485,10 @@ pub enum SourceImageError {
     LeaseInactive,
     #[error("provider workspace view is invalid or could not be published")]
     ProviderWorkspaceView,
+    #[error("source inventory and capture dispositions do not form an exact closed bundle")]
+    InventoryCaptureMismatch,
+    #[error("source inventory capture exceeded the aggregate byte bound")]
+    InventoryCaptureBound,
 }
 
 /// Capture policy loaded from the validated deployment profile.
@@ -668,6 +658,10 @@ pub struct SourceImageStore {
     blobs: BlobStore,
     policy: SourceCapturePolicy,
     metrics: SourceImageMetrics,
+    #[cfg(test)]
+    lease_metric_reads: u64,
+    #[cfg(test)]
+    fail_next_lease_metric_read: bool,
 }
 
 enum StableCapture {
@@ -689,6 +683,10 @@ impl SourceImageStore {
             blobs: BlobStore::open(root)?,
             policy,
             metrics: SourceImageMetrics::default(),
+            #[cfg(test)]
+            lease_metric_reads: 0,
+            #[cfg(test)]
+            fail_next_lease_metric_read: false,
         })
     }
 
@@ -711,6 +709,19 @@ impl SourceImageStore {
     ///
     /// Returns the same failures as [`Self::capture`]. A changed token defers publication.
     pub fn capture_with_fence(
+        &mut self,
+        store: &mut OperationalStore,
+        request: &CaptureRequest,
+        observe_change_token: impl FnMut() -> Option<u64>,
+    ) -> Result<CaptureOutcome, SourceImageError> {
+        // A failed observation must occur before acquiring a holder. No fallible metrics
+        // read may discard an already committed lease before returning its ownership token.
+        self.refresh_lease_metrics(store)?;
+        self.capture_with_observed_leases(store, request, observe_change_token)
+    }
+
+    /// The inventory batch observes once, then applies each committed lease-state delta.
+    fn capture_with_observed_leases(
         &mut self,
         store: &mut OperationalStore,
         request: &CaptureRequest,
@@ -751,7 +762,7 @@ impl SourceImageStore {
             encoding.code(),
             line_index.newline_kind as u16,
         )?;
-        let lease = acquire_source_blob_lease(
+        let (lease, previous_state) = acquire_source_blob_lease(
             store,
             digest,
             request.workspace_id,
@@ -761,7 +772,12 @@ impl SourceImageStore {
             self.policy.lease_ttl,
         )?;
         self.metrics.acquired_leases = self.metrics.acquired_leases.saturating_add(1);
-        self.refresh_lease_metrics(store)?;
+        if previous_state != Some(1) {
+            self.metrics.live_holders = self.metrics.live_holders.saturating_add(1);
+        }
+        if previous_state == Some(2) {
+            self.metrics.orphan_holders = self.metrics.orphan_holders.saturating_sub(1);
+        }
         self.metrics.published_images = self.metrics.published_images.saturating_add(1);
         self.metrics.captured_bytes = self
             .metrics
@@ -837,6 +853,13 @@ impl SourceImageStore {
     }
 
     fn refresh_lease_metrics(&mut self, store: &OperationalStore) -> Result<(), SourceImageError> {
+        #[cfg(test)]
+        {
+            self.lease_metric_reads += 1;
+            if std::mem::take(&mut self.fail_next_lease_metric_read) {
+                return Err(SourceImageError::BlobIo);
+            }
+        }
         let (live, orphaned) = store
             .reader_factory()
             .open()?
@@ -893,23 +916,44 @@ impl SourceImageStore {
         store: &mut OperationalStore,
         lease_id: [u8; 16],
     ) -> Result<(), SourceImageError> {
-        let removed = store.write_transaction(|transaction| {
+        self.release_without_observation(store, lease_id)?;
+        self.refresh_lease_metrics(store)
+    }
+
+    /// Release ownership even when a metrics reader is unavailable; batches observe once.
+    fn release_without_observation(
+        &mut self,
+        store: &mut OperationalStore,
+        lease_id: [u8; 16],
+    ) -> Result<(), SourceImageError> {
+        let (removed, previous_state) = store.write_transaction(|transaction| {
+            let previous_state = transaction
+                .query_row(
+                    "SELECT state_code FROM source_blob_lease WHERE lease_id=?1",
+                    [lease_id.as_slice()],
+                    |row| row.get::<_, u16>(0),
+                )
+                .optional()?;
             transaction.execute(
                 "DELETE FROM source_blob_lease_member WHERE lease_id=?1",
                 [lease_id.as_slice()],
             )?;
-            transaction
-                .execute(
-                    "DELETE FROM source_blob_lease WHERE lease_id=?1",
-                    [lease_id.as_slice()],
-                )
-                .map_err(SourceImageError::from)
+            let removed = transaction.execute(
+                "DELETE FROM source_blob_lease WHERE lease_id=?1",
+                [lease_id.as_slice()],
+            )?;
+            Ok::<_, SourceImageError>((removed, previous_state))
         })?;
         self.metrics.released_leases = self
             .metrics
             .released_leases
             .saturating_add(u64::try_from(removed).unwrap_or(u64::MAX));
-        self.refresh_lease_metrics(store)?;
+        if previous_state == Some(1) {
+            self.metrics.live_holders = self.metrics.live_holders.saturating_sub(1);
+        }
+        if previous_state == Some(2) {
+            self.metrics.orphan_holders = self.metrics.orphan_holders.saturating_sub(1);
+        }
         Ok(())
     }
 
@@ -1194,9 +1238,18 @@ pub fn current_source_generation(
     store: &OperationalStore,
     workspace_id: [u8; 16],
 ) -> Result<u64, SourceImageError> {
-    store
-        .reader_factory()
-        .open()?
+    current_source_generation_from_reader(&store.reader_factory().open()?, workspace_id)
+}
+
+/// Observe a fresh durable fence without opening a second logical writer.
+///
+/// # Errors
+/// Returns a persistence failure when the workspace is missing or unreadable.
+pub fn current_source_generation_from_reader(
+    reader: &crate::operational_store::OperationalReader,
+    workspace_id: [u8; 16],
+) -> Result<u64, SourceImageError> {
+    reader
         .with_connection(|connection| {
             connection.query_row(
                 "SELECT source_generation FROM workspace_generation WHERE workspace_id=?1",
@@ -1267,12 +1320,12 @@ fn acquire_source_blob_lease(
     holder_kind: SourceBlobHolderKind,
     holder_id: [u8; 16],
     ttl: Duration,
-) -> Result<SourceBlobLease, SourceImageError> {
+) -> Result<(SourceBlobLease, Option<u16>), SourceImageError> {
     let lease_id = random_registration_nonce()?;
     let expires_at = unix_seconds()?.saturating_add(ttl.as_secs());
     let source_generation_sql = sql_i64(source_generation)?;
     let expires_at_sql = sql_i64(expires_at)?;
-    let actual_lease_id = store.write_transaction(|transaction| {
+    let (actual_lease_id, previous_state) = store.write_transaction(|transaction| {
         let exists: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM source_blob WHERE blob_digest=?1)",
             [blob_digest.as_slice()],
@@ -1281,6 +1334,19 @@ fn acquire_source_blob_lease(
         if !exists {
             return Err(SourceImageError::BlobDigestMismatch);
         }
+        let previous_state = transaction
+            .query_row(
+                "SELECT state_code FROM source_blob_lease WHERE workspace_id=?1
+                 AND source_generation=?2 AND holder_kind_code=?3 AND holder_id=?4",
+                params![
+                    workspace_id.as_slice(),
+                    source_generation_sql,
+                    holder_kind as u16,
+                    holder_id.as_slice()
+                ],
+                |row| row.get::<_, u16>(0),
+            )
+            .optional()?;
         transaction.execute(
             "INSERT OR IGNORE INTO source_blob_lease(lease_id, workspace_id,
              source_generation, holder_kind_code, holder_id, state_code, expires_at, orphaned_at)
@@ -1317,13 +1383,16 @@ fn acquire_source_blob_lease(
              VALUES (?1, ?2)",
             params![actual.as_slice(), blob_digest.as_slice()],
         )?;
-        Ok(actual)
+        Ok((actual, previous_state))
     })?;
-    Ok(SourceBlobLease {
-        lease_id: actual_lease_id,
-        blob_digest,
-        expires_at,
-    })
+    Ok((
+        SourceBlobLease {
+            lease_id: actual_lease_id,
+            blob_digest,
+            expires_at,
+        },
+        previous_state,
+    ))
 }
 
 fn build_line_index(bytes: &[u8]) -> LineIndex {
@@ -1653,6 +1722,63 @@ mod tests {
             holder_kind: SourceBlobHolderKind::ProviderRun,
             holder_id: [9; 16],
         }
+    }
+
+    #[test]
+    fn rt_cpg_wp78_single_capture_observation_precedes_lease_acquisition() {
+        let (_directory, mut store, workspace_id, root, mut images) = fixture();
+        fs::write(root.join("source.rs"), b"fn main() {}\n").unwrap();
+        let request = request(workspace_id, b"source.rs");
+        images.fail_next_lease_metric_read = true;
+        assert!(images.capture(&mut store, &request).is_err());
+        assert_eq!(images.metrics().acquired_leases, 0);
+        let CaptureOutcome::Published(first) = images.capture(&mut store, &request).unwrap() else {
+            panic!("stable source must be captured");
+        };
+        let CaptureOutcome::Published(reused) = images.capture(&mut store, &request).unwrap()
+        else {
+            panic!("repeated holder must remain live");
+        };
+        assert_eq!(first.lease.lease_id, reused.lease.lease_id);
+        assert_eq!(
+            images.metrics().live_holders,
+            1,
+            "reusing a holder is not a new live lease"
+        );
+        images.fail_next_lease_metric_read = true;
+        assert!(images.capture(&mut store, &request).is_err());
+        let durable: i64 = store
+            .reader_factory()
+            .open()
+            .unwrap()
+            .with_connection(|connection| {
+                connection.query_row("SELECT count(*) FROM source_blob_lease", [], |row| {
+                    row.get(0)
+                })
+            })
+            .unwrap();
+        assert_eq!(
+            durable, 1,
+            "failed recapture cannot release an existing owner's lease"
+        );
+        assert_eq!(images.metrics().acquired_leases, 2);
+        images
+            .orphan_after_restart(&mut store, unix_seconds().unwrap())
+            .unwrap();
+        assert_eq!(images.metrics().orphan_holders, 1);
+        let CaptureOutcome::Published(reactivated) = images.capture(&mut store, &request).unwrap()
+        else {
+            panic!("orphan holder must reactivate");
+        };
+        assert_eq!(reactivated.lease.lease_id, first.lease.lease_id);
+        assert_eq!(
+            (
+                images.metrics().live_holders,
+                images.metrics().orphan_holders
+            ),
+            (1, 0)
+        );
+        images.release(&mut store, first.lease.lease_id).unwrap();
     }
 
     #[test]
@@ -2022,9 +2148,10 @@ mod tests {
         let view = publish_provider_workspace_view(
             &directory.path().join("provider-state"),
             "run:provider-view-test",
+            workspace_id,
+            image.source_generation,
             &[&image],
             &dependencies,
-            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         )
         .unwrap();
         assert_eq!(

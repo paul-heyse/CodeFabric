@@ -8,6 +8,9 @@ use thiserror::Error;
 use crate::analysis_context::{
     AnalysisContext, AnalysisContextCandidate, AnalysisContextDiscoveryPort,
     AnalysisContextDiscoveryRequest, AnalysisContextError, AnalysisContextKind,
+    ContextArtifactInput, ContextLookupEvidence, ContextLookupKind, ContextLookupObservation,
+    ContextSearchRoot, ContextSearchScope, PythonContextSettings, PythonLanguageVersion,
+    PythonModuleBinding,
 };
 use crate::identity::{IdentityDomain, context_set_identity, decode_public_id, encode_public_id};
 use crate::snapshot::{SnapshotContextRecord, SnapshotContexts};
@@ -52,6 +55,8 @@ pub struct PythonRegisteredInputs {
     pub dependency_roots: Vec<String>,
     pub frozen_requirement_file_ids: Vec<String>,
     pub authorized_roots: Vec<PythonAuthorizedRoot>,
+    /// A registered build-system map takes precedence over filesystem module derivation.
+    pub module_map: Vec<PythonModuleBinding>,
 }
 
 /// Authorized mapping from a discovered workspace-relative root to its application ID.
@@ -80,10 +85,12 @@ pub struct PythonContextDiscoveryRequest {
     pub workspace_profile: Option<PythonWorkspaceProfile>,
     pub registered: PythonRegisteredInputs,
     pub deployment: PythonDeploymentProfile,
-    pub typeshed_bundle_digest: [u8; 32],
-    pub pyrefly_bundle_digest: [u8; 32],
+    /// Missing external bundle evidence does not prevent the native syntax context.
+    pub typeshed_bundle_digest: Option<[u8; 32]>,
+    pub pyrefly_bundle_digest: Option<[u8; 32]>,
     pub ruff_bundle_digest: [u8; 32],
     pub provider_bundle_version: String,
+    pub search_scope: ContextSearchScope,
 }
 
 /// Python implementation of the lane-neutral analysis-context discovery port.
@@ -109,6 +116,14 @@ impl PythonContextDiscoveryAdapter {
         &self,
         request: &AnalysisContextDiscoveryRequest,
     ) -> Result<PythonContextDiscoveryProduct, PythonContextDiscoveryError> {
+        if request.workspace_id != self.template.workspace_id
+            || request.source_generation != self.template.source_generation
+        {
+            return Err(PythonContextDiscoveryError::terminal(
+                "CONTEXT_DISCOVERY_GENERATION_MISMATCH",
+                "immutable context inputs cannot be rebound to another workspace or generation",
+            ));
+        }
         let visible = request
             .source_paths
             .iter()
@@ -125,10 +140,7 @@ impl PythonContextDiscoveryAdapter {
                 "lane-neutral source inventory omits a configured discovery input",
             ));
         }
-        let mut lane_request = self.template.clone();
-        lane_request.workspace_id.clone_from(&request.workspace_id);
-        lane_request.source_generation = request.source_generation;
-        discover_python_context(&lane_request)
+        discover_python_context(&self.template)
     }
 }
 
@@ -173,11 +185,18 @@ pub struct PythonAnalysisContextManifest {
     pub dependency_roots: Vec<String>,
     pub namespace_package_policy: String,
     pub import_precedence: Vec<String>,
-    pub typeshed_bundle_digest: String,
+    pub typeshed_bundle_digest: Option<String>,
     pub lockfile_artifacts: Vec<PythonContextArtifact>,
     pub project_config_artifacts: Vec<PythonContextArtifact>,
-    pub pyrefly_bundle_digest: String,
+    pub pyrefly_bundle_digest: Option<String>,
     pub ruff_bundle_digest: String,
+    pub provider_bundle_version: String,
+    pub platforms: Vec<String>,
+    pub root_bindings: Vec<ContextSearchRoot>,
+    pub module_map: Vec<PythonModuleBinding>,
+    pub configuration_namespace: Vec<u8>,
+    pub configuration_roots: Vec<ContextSearchRoot>,
+    pub configuration_policy_identity: [u8; 32],
 }
 
 /// Why a configuration artifact participates in invalidation.
@@ -206,6 +225,7 @@ pub struct PythonConfigurationDependency {
 pub struct PythonConfigurationDependencySet {
     pub source_generation: u64,
     pub dependencies: Vec<PythonConfigurationDependency>,
+    pub lookup_evidence: Vec<ContextLookupEvidence>,
     pub dependency_set_digest: String,
 }
 
@@ -287,14 +307,83 @@ impl PythonContextDiscoveryProduct {
         let dependency_digest = dependency_set_digest(
             self.configuration_dependencies.source_generation,
             &self.configuration_dependencies.dependencies,
+            &self.configuration_dependencies.lookup_evidence,
         )?;
-        if dependency_digest != self.configuration_dependencies.dependency_set_digest {
+        validate_lookup_closure(
+            &self.manifest,
+            &self.configuration_dependencies.lookup_evidence,
+        )?;
+        if dependency_digest != self.configuration_dependencies.dependency_set_digest
+            || self.source_generation != self.configuration_dependencies.source_generation
+            || self.context.provider_bundle_version != self.manifest.provider_bundle_version
+        {
             return Err(PythonContextDiscoveryError::terminal(
                 "CONTEXT_DEPENDENCY_SET_MISMATCH",
                 "configuration dependency set digest drifted",
             ));
         }
         Ok(())
+    }
+
+    /// Project the selected values a provider must install from the identity-bearing manifest.
+    ///
+    /// # Errors
+    /// Rejects inconsistent identities, malformed selected versions or missing root bindings.
+    pub fn effective_settings(&self) -> Result<PythonContextSettings, PythonContextDiscoveryError> {
+        self.validate()?;
+        let manifest = &self.manifest;
+        let PythonMinor(major, minor) = parse_minor(&manifest.python_language_version)?;
+        let roots = |ids: &[String]| {
+            ids.iter()
+                .map(|id| {
+                    manifest
+                        .root_bindings
+                        .iter()
+                        .find(|root| &root.root_id == id)
+                        .cloned()
+                        .ok_or_else(|| {
+                            PythonContextDiscoveryError::terminal(
+                                "CONTEXT_ROOT_UNAUTHORIZED",
+                                "selected root has no immutable binding",
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        };
+        let artifacts = |values: &[PythonContextArtifact]| {
+            values
+                .iter()
+                .map(|artifact| {
+                    Ok(ContextArtifactInput {
+                        file_id: artifact.file_id.clone(),
+                        digest: parse_digest(&artifact.digest)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, PythonContextDiscoveryError>>()
+        };
+        Ok(PythonContextSettings {
+            language_version: PythonLanguageVersion { major, minor },
+            platforms: manifest.platforms.clone(),
+            module_roots: roots(&manifest.module_roots)?,
+            source_roots: roots(&manifest.source_roots)?,
+            stub_roots: roots(&manifest.stub_roots)?,
+            dependency_roots: roots(&manifest.dependency_roots)?,
+            module_map: manifest.module_map.clone(),
+            typeshed_bundle_digest: manifest
+                .typeshed_bundle_digest
+                .as_deref()
+                .map(parse_digest)
+                .transpose()?,
+            pyrefly_bundle_digest: manifest
+                .pyrefly_bundle_digest
+                .as_deref()
+                .map(parse_digest)
+                .transpose()?,
+            ruff_bundle_digest: parse_digest(&manifest.ruff_bundle_digest)?,
+            provider_bundle_version: manifest.provider_bundle_version.clone(),
+            configuration_artifacts: artifacts(&manifest.project_config_artifacts)?,
+            lock_artifacts: artifacts(&manifest.lockfile_artifacts)?,
+        })
     }
 
     /// Build snapshot selection with this context as the sole Python default.
@@ -354,7 +443,17 @@ pub fn plan_python_context_transition(
     previous: &PythonContextDiscoveryProduct,
     selected: &PythonContextDiscoveryProduct,
 ) -> PythonContextInvalidationPlan {
-    let changed = previous.context.analysis_context_id != selected.context.analysis_context_id;
+    let changed = previous.context.analysis_context_id != selected.context.analysis_context_id
+        || previous.configuration_dependencies.lookup_evidence
+            != selected.configuration_dependencies.lookup_evidence
+        || selected
+            .configuration_dependencies
+            .lookup_evidence
+            .iter()
+            .any(|evidence| {
+                !evidence.scope.is_closed()
+                    || matches!(evidence.observation, ContextLookupObservation::Incomplete)
+            });
     PythonContextInvalidationPlan {
         previous_context_id: previous.context.analysis_context_id.clone(),
         selected_context_id: selected.context.analysis_context_id.clone(),
@@ -388,10 +487,9 @@ pub fn discover_python_context(
     decode_public_id(IdentityDomain::Workspace, None, &request.workspace_id)?;
     validate_request(request)?;
     let files = validate_files(&request.files)?;
-    let pyproject_path = project_path(&request.project_root_path, "pyproject.toml");
-    let pyrefly_path = project_path(&request.project_root_path, "pyrefly.toml");
-    let pyproject_file = files.get(&pyproject_path).copied();
-    let pyrefly_file = files.get(&pyrefly_path).copied();
+    let lookup_evidence = configuration_lookups(request, &files)?;
+    let pyproject_file = first_configuration(request, &files, "pyproject.toml");
+    let pyrefly_file = first_configuration(request, &files, "pyrefly.toml");
     let pyproject = pyproject_file
         .map(|file| parse_toml(file, "pyproject.toml"))
         .transpose()?;
@@ -400,6 +498,12 @@ pub fn discover_python_context(
         .transpose()?;
 
     let mut diagnostics = Vec::new();
+    if request.typeshed_bundle_digest.is_none() || request.pyrefly_bundle_digest.is_none() {
+        diagnostics.push(PythonContextDiagnostic {
+            code: "CONTEXT_EXTERNAL_BUNDLE_UNAVAILABLE", terminal: false,
+            detail: "native syntax settings are selected; external semantic bundle inputs are unavailable".to_owned(),
+        });
+    }
     let language_version = resolve_python_version(
         request.workspace_profile.as_ref(),
         pyrefly.as_ref(),
@@ -408,8 +512,14 @@ pub fn discover_python_context(
         &mut diagnostics,
     )?;
     let (lock_artifacts, lock_dependencies) = resolve_lock_artifacts(request, &files)?;
-    let configured_roots = configured_package_roots(request, pyrefly.as_ref(), pyproject.as_ref())?;
-    let (manifest, dependencies) = assemble_manifest(
+    let configured_roots = configured_package_roots(
+        request,
+        pyrefly.as_ref(),
+        pyproject.as_ref(),
+        pyrefly_file,
+        pyproject_file,
+    )?;
+    let (mut manifest, dependencies) = assemble_manifest(
         ManifestAssembly {
             request,
             language_version: &language_version,
@@ -421,6 +531,8 @@ pub fn discover_python_context(
         },
         &mut diagnostics,
     )?;
+    manifest.platforms = selected_platforms(request, pyrefly.as_ref(), pyproject.as_ref())?;
+    manifest.module_map = discover_module_map(request, &manifest)?;
     let canonical_manifest = canonical_json(&manifest)?;
     let manifest_fingerprint = crate::integrity::digest_bytes(&canonical_manifest);
     let context = AnalysisContext::new_from_manifest_fingerprint(
@@ -431,7 +543,8 @@ pub fn discover_python_context(
         manifest_fingerprint,
         true,
     )?;
-    let dependency_set_digest = dependency_set_digest(request.source_generation, &dependencies)?;
+    let dependency_set_digest =
+        dependency_set_digest(request.source_generation, &dependencies, &lookup_evidence)?;
     let product = PythonContextDiscoveryProduct {
         manifest,
         canonical_manifest,
@@ -440,6 +553,7 @@ pub fn discover_python_context(
         configuration_dependencies: PythonConfigurationDependencySet {
             source_generation: request.source_generation,
             dependencies,
+            lookup_evidence,
             dependency_set_digest,
         },
         diagnostics,
@@ -543,11 +657,18 @@ fn assemble_manifest(
             )?,
             namespace_package_policy: NAMESPACE_PACKAGE_POLICY.to_owned(),
             import_precedence: IMPORT_PRECEDENCE.iter().map(ToString::to_string).collect(),
-            typeshed_bundle_digest: digest_string(&request.typeshed_bundle_digest),
+            typeshed_bundle_digest: request.typeshed_bundle_digest.as_ref().map(digest_string),
             lockfile_artifacts: input.lock_artifacts,
             project_config_artifacts,
-            pyrefly_bundle_digest: digest_string(&request.pyrefly_bundle_digest),
+            pyrefly_bundle_digest: request.pyrefly_bundle_digest.as_ref().map(digest_string),
             ruff_bundle_digest: digest_string(&request.ruff_bundle_digest),
+            provider_bundle_version: request.provider_bundle_version.clone(),
+            platforms: Vec::new(),
+            root_bindings: authorized_root_bindings(request),
+            module_map: Vec::new(),
+            configuration_namespace: request.search_scope.namespace.clone(),
+            configuration_roots: request.search_scope.ordered_roots.clone(),
+            configuration_policy_identity: request.search_scope.policy_identity,
         },
         dependencies,
     ))
@@ -556,6 +677,21 @@ fn assemble_manifest(
 fn validate_request(
     request: &PythonContextDiscoveryRequest,
 ) -> Result<(), PythonContextDiscoveryError> {
+    request.search_scope.validate()?;
+    if request.files.iter().any(|file| {
+        let path = file.relative_path.as_bytes();
+        let namespace = request.search_scope.namespace.as_slice();
+        namespace != b"."
+            && path != namespace
+            && !path
+                .strip_prefix(namespace)
+                .is_some_and(|suffix| suffix.starts_with(b"/"))
+    }) {
+        return Err(PythonContextDiscoveryError::terminal(
+            "CONTEXT_NAMESPACE_INVALID",
+            "immutable context input is outside the authorized namespace",
+        ));
+    }
     if request.project_root_id.is_empty()
         || request.platform_tag.is_empty()
         || request.provider_bundle_version.is_empty()
@@ -608,6 +744,355 @@ fn validate_files(
         }
     }
     Ok(files)
+}
+
+const CONFIGURATION_LOOKUPS: [(&str, ContextLookupKind); 6] = [
+    (
+        "pyproject.toml",
+        ContextLookupKind::PythonProjectConfiguration,
+    ),
+    ("pyrefly.toml", ContextLookupKind::PyreflyConfiguration),
+    ("uv.lock", ContextLookupKind::UvLock),
+    ("poetry.lock", ContextLookupKind::PoetryLock),
+    ("pdm.lock", ContextLookupKind::PdmLock),
+    ("Pipfile.lock", ContextLookupKind::PipfileLock),
+];
+
+fn first_configuration<'a>(
+    request: &PythonContextDiscoveryRequest,
+    files: &BTreeMap<String, &'a PythonDiscoveryFile>,
+    name: &str,
+) -> Option<&'a PythonDiscoveryFile> {
+    request.search_scope.ordered_roots.iter().find_map(|root| {
+        let path = std::str::from_utf8(&root.relative_path).ok()?;
+        files.get(&project_path(path, name)).copied()
+    })
+}
+
+fn configuration_lookups(
+    request: &PythonContextDiscoveryRequest,
+    files: &BTreeMap<String, &PythonDiscoveryFile>,
+) -> Result<Vec<ContextLookupEvidence>, PythonContextDiscoveryError> {
+    let mut result = Vec::new();
+    for root in &request.search_scope.ordered_roots {
+        let path = std::str::from_utf8(&root.relative_path).map_err(|_| {
+            PythonContextDiscoveryError::terminal(
+                "CONTEXT_NAMESPACE_UNSUPPORTED",
+                "Python configuration root is not UTF-8",
+            )
+        })?;
+        for (name, kind) in CONFIGURATION_LOOKUPS {
+            let relative_path = project_path(path, name);
+            result.push(lookup_evidence(
+                request,
+                relative_path.as_bytes(),
+                kind,
+                files.get(&relative_path).copied(),
+            ));
+        }
+    }
+    for id in &request.registered.frozen_requirement_file_ids {
+        let file = files
+            .values()
+            .find(|file| &file.file_id == id)
+            .ok_or_else(|| {
+                PythonContextDiscoveryError::terminal(
+                    "CONTEXT_DEPENDENCY_INPUT_MISSING",
+                    "registered frozen requirements are unavailable",
+                )
+            })?;
+        result.push(lookup_evidence(
+            request,
+            file.relative_path.as_bytes(),
+            ContextLookupKind::FrozenRequirements,
+            Some(file),
+        ));
+    }
+    for evidence in &result {
+        evidence.validate()?;
+    }
+    Ok(result)
+}
+
+fn lookup_evidence(
+    request: &PythonContextDiscoveryRequest,
+    relative_path: &[u8],
+    kind: ContextLookupKind,
+    file: Option<&PythonDiscoveryFile>,
+) -> ContextLookupEvidence {
+    ContextLookupEvidence {
+        scope: request.search_scope.clone(),
+        kind,
+        relative_path: relative_path.to_vec(),
+        observation: file.map_or_else(
+            || {
+                if request.search_scope.is_closed() {
+                    ContextLookupObservation::Absent
+                } else {
+                    ContextLookupObservation::Incomplete
+                }
+            },
+            |file| ContextLookupObservation::Present {
+                file_id: file.file_id.clone(),
+                digest: file.digest,
+            },
+        ),
+    }
+}
+
+fn validate_lookup_closure(
+    manifest: &PythonAnalysisContextManifest,
+    evidence: &[ContextLookupEvidence],
+) -> Result<(), PythonContextDiscoveryError> {
+    let Some(first) = evidence.first() else {
+        return Err(PythonContextDiscoveryError::terminal(
+            "CONTEXT_LOOKUP_CLOSURE_INVALID",
+            "configuration search evidence is absent",
+        ));
+    };
+    let mut observed = BTreeSet::new();
+    for item in evidence {
+        item.validate()?;
+        if item.scope.namespace != manifest.configuration_namespace
+            || item.scope.ordered_roots != manifest.configuration_roots
+            || item.scope.policy_identity != manifest.configuration_policy_identity
+            || item.scope != first.scope
+            || !observed.insert((item.kind, item.relative_path.clone()))
+        {
+            return Err(PythonContextDiscoveryError::terminal(
+                "CONTEXT_LOOKUP_CLOSURE_INVALID",
+                "lookup support has a different namespace or duplicate key",
+            ));
+        }
+    }
+    for root in &manifest.configuration_roots {
+        let path = std::str::from_utf8(&root.relative_path).map_err(|_| {
+            PythonContextDiscoveryError::terminal(
+                "CONTEXT_LOOKUP_CLOSURE_INVALID",
+                "invalid configuration root",
+            )
+        })?;
+        for (name, kind) in CONFIGURATION_LOOKUPS {
+            if !observed.contains(&(kind, project_path(path, name).into_bytes())) {
+                return Err(PythonContextDiscoveryError::terminal(
+                    "CONTEXT_LOOKUP_CLOSURE_INVALID",
+                    "required failed or positive configuration lookup is missing",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn authorized_root_bindings(request: &PythonContextDiscoveryRequest) -> Vec<ContextSearchRoot> {
+    let mut roots = vec![ContextSearchRoot {
+        root_id: request.project_root_id.clone(),
+        relative_path: request.project_root_path.as_bytes().to_vec(),
+    }];
+    roots.extend(
+        request
+            .registered
+            .authorized_roots
+            .iter()
+            .map(|root| ContextSearchRoot {
+                root_id: root.path_id.clone(),
+                relative_path: root.relative_path.as_bytes().to_vec(),
+            }),
+    );
+    roots.sort_by(|left, right| left.root_id.cmp(&right.root_id));
+    roots.dedup();
+    roots
+}
+
+fn selected_platforms(
+    request: &PythonContextDiscoveryRequest,
+    standalone: Option<&toml::Value>,
+    project: Option<&toml::Value>,
+) -> Result<Vec<String>, PythonContextDiscoveryError> {
+    let project = project
+        .and_then(|value| value.get("tool"))
+        .and_then(|value| value.get("pyrefly"));
+    let read = |value: Option<&toml::Value>| -> Result<Vec<String>, PythonContextDiscoveryError> {
+        let Some(value) = value.and_then(|value| value.get("python-platform")) else {
+            return Ok(Vec::new());
+        };
+        if let Some(value) = value.as_str() {
+            Ok(vec![value.to_owned()])
+        } else {
+            optional_string_array(Some(value), "python-platform")
+        }
+    };
+    let standalone = read(standalone)?;
+    let project = read(project)?;
+    if !standalone.is_empty() && !project.is_empty() && standalone != project {
+        return Err(PythonContextDiscoveryError::terminal(
+            "CONTEXT_PLATFORM_CONFLICT",
+            "Python platform selections conflict",
+        ));
+    }
+    let mut result = if standalone.is_empty() {
+        project
+    } else {
+        standalone
+    };
+    if result.is_empty() {
+        let tag = request.platform_tag.as_str();
+        result.push(
+            if tag == "darwin" || tag.starts_with("macos-") {
+                "darwin"
+            } else if tag == "win32" || tag.starts_with("windows-") {
+                "win32"
+            } else if tag == "linux" || tag.starts_with("linux-") {
+                "linux"
+            } else if tag == "all" {
+                "all"
+            } else {
+                return Err(PythonContextDiscoveryError::terminal(
+                    "CONTEXT_PLATFORM_UNSUPPORTED",
+                    "deployment platform has no explicit Python semantic mapping",
+                ));
+            }
+            .to_owned(),
+        );
+    }
+    if result
+        .iter()
+        .any(|value| !matches!(value.as_str(), "linux" | "darwin" | "win32" | "all"))
+        || result.len() > 1 && result.iter().any(|value| value == "all")
+    {
+        return Err(PythonContextDiscoveryError::terminal(
+            "CONTEXT_PLATFORM_UNSUPPORTED",
+            "unsupported or contradictory Python platforms",
+        ));
+    }
+    Ok(result)
+}
+
+fn discover_module_map(
+    request: &PythonContextDiscoveryRequest,
+    manifest: &PythonAnalysisContextManifest,
+) -> Result<Vec<PythonModuleBinding>, PythonContextDiscoveryError> {
+    let mut result = Vec::new();
+    let mut bound_files = BTreeSet::new();
+    let registered = !request.registered.module_map.is_empty();
+    let mut files = request.files.iter().collect::<Vec<_>>();
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    let mut selected_roots = Vec::new();
+    for id in manifest
+        .stub_roots
+        .iter()
+        .chain(&manifest.module_roots)
+        .chain(&manifest.source_roots)
+        .chain(&manifest.dependency_roots)
+    {
+        if !selected_roots.contains(id) {
+            selected_roots.push(id.clone());
+        }
+    }
+    for id in selected_roots {
+        let root = manifest
+            .root_bindings
+            .iter()
+            .find(|root| root.root_id == id)
+            .ok_or_else(|| {
+                PythonContextDiscoveryError::terminal(
+                    "CONTEXT_ROOT_UNAUTHORIZED",
+                    "selected module root lacks its authorized path",
+                )
+            })?;
+        let path = std::str::from_utf8(&root.relative_path).map_err(|_| {
+            PythonContextDiscoveryError::terminal(
+                "CONTEXT_NAMESPACE_UNSUPPORTED",
+                "module root is not UTF-8",
+            )
+        })?;
+        for file in &files {
+            let relative = if matches!(path, "." | "") {
+                Some(file.relative_path.as_str())
+            } else {
+                file.relative_path
+                    .strip_prefix(path)
+                    .and_then(|value| value.strip_prefix('/'))
+            };
+            let Some(relative) = relative else { continue };
+            let Some((stem, is_stub)) = relative
+                .strip_suffix(".pyi")
+                .map(|stem| (stem, true))
+                .or_else(|| relative.strip_suffix(".py").map(|stem| (stem, false)))
+            else {
+                continue;
+            };
+            let is_package = stem == "__init__" || stem.ends_with("/__init__");
+            let stem = stem.strip_suffix("/__init__").unwrap_or(stem);
+            if stem == "__init__" {
+                continue;
+            }
+            // Root order is semantic precedence, not permission to duplicate one file binding.
+            // Registered build maps are validated against every applicable authorized root below.
+            if !registered && !bound_files.insert(file.file_id.as_str()) {
+                continue;
+            }
+            result.push(PythonModuleBinding {
+                module_name: stem.replace('/', "."),
+                file_id: file.file_id.clone(),
+                relative_path: file.relative_path.as_bytes().to_vec(),
+                root_id: id.clone(),
+                is_stub,
+                is_package,
+            });
+        }
+    }
+    if registered {
+        let candidates = result
+            .iter()
+            .map(|candidate| {
+                (
+                    candidate.file_id.as_str(),
+                    candidate.relative_path.as_slice(),
+                    candidate.root_id.as_str(),
+                    candidate.is_stub,
+                    candidate.is_package,
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        for binding in &request.registered.module_map {
+            if binding.module_name.is_empty()
+                || !bound_files.insert(binding.file_id.as_str())
+                || !candidates.contains(&(
+                    binding.file_id.as_str(),
+                    binding.relative_path.as_slice(),
+                    binding.root_id.as_str(),
+                    binding.is_stub,
+                    binding.is_package,
+                ))
+            {
+                return Err(PythonContextDiscoveryError::terminal(
+                    "CONTEXT_MODULE_MAP_INVALID",
+                    "registered module mapping does not resolve to a selected immutable file",
+                ));
+            }
+        }
+        result.clone_from(&request.registered.module_map);
+    }
+    Ok(result)
+}
+
+fn parse_digest(value: &str) -> Result<[u8; 32], PythonContextDiscoveryError> {
+    if !valid_digest(value) {
+        return Err(PythonContextDiscoveryError::terminal(
+            "CONTEXT_INPUT_INVALID",
+            "invalid artifact digest",
+        ));
+    }
+    let mut output = [0; 32];
+    for (slot, pair) in output
+        .iter_mut()
+        .zip(value.as_bytes()[3..].as_chunks::<2>().0)
+    {
+        let pair = std::str::from_utf8(pair).expect("validated hexadecimal ASCII");
+        *slot = u8::from_str_radix(pair, 16).expect("validated hexadecimal digits");
+    }
+    Ok(output)
 }
 
 fn parse_toml(
@@ -748,11 +1233,7 @@ fn resolve_lock_artifacts(
 > {
     let mut candidates = KNOWN_LOCK_FILES
         .iter()
-        .filter_map(|name| {
-            files
-                .get(&project_path(&request.project_root_path, name))
-                .copied()
-        })
+        .filter_map(|name| first_configuration(request, files, name))
         .collect::<Vec<_>>();
     let by_id = files
         .values()
@@ -826,6 +1307,8 @@ fn configured_package_roots(
     request: &PythonContextDiscoveryRequest,
     pyrefly: Option<&toml::Value>,
     pyproject: Option<&toml::Value>,
+    pyrefly_file: Option<&PythonDiscoveryFile>,
+    pyproject_file: Option<&PythonDiscoveryFile>,
 ) -> Result<Vec<String>, PythonContextDiscoveryError> {
     let standalone = pyrefly
         .map(pyrefly_search_paths)
@@ -837,23 +1320,39 @@ fn configured_package_roots(
         .map(pyrefly_search_paths)
         .transpose()?
         .unwrap_or_default();
+    let resolve = |paths: Vec<String>, base: &str| {
+        paths
+            .iter()
+            .map(|path| authorized_root_id(request, path, base))
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let standalone = resolve(standalone, configuration_origin(pyrefly_file))?;
+    let project_pyrefly = resolve(project_pyrefly, configuration_origin(pyproject_file))?;
     if !standalone.is_empty() && !project_pyrefly.is_empty() && standalone != project_pyrefly {
         return Err(PythonContextDiscoveryError::terminal(
             "CONTEXT_ROOTS_CONFLICT",
             "pyrefly.toml and [tool.pyrefly] select different search paths",
         ));
     }
-    let configured = if !standalone.is_empty() {
-        standalone
+    if !standalone.is_empty() {
+        Ok(standalone)
     } else if !project_pyrefly.is_empty() {
-        project_pyrefly
+        Ok(project_pyrefly)
     } else {
-        setuptools_package_roots(pyproject)?
-    };
-    configured
-        .iter()
-        .map(|path| authorized_root_id(request, path))
-        .collect()
+        resolve(
+            setuptools_package_roots(pyproject)?,
+            configuration_origin(pyproject_file),
+        )
+    }
+}
+
+fn configuration_origin(file: Option<&PythonDiscoveryFile>) -> &str {
+    file.and_then(|file| {
+        file.relative_path
+            .rsplit_once('/')
+            .map(|(parent, _)| parent)
+    })
+    .unwrap_or(".")
 }
 
 fn pyrefly_search_paths(
@@ -922,6 +1421,7 @@ fn optional_string_array(
 fn authorized_root_id(
     request: &PythonContextDiscoveryRequest,
     configured_path: &str,
+    configuration_root: &str,
 ) -> Result<String, PythonContextDiscoveryError> {
     if !valid_relative_path(configured_path) {
         return Err(PythonContextDiscoveryError::terminal(
@@ -930,9 +1430,9 @@ fn authorized_root_id(
         ));
     }
     let path = if matches!(configured_path, "" | ".") {
-        request.project_root_path.clone()
+        configuration_root.to_owned()
     } else {
-        project_path(&request.project_root_path, configured_path)
+        project_path(configuration_root, configured_path)
     };
     if path == request.project_root_path {
         return Ok(request.project_root_id.clone());
@@ -1160,15 +1660,18 @@ fn validate_artifact(
 fn dependency_set_digest(
     source_generation: u64,
     dependencies: &[PythonConfigurationDependency],
+    lookup_evidence: &[ContextLookupEvidence],
 ) -> Result<String, PythonContextDiscoveryError> {
     #[derive(Serialize)]
     struct DigestView<'a> {
         source_generation: u64,
         dependencies: &'a [PythonConfigurationDependency],
+        lookup_evidence: &'a [ContextLookupEvidence],
     }
     let bytes = canonical_json(&DigestView {
         source_generation,
         dependencies,
+        lookup_evidence,
     })?;
     Ok(digest_string(&crate::integrity::digest_bytes(&bytes)))
 }
@@ -1273,10 +1776,21 @@ mod tests {
                 supported_python_versions: vec!["3.12".to_owned(), "3.13".to_owned()],
                 default_python_version: "3.13".to_owned(),
             },
-            typeshed_bundle_digest: [0x31; 32],
-            pyrefly_bundle_digest: [0x32; 32],
+            typeshed_bundle_digest: Some([0x31; 32]),
+            pyrefly_bundle_digest: Some([0x32; 32]),
             ruff_bundle_digest: [0x33; 32],
             provider_bundle_version: "python-providers-v1".to_owned(),
+            search_scope: ContextSearchScope {
+                namespace: b".".to_vec(),
+                ordered_roots: vec![ContextSearchRoot {
+                    root_id: "path:project-root".to_owned(),
+                    relative_path: b".".to_vec(),
+                }],
+                policy_identity: [0x34; 32],
+                universe: crate::analysis_context::ContextSearchUniverse::Closed {
+                    inventory_identity: [0x35; 32],
+                },
+            },
         }
     }
 
@@ -1367,6 +1881,13 @@ mod tests {
         let mut namespace = base_request();
         namespace.registered.module_roots = vec!["path:namespace-root".to_owned()];
         namespace.registered.source_roots = vec!["path:namespace-root".to_owned()];
+        namespace
+            .registered
+            .authorized_roots
+            .push(PythonAuthorizedRoot {
+                relative_path: "namespace".to_owned(),
+                path_id: "path:namespace-root".to_owned(),
+            });
         let namespace = discover_python_context(&namespace).unwrap();
         assert_eq!(namespace.manifest.module_roots, ["path:namespace-root"]);
         assert_eq!(
@@ -1402,6 +1923,13 @@ mod tests {
             "project_config_artifacts",
             "pyrefly_bundle_digest",
             "ruff_bundle_digest",
+            "provider_bundle_version",
+            "platforms",
+            "root_bindings",
+            "module_map",
+            "configuration_namespace",
+            "configuration_roots",
+            "configuration_policy_identity",
         ]
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -1560,5 +2088,347 @@ mod tests {
         let unchanged = plan_python_context_transition(&after, &after);
         assert!(!unchanged.republish_required);
         assert!(unchanged.invalidated_families.is_empty());
+    }
+
+    #[test]
+    fn rt_cpg_wp78_integrity() {
+        let request = base_request();
+        let product = discover_python_context(&request).unwrap();
+        let settings = product.effective_settings().unwrap();
+        assert_eq!(
+            settings.language_version,
+            PythonLanguageVersion {
+                major: 3,
+                minor: 12
+            }
+        );
+        assert_eq!(settings.platforms, ["darwin"]);
+        assert_eq!(settings.module_roots[0].relative_path, b"src");
+        assert_eq!(settings.module_map[0].module_name, "pkg");
+        assert_eq!(settings.module_map[0].relative_path, b"src/pkg/__init__.py");
+        assert!(settings.module_map[0].is_package);
+        let context_id = decode_public_id(
+            IdentityDomain::AnalysisContext,
+            None,
+            &product.context.analysis_context_id,
+        )
+        .unwrap();
+        assert_eq!(context_id.len(), 16);
+        let fingerprint = product.context.fingerprint_bytes().unwrap();
+        assert_eq!(fingerprint.len(), 32);
+        assert_ne!(context_id.as_slice(), &fingerprint[..16]);
+        assert_eq!(product.configuration_dependencies.lookup_evidence.len(), 6);
+        let absent = product
+            .configuration_dependencies
+            .lookup_evidence
+            .iter()
+            .find(|item| item.kind == ContextLookupKind::PyreflyConfiguration)
+            .unwrap();
+        assert_eq!(absent.observation, ContextLookupObservation::Absent);
+        assert_eq!(absent.scope, request.search_scope);
+        let mut missing = product.clone();
+        missing.configuration_dependencies.lookup_evidence.remove(1);
+        missing.configuration_dependencies.dependency_set_digest = dependency_set_digest(
+            missing.source_generation,
+            &missing.configuration_dependencies.dependencies,
+            &missing.configuration_dependencies.lookup_evidence,
+        )
+        .unwrap();
+        assert!(
+            missing.validate().is_err(),
+            "resealing a digest cannot restore omitted failed lookup evidence"
+        );
+
+        let mut changed = request.clone();
+        changed.files[1] = file("src/pkg/__init__.py", "file:package", "VALUE = 99\n");
+        changed.source_generation += 1;
+        changed.search_scope.universe = crate::analysis_context::ContextSearchUniverse::Closed {
+            inventory_identity: [91; 32],
+        };
+        let source_only = discover_python_context(&changed).unwrap();
+        assert_eq!(
+            source_only.context.context_fingerprint,
+            product.context.context_fingerprint
+        );
+        assert_eq!(source_only.effective_settings().unwrap(), settings);
+
+        changed.files.push(file(
+            "pyrefly.toml",
+            "file:pyrefly",
+            "python-platform='linux'\n",
+        ));
+        let configured = discover_python_context(&changed).unwrap();
+        assert_eq!(
+            configured.effective_settings().unwrap().platforms,
+            ["linux"]
+        );
+        assert_ne!(
+            configured.context.analysis_context_id,
+            source_only.context.analysis_context_id
+        );
+        assert!(plan_python_context_transition(&source_only, &configured).republish_required);
+        assert!(configured.configuration_dependencies.lookup_evidence.iter().any(|item| {
+            item.kind == ContextLookupKind::PyreflyConfiguration &&
+                matches!(&item.observation, ContextLookupObservation::Present { file_id, .. } if file_id == "file:pyrefly")
+        }));
+    }
+
+    #[test]
+    fn python_effective_context_root_order_stubs_lock_and_negative_scope() {
+        let mut request = base_request();
+        request
+            .registered
+            .authorized_roots
+            .push(PythonAuthorizedRoot {
+                relative_path: "stubs".to_owned(),
+                path_id: "path:stubs".to_owned(),
+            });
+        request.registered.stub_roots = vec!["path:stubs".to_owned()];
+        request
+            .files
+            .push(file("stubs/pkg.pyi", "file:stub", "VALUE: str\n"));
+        request
+            .files
+            .push(file("uv.lock", "file:lock", "version = 1\n"));
+        let before = discover_python_context(&request).unwrap();
+        let settings = before.effective_settings().unwrap();
+        assert!(settings.module_map[0].is_stub);
+        assert_eq!(settings.module_map[0].module_name, "pkg");
+        assert!(!settings.module_map[1].is_stub);
+        assert_eq!(
+            settings.lock_artifacts[0].digest,
+            crate::integrity::digest_bytes(b"version = 1\n")
+        );
+        request.files[3] = file("uv.lock", "file:lock", "version = 2\n");
+        let lock_changed = discover_python_context(&request).unwrap();
+        assert_ne!(
+            lock_changed.context.analysis_context_id,
+            before.context.analysis_context_id
+        );
+        assert_ne!(
+            lock_changed.effective_settings().unwrap().lock_artifacts,
+            settings.lock_artifacts
+        );
+        request.registered.module_roots = vec!["path:src-root".to_owned(), "path:stubs".to_owned()];
+        let ordered = discover_python_context(&request).unwrap();
+        request.registered.module_roots.reverse();
+        let reversed = discover_python_context(&request).unwrap();
+        assert_ne!(
+            ordered.effective_settings().unwrap().module_roots,
+            reversed.effective_settings().unwrap().module_roots
+        );
+        assert_ne!(
+            ordered.context.analysis_context_id,
+            reversed.context.analysis_context_id
+        );
+        request.search_scope.universe =
+            crate::analysis_context::ContextSearchUniverse::Incomplete {
+                observed_identity: [73; 32],
+            };
+        let incomplete = discover_python_context(&request).unwrap();
+        assert!(
+            incomplete
+                .configuration_dependencies
+                .lookup_evidence
+                .iter()
+                .any(|item| item.observation == ContextLookupObservation::Incomplete)
+        );
+        assert!(
+            !incomplete
+                .configuration_dependencies
+                .lookup_evidence
+                .iter()
+                .any(|item| item.observation == ContextLookupObservation::Absent)
+        );
+        assert!(plan_python_context_transition(&incomplete, &incomplete).republish_required);
+    }
+
+    #[test]
+    fn python_effective_context_overlapping_roots_bind_each_file_once() {
+        let mut request = base_request();
+        request
+            .registered
+            .authorized_roots
+            .push(PythonAuthorizedRoot {
+                relative_path: "src/pkg".to_owned(),
+                path_id: "path:nested".to_owned(),
+            });
+        request
+            .files
+            .push(file("src/pkg/deep/mod.py", "file:nested", "VALUE = 2\n"));
+        request.registered.module_roots = vec![
+            request.project_root_id.clone(),
+            "path:src-root".to_owned(),
+            "path:nested".to_owned(),
+        ];
+        let outer = discover_python_context(&request).unwrap();
+        let outer_settings = outer.effective_settings().unwrap();
+        assert_eq!(outer_settings.module_map.len(), 2);
+        let outer_binding = outer_settings
+            .module_map
+            .iter()
+            .find(|binding| binding.file_id == "file:nested")
+            .unwrap();
+        assert_eq!(outer_binding.module_name, "src.pkg.deep.mod");
+        assert_eq!(outer_binding.root_id, request.project_root_id);
+
+        request.registered.module_roots.reverse();
+        let inner = discover_python_context(&request).unwrap();
+        let inner_settings = inner.effective_settings().unwrap();
+        assert_eq!(inner_settings.module_map.len(), 2);
+        let inner_binding = inner_settings
+            .module_map
+            .iter()
+            .find(|binding| binding.file_id == "file:nested")
+            .unwrap();
+        assert_eq!(inner_binding.module_name, "deep.mod");
+        assert_eq!(inner_binding.root_id, "path:nested");
+        assert_ne!(
+            outer.context.analysis_context_id,
+            inner.context.analysis_context_id
+        );
+        assert_eq!(
+            inner_settings
+                .module_map
+                .iter()
+                .map(|binding| &binding.file_id)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            inner_settings.module_map.len()
+        );
+
+        // Precedence is across root classes as well as within an ordered class.
+        request.registered.stub_roots = vec![request.project_root_id.clone()];
+        let stub_first = discover_python_context(&request)
+            .unwrap()
+            .effective_settings()
+            .unwrap();
+        assert_eq!(
+            stub_first
+                .module_map
+                .iter()
+                .find(|binding| binding.file_id == "file:nested")
+                .unwrap()
+                .module_name,
+            "src.pkg.deep.mod"
+        );
+    }
+
+    #[test]
+    fn python_effective_context_registered_map_preserves_override_without_ambiguity() {
+        let mut request = base_request();
+        request.registered.module_roots =
+            vec!["path:src-root".to_owned(), request.project_root_id.clone()];
+        request.registered.module_map = vec![PythonModuleBinding {
+            module_name: "registered.package".to_owned(),
+            file_id: "file:package".to_owned(),
+            relative_path: b"src/pkg/__init__.py".to_vec(),
+            root_id: request.project_root_id.clone(),
+            is_stub: false,
+            is_package: true,
+        }];
+        let selected = discover_python_context(&request)
+            .unwrap()
+            .effective_settings()
+            .unwrap();
+        assert_eq!(selected.module_map, request.registered.module_map);
+        for mutation in 0..3 {
+            let mut invalid = request.clone();
+            match mutation {
+                0 => {
+                    let mut duplicate = invalid.registered.module_map[0].clone();
+                    duplicate.module_name = "different.name".to_owned();
+                    duplicate.root_id = "path:src-root".to_owned();
+                    invalid.registered.module_map.push(duplicate);
+                }
+                1 => invalid.registered.module_map[0].relative_path = b"different.py".to_vec(),
+                _ => invalid.registered.module_map[0].root_id = "path:unselected".to_owned(),
+            }
+            assert_eq!(
+                discover_python_context(&invalid).unwrap_err().code(),
+                "CONTEXT_MODULE_MAP_INVALID"
+            );
+        }
+    }
+
+    #[test]
+    fn python_configuration_search_order_uses_selected_config_relative_roots() {
+        let mut request = base_request();
+        request.project_root_path = "app".to_owned();
+        request.project_root_id = "path:app".to_owned();
+        request
+            .registered
+            .authorized_roots
+            .push(PythonAuthorizedRoot {
+                path_id: "path:app-src".to_owned(),
+                relative_path: "app/src".to_owned(),
+            });
+        request.search_scope.ordered_roots.insert(
+            0,
+            ContextSearchRoot {
+                root_id: "path:app".to_owned(),
+                relative_path: b"app".to_vec(),
+            },
+        );
+        request.files.push(file("app/pyproject.toml", "file:app-config",
+            "[project]\nrequires-python='>=3.13,<3.14'\n[tool.setuptools.packages.find]\nwhere=['src']\n"));
+        request
+            .files
+            .push(file("app/src/mod.py", "file:app-mod", "VALUE = 4\n"));
+        let nested = discover_python_context(&request).unwrap();
+        let settings = nested.effective_settings().unwrap();
+        assert_eq!(settings.language_version.minor, 13);
+        assert_eq!(settings.module_roots[0].relative_path, b"app/src");
+        assert_eq!(settings.module_map[0].module_name, "mod");
+        assert_eq!(nested.configuration_dependencies.lookup_evidence.len(), 12);
+        request.search_scope.ordered_roots.reverse();
+        let root_first = discover_python_context(&request).unwrap();
+        assert_eq!(
+            root_first
+                .effective_settings()
+                .unwrap()
+                .language_version
+                .minor,
+            12
+        );
+        assert_eq!(
+            root_first.effective_settings().unwrap().module_roots[0].relative_path,
+            b"src"
+        );
+        assert_ne!(
+            nested.context.analysis_context_id,
+            root_first.context.analysis_context_id
+        );
+    }
+
+    #[test]
+    fn python_syntax_context_does_not_fabricate_external_bundle_identity() {
+        let mut request = base_request();
+        request.typeshed_bundle_digest = None;
+        request.pyrefly_bundle_digest = None;
+        let syntax = discover_python_context(&request).unwrap();
+        let settings = syntax.effective_settings().unwrap();
+        assert!(settings.typeshed_bundle_digest.is_none());
+        assert!(settings.pyrefly_bundle_digest.is_none());
+        assert_eq!(settings.ruff_bundle_digest, request.ruff_bundle_digest);
+        assert_eq!(settings.language_version.minor, 12);
+        assert_eq!(settings.module_map[0].module_name, "pkg");
+        assert!(syntax.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "CONTEXT_EXTERNAL_BUNDLE_UNAVAILABLE" && !diagnostic.terminal
+        }));
+        request.typeshed_bundle_digest = Some([15; 32]);
+        request.pyrefly_bundle_digest = Some([16; 32]);
+        let semantic = discover_python_context(&request).unwrap();
+        assert_ne!(
+            syntax.context.analysis_context_id,
+            semantic.context.analysis_context_id
+        );
+        assert_eq!(
+            semantic
+                .effective_settings()
+                .unwrap()
+                .typeshed_bundle_digest,
+            Some([15; 32])
+        );
     }
 }

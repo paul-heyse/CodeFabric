@@ -17,8 +17,9 @@ use thiserror::Error;
 
 use crate::provider_contracts::{
     ProviderContractError, ProviderCoverage, ProviderCoverageState, ProviderJob, ProviderLane,
-    ProviderRelationOutput, ProviderRunEvidenceSpec, ProviderRunResult, ProviderTerminalStatus,
-    ProviderTrustOutcome, RELATION_SEMANTIC_ROLE_METADATA_KEY, SEMANTIC_ROLE_METADATA_KEY,
+    ProviderRelationOutput, ProviderRunEvidenceSpec, ProviderRunResult, ProviderRunSupport,
+    ProviderTerminalStatus, ProviderTrustOutcome, RELATION_SEMANTIC_ROLE_METADATA_KEY,
+    SEMANTIC_ROLE_METADATA_KEY,
 };
 use crate::provider_raw_kinds::ProviderRawKindDisposition;
 use crate::provider_types::ProviderText;
@@ -40,20 +41,23 @@ use crate::tree_sitter_adapter::{
 pub const TREE_SITTER_RUNTIME_RELEASE: &str = "0.26.12";
 pub const TREE_SITTER_PYTHON_GRAMMAR_RELEASE: &str = "0.25.0";
 pub const RUFF_COMPONENT_RELEASE: &str = "0.0.7";
-pub const PROVIDER_NATIVE_SYNTAX_SCHEMA_RELEASE: &str = "1";
+pub const PROVIDER_NATIVE_SYNTAX_SCHEMA_RELEASE: &str = "2";
 
 const TREE_SITTER_PROVIDER_ID: &str = "tree-sitter-python";
 const RUFF_PROVIDER_ID: &str = "ruff-python";
 const TREE_SITTER_PROVIDER_RELEASE: &str = "tree-sitter=0.26.12;tree-sitter-python=0.25.0";
-const RUFF_PROVIDER_RELEASE: &str =
-    "ruff-python-ast=0.0.7;ruff-python-parser=0.0.7;python-target=3.14";
+const RUFF_PROVIDER_RELEASE: &str = "ruff-python-ast=0.0.7;ruff-python-parser=0.0.7";
 
 /// Immutable run pins repeated by every provider-native relation row.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SyntaxProviderRunPin {
     pub provider_run_id: [u8; 16],
-    pub analysis_context_id: [u8; 32],
+    /// Application-owned canonical identity, never a shortened fingerprint.
+    pub analysis_context_id: [u8; 16],
+    /// Exact effective context manifest fingerprint used by lane admission.
+    pub context_fingerprint: [u8; 32],
     pub semantic_environment_id: [u8; 32],
+    pub python_version: (u16, u16),
 }
 
 /// The two exact in-process provider runs that observe one immutable source image.
@@ -261,20 +265,30 @@ impl<'a> InProcessProviderJobs<'a> {
         Ok(Self { tree_sitter, ruff })
     }
 
-    fn pins(self) -> PythonSyntaxRunPins {
+    fn pins(self) -> Result<PythonSyntaxRunPins, ProviderNativeSyntaxError> {
         let context = self.tree_sitter.context();
-        PythonSyntaxRunPins {
+        let python_version =
+            context
+                .python_version()
+                .ok_or(ProviderNativeSyntaxError::InvalidModule(
+                    "effective context does not select a Python language version",
+                ))?;
+        Ok(PythonSyntaxRunPins {
             tree_sitter: SyntaxProviderRunPin {
                 provider_run_id: self.tree_sitter.run().provider_run_id(),
                 analysis_context_id: context.analysis_context_id(),
+                context_fingerprint: context.context_fingerprint(),
                 semantic_environment_id: context.semantic_environment_id(),
+                python_version,
             },
             ruff: SyntaxProviderRunPin {
                 provider_run_id: self.ruff.run().provider_run_id(),
                 analysis_context_id: context.analysis_context_id(),
+                context_fingerprint: context.context_fingerprint(),
                 semantic_environment_id: context.semantic_environment_id(),
+                python_version,
             },
-        }
+        })
     }
 }
 
@@ -309,6 +323,8 @@ impl ProviderNativeSyntaxRun {
 pub enum ProviderNativeSyntaxError {
     #[error("source image is not an exact valid Python source image: {0}")]
     InvalidSource(&'static str),
+    #[error("module input differs from the selected effective context: {0}")]
+    InvalidModule(&'static str),
     #[error("Tree-sitter and Ruff runs do not share one analysis context and semantic environment")]
     MixedRunContext,
     #[error("provider snapshot does not match the immutable source image: {0}")]
@@ -372,8 +388,9 @@ impl ExactPythonSyntaxRunner {
         module: PythonModuleInput<'_>,
     ) -> Result<ProviderNativeSyntaxRun, ProviderNativeSyntaxError> {
         validate_job_source(jobs, source)?;
+        validate_job_module(jobs, source.file_id, module)?;
         let text = validated_provider_text(source)?;
-        let pins = jobs.pins();
+        let pins = jobs.pins()?;
         validate_run_pins(pins)?;
         let tree = self
             .tree_sitter
@@ -398,8 +415,9 @@ impl ExactPythonSyntaxRunner {
         module: PythonModuleInput<'_>,
     ) -> Result<ProviderNativeSyntaxRun, ProviderNativeSyntaxError> {
         validate_job_source(jobs, source)?;
+        validate_job_module(jobs, source.file_id, module)?;
         let text = validated_provider_text(source)?;
-        let pins = jobs.pins();
+        let pins = jobs.pins()?;
         validate_run_pins(pins)?;
         let tree =
             self.tree_sitter
@@ -427,12 +445,41 @@ fn validate_job_source(
     source: &ProviderNativeSourceImage,
 ) -> Result<(), ProviderNativeSyntaxError> {
     let binding = jobs.tree_sitter.source();
-    if binding.file_id() != source.file_id
+    if binding.file_id() != Some(source.file_id)
         || binding.generation() != source.source_generation
         || binding.content_digest() != source.content_digest
     {
         return Err(ProviderNativeSyntaxError::InvalidSource(
             "provider job source pins differ from the immutable source image",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_job_module(
+    jobs: InProcessProviderJobs<'_>,
+    file_id: [u8; 16],
+    module: PythonModuleInput<'_>,
+) -> Result<(), ProviderNativeSyntaxError> {
+    let selected = jobs.tree_sitter.context().module_for_file(file_id).ok_or(
+        ProviderNativeSyntaxError::InvalidModule("source has no selected module binding"),
+    )?;
+    #[cfg(unix)]
+    let path = {
+        use std::os::unix::ffi::OsStrExt;
+        module.module_path.as_os_str().as_bytes()
+    };
+    #[cfg(not(unix))]
+    let path = module
+        .module_path
+        .to_str()
+        .ok_or(ProviderNativeSyntaxError::InvalidModule(
+            "module path is not representable",
+        ))?
+        .as_bytes();
+    if selected.qualified_name != module.module_name || selected.relative_path != path {
+        return Err(ProviderNativeSyntaxError::InvalidModule(
+            "module name or byte-native path differs from the selected context",
         ));
     }
     Ok(())
@@ -452,7 +499,9 @@ fn semantic_result(
 
 fn validate_run_pins(pins: PythonSyntaxRunPins) -> Result<(), ProviderNativeSyntaxError> {
     if pins.tree_sitter.analysis_context_id != pins.ruff.analysis_context_id
+        || pins.tree_sitter.context_fingerprint != pins.ruff.context_fingerprint
         || pins.tree_sitter.semantic_environment_id != pins.ruff.semantic_environment_id
+        || pins.tree_sitter.python_version != pins.ruff.python_version
     {
         return Err(ProviderNativeSyntaxError::MixedRunContext);
     }
@@ -747,6 +796,7 @@ fn provider_result(
             diagnostics: Vec::new(),
             trust: ProviderTrustOutcome::Trusted,
             terminal: ProviderTerminalStatus::Complete,
+            support: ProviderRunSupport::from_job_inputs(job, true),
         },
     )?)
 }
@@ -2127,15 +2177,33 @@ fn common_fields() -> Vec<Field> {
         ),
         typed_field(
             "analysis_context_id",
+            DataType::FixedSizeBinary(16),
+            false,
+            "canonical-analysis-context-id",
+        ),
+        typed_field(
+            "context_fingerprint",
             DataType::FixedSizeBinary(32),
             false,
-            "analysis-context-id",
+            "effective-context-manifest-fingerprint",
         ),
         typed_field(
             "semantic_environment_id",
             DataType::FixedSizeBinary(32),
             false,
             "semantic-environment-id",
+        ),
+        typed_field(
+            "python_target_major",
+            DataType::UInt16,
+            false,
+            "selected-python-major",
+        ),
+        typed_field(
+            "python_target_minor",
+            DataType::UInt16,
+            false,
+            "selected-python-minor",
         ),
         typed_field("file_id", DataType::FixedSizeBinary(16), false, "file-id"),
         typed_field(
@@ -2164,8 +2232,17 @@ fn common_columns(pin: RelationPin<'_>, row_count: usize) -> Vec<ArrayRef> {
             pin.provider_release,
             row_count,
         ))),
-        fixed32_repeat(&pin.run.analysis_context_id, row_count),
+        fixed16_repeat(&pin.run.analysis_context_id, row_count),
+        fixed32_repeat(&pin.run.context_fingerprint, row_count),
         fixed32_repeat(&pin.run.semantic_environment_id, row_count),
+        Arc::new(UInt16Array::from_iter_values(std::iter::repeat_n(
+            pin.run.python_version.0,
+            row_count,
+        ))),
+        Arc::new(UInt16Array::from_iter_values(std::iter::repeat_n(
+            pin.run.python_version.1,
+            row_count,
+        ))),
         fixed16_repeat(&pin.source.file_id, row_count),
         fixed32_repeat(&pin.source.content_digest, row_count),
         Arc::new(UInt64Array::from_iter_values(std::iter::repeat_n(
@@ -2457,11 +2534,11 @@ pub(crate) mod job_tests {
     use crate::provider_contracts::{
         CancellationHandle, CancellationProbe, ContextIdentity, ProviderBuildIdentity,
         ProviderContextBinding, ProviderFamilyIdentity, ProviderFamilyRequest, ProviderIdentity,
-        ProviderJobSpec, ProviderPolicyIdentity, ProviderProgramIdentity, ProviderProtocolIdentity,
-        ProviderRelationIdentity, ProviderResourceCeilingSpec, ProviderResourceCeilings,
-        ProviderRunBinding, ProviderRunIdentity, ProviderRunProvenance, ProviderSchemaIdentity,
-        ProviderScopeIdentity, ProviderSourceBinding, ProviderTrustPosture, SourceIdentity,
-        SuiteIdentity, admit_provider_result,
+        ProviderJobSpec, ProviderModuleBinding, ProviderPolicyIdentity, ProviderProgramIdentity,
+        ProviderProtocolIdentity, ProviderRelationIdentity, ProviderResourceCeilingSpec,
+        ProviderResourceCeilings, ProviderRunBinding, ProviderRunIdentity, ProviderRunProvenance,
+        ProviderSchemaIdentity, ProviderScopeIdentity, ProviderSourceBinding, ProviderTrustPosture,
+        SourceIdentity, SuiteIdentity, admit_provider_result,
     };
 
     struct FixtureJobs {
@@ -2564,6 +2641,26 @@ pub(crate) mod job_tests {
         run_pin: [u8; 16],
         spec: ProviderResourceCeilingSpec,
     ) -> (CancellationHandle, ProviderJob) {
+        job_with_modules(
+            target,
+            source,
+            run_pin,
+            spec,
+            vec![ProviderModuleBinding {
+                file_id: source.file_id,
+                qualified_name: "fixture.module".into(),
+                relative_path: b"fixture/module.py".to_vec(),
+            }],
+        )
+    }
+
+    fn job_with_modules(
+        target: ProviderLane,
+        source: &ProviderNativeSourceImage,
+        run_pin: [u8; 16],
+        spec: ProviderResourceCeilingSpec,
+        modules: Vec<ProviderModuleBinding>,
+    ) -> (CancellationHandle, ProviderJob) {
         let (owner, cancellation) =
             CancellationProbe::pair(spec.cancellation_poll_work_units).unwrap();
         let provider = match target {
@@ -2573,16 +2670,22 @@ pub(crate) mod job_tests {
         };
         let context = ProviderContextBinding::try_new(
             ContextIdentity::try_new("fixture.context").unwrap(),
+            [5; 16],
             [3; 32],
             [4; 32],
         )
+        .unwrap()
+        .with_modules(modules)
+        .unwrap()
+        .with_python_version(3, 14)
         .unwrap();
         let job = ProviderJob::try_new(ProviderJobSpec {
             suite: SuiteIdentity::try_new("codefabric-relational-data-fabric@2.3.0").unwrap(),
             provider: ProviderIdentity::try_new(provider).unwrap(),
             protocol: ProviderProtocolIdentity::try_new("in-process-arrow@1").unwrap(),
-            source: ProviderSourceBinding::try_new(
+            source: ProviderSourceBinding::try_file(
                 SourceIdentity::try_new("fixture.source").unwrap(),
+                [6; 16],
                 source.file_id,
                 source.source_generation,
                 source.content_digest,
@@ -2658,6 +2761,207 @@ pub(crate) mod job_tests {
         for relation in NativeSyntaxRelation::ALL {
             assert!(!relation.schema().fields().is_empty());
         }
+    }
+
+    #[test]
+    fn native_context_identity_and_fingerprint_remain_distinct() {
+        use arrow_array::{Array, FixedSizeBinaryArray};
+
+        let run = run_fixture("value = 1\n", 1, 7);
+        for relation in NativeSyntaxRelation::ALL {
+            let batch = run.relation(relation);
+            let schema = batch.schema_ref();
+            assert_eq!(
+                schema.metadata()["codefabric.provider_native_schema_release"],
+                "2"
+            );
+            for (name, width, marker) in [
+                ("analysis_context_id", 16, 5),
+                ("context_fingerprint", 32, 3),
+                ("semantic_environment_id", 32, 4),
+            ] {
+                assert_eq!(
+                    schema.field_with_name(name).unwrap().data_type(),
+                    &DataType::FixedSizeBinary(width),
+                );
+                let column = batch
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<FixedSizeBinaryArray>()
+                    .unwrap();
+                assert_eq!(column.null_count(), 0);
+                for row in 0..batch.num_rows() {
+                    assert_eq!(
+                        column.value(row),
+                        vec![marker; usize::try_from(width).unwrap()]
+                    );
+                }
+            }
+        }
+        let canonical_field = NativeSyntaxRelation::RuffBinding
+            .schema()
+            .field_with_name("analysis_context_id")
+            .unwrap()
+            .clone();
+        assert_eq!(
+            canonical_field.metadata()[SEMANTIC_ROLE_METADATA_KEY],
+            "semantic.provenance.analysis-context",
+        );
+
+        let pin = SyntaxProviderRunPin {
+            provider_run_id: [1; 16],
+            analysis_context_id: [5; 16],
+            context_fingerprint: [3; 32],
+            semantic_environment_id: [4; 32],
+            python_version: (3, 14),
+        };
+        for other in [
+            SyntaxProviderRunPin {
+                analysis_context_id: [3; 16],
+                ..pin
+            },
+            SyntaxProviderRunPin {
+                context_fingerprint: [5; 32],
+                ..pin
+            },
+        ] {
+            assert!(matches!(
+                validate_run_pins(PythonSyntaxRunPins {
+                    tree_sitter: pin,
+                    ruff: other,
+                }),
+                Err(ProviderNativeSyntaxError::MixedRunContext),
+            ));
+        }
+    }
+
+    #[test]
+    fn native_context_module_binding_is_a_causal_provider_input() {
+        let input = source("value = 1\n", 1);
+        let jobs = jobs(&input);
+        let mut runner = ExactPythonSyntaxRunner::new().unwrap();
+        for module in [
+            PythonModuleInput {
+                module_name: "wrong.module",
+                ..module()
+            },
+            PythonModuleInput {
+                module_path: Path::new("wrong/module.py"),
+                ..module()
+            },
+        ] {
+            assert!(matches!(
+                runner.run_full(jobs.borrowed(), 1, &input, module),
+                Err(ProviderNativeSyntaxError::InvalidModule(_)),
+            ));
+        }
+        assert_eq!(runner.lifecycle_observation().tree_sitter_completed_runs, 0);
+        assert_eq!(runner.lifecycle_observation().ruff_completed_runs, 0);
+
+        let (_tree_owner, tree) = job_with_modules(
+            ProviderLane::TreeSitter,
+            &input,
+            [1; 16],
+            limits(),
+            Vec::new(),
+        );
+        let (_ruff_owner, ruff) =
+            job_with_modules(ProviderLane::Ruff, &input, [2; 16], limits(), Vec::new());
+        assert!(matches!(
+            runner.run_full(
+                InProcessProviderJobs::try_new(&tree, &ruff).unwrap(),
+                1,
+                &input,
+                module()
+            ),
+            Err(ProviderNativeSyntaxError::InvalidModule(_)),
+        ));
+
+        let run = runner
+            .run_full(jobs.borrowed(), 1, &input, module())
+            .unwrap();
+        assert!(
+            !run.tree_sitter_result()
+                .support()
+                .requires_context_invalidation()
+        );
+        let mut support = run.tree_sitter_result().support().clone();
+        support.common_dependencies = Arc::from([]);
+        let detached = ProviderRunResult::try_from_job(
+            &jobs.tree,
+            ProviderRunEvidenceSpec {
+                relations: run.tree_sitter_result().relations().to_vec(),
+                coverage: run.tree_sitter_result().coverage().to_vec(),
+                gaps: Vec::new(),
+                diagnostics: Vec::new(),
+                trust: ProviderTrustOutcome::Trusted,
+                terminal: ProviderTerminalStatus::Complete,
+                support,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            admit_provider_result(jobs.tree.clone(), detached),
+            Err(ProviderContractError::SupportMismatch),
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_context_module_paths_preserve_non_utf8_bytes() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let input = source("value = 1\n", 1);
+        let raw_path = b"fixture/non-utf8-\xff.py";
+        let module_binding = ProviderModuleBinding {
+            file_id: input.file_id,
+            qualified_name: "fixture.module".into(),
+            relative_path: raw_path.to_vec(),
+        };
+        let (_tree_owner, tree) = job_with_modules(
+            ProviderLane::TreeSitter,
+            &input,
+            [1; 16],
+            limits(),
+            vec![module_binding.clone()],
+        );
+        let (_ruff_owner, ruff) = job_with_modules(
+            ProviderLane::Ruff,
+            &input,
+            [2; 16],
+            limits(),
+            vec![module_binding],
+        );
+        let jobs = InProcessProviderJobs::try_new(&tree, &ruff).unwrap();
+        let mut runner = ExactPythonSyntaxRunner::new().unwrap();
+        let run = runner
+            .run_full(
+                jobs,
+                1,
+                &input,
+                PythonModuleInput {
+                    module_name: "fixture.module",
+                    module_path: Path::new(OsStr::from_bytes(raw_path)),
+                },
+            )
+            .unwrap();
+        assert!(run.relation(NativeSyntaxRelation::RuffBinding).num_rows() > 0);
+        assert!(matches!(
+            runner.run_incremental(
+                jobs,
+                2,
+                &input,
+                TreeSitterEdit {
+                    start_byte: 0,
+                    old_end_byte: 0,
+                    new_end_byte: 0
+                },
+                module()
+            ),
+            Err(ProviderNativeSyntaxError::InvalidModule(_)),
+        ));
     }
 
     #[test]

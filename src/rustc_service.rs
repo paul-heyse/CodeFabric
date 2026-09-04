@@ -353,6 +353,21 @@ impl RustcProviderRunResult {
         let mut batches = BTreeMap::<String, Vec<RecordBatch>>::new();
         for compilation in &compilations {
             compilation.validate()?;
+            validate_job_admission(job, &compilation.accepted().admission)
+                .map_err(RustcProviderLifecycleError::Protocol)?;
+            let header = &compilation.accepted().control.header;
+            if &header.run != job.run().identity()
+                || &header.source != job.source().identity()
+                || &header.context != job.context().identity()
+                || &header.protocol != job.protocol()
+                || &header.compiler_build != job.provenance().provider_build()
+            {
+                return Err(RustcProviderLifecycleError::Protocol(
+                    Status::failed_precondition(
+                        "rustc result control pins differ from the provider job",
+                    ),
+                ));
+            }
             for owner in &compilation.accepted().owners {
                 for relation in &owner.relations {
                     batches
@@ -393,6 +408,7 @@ impl RustcProviderRunResult {
         let result = ProviderRunResult::try_from_job(
             job,
             ProviderRunEvidenceSpec {
+                support: crate::provider_contracts::ProviderRunSupport::conservative(job),
                 relations,
                 coverage,
                 gaps: Vec::new(),
@@ -445,6 +461,7 @@ impl RustcProviderRunResult {
         let result = ProviderRunResult::try_from_job(
             job,
             ProviderRunEvidenceSpec {
+                support: crate::provider_contracts::ProviderRunSupport::conservative(job),
                 relations: Vec::new(),
                 coverage,
                 gaps,
@@ -1206,12 +1223,41 @@ fn compilation_header(
     })
 }
 
+/// Check the binary row pins as well as the textual protocol labels. A transport response
+/// cannot relabel a different canonical workspace, context, or source as the current job.
+fn validate_job_admission(job: &ProviderJob, admission: &RustcRunAdmission) -> Result<(), Status> {
+    if job.lane() != ProviderLane::Rustc
+        || job.trust() != ProviderTrustPosture::CompilerSubprocessConstrained
+        || job.provider().as_str() != "rustc-public-mir"
+        || job.protocol().as_str()
+            != format!(
+                "codefabric.rustc.extractor.{}",
+                crate::rustc_relation_schema::RUSTC_RELATION_PROTOCOL_VERSION
+            )
+        || job.run().identity().as_str() != admission.provider_run_id
+        || job.source().workspace_id() != admission.canonical_workspace_id
+        || job.source().generation() != admission.source_generation
+        || job.context().identity().as_str() != admission.analysis_context_id
+        || job.context().analysis_context_id() != admission.canonical_analysis_context_id
+        || crate::integrity::frame_digest(job.context().context_fingerprint())
+            != admission.context_manifest_digest
+        || crate::integrity::frame_digest(job.source().content_digest())
+            != admission.source_snapshot_manifest_digest
+    {
+        return Err(Status::failed_precondition(
+            "rustc job canonical source/context pins differ from admission",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_begin(
     job: &ProviderJob,
     admission: &RustcRunAdmission,
     policy: &RustcProtocolPolicy,
     begin: &CompilationBegin,
 ) -> Result<(), Status> {
+    validate_job_admission(job, admission)?;
     let target = begin
         .target
         .as_ref()
@@ -1315,6 +1361,7 @@ impl RustcObservationService {
         trust_binding: RustCompilationProtocolBinding,
     ) -> Result<(Self, mpsc::Receiver<AcceptedRustcCompilation>), Status> {
         policy.validate()?;
+        validate_job_admission(&job, &admission)?;
         if !valid_identifier(&admission.provider_run_id)
             || !valid_identifier(&admission.workspace_id)
             || !valid_identifier(&admission.analysis_context_id)
@@ -1741,6 +1788,8 @@ pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
     if lifecycle.trust_policy.trust_mode != RustCompilationTrustMode::UntrustedSandboxed {
         return Err(RustCompilationTrustError::UntrustedAdmissionRequired.into());
     }
+    validate_job_admission(lifecycle.provider_job, &lifecycle.run_admission)
+        .map_err(RustcProviderLifecycleError::Protocol)?;
     let plan = compile_rust_compilation_launch_plan(
         lifecycle.trust_policy,
         lifecycle.sandbox_capabilities,
@@ -2282,16 +2331,19 @@ mod tests {
                 crate::rustc_relation_schema::RUSTC_RELATION_PROTOCOL_VERSION
             ))
             .unwrap(),
-            source: ProviderSourceBinding::try_new(
+            source: ProviderSourceBinding::try_file(
                 SourceIdentity::try_new(admission.source_snapshot_manifest_digest.clone()).unwrap(),
+                admission.canonical_workspace_id,
                 [1; 16],
                 admission.source_generation,
-                [2; 32],
+                crate::identity::decode_b3_digest(&admission.source_snapshot_manifest_digest)
+                    .unwrap(),
             )
             .unwrap(),
             context: ProviderContextBinding::try_new(
                 ContextIdentity::try_new(admission.analysis_context_id.clone()).unwrap(),
-                [3; 32],
+                admission.canonical_analysis_context_id,
+                crate::identity::decode_b3_digest(&admission.context_manifest_digest).unwrap(),
                 [4; 32],
             )
             .unwrap(),
@@ -2410,10 +2462,7 @@ mod tests {
         .unwrap();
         let paths = RustCompilationPrivatePaths::prepare(&private_parent, "lifecycle").unwrap();
         let request = RustCompilationRunRequest {
-            manifest_relative_path: "Cargo.toml".into(),
-            package_names: vec!["fixture".into()],
-            feature_names: Vec::new(),
-            all_targets: true,
+            preparation: crate::rust_compilation_trust::SelectedRustCompilationPreparation::test_only_containment_fixture("Cargo.toml".into(), "fixture", &[]),
             build_scripts_present: true,
             procedural_macros_present: true,
             context: RustCompilationContextPins {
@@ -3010,6 +3059,79 @@ mod tests {
         };
         assert_eq!(error.code(), tonic::Code::FailedPrecondition);
         assert!(error.message().contains("launch-plan binding differs"));
+    }
+
+    #[test]
+    fn rustc_selected_job_pins_reject_canonical_and_digest_drift() {
+        let (policy, admission, begin) = fixture();
+        let job = provider_job(&policy, &admission, &[RustcRelation::MirBody]);
+        validate_job_admission(&job, &admission).unwrap();
+        let mutations: [fn(&mut RustcRunAdmission); 4] = [
+            |value| value.canonical_workspace_id = [91; 16],
+            |value| value.canonical_analysis_context_id = [92; 16],
+            |value| value.context_manifest_digest = b3("other-context"),
+            |value| value.source_snapshot_manifest_digest = b3("other-source"),
+        ];
+        for mutate in mutations {
+            let mut changed = admission.clone();
+            mutate(&mut changed);
+            let binding = trust_binding(&policy, &changed);
+            let error =
+                RustcObservationService::new(job.clone(), policy.clone(), changed.clone(), binding)
+                    .unwrap_err();
+            assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+            assert!(validate_begin(&job, &changed, &policy, &begin).is_err());
+        }
+
+        let (validator, mut end) = accepted_stream();
+        let mut events = validator.events.clone();
+        events.push(event(Event::CompilationEnd(end.clone())));
+        end.overall_stream_digest = overall_stream_digest(&events);
+        let accepted = validator
+            .finish(end.clone(), event(Event::CompilationEnd(end)), false)
+            .unwrap();
+        let mut qualified = TrustQualifiedRustcCompilation::test_only(accepted);
+        qualified.accepted.admission.canonical_workspace_id = [93; 16];
+        assert!(matches!(
+            RustcProviderRunResult::try_new(&job, vec![qualified]),
+            Err(RustcProviderLifecycleError::Protocol(_))
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rustc_selected_job_pin_drift_never_invokes_launcher() {
+        let harness = lifecycle_harness();
+        let job = provider_job(
+            &harness.protocol_policy,
+            &harness.admission,
+            &[RustcRelation::MirBody],
+        );
+        let mut admission = harness.admission.clone();
+        admission.canonical_analysis_context_id = [94; 16];
+        let invoked = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&invoked);
+        let result = execute_prepared_rustc_lifecycle(
+            job,
+            lifecycle_plan(&harness),
+            harness.paths.extractor_socket_path.clone(),
+            harness.protocol_policy.clone(),
+            admission,
+            harness.allowed_uid,
+            move |plan, _| {
+                observed.store(true, Ordering::Release);
+                async move {
+                    RustCompilationLauncherReceipt::test_only_contained_success(&plan)
+                        .map_err(Into::into)
+                }
+            },
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(RustcProviderLifecycleError::Protocol(_))
+        ));
+        assert!(!invoked.load(Ordering::Acquire));
+        assert!(!harness.paths.extractor_socket_path.exists());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

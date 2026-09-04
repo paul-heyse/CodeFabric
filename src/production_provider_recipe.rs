@@ -368,7 +368,7 @@ pub(crate) fn current_v23_provider_program_definition()
                 ReleaseProviderIdentity::try_new("ruff-python")?,
                 ReleaseProviderProtocolIdentity::try_new("in-process-arrow@1")?,
                 ReleaseProviderBuildIdentity::try_new(format!(
-                    "ruff-python={RUFF_COMPONENT_RELEASE};python-target=3.14"
+                    "ruff-python={RUFF_COMPONENT_RELEASE}"
                 ))?,
                 ProviderTrustPosture::InProcessConstrained,
                 native_lane(ProviderNativeLane::Ruff)?,
@@ -558,7 +558,7 @@ fn native_syntax_plan(
         ProviderNativeLane::Ruff => (
             "ruff-python",
             format!(
-                "ruff-python-ast={RUFF_COMPONENT_RELEASE};ruff-python-parser={RUFF_COMPONENT_RELEASE};python-target=3.14"
+                "ruff-python-ast={RUFF_COMPONENT_RELEASE};ruff-python-parser={RUFF_COMPONENT_RELEASE}"
             ),
         ),
         ProviderNativeLane::Pyrefly | ProviderNativeLane::Rustc => {
@@ -1373,6 +1373,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation"
             | "provider_revision"
@@ -1388,6 +1391,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation"
             | "provider_revision"
@@ -1403,6 +1409,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1418,6 +1427,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1433,6 +1445,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1446,6 +1461,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1459,6 +1477,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1482,6 +1503,9 @@ fn compiled_provider_field_role(
                 | "provider_id"
                 | "provider_release"
                 | "analysis_context_id"
+                | "context_fingerprint"
+                | "python_target_major"
+                | "python_target_minor"
                 | "semantic_environment_id"
                 | "source_generation" => Some(PROVENANCE_FACT_ROLE),
                 "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1498,6 +1522,9 @@ fn compiled_provider_field_role(
                 | "provider_id"
                 | "provider_release"
                 | "analysis_context_id"
+                | "context_fingerprint"
+                | "python_target_major"
+                | "python_target_minor"
                 | "semantic_environment_id"
                 | "source_generation" => Some(PROVENANCE_FACT_ROLE),
                 "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1514,6 +1541,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1534,6 +1564,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1548,6 +1581,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1563,6 +1599,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1578,6 +1617,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1592,6 +1634,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1604,6 +1649,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1631,6 +1679,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1648,6 +1699,9 @@ fn compiled_provider_field_role(
                 | "provider_id"
                 | "provider_release"
                 | "analysis_context_id"
+                | "context_fingerprint"
+                | "python_target_major"
+                | "python_target_minor"
                 | "semantic_environment_id"
                 | "source_generation" => Some(PROVENANCE_FACT_ROLE),
                 "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1662,6 +1716,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1678,6 +1735,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1694,6 +1754,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1711,6 +1774,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1725,6 +1791,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1738,6 +1807,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -1763,6 +1835,9 @@ fn compiled_provider_field_role(
             | "provider_id"
             | "provider_release"
             | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "file_id" => Some(FILE_IDENTITY_ROLE),
@@ -2642,6 +2717,31 @@ mod tests {
                 field,
             }) if field == "unclassified_future_provider_field"
         ));
+    }
+
+    #[test]
+    fn compiled_native_descriptors_include_exact_context_and_language_inputs() {
+        for native in NativeSyntaxRelation::ALL {
+            let relation = ProviderRelation::NativeSyntax(native);
+            let schema = relation.schema();
+            let fields = relation_fields(relation, &schema).unwrap();
+            assert_eq!(fields.len(), schema.fields().len());
+            for (name, data_type) in [
+                ("analysis_context_id", DataType::FixedSizeBinary(16)),
+                ("context_fingerprint", DataType::FixedSizeBinary(32)),
+                ("python_target_major", DataType::UInt16),
+                ("python_target_minor", DataType::UInt16),
+            ] {
+                assert_eq!(
+                    schema.field_with_name(name).unwrap().data_type(),
+                    &data_type
+                );
+                assert_eq!(
+                    compiled_provider_field_role(relation, name).unwrap(),
+                    PROVENANCE_FACT_ROLE
+                );
+            }
+        }
     }
 
     #[test]

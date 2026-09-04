@@ -7,6 +7,12 @@ use crate::identity::{
     CbefField, CbefRecord, CbefValue, IdentityDomain, IdentityError, SOURCE_CONTEXT_ID,
     StringNormalization, decode_public_id, derive_identity, encode_public_id,
 };
+
+mod inputs;
+pub use inputs::*;
+
+#[cfg(feature = "daemon")]
+pub mod rust_context;
 /// Closed analysis context kinds accepted by the public contract.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -98,6 +104,10 @@ pub enum AnalysisContextError {
     DiscoveredSourceContext,
     #[error("semantic context discovery emitted a duplicate canonical context")]
     DuplicateDiscoveredContext,
+    #[error("context search scope is invalid or lacks its inventory/policy identity")]
+    InvalidSearchScope,
+    #[error("context lookup evidence is inconsistent with its selected search universe")]
+    InvalidLookupEvidence,
 }
 
 /// Materialize and deterministically order application-owned discovery candidates.

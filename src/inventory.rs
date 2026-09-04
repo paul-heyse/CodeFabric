@@ -69,6 +69,163 @@ pub struct SourceInventory {
     pub digest: [u8; 32],
 }
 
+/// A full authorized walk, never a changed-work subset. Construction is fenced by its owner.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompleteSourceInventory {
+    inventory: SourceInventory,
+    change_token: u64,
+    read_failures: BTreeMap<Vec<u8>, InventoryReadFailure>,
+}
+
+/// A member remains in the inventory even when its bytes cannot yet be verified.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InventoryReadFailure {
+    Unreadable,
+    Pending,
+}
+
+impl CompleteSourceInventory {
+    #[must_use]
+    pub const fn inventory(&self) -> &SourceInventory {
+        &self.inventory
+    }
+
+    #[must_use]
+    pub const fn change_token(&self) -> u64 {
+        self.change_token
+    }
+
+    #[must_use]
+    pub fn read_failure(&self, path: &[u8]) -> Option<InventoryReadFailure> {
+        self.read_failures.get(path).copied()
+    }
+}
+
+/// Changed members of a separately identified complete inventory, not a replacement inventory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChangedSourcePaths {
+    workspace_id: [u8; 16],
+    inventory_digest: [u8; 32],
+    source_generation: u64,
+    paths: BTreeSet<Vec<u8>>,
+    removed_paths: BTreeSet<Vec<u8>>,
+    predecessor: Option<(u64, [u8; 32])>,
+}
+
+impl ChangedSourcePaths {
+    /// Bind unique changed paths to a complete inventory.
+    ///
+    /// # Errors
+    /// Rejects duplicate paths and paths absent from the full inventory. Deletions belong in
+    /// explicit withdrawal work, not this set of currently selected members.
+    pub fn try_new(
+        inventory: &CompleteSourceInventory,
+        paths: impl IntoIterator<Item = Vec<u8>>,
+    ) -> Result<Self, InventoryError> {
+        let members = inventory
+            .inventory
+            .records
+            .iter()
+            .map(|record| record.path.raw_relative_path_bytes.as_slice())
+            .collect::<BTreeSet<_>>();
+        let mut changed = BTreeSet::new();
+        for path in paths {
+            if !members.contains(path.as_slice()) || !changed.insert(path) {
+                return Err(InventoryError::InvalidChangedWork);
+            }
+        }
+        Ok(Self {
+            workspace_id: inventory.inventory.workspace_id,
+            inventory_digest: inventory.inventory.digest,
+            source_generation: inventory.inventory.source_generation,
+            paths: changed,
+            removed_paths: BTreeSet::new(),
+            predecessor: None,
+        })
+    }
+
+    /// Bind present changes and checked removals to two complete inventories.
+    ///
+    /// # Errors
+    /// Rejects unrelated workspaces, non-forward generations, duplicates, and paths absent
+    /// from both inventories. A removed path must have existed in the predecessor.
+    pub fn try_between(
+        previous: &CompleteSourceInventory,
+        current: &CompleteSourceInventory,
+        paths: impl IntoIterator<Item = Vec<u8>>,
+    ) -> Result<Self, InventoryError> {
+        if previous.inventory.workspace_id != current.inventory.workspace_id
+            || previous.inventory.source_generation >= current.inventory.source_generation
+        {
+            return Err(InventoryError::InvalidChangedWork);
+        }
+        let current_paths = current
+            .inventory
+            .records
+            .iter()
+            .map(|record| record.path.raw_relative_path_bytes.as_slice())
+            .collect::<BTreeSet<_>>();
+        let previous_paths = previous
+            .inventory
+            .records
+            .iter()
+            .map(|record| record.path.raw_relative_path_bytes.as_slice())
+            .collect::<BTreeSet<_>>();
+        let mut present = BTreeSet::new();
+        let mut removed = BTreeSet::new();
+        for path in paths {
+            let selected = if current_paths.contains(path.as_slice()) {
+                &mut present
+            } else if previous_paths.contains(path.as_slice()) {
+                &mut removed
+            } else {
+                return Err(InventoryError::InvalidChangedWork);
+            };
+            if !selected.insert(path) {
+                return Err(InventoryError::InvalidChangedWork);
+            }
+        }
+        let mut changed = Self::try_new(current, present)?;
+        changed.removed_paths = removed;
+        changed.predecessor = Some((
+            previous.inventory.source_generation,
+            previous.inventory.digest,
+        ));
+        Ok(changed)
+    }
+
+    /// Exact predecessor generation and full inventory digest supporting removals.
+    #[must_use]
+    pub const fn predecessor(&self) -> Option<(u64, [u8; 32])> {
+        self.predecessor
+    }
+
+    #[must_use]
+    pub const fn workspace_id(&self) -> [u8; 16] {
+        self.workspace_id
+    }
+
+    #[must_use]
+    pub const fn removed_paths(&self) -> &BTreeSet<Vec<u8>> {
+        &self.removed_paths
+    }
+
+    #[must_use]
+    pub const fn inventory_digest(&self) -> [u8; 32] {
+        self.inventory_digest
+    }
+
+    #[must_use]
+    pub const fn source_generation(&self) -> u64 {
+        self.source_generation
+    }
+
+    #[must_use]
+    pub const fn paths(&self) -> &BTreeSet<Vec<u8>> {
+        &self.paths
+    }
+}
+
 /// One stable current-byte replacement used to advance an existing inventory generation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InventoryFileUpsert {
@@ -107,12 +264,15 @@ pub enum InventoryError {
     BoundExceeded(&'static str),
     #[error("source changed during inventory")]
     SourceChanged,
+    #[error("changed work is not a unique subset of the complete source inventory")]
+    InvalidChangedWork,
 }
 
 /// Generic non-Git walker. WP17 may replace classification, never authorization.
 pub struct InventoryWalker {
     limits: InventoryLimits,
     metrics: InventoryMetrics,
+    read_failures: BTreeMap<Vec<u8>, InventoryReadFailure>,
 }
 
 impl InventoryWalker {
@@ -127,6 +287,7 @@ impl InventoryWalker {
                 excluded_files: 0,
                 duration_micros: 0,
             },
+            read_failures: BTreeMap::new(),
         }
     }
 
@@ -142,11 +303,65 @@ impl InventoryWalker {
         source_generation: u64,
         cancellation: &Cancellation,
     ) -> Result<SourceInventory, InventoryError> {
+        let inventory = self.walk(root, store, source_generation, cancellation, false)?;
+        persist_inventory(
+            store,
+            root.workspace_id(),
+            source_generation,
+            &inventory.records,
+        )?;
+        Ok(inventory)
+    }
+
+    /// Walk the entire selected root with an owner-supplied generation/change-token fence.
+    /// Unreadable and unstable regular members are retained as explicit observations.
+    ///
+    /// # Errors
+    /// Rejects an unstable fence, incomplete directory enumeration, cancellation, or any bound.
+    pub fn walk_selected_with_fence(
+        &mut self,
+        root: &SecureRoot,
+        store: &mut OperationalStore,
+        source_generation: u64,
+        change_token: u64,
+        cancellation: &Cancellation,
+        mut observe_change_token: impl FnMut() -> Option<u64>,
+    ) -> Result<CompleteSourceInventory, InventoryError> {
+        if observe_change_token() != Some(change_token) {
+            return Err(InventoryError::SourceChanged);
+        }
+        let inventory = self.walk(root, store, source_generation, cancellation, true)?;
+        require_source_generation(store, root.workspace_id(), source_generation)?;
+        if observe_change_token() != Some(change_token) {
+            return Err(InventoryError::SourceChanged);
+        }
+        persist_inventory(
+            store,
+            root.workspace_id(),
+            source_generation,
+            &inventory.records,
+        )?;
+        Ok(CompleteSourceInventory {
+            inventory,
+            change_token,
+            read_failures: self.read_failures.clone(),
+        })
+    }
+
+    fn walk(
+        &mut self,
+        root: &SecureRoot,
+        store: &mut OperationalStore,
+        source_generation: u64,
+        cancellation: &Cancellation,
+        retain_read_failures: bool,
+    ) -> Result<SourceInventory, InventoryError> {
         require_source_generation(store, root.workspace_id(), source_generation)?;
         let started = Instant::now();
         let mut records = Vec::new();
         let mut stack = vec![(Vec::<Vec<u8>>::new(), 0_u32)];
         self.metrics = InventoryMetrics::default();
+        self.read_failures.clear();
         while let Some((components, depth)) = stack.pop() {
             self.check_progress(started, cancellation)?;
             self.metrics.directories = self.metrics.directories.saturating_add(1);
@@ -187,7 +402,13 @@ impl InventoryWalker {
                         stack.push((child, next_depth));
                     }
                     SecureDirectoryEntryKind::RegularFile => {
-                        self.add_regular(root, &child, entry.size, &mut records)?;
+                        self.add_regular(
+                            root,
+                            &child,
+                            entry.size,
+                            &mut records,
+                            retain_read_failures,
+                        )?;
                     }
                     SecureDirectoryEntryKind::Symlink | SecureDirectoryEntryKind::Other => {
                         self.add_excluded(root, &child, entry.kind, entry.size, &mut records)?;
@@ -201,7 +422,6 @@ impl InventoryWalker {
                 .cmp(&right.path.raw_relative_path_bytes)
         });
         let digest = merkle_inventory_digest(&records);
-        persist_inventory(store, root.workspace_id(), source_generation, &records)?;
         self.metrics.duration_micros =
             u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         Ok(SourceInventory {
@@ -223,6 +443,7 @@ impl InventoryWalker {
         components: &[Vec<u8>],
         observed_size: u64,
         records: &mut Vec<SourceInventoryRecord>,
+        retain_read_failures: bool,
     ) -> Result<(), InventoryError> {
         self.metrics.files = self.metrics.files.saturating_add(1);
         if self.metrics.files > self.limits.maximum_file_count {
@@ -241,7 +462,7 @@ impl InventoryWalker {
         if self.metrics.bytes_considered > self.limits.maximum_total_bytes_considered {
             return Err(InventoryError::BoundExceeded("total-bytes"));
         }
-        let (digest, filesystem_identity, inclusion) = match root
+        let (digest, filesystem_identity, inclusion, byte_length) = match root
             .read_stable_file(&path, ORDINARY_SOURCE_MAXIMUM_BYTES)
         {
             Ok(read) => (
@@ -251,10 +472,29 @@ impl InventoryWalker {
                     read.metadata.inode,
                 )),
                 InclusionState::Included,
+                read.metadata.size,
             ),
             Err(StableReadError::SizeLimitExceeded { .. }) => {
                 self.metrics.excluded_files = self.metrics.excluded_files.saturating_add(1);
-                (None, None, InclusionState::ExcludedSizeLimit)
+                (None, None, InclusionState::ExcludedSizeLimit, observed_size)
+            }
+            Err(StableReadError::ChangedDuringRead) if retain_read_failures => {
+                self.read_failures.insert(
+                    workspace_path.raw_relative_path_bytes.clone(),
+                    InventoryReadFailure::Pending,
+                );
+                (None, None, InclusionState::Included, observed_size)
+            }
+            Err(StableReadError::Secure(
+                SecurePathError::SourceAccessDenied
+                | SecurePathError::OperatingSystem
+                | SecurePathError::OutsideAuthorizedRoot,
+            )) if retain_read_failures => {
+                self.read_failures.insert(
+                    workspace_path.raw_relative_path_bytes.clone(),
+                    InventoryReadFailure::Unreadable,
+                );
+                (None, None, InclusionState::Included, observed_size)
             }
             Err(StableReadError::ChangedDuringRead) => return Err(InventoryError::SourceChanged),
             Err(error) => return Err(error.into()),
@@ -267,7 +507,7 @@ impl InventoryWalker {
             filesystem_identity,
             file_id,
             content_digest: digest,
-            byte_length: observed_size,
+            byte_length,
             file_kind: InventoryFileKind::Regular,
             classification: InventoryClassification::UntrackedNotIgnored,
             inclusion,

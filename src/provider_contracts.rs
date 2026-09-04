@@ -15,6 +15,9 @@ use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use thiserror::Error;
 
+mod inputs;
+pub use inputs::*;
+
 const MAX_IDENTITY_BYTES: usize = 512;
 const MAX_DIAGNOSTIC_BYTES: usize = 8 * 1024;
 const MAX_REQUESTED_FAMILIES: usize = 4_096;
@@ -112,9 +115,9 @@ categorical_identity!(DiagnosticCode, "diagnostic code");
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProviderSourceBinding {
     identity: SourceIdentity,
-    file_id: [u8; 16],
+    workspace_id: [u8; 16],
     generation: u64,
-    content_digest: [u8; 32],
+    selection: ProviderSourceSelection,
 }
 
 impl ProviderSourceBinding {
@@ -123,20 +126,36 @@ impl ProviderSourceBinding {
     /// # Errors
     ///
     /// Rejects zero file or content identities.
-    pub fn try_new(
+    pub fn try_file(
         identity: SourceIdentity,
+        workspace_id: [u8; 16],
         file_id: [u8; 16],
         generation: u64,
         content_digest: [u8; 32],
     ) -> Result<Self, ProviderContractError> {
+        require_nonzero_bytes(&workspace_id)?;
         require_nonzero_bytes(&file_id)?;
         require_nonzero_bytes(&content_digest)?;
         Ok(Self {
             identity,
-            file_id,
+            workspace_id,
             generation,
-            content_digest,
+            selection: ProviderSourceSelection::File {
+                file_id,
+                content_digest,
+            },
         })
+    }
+
+    /// Bind a context-wide job to the complete captured inventory, never a dirty subset.
+    #[must_use]
+    pub fn from_inventory(identity: SourceIdentity, inventory: ProviderSourceInventory) -> Self {
+        Self {
+            identity,
+            workspace_id: inventory.workspace_id(),
+            generation: inventory.source_generation(),
+            selection: ProviderSourceSelection::Inventory(inventory),
+        }
     }
 
     #[must_use]
@@ -145,8 +164,21 @@ impl ProviderSourceBinding {
     }
 
     #[must_use]
-    pub const fn file_id(&self) -> [u8; 16] {
-        self.file_id
+    pub const fn workspace_id(&self) -> [u8; 16] {
+        self.workspace_id
+    }
+
+    #[must_use]
+    pub const fn file_id(&self) -> Option<[u8; 16]> {
+        match &self.selection {
+            ProviderSourceSelection::File { file_id, .. } => Some(*file_id),
+            ProviderSourceSelection::Inventory(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn selection(&self) -> &ProviderSourceSelection {
+        &self.selection
     }
 
     #[must_use]
@@ -156,7 +188,10 @@ impl ProviderSourceBinding {
 
     #[must_use]
     pub const fn content_digest(&self) -> [u8; 32] {
-        self.content_digest
+        match &self.selection {
+            ProviderSourceSelection::File { content_digest, .. } => *content_digest,
+            ProviderSourceSelection::Inventory(inventory) => inventory.identity(),
+        }
     }
 }
 
@@ -164,8 +199,13 @@ impl ProviderSourceBinding {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProviderContextBinding {
     identity: ContextIdentity,
-    analysis_context_id: [u8; 32],
+    analysis_context_id: [u8; 16],
+    context_fingerprint: [u8; 32],
     semantic_environment_id: [u8; 32],
+    support_obligations: Arc<[ProviderSupportDependency]>,
+    modules: Arc<[ProviderModuleBinding]>,
+    python_version: Option<(u16, u16)>,
+    effective_input_identity: [u8; 32],
 }
 
 impl ProviderContextBinding {
@@ -176,16 +216,25 @@ impl ProviderContextBinding {
     /// Rejects zero analysis-context or semantic-environment identities.
     pub fn try_new(
         identity: ContextIdentity,
-        analysis_context_id: [u8; 32],
+        analysis_context_id: [u8; 16],
+        context_fingerprint: [u8; 32],
         semantic_environment_id: [u8; 32],
     ) -> Result<Self, ProviderContractError> {
         require_nonzero_bytes(&analysis_context_id)?;
+        require_nonzero_bytes(&context_fingerprint)?;
         require_nonzero_bytes(&semantic_environment_id)?;
-        Ok(Self {
+        let mut context = Self {
             identity,
             analysis_context_id,
+            context_fingerprint,
             semantic_environment_id,
-        })
+            support_obligations: Arc::from([]),
+            modules: Arc::from([]),
+            python_version: None,
+            effective_input_identity: [0; 32],
+        };
+        context.refresh_effective_input_identity()?;
+        Ok(context)
     }
 
     #[must_use]
@@ -194,8 +243,95 @@ impl ProviderContextBinding {
     }
 
     #[must_use]
-    pub const fn analysis_context_id(&self) -> [u8; 32] {
+    pub const fn analysis_context_id(&self) -> [u8; 16] {
         self.analysis_context_id
+    }
+
+    #[must_use]
+    pub const fn context_fingerprint(&self) -> [u8; 32] {
+        self.context_fingerprint
+    }
+
+    /// Content identity of the exact selected invocation inputs, not a canonical context ID.
+    #[must_use]
+    pub const fn effective_input_identity(&self) -> [u8; 32] {
+        self.effective_input_identity
+    }
+
+    fn refresh_effective_input_identity(&mut self) -> Result<(), ProviderContractError> {
+        self.effective_input_identity = inputs::effective_context_input_identity(self)?;
+        Ok(())
+    }
+
+    /// Install the actual selected configuration and search observations as required support.
+    ///
+    /// # Errors
+    /// Rejects malformed or duplicate observations, including absence without a closed search.
+    pub fn with_support_obligations(
+        mut self,
+        mut dependencies: Vec<ProviderSupportDependency>,
+    ) -> Result<Self, ProviderContractError> {
+        inputs::validate_dependencies(&dependencies)?;
+        if dependencies
+            .iter()
+            .any(|dependency| dependency.scope.effective_context != self.context_fingerprint)
+        {
+            return Err(ProviderContractError::SupportMismatch);
+        }
+        dependencies.sort();
+        self.support_obligations = dependencies.into();
+        self.refresh_effective_input_identity()?;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub fn support_obligations(&self) -> &[ProviderSupportDependency] {
+        &self.support_obligations
+    }
+
+    /// Bind the selected module map without inventing names from file identities.
+    ///
+    /// # Errors
+    /// Rejects duplicate files and malformed module/path identities.
+    pub fn with_modules(
+        mut self,
+        mut modules: Vec<ProviderModuleBinding>,
+    ) -> Result<Self, ProviderContractError> {
+        inputs::validate_modules(&modules)?;
+        modules.sort_by_key(|module| module.file_id);
+        self.modules = modules.into();
+        self.refresh_effective_input_identity()?;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub fn module_for_file(&self, file_id: [u8; 16]) -> Option<&ProviderModuleBinding> {
+        self.modules
+            .binary_search_by_key(&file_id, |module| module.file_id)
+            .ok()
+            .map(|index| &self.modules[index])
+    }
+
+    /// Select the real language version consumed by Ruff. Unsupported versions fail closed.
+    ///
+    /// # Errors
+    /// Rejects versions outside the pinned provider's supported Python 3.7-3.15 range.
+    pub fn with_python_version(
+        mut self,
+        major: u16,
+        minor: u16,
+    ) -> Result<Self, ProviderContractError> {
+        if major != 3 || !(7..=15).contains(&minor) {
+            return Err(ProviderContractError::SupportMismatch);
+        }
+        self.python_version = Some((major, minor));
+        self.refresh_effective_input_identity()?;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn python_version(&self) -> Option<(u16, u16)> {
+        self.python_version
     }
 
     #[must_use]
@@ -533,15 +669,16 @@ pub struct ProviderFamilyRequest {
     schema_identity: ProviderSchemaIdentity,
     schema: SchemaRef,
     scope: ProviderScopeIdentity,
-    requested_units: NonZeroU64,
+    requested_units: u64,
 }
 
 impl ProviderFamilyRequest {
-    /// Construct a non-empty family request.
+    /// Construct a schema-bearing family request. A zero unit census is lawful only when
+    /// the containing job binds a proved empty selected inventory.
     ///
     /// # Errors
     ///
-    /// Rejects a zero requested-unit census.
+    /// Rejects an empty Arrow schema; job construction validates zero-unit scope.
     pub fn try_new(
         family: ProviderFamilyIdentity,
         relation: ProviderRelationIdentity,
@@ -559,14 +696,13 @@ impl ProviderFamilyRequest {
             schema_identity,
             schema,
             scope,
-            requested_units: NonZeroU64::new(requested_units)
-                .ok_or(ProviderContractError::EmptyRequest)?,
+            requested_units,
         })
     }
 
     #[must_use]
     pub const fn requested_units(&self) -> u64 {
-        self.requested_units.get()
+        self.requested_units
     }
 
     #[must_use]
@@ -649,6 +785,7 @@ pub struct ProviderJob {
     deadline: Instant,
     cancellation: CancellationProbe,
     provenance: ProviderRunProvenance,
+    producer_release_identity: [u8; 32],
 }
 
 /// Arguments kept together so job construction has one validation boundary.
@@ -689,6 +826,11 @@ impl ProviderJob {
         let mut families = BTreeSet::new();
         let mut relations = BTreeSet::new();
         for request in &spec.requests {
+            if request.requested_units == 0
+                && !matches!(spec.source.selection(), ProviderSourceSelection::Inventory(inventory) if inventory.selected_files().next().is_none())
+            {
+                return Err(ProviderContractError::EmptyRequest);
+            }
             if !families.insert(request.family.clone()) {
                 return Err(ProviderContractError::DuplicateFamily);
             }
@@ -696,6 +838,8 @@ impl ProviderJob {
                 return Err(ProviderContractError::DuplicateRelation);
             }
         }
+        inputs::validate_job_input_bounds(&spec)?;
+        let producer_release_identity = spec.provenance.producer_release_identity()?;
         Ok(Self {
             suite: spec.suite,
             provider: spec.provider,
@@ -710,6 +854,7 @@ impl ProviderJob {
             deadline: spec.deadline,
             cancellation: spec.cancellation,
             provenance: spec.provenance,
+            producer_release_identity,
         })
     }
 
@@ -771,6 +916,11 @@ impl ProviderJob {
     #[must_use]
     pub const fn provenance(&self) -> &ProviderRunProvenance {
         &self.provenance
+    }
+
+    #[must_use]
+    pub const fn producer_release_identity(&self) -> [u8; 32] {
+        self.producer_release_identity
     }
 
     #[must_use]
@@ -1049,6 +1199,7 @@ pub struct ProviderRunResult {
     trust: ProviderTrustOutcome,
     terminal: ProviderTerminalStatus,
     resources: ProviderResourceOutcome,
+    support: ProviderRunSupport,
 }
 
 /// Identity and evidence arguments for one provider result.
@@ -1067,6 +1218,7 @@ pub struct ProviderRunResultSpec {
     pub diagnostics: Vec<ProviderDiagnostic>,
     pub trust: ProviderTrustOutcome,
     pub terminal: ProviderTerminalStatus,
+    pub support: ProviderRunSupport,
 }
 
 /// Provider-authored evidence whose categorical and binary invocation pins are copied from a job.
@@ -1078,6 +1230,7 @@ pub struct ProviderRunEvidenceSpec {
     pub diagnostics: Vec<ProviderDiagnostic>,
     pub trust: ProviderTrustOutcome,
     pub terminal: ProviderTerminalStatus,
+    pub support: ProviderRunSupport,
 }
 
 impl ProviderRunResult {
@@ -1107,6 +1260,7 @@ impl ProviderRunResult {
             diagnostics: evidence.diagnostics,
             trust: evidence.trust,
             terminal: evidence.terminal,
+            support: evidence.support,
         })
     }
 
@@ -1128,7 +1282,8 @@ impl ProviderRunResult {
         let mut relation_ids = BTreeSet::new();
         let mut batches = 0_usize;
         let mut rows = 0_u64;
-        let mut bytes = 0_u64;
+        // Include owned typed support as well as Arrow buffers in the result envelope.
+        let mut bytes = spec.support.memory_bytes()?;
         for relation in &spec.relations {
             if !relation_ids.insert(relation.relation.clone()) {
                 return Err(ProviderContractError::DuplicateRelation);
@@ -1201,12 +1356,18 @@ impl ProviderRunResult {
             trust: spec.trust,
             terminal: spec.terminal,
             resources,
+            support: spec.support,
         })
     }
 
     #[must_use]
     pub const fn resources(&self) -> ProviderResourceOutcome {
         self.resources
+    }
+
+    #[must_use]
+    pub const fn support(&self) -> &ProviderRunSupport {
+        &self.support
     }
 
     #[must_use]
@@ -1351,6 +1512,7 @@ pub fn admit_provider_result(
     if matches!(result.trust, ProviderTrustOutcome::Rejected { .. }) {
         return Err(ProviderContractError::RejectedTrust);
     }
+    result.support.validate_for_job(&job)?;
 
     let requests = job
         .requests
@@ -1535,6 +1697,12 @@ impl RustcCompilationControl {
 /// Closed provider-contract validation failures.
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum ProviderContractError {
+    #[error(
+        "provider input dispositions or changed/withdrawn membership do not close the authorized inventory"
+    )]
+    SourceInventoryMismatch,
+    #[error("provider support or replacement partitions differ from the exact job obligations")]
+    SupportMismatch,
     #[error("invalid {kind}")]
     InvalidIdentity { kind: &'static str },
     #[error("provider invocation carries an all-zero binary pin")]
@@ -1599,6 +1767,750 @@ mod tests {
 
     use super::*;
 
+    fn input_member(path: &[u8], file: u8) -> ProviderInventoryMember {
+        ProviderInventoryMember {
+            relative_path: path.to_vec(),
+            disposition: ProviderInputDisposition::Captured {
+                file_id: [file; 16],
+                digest: [17; 32],
+                byte_length: 12,
+            },
+            selected_for_provider: true,
+        }
+    }
+
+    fn missing_import() -> ProviderSupportDependency {
+        ProviderSupportDependency {
+            key: ProviderLookupKey::Import {
+                qualified_name: b"optional_dependency".to_vec(),
+            },
+            scope: ProviderSearchScope {
+                namespace: b"python-project".to_vec(),
+                ordered_roots: vec![b"src".to_vec(), b"stubs".to_vec()],
+                policy_identity: [21; 32],
+                effective_context: [3; 32],
+            },
+            outcome: ProviderLookupOutcome::Absent {
+                closed_universe: [22; 32],
+            },
+        }
+    }
+
+    fn complete_with_support(job: &ProviderJob, support: ProviderRunSupport) -> ProviderRunResult {
+        let request = &job.requests()[0];
+        ProviderRunResult::try_from_job(
+            job,
+            ProviderRunEvidenceSpec {
+                relations: vec![
+                    ProviderRelationOutput::try_new(
+                        request.relation().clone(),
+                        request.schema_identity().clone(),
+                        Arc::clone(request.schema()),
+                        vec![RecordBatch::new_empty(Arc::clone(request.schema()))],
+                    )
+                    .unwrap(),
+                ],
+                coverage: vec![ProviderCoverage::new(
+                    request.family().clone(),
+                    ProviderCoverageState::Complete {
+                        completed_units: request.requested_units(),
+                    },
+                )],
+                gaps: vec![],
+                diagnostics: vec![],
+                trust: ProviderTrustOutcome::Trusted,
+                terminal: ProviderTerminalStatus::Complete,
+                support,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn rt_cpg_wp78_behavior() {
+        let (_, mut original) = job();
+        original.context = original
+            .context
+            .with_support_obligations(vec![missing_import()])
+            .unwrap();
+        let old = ProviderSourceInventory::try_new(
+            [6; 16],
+            7,
+            [25; 32],
+            &[b"src/a.py".to_vec(), b"src/b.py".to_vec()],
+            vec![input_member(b"src/a.py", 7), input_member(b"src/b.py", 8)],
+            vec![b"src/a.py".to_vec()],
+            None,
+        )
+        .unwrap();
+        assert_eq!(old.selected_files().count(), 2);
+        assert_eq!(old.changed_paths().len(), 1);
+        original.source = ProviderSourceBinding::from_inventory(
+            SourceIdentity::try_new("closed-inventory-7").unwrap(),
+            old.clone(),
+        );
+        let support = ProviderRunSupport::from_job_inputs(&original, true);
+        assert!(!support.requires_context_invalidation());
+        let admitted =
+            admit_provider_result(original.clone(), complete_with_support(&original, support))
+                .unwrap();
+        assert_eq!(admitted.result().support().partitions.len(), 3);
+        assert!(admitted.result().support().partitions.iter().all(|entry| {
+            admitted
+                .result()
+                .support()
+                .dependencies_for(entry)
+                .any(|dependency| *dependency == missing_import())
+        }));
+
+        let mut changed = original.clone();
+        let mut lookup = missing_import();
+        lookup.scope.ordered_roots.reverse();
+        lookup.scope.effective_context = [32; 32];
+        changed.context = ProviderContextBinding::try_new(
+            ContextIdentity::try_new("selected-stubs-first").unwrap(),
+            [31; 16],
+            [32; 32],
+            [33; 32],
+        )
+        .unwrap()
+        .with_support_obligations(vec![lookup])
+        .unwrap();
+        assert_eq!(
+            original.source, changed.source,
+            "source bytes did not change"
+        );
+        assert_ne!(original.context, changed.context);
+        assert_ne!(
+            ProviderRunSupport::from_job_inputs(&original, true),
+            ProviderRunSupport::from_job_inputs(&changed, true)
+        );
+        assert_eq!(
+            admit_provider_result(changed, admitted.result().clone()).unwrap_err(),
+            ProviderContractError::IdentityMismatch
+        );
+
+        let empty =
+            ProviderSourceInventory::try_new([6; 16], 8, [26; 32], &[], vec![], vec![], Some(&old))
+                .unwrap();
+        assert_eq!(empty.withdrawn().len(), 2);
+        let mut deleted = original;
+        deleted.source = ProviderSourceBinding::from_inventory(
+            SourceIdentity::try_new("closed-empty-8").unwrap(),
+            empty,
+        );
+        deleted.requests[0].requested_units = 0;
+        let support = ProviderRunSupport::from_job_inputs(&deleted, true);
+        assert_eq!(
+            support
+                .partitions
+                .iter()
+                .filter(|entry| entry.partition.action == ProviderPartitionAction::Withdraw)
+                .count(),
+            2
+        );
+        let admitted =
+            admit_provider_result(deleted.clone(), complete_with_support(&deleted, support))
+                .unwrap();
+        assert_eq!(admitted.result().resources().rows, 0);
+        assert_eq!(admitted.result().resources().relations, 1);
+        let current = match deleted.source.selection() {
+            ProviderSourceSelection::Inventory(current) => current,
+            _ => unreachable!(),
+        };
+        let recreated = ProviderSourceInventory::try_new(
+            [6; 16],
+            9,
+            [27; 32],
+            &[b"src/a.py".to_vec()],
+            vec![input_member(b"src/a.py", 7)],
+            vec![b"src/a.py".to_vec()],
+            Some(current),
+        )
+        .unwrap();
+        assert_eq!(recreated.selected_files().count(), 1);
+        assert!(recreated.withdrawn().is_empty());
+    }
+
+    #[test]
+    fn rt_cpg_wp78_faults() {
+        let paths = vec![b"a.py".to_vec(), b"b.py".to_vec()];
+        for incomplete in [vec![input_member(b"a.py", 7)], vec![]] {
+            assert_eq!(
+                ProviderSourceInventory::try_new(
+                    [6; 16],
+                    7,
+                    [25; 32],
+                    &paths,
+                    incomplete,
+                    vec![b"a.py".to_vec()],
+                    None
+                )
+                .unwrap_err(),
+                ProviderContractError::SourceInventoryMismatch,
+                "dirty work is not the full inventory"
+            );
+        }
+        let (_, mut job) = job();
+        job.context = job
+            .context
+            .with_support_obligations(vec![missing_import()])
+            .unwrap();
+        let mut incomplete = ProviderRunSupport::from_job_inputs(&job, true);
+        incomplete.common_dependencies = incomplete
+            .common_dependencies
+            .iter()
+            .filter(|dependency| !matches!(dependency.key, ProviderLookupKey::Import { .. }))
+            .cloned()
+            .collect();
+        assert_eq!(
+            admit_provider_result(job.clone(), complete_with_support(&job, incomplete))
+                .unwrap_err(),
+            ProviderContractError::SupportMismatch
+        );
+        let mut missing_partition = ProviderRunSupport::from_job_inputs(&job, true);
+        missing_partition.partitions.clear();
+        assert_eq!(
+            admit_provider_result(job.clone(), complete_with_support(&job, missing_partition))
+                .unwrap_err(),
+            ProviderContractError::SupportMismatch
+        );
+        let mut wrong_context = ProviderRunSupport::from_job_inputs(&job, true);
+        wrong_context.partitions[0].partition.key.context_id = [99; 16];
+        assert_eq!(
+            admit_provider_result(job.clone(), complete_with_support(&job, wrong_context))
+                .unwrap_err(),
+            ProviderContractError::SupportMismatch
+        );
+        assert!(ProviderRunSupport::conservative(&job).requires_context_invalidation());
+        let mut unknown_lookup = missing_import();
+        unknown_lookup.outcome = ProviderLookupOutcome::Incomplete {
+            observed_universe: [22; 32],
+        };
+        job.context = job
+            .context
+            .with_support_obligations(vec![unknown_lookup])
+            .unwrap();
+        let support = ProviderRunSupport::from_job_inputs(&job, true);
+        assert!(support.requires_context_invalidation());
+        admit_provider_result(job.clone(), complete_with_support(&job, support)).unwrap();
+        assert_ne!(
+            job.context.analysis_context_id().len(),
+            job.context.context_fingerprint().len()
+        );
+        assert_ne!(job.source.workspace_id(), job.source.file_id().unwrap());
+    }
+
+    #[test]
+    fn rt_cpg_wp78_path_owned_file_identity_rejects_drift() {
+        let previous = ProviderSourceInventory::try_new(
+            [6; 16],
+            7,
+            [25; 32],
+            &[b"a.py".to_vec()],
+            vec![input_member(b"a.py", 7)],
+            vec![],
+            None,
+        )
+        .unwrap();
+        for member in [input_member(b"a.py", 8), input_member(b"renamed.py", 7)] {
+            assert_eq!(
+                ProviderSourceInventory::try_new(
+                    [6; 16],
+                    8,
+                    [26; 32],
+                    &[member.relative_path.clone()],
+                    vec![member],
+                    vec![],
+                    Some(&previous),
+                )
+                .unwrap_err(),
+                ProviderContractError::SourceInventoryMismatch
+            );
+        }
+        let renamed = ProviderSourceInventory::try_new(
+            [6; 16],
+            8,
+            [26; 32],
+            &[b"renamed.py".to_vec()],
+            vec![input_member(b"renamed.py", 8)],
+            vec![],
+            Some(&previous),
+        )
+        .unwrap();
+        assert_eq!(renamed.withdrawn(), &[([7; 16], b"a.py".to_vec())]);
+    }
+
+    #[test]
+    fn rt_cpg_wp78_producer_program_and_effective_inputs_bind_support() {
+        let (_, original) = job();
+        // Independently computed with the pinned Python rfc8785 + blake3 implementations.
+        assert_eq!(
+            blake3::Hash::from(original.producer_release_identity())
+                .to_hex()
+                .as_str(),
+            "4a69ad52e3d79556ce8824446cbd5fd42037333543f125f9809e6e2fe1d39899"
+        );
+        let support = ProviderRunSupport::from_job_inputs(&original, true);
+        let mut changed = original.clone();
+        changed.provenance = ProviderRunProvenance::new(
+            original.provenance.provider_build().clone(),
+            original.provenance.policy().clone(),
+            ProviderProgramIdentity::try_new("provider-program.changed").unwrap(),
+        );
+        changed = rebuild_job(changed).unwrap();
+        assert_ne!(
+            original.provenance.producer_release_identity(),
+            changed.provenance.producer_release_identity()
+        );
+        assert_ne!(
+            original.replacement_obligations(),
+            changed.replacement_obligations()
+        );
+        assert_eq!(
+            admit_provider_result(
+                changed.clone(),
+                complete_with_support(&changed, support.clone())
+            )
+            .unwrap_err(),
+            ProviderContractError::SupportMismatch
+        );
+
+        let module = ProviderModuleBinding {
+            file_id: [7; 16],
+            qualified_name: "a".into(),
+            relative_path: b"a.py".to_vec(),
+        };
+        let with_module = original
+            .context
+            .clone()
+            .with_modules(vec![module.clone()])
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            &with_module.modules,
+            &with_module.clone().modules
+        ));
+        let with_version = original.context.clone().with_python_version(3, 14).unwrap();
+        let mut renamed = module;
+        renamed.qualified_name = "different_module".into();
+        assert_ne!(
+            with_module.effective_input_identity(),
+            original
+                .context
+                .clone()
+                .with_modules(vec![renamed])
+                .unwrap()
+                .effective_input_identity()
+        );
+        assert_ne!(
+            with_version.effective_input_identity(),
+            original
+                .context
+                .clone()
+                .with_python_version(3, 13)
+                .unwrap()
+                .effective_input_identity()
+        );
+        for context in [with_module, with_version] {
+            assert_eq!(
+                context.analysis_context_id(),
+                original.context.analysis_context_id()
+            );
+            assert_eq!(
+                context.context_fingerprint(),
+                original.context.context_fingerprint()
+            );
+            assert_ne!(
+                context.effective_input_identity(),
+                original.context.effective_input_identity()
+            );
+            changed = original.clone();
+            changed.context = context;
+            assert_eq!(
+                admit_provider_result(
+                    changed.clone(),
+                    complete_with_support(&changed, support.clone())
+                )
+                .unwrap_err(),
+                ProviderContractError::SupportMismatch
+            );
+        }
+    }
+
+    #[test]
+    fn rt_cpg_wp78_extra_lookup_authority_is_not_self_attested() {
+        let (_, mut job) = job();
+        job.context = job
+            .context
+            .with_support_obligations(vec![missing_import()])
+            .unwrap();
+        let mut extra = missing_import();
+        extra.key = ProviderLookupKey::Import {
+            qualified_name: b"another_dependency".to_vec(),
+        };
+        for mutation in 0..4 {
+            let mut bad = extra.clone();
+            match mutation {
+                0 => bad.scope.effective_context = [99; 32],
+                1 => bad.scope.policy_identity = [99; 32],
+                2 => bad.scope.ordered_roots.reverse(),
+                _ => {
+                    bad.outcome = ProviderLookupOutcome::Absent {
+                        closed_universe: [99; 32],
+                    }
+                }
+            }
+            for common in [false, true] {
+                let mut support = ProviderRunSupport::from_job_inputs(&job, true);
+                if common {
+                    let mut shared = support.common_dependencies.to_vec();
+                    shared.push(bad.clone());
+                    support.common_dependencies = shared.into();
+                } else {
+                    support.partitions[0].dependencies.push(bad.clone());
+                }
+                assert_eq!(
+                    admit_provider_result(job.clone(), complete_with_support(&job, support))
+                        .unwrap_err(),
+                    ProviderContractError::SupportMismatch
+                );
+            }
+        }
+        let mut authorized = ProviderRunSupport::from_job_inputs(&job, true);
+        authorized.partitions[0].dependencies.push(extra.clone());
+        let admitted =
+            admit_provider_result(job.clone(), complete_with_support(&job, authorized)).unwrap();
+        assert!(!admitted.result().support().requires_context_invalidation());
+        let mut tight = job.clone();
+        tight.ceilings.work_units = NonZeroU64::new(5).unwrap();
+        let tight = rebuild_job(tight).unwrap();
+        assert_eq!(
+            admit_provider_result(tight, admitted.result().clone()).unwrap_err(),
+            ProviderContractError::ResourceCeilingExceeded
+        );
+        extra.scope.ordered_roots = vec![b"unobserved_root".to_vec()];
+        extra.outcome = ProviderLookupOutcome::Incomplete {
+            observed_universe: [99; 32],
+        };
+        let mut conservative = ProviderRunSupport::from_job_inputs(&job, true);
+        conservative.partitions[0].dependencies.push(extra);
+        let admitted =
+            admit_provider_result(job.clone(), complete_with_support(&job, conservative)).unwrap();
+        assert!(admitted.result().support().requires_context_invalidation());
+    }
+
+    #[test]
+    fn rt_cpg_wp78_consumed_source_support_requires_exact_captured_authority() {
+        let (_, original) = job();
+        for inventory_source in [false, true] {
+            let mut job = original.clone();
+            job.context = job
+                .context
+                .with_support_obligations(vec![missing_import()])
+                .unwrap();
+            if inventory_source {
+                let mut configuration = input_member(b"config.py", 8);
+                configuration.selected_for_provider = false;
+                job.source = ProviderSourceBinding::from_inventory(
+                    SourceIdentity::try_new("inventory").unwrap(),
+                    ProviderSourceInventory::try_new(
+                        [6; 16],
+                        7,
+                        [25; 32],
+                        &[
+                            b"a.py".to_vec(),
+                            b"config.py".to_vec(),
+                            b"unreadable.py".to_vec(),
+                        ],
+                        vec![
+                            input_member(b"a.py", 7),
+                            configuration,
+                            ProviderInventoryMember {
+                                relative_path: b"unreadable.py".to_vec(),
+                                disposition: ProviderInputDisposition::Unreadable,
+                                selected_for_provider: false,
+                            },
+                        ],
+                        vec![],
+                        None,
+                    )
+                    .unwrap(),
+                );
+            }
+            let job = rebuild_job(job).unwrap();
+            for (file, digest, accepted) in [
+                (7, 17, true),
+                (7, 99, false),
+                (8, 17, inventory_source),
+                (9, 17, false),
+                (99, 17, false),
+            ] {
+                for common in [false, true] {
+                    let mut dependency = missing_import();
+                    dependency.key = ProviderLookupKey::SourceBytes {
+                        file_id: [file; 16],
+                    };
+                    dependency.outcome = ProviderLookupOutcome::Consumed {
+                        revision: [digest; 32],
+                        candidates: vec![],
+                    };
+                    let mut support = ProviderRunSupport::from_job_inputs(&job, true);
+                    if common {
+                        let mut shared = support.common_dependencies.to_vec();
+                        shared.push(dependency);
+                        support.common_dependencies = shared.into();
+                    } else {
+                        support.partitions[0].dependencies.push(dependency);
+                    }
+                    let result =
+                        admit_provider_result(job.clone(), complete_with_support(&job, support));
+                    assert_eq!(
+                        result.is_ok(),
+                        accepted,
+                        "inventory={inventory_source}, common={common}, file={file}, digest={digest}"
+                    );
+                    if let Err(error) = result {
+                        assert_eq!(error, ProviderContractError::SupportMismatch);
+                    }
+                }
+            }
+            let mut dependency = missing_import();
+            dependency.key = ProviderLookupKey::SourceBytes { file_id: [99; 16] };
+            let mut absent = ProviderRunSupport::from_job_inputs(&job, true);
+            absent.partitions[0].dependencies.push(dependency.clone());
+            assert_eq!(
+                admit_provider_result(job.clone(), complete_with_support(&job, absent))
+                    .unwrap_err(),
+                ProviderContractError::SupportMismatch,
+            );
+            dependency.outcome = ProviderLookupOutcome::Incomplete {
+                observed_universe: [22; 32],
+            };
+            let mut incomplete = ProviderRunSupport::from_job_inputs(&job, true);
+            incomplete.partitions[0].dependencies.push(dependency);
+            let admitted =
+                admit_provider_result(job.clone(), complete_with_support(&job, incomplete))
+                    .unwrap();
+            assert!(admitted.result().support().requires_context_invalidation());
+        }
+    }
+
+    #[test]
+    fn rt_cpg_wp78_support_bundle_identity_is_canonical_and_root_ordered() {
+        let first = missing_import();
+        // Independent Python rfc8785/blake3 oracle for the externally tagged typed record.
+        assert_eq!(
+            blake3::Hash::from(
+                provider_support_bundle_identity(std::slice::from_ref(&first)).unwrap()
+            )
+            .to_hex()
+            .as_str(),
+            "b1a16696c4b7a4dd33de6df184bc71d2567260cc288e6481a6445a85c499732b"
+        );
+        let mut second = first.clone();
+        second.key = ProviderLookupKey::Name {
+            name: b"name".to_vec(),
+        };
+        let baseline = provider_support_bundle_identity(&[first.clone(), second.clone()]).unwrap();
+        assert_eq!(
+            baseline,
+            provider_support_bundle_identity(&[second.clone(), first.clone()]).unwrap()
+        );
+        second.scope.ordered_roots.reverse();
+        assert_ne!(
+            baseline,
+            provider_support_bundle_identity(&[first.clone(), second]).unwrap()
+        );
+        let mut contradiction = first.clone();
+        contradiction.outcome = ProviderLookupOutcome::Absent {
+            closed_universe: [99; 32],
+        };
+        assert_eq!(
+            provider_support_bundle_identity(&[first, contradiction]).unwrap_err(),
+            ProviderContractError::SupportMismatch
+        );
+    }
+
+    fn rebuild_job(job: ProviderJob) -> Result<ProviderJob, ProviderContractError> {
+        ProviderJob::try_new(ProviderJobSpec {
+            suite: job.suite,
+            provider: job.provider,
+            protocol: job.protocol,
+            source: job.source,
+            context: job.context,
+            run: job.run,
+            lane: job.lane,
+            trust: job.trust,
+            requests: job.requests,
+            ceilings: job.ceilings,
+            deadline: job.deadline,
+            cancellation: job.cancellation,
+            provenance: job.provenance,
+        })
+    }
+
+    #[test]
+    fn rt_cpg_wp78_shared_support_is_linear_and_charged() {
+        let build = |count: u8| {
+            let (_, mut job) = job();
+            let members = (1..=count)
+                .map(|file| input_member(format!("file{file}.py").as_bytes(), file))
+                .collect::<Vec<_>>();
+            let paths = members
+                .iter()
+                .map(|member| member.relative_path.clone())
+                .collect::<Vec<_>>();
+            job.source = ProviderSourceBinding::from_inventory(
+                SourceIdentity::try_new("inventory").unwrap(),
+                ProviderSourceInventory::try_new(
+                    [6; 16],
+                    7,
+                    [25; 32],
+                    &paths,
+                    members,
+                    vec![],
+                    None,
+                )
+                .unwrap(),
+            );
+            job.requests.push(
+                ProviderFamilyRequest::try_new(
+                    ProviderFamilyIdentity::try_new("syntax.names").unwrap(),
+                    ProviderRelationIdentity::try_new("raw.names").unwrap(),
+                    ProviderSchemaIdentity::try_new("raw.names.v1").unwrap(),
+                    relation_schema(),
+                    ProviderScopeIdentity::try_new("workspace").unwrap(),
+                    u64::from(count),
+                )
+                .unwrap(),
+            );
+            rebuild_job(job).unwrap()
+        };
+        let small = ProviderRunSupport::from_job_inputs(&build(16), true);
+        let large_job = build(32);
+        let large = ProviderRunSupport::from_job_inputs(&large_job, true);
+        assert_eq!(large.common_dependencies().len(), 34);
+        assert_eq!(large.partitions.len(), 66);
+        assert!(
+            large
+                .partitions
+                .iter()
+                .all(|partition| partition.dependencies.is_empty())
+        );
+        assert!(large.memory_bytes().unwrap() <= 2 * small.memory_bytes().unwrap());
+        assert!(Arc::ptr_eq(
+            &large.common_dependencies,
+            &large.clone().common_dependencies
+        ));
+        let (_, job) = job();
+        let support = ProviderRunSupport::from_job_inputs(&job, true);
+        let support_bytes = support.memory_bytes().unwrap();
+        let result = complete_with_support(&job, support);
+        let arrow_bytes = result
+            .relations()
+            .iter()
+            .flat_map(ProviderRelationOutput::batches)
+            .map(|batch| u64::try_from(batch.get_array_memory_size()).unwrap())
+            .sum::<u64>();
+        assert_eq!(result.resources().bytes, support_bytes + arrow_bytes);
+        let mut too_small = job;
+        too_small.ceilings.bytes = NonZeroU64::new(support_bytes - 1).unwrap();
+        assert_eq!(
+            admit_provider_result(too_small, result).unwrap_err(),
+            ProviderContractError::ResourceCeilingExceeded
+        );
+    }
+
+    #[test]
+    fn rt_cpg_wp78_resource_bounds_precede_support_expansion() {
+        assert_eq!(
+            ProviderSourceInventory::try_new(
+                [6; 16],
+                7,
+                [25; 32],
+                &vec![Vec::new(); 262_145],
+                vec![],
+                vec![],
+                None
+            )
+            .unwrap_err(),
+            ProviderContractError::ResourceCeilingExceeded
+        );
+        let oversized = vec![b'x'; 16_385];
+        let mut dependency = missing_import();
+        dependency.scope.namespace = oversized.clone();
+        assert_eq!(
+            provider_support_bundle_identity(&[dependency]).unwrap_err(),
+            ProviderContractError::ResourceCeilingExceeded
+        );
+        let mut dependency = missing_import();
+        dependency.outcome = ProviderLookupOutcome::Consumed {
+            revision: [1; 32],
+            candidates: vec![[1; 16]; 65_537],
+        };
+        assert_eq!(
+            provider_support_bundle_identity(&[dependency]).unwrap_err(),
+            ProviderContractError::ResourceCeilingExceeded
+        );
+        assert_eq!(
+            context_binding()
+                .with_modules(vec![ProviderModuleBinding {
+                    file_id: [7; 16],
+                    qualified_name: "a".into(),
+                    relative_path: oversized
+                }])
+                .unwrap_err(),
+            ProviderContractError::ResourceCeilingExceeded
+        );
+        let (_, original) = job();
+        for resource in 0..3 {
+            let mut limited = original.clone();
+            match resource {
+                0 => limited.ceilings.work_units = NonZeroU64::new(1).unwrap(),
+                1 => limited.ceilings.bytes = NonZeroU64::new(1).unwrap(),
+                _ => {
+                    limited.ceilings.input_bytes = NonZeroU64::new(1).unwrap();
+                    limited.source = ProviderSourceBinding::from_inventory(
+                        SourceIdentity::try_new("inventory").unwrap(),
+                        ProviderSourceInventory::try_new(
+                            [6; 16],
+                            7,
+                            [25; 32],
+                            &[b"a.py".to_vec()],
+                            vec![input_member(b"a.py", 7)],
+                            vec![],
+                            None,
+                        )
+                        .unwrap(),
+                    );
+                }
+            }
+            assert_eq!(
+                rebuild_job(limited).unwrap_err(),
+                ProviderContractError::ResourceCeilingExceeded
+            );
+        }
+        let mut source_limit = input_member(b"a.py", 7);
+        source_limit.disposition = ProviderInputDisposition::Captured {
+            file_id: [7; 16],
+            digest: [17; 32],
+            byte_length: MAX_INPUT_BYTES,
+        };
+        assert_eq!(
+            ProviderSourceInventory::try_new(
+                [6; 16],
+                7,
+                [25; 32],
+                &[b"a.py".to_vec(), b"b.py".to_vec()],
+                vec![source_limit, input_member(b"b.py", 8)],
+                vec![],
+                None
+            )
+            .unwrap_err(),
+            ProviderContractError::ResourceCeilingExceeded
+        );
+    }
+
     fn identity<T>(
         value: &str,
         constructor: impl FnOnce(Arc<str>) -> Result<T, ProviderContractError>,
@@ -1635,8 +2547,9 @@ mod tests {
     }
 
     fn source_binding() -> ProviderSourceBinding {
-        ProviderSourceBinding::try_new(
+        ProviderSourceBinding::try_file(
             identity("source-generation-7", SourceIdentity::try_new),
+            [6; 16],
             [7; 16],
             7,
             [17; 32],
@@ -1647,6 +2560,7 @@ mod tests {
     fn context_binding() -> ProviderContextBinding {
         ProviderContextBinding::try_new(
             identity("python-context-3", ContextIdentity::try_new),
+            [3; 16],
             [3; 32],
             [4; 32],
         )
@@ -1731,6 +2645,7 @@ mod tests {
             _ => Vec::new(),
         };
         ProviderRunResult::try_new(ProviderRunResultSpec {
+            support: ProviderRunSupport::conservative(&job().1),
             suite: identity(
                 "codefabric-relational-data-fabric@2.3.0",
                 SuiteIdentity::try_new,
@@ -1796,6 +2711,7 @@ mod tests {
             ProviderRunResult::try_from_job(
                 &job,
                 ProviderRunEvidenceSpec {
+                    support: ProviderRunSupport::conservative(&job),
                     relations,
                     coverage: vec![ProviderCoverage::new(
                         job.requests()[0].family().clone(),
@@ -1836,6 +2752,7 @@ mod tests {
         let (_, job) = job();
         let family = job.requests()[0].family().clone();
         let evidence = ProviderRunEvidenceSpec {
+            support: ProviderRunSupport::conservative(&job),
             relations: Vec::new(),
             coverage: vec![ProviderCoverage::new(
                 family.clone(),
@@ -1936,6 +2853,7 @@ mod tests {
     fn unknown_output_requires_an_explicit_matching_gap_and_terminal() {
         let family = identity("syntax.calls", ProviderFamilyIdentity::try_new);
         let error = ProviderRunResult::try_new(ProviderRunResultSpec {
+            support: ProviderRunSupport::conservative(&job().1),
             suite: identity(
                 "codefabric-relational-data-fabric@2.3.0",
                 SuiteIdentity::try_new,
