@@ -12,6 +12,15 @@ use std::time::{Duration, Instant};
 use arrow_schema::SchemaRef;
 use thiserror::Error;
 
+mod independent;
+
+pub use independent::{
+    AnalysisDisposition, AnalysisGapReason, AnalysisGapRetryability, AnalysisPrecision,
+    ConformanceFixture, FixtureAssertion, FixtureFact, FixtureFactKind, FixtureResult,
+    FixtureUnknown, FixtureUnknownCause, RequiredAnalysisConformance, RequiredAnalysisFamily,
+    RequiredAnalysisObservation,
+};
+
 use crate::provider_contracts::{
     AdmittedProviderResult, CancellationProbe, ProviderBuildIdentity, ProviderContextBinding,
     ProviderContractError, ProviderFamilyIdentity, ProviderFamilyRequest, ProviderIdentity,
@@ -400,6 +409,7 @@ pub(crate) struct ProofProgramDefinition {
     identity: ProofProgramIdentity,
     expectations: Vec<ProofExpectationDefinition>,
     faults: Vec<CausalFaultDefinition>,
+    independent: independent::IndependentProofDefinition,
 }
 
 impl ProofProgramDefinition {
@@ -418,6 +428,7 @@ impl ProofProgramDefinition {
             identity,
             expectations,
             faults,
+            independent: independent::current_definition(),
         })
     }
 }
@@ -802,19 +813,28 @@ pub struct CompiledProofProgram {
     identity: ProofProgramIdentity,
     expectations: Arc<[ProofExpectationDefinition]>,
     faults: Arc<[CausalFaultDefinition]>,
+    independent: independent::IndependentProofContract,
 }
 
 /// Independent proof input constructed from the compiled release, not provider output.
 #[derive(Clone, Debug)]
 pub struct CompiledProofInput {
+    pub program_identity: ProofProgramIdentity,
     pub expectations: Arc<[(ProofExpectationIdentity, ProviderRelationIdentity, u64)]>,
     pub faults: Arc<[(CausalFaultIdentity, ProviderRelationIdentity, CausalEffect)]>,
 }
 
 impl CompiledProofProgram {
+    /// Content identity of all compiled proof operands, including independent source examples.
+    #[must_use]
+    pub const fn identity(&self) -> &ProofProgramIdentity {
+        &self.identity
+    }
+
     #[must_use]
     pub fn construct_input(&self) -> CompiledProofInput {
         CompiledProofInput {
+            program_identity: self.identity.clone(),
             expectations: Arc::from(
                 self.expectations
                     .iter()
@@ -1204,7 +1224,7 @@ fn compile_queries(
 }
 
 fn compile_proof(
-    definition: ProofProgramDefinition,
+    mut definition: ProofProgramDefinition,
     available: &BTreeMap<ProviderRelationIdentity, (ProviderSchemaIdentity, SchemaRef)>,
     queries: &CompiledQueryProgram,
 ) -> Result<CompiledProofProgram, SemanticReleaseError> {
@@ -1234,10 +1254,45 @@ fn compile_proof(
             return Err(SemanticReleaseError::InvalidProofProgram);
         }
     }
+    // Construction order is not semantic authority. Retain the same canonical order that is
+    // hashed, including for consumers that select one declared expectation or causal effect.
+    definition
+        .expectations
+        .sort_by(|left, right| left.identity.cmp(&right.identity));
+    definition
+        .faults
+        .sort_by(|left, right| left.identity.cmp(&right.identity));
+    let independent = independent::IndependentProofContract::compile(definition.independent)?;
+    let mut digest = blake3::Hasher::new();
+    digest.update(b"codefabric.compiled-proof-program.operands.v1\0");
+    independent::hash_frame(&mut digest, definition.identity.as_str().as_bytes());
+    independent::hash_count(&mut digest, definition.expectations.len());
+    for expectation in &definition.expectations {
+        independent::hash_frame(&mut digest, expectation.identity.as_str().as_bytes());
+        independent::hash_frame(&mut digest, expectation.relation.as_str().as_bytes());
+        digest.update(&expectation.minimum_rows.to_be_bytes());
+    }
+    independent::hash_count(&mut digest, definition.faults.len());
+    for fault in &definition.faults {
+        independent::hash_frame(&mut digest, fault.identity.as_str().as_bytes());
+        independent::hash_frame(&mut digest, fault.target_relation.as_str().as_bytes());
+        digest.update(&[match fault.effect {
+            CausalEffect::RejectAdmission => 0,
+            CausalEffect::ChangeTransformation => 1,
+            CausalEffect::ChangeQuery => 2,
+            CausalEffect::ChangeProofTerminal => 3,
+        }]);
+    }
+    digest.update(&independent.content_identity());
+    let identity = ProofProgramIdentity::try_new(format!(
+        "codefabric.compiled-proof-program.v1.b3:{}",
+        digest.finalize().to_hex()
+    ))?;
     Ok(CompiledProofProgram {
-        identity: definition.identity,
+        identity,
         expectations: Arc::from(definition.expectations),
         faults: Arc::from(definition.faults),
+        independent,
     })
 }
 
@@ -1420,6 +1475,12 @@ pub(crate) fn compile_current_v23_release(
 /// Release compiler failures. No variant permits fallback to a marker or runtime registry.
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum SemanticReleaseError {
+    #[error("independent release proof contract is invalid: {0}")]
+    InvalidIndependentProof(&'static str),
+    #[error("required analysis observations violate release proof: {0}")]
+    InvalidRequiredAnalysisObservation(&'static str),
+    #[error("independent source fixture result differs from its released expectation: {0}")]
+    IndependentFixtureMismatch(&'static str),
     #[error("application provider contract is invalid: {0}")]
     ProviderContract(#[from] ProviderContractError),
     #[error("program identity is empty, padded, control-bearing, or oversized")]
@@ -1572,7 +1633,7 @@ mod tests {
         .unwrap()
     }
 
-    fn fixture_definition() -> CurrentSemanticReleaseDefinition {
+    pub(super) fn fixture_definition() -> CurrentSemanticReleaseDefinition {
         let lanes = vec![
             provider_lane(ProviderLane::TreeSitter, "tree-sitter"),
             provider_lane(ProviderLane::Ruff, "ruff"),
