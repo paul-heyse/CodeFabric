@@ -1120,6 +1120,26 @@ gate-filter-census:
 packet-oracle-check packet:
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check "{{packet}}"
 
+[doc("Execute the selected real-time CPG packet's four real oracles and local gates")]
+[group('test')]
+real-time-cpg-packet-check packet *args:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/real_time_cpg_assurance.py packet "$@"
+
+[doc("Derive and execute real-time CPG milestone members and integration gates")]
+[group('gate')]
+real-time-cpg-milestone-check milestone *args:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/real_time_cpg_assurance.py milestone "$@"
+
+[doc("Derive and execute real-time CPG decommission prerequisites and exit gates")]
+[group('gate')]
+real-time-cpg-decommission-check batch *args:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/real_time_cpg_assurance.py decommission "$@"
+
+[doc("Nonmutatingly certify the current real-time CPG candidate and retained real proof")]
+[group('gate')]
+real-time-cpg-certification *args:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/real_time_cpg_assurance.py certification "$@"
+
 [doc("Derive active-plan input freshness and proving-commit trust")]
 [group('gate')]
 plan-status:
