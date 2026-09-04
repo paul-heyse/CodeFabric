@@ -1,0 +1,340 @@
+{
+  "schema_version": 2,
+  "plan_path": "docs/plans/codefabric_real_time_cpg_implementation_plan_v2_2026-09-04.md",
+  "design_path": "docs/designs/codefabric_real_time_cpg_planning_contracts_design_v1_2026-09-04.md",
+  "baseline_commit": "df1c50c684a5e005c4b76ada9cd19d8030d9d7dd",
+  "status": "executing",
+  "current_packet": "WP77",
+  "packets": {
+    "WP77": {
+      "status": "in_progress",
+      "proving_commit": null,
+      "deviations": [
+        "Integrate carefully with the pre-existing provider/admission/derived-analysis edits; preserve unrelated work. The execution preflight snapshot is recoverable under /tmp/codefabric-rt-cpg-exec-jbqlfs and no inherited completion is assumed."
+      ],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP78": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP79": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP80": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP81": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP82": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP83": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP84": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP85": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP86": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP87": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP88": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP89": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP90": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP91": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP92": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP93": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP94": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP95": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP96": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP97": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP98": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP99": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP100": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP101": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP102": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP103": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP104": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP105": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "WP106": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "milestones": {
+    "M18": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M19": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M20": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M21": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M22": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M23": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M24": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "M25": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "decommission_batches": {
+    "DB24": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB25": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB26": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB27": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB28": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB29": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    },
+    "DB30": {
+      "status": "not_started",
+      "proving_commit": null,
+      "deviations": [],
+      "failed_approaches": [],
+      "blockers": []
+    }
+  },
+  "baseline_failures": [
+    "The pre-edit just ci-fast run stops at root-clippy on the existing broad Clippy diagnostics, including similar_names and too_many_lines. No baseline waiver is granted; WP105 owns full quality closure and each earlier packet must keep its local obligations passing."
+  ],
+  "discovered_obligations": [],
+  "plan_deviations": [
+    "Approval/activation uses v2 with unchanged WP77-WP106 scope, IDs and dependency/proof contracts: v1 lacked the activation validator's mandatory whole-worktree digest mode. V1 and design inputs are retained unchanged; the user authorized the entire v1 implementation."
+  ],
+  "next_action": "WP77: run source/contract preflight, replace unsupported Python CFG/dataflow complete claims with precise required-family gaps, admit independent release expectations, and install fail-closed packet/milestone/decommission/certification dispatch. Re-run packet-local gates before any proving commit/completion.",
+  "updated_at": "2026-09-04T21:42:06.651Z"
+}
