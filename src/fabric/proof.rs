@@ -473,6 +473,7 @@ pub(crate) fn evaluate_compiled_activation_candidate(
     }
 
     let compiled_input = proof_program.construct_input();
+    let proof_content = compiled_input.program_identity.as_str().as_bytes();
     let (compiled_expectation, expectation_relation, _) = compiled_input
         .expectations
         .first()
@@ -487,6 +488,7 @@ pub(crate) fn evaluate_compiled_activation_candidate(
         b"oracle",
         &[
             b"activation-candidate-exact-authority",
+            proof_content,
             expectation_relation.as_str().as_bytes(),
             fault_relation.as_str().as_bytes(),
         ],
@@ -506,6 +508,7 @@ pub(crate) fn evaluate_compiled_activation_candidate(
         b"expectation",
         &[
             b"candidate-selection-preserves-exact-authority",
+            proof_content,
             compiled_expectation.as_str().as_bytes(),
         ],
     ))
@@ -514,6 +517,7 @@ pub(crate) fn evaluate_compiled_activation_candidate(
         b"causal-fault",
         &[
             b"substitute-table-version-vector",
+            proof_content,
             compiled_fault.as_str().as_bytes(),
         ],
     ))
@@ -526,6 +530,7 @@ pub(crate) fn evaluate_compiled_activation_candidate(
     let run_id = ProofRunId::new(identity16(
         b"run",
         &[
+            proof_content,
             pins.epoch.as_bytes(),
             pins.table_versions.as_bytes(),
             pins.source_authority.as_bytes(),
@@ -558,7 +563,7 @@ pub(crate) fn evaluate_compiled_activation_candidate(
         oracle_id,
         implementation: OracleImplementationRef::new(identity32(
             b"oracle-implementation",
-            &[b"compiled-activation-candidate-proof-v1"],
+            &[b"compiled-activation-candidate-proof-v1", proof_content],
         ))
         .expect("domain-separated release identity is nonzero"),
         violation_relation: ProofRelationId::new(identity16(
@@ -579,7 +584,7 @@ pub(crate) fn evaluate_compiled_activation_candidate(
         .expect("domain-separated release identity is nonzero"),
         source_anchor: SourceAnchorRef::new(identity32(
             b"source-anchor",
-            &[b"SUITE-proof-and-activation-contract"],
+            &[b"SUITE-proof-and-activation-contract", proof_content],
         ))
         .expect("domain-separated release identity is nonzero"),
         authority: independent_authority,
@@ -590,7 +595,7 @@ pub(crate) fn evaluate_compiled_activation_candidate(
         coverage_scope: scope_id,
         program: CausalFaultProgramRef::new(identity32(
             b"fault-program",
-            &[b"replace-exact-table-version-reference"],
+            &[b"replace-exact-table-version-reference", proof_content],
         ))
         .expect("domain-separated release identity is nonzero"),
         required_effect: RequiredCausalEffect::SemanticDiscrimination,

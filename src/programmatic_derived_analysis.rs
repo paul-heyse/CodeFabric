@@ -59,8 +59,8 @@ use crate::provider_admission::{
 use crate::provider_native_syntax::NativeSyntaxRelation;
 use crate::pyrefly_service::PyreflyRelation;
 use crate::python_derived_analysis::{
-    PYTHON_DERIVED_AUTHORITY, PythonDerivedRelation, PythonFlowBindings, PythonFlowFields,
-    PythonFlowRelations, PythonFlowSemanticValues,
+    PythonDerivedRelation, PythonFlowBindings, PythonFlowFields, PythonFlowRelations,
+    PythonFlowSemanticValues,
 };
 use crate::relation_ipc::{CoverageTrailer, RemainderReason, TerminalStatus};
 use crate::relational_program::RelationId;
@@ -70,7 +70,9 @@ use crate::rust_mir_derived_analysis::{
 use crate::rustc_relation_schema::RustcRelation;
 use crate::schema_contract::FIELD_ID_METADATA_KEY;
 use crate::semantic_release::{
+    AnalysisDisposition, AnalysisGapReason, AnalysisGapRetryability, AnalysisPrecision,
     CompiledProofProgram, CompiledQueryProgram, CompiledTransformationProgram,
+    RequiredAnalysisFamily, RequiredAnalysisObservation, SemanticReleaseError,
     TransformationProgramIdentity,
 };
 
@@ -1592,7 +1594,7 @@ fn insert_released_native(
 
 #[allow(clippy::too_many_lines)]
 fn released_native_implementations(
-    epoch_id: FabricEpochId,
+    _epoch_id: FabricEpochId,
     bindings: &ReleasedAnalysisBindings,
 ) -> Result<
     BTreeMap<ReleasedDerivedFamilyRole, ReleasedNativeAnalysisImplementation>,
@@ -1600,173 +1602,10 @@ fn released_native_implementations(
 > {
     let mut implementations = BTreeMap::new();
 
-    let python_node_role = ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode);
-    let python_node_contract =
-        released_transformation_contract("analysis.python.cfg_node.programmatic.v3", 65_536);
-    let python_node_output = released_output(
-        ProgrammaticRelationId::new(
-            bindings
-                .python
-                .relation_id(PythonDerivedRelation::CfgNode)
-                .as_str(),
-        ),
-        "python_cfg_node_programmatic",
-        "application.python.cfg_node.field",
-        ProgrammaticPythonCfgNodeTransformation::OUTPUT_FIELD_COUNT,
-    );
-    let python_node_witness = python_node_output.fields()[13].field_id().clone();
-    let python_node = Arc::new(ProgrammaticPythonCfgNodeTransformation::try_new(
-        python_node_contract.clone(),
-        python_node_output,
-        &bindings.python,
-        epoch_id,
-        ProgrammaticPythonCfgNodeRowContract::try_new(
-            "codefabric.python-cfg-node.programmatic-datafusion-55.v3",
-            "ruff-typed-ast-node-normalization.v3",
-            PYTHON_DERIVED_AUTHORITY,
-        )?,
-    )?);
-    insert_released_native(
-        bindings,
-        &mut implementations,
-        python_node_role,
-        &python_node_contract,
-        DerivedPrecisionPolicy::Exact,
-        python_node_witness,
-        python_node,
-    )?;
-
-    let python_cfg_role = ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgEdge);
-    let python_cfg_contract =
-        released_transformation_contract("analysis.python.cfg.programmatic.v3", 65_536);
-    let python_cfg_output = released_output(
-        ProgrammaticRelationId::new(
-            bindings
-                .python
-                .relation_id(PythonDerivedRelation::CfgEdge)
-                .as_str(),
-        ),
-        "python_cfg_edge_programmatic",
-        "application.python.cfg_edge.field",
-        ProgrammaticPythonCfgEdgeTransformation::OUTPUT_FIELD_COUNT,
-    );
-    let python_cfg_witness = python_cfg_output.fields()[13].field_id().clone();
-    let python_cfg = Arc::new(ProgrammaticPythonCfgEdgeTransformation::try_new(
-        python_cfg_contract.clone(),
-        python_cfg_output,
-        &bindings.python,
-        epoch_id,
-        ProgrammaticPythonCfgEdgeRowContract::try_new(
-            "codefabric.python-cfg.programmatic-datafusion-55.v3",
-            "ruff-evaluation-order-sequential-cfg.v3",
-            PYTHON_DERIVED_AUTHORITY,
-            "sequential",
-        )?,
-    )?);
-    insert_released_native(
-        bindings,
-        &mut implementations,
-        python_cfg_role,
-        &python_cfg_contract,
-        DerivedPrecisionPolicy::SoundMay,
-        python_cfg_witness,
-        python_cfg,
-    )?;
-
-    for (
-        role,
-        semantic_id,
-        table_name,
-        field_prefix,
-        algorithm_release,
-        precision_release,
-        precision,
-    ) in [
-        (
-            PythonDerivedRelation::EvaluationOrder,
-            "analysis.python.evaluation_order.programmatic.v3",
-            "python_evaluation_order_programmatic",
-            "application.python.evaluation_order.field",
-            "codefabric.python-evaluation-order.programmatic-datafusion-55.v3",
-            "sequential-cfg-node-order.v3",
-            DerivedPrecisionPolicy::SoundMay,
-        ),
-        (
-            PythonDerivedRelation::DefUse,
-            "analysis.python.def_use.programmatic.v3",
-            "python_def_use_programmatic",
-            "application.python.def_use.field",
-            "codefabric.python-def-use.programmatic-datafusion-55.v3",
-            "resolved-reference-owner-candidate.v3",
-            DerivedPrecisionPolicy::SoundMay,
-        ),
-        (
-            PythonDerivedRelation::ReachingDefinition,
-            "analysis.python.reaching_definition.programmatic.v3",
-            "python_reaching_definition_programmatic",
-            "application.python.reaching_definition.field",
-            "codefabric.python-reaching-definition.programmatic-datafusion-55.v3",
-            "complete-sequential-cfg-latest-definition.v3",
-            DerivedPrecisionPolicy::Exact,
-        ),
-        (
-            PythonDerivedRelation::Liveness,
-            "analysis.python.liveness.programmatic.v3",
-            "python_liveness_programmatic",
-            "application.python.liveness.field",
-            "codefabric.python-liveness.programmatic-datafusion-55.v3",
-            "complete-sequential-cfg-live-range.v3",
-            DerivedPrecisionPolicy::Exact,
-        ),
-        (
-            PythonDerivedRelation::ValueFlow,
-            "analysis.python.value_flow.programmatic.v3",
-            "python_value_flow_programmatic",
-            "application.python.value_flow.field",
-            "codefabric.python-value-flow.programmatic-datafusion-55.v3",
-            "selected-reaching-definition-value-flow.v3",
-            DerivedPrecisionPolicy::Exact,
-        ),
-    ] {
-        let typed_role = ReleasedDerivedFamilyRole::Python(role);
-        let contract = released_transformation_contract(semantic_id, 262_144);
-        let output = released_output(
-            ProgrammaticRelationId::new(bindings.python.relation_id(role).as_str()),
-            table_name,
-            field_prefix,
-            match role {
-                PythonDerivedRelation::EvaluationOrder => {
-                    ProgrammaticPythonDataflowTransformation::EVALUATION_OUTPUT_FIELD_COUNT
-                }
-                PythonDerivedRelation::Liveness => {
-                    ProgrammaticPythonDataflowTransformation::LIVENESS_OUTPUT_FIELD_COUNT
-                }
-                _ => ProgrammaticPythonDataflowTransformation::FLOW_LINK_OUTPUT_FIELD_COUNT,
-            },
-        );
-        let witness = output.fields()[13].field_id().clone();
-        let transformation = Arc::new(ProgrammaticPythonDataflowTransformation::try_new(
-            contract.clone(),
-            output,
-            &bindings.python,
-            epoch_id,
-            role,
-            ProgrammaticPythonDataflowRowContract::try_new(
-                algorithm_release,
-                precision_release,
-                PYTHON_DERIVED_AUTHORITY,
-            )?,
-        )?);
-        insert_released_native(
-            bindings,
-            &mut implementations,
-            typed_role,
-            &contract,
-            precision,
-            witness,
-            transformation,
-        )?;
-    }
+    // Owner-local control and dataflow are required capabilities, but the former
+    // file-sequential transformations do not implement them. Keep their released
+    // family obligations and emit AlgorithmUnavailable / RequiresReleaseChange
+    // until an independently proved control/evaluation implementation is installed.
 
     let rust_cfg_role = ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::CfgEdge);
     let rust_cfg_contract =
@@ -2558,6 +2397,11 @@ pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
         remainder_relation,
     )?;
     let derived = compose_programmatic_derived_analyses(admitted, composition)?;
+    // Validate actual producer/remainder observations before they become query authority. This
+    // admits truthful required gaps without promoting them to selected-profile conformance.
+    proof_program.validate_required_analysis_observations(&required_analysis_observations(
+        derived.observation(),
+    ))?;
     let query_requirements = released_query_family_requirements(query_program)?;
     let closure_catalog = released_producer_closure_catalog(
         derived.provider_reports(),
@@ -2575,6 +2419,66 @@ pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
         derived,
         census: census_observation,
     })
+}
+
+fn required_analysis_observations(
+    observation: &DerivedAnalysisCompositionObservation,
+) -> Vec<RequiredAnalysisObservation> {
+    let producers = observation.producers.iter().filter_map(|producer| {
+        let family = RequiredAnalysisFamily::from_relation(producer.family_id.as_str())?;
+        let disposition = match &producer.completeness {
+            DerivedCompletenessPolicy::Complete => AnalysisDisposition::Complete {
+                precision: match &producer.precision {
+                    DerivedPrecisionPolicy::Exact => AnalysisPrecision::Exact,
+                    DerivedPrecisionPolicy::SoundMay => AnalysisPrecision::SoundMay,
+                    DerivedPrecisionPolicy::SoundMust => AnalysisPrecision::SoundMust,
+                    DerivedPrecisionPolicy::Bounded { max_steps } => AnalysisPrecision::Bounded {
+                        max_steps: max_steps.get(),
+                    },
+                },
+            },
+            DerivedCompletenessPolicy::Partial { .. }
+            | DerivedCompletenessPolicy::Unknown { .. } => AnalysisDisposition::Incomplete,
+        };
+        Some(RequiredAnalysisObservation {
+            family,
+            disposition,
+        })
+    });
+    let remainders = observation.remainders.iter().filter_map(|remainder| {
+        let family = RequiredAnalysisFamily::from_relation(remainder.family_id.as_str())?;
+        Some(RequiredAnalysisObservation {
+            family,
+            disposition: AnalysisDisposition::Unavailable {
+                reason: match remainder.reason {
+                    DerivedRemainderReason::Unsupported => AnalysisGapReason::Unsupported,
+                    DerivedRemainderReason::ProviderUnavailable => {
+                        AnalysisGapReason::ProviderUnavailable
+                    }
+                    DerivedRemainderReason::ResourceLimit => AnalysisGapReason::ResourceLimit,
+                    DerivedRemainderReason::AlgorithmUnavailable => {
+                        AnalysisGapReason::AlgorithmUnavailable
+                    }
+                    DerivedRemainderReason::PrivateCompilerEvidenceUnavailable => {
+                        AnalysisGapReason::PrivateCompilerEvidenceUnavailable
+                    }
+                    DerivedRemainderReason::TypedTransformationAdapterUnavailable => {
+                        AnalysisGapReason::TypedTransformationAdapterUnavailable
+                    }
+                },
+                retryability: match remainder.retryability {
+                    DerivedRemainderRetryability::Retryable => AnalysisGapRetryability::Retryable,
+                    DerivedRemainderRetryability::RequiresReleaseChange => {
+                        AnalysisGapRetryability::RequiresReleaseChange
+                    }
+                    DerivedRemainderRetryability::PermanentlyUnsupported => {
+                        AnalysisGapRetryability::PermanentlyUnsupported
+                    }
+                },
+            },
+        })
+    });
+    producers.chain(remainders).collect()
 }
 
 fn released_producer_closure_catalog(
@@ -2821,6 +2725,8 @@ pub struct ProgrammaticPythonCfgNodeRowContract {
 }
 
 impl ProgrammaticPythonCfgNodeRowContract {
+    // Historical native-plan fixture only; WP84/WP85 replace the withdrawn semantics.
+    #[cfg(test)]
     pub(crate) fn try_new(
         algorithm_release: impl Into<Arc<str>>,
         precision_release: impl Into<Arc<str>>,
@@ -2860,6 +2766,8 @@ pub struct ProgrammaticPythonCfgNodeTransformation {
 impl ProgrammaticPythonCfgNodeTransformation {
     pub const OUTPUT_FIELD_COUNT: usize = 18;
 
+    // Historical native-plan fixture only; WP84/WP85 replace the withdrawn semantics.
+    #[cfg(test)]
     pub(crate) fn try_new(
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
@@ -2979,6 +2887,8 @@ pub struct ProgrammaticPythonCfgEdgeRowContract {
 }
 
 impl ProgrammaticPythonCfgEdgeRowContract {
+    // Historical native-plan fixture only; WP84/WP85 replace the withdrawn semantics.
+    #[cfg(test)]
     pub(crate) fn try_new(
         algorithm_release: impl Into<Arc<str>>,
         precision_release: impl Into<Arc<str>>,
@@ -3022,6 +2932,8 @@ pub struct ProgrammaticPythonCfgEdgeTransformation {
 impl ProgrammaticPythonCfgEdgeTransformation {
     pub const OUTPUT_FIELD_COUNT: usize = 17;
 
+    // Historical native-plan fixture only; WP84/WP85 replace the withdrawn semantics.
+    #[cfg(test)]
     pub(crate) fn try_new(
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
@@ -3207,6 +3119,8 @@ pub struct ProgrammaticPythonDataflowRowContract {
 }
 
 impl ProgrammaticPythonDataflowRowContract {
+    // Historical native-plan fixture only; WP84/WP85 replace the withdrawn semantics.
+    #[cfg(test)]
     pub(crate) fn try_new(
         algorithm_release: impl Into<Arc<str>>,
         precision_release: impl Into<Arc<str>>,
@@ -3252,6 +3166,8 @@ impl ProgrammaticPythonDataflowTransformation {
     pub const FLOW_LINK_OUTPUT_FIELD_COUNT: usize = 20;
     pub const LIVENESS_OUTPUT_FIELD_COUNT: usize = 18;
 
+    // Historical native-plan fixture only; WP84/WP85 replace the withdrawn semantics.
+    #[cfg(test)]
     pub(crate) fn try_new(
         contract: ProgrammaticTransformationContract,
         output: TransformationOutput,
@@ -6006,6 +5922,7 @@ fn rust_unsafe_output_columns(alias: &'static str) -> Vec<Expr> {
     .collect()
 }
 
+#[cfg(test)]
 fn python_flow_event_identity_udf() -> Arc<ScalarUDF> {
     Arc::new(create_udf(
         "codefabric_python_flow_event_identity_v3",
@@ -6057,6 +5974,7 @@ fn python_flow_event_identity_udf() -> Arc<ScalarUDF> {
     ))
 }
 
+#[cfg(test)]
 fn python_flow_location_identity_udf() -> Arc<ScalarUDF> {
     Arc::new(create_udf(
         "codefabric_python_flow_location_identity_v3",
@@ -6103,6 +6021,7 @@ fn python_flow_location_identity_udf() -> Arc<ScalarUDF> {
     ))
 }
 
+#[cfg(test)]
 fn python_flow_relation_identity_udf() -> Arc<ScalarUDF> {
     Arc::new(create_udf(
         "codefabric_python_flow_relation_identity_v3",
@@ -6155,6 +6074,7 @@ fn python_flow_relation_identity_udf() -> Arc<ScalarUDF> {
     ))
 }
 
+#[cfg(test)]
 fn python_cfg_node_identity_udf() -> Arc<ScalarUDF> {
     Arc::new(create_udf(
         "codefabric_python_cfg_node_identity_v3",
@@ -6204,6 +6124,7 @@ fn python_cfg_node_identity_udf() -> Arc<ScalarUDF> {
     ))
 }
 
+#[cfg(test)]
 fn python_cfg_edge_identity_udf() -> Arc<ScalarUDF> {
     Arc::new(create_udf(
         "codefabric_python_cfg_edge_identity_v3",
@@ -8412,6 +8333,8 @@ const fn retryability_code(retryability: DerivedRemainderRetryability) -> u8 {
 /// Fail-closed errors for derived-family closure and registration.
 #[derive(Debug, Error)]
 pub(crate) enum ProgrammaticDerivedAnalysisError {
+    #[error("compiled required-analysis proof rejected the composition: {0}")]
+    RequiredAnalysisProof(#[from] SemanticReleaseError),
     #[error("compiled semantic-release program is invalid: {0}")]
     InvalidCompiledReleaseProgram(&'static str),
     #[error("release producer input unit count exceeds u64")]
@@ -8601,7 +8524,7 @@ pub(crate) enum ProgrammaticDerivedAnalysisError {
 #[cfg(test)]
 mod tests {
     use arrow_array::{
-        ArrayRef, BooleanArray, FixedSizeBinaryArray, RecordBatch, StringArray, UInt32Array,
+        ArrayRef, BooleanArray, FixedSizeBinaryArray, RecordBatch, StringArray, UInt8Array,
         UInt64Array,
     };
     use arrow_schema::SchemaRef;
@@ -8618,7 +8541,7 @@ mod tests {
         admit_provider_relations_programmatic,
         tests::{
             ExactWorkspaceFixture, changed_exact_workspace_fixture, exact_workspace_fixture,
-            programmatic_epoch_builder,
+            exact_workspace_fixture_from, programmatic_epoch_builder,
         },
     };
     use crate::provider_native_syntax::NativeSyntaxRelation;
@@ -10039,18 +9962,176 @@ mod tests {
         (sealed, observation, census_observation, relations)
     }
 
+    async fn assert_required_python_gaps(
+        sealed: &SealedProgrammaticSchemaAssembly,
+        observation: &DerivedAnalysisCompositionObservation,
+    ) {
+        let bindings = released_analysis_bindings().unwrap();
+        let rows = collect_relation(sealed, &observation.remainder_relation_id).await;
+        for role in [
+            PythonDerivedRelation::CfgNode,
+            PythonDerivedRelation::CfgEdge,
+            PythonDerivedRelation::EvaluationOrder,
+            PythonDerivedRelation::DefUse,
+            PythonDerivedRelation::ReachingDefinition,
+            PythonDerivedRelation::Liveness,
+            PythonDerivedRelation::ValueFlow,
+        ] {
+            let relation = bindings.python.relation_id(role);
+            let family = DerivedFamilyId::try_new(relation.as_str()).unwrap();
+            assert!(
+                sealed
+                    .relation(&ProgrammaticRelationId::new(relation.as_str()))
+                    .is_none()
+            );
+            assert!(
+                observation
+                    .producers
+                    .iter()
+                    .all(|value| value.family_id != family)
+            );
+            let remainder = observation
+                .remainders
+                .iter()
+                .find(|value| value.family_id == family)
+                .expect("required unimplemented analysis must have explicit evidence");
+            assert_eq!(
+                remainder.reason,
+                DerivedRemainderReason::AlgorithmUnavailable
+            );
+            assert_eq!(
+                remainder.retryability,
+                DerivedRemainderRetryability::RequiresReleaseChange
+            );
+            assert!(!remainder.inputs.is_empty());
+            assert_ne!(remainder.input_vector_identity, [0; 32]);
+            let mut matches = 0;
+            for batch in &rows {
+                let families = batch
+                    .column_by_name("__cf_derived_family")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<FixedSizeBinaryArray>()
+                    .unwrap();
+                let reasons = batch
+                    .column_by_name("__cf_derived_remainder_reason")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<UInt8Array>()
+                    .unwrap();
+                let retry = batch
+                    .column_by_name("__cf_derived_remainder_retryability")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<UInt8Array>()
+                    .unwrap();
+                for row in 0..batch.num_rows() {
+                    if families.value(row) == family_identity(&family) {
+                        matches += 1;
+                        assert_eq!(reasons.value(row), 3, "algorithm unavailable");
+                        assert_eq!(retry.value(row), 1, "requires release change");
+                    }
+                }
+            }
+            assert_eq!(matches, 1, "exactly one queryable required-family gap");
+        }
+    }
+
+    #[tokio::test]
+    async fn rt_cpg_wp77_behavior() {
+        let baseline = exact_workspace_fixture();
+        let changed = changed_exact_workspace_fixture();
+        let (sealed, observation, _, _) = execute_existing_fixture(&baseline, 97).await;
+        let (changed_sealed, changed_observation, _, _) =
+            execute_existing_fixture(&changed, 98).await;
+        assert_required_python_gaps(&sealed, &observation).await;
+        assert_required_python_gaps(&changed_sealed, &changed_observation).await;
+        let cfg = DerivedFamilyId::try_new("application.python.cfg_edge").unwrap();
+        let source_evidence = |value: &DerivedAnalysisCompositionObservation| {
+            value
+                .remainders
+                .iter()
+                .find(|row| row.family_id == cfg)
+                .unwrap()
+                .input_vector_identity
+        };
+        assert_ne!(
+            source_evidence(&observation),
+            source_evidence(&changed_observation)
+        );
+        for result in [&sealed, &changed_sealed] {
+            let raw = collect_relation(
+                result,
+                &ProgrammaticRelationId::new(NativeSyntaxRelation::RuffAstNode.as_str()),
+            )
+            .await;
+            assert!(raw.iter().any(|batch| batch.num_rows() > 0));
+        }
+        let release = crate::fabric::production_kernel::compile_test_semantic_release();
+        let proof = release.proof();
+        // Execute the immutable branch/loop/return/nested-owner examples through the real
+        // Tree-sitter/Ruff adapters and released composition. No target CFG facts are invented:
+        // absent implementations must produce their actual source-bound required remainders.
+        let mut exercised = 0;
+        for example in proof.conformance_fixtures() {
+            if example.required_families().is_empty() {
+                continue;
+            }
+            let fixture = exact_workspace_fixture_from(
+                [(21, example.source()), (22, "sentinel = 1\n")],
+                [(31, "value: int = 1\n"), (32, "other: int = 2\n")],
+                [41, 42],
+                65,
+            );
+            let (sealed, observation, _, _) = execute_existing_fixture(&fixture, 97).await;
+            assert_required_python_gaps(&sealed, &observation).await;
+            let analyses: Vec<_> = required_analysis_observations(&observation)
+                .into_iter()
+                .filter(|row| example.required_families().contains(&row.family))
+                .collect();
+            let result = crate::semantic_release::FixtureResult {
+                fixture_id: example.id(),
+                source: example.source(),
+                facts: &[],
+                unknowns: &[],
+                analyses: &analyses,
+            };
+            assert_eq!(
+                proof.validate_fixture_result(&result).unwrap(),
+                crate::semantic_release::RequiredAnalysisConformance::PendingImplementation
+            );
+            let mut false_complete = analyses.clone();
+            false_complete[0].disposition = AnalysisDisposition::Complete {
+                precision: AnalysisPrecision::Exact,
+            };
+            assert!(
+                proof
+                    .validate_fixture_result(&crate::semantic_release::FixtureResult {
+                        analyses: &false_complete,
+                        ..result
+                    })
+                    .is_err()
+            );
+            exercised += 1;
+        }
+        assert_eq!(
+            exercised, 4,
+            "required source fixtures must remain executable"
+        );
+    }
+
     #[tokio::test]
     async fn wp35_beh_existing_family_census_executes_all_real_catalog_input_producers() {
         let fixture = exact_workspace_fixture();
         let (sealed, observation, census, relations) = execute_existing_fixture(&fixture, 91).await;
 
         assert_eq!(census.accepted_roles.len(), 38);
-        assert_eq!(census.programmatic_producer_roles.len(), 14);
-        assert_eq!(census.explicit_remainder_roles.len(), 24);
+        assert_eq!(census.programmatic_producer_roles.len(), 7);
+        assert_eq!(census.explicit_remainder_roles.len(), 31);
         assert_eq!(census.dependency_contracts.len(), 38);
         assert_eq!(census.common_semantic_identities.len(), 10);
-        assert_eq!(observation.producers.len(), 14);
-        assert_eq!(observation.remainders.len(), 24);
+        assert_eq!(observation.producers.len(), 7);
+        assert_eq!(observation.remainders.len(), 31);
         assert_eq!(
             census
                 .programmatic_producer_roles
@@ -10058,13 +10139,6 @@ mod tests {
                 .copied()
                 .collect::<BTreeSet<_>>(),
             BTreeSet::from([
-                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgNode),
-                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::CfgEdge),
-                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::EvaluationOrder),
-                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::DefUse),
-                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::ReachingDefinition),
-                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::Liveness),
-                ReleasedDerivedFamilyRole::Python(PythonDerivedRelation::ValueFlow),
                 ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::CfgEdge),
                 ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::OwnershipState),
                 ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::AliasPointsTo),
@@ -10100,92 +10174,7 @@ mod tests {
             [0; 32]
         );
 
-        let raw_python = collect_relation(
-            &sealed,
-            &ProgrammaticRelationId::new(NativeSyntaxRelation::RuffAstNode.as_str()),
-        )
-        .await;
-        let mut evaluable_nodes_by_file = BTreeMap::<Vec<u8>, usize>::new();
-        for batch in &raw_python {
-            let file_ids = batch
-                .column_by_name("file_id")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<FixedSizeBinaryArray>()
-                .unwrap();
-            let evaluation = batch
-                .column_by_name("evaluation_ordinal")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<UInt32Array>()
-                .unwrap();
-            for row in 0..batch.num_rows() {
-                if !evaluation.is_null(row) {
-                    *evaluable_nodes_by_file
-                        .entry(file_ids.value(row).to_vec())
-                        .or_default() += 1;
-                }
-            }
-        }
-        let evaluable_python_count = evaluable_nodes_by_file.values().sum::<usize>();
-        let python_node_rows = collect_relation(&sealed, &relations.python_cfg_node).await;
-        assert_eq!(
-            python_node_rows
-                .iter()
-                .map(arrow_array::RecordBatch::num_rows)
-                .sum::<usize>(),
-            evaluable_python_count
-        );
-        assert!(evaluable_python_count > 0);
-        assert!(python_node_rows.iter().all(|batch| {
-            let complete = batch
-                .column_by_name("analysis_completeness")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let identities = batch
-                .column_by_name("node_id")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<FixedSizeBinaryArray>()
-                .unwrap();
-            (0..batch.num_rows()).all(|row| {
-                complete.value(row) == "complete"
-                    && !identities.is_null(row)
-                    && identities.value(row) != [0; 16]
-            })
-        }));
-        let independent_python_edge_count = evaluable_nodes_by_file
-            .values()
-            .map(|nodes| nodes.saturating_sub(1))
-            .sum::<usize>();
-        let python_rows = collect_relation(&sealed, &relations.python_cfg).await;
-        assert_eq!(
-            python_rows
-                .iter()
-                .map(arrow_array::RecordBatch::num_rows)
-                .sum::<usize>(),
-            independent_python_edge_count
-        );
-        assert!(independent_python_edge_count > 0);
-        let evaluation_rows = collect_relation(&sealed, &relations.python_evaluation_order).await;
-        assert_eq!(
-            evaluation_rows
-                .iter()
-                .map(arrow_array::RecordBatch::num_rows)
-                .sum::<usize>(),
-            independent_python_edge_count
-        );
-        assert!(evaluation_rows.iter().all(|batch| {
-            let kinds = batch
-                .column_by_name("relation_kind")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            (0..batch.num_rows()).all(|row| kinds.value(row) == "NODE_EVALUATES_BEFORE")
-        }));
+        assert_required_python_gaps(&sealed, &observation).await;
 
         let rust_rows = collect_relation(&sealed, &relations.rust_mir_cfg).await;
         assert_eq!(
@@ -10354,131 +10343,15 @@ mod tests {
                 .iter()
                 .map(arrow_array::RecordBatch::num_rows)
                 .sum::<usize>(),
-            24
+            31
         );
-        let baseline_def_use_count = collect_relation(&sealed, &relations.python_def_use)
-            .await
-            .iter()
-            .map(RecordBatch::num_rows)
-            .sum::<usize>();
-
         let changed = changed_exact_workspace_fixture();
-        let (changed_sealed, changed_observation, changed_census, changed_relations) =
+        let (changed_sealed, changed_observation, changed_census, _) =
             execute_existing_fixture(&changed, 92).await;
-        assert_eq!(changed_census.programmatic_producer_roles.len(), 14);
-        assert_eq!(changed_census.explicit_remainder_roles.len(), 24);
-        assert_eq!(changed_observation.producers.len(), 14);
-        assert_eq!(changed_observation.remainders.len(), 24);
-
-        let def_use = collect_relation(&changed_sealed, &changed_relations.python_def_use).await;
-        let reaching = collect_relation(
-            &changed_sealed,
-            &changed_relations.python_reaching_definition,
-        )
-        .await;
-        let liveness = collect_relation(&changed_sealed, &changed_relations.python_liveness).await;
-        let value_flow =
-            collect_relation(&changed_sealed, &changed_relations.python_value_flow).await;
-        let row_count =
-            |batches: &[RecordBatch]| batches.iter().map(RecordBatch::num_rows).sum::<usize>();
-        let def_use_count = row_count(&def_use);
-        let reaching_count = row_count(&reaching);
-        let liveness_count = row_count(&liveness);
-        let value_flow_count = row_count(&value_flow);
-        assert!(def_use_count > 0);
-        assert_ne!(baseline_def_use_count, def_use_count);
-        assert!(reaching_count > 0 && reaching_count <= def_use_count);
-        assert!(liveness_count > 0);
-        assert_eq!(value_flow_count, reaching_count);
-        for (batches, expected_kind) in [
-            (&def_use, "def_use"),
-            (&reaching, "reaching_definition"),
-            (&value_flow, "value_flow"),
-        ] {
-            assert!(batches.iter().all(|batch| {
-                let kinds = batch
-                    .column_by_name("relation_kind")
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .unwrap();
-                let edges = batch
-                    .column_by_name("edge_id")
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<FixedSizeBinaryArray>()
-                    .unwrap();
-                let definitions = batch
-                    .column_by_name("definition_event_id")
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<FixedSizeBinaryArray>()
-                    .unwrap();
-                let uses = batch
-                    .column_by_name("use_event_id")
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<FixedSizeBinaryArray>()
-                    .unwrap();
-                let algorithms = batch
-                    .column_by_name("algorithm_release")
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .unwrap();
-                let authorities = batch
-                    .column_by_name("authority")
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .unwrap();
-                let completeness = batch
-                    .column_by_name("analysis_completeness")
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .unwrap();
-                (0..batch.num_rows()).all(|row| {
-                    kinds.value(row) == expected_kind
-                        && edges.value(row) != [0; 16]
-                        && definitions.value(row) != [0; 16]
-                        && uses.value(row) != [0; 16]
-                        && definitions.value(row) != uses.value(row)
-                        && algorithms.value(row).starts_with("codefabric.python-")
-                        && authorities.value(row) == PYTHON_DERIVED_AUTHORITY
-                        && completeness.value(row) == "complete"
-                })
-            }));
-        }
-        assert!(liveness.iter().all(|batch| {
-            let boundaries = batch
-                .column_by_name("boundary")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let kinds = batch
-                .column_by_name("relation_kind")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            (0..batch.num_rows()).all(|row| {
-                matches!(boundaries.value(row), "ENTRY" | "EXIT")
-                    && matches!(kinds.value(row), "live_entry" | "live_exit")
-            })
-        }));
-
-        let reaching_plan = changed_sealed
-            .observations()
-            .provenance(&changed_relations.python_reaching_definition)
-            .and_then(ProvenanceObservation::logical_plan)
-            .unwrap()
-            .display_indent()
-            .to_string();
-        for operator in ["Left Join", "Aggregate", "WindowAggr", "Filter"] {
-            assert!(reaching_plan.contains(operator), "{reaching_plan}");
-        }
+        assert_eq!(changed_census.accepted_roles.len(), 38);
+        assert_eq!(changed_observation.producers.len(), 7);
+        assert_eq!(changed_observation.remainders.len(), 31);
+        assert_required_python_gaps(&changed_sealed, &changed_observation).await;
     }
 
     #[tokio::test]
@@ -10887,15 +10760,10 @@ mod tests {
                 .unwrap()
                 .provenance_closure_identity
         };
-        for domain in [
-            DerivedAnalysisDomain::Python,
-            DerivedAnalysisDomain::RustMir,
-        ] {
-            assert_ne!(
-                producer_authority(&baseline_observation, domain),
-                producer_authority(&changed_observation, domain)
-            );
-        }
+        assert_ne!(
+            producer_authority(&baseline_observation, DerivedAnalysisDomain::RustMir),
+            producer_authority(&changed_observation, DerivedAnalysisDomain::RustMir)
+        );
         let common_call_graph_family =
             ReleasedDerivedFamilyRole::Common(ReleasedCommonDerivedFamilyRole::CallGraph)
                 .family_identity(&released_analysis_bindings().unwrap())
@@ -10917,44 +10785,20 @@ mod tests {
         assert_ne!(baseline_common.0, changed_common.0);
         assert_ne!(baseline_common.1, changed_common.1);
 
-        let fixed_identity_values = |batches: &[arrow_array::RecordBatch], name: &str| {
-            batches
+        assert_required_python_gaps(&baseline_sealed, &baseline_observation).await;
+        assert_required_python_gaps(&changed_sealed, &changed_observation).await;
+        let python_cfg = DerivedFamilyId::try_new("application.python.cfg_edge").unwrap();
+        let python_input = |observation: &DerivedAnalysisCompositionObservation| {
+            observation
+                .remainders
                 .iter()
-                .flat_map(|batch| {
-                    let values = batch
-                        .column_by_name(name)
-                        .unwrap()
-                        .as_any()
-                        .downcast_ref::<FixedSizeBinaryArray>()
-                        .unwrap();
-                    (0..values.len())
-                        .filter(|row| !values.is_null(*row))
-                        .map(|row| values.value(row).to_vec())
-                        .collect::<Vec<_>>()
-                })
-                .collect::<BTreeSet<_>>()
+                .find(|value| value.family_id == python_cfg)
+                .unwrap()
+                .input_vector_identity
         };
-        let baseline_python =
-            collect_relation(&baseline_sealed, &baseline_relations.python_cfg).await;
-        let changed_python = collect_relation(&changed_sealed, &changed_relations.python_cfg).await;
-        let python_bindings = python_flow_bindings();
-        let baseline_python_nodes =
-            collect_relation(&baseline_sealed, &baseline_relations.python_cfg_node).await;
-        let changed_python_nodes =
-            collect_relation(&changed_sealed, &changed_relations.python_cfg_node).await;
         assert_ne!(
-            fixed_identity_values(
-                &baseline_python_nodes,
-                python_bindings.fields.node_id.as_ref()
-            ),
-            fixed_identity_values(
-                &changed_python_nodes,
-                python_bindings.fields.node_id.as_ref()
-            )
-        );
-        assert_ne!(
-            fixed_identity_values(&baseline_python, python_bindings.fields.edge_id.as_ref()),
-            fixed_identity_values(&changed_python, python_bindings.fields.edge_id.as_ref())
+            python_input(&baseline_observation),
+            python_input(&changed_observation)
         );
 
         let u64_values = |batches: &[arrow_array::RecordBatch], name: &str| {
@@ -10989,8 +10833,8 @@ mod tests {
         let outcome = release
             .admit_and_compose_derived_analyses(programmatic_epoch_builder(), fixture.runs())
             .unwrap();
-        assert_eq!(outcome.derived().observation().producers.len(), 14);
-        assert_eq!(outcome.derived().observation().remainders.len(), 24);
+        assert_eq!(outcome.derived().observation().producers.len(), 7);
+        assert_eq!(outcome.derived().observation().remainders.len(), 31);
         assert_eq!(
             outcome
                 .derived()
@@ -10999,10 +10843,7 @@ mod tests {
                 .iter()
                 .map(|producer| producer.domain)
                 .collect::<BTreeSet<_>>(),
-            BTreeSet::from([
-                DerivedAnalysisDomain::Python,
-                DerivedAnalysisDomain::RustMir,
-            ])
+            BTreeSet::from([DerivedAnalysisDomain::RustMir])
         );
         assert!(
             outcome
@@ -11040,14 +10881,14 @@ mod tests {
                     | DerivedInputAuthoritySource::DeclaredRemainder(_) => None,
                 })
                 .collect::<BTreeSet<_>>(),
-            BTreeSet::from([1, 3])
+            BTreeSet::from([3])
         );
 
         let observation = outcome.derived().observation().clone();
         let (derived, census) = outcome.into_parts();
         assert_eq!(census.accepted_roles.len(), 38);
-        assert_eq!(census.programmatic_producer_roles.len(), 14);
-        assert_eq!(census.explicit_remainder_roles.len(), 24);
+        assert_eq!(census.programmatic_producer_roles.len(), 7);
+        assert_eq!(census.explicit_remainder_roles.len(), 31);
         assert_eq!(
             census.accepted_roles.len(),
             census.programmatic_producer_roles.len() + census.explicit_remainder_roles.len()
@@ -11098,7 +10939,7 @@ mod tests {
                 .iter()
                 .map(arrow_array::RecordBatch::num_rows)
                 .sum::<usize>(),
-            24
+            31
         );
     }
 

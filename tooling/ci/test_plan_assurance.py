@@ -81,7 +81,7 @@ def test_packet_assurance_remains_runnable_during_declared_input_evolution(
     )
     plan_path, plan, state = assurance._active()
     assert plan_path == artifact_contracts.active_plan_path()
-    assert plan["plan_id"] == "codefabric-execution-proved-relational-data-fabric"
+    assert plan["plan_id"] == artifact_contracts.parse_frontmatter(plan_path)["plan_id"]
     assert state["status"] in {"executing", "complete"}
 
 

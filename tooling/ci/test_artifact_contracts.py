@@ -296,28 +296,27 @@ def test_non_relational_plan_has_no_implicit_relational_evidence() -> None:
 
 def test_planned_input_evolution_requires_completed_ancestor_proof() -> None:
     state = load_state(STATE)
-    evolutions = [
-        deviation
-        for deviation in state["plan_deviations"]
-        if deviation.get("kind") == "planned_design_input_evolution"
+    packet = next(iter(state["packets"]))
+    state["plan_deviations"] = [
+        "A narrative deviation is not input-evolution authority.",
+        {
+            "kind": "planned_design_input_evolution",
+            "packet": packet,
+            "paths": ["README.md"],
+        },
     ]
+    state["packets"][packet]["status"] = "complete"
+    state["packets"][packet]["proving_commit"] = state["baseline_commit"]
+    assert _accepted_input_evolution_paths(ROOT, state) == {"README.md"}
+
     incomplete = deepcopy(state)
-    for evolution in evolutions:
-        packet = evolution["packet"]
-        incomplete["packets"][packet]["status"] = "in_progress"
-        incomplete["packets"][packet]["proving_commit"] = None
+    incomplete["packets"][packet]["status"] = "in_progress"
+    incomplete["packets"][packet]["proving_commit"] = None
     assert not _accepted_input_evolution_paths(ROOT, incomplete)
 
-    expected = {
-        path
-        for evolution in evolutions
-        if state["packets"][evolution["packet"]]["status"] == "complete"
-        and commit_trust(ROOT, state["packets"][evolution["packet"]]["proving_commit"])[
-            "ancestor"
-        ]
-        for path in evolution["paths"]
-    }
-    assert _accepted_input_evolution_paths(ROOT, state) == expected
+    unproved = deepcopy(state)
+    unproved["packets"][packet]["proving_commit"] = "0" * 40
+    assert not _accepted_input_evolution_paths(ROOT, unproved)
 
 
 def test_gate_substitution_is_explicit_and_cannot_self_replace() -> None:

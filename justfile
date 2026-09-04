@@ -765,7 +765,7 @@ provider-job-contract-check:
 [doc("Compile every behavior-bearing release program and execute independent operand faults")]
 [group('test')]
 release-program-contract-check:
-    cargo test --locked --no-default-features --features release-compiler --lib semantic_release::tests
+    cargo test --locked --no-default-features --features release-compiler --lib semantic_release::
     cargo test --locked --lib current_v23_release_compiles_all_exact_provider_relation_schemas
 
 [doc("Reject stale suite identity, categorical conflation, and forged release jobs")]

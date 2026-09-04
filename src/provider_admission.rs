@@ -3569,7 +3569,7 @@ pub(crate) mod tests {
         )
     }
 
-    fn exact_workspace_fixture_from(
+    pub(crate) fn exact_workspace_fixture_from(
         native_sources: [(u8, &str); 2],
         pyrefly_sources: [(u8, &str); 2],
         rustc_markers: [u8; 2],

@@ -1365,6 +1365,11 @@ pub fn admit_provider_result(
     if requests.keys().ne(coverage.keys()) {
         return Err(ProviderContractError::CoverageSetMismatch);
     }
+    let emitted_relations = result
+        .relations
+        .iter()
+        .map(|relation| &relation.relation)
+        .collect::<BTreeSet<_>>();
     for (family, request) in &requests {
         let state = coverage[family];
         if state.completed_units() > request.requested_units()
@@ -1374,6 +1379,11 @@ pub fn admit_provider_result(
                 && state.completed_units() >= request.requested_units()
         {
             return Err(ProviderContractError::FalseCoverage);
+        }
+        if matches!(state, ProviderCoverageState::Complete { .. })
+            && !emitted_relations.contains(&request.relation)
+        {
+            return Err(ProviderContractError::MissingCompleteRelation);
         }
     }
 
@@ -1569,6 +1579,8 @@ pub enum ProviderContractError {
     CoverageSetMismatch,
     #[error("provider result falsely reports completed or remainder coverage")]
     FalseCoverage,
+    #[error("complete provider coverage lacks its schema-bearing relation output")]
+    MissingCompleteRelation,
     #[error("provider emitted an unrequested relation")]
     UnrequestedRelation,
     #[error("provider result exceeds its effective resource ceiling")]
@@ -1774,6 +1786,85 @@ mod tests {
                     diagnostics: 0,
                 },
             }
+        );
+    }
+
+    #[test]
+    fn provider_complete_coverage_requires_real_or_empty_relation() {
+        let (_, job) = job();
+        let complete = |relations| {
+            ProviderRunResult::try_from_job(
+                &job,
+                ProviderRunEvidenceSpec {
+                    relations,
+                    coverage: vec![ProviderCoverage::new(
+                        job.requests()[0].family().clone(),
+                        ProviderCoverageState::Complete { completed_units: 2 },
+                    )],
+                    gaps: Vec::new(),
+                    diagnostics: Vec::new(),
+                    trust: ProviderTrustOutcome::Trusted,
+                    terminal: ProviderTerminalStatus::Complete,
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            admit_provider_result(job.clone(), complete(Vec::new())).unwrap_err(),
+            ProviderContractError::MissingCompleteRelation
+        );
+        let request = &job.requests()[0];
+        let empty = ProviderRelationOutput::try_new(
+            request.relation().clone(),
+            request.schema_identity().clone(),
+            Arc::clone(request.schema()),
+            vec![RecordBatch::new_empty(Arc::clone(request.schema()))],
+        )
+        .unwrap();
+        let admitted = admit_provider_result(job.clone(), complete(vec![empty])).unwrap();
+        assert_eq!(admitted.result().resources().relations, 1);
+        assert_eq!(admitted.result().resources().rows, 0);
+        assert!(admitted.result().gaps().is_empty());
+        assert_eq!(
+            admitted.result().terminal(),
+            ProviderTerminalStatus::Complete
+        );
+    }
+
+    #[test]
+    fn provider_unavailable_requires_unknown_not_empty_success() {
+        let (_, job) = job();
+        let family = job.requests()[0].family().clone();
+        let evidence = ProviderRunEvidenceSpec {
+            relations: Vec::new(),
+            coverage: vec![ProviderCoverage::new(
+                family.clone(),
+                ProviderCoverageState::Unknown {
+                    completed_units: 0,
+                    cause: ProviderUnknownCause::Unsupported,
+                },
+            )],
+            gaps: vec![
+                ProviderGap::try_new(
+                    family,
+                    ProviderUnknownCause::Unsupported,
+                    "required extractor is not implemented",
+                )
+                .unwrap(),
+            ],
+            diagnostics: Vec::new(),
+            trust: ProviderTrustOutcome::Trusted,
+            terminal: ProviderTerminalStatus::Unknown,
+        };
+        let unavailable = ProviderRunResult::try_from_job(&job, evidence.clone()).unwrap();
+        let admitted = admit_provider_result(job.clone(), unavailable).unwrap();
+        assert!(admitted.result().relations().is_empty());
+        assert_eq!(admitted.result().gaps().len(), 1);
+        let mut missing_gap = evidence;
+        missing_gap.gaps.clear();
+        assert_eq!(
+            ProviderRunResult::try_from_job(&job, missing_gap).unwrap_err(),
+            ProviderContractError::MissingOrContradictoryGap
         );
     }
 
