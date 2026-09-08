@@ -166,10 +166,16 @@ pub(crate) struct NativeLaneJoined {
 pub(crate) trait NativeLaneResourcePolicy: Send + Sync + 'static {
     /// Concrete native policies supply the original operation bank. None is
     /// retained for the finite standalone lifecycle harness only.
-    fn runtime_admission(&self) -> Option<Arc<dyn tokio::runtime::resource::RuntimeAllocationAdmission>> { None }
+    fn runtime_admission(
+        &self,
+    ) -> Option<Arc<dyn tokio::runtime::resource::RuntimeAllocationAdmission>> {
+        None
+    }
     /// Bind an allocation owner to one complete native operation. Concrete
     /// policies reject reuse before any native runtime or worker is constructed.
-    fn begin_operation(&self) -> Result<(), NativeResourceFailure> { Ok(()) }
+    fn begin_operation(&self) -> Result<(), NativeResourceFailure> {
+        Ok(())
+    }
     fn enter_thread(&self);
     fn exit_thread(&self);
     fn check_available(&self) -> Result<(), NativeResourceFailure>;
@@ -195,7 +201,12 @@ impl From<NativeResourceFailure> for NativeLaneError {
 
 impl From<tokio::runtime::resource::ResourceLayoutError> for NativeLaneError {
     fn from(error: tokio::runtime::resource::ResourceLayoutError) -> Self {
-        NativeResourceFailure { kind: error.kind, requested: error.requested, limit: error.limit }.into()
+        NativeResourceFailure {
+            kind: error.kind,
+            requested: error.requested,
+            limit: error.limit,
+        }
+        .into()
     }
 }
 impl From<tokio::runtime::resource::LocalRuntimeBuildError> for NativeLaneError {
@@ -488,7 +499,9 @@ impl NativeExecutionLane {
         let reservation = admission
             .budget
             .try_reserve(admission.class, self.reservation)?;
-        if let Some(policy) = &resource_policy { policy.begin_operation()?; }
+        if let Some(policy) = &resource_policy {
+            policy.begin_operation()?;
+        }
         let scope = admission.scope.clone();
         let output_budget = admission.budget.clone();
         let deadline = admission.deadline;

@@ -1155,15 +1155,40 @@ async fn owned_local_production_registry_bootstrap_and_joined_mutation_share_one
         "production-bootstrap-test",
         NonZeroUsize::new(4).unwrap(),
         NonZeroUsize::new(1).unwrap(),
-    ).unwrap();
-    resources.local_store().inner.bootstrap_fail_step.store(4, Ordering::Release);
-    let failure = resources.bootstrap_local_store_owned(&bootstrap_scope).await.unwrap_err();
-    assert!(matches!(failure, crate::fabric::workspace_resources::WorkspaceStoreBootstrapError::Store(_)));
+    )
+    .unwrap();
+    resources
+        .local_store()
+        .inner
+        .bootstrap_fail_step
+        .store(4, Ordering::Release);
+    let failure = resources
+        .bootstrap_local_store_owned(&bootstrap_scope)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        failure,
+        crate::fabric::workspace_resources::WorkspaceStoreBootstrapError::Store(_)
+    ));
     assert!(resources.local_store().observe().unwrap().bootstrap_pending);
-    assert!(resources.local_store().observe().unwrap().reserved_disk_bytes > 0);
+    assert!(
+        resources
+            .local_store()
+            .observe()
+            .unwrap()
+            .reserved_disk_bytes
+            > 0
+    );
     assert_eq!(resources.budget().observation().used.running_jobs, 0);
-    resources.local_store().inner.bootstrap_fail_step.store(0, Ordering::Release);
-    resources.bootstrap_local_store_owned(&bootstrap_scope).await.unwrap();
+    resources
+        .local_store()
+        .inner
+        .bootstrap_fail_step
+        .store(0, Ordering::Release);
+    resources
+        .bootstrap_local_store_owned(&bootstrap_scope)
+        .await
+        .unwrap();
     let owner = resources.local_store().as_ref().clone();
     assert!(owner.budget().same_scope(resources.budget()));
     let url = Url::parse("file:///").unwrap();
@@ -1212,7 +1237,10 @@ async fn owned_local_production_registry_bootstrap_and_joined_mutation_share_one
     std::fs::write(source_blobs.join("foreign-ledger"), vec![0; 32_768]).unwrap();
     let denied = Path::from_absolute_path(source_blobs.join("foreign-ledger")).unwrap();
     assert!(actual.head(&denied).await.is_err());
-    resources.bootstrap_local_store_owned(&bootstrap_scope).await.unwrap();
+    resources
+        .bootstrap_local_store_owned(&bootstrap_scope)
+        .await
+        .unwrap();
     assert_eq!(
         owner.observe().unwrap().files,
         1,
@@ -1222,9 +1250,11 @@ async fn owned_local_production_registry_bootstrap_and_joined_mutation_share_one
         owner.observe().unwrap().physical_bytes,
         owner.observe().unwrap().reserved_disk_bytes
     );
-    bootstrap_scope.cancel_and_join(Duration::from_secs(2)).await.unwrap();
+    bootstrap_scope
+        .cancel_and_join(Duration::from_secs(2))
+        .await
+        .unwrap();
     assert_eq!(resources.budget().observation().used.running_jobs, 0);
-
 }
 
 #[test]
@@ -1296,8 +1326,12 @@ async fn owned_local_production_registry_provisions_and_reopens_exact_native_del
         "production-bootstrap-test",
         NonZeroUsize::new(4).unwrap(),
         NonZeroUsize::new(1).unwrap(),
-    ).unwrap();
-    resources.bootstrap_local_store_owned(&bootstrap_scope).await.unwrap();
+    )
+    .unwrap();
+    resources
+        .bootstrap_local_store_owned(&bootstrap_scope)
+        .await
+        .unwrap();
     let root_path =
         bootstrap_workspace_path(&directory, resources.budget()).join("activation-control");
     let root = Url::from_directory_path(&root_path).unwrap();
@@ -1343,7 +1377,9 @@ async fn owned_local_production_registry_provisions_and_reopens_exact_native_del
     assert!(!observation.mutation_active);
     assert_eq!(observation.pending_read_operations, 0);
     assert_eq!(observation.reserved_disk_bytes, observation.physical_bytes);
-    bootstrap_scope.cancel_and_join(Duration::from_secs(2)).await.unwrap();
+    bootstrap_scope
+        .cancel_and_join(Duration::from_secs(2))
+        .await
+        .unwrap();
     assert_eq!(resources.budget().observation().used.running_jobs, 0);
-
 }

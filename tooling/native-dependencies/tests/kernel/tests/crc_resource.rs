@@ -74,6 +74,9 @@ fn request_bytes(accounting: &Accounting, kind: &str) -> usize {
 
 fn engine(scope: Arc<NativeResourceScope>, runtime: &tokio::runtime::Runtime, store: Arc<dyn object_store::ObjectStore>) -> buoyant_kernel_engine::DefaultEngine<buoyant_kernel_engine::executor::tokio::TokioMultiThreadExecutor> {
     DefaultEngineBuilder::try_new_with_executor(store, buoyant_kernel_engine::executor::tokio::TokioMultiThreadExecutor::try_new_current_shared(runtime.handle().clone()).unwrap()).unwrap()
+        // Eight native rows cover these one/two-action fixtures while keeping
+        // the decoder's initial tape within the explicit 4,096-entry policy.
+        .with_batch_size(std::num::NonZeroUsize::new(8).unwrap())
         .with_json_resource_limits(limits()).unwrap().with_resource_scope(scope).try_build().unwrap()
 }
 

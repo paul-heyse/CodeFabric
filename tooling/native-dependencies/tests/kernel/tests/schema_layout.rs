@@ -185,3 +185,85 @@ fn observed_native_hint_decode_and_copy_allocation_is_preadmitted() {
     assert!(result.unwrap_err().is_resource_exhausted());
     assert_eq!(allocated, 0);
 }
+
+#[test]
+fn typed_schema_filter_and_metadata_rebuild_admit_original_allocations_and_retain_owner() {
+    use buoyant_kernel::actions::Metadata;
+    use buoyant_kernel::schema::{MetadataColumnSpec, ToSchema};
+    for keep_fields in [false, true] {
+        let budget = Arc::new(Budget::default());
+        let scope = NativeResourceScope::try_new(budget.clone(), 32).unwrap();
+        let weak = Arc::downgrade(&scope);
+        let result = with_resource_scope(scope.clone(), limits(), || {
+            let source = Metadata::try_to_schema()?;
+            let before = budget.admitted.load(Ordering::SeqCst);
+            let tracking = Tracking::begin();
+            let rebuilt = source.try_add_metadata_column_with_resources("_file", MetadataColumnSpec::FilePath)?;
+            let filtered = rebuilt.with_fields_filtered(|field| keep_fields && field.get_metadata_column_spec().is_none())?;
+            let output = filtered.try_into_arc()?;
+            let allocated = tracking.finish();
+            let admitted = budget.admitted.load(Ordering::SeqCst) - before;
+            assert!(allocated <= admitted, "native rebuilt {allocated}, admitted {admitted}");
+            assert_eq!(output.num_fields(), if keep_fields { source.num_fields() } else { 0 });
+            if keep_fields { assert_eq!(*output, source); }
+            assert!(Arc::ptr_eq(output.resource_scope().unwrap(), &scope));
+            Ok(output)
+        }).unwrap();
+        drop(scope);
+        assert!(weak.upgrade().is_some(), "even an empty filtered schema owns its admitted root");
+        drop(result);
+        assert!(weak.upgrade().is_none());
+    }
+}
+
+#[test]
+fn schema_rebuild_denial_precedes_clone_or_filter_callback_and_unowned_source_stays_rejected() {
+    use buoyant_kernel::actions::Metadata;
+    use buoyant_kernel::schema::{MetadataColumnSpec, ToSchema};
+    for deny in ["native_schema_rebuild_retained", "native_schema_rebuild"] {
+        for add_column in [false, true] {
+            let budget = Arc::new(Budget { deny, admitted: AtomicUsize::new(0) });
+            let scope = NativeResourceScope::try_new(budget, 16).unwrap();
+            with_resource_scope(scope, limits(), || {
+                let source = Metadata::try_to_schema()?;
+                let called = Cell::new(false);
+                let tracking = Tracking::begin();
+                let result = if add_column {
+                    source.try_add_metadata_column_with_resources("_file", MetadataColumnSpec::FilePath)
+                } else { source.with_fields_filtered(|_| { called.set(true); true }) };
+                let allocated = tracking.finish();
+                assert!(result.unwrap_err().is_resource_exhausted());
+                // A successful retained admission creates its receipt before a
+                // later scratch denial; no schema allocation or callback occurs.
+                assert_eq!(allocated, if deny == "native_schema_rebuild" { 2 * std::mem::size_of::<usize>() + std::mem::size_of::<Receipt>() } else { 0 });
+                assert!(!called.get());
+                Ok(())
+            }).unwrap_err(); // The same native scope latches the typed refusal.
+        }
+    }
+    let unowned = Metadata::to_schema();
+    let scope = NativeResourceScope::try_new(Arc::new(Budget::default()), 8).unwrap();
+    let called = Cell::new(false);
+    let tracking = Tracking::begin();
+    let result = with_resource_scope(scope, limits(), || unowned.with_fields_filtered(|_| { called.set(true); true }));
+    let allocated = tracking.finish();
+    assert!(result.unwrap_err().to_string().contains("native_schema_unadmitted_transform_source"));
+    assert_eq!(allocated, 0);
+    assert!(!called.get());
+}
+
+#[test]
+fn moved_schema_arc_rejects_a_different_bank_before_allocating_its_owner() {
+    use buoyant_kernel::{actions::Metadata, schema::ToSchema};
+    let original = NativeResourceScope::try_new(Arc::new(Budget::default()), 8).unwrap();
+    let schema = with_resource_scope(original.clone(), limits(), Metadata::try_to_schema).unwrap();
+    let weak = Arc::downgrade(&original);
+    drop(original);
+    let current = NativeResourceScope::try_new(Arc::new(Budget::default()), 8).unwrap();
+    let tracking = Tracking::begin();
+    let result = with_resource_scope(current, limits(), || schema.try_into_arc());
+    let allocated = tracking.finish();
+    assert!(result.unwrap_err().to_string().contains("native_schema_unadmitted_arc_source"));
+    assert_eq!(allocated, 0);
+    assert!(weak.upgrade().is_none());
+}

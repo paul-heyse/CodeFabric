@@ -1496,7 +1496,7 @@ pub(crate) fn build_json_reorder_indices(schema: &StructType) -> DeltaResult<Vec
 #[internal_api]
 pub(crate) fn json_arrow_schema(schema: &StructType) -> DeltaResult<ArrowSchema> {
     let json_fields = schema.with_fields_filtered(|f| f.get_metadata_column_spec().is_none())?;
-    Ok(ArrowSchema::try_from_kernel(&json_fields)?)
+    crate::engine::arrow_expression::scalar_resource::prepare_schema(&json_fields)
 }
 
 #[cfg(test)]

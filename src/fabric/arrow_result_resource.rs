@@ -1331,8 +1331,8 @@ pub enum ArrowResultResourceError {
 mod tests {
     #[test]
     fn wp79_legacy_package_and_chunk_ownership_survive_all_external_clones() {
-        use crate::resource_budget::test_resource_budget;
         use crate::provider_contracts::allocation::ProviderAllocation;
+        use crate::resource_budget::test_resource_budget;
         let source_budget = test_resource_budget();
         let target_budget = test_resource_budget();
         let relation = string_relation("result.owned", &["alpha", "beta"]);

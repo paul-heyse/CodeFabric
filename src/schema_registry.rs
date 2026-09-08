@@ -463,14 +463,23 @@ mod tests {
                 domain.rust_type
             );
             validate_logical_extension_field(&field).unwrap();
+
+            let wrong_width = Field::new("id", DataType::FixedSizeBinary(32), false)
+                .with_metadata(field.metadata().clone());
+            assert!(
+                validate_logical_extension_field(&wrong_width).is_err(),
+                "{} must reject 32-byte storage",
+                domain.extension_name
+            );
         }
         let hash = Field::new("digest", DataType::FixedSizeBinary(32), false)
             .with_extension_type(Hash32Extension::v1());
         validate_logical_extension_field(&hash).unwrap();
 
-        let wrong_width = Field::new("id", DataType::FixedSizeBinary(32), false)
+        let wrong_width = Field::new("digest", DataType::FixedSizeBinary(16), false)
             .with_metadata(hash.metadata().clone());
         assert!(validate_logical_extension_field(&wrong_width).is_err());
+        assert!(wrong_width.try_extension_type::<Hash32Extension>().is_err());
     }
 
     #[test]

@@ -301,7 +301,90 @@ impl std::error::Error for ScopedTransformError {
     }
 }
 
-/// Admission for the fixed native MakePhysical/filter transformations. This is
+/// Admission for the original top-level `try_new` rebuild, with cloned fields
+/// from an admitted schema and optionally one predefined metadata column. It
+/// does not traverse a caller-supplied transform or invent a JSON source shape.
+pub(super) struct SchemaRebuildAdmission {
+    scope: Arc<NativeResourceScope>,
+    scratch: Arc<dyn crate::resource::AllocationReceipt>,
+    retained_bytes: usize,
+    source_shape: Option<JsonShape>,
+}
+
+impl SchemaRebuildAdmission {
+    pub(super) fn begin(
+        schema: &StructType,
+        metadata: Option<(&str, MetadataColumnSpec)>,
+    ) -> DeltaResult<Option<Self>> {
+        let Some(scope) = crate::resource::current_resource_scope() else {
+            return Ok(None);
+        };
+        scope.check_available()?;
+        if schema.resource_owner.scope.is_none() {
+            return Err(ResourceExhausted {
+                kind: "native_schema_unadmitted_transform_source",
+                requested: 1,
+                limit: 0,
+            }.into());
+        }
+        let fields = add(schema.num_fields(), usize::from(metadata.is_some()))?;
+        let mut names = 0;
+        for field in schema.fields() { names = add(names, field.name.len())?; }
+        let metadata_payload = if let Some((name, spec)) = metadata {
+            names = add(names, name.len())?;
+            sum([
+                name.len(),
+                super::ColumnMetadataKey::MetadataSpec.as_ref().len(),
+                spec.text_value().len(),
+                growing_hash_table::<String, MetadataValue>(1)?,
+            ])?
+        } else { 0 };
+        // The original retained bound dominates one deep clone of all field
+        // payloads, including metadata and nested types. Rebuilding the root
+        // uses fresh IndexMap entries/index and metadata-column maps; key names
+        // are copied once more. A filter can only reduce these actual inputs.
+        let retained_bytes = sum([
+            schema.resource_owner.retained_bytes,
+            derived_struct_bytes(fields, add(names, metadata_payload)?)?,
+            growing_hash_table::<MetadataColumnSpec, usize>(fields)?,
+        ])?;
+        scope.reserve(AllocationRequest { kind: "native_schema_rebuild_retained", bytes: retained_bytes })?;
+        // Native validation lowercases each name (<=12 UTF-8 bytes per source
+        // byte) into a growing String and inserts it in a growing HashSet.
+        // Its only diagnostics are a fixed metadata error or one field name;
+        // allow both format growth and Error::schema's owned string copy.
+        let scratch = scope.reserve_transient(AllocationRequest {
+            kind: "native_schema_rebuild",
+            bytes: sum([
+                mul(add(mul(names, 12)?, mul(fields, 8)?)?, 4)?,
+                growing_hash_table::<String, ()>(fields)?,
+                mul(add(names, 128)?, 8)?,
+                size_of::<ScopedTransformError>(),
+            ])?,
+        })?;
+        Ok(Some(Self { scope, scratch, retained_bytes,
+            source_shape: if metadata.is_none() { schema.resource_owner.source_shape } else { None } }))
+    }
+
+    pub(super) fn finish(self, result: DeltaResult<StructType>) -> DeltaResult<StructType> {
+        self.scope.check_available()?;
+        match result {
+            Ok(mut schema) => {
+                schema.resource_owner = SchemaResourceOwner {
+                    scope: Some(self.scope), retained_bytes: self.retained_bytes,
+                    source_shape: self.source_shape,
+                };
+                Ok(schema)
+            }
+            Err(error) if error.is_resource_exhausted() => Err(error),
+            Err(error) => Err(Error::generic_err(ScopedTransformError {
+                error, _scope: self.scope, _scratch: self.scratch,
+            })),
+        }
+    }
+}
+
+/// Admission for the fixed native MakePhysical transformation. This is
 /// not a bound for arbitrary caller-supplied SchemaTransform implementations.
 pub(super) struct SchemaTransformAdmission {
     scope: Arc<NativeResourceScope>,
@@ -427,6 +510,40 @@ impl std::error::Error for ScopedSchemaError {
 }
 
 impl StructType {
+    /// Share this admitted original schema after reserving its native Arc owner.
+    /// Moving into the Arc preserves the original schema's payload owner.
+    #[delta_kernel_derive::internal_api]
+    pub(crate) fn try_into_arc(self) -> DeltaResult<Arc<Self>> {
+        let current = crate::resource::current_resource_scope();
+        let same_owner = match (&self.resource_owner.scope, &current) {
+            (Some(original), Some(current)) => Arc::ptr_eq(original, current),
+            (None, None) => !super::visitor_selection::governed(),
+            _ => false,
+        };
+        // The Arc allocation and the moved payload must retain the same bank.
+        // A foreign/current scope cannot pay for a header whose only retained
+        // field would keep the earlier operation alive instead.
+        if !same_owner {
+            return Err(ResourceExhausted { kind: "native_schema_unadmitted_arc_source", requested: 1, limit: 0 }.into());
+        }
+        super::visitor_selection::admit(
+            aggregate(&[part::<usize>(), part::<usize>(), part::<Self>()])?,
+            "native_schema_arc",
+        )?;
+        Ok(Arc::new(self))
+    }
+
+    /// Rebuild an admitted schema with one predefined metadata field. Borrow the
+    /// name so admission precedes even its first owned String allocation.
+    #[delta_kernel_derive::internal_api]
+    pub(crate) fn try_add_metadata_column_with_resources(
+        &self, name: &str, spec: MetadataColumnSpec,
+    ) -> DeltaResult<Self> {
+        let admission = SchemaRebuildAdmission::begin(self, Some((name, spec)))?;
+        let result = self.add_metadata_column(name, spec);
+        match admission { Some(admission) => admission.finish(result), None => result }
+    }
+
     /// Bind an original schema decoded inside a separately pre-admitted native
     /// container. The caller's bound must include decode_bytes of this shape.
     pub(crate) fn attach_container_decode_owner(

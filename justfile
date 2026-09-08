@@ -251,7 +251,8 @@ typos:
 [doc("Rust tests via nextest (does NOT include doctests)")]
 [group('test')]
 root-test-rust:
-    cargo nextest run --locked
+    cargo build --locked --manifest-path pyrefly-sidecar/Cargo.toml --bin codefabric-pyrefly-sidecar
+    CODEFABRIC_PYREFLY_SIDECAR_BIN="$CF_ROOT/target/debug/codefabric-pyrefly-sidecar" cargo nextest run --locked
 
 [doc("Focused incremental nextest edit loop -- root-test remains the gate")]
 [group('test')]

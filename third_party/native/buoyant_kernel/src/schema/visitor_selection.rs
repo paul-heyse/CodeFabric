@@ -65,9 +65,18 @@ impl OwnedVisitorSelection {
     }
     /// Validate the original selector against current ownership before getters use it.
     pub(crate) fn validate_current(&self)->DeltaResult<()> {
-        if let Some(scope)=&self.scope {scope.check_available()?;if crate::resource::current_resource_scope().is_none(){return Err(pressure("native_visitor_selection_owner",1,0));}}
+        let current = crate::resource::current_resource_scope();
+        let same_scope = match (&self.scope, &current) {
+            (None, None) => true,
+            (Some(original), Some(current)) => Arc::ptr_eq(original, current),
+            _ => false,
+        };
+        if !same_scope { return Err(pressure("native_visitor_selection_owner", 1, 0)); }
+        if let Some(scope) = &self.scope { scope.check_available()?; }
         #[cfg(feature="arrow-59")]
-        if !self.arrow_owner.is_empty() && arrow_schema_59::resource::current_resource_owner().is_none(){return Err(pressure("native_visitor_selection_arrow_owner",1,0));}
+        if !self.arrow_owner.same_owner(&arrow_schema_59::resource::ResourceOwnerHandle::capture()) {
+            return Err(pressure("native_visitor_selection_arrow_owner", 1, 0));
+        }
         Ok(())
     }
 }

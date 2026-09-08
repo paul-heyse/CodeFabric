@@ -16,8 +16,7 @@ use crate::actions::visitors::{
     METADATA_LEAVES, PROTOCOL_LEAVES, visit_metadata_at, visit_protocol_at,
 };
 use crate::actions::{
-    ADD_NAME, COMMIT_INFO_NAME, DOMAIN_METADATA_FIELD, DomainMetadata, METADATA_FIELD,
-    PROTOCOL_FIELD, REMOVE_NAME, SET_TRANSACTION_FIELD, SetTransaction,
+    DomainMetadata, Metadata, Protocol, SetTransaction, METADATA_NAME, PROTOCOL_NAME,
 };
 use crate::crc::{
     Crc, CrcDelta, FileSizeHistogram, FileStatsDelta, is_incremental_safe_operation,
@@ -25,38 +24,35 @@ use crate::crc::{
 };
 use crate::engine_data::{GetData, TypedGetData as _};
 use crate::schema::{
-    ColumnName, ColumnNamesAndTypes, DataType, MetadataColumnSpec, SchemaRef, column_name, schema,
+    ColumnName, ColumnNamesAndTypes, DataType, MetadataColumnSpec, OwnedVisitorSelection,
+    ToSchema, column_name,
 };
 use crate::snapshot::IncrementalReplay;
 use crate::utils::require;
 use crate::{DeltaResult, Engine, Error, RowVisitor, Version};
 
-#[allow(clippy::expect_used)]
-static REPLAY_SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| {
-    let base = schema! {
-        // size is the only Add leaf the visitor reads, and it is required, so its presence marks
-        // an Add row.
-        nullable ADD_NAME: { not_null "size": LONG },
-        // remove.size is optional, so we read remove.path (required) to know a row is a Remove
-        // before reading its size.
-        nullable REMOVE_NAME: {
-            not_null "path": STRING,
-            nullable "size": LONG,
-        },
-        (&PROTOCOL_FIELD),
-        (&METADATA_FIELD),
-        (&SET_TRANSACTION_FIELD),
-        (&DOMAIN_METADATA_FIELD),
-        nullable COMMIT_INFO_NAME: {
-            nullable "operation": STRING,
-            nullable "inCommitTimestamp": LONG,
-        },
-    };
-    let with_file = base
-        .add_metadata_column("_file", MetadataColumnSpec::FilePath)
-        .expect("add _file metadata column");
-    Arc::new(with_file)
-});
+// These native projections encode the same leaf/nullability contract as the
+// original replay schema, but each operation admits and owns its construction.
+#[allow(dead_code)]
+#[derive(delta_kernel_derive::ToSchema)]
+struct ReplayAdd { size: i64 }
+#[allow(dead_code)]
+#[derive(delta_kernel_derive::ToSchema)]
+struct ReplayRemove { path: String, size: Option<i64> }
+#[allow(dead_code)]
+#[derive(delta_kernel_derive::ToSchema)]
+struct ReplayCommitInfo { operation: Option<String>, in_commit_timestamp: Option<i64> }
+#[allow(dead_code)]
+#[derive(delta_kernel_derive::ToSchema)]
+struct ReplayProjection {
+    add: Option<ReplayAdd>,
+    remove: Option<ReplayRemove>,
+    protocol: Option<Protocol>,
+    meta_data: Option<Metadata>,
+    txn: Option<SetTransaction>,
+    domain_metadata: Option<DomainMetadata>,
+    commit_info: Option<ReplayCommitInfo>,
+}
 
 impl LogSegment {
     /// Try to build the CRC at this segment's `end_version` from the caller's resolved `base` CRC.
@@ -218,7 +214,13 @@ impl LogSegment {
         let files: Vec<_> = deltas.iter().rev().map(|c| c.location.clone()).collect();
         let batches = engine
             .json_handler()
-            .read_json_files(&files, REPLAY_SCHEMA.clone(), None)?;
+            .read_json_files(
+                &files,
+                ReplayProjection::try_to_schema()?
+                    .try_add_metadata_column_with_resources("_file", MetadataColumnSpec::FilePath)?
+                    .try_into_arc()?,
+                None,
+            )?;
 
         for batch_result in batches {
             // Transient visitor borrows the shared accumulator for the duration of the
@@ -423,6 +425,10 @@ const COL_TXN_APP_ID: usize = 9;
 const COL_TXN_VERSION: usize = 10;
 const COL_TXN_LAST_UPDATED: usize = 11;
 const N_FIXED_COLS: usize = COL_TXN_LAST_UPDATED + 1;
+// These match the ordinal contracts in visit_protocol_at / visit_metadata_at.
+// Keep counts independent of legacy process-static leaf caches.
+const N_PROTOCOL_COLS: usize = 4;
+const N_METADATA_COLS: usize = 9;
 
 /// Thin shim that pulls leaf values from `getters` and forwards them to the accumulator's
 /// `on_*` methods. All behavior lives in [`CrcReplayAccumulator`].
@@ -431,6 +437,29 @@ struct CrcReplayVisitor<'a> {
 }
 
 impl RowVisitor for CrcReplayVisitor<'_> {
+    fn try_selection(&self) -> DeltaResult<OwnedVisitorSelection> {
+        let fixed = OwnedVisitorSelection::try_from_paths(
+            &[
+                &["_file"], &["commitInfo", "operation"],
+                &["commitInfo", "inCommitTimestamp"], &["add", "size"],
+                &["remove", "path"], &["remove", "size"],
+                &["domainMetadata", "domain"], &["domainMetadata", "configuration"],
+                &["domainMetadata", "removed"], &["txn", "appId"],
+                &["txn", "version"], &["txn", "lastUpdated"],
+            ],
+            &[DataType::STRING, DataType::STRING, DataType::LONG, DataType::LONG,
+              DataType::STRING, DataType::LONG, DataType::STRING, DataType::STRING,
+              DataType::BOOLEAN, DataType::STRING, DataType::LONG, DataType::LONG],
+        )?;
+        let protocol = OwnedVisitorSelection::try_from_schema(
+            &Protocol::try_to_schema()?, Some(PROTOCOL_NAME),
+        )?;
+        let metadata = OwnedVisitorSelection::try_from_schema(
+            &Metadata::try_to_schema()?, Some(METADATA_NAME),
+        )?;
+        fixed.try_append(protocol)?.try_append(metadata)
+    }
+
     fn selected_column_names_and_types(&self) -> (&'static [ColumnName], &'static [DataType]) {
         static NAMES_AND_TYPES: LazyLock<ColumnNamesAndTypes> = LazyLock::new(|| {
             const STRING: DataType = DataType::STRING;
@@ -462,8 +491,8 @@ impl RowVisitor for CrcReplayVisitor<'_> {
     }
 
     fn visit<'a>(&mut self, row_count: usize, getters: &[&'a dyn GetData<'a>]) -> DeltaResult<()> {
-        let n_protocol_leaves = PROTOCOL_LEAVES.as_ref().0.len();
-        let n_metadata_leaves = METADATA_LEAVES.as_ref().0.len();
+        let n_protocol_leaves = N_PROTOCOL_COLS;
+        let n_metadata_leaves = N_METADATA_COLS;
         require!(
             getters.len() == N_FIXED_COLS + n_protocol_leaves + n_metadata_leaves,
             Error::internal_error(format!(
@@ -906,7 +935,7 @@ impl CrcReplayVisitor<'_> {
         // any data-dependent original getter lengths are available.
         reserve(scope, "crc_replay_getter_diagnostics", diagnostic_bytes(0)?)?;
         let protocol_start = N_FIXED_COLS;
-        let metadata_start = N_FIXED_COLS + PROTOCOL_LEAVES.as_ref().0.len();
+        let metadata_start = N_FIXED_COLS + N_PROTOCOL_COLS;
         let mut bytes = add(
             map_layout::<String, crate::actions::DomainMetadata>(add(
                 self.acc.delta.domain_metadata.capacity(),

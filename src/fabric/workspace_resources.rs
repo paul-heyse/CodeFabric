@@ -4,15 +4,19 @@
 //! Native pool reservations, application allocations, retained generations, and durable result
 //! capacities all compete at this owner. It does not pretend that allocator RSS is instrumented.
 
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::child_session::resource_governance::WorkspaceResourceCoordinator;
 use super::command::{ResourceEnvelopeRef, WorkspaceId};
+use super::native_execution_lane::{NativeAdmissionFailure, NativeLaneEnvelope, NativeLaneError};
+use super::native_resource_policy::NativeResourceLimits;
 use super::owned_local_store::{OwnedLocalStore, OwnedLocalStoreError, OwnedLocalStoreLimits};
 use super::programmatic_active_workspace_builder::ProductionActiveWorkspaceConfig;
 use super::resource_ownership::WorkspaceFabricResources;
+use super::workspace_native_execution::{WorkspaceNativeExecution, WorkspaceNativeProfile};
 use crate::resource_budget::{
     ChargedValue, ResourceAmounts, ResourceBudget, ResourceBudgetPolicy, ResourceClass,
 };
@@ -175,6 +179,76 @@ impl ProductionWorkspaceResources {
         &self.local_store
     }
 
+    /// Bind native phases to the caller's workspace lifecycle after physical bootstrap.
+    /// Clone the returned executor to share its operation identities and data/control scopes.
+    pub(crate) fn native_execution(
+        &self,
+        scope: &crate::cancellation::StructuredCancellationScope,
+    ) -> Result<WorkspaceNativeExecution, NativeLaneError> {
+        let observed = self
+            .local_store
+            .observe()
+            .map_err(WorkspaceNativeExecution::store_admission_failure)?;
+        if !observed.ready || observed.bootstrap_pending || observed.roots != 2 {
+            return Err(NativeAdmissionFailure::StoreNotReconciled.into());
+        }
+        let limit = local_store_limits().max_path_bytes;
+        // A Unix file URL contains at most three encoded bytes per path byte plus
+        // file:// and a trailing slash. Include old and new String capacities during
+        // growth for both URLs, one explicitly reserved path scratch buffer, and the
+        // retained array/receipt/Arc descriptors before constructing any of them.
+        let bytes = (limit * 3 + 8) * 4 * 2
+            + limit
+            + std::mem::size_of::<[url::Url; 2]>()
+            + std::mem::size_of::<crate::resource_budget::ResourceReservation>()
+            + 2 * std::mem::size_of::<usize>();
+        let charge = self.budget.try_reserve(
+            ResourceClass::Control,
+            ResourceAmounts {
+                memory_bytes: bytes as u64,
+                ..ResourceAmounts::default()
+            },
+        )?;
+        let mut name = [0_u8; 32];
+        for (index, byte) in self.budget.owner().id.iter().copied().enumerate() {
+            name[index * 2] = b"0123456789abcdef"[usize::from(byte >> 4)];
+            name[index * 2 + 1] = b"0123456789abcdef"[usize::from(byte & 15)];
+        }
+        let name = std::str::from_utf8(&name).expect("hex is ASCII");
+        let mut path = PathBuf::new();
+        path.try_reserve_exact(limit)
+            .map_err(|_| NativeLaneError::InvalidEnvelope("native directory path allocation"))?;
+        let mut directory = |leaf: &str| -> Result<url::Url, NativeLaneError> {
+            let length = self.local_store_state_root.as_os_str().as_bytes().len()
+                + "/fabric/".len()
+                + name.len()
+                + 1
+                + leaf.len();
+            if length > limit {
+                return Err(NativeLaneError::InvalidEnvelope(
+                    "native directory path bound",
+                ));
+            }
+            path.clear();
+            path.push(&*self.local_store_state_root);
+            path.push("fabric");
+            path.push(name);
+            path.push(leaf);
+            url::Url::from_directory_path(&path)
+                .map_err(|()| NativeLaneError::InvalidEnvelope("native directory URL"))
+        };
+        let directories = [directory("activation-control")?, directory("epochs")?];
+        let directories = charge.into_charged_value(directories);
+        WorkspaceNativeExecution::try_new(
+            self.budget.clone(),
+            scope,
+            self.local_store.clone(),
+            local_native_profile(ResourceClass::Data),
+            local_native_profile(ResourceClass::Control),
+            directories,
+        )
+    }
+
     pub(crate) fn budget(&self) -> &ResourceBudget {
         &self.budget
     }
@@ -242,6 +316,74 @@ pub(crate) const fn local_store_limits() -> OwnedLocalStoreLimits {
     }
 }
 
+/// Finite initial native phase selection. Decoder geometry is an upper bound;
+/// every admitted allocation still competes in the existing workspace budget.
+/// Control uses a smaller independent runtime so data pressure cannot consume its reserve.
+pub(crate) fn local_native_profile(class: ResourceClass) -> WorkspaceNativeProfile {
+    let policy = local_resource_policy();
+    let (workers, tasks, allocations, bytes, values) = match class {
+        ResourceClass::Data => (
+            4,
+            4096,
+            65_536,
+            local_store_limits().max_read_bytes as usize,
+            policy.limits.rows as usize,
+        ),
+        ResourceClass::Control => (
+            1,
+            128,
+            4096,
+            policy.control_reserve.memory_bytes as usize,
+            policy.control_reserve.rows as usize,
+        ),
+    };
+    WorkspaceNativeProfile {
+        lane: NativeLaneEnvelope {
+            worker_threads: NonZeroUsize::new(workers).expect("finite workers"),
+            blocking_threads: NonZeroUsize::new(workers * 4).expect("nested blocking headroom"),
+            thread_stack_bytes: NonZeroUsize::new(2 * 1024 * 1024).unwrap(),
+            runtime_memory_bytes: NonZeroU64::new(1024 * 1024).unwrap(),
+            // Actual native backing is admitted by its own required allocation callbacks.
+            native_buffer_bytes: 0,
+            native_task_slots: NonZeroU64::new(tasks).unwrap(),
+            task_memory_bytes: NonZeroU64::new(512).unwrap(),
+            parallel_blocking_roots: NonZeroUsize::new(workers).unwrap(),
+            blocking_nesting: NonZeroUsize::new(2).unwrap(),
+        },
+        resources: NativeResourceLimits {
+            kernel_allocations: allocations,
+            original_owners: 128,
+            original_owner_depth: policy.limits.retained_generations as usize,
+            url_reference_bytes: local_store_limits().max_path_bytes,
+            kernel_json: buoyant_kernel::resource::JsonResourceLimits {
+                max_bytes: bytes,
+                max_tokens: values,
+                max_depth: 32,
+                max_string_bytes: bytes,
+                max_container_items: values,
+            },
+            json: arrow_json::resource::ReaderResourceLimits {
+                allocations,
+                collection_entries: values,
+                string_bytes: bytes,
+                nesting: 32,
+            },
+            parquet: parquet::resource::ReaderResourceLimits {
+                allocations,
+                collection_entries: values,
+                string_bytes: bytes,
+                footer_bytes: bytes,
+                page_bytes: bytes,
+                page_values: values,
+                output_values: values,
+                output_bytes: bytes,
+                schema_depth: 32,
+                codec_bytes: bytes,
+            },
+        },
+    }
+}
+
 fn resource_policy_identity(
     policy: ResourceBudgetPolicy,
     config: &ProductionActiveWorkspaceConfig,
@@ -250,6 +392,52 @@ fn resource_policy_identity(
     let mut hash = blake3::Hasher::new();
     hash.update(b"codefabric.aggregate-resource-envelope.v1\0");
     hash.update(b"owned-local-store.workspace-bootstrap.v1\0");
+    hash.update(b"workspace-native-execution.required-policies.v1\0");
+    for class in [ResourceClass::Data, ResourceClass::Control] {
+        let profile = local_native_profile(class);
+        let lane = profile.lane;
+        for value in [
+            lane.worker_threads.get() as u64,
+            lane.blocking_threads.get() as u64,
+            lane.thread_stack_bytes.get() as u64,
+            lane.runtime_memory_bytes.get(),
+            lane.native_buffer_bytes,
+            lane.native_task_slots.get(),
+            lane.task_memory_bytes.get(),
+            lane.parallel_blocking_roots.get() as u64,
+            lane.blocking_nesting.get() as u64,
+        ] {
+            hash.update(&value.to_be_bytes());
+        }
+        let limits = profile.resources;
+        for value in [
+            limits.kernel_allocations,
+            limits.original_owners,
+            limits.original_owner_depth,
+            limits.url_reference_bytes,
+            limits.kernel_json.max_bytes,
+            limits.kernel_json.max_tokens,
+            limits.kernel_json.max_depth,
+            limits.kernel_json.max_string_bytes,
+            limits.kernel_json.max_container_items,
+            limits.json.allocations,
+            limits.json.collection_entries,
+            limits.json.string_bytes,
+            limits.json.nesting,
+            limits.parquet.allocations,
+            limits.parquet.collection_entries,
+            limits.parquet.string_bytes,
+            limits.parquet.footer_bytes,
+            limits.parquet.page_bytes,
+            limits.parquet.page_values,
+            limits.parquet.output_values,
+            limits.parquet.output_bytes,
+            limits.parquet.schema_depth,
+            limits.parquet.codec_bytes,
+        ] {
+            hash.update(&(value as u64).to_be_bytes());
+        }
+    }
     for value in [
         store.max_roots as u64,
         store.max_object_bytes,

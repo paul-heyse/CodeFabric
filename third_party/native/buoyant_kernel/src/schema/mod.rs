@@ -1343,7 +1343,7 @@ impl StructType {
         &self,
         mut predicate: impl FnMut(&StructField) -> bool,
     ) -> DeltaResult<Self> {
-        let admission = resource::SchemaTransformAdmission::begin(self)?;
+        let admission = resource::SchemaRebuildAdmission::begin(self, None)?;
         let result = Self::try_new(self.fields().filter(|f| predicate(f)).cloned());
         match admission {
             Some(admission) => admission.finish(result),

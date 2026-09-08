@@ -26,10 +26,49 @@ async fn stable_dependency_contract_is_executable() {
 fn wp02_behavioral_target_compile() {
     assert_eq!(arrow::ARROW_VERSION, "59.2.0");
     assert_eq!(datafusion::DATAFUSION_VERSION, "55.0.0");
+    let root = repository_root();
+    let output = Command::new(env!("CARGO"))
+        .args([
+            "metadata",
+            "--locked",
+            "--format-version",
+            "1",
+            "--all-features",
+        ])
+        .current_dir(&root)
+        .output()
+        .expect("resolve integrated native dependencies");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("Cargo metadata JSON");
+    let packages = metadata["packages"].as_array().expect("resolved packages");
+    for (name, directory) in [
+        ("deltalake", "deltalake"),
+        ("deltalake-core", "core"),
+        ("deltalake-derive", "derive"),
+        ("deltalake-aws", "aws"),
+    ] {
+        let mut matches = packages.iter().filter(|package| package["name"] == name);
+        let package = matches.next().expect("selected native Delta package");
+        assert!(matches.next().is_none(), "duplicate Delta package {name}");
+        assert_eq!(package["version"], "1.0.0", "Delta version changed: {name}");
+        assert!(
+            package["source"].is_null(),
+            "non-native Delta source: {name}"
+        );
+        assert_eq!(
+            Path::new(package["manifest_path"].as_str().expect("native manifest")),
+            root.join("third_party/native/delta-rs/crates")
+                .join(directory)
+                .join("Cargo.toml"),
+            "wrong native source selected for {name}"
+        );
+    }
     let lock = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.lock"));
-    assert!(lock.contains(
-        "git+https://github.com/delta-io/delta-rs.git?rev=43a0cf10a313e5077c48637ad786a05359136bbb#43a0cf10a313e5077c48637ad786a05359136bbb"
-    ));
     assert!(!lock.contains("9f9223197469897ef05ae4369eb4fd1390174e65"));
 }
 

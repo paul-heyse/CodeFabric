@@ -12,15 +12,23 @@ use std::time::Instant;
 
 use crate::cancellation::{Cancellation, StructuredCancellationScope};
 use crate::resource_budget::{
-    ResourceAmounts, ResourceBudget, ResourceBudgetError, ResourceClass, ResourceReservation,
-    ResourceScopeKind,
+    ChargedValue, ResourceAmounts, ResourceBudget, ResourceBudgetError, ResourceClass,
+    ResourceReservation, ResourceScopeKind,
 };
 
 use super::native_execution_lane::{
     NativeAdmissionFailure, NativeExecutionLane, NativeLaneAdmission, NativeLaneCleanup,
     NativeLaneEnvelope, NativeLaneError, NativeLaneOutput,
 };
+use super::native_lane_resource_policy::NativeOperationResourcePolicy;
+use super::native_resource_policy::{NativeResourceLimits, NativeResourceOwner};
 use super::owned_local_store::{OwnedLocalMutation, OwnedLocalStore, OwnedLocalStoreError};
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WorkspaceNativeProfile {
+    pub lane: NativeLaneEnvelope,
+    pub resources: NativeResourceLimits,
+}
 
 #[derive(Clone)]
 pub(crate) struct WorkspaceNativeExecution {
@@ -34,6 +42,9 @@ struct WorkspaceNativeOwner {
     store: Arc<OwnedLocalStore>,
     data_lane: NativeExecutionLane,
     control_lane: NativeExecutionLane,
+    data_resources: NativeResourceLimits,
+    control_resources: NativeResourceLimits,
+    authorized_directories: ChargedValue<[url::Url; 2]>,
     next_operation: AtomicU64,
     _reservation: ResourceReservation,
 }
@@ -53,15 +64,18 @@ impl WorkspaceNativeExecution {
         budget: ResourceBudget,
         scope: &StructuredCancellationScope,
         store: Arc<OwnedLocalStore>,
-        data_profile: NativeLaneEnvelope,
-        control_profile: NativeLaneEnvelope,
+        data_profile: WorkspaceNativeProfile,
+        control_profile: WorkspaceNativeProfile,
+        authorized_directories: ChargedValue<[url::Url; 2]>,
     ) -> Result<Self, NativeLaneError> {
-        if budget.owner().kind != ResourceScopeKind::Workspace || !budget.same_scope(store.budget())
+        if budget.owner().kind != ResourceScopeKind::Workspace
+            || !budget.same_scope(store.budget())
+            || !budget.same_scope(authorized_directories.reservation().owner())
         {
             return Err(ResourceBudgetError::ForeignOwner.into());
         }
-        let data_lane = NativeExecutionLane::try_new(data_profile)?;
-        let control_lane = NativeExecutionLane::try_new(control_profile)?;
+        let data_lane = NativeExecutionLane::try_new(data_profile.lane)?;
+        let control_lane = NativeExecutionLane::try_new(control_profile.lane)?;
         let reservation = budget.try_reserve(
             ResourceClass::Data,
             ResourceAmounts {
@@ -82,6 +96,9 @@ impl WorkspaceNativeExecution {
                 store,
                 data_lane,
                 control_lane,
+                data_resources: data_profile.resources,
+                control_resources: control_profile.resources,
+                authorized_directories,
                 next_operation: AtomicU64::new(0),
                 _reservation: reservation,
             }),
@@ -99,7 +116,9 @@ impl WorkspaceNativeExecution {
         T: NativeLaneOutput,
         E: Display,
         F: Future<Output = Result<T, E>>,
-        O: FnOnce(Cancellation, Arc<OwnedLocalStore>) -> F + Send + 'static,
+        O: FnOnce(Cancellation, Arc<OwnedLocalStore>, Arc<NativeResourceOwner>) -> F
+            + Send
+            + 'static,
     {
         self.run_read_classified(name, class, deadline, operation, |error| {
             NativeLaneError::operation(&error)
@@ -121,7 +140,9 @@ impl WorkspaceNativeExecution {
     where
         T: NativeLaneOutput,
         F: Future<Output = Result<T, E>>,
-        O: FnOnce(Cancellation, Arc<OwnedLocalStore>) -> F + Send + 'static,
+        O: FnOnce(Cancellation, Arc<OwnedLocalStore>, Arc<NativeResourceOwner>) -> F
+            + Send
+            + 'static,
         C: FnOnce(E) -> NativeLaneError + Send + 'static,
     {
         self.run(
@@ -148,7 +169,9 @@ impl WorkspaceNativeExecution {
         T: NativeLaneOutput,
         E: Display,
         F: Future<Output = Result<T, E>>,
-        O: FnOnce(Cancellation, Arc<OwnedLocalStore>) -> F + Send + 'static,
+        O: FnOnce(Cancellation, Arc<OwnedLocalStore>, Arc<NativeResourceOwner>) -> F
+            + Send
+            + 'static,
     {
         self.run_mutation_classified(name, class, deadline, operation, |error| {
             NativeLaneError::operation(&error)
@@ -167,7 +190,9 @@ impl WorkspaceNativeExecution {
     where
         T: NativeLaneOutput,
         F: Future<Output = Result<T, E>>,
-        O: FnOnce(Cancellation, Arc<OwnedLocalStore>) -> F + Send + 'static,
+        O: FnOnce(Cancellation, Arc<OwnedLocalStore>, Arc<NativeResourceOwner>) -> F
+            + Send
+            + 'static,
         C: FnOnce(E) -> NativeLaneError + Send + 'static,
     {
         self.run(
@@ -192,12 +217,22 @@ impl WorkspaceNativeExecution {
     where
         T: NativeLaneOutput,
         F: Future<Output = Result<T, E>>,
-        O: FnOnce(Cancellation, Arc<OwnedLocalStore>) -> F + Send + 'static,
+        O: FnOnce(Cancellation, Arc<OwnedLocalStore>, Arc<NativeResourceOwner>) -> F
+            + Send
+            + 'static,
         C: FnOnce(E) -> NativeLaneError + Send + 'static,
     {
-        let (parent, lane) = match request.class {
-            ResourceClass::Data => (&self.owner.data_scope, &self.owner.data_lane),
-            ResourceClass::Control => (&self.owner.control_scope, &self.owner.control_lane),
+        let (parent, lane, limits) = match request.class {
+            ResourceClass::Data => (
+                &self.owner.data_scope,
+                &self.owner.data_lane,
+                self.owner.data_resources,
+            ),
+            ResourceClass::Control => (
+                &self.owner.control_scope,
+                &self.owner.control_lane,
+                self.owner.control_resources,
+            ),
         };
         // Validate the descriptive name before allocating an operation identity. Distinct
         // calls can safely share the description while their registry keys stay unique.
@@ -210,12 +245,26 @@ impl WorkspaceNativeExecution {
             })
             .map_err(|_| NativeAdmissionFailure::NativeLimit("workspace operation identities"))?;
         let scope = named.child(&format!("operation-{id}"))?;
+        // Every call has a distinct native receipt bank but competes against the original
+        // workspace ceiling. The bridge seals that bank only after the runtime joins.
+        let resource_owner = NativeResourceOwner::try_new(
+            self.owner.budget.clone(),
+            request.class,
+            limits,
+            &*self.owner.authorized_directories,
+        )
+        .map_err(|error| NativeLaneError::NativeResourceExhausted {
+            kind: error.kind,
+            requested: error.requested,
+            limit: error.limit,
+        })?;
+        let resource_policy = NativeOperationResourcePolicy::try_new(resource_owner.clone())?;
         let lease = Arc::new(Mutex::new(None::<OwnedLocalMutation>));
         let begin_lease = Arc::clone(&lease);
         let cleanup_lease = Arc::clone(&lease);
         let operation_store = Arc::clone(&self.owner.store);
         let reconcile_store = Arc::clone(&self.owner.store);
-        lane.spawn_classified(
+        lane.spawn_with_resource_policy(
             NativeLaneAdmission {
                 scope: &scope,
                 name: "native",
@@ -223,6 +272,7 @@ impl WorkspaceNativeExecution {
                 class: request.class,
                 deadline: request.deadline,
             },
+            Some(resource_policy),
             move |cancellation| async move {
                 if request.mutation {
                     let mutation = operation_store
@@ -232,7 +282,7 @@ impl WorkspaceNativeExecution {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(mutation);
                 }
-                operation(cancellation, operation_store)
+                operation(cancellation, operation_store, resource_owner)
                     .await
                     .map_err(classify)
             },
@@ -269,7 +319,7 @@ impl WorkspaceNativeExecution {
         .await?
     }
 
-    fn store_admission_failure(error: OwnedLocalStoreError) -> NativeLaneError {
+    pub(super) fn store_admission_failure(error: OwnedLocalStoreError) -> NativeLaneError {
         match error {
             OwnedLocalStoreError::Budget(error) => error.into(),
             OwnedLocalStoreError::ForeignOwner => ResourceBudgetError::ForeignOwner.into(),
@@ -341,6 +391,16 @@ mod tests {
         }
     }
 
+    fn native_profile() -> WorkspaceNativeProfile {
+        let mut selected =
+            super::super::workspace_resources::local_native_profile(ResourceClass::Data);
+        selected.lane = profile();
+        selected.resources.kernel_allocations = 4096;
+        selected.resources.json.allocations = 4096;
+        selected.resources.parquet.allocations = 4096;
+        selected
+    }
+
     struct Fixture {
         _directory: TempDir,
         budget: ResourceBudget,
@@ -395,8 +455,21 @@ mod tests {
                 budget.clone(),
                 &scope,
                 store.clone(),
-                profile(),
-                profile(),
+                native_profile(),
+                native_profile(),
+                budget
+                    .try_reserve(
+                        ResourceClass::Control,
+                        ResourceAmounts {
+                            memory_bytes: 8192,
+                            ..ResourceAmounts::default()
+                        },
+                    )
+                    .unwrap()
+                    .into_charged_value([
+                        url::Url::from_directory_path(&data).unwrap(),
+                        url::Url::from_directory_path(&control).unwrap(),
+                    ]),
             )
             .unwrap();
             Self {
@@ -427,8 +500,9 @@ mod tests {
                 budget(),
                 &fixture.scope,
                 fixture.store.clone(),
-                profile(),
-                profile()
+                native_profile(),
+                native_profile(),
+                fixture.executor.owner.authorized_directories.clone(),
             ),
             Err(NativeLaneError::Budget(ResourceBudgetError::ForeignOwner))
         ));
@@ -470,6 +544,57 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn workspace_native_installs_exact_fresh_owner_for_each_class_and_joins_it() {
+        let fixture = Fixture::new(4);
+        let owners = Arc::new(Mutex::new(Vec::new()));
+        for class in [ResourceClass::Data, ResourceClass::Control] {
+            let observed_owners = owners.clone();
+            let budget = fixture.budget.clone();
+            fixture
+                .executor
+                .run_read(
+                    "required-policies",
+                    class,
+                    deadline(),
+                    move |_, store, owner| async move {
+                        assert!(owner.belongs_to(&budget));
+                        assert!(store.budget().same_scope(&budget));
+                        assert!(Arc::ptr_eq(
+                            &buoyant_kernel::resource::current_resource_scope().unwrap(),
+                            owner.scope(),
+                        ));
+                        let arrow_owner = arrow_schema::resource::current_resource_owner().unwrap();
+                        let concrete = (arrow_owner.as_ref() as &dyn std::any::Any)
+                            .downcast_ref::<NativeResourceOwner>()
+                            .unwrap();
+                        assert!(std::ptr::eq(concrete, owner.as_ref()));
+                        assert!(arrow_json::resource::ReaderResourcePolicy::current().is_some());
+                        assert!(parquet::resource::ReaderResourcePolicy::current().is_some());
+                        tokio::runtime::resource::check_current_profile().unwrap();
+                        observed_owners.lock().unwrap().push(Arc::downgrade(&owner));
+                        let expected = owner.scope().clone();
+                        tokio::spawn(async move {
+                            assert!(Arc::ptr_eq(
+                                &buoyant_kernel::resource::current_resource_scope().unwrap(),
+                                &expected,
+                            ));
+                        })
+                        .await
+                        .unwrap();
+                        Ok::<(), &'static str>(())
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let owners = owners.lock().unwrap();
+        assert_eq!(owners.len(), 2);
+        assert!(!std::sync::Weak::ptr_eq(&owners[0], &owners[1]));
+        assert!(owners.iter().all(|owner| owner.upgrade().is_none()));
+        assert_eq!(fixture.budget.observation().used.running_jobs, 0);
+    }
+
     async fn read_while_rejecting_mutation(fixture: &Fixture) -> u64 {
         let source = fixture.location("initial");
         let forbidden = fixture.location("reader-write");
@@ -479,7 +604,7 @@ mod tests {
                 "read",
                 ResourceClass::Data,
                 deadline(),
-                move |_, store| async move {
+                move |_, store, _| async move {
                     let bytes = store.get(&source).await?.bytes().await?;
                     assert_eq!(bytes.as_ref(), b"old");
                     let error = store
@@ -517,7 +642,7 @@ mod tests {
                     "write",
                     ResourceClass::Data,
                     deadline(),
-                    move |_, store| async move {
+                    move |_, store, _| async move {
                         store
                             .put_opts(&target, b"new".to_vec().into(), PutOptions::default())
                             .await?;
@@ -535,7 +660,7 @@ mod tests {
         let operation_invoked = invoked.clone();
         let busy = fixture
             .executor
-            .run_mutation("write", ResourceClass::Data, deadline(), move |_, _| {
+            .run_mutation("write", ResourceClass::Data, deadline(), move |_, _, _| {
                 operation_invoked.store(true, Ordering::Release);
                 ready(Ok::<(), &'static str>(()))
             })
@@ -564,12 +689,15 @@ mod tests {
             .unwrap();
         let denied = fixture
             .executor
-            .run_read("full", ResourceClass::Data, deadline(), |_, _| {
+            .run_read("full", ResourceClass::Data, deadline(), |_, _, _| {
                 ready(Ok::<(), &'static str>(()))
             })
             .await
             .unwrap_err();
-        assert!(matches!(denied, NativeLaneError::Budget(_)));
+        assert!(matches!(
+            denied,
+            NativeLaneError::NativeResourceExhausted { .. }
+        ));
         let status = Path::from_absolute_path(fixture.control.join("status")).unwrap();
         let count = fixture
             .executor
@@ -577,7 +705,7 @@ mod tests {
                 "status",
                 ResourceClass::Control,
                 deadline(),
-                move |_, store| async move {
+                move |_, store, _| async move {
                     let bytes = store.get(&status).await?.bytes().await?;
                     Ok::<u64, object_store::Error>(u64::try_from(bytes.len()).unwrap())
                 },
@@ -607,7 +735,7 @@ mod tests {
                     "multipart",
                     ResourceClass::Data,
                     deadline(),
-                    move |cancel, store| async move {
+                    move |cancel, store, _| async move {
                         let mut upload = store
                             .put_multipart_opts(&location, PutMultipartOptions::default())
                             .await?;
@@ -636,7 +764,7 @@ mod tests {
                 "multipart",
                 ResourceClass::Data,
                 deadline(),
-                move |_, store| async move {
+                move |_, store, _| async move {
                     store
                         .put_opts(&target, b"complete".to_vec().into(), PutOptions::default())
                         .await?;
@@ -681,7 +809,7 @@ mod tests {
                 "opaque-error",
                 ResourceClass::Data,
                 deadline(),
-                |_, _| ready(Err::<(), _>(())),
+                |_, _, _| ready(Err::<(), _>(())),
                 move |()| {
                     NativeLaneError::Runtime(std::io::Error::other(OpaqueNativeFailure {
                         runtime: tokio::runtime::Handle::current(),
@@ -708,7 +836,7 @@ mod tests {
                 "large-error",
                 ResourceClass::Data,
                 deadline(),
-                |_, _| ready(Err::<(), _>(())),
+                |_, _, _| ready(Err::<(), _>(())),
                 |()| NativeLaneError::Operation("x".repeat(64 * 1024)),
             )
             .await
@@ -724,7 +852,7 @@ mod tests {
                 "nested-error",
                 ResourceClass::Data,
                 deadline(),
-                |_, _| ready(Err::<(), _>(())),
+                |_, _, _| ready(Err::<(), _>(())),
                 |()| {
                     let mut error = NativeLaneError::Budget(ResourceBudgetError::ForeignOwner);
                     for _ in 0..256 {
@@ -771,7 +899,7 @@ mod tests {
                 "rejection-and-census-failure",
                 ResourceClass::Data,
                 deadline(),
-                move |_, _| async move {
+                move |_, _, _| async move {
                     // External path replacement is a fault injected after mutation admission.
                     std::fs::rename(original, target).unwrap();
                     Err::<(), _>(ResourceBudgetError::ForeignOwner)
@@ -802,7 +930,7 @@ mod tests {
                 "joined-retry",
                 ResourceClass::Control,
                 deadline(),
-                |_, store| ready(store.retry_after_join_reconciliation()),
+                |_, store, _| ready(store.retry_after_join_reconciliation()),
             )
             .await
             .unwrap();
@@ -823,7 +951,7 @@ mod tests {
                     "same-description",
                     ResourceClass::Data,
                     deadline(),
-                    move |_, store| async move {
+                    move |_, store, _| async move {
                         let _bytes = store.get(&source).await?.bytes().await?;
                         started.send(()).unwrap();
                         let _ = released.await;
@@ -839,7 +967,7 @@ mod tests {
                 "same-description",
                 ResourceClass::Data,
                 deadline(),
-                |_, _| ready(Ok::<(), &'static str>(())),
+                |_, _, _| ready(Ok::<(), &'static str>(())),
             )
             .await
             .unwrap_err();
@@ -855,7 +983,7 @@ mod tests {
                 "typed",
                 ResourceClass::Data,
                 deadline(),
-                |_, _| ready(Err::<(), _>(ResourceBudgetError::ForeignOwner)),
+                |_, _, _| ready(Err::<(), _>(ResourceBudgetError::ForeignOwner)),
                 NativeLaneError::Budget,
             )
             .await

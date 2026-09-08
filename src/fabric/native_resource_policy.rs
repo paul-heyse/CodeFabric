@@ -350,15 +350,28 @@ impl NativeResourceOwner {
 
     pub(crate) fn claim_operation(&self) -> Result<(), kernel::ResourceExhausted> {
         self.check_available()?;
-        if self.scope.allocations_sealed() || self.operation_claimed.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
-            return Err(kernel::ResourceExhausted { kind: "native resource owner already bound", requested: 1, limit: 0 });
+        if self.scope.allocations_sealed()
+            || self
+                .operation_claimed
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+        {
+            return Err(kernel::ResourceExhausted {
+                kind: "native resource owner already bound",
+                requested: 1,
+                limit: 0,
+            });
         }
         Ok(())
     }
     pub(crate) fn belongs_to(&self, budget: &ResourceBudget) -> bool {
         self.budget.same_root(budget)
-            && self.budget.ancestor_owner(ResourceScopeKind::Workspace).is_some()
-            && self.budget.ancestor_owner(ResourceScopeKind::Workspace) == budget.ancestor_owner(ResourceScopeKind::Workspace)
+            && self
+                .budget
+                .ancestor_owner(ResourceScopeKind::Workspace)
+                .is_some()
+            && self.budget.ancestor_owner(ResourceScopeKind::Workspace)
+                == budget.ancestor_owner(ResourceScopeKind::Workspace)
     }
 
     pub(crate) fn scope(&self) -> &Arc<kernel::NativeResourceScope> {

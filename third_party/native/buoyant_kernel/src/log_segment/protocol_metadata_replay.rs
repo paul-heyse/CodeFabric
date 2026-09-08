@@ -8,13 +8,22 @@ use std::sync::Arc;
 use tracing::{info, instrument};
 
 use super::LogSegment;
-use crate::actions::{Metadata, Protocol, METADATA_FIELD, PROTOCOL_FIELD};
+use crate::actions::{Metadata, Protocol};
 use crate::crc::Crc;
 use crate::log_replay::ActionsBatch;
 use crate::metrics::events::PROTOCOL_METADATA_LOADED_SPAN;
 use crate::metrics::SnapshotLoadMetricContext;
-use crate::schema::schema_ref;
+use crate::schema::ToSchema;
 use crate::{DeltaResult, Engine, Error};
+
+// Native typed projection, constructed afresh after its complete ToSchema
+// allocation admission. A process-static schema cannot own an operation budget.
+#[allow(dead_code)]
+#[derive(delta_kernel_derive::ToSchema)]
+struct ProtocolMetadataProjection {
+    protocol: Option<Protocol>,
+    meta_data: Option<Metadata>,
+}
 
 impl LogSegment {
     /// Read the latest Protocol and Metadata from this log segment, using CRC when available.
@@ -133,10 +142,7 @@ impl LogSegment {
         &self,
         engine: &dyn Engine,
     ) -> DeltaResult<impl Iterator<Item = DeltaResult<ActionsBatch>> + Send> {
-        let schema = schema_ref! {
-            (&PROTOCOL_FIELD),
-            (&METADATA_FIELD),
-        };
+        let schema = ProtocolMetadataProjection::try_to_schema()?.try_into_arc()?;
         self.read_actions(engine, schema)
     }
 }
