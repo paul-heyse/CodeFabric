@@ -46,3 +46,20 @@ struct CountWake(AtomicUsize);impl std::task::Wake for CountWake{fn wake(self:Ar
  let waker=std::task::Waker::noop();let mut cx=Context::from_waker(waker);let error=match Pin::new(&mut task).poll(&mut cx){Poll::Ready(Err(error))=>error,_=>panic!("expected inline refusal")};
  assert_eq!(error.resource_error().unwrap().kind,"tokio_runtime_shutdown");assert_eq!(polled.load(Ordering::SeqCst),0);
 }
+
+#[test]
+fn join_set_task_denial_precedes_entry_allocation_and_never_polls_input() {
+    let admission = Arc::new(Admission::new());
+    let runtime = profile().build(admission.clone(), || {}, || {}).unwrap();
+    let _entered = runtime.enter();
+    let mut set = tokio::task::JoinSet::new();
+    let polled = Arc::new(AtomicUsize::new(0));
+    let future = LargeFuture { _bytes: [0; 32768], polled: polled.clone() };
+    admission.deny.store(true, Ordering::SeqCst);
+    let (result, allocations) = observed(|| set.try_spawn(future));
+    assert_eq!(result.unwrap_err().kind, "native_test_deny");
+    assert_eq!(allocations, 0);
+    assert!(set.is_empty());
+    assert_eq!(polled.load(Ordering::SeqCst), 0);
+    assert_eq!(admission.failures.load(Ordering::SeqCst), 1);
+}

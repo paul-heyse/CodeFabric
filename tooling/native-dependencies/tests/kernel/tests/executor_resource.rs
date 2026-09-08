@@ -1,5 +1,7 @@
 //! Native executor descriptor/queue admission, separate from runtime construction policy.
-use std::{cell::RefCell, sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}}};
+#[path = "../../support/native_runtime.rs"]
+mod native_runtime;
+use std::{sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}}};
 use buoyant_kernel::resource::*;
 use buoyant_kernel_engine::{DefaultEngineBuilder, executor::{TaskExecutor, tokio::{TokioBackgroundExecutor, TokioMultiThreadExecutor}}};
 
@@ -26,18 +28,13 @@ fn scope(slots: usize) -> (Arc<NativeResourceScope>, Arc<Accounting>) {
 fn policy(scope: Arc<NativeResourceScope>) -> NativeResourceThreadPolicy {
     NativeResourceThreadPolicy::try_new(scope, JsonResourceLimits { max_bytes: 4096, max_tokens: 256, max_depth: 16, max_string_bytes: 2048, max_container_items: 256 }).unwrap()
 }
-thread_local! { static WORKER: RefCell<Option<NativeResourceThreadGuard>> = const { RefCell::new(None) }; }
 fn runtime(scope: Arc<NativeResourceScope>) -> tokio::runtime::Runtime {
-    let policy = policy(scope);
-    tokio::runtime::Builder::new_multi_thread().worker_threads(1).max_blocking_threads(2)
-        .on_thread_start(move || WORKER.with(|slot| *slot.borrow_mut() = Some(policy.enter_thread())))
-        .on_thread_stop(|| WORKER.with(|slot| { slot.borrow_mut().take(); }))
-        .build().unwrap()
+    native_runtime::kernel_runtime(scope, JsonResourceLimits { max_bytes: 4096, max_tokens: 256, max_depth: 16, max_string_bytes: 2048, max_container_items: 256 })
 }
 
 #[test]
 fn executor_denies_every_native_enqueue_phase_before_polling_input() {
-    for kind in ["native_executor_channel", "native_executor_send", "native_executor_relay"] {
+    for kind in ["native_executor_channel", "tokio_async_task", "native_executor_relay"] {
         let (scope, accounting) = scope(64);
         let runtime = runtime(scope.clone());
         let entered = runtime.enter();
@@ -58,14 +55,14 @@ fn executor_denies_every_native_enqueue_phase_before_polling_input() {
 
 #[test]
 fn executor_cumulative_calls_exhaust_finite_slots_including_completed_tasks() {
-    let (scope, accounting) = scope(10);
+    let (scope, accounting) = scope(40);
     let runtime = runtime(scope.clone());
     let entered = runtime.enter();
     let policy = policy(scope.clone()); let guard = policy.enter_thread();
     let executor = TokioMultiThreadExecutor::try_new_current(runtime.handle().clone()).unwrap();
     let mut accepted = 0;
     while executor.try_block_on(async { 23 }).is_ok() { accepted += 1; }
-    assert!(accepted > 0 && accepted < 10);
+    assert!(accepted > 0 && accepted < 40);
     assert!(scope.failure().is_some());
     assert!(accounting.requests.lock().unwrap().iter().filter(|request| request.kind == "native_executor_channel").count() > 1);
     drop((executor, guard, policy)); drop(entered); drop(runtime); drop(scope);
@@ -81,7 +78,7 @@ fn executor_rejects_foreign_runtime_and_uninstalled_worker_before_work() {
     assert!(executor.try_block_on(async { 0 }).unwrap_err().is_resource_exhausted());
     drop((guard, policy, executor, runtime));
     let (scope, _) = self::scope(64);
-    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).max_blocking_threads(1).build().unwrap();
+    let runtime = native_runtime::runtime(scope.clone(), || {}, || {});
     let entered = runtime.enter(); let policy = self::policy(scope.clone()); let guard = policy.enter_thread();
     let executor = TokioMultiThreadExecutor::try_new_current(runtime.handle().clone()).unwrap();
     let polls = Arc::new(AtomicUsize::new(0)); let observed = polls.clone();
@@ -105,7 +102,7 @@ fn engine_required_background_constructor_is_typed_and_allocates_no_native_runti
 #[test]
 fn owned_join_set_denies_each_roll_before_spawn_and_keeps_completed_receipts() {
     use buoyant_kernel_engine::resource::OwnedJoinSet;
-    for denied in ["native_join_set_entry", "native_spawn_task"] {
+    for denied in ["native_join_set_entry", "tokio_async_task"] {
         let (scope, accounting) = scope(64);
         let runtime = runtime(scope.clone()); let entered = runtime.enter();
         let policy = policy(scope.clone()); let guard = policy.enter_thread();
@@ -169,7 +166,7 @@ fn owned_channel_denial_prevents_enqueue_and_original_block_owners_outlive_runti
 #[test]
 fn owned_channel_recycled_blocks_still_require_finite_total_send_admission() {
     use buoyant_kernel_engine::resource::try_channel;
-    let (scope, accounting) = scope(12);
+    let (scope, accounting) = scope(40);
     let runtime = runtime(scope.clone()); let entered = runtime.enter();
     let policy = policy(scope.clone()); let guard = policy.enter_thread();
     let (sender, mut receiver) = try_channel::<u64>(1).unwrap();
@@ -181,8 +178,17 @@ fn owned_channel_recycled_blocks_still_require_finite_total_send_admission() {
         }
         count
     });
-    assert!(accepted > 0 && accepted < 12);
+    assert!(accepted > 0 && accepted < 40);
     assert!(scope.failure().is_some());
     drop((sender, receiver, guard, policy)); drop(entered); drop(runtime); drop(scope);
     assert_eq!(accounting.live.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn compatibility_background_executor_runs_inside_current_thread_runtime() {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let executor = TokioBackgroundExecutor::try_new().unwrap();
+    runtime.block_on(async {
+        assert_eq!(executor.try_block_on(async { 29 }).unwrap(), 29);
+    });
 }

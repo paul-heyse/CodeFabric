@@ -6,6 +6,8 @@ mod resource_budget;
 mod native_resource_policy;
 use native_resource_policy::*;
 use resource_budget::*;
+#[path = "../../support/native_runtime.rs"]
+mod native_runtime;
 use std::cell::RefCell;
 use std::sync::Arc;
 use arrow_schema::resource::{ResourceAllocationRequest, RetainedResourceOwner};
@@ -115,12 +117,10 @@ fn native_worker_all_policies_cover_coordinator_runtime_and_blocking_threads() {
     let start_owner = owner.clone();
     let guard = owner.enter_thread().unwrap();
     verify_current(&owner);
-    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).max_blocking_threads(3)
-        .on_thread_start(move || {
+    let runtime = native_runtime::runtime(owner.scope().clone(), move || {
             let guard = start_owner.enter_thread().unwrap();
             WORKER.with(|slot| *slot.borrow_mut() = Some(guard));
-        })
-        .on_thread_stop(|| WORKER.with(|slot| { slot.borrow_mut().take(); })).build().unwrap();
+        }, || WORKER.with(|slot| { slot.borrow_mut().take(); }));
     let output = runtime.block_on(async {
         let async_owner = owner.clone();
         let asynchronous = tokio::spawn(async move {
@@ -166,17 +166,17 @@ fn native_worker_url_policy_covers_all_worker_kinds_and_rejects_foreign_origins(
     let base = url::Url::parse("file:///workspace/_delta_log/").unwrap();
     let start = owner.clone();
     let _guard = owner.enter_thread().unwrap();
-    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).max_blocking_threads(1)
-        .on_thread_start(move || { WORKER.with(|slot| *slot.borrow_mut() = Some(start.enter_thread().unwrap())); })
-        .on_thread_stop(|| WORKER.with(|slot| { slot.borrow_mut().take(); })).build().unwrap();
+    let runtime = native_runtime::runtime(owner.scope().clone(), move || { WORKER.with(|slot| *slot.borrow_mut() = Some(start.enter_thread().unwrap())); }, || WORKER.with(|slot| { slot.borrow_mut().take(); }));
     let first = buoyant_kernel::OwnedFileMeta::try_from_reference(&base, "original.json", 0, 0).unwrap();
     let asynchronous = runtime.block_on(async {
         let base_for_blocking = base.clone();
-        let asynchronous = tokio::spawn(async move { buoyant_kernel::OwnedFileMeta::try_from_reference(&base, "nested.json", 0, 0).unwrap() });
+        // Finish successful URL construction before the blocking worker latches
+        // the deliberate origin failure for the entire shared operation.
+        let asynchronous = tokio::spawn(async move { buoyant_kernel::OwnedFileMeta::try_from_reference(&base, "nested.json", 0, 0).unwrap() }).await.unwrap();
         tokio::task::spawn_blocking(move || {
             assert!(buoyant_kernel::OwnedFileMeta::try_from_reference(&base_for_blocking, "https://foreign.example/private", 0, 0).is_err());
         }).await.unwrap();
-        asynchronous.await.unwrap()
+        asynchronous
     });
     drop(runtime);
     assert!(Arc::ptr_eq(first.resource_scope().unwrap(), owner.scope()));

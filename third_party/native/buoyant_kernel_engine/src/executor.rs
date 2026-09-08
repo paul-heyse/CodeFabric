@@ -123,7 +123,10 @@ pub mod tokio {
                 Err(Error::generic("native Tokio executor terminated before returning its admitted result"))
             }
         };
-        if Handle::try_current().is_ok() {
+        // A background executor can be called from a current-thread runtime:
+        // its independent worker drives the future while this thread receives.
+        // Only a multithread caller can perform Tokio's worker-core handoff.
+        if Handle::try_current().is_ok_and(|handle| handle.runtime_flavor() == RuntimeFlavor::MultiThread) {
             tokio::runtime::resource::try_block_in_place(recv).map_err(|error| delta_kernel::resource::ResourceExhausted {kind:error.kind,requested:error.requested,limit:error.limit})?
         } else { recv() }
     }

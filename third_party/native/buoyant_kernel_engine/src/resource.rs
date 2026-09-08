@@ -238,7 +238,7 @@ where T: Send + 'static, E: From<delta_kernel::Error> + Send + 'static,
             scope.reserve(AllocationRequest { kind: "native_join_set_entry", bytes: add(entry,abort)? })?;
         }
         admit_task(&guarded, self.scope.as_ref())?;
-        Ok(self.inner.spawn(guarded))
+        self.inner.try_spawn(guarded).map_err(native_error)
     }
 }
 

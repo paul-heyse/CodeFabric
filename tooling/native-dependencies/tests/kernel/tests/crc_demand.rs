@@ -4,6 +4,8 @@ mod resource_budget;
 mod native_resource_policy;
 #[path = "support/native_owner.rs"]
 mod native_owner;
+#[path = "support/crc_runtime.rs"]
+mod crc_runtime;
 use std::collections::HashMap;
 use std::sync::{
     Arc, Mutex,
@@ -19,8 +21,9 @@ fn limits() -> JsonResourceLimits {
     JsonResourceLimits { max_bytes: 1 << 20, max_tokens: 1 << 16, max_depth: 64, max_string_bytes: 1 << 20, max_container_items: 1 << 16 }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Accounting {
+    budget: resource_budget::ResourceBudget,
     live: AtomicUsize,
     released: AtomicUsize,
     deny: AtomicBool,
@@ -28,10 +31,14 @@ struct Accounting {
     requests: Mutex<Vec<AllocationRequest>>,
 }
 
+impl Default for Accounting {
+    fn default() -> Self { Self { budget: native_owner::budget(), live: AtomicUsize::new(0), released: AtomicUsize::new(0), deny: AtomicBool::new(false), deny_kind: Mutex::new(None), requests: Mutex::new(Vec::new()) } }
+}
+
 #[derive(Debug)]
 struct Admission(Arc<Accounting>);
 #[derive(Debug)]
-struct Receipt { bytes: usize, accounting: Arc<Accounting> }
+struct Receipt { bytes: usize, accounting: Arc<Accounting>, _reservation: resource_budget::ResourceReservation }
 impl AllocationReceipt for Receipt { fn bytes(&self) -> usize { self.bytes } }
 impl Drop for Receipt {
     fn drop(&mut self) {
@@ -47,13 +54,15 @@ impl AllocationAdmission for Admission {
         {
             return Err(ResourceExhausted { kind: request.kind, requested: request.bytes, limit: 0 });
         }
+        let reservation = self.0.budget.try_reserve(resource_budget::ResourceClass::Data, resource_budget::ResourceAmounts { memory_bytes: request.bytes as u64, ..Default::default() })
+            .map_err(|_| ResourceExhausted { kind: request.kind, requested: request.bytes, limit: (240 << 20) })?;
         self.0.live.fetch_add(request.bytes, Ordering::SeqCst);
-        Ok(Arc::new(Receipt { bytes: request.bytes, accounting: self.0.clone() }))
+        Ok(Arc::new(Receipt { bytes: request.bytes, accounting: self.0.clone(), _reservation: reservation }))
     }
 }
 fn scope() -> (Arc<NativeResourceScope>, Arc<Accounting>) {
     let accounting = Arc::new(Accounting::default());
-    let scope = NativeResourceScope::try_new(Arc::new(Admission(accounting.clone())), 256).unwrap();
+    let scope = NativeResourceScope::try_new(Arc::new(Admission(accounting.clone())), 4096).unwrap();
     (scope, accounting)
 }
 fn parse(scope: Arc<NativeResourceScope>) -> Crc {
@@ -61,6 +70,11 @@ fn parse(scope: Arc<NativeResourceScope>) -> Crc {
 }
 fn request_bytes(accounting: &Accounting, kind: &str) -> usize {
     accounting.requests.lock().unwrap().iter().rev().find(|request| request.kind == kind).unwrap().bytes
+}
+
+fn engine(scope: Arc<NativeResourceScope>, runtime: &tokio::runtime::Runtime, store: Arc<dyn object_store::ObjectStore>) -> buoyant_kernel_engine::DefaultEngine<buoyant_kernel_engine::executor::tokio::TokioMultiThreadExecutor> {
+    DefaultEngineBuilder::try_new_with_executor(store, buoyant_kernel_engine::executor::tokio::TokioMultiThreadExecutor::try_new_current_shared(runtime.handle().clone()).unwrap()).unwrap()
+        .with_json_resource_limits(limits()).unwrap().with_resource_scope(scope).try_build().unwrap()
 }
 
 #[test]
@@ -157,8 +171,12 @@ fn crc_counted_writer_retains_actual_bytes_through_slice_after_delete() {
     let (scope, accounting) = scope();
     let crc = parse(scope.clone());
     let store = Arc::new(object_store::memory::InMemory::new());
-    let engine = DefaultEngineBuilder::new(store.clone()).with_json_resource_limits(limits()).unwrap().with_resource_scope(scope.clone()).build().unwrap();
-    let path = url::Url::parse("memory:///0.crc").unwrap();
+    let owner = crc_runtime::Owner::new(scope.clone(), &url::Url::parse("file:///workspace/").unwrap(), limits());
+    let runtime = owner.runtime();
+    let entered = runtime.enter();
+    let thread = owner.enter();
+    let engine = engine(scope.clone(), &runtime, store.clone());
+    let path = url::Url::parse("file:///workspace/0.crc").unwrap();
     buoyant_kernel::crc::try_write_crc_file(&engine, &path, &crc).unwrap();
     let output = engine.storage_handler().read_files(vec![(path.clone(), None)]).unwrap().next().unwrap().unwrap();
     let decoded = Crc::try_from_json_bytes_admitted(&output, 0, None, Some(limits())).unwrap();
@@ -167,7 +185,8 @@ fn crc_counted_writer_retains_actual_bytes_through_slice_after_delete() {
     let pointer = sliced.as_ptr();
     assert_eq!(pointer, output.as_ptr());
     engine.storage_handler().delete(&path).unwrap();
-    drop((scope, engine, crc, output));
+    drop((engine, crc, output, decoded, thread));
+    drop(entered); drop(runtime); drop(owner); drop(scope);
     assert!(accounting.live.load(Ordering::SeqCst) > 0);
     assert_eq!(sliced[0], b'{');
     drop(sliced);
@@ -178,11 +197,18 @@ fn crc_counted_writer_retains_actual_bytes_through_slice_after_delete() {
 fn crc_writer_denial_precedes_storage_mutation() {
     let (scope, accounting) = scope();
     let crc = parse(scope.clone());
-    let engine = DefaultEngineBuilder::new(Arc::new(object_store::memory::InMemory::new())).with_json_resource_limits(limits()).unwrap().with_resource_scope(scope.clone()).build().unwrap();
-    let path = url::Url::parse("memory:///denied.crc").unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let root = url::Url::from_directory_path(directory.path()).unwrap();
+    let owner = crc_runtime::Owner::new(scope.clone(), &root, limits());
+    let runtime = owner.runtime();
+    let entered = runtime.enter();
+    let thread = owner.enter();
+    let engine = engine(scope.clone(), &runtime, Arc::new(object_store::local::LocalFileSystem::new()));
+    let path = root.join("denied.crc").unwrap();
     accounting.deny.store(true, Ordering::SeqCst);
     assert!(buoyant_kernel::crc::try_write_crc_file(&engine, &path, &crc).unwrap_err().is_resource_exhausted());
-    assert!(engine.storage_handler().head(&path).is_err());
+    assert!(!directory.path().join("denied.crc").exists(), "denial must precede native filesystem mutation");
+    drop(thread); drop(entered); drop(runtime);
 }
 
 #[test]
@@ -192,11 +218,16 @@ fn crc_capacity_failure_does_not_become_optional_snapshot_fallback() {
     std::fs::create_dir(directory.path().join("_delta_log")).unwrap();
     std::fs::write(directory.path().join("_delta_log/00000000000000000000.crc"), CRC).unwrap();
     std::fs::write(directory.path().join("_delta_log/00000000000000000000.json"), b"{}").unwrap();
-    let engine = DefaultEngineBuilder::new(Arc::new(object_store::local::LocalFileSystem::new())).with_json_resource_limits(limits()).unwrap().with_resource_scope(scope).build().unwrap();
+    let owner = crc_runtime::Owner::new(scope.clone(), &url::Url::from_directory_path(directory.path()).unwrap(), limits());
+    let runtime = owner.runtime();
+    let entered = runtime.enter();
+    let thread = owner.enter();
+    let engine = engine(scope.clone(), &runtime, Arc::new(object_store::local::LocalFileSystem::new()));
     *accounting.deny_kind.lock().unwrap() = Some("crc_decode_and_conversion");
     let error = Snapshot::builder_for(url::Url::from_directory_path(directory.path()).unwrap().as_str()).build(&engine).unwrap_err();
     assert!(error.is_resource_exhausted());
     assert!(error.to_string().contains("crc_decode_and_conversion"), "{error:?}");
+    drop(thread); drop(entered); drop(runtime);
 }
 
 #[test]
@@ -285,7 +316,11 @@ fn crc_native_replay_preadmits_owned_getter_materialization() {
     std::fs::write(log.join("00000000000000000000.crc"), CRC).unwrap();
     std::fs::write(log.join("00000000000000000000.json"), b"{}").unwrap();
     std::fs::write(log.join("00000000000000000001.json"), b"{\"commitInfo\":{\"operation\":\"WRITE\"}}\n{\"add\":{\"path\":\"a.parquet\",\"size\":8}}\n").unwrap();
-    let engine = DefaultEngineBuilder::new(Arc::new(object_store::local::LocalFileSystem::new())).with_json_resource_limits(limits()).unwrap().with_resource_scope(scope.clone()).build().unwrap();
+    let owner = crc_runtime::Owner::new(scope.clone(), &url::Url::from_directory_path(directory.path()).unwrap(), limits());
+    let runtime = owner.runtime();
+    let entered = runtime.enter();
+    let thread = owner.enter();
+    let engine = engine(scope.clone(), &runtime, Arc::new(object_store::local::LocalFileSystem::new()));
     let url = url::Url::from_directory_path(directory.path()).unwrap();
     let snapshot = Snapshot::builder_for(url.as_str())
         .with_incremental_crc_replay(buoyant_kernel::snapshot::IncrementalReplay::UpToCommits(1))
@@ -304,6 +339,7 @@ fn crc_native_replay_preadmits_owned_getter_materialization() {
         .build(&engine).unwrap_err();
     assert!(error.is_resource_exhausted());
     assert!(error.to_string().contains("crc_replay_owned_batch"));
+    drop(thread); drop(entered); drop(runtime);
 }
 
 #[test]
@@ -318,18 +354,16 @@ fn crc_native_create_transaction_preadmits_zero_state() {
     let scope = owner.scope().clone();
     let before = budget.observation().used.memory_bytes;
     eprintln!("NATIVE_PHASE|owner|{}|{}", before, budget.observation().peak.memory_bytes);
-    let engine = DefaultEngineBuilder::new(Arc::new(object_store::local::LocalFileSystem::new())).with_json_resource_limits(limits()).unwrap().with_resource_scope(scope.clone()).with_task_executor(buoyant_kernel_engine::executor::tokio::TokioMultiThreadExecutor::try_new_current_shared(runtime.handle().clone()).unwrap()).try_build().unwrap();
+    let engine = engine(scope.clone(), &runtime, Arc::new(object_store::local::LocalFileSystem::new()));
     let schema = Arc::new(StructType::try_new([StructField::nullable("id", DataType::LONG)]).unwrap());
     let transaction = create_table(directory.path().to_str().unwrap(), schema, "crc-resource-test").build(&engine, Box::new(FileSystemCommitter::new())).unwrap();
     eprintln!("NATIVE_PHASE|built|{}|{}", budget.observation().used.memory_bytes, budget.observation().peak.memory_bytes);
     let CommitResult::CommittedTransaction(committed) = transaction.commit(&engine).unwrap() else { panic!("native commit failed") };
+    eprintln!("NATIVE_PHASE|committed|{}|{}", budget.observation().used.memory_bytes, budget.observation().peak.memory_bytes);
     let crc = committed.post_commit_snapshot().unwrap().crc().unwrap();
     assert_eq!(crc.version, 0);
     assert!(Arc::ptr_eq(crc.resource_scope().unwrap(), &scope));
     assert!(budget.observation().used.memory_bytes > before);
-    assert!(budget.observation().used.memory_bytes > before);
-    assert!(budget.observation().used.memory_bytes > before);
-    eprintln!("NATIVE_PHASE|committed|{}|{}", budget.observation().used.memory_bytes, budget.observation().peak.memory_bytes);
     drop(guard); drop(entered); drop(runtime);
 
 }
@@ -369,7 +403,7 @@ fn native_action_resource_marker_preserves_generated_schema_and_conversion() {
     let scope = owner.scope().clone();
     let before = budget.observation().used.memory_bytes;
     let crc = parse(scope.clone());
-    let engine = DefaultEngineBuilder::new(Arc::new(object_store::memory::InMemory::new())).with_task_executor(buoyant_kernel_engine::executor::tokio::TokioMultiThreadExecutor::try_new_current_shared(runtime.handle().clone()).unwrap()).try_build().unwrap();
+    let engine = engine(scope.clone(), &runtime, Arc::new(object_store::memory::InMemory::new()));
     let batch = crc.protocol.into_engine_data(Arc::new(protocol_schema), &engine).unwrap();
     assert_eq!(batch.len(), 1);
     assert!(budget.observation().used.memory_bytes > before);
@@ -399,7 +433,11 @@ fn native_normal_log_replay_admits_original_metadata_and_protocol() {
     std::fs::write(log.join("00000000000000000000.json"), br#"{"protocol":{"minReaderVersion":1,"minWriterVersion":2}}
 {"metaData":{"id":"original-replay","format":{"provider":"parquet","options":{}},"schemaString":"{\"type\":\"struct\",\"fields\":[{\"name\":\"id\",\"type\":\"long\",\"nullable\":true,\"metadata\":{}}]}","partitionColumns":[],"configuration":{"test":"original-value"}}}
 "#).unwrap();
-    let engine = DefaultEngineBuilder::new(Arc::new(object_store::local::LocalFileSystem::new())).with_json_resource_limits(limits()).unwrap().with_resource_scope(scope.clone()).build().unwrap();
+    let owner = crc_runtime::Owner::new(scope.clone(), &url::Url::from_directory_path(directory.path()).unwrap(), limits());
+    let runtime = owner.runtime();
+    let entered = runtime.enter();
+    let thread = owner.enter();
+    let engine = engine(scope.clone(), &runtime, Arc::new(object_store::local::LocalFileSystem::new()));
     let url = url::Url::from_directory_path(directory.path()).unwrap();
     let snapshot = Snapshot::builder_for(url.as_str()).build(&engine).unwrap();
     let configuration = snapshot.table_configuration();
@@ -412,6 +450,7 @@ fn native_normal_log_replay_admits_original_metadata_and_protocol() {
     let error = Snapshot::builder_for(url.as_str()).build(&engine).unwrap_err();
     assert!(error.is_resource_exhausted());
     assert!(error.to_string().contains("native_metadata_from_getters"));
+    drop(thread); drop(entered); drop(runtime);
 }
 
 #[test]

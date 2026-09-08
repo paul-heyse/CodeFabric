@@ -1,3 +1,7 @@
+#[path = "support/crc_runtime.rs"]
+mod crc_runtime;
+#[path = "../../support/native_runtime.rs"]
+mod native_runtime;
 use std::sync::{Arc, Mutex, atomic::{AtomicUsize, AtomicBool, Ordering}};
 use buoyant_kernel::{OwnedFileMeta, OwnedLogPaths, resource::*};
 use url::Url;
@@ -108,15 +112,17 @@ fn governed_parser_rejects_legacy_unadmitted_file_meta() {
     assert!(OwnedFileMeta::unadmitted(meta).into_parsed().unwrap_err().is_resource_exhausted());
 }
 #[test]
-fn native_listing_retains_captured_scope_across_background_runtime() {
+fn native_listing_retains_captured_scope_across_owned_runtime() {
     use buoyant_kernel::Engine;
     let (scope, ledger, policy) = scope();
+    let runtime = native_runtime::kernel_runtime(scope.clone(), JsonResourceLimits { max_bytes: 1<<20, max_tokens: 1<<16, max_depth: 64, max_string_bytes: 1<<20, max_container_items: 1<<16 });
+    let entered = runtime.enter();
     let thread = policy.enter_thread();
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("_delta_log");
     std::fs::create_dir(&log).unwrap();
     for version in [2, 0, 1] { std::fs::write(log.join(format!("{version:020}.json")), "{}").unwrap(); }
-    let engine = buoyant_kernel_engine::DefaultEngineBuilder::new(Arc::new(object_store::local::LocalFileSystem::new())).build().unwrap();
+    let engine = buoyant_kernel_engine::DefaultEngineBuilder::try_new_with_executor(Arc::new(object_store::local::LocalFileSystem::new()), buoyant_kernel_engine::executor::tokio::TokioMultiThreadExecutor::try_new_current_shared(runtime.handle().clone()).unwrap()).unwrap().build().unwrap();
     let root = Url::from_directory_path(&log).unwrap();
     let mut iter = engine.storage_handler().list_from(&root.join("00000000000000000000").unwrap()).unwrap();
     let first = iter.next().unwrap().unwrap();
@@ -124,7 +130,7 @@ fn native_listing_retains_captured_scope_across_background_runtime() {
     assert!(first.location.path().ends_with("00000000000000000000.json"));
     let last = iter.last().unwrap().unwrap();
     assert!(last.location.path().ends_with("00000000000000000002.json"));
-    drop(engine); drop(thread); drop(policy); drop(scope);
+    drop(engine); drop(thread); drop(policy); drop(entered); drop(runtime); drop(scope);
     assert!(ledger.live.load(Ordering::SeqCst) > 0);
     drop(first); drop(last);
     assert_eq!(ledger.live.load(Ordering::SeqCst), 0);
@@ -195,21 +201,25 @@ fn read_selection_denial_precedes_url_copy() {
 #[test]
 fn buffered_total_node_denial_precedes_native_file_open() {
     use buoyant_kernel::Engine;
-    use buoyant_kernel::schema::{StructType, StructField, DataType};
-    // Build caller-provided schema/inputs before selecting the native scope.
-    let schema = Arc::new(StructType::try_new([StructField::nullable("x", DataType::LONG)]).unwrap());
+    use buoyant_kernel::schema::StructType;
     let input = buoyant_kernel::FileMeta::new(Url::parse("file:///missing/part.json").unwrap(), 0, 1);
     let (scope, ledger, policy) = scope();
-    let thread = policy.enter_thread();
+    let owner = crc_runtime::Owner::new(scope.clone(), &Url::parse("file:///missing/").unwrap(), JsonResourceLimits { max_bytes: 1<<20, max_tokens: 1<<16, max_depth: 64, max_string_bytes: 1<<20, max_container_items: 1<<16 });
+    let runtime = owner.runtime();
+    let entered = runtime.enter();
+    let thread = owner.enter();
+    let schema = Arc::new(StructType::try_from_json_with_resources(
+        r#"{"type":"struct","fields":[{"name":"x","type":"long","nullable":true,"metadata":{}}]}"#,
+        scope.clone(), current_json_resource_limits().unwrap()).unwrap());
     *ledger.deny.lock().unwrap() = Some("native_buffered_total_nodes");
-    let engine = buoyant_kernel_engine::DefaultEngineBuilder::new(Arc::new(object_store::memory::InMemory::new())).build().unwrap();
+    let engine = buoyant_kernel_engine::DefaultEngineBuilder::try_new_with_executor(Arc::new(object_store::memory::InMemory::new()), buoyant_kernel_engine::executor::tokio::TokioMultiThreadExecutor::try_new_current_shared(runtime.handle().clone()).unwrap()).unwrap().build().unwrap();
     let error = match engine.json_handler().read_json_files(&[input], schema, None) {
         Ok(_) => panic!("descriptor denial must precede opening the missing file"),
         Err(error) => error,
     };
-    assert!(error.is_resource_exhausted());
-    assert!(ledger.requests.lock().unwrap().iter().any(|request| request.kind == "native_buffered_total_nodes"));
-    drop(error); drop(engine); drop(thread); drop(policy); drop(scope);
+    assert!(error.is_resource_exhausted(), "{error:?}");
+    assert!(ledger.requests.lock().unwrap().iter().any(|request| request.kind == "native_buffered_total_nodes"), "{error:?}");
+    drop(error); drop(engine); drop(thread); drop(policy); drop(entered); drop(runtime); drop(owner); drop(scope);
     assert_eq!(ledger.live.load(Ordering::SeqCst), 0);
 }
 

@@ -148,6 +148,29 @@ impl<T: 'static> JoinSet<T> {
         self.insert(crate::spawn(task))
     }
 
+    /// Spawn a task while surfacing native resource denial before inserting a
+    /// JoinSet entry. Successful tasks preserve the ordinary spawn semantics.
+    ///
+    /// The caller must preadmit this set's descriptor/list allocation separately.
+    /// This method reports the original runtime task admission error and never
+    /// polls or stores a task denied by that runtime.
+    #[cfg(all(feature = "rt-multi-thread", feature = "time"))]
+    #[track_caller]
+    pub fn try_spawn<F>(
+        &mut self,
+        task: F,
+    ) -> Result<AbortHandle, crate::runtime::resource::ResourceLayoutError>
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send,
+    {
+        let task = crate::spawn(task);
+        if let Some(error) = task.resource_denial() {
+            return Err(error);
+        }
+        Ok(self.insert(task))
+    }
+
     /// Spawn the provided task on the provided runtime and store it in this
     /// `JoinSet` returning an [`AbortHandle`] that can be used to remotely
     /// cancel the task.

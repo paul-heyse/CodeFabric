@@ -551,7 +551,7 @@ async fn cache_update_admits_new_identity_and_descriptors_and_reuse_does_not_clo
             .await?
             .with_materialized_files_admission(policy.clone())?,
     )
-    .try_materialize_files_with_engine(log_store.engine(None))
+    .try_materialize_files_with_engine(log_store.engine(None)?)
     .await?;
     assert_eq!(policy.live(), (1, 1));
     let reused = original
@@ -582,7 +582,7 @@ async fn cache_update_admits_new_identity_and_descriptors_and_reuse_does_not_clo
         .version();
     let updated = original
         .clone()
-        .update(log_store.engine(None), Some(version))
+        .update(log_store.engine(None)?, Some(version))
         .await?;
     assert_eq!(updated.version(), 1);
     assert_eq!(policy.live(), (2, 2));
@@ -644,12 +644,12 @@ async fn cache_checkpoint_refresh_keeps_admission_and_acquires_new_identity_rece
             .await?
             .with_materialized_files_admission(policy.clone())?,
     )
-    .try_materialize_files_with_engine(log_store.engine(None))
+    .try_materialize_files_with_engine(log_store.engine(None)?)
     .await?;
     deltalake_core::checkpoints::create_checkpoint(&table, None).await?;
     let refreshed = original
         .clone()
-        .update(log_store.engine(None), Some(0))
+        .update(log_store.engine(None)?, Some(0))
         .await?;
     assert_eq!(refreshed.version(), original.version());
     assert!(

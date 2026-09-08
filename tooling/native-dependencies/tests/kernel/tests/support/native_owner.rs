@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#[path = "../../../support/native_runtime.rs"]
+mod native_runtime;
 use std::sync::Arc;
 use crate::{native_resource_policy::*, resource_budget::*};
 pub fn budget() -> ResourceBudget {
@@ -24,7 +26,7 @@ pub fn new_owner(budget: ResourceBudget, class: ResourceClass, limits: NativeRes
 
 thread_local! { static THREAD_POLICY: std::cell::RefCell<Option<NativeResourceThreadGuard>> = const { std::cell::RefCell::new(None) }; }
 pub fn runtime(owner: Arc<NativeResourceOwner>) -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_multi_thread().worker_threads(1).max_blocking_threads(2).enable_all()
-        .on_thread_start(move || THREAD_POLICY.with(|slot| *slot.borrow_mut() = Some(owner.enter_thread().unwrap())))
-        .on_thread_stop(|| THREAD_POLICY.with(|slot| { slot.borrow_mut().take(); })).build().unwrap()
+    native_runtime::runtime(owner.scope().clone(),
+        move || THREAD_POLICY.with(|slot| *slot.borrow_mut() = Some(owner.enter_thread().unwrap())),
+        || THREAD_POLICY.with(|slot| { slot.borrow_mut().take(); }))
 }
