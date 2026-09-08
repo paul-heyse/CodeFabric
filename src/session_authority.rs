@@ -142,7 +142,7 @@ impl RegisteredLaunchGrant {
             || self.expires_at_unix_ms <= self.issued_at_unix_ms
             || self.daemon_generation == 0
             || self.supervisor_generation == 0
-            || self.workspace_ids.iter().any(|id| *id == [0; 16])
+            || self.workspace_ids.contains(&[0; 16])
             || self.peer_start_identity.as_ref().is_some_and(|identity| {
                 identity.is_empty() || identity.len() > 128 || !identity.is_ascii()
             })

@@ -33,6 +33,7 @@ CONTRACTS = {
             {
                 "contract-models",
                 "dep:arrow-array",
+                "dep:arrow-buffer",
                 "dep:arrow-schema",
                 "dep:thiserror",
             }
@@ -56,7 +57,7 @@ CONTRACTS = {
             }
         ),
         required_packages=frozenset(
-            {"arrow-array", "arrow-schema", "codefabric", "thiserror"}
+            {"arrow-array", "arrow-buffer", "arrow-schema", "codefabric", "thiserror"}
         ),
         forbidden_packages=frozenset(
             {
@@ -100,7 +101,7 @@ CONTRACTS = {
             }
         ),
         required_packages=frozenset(
-            {"arrow-array", "arrow-schema", "codefabric", "thiserror"}
+            {"arrow-array", "arrow-buffer", "arrow-schema", "codefabric", "thiserror"}
         ),
         forbidden_packages=frozenset(
             {
@@ -212,6 +213,7 @@ CONTRACTS = {
                 "dep:arrow-schema",
                 "dep:arrow-select",
                 "dep:arrow-string",
+                "dep:bytes",
                 "dep:datafusion",
                 "dep:deltalake",
                 "dep:futures",

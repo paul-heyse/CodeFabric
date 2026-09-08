@@ -6,6 +6,8 @@
 
 [files]
 extend-exclude = [
+  # Immutable upstream/amended dependency artifacts have their own exact census verifier.
+  "third_party/native/",
   "target/",
   "dist/",
   ".venv/",

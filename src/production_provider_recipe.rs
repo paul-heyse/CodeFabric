@@ -2504,7 +2504,7 @@ mod tests {
 
         let expected_relations = NativeSyntaxRelation::ALL
             .into_iter()
-            .map(|relation| relation.as_str())
+            .map(super::super::provider_native_syntax::NativeSyntaxRelation::as_str)
             .chain(
                 PyreflyRelation::ALL
                     .into_iter()

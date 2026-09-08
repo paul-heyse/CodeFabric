@@ -1774,7 +1774,7 @@ fn projection_identity_digest(projections: &[ProjectionRow]) -> [u8; 32] {
             None => {
                 hasher.update(&[0]);
             }
-        };
+        }
         match projection.type_key {
             Some(value) => {
                 hasher.update(&[1]);
@@ -1783,7 +1783,7 @@ fn projection_identity_digest(projections: &[ProjectionRow]) -> [u8; 32] {
             None => {
                 hasher.update(&[0]);
             }
-        };
+        }
     }
     *hasher.finalize().as_bytes()
 }
@@ -1865,8 +1865,7 @@ fn parse_accesses(
                     family: Arc::from("dataflow"),
                     reason_code: Arc::from("UNCLASSIFIED_ACCESS_KIND"),
                     detail: Arc::from(format!(
-                        "{access_kind} at block {block_index} {slot_kind} {slot_index}:{access_ordinal} has no transfer rule in {}",
-                        RUST_MIR_DERIVED_ANALYSIS_RELEASE
+                        "{access_kind} at block {block_index} {slot_kind} {slot_index}:{access_ordinal} has no transfer rule in {RUST_MIR_DERIVED_ANALYSIS_RELEASE}"
                     )),
                     bounded: true,
                     input_relation: Some(Arc::from(RustcRelation::Access.relation_id())),

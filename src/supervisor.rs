@@ -3043,15 +3043,16 @@ async fn observe_adapter_distribution(
             .await
             .map(|_| bytes)
     });
-    let status = match tokio::time::timeout(ADAPTER_IDENTITY_PROBE_TIMEOUT, child.wait()).await {
-        Ok(status) => status
-            .map_err(|source| SupervisorError::Child(format!("adapter identity join: {source}")))?,
-        Err(_) => {
-            terminate_and_join_child(&mut child, "adapter identity probe timeout").await?;
-            return Err(SupervisorError::Policy(
-                "adapter distribution identity observation timed out".into(),
-            ));
-        }
+    let status = if let Ok(status) =
+        tokio::time::timeout(ADAPTER_IDENTITY_PROBE_TIMEOUT, child.wait()).await
+    {
+        status
+            .map_err(|source| SupervisorError::Child(format!("adapter identity join: {source}")))?
+    } else {
+        terminate_and_join_child(&mut child, "adapter identity probe timeout").await?;
+        return Err(SupervisorError::Policy(
+            "adapter distribution identity observation timed out".into(),
+        ));
     };
     let stdout = stdout_task
         .await
@@ -4158,6 +4159,8 @@ impl SupervisorError {
     }
 }
 
+const _: u32 = MAX_DAEMON_RESTARTS;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4915,10 +4918,7 @@ mod tests {
         drop(registry);
         release.wait().await;
         let envelope = activation.await.unwrap().expect("accepted activation");
-        assert_eq!(
-            envelope.session_expires_at_unix_ms > unix_millis().unwrap(),
-            true
-        );
+        assert!(envelope.session_expires_at_unix_ms > unix_millis().unwrap());
         assert_eq!(launches.lock().await.active.len(), 1);
         server.await.unwrap();
     }
@@ -5200,5 +5200,3 @@ raise SystemExit(0 if data == b'{"format":"probe"}\n' else 93)
         assert!(debug.contains("[REDACTED]"));
     }
 }
-
-const _: u32 = MAX_DAEMON_RESTARTS;

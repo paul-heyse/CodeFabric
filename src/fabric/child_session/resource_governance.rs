@@ -1,8 +1,8 @@
-//! Epoch-scoped resource admission and shared DataFusion execution resources.
+//! Workspace-scoped resource admission with immutable epoch-pinned views.
 //!
 //! The coordinator is an application-owned overlay around DataFusion's native
 //! [`RuntimeEnv`] resource authorities. Every reduced child session gets a closed
-//! object-store registry but shares the epoch's exact memory pool, disk manager,
+//! object-store registry but shares the workspace's exact memory pool, disk manager,
 //! and caches. Scheduling remains application-owned because DataFusion does not
 //! provide daemon-wide agent fairness, update reservations, result-lease quotas,
 //! or admission backpressure.
@@ -11,10 +11,12 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::future::Future;
 use std::num::{NonZeroU64, NonZeroUsize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use datafusion::execution::runtime_env::{RuntimeEnv, RuntimeEnvBuilder};
+use futures::FutureExt as _;
 use tokio::sync::oneshot;
 use tokio::time::Instant;
 
@@ -23,8 +25,13 @@ use crate::fabric::arrow_result_resource::{
     ArrowResultResourceError, ArrowResultResourcePackage, ResultResourceLease,
 };
 use crate::fabric::command::{EpochId, LeaseId, PrincipalId};
+use crate::fabric::native_operations::{self, NativeOperation, NativeOperationRegistry};
+pub use crate::fabric::native_operations::{NativeOperationError, NativeOperationObservation};
 #[cfg(feature = "daemon")]
 use crate::fabric::streamed_result_package::SealedStreamedResultPackage;
+use crate::resource_budget::{
+    ResourceAmounts, ResourceBudget, ResourceBudgetError, ResourceClass, ResourceReservation,
+};
 
 use super::{ChildResourceLimits, ClosedObjectStoreRegistry};
 
@@ -124,6 +131,55 @@ pub struct EpochResourcePolicy {
 }
 
 impl EpochResourcePolicy {
+    pub(crate) fn matches_native_resources(
+        &self,
+        native: &crate::fabric::resource_ownership::NativeFabricResourceConfig,
+    ) -> bool {
+        let child = &self.datafusion_resources;
+        child.memory_limit_bytes == native.memory_limit_bytes
+            && child.max_spill_bytes == native.max_spill_bytes
+            && child.max_spill_merge_fan_in == native.max_spill_merge_fan_in
+            && child.tracked_consumer_count == native.tracked_consumer_count
+            && child.cache_policy == native.cache_policy
+    }
+    /// Stable encoding of the complete numeric scheduling and child-session policy.
+    /// A workspace label is not an execution-resource policy identity.
+    pub(crate) fn identity(&self) -> [u8; 32] {
+        let mut hash = blake3::Hasher::new();
+        hash.update(b"codefabric.workspace-scheduling-policy.v1\0");
+        for value in [
+            self.datafusion_resources.memory_limit_bytes as u64,
+            self.datafusion_resources.max_spill_bytes,
+            self.datafusion_resources.max_spill_merge_fan_in as u64,
+            self.datafusion_resources.tracked_consumer_count.get() as u64,
+            self.datafusion_resources.batch_size.get() as u64,
+            self.datafusion_resources.target_partitions.get() as u64,
+            self.max_concurrent_work.get() as u64,
+            self.reserved_update_slots as u64,
+            self.max_queued_work.get() as u64,
+            self.max_execution_millis.get(),
+            self.cancellation_poll_millis.get(),
+            self.aging_grants_per_priority_step.get(),
+            self.max_live_result_leases.get() as u64,
+            self.max_retained_result_bytes.get(),
+            self.max_result_lease_millis.get(),
+        ] {
+            hash.update(&value.to_be_bytes());
+        }
+        for class in EpochWorkClass::ALL {
+            let policy = &self.work_class_policies[&class];
+            hash.update(&[
+                class.protocol_index() as u8,
+                policy.priority_rank,
+                u8::from(policy.reserved_headroom_eligible),
+            ]);
+        }
+        let cache = self.datafusion_resources.cache_policy.identity_fragment();
+        hash.update(&(cache.len() as u64).to_be_bytes());
+        hash.update(cache.as_bytes());
+        *hash.finalize().as_bytes()
+    }
+
     /// Construct one fully bounded epoch policy.
     ///
     /// # Errors
@@ -253,34 +309,81 @@ pub struct EpochResourceObservation {
     pub logical_plan_cache_capacity_entries: usize,
     pub active_work: usize,
     pub queued_work: usize,
+    pub oldest_queue_age_millis: u64,
     pub active_by_class: BTreeMap<EpochWorkClass, usize>,
     pub queued_by_class: BTreeMap<EpochWorkClass, usize>,
     pub live_result_leases: usize,
     pub retained_result_bytes: u64,
+    pub native_operations: NativeOperationObservation,
 }
 
-/// Shared epoch resource authority. Cloning preserves the same scheduler and
-/// DataFusion memory/spill domain.
+/// Epoch-pinned view of one workspace scheduler and native resource domain.
+/// Neither cloning nor selecting another epoch creates new admission capacity.
 #[derive(Clone)]
 pub struct EpochResourceCoordinator {
+    epoch_id: EpochId,
     inner: Arc<ResourceInner>,
+}
+
+/// The single scheduling/retention owner for current, candidate and leased epochs.
+#[derive(Clone)]
+pub(crate) struct WorkspaceResourceCoordinator {
+    inner: Arc<ResourceInner>,
+}
+
+impl WorkspaceResourceCoordinator {
+    pub(crate) fn try_new(
+        resource_policy: [u8; 32],
+        policy: EpochResourcePolicy,
+        datafusion_runtime: Arc<RuntimeEnv>,
+        budget: ResourceBudget,
+    ) -> Result<Self, EpochResourceError> {
+        native_operations::install()?;
+        if all_zero(&resource_policy) {
+            return Err(EpochResourceError::InvalidResourcePolicy);
+        }
+        Ok(Self {
+            inner: Arc::new(ResourceInner {
+                resource_policy,
+                policy,
+                datafusion_runtime,
+                budget,
+                native: NativeOperationRegistry::default(),
+                state: Mutex::new(SchedulerState::default()),
+            }),
+        })
+    }
+
+    pub(crate) fn for_epoch(
+        &self,
+        epoch_id: EpochId,
+    ) -> Result<EpochResourceCoordinator, EpochResourceError> {
+        if all_zero(epoch_id.as_bytes()) {
+            return Err(EpochResourceError::InvalidEpoch);
+        }
+        Ok(EpochResourceCoordinator {
+            epoch_id,
+            inner: Arc::clone(&self.inner),
+        })
+    }
 }
 
 impl fmt::Debug for EpochResourceCoordinator {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("EpochResourceCoordinator")
-            .field("epoch_id", &self.inner.epoch_id)
+            .field("epoch_id", &self.epoch_id)
             .field("resource_policy", &"REDACTED_IDENTITY")
             .finish_non_exhaustive()
     }
 }
 
 struct ResourceInner {
-    epoch_id: EpochId,
     resource_policy: [u8; 32],
     policy: EpochResourcePolicy,
     datafusion_runtime: Arc<RuntimeEnv>,
+    budget: ResourceBudget,
+    native: NativeOperationRegistry,
     state: Mutex<SchedulerState>,
 }
 
@@ -321,7 +424,10 @@ struct FairClassQueue {
 }
 
 struct Waiter {
+    _queue_reservation: ResourceReservation,
     id: u64,
+    epoch_id: EpochId,
+    enqueued_at: Instant,
     principal_id: PrincipalId,
     class: EpochWorkClass,
     enqueue_sequence: u64,
@@ -400,32 +506,25 @@ impl EpochResourceCoordinator {
     ///
     /// Rejects sentinel epoch/policy identities and DataFusion runtime setup
     /// failures.
+    #[cfg(test)]
     pub fn try_new(
         epoch_id: EpochId,
         resource_policy: [u8; 32],
         policy: EpochResourcePolicy,
     ) -> Result<Self, EpochResourceError> {
-        if all_zero(epoch_id.as_bytes()) {
-            return Err(EpochResourceError::InvalidEpoch);
-        }
-        if all_zero(&resource_policy) {
-            return Err(EpochResourceError::InvalidResourcePolicy);
-        }
         let datafusion_runtime = policy.datafusion_resources.runtime_env()?;
-        Ok(Self {
-            inner: Arc::new(ResourceInner {
-                epoch_id,
-                resource_policy,
-                policy,
-                datafusion_runtime,
-                state: Mutex::new(SchedulerState::default()),
-            }),
-        })
+        WorkspaceResourceCoordinator::try_new(
+            resource_policy,
+            policy,
+            datafusion_runtime,
+            test_scheduler_budget(),
+        )?
+        .for_epoch(epoch_id)
     }
 
     #[must_use]
     pub fn epoch_id(&self) -> EpochId {
-        self.inner.epoch_id
+        self.epoch_id
     }
 
     #[must_use]
@@ -436,6 +535,10 @@ impl EpochResourceCoordinator {
     #[must_use]
     pub fn policy(&self) -> &EpochResourcePolicy {
         &self.inner.policy
+    }
+
+    pub(crate) fn resource_budget(&self) -> &ResourceBudget {
+        &self.inner.budget
     }
 
     /// Admit one bounded operation through priority, aging, agent fairness,
@@ -465,8 +568,19 @@ impl EpochResourceCoordinator {
                 .ok_or(EpochResourceError::CounterOverflow("next_waiter_id"))?;
             state.next_waiter_id = next_waiter_id;
             let enqueue_sequence = state.dispatch_sequence;
+            let queue_reservation = self.inner.budget.try_reserve(
+                resource_class(request.class),
+                ResourceAmounts {
+                    queued_jobs: 1,
+                    memory_bytes: 4096,
+                    ..ResourceAmounts::default()
+                },
+            )?;
             state.queues.entry(request.class).or_default().push(Waiter {
+                _queue_reservation: queue_reservation,
                 id: waiter_id,
+                epoch_id: request.epoch_id,
+                enqueued_at: Instant::now(),
                 principal_id: request.principal_id,
                 class: request.class,
                 enqueue_sequence,
@@ -477,6 +591,11 @@ impl EpochResourceCoordinator {
             state.queued_work += 1;
             self.dispatch_locked(&mut state);
             waiter_id
+        };
+
+        let _queued_ownership = QueuedWorkRegistration {
+            coordinator: self.clone(),
+            waiter_id,
         };
 
         let cancellation_poll =
@@ -498,6 +617,9 @@ impl EpochResourceCoordinator {
                         self.remove_waiter(waiter_id);
                         return Err(EpochResourceError::Cancelled);
                     }
+                    // Provider/control operations may have freed shared root capacity without
+                    // touching this scheduler. A bounded poll reconsiders the same fair queue.
+                    self.dispatch_locked(&mut *self.lock_state()?);
                 }
             }
         }
@@ -512,9 +634,9 @@ impl EpochResourceCoordinator {
         package: &ArrowResultResourcePackage,
         observed_at_unix_ms: i64,
     ) -> Result<EpochResultLeasePermit, EpochResourceError> {
-        if package.metadata().epoch_id() != self.inner.epoch_id {
+        if package.metadata().epoch_id() != self.epoch_id {
             return Err(EpochResourceError::EpochMismatch {
-                expected: self.inner.epoch_id,
+                expected: self.epoch_id,
                 actual: package.metadata().epoch_id(),
             });
         }
@@ -531,9 +653,9 @@ impl EpochResourceCoordinator {
         package: &SealedStreamedResultPackage,
         observed_at_unix_ms: i64,
     ) -> Result<EpochResultLeasePermit, EpochResourceError> {
-        if package.epoch_id() != self.inner.epoch_id {
+        if package.epoch_id() != self.epoch_id {
             return Err(EpochResourceError::EpochMismatch {
-                expected: self.inner.epoch_id,
+                expected: self.epoch_id,
                 actual: package.epoch_id(),
             });
         }
@@ -593,7 +715,7 @@ impl EpochResourceCoordinator {
         state.retained_result_bytes = next_bytes;
         Ok(EpochResultLeasePermit {
             coordinator: self.clone(),
-            epoch_id: self.inner.epoch_id,
+            epoch_id: self.epoch_id,
             principal_id,
             lease_id: lease.lease_id(),
             retained_bytes,
@@ -615,7 +737,7 @@ impl EpochResourceCoordinator {
             })
             .collect();
         Ok(EpochResourceObservation {
-            epoch_id: self.inner.epoch_id,
+            epoch_id: self.epoch_id,
             resource_policy: self.inner.resource_policy,
             memory_limit_bytes: self.inner.policy.datafusion_resources.memory_limit_bytes,
             memory_reserved_bytes: self.inner.datafusion_runtime.memory_pool.reserved(),
@@ -651,10 +773,19 @@ impl EpochResourceCoordinator {
                 .logical_plan_entries(),
             active_work: state.active_work,
             queued_work: state.queued_work,
+            oldest_queue_age_millis: state
+                .queues
+                .values()
+                .flat_map(|queue| queue.by_principal.values())
+                .filter_map(|queue| queue.front())
+                .map(|waiter| waiter.enqueued_at.elapsed().as_millis())
+                .max()
+                .map_or(0, |millis| u64::try_from(millis).unwrap_or(u64::MAX)),
             active_by_class: state.active_by_class.clone(),
             queued_by_class,
             live_result_leases: state.live_result_leases,
             retained_result_bytes: state.retained_result_bytes,
+            native_operations: self.inner.native.observation(),
         })
     }
 
@@ -664,9 +795,9 @@ impl EpochResourceCoordinator {
         resource_policy: &[u8; 32],
         requested: &ChildResourceLimits,
     ) -> Result<Arc<RuntimeEnv>, EpochResourceError> {
-        if epoch_id != self.inner.epoch_id {
+        if epoch_id != self.epoch_id {
             return Err(EpochResourceError::EpochMismatch {
-                expected: self.inner.epoch_id,
+                expected: self.epoch_id,
                 actual: epoch_id,
             });
         }
@@ -683,9 +814,9 @@ impl EpochResourceCoordinator {
     }
 
     fn validate_request(&self, request: &EpochWorkRequest) -> Result<(), EpochResourceError> {
-        if request.epoch_id != self.inner.epoch_id {
+        if request.epoch_id != self.epoch_id {
             return Err(EpochResourceError::EpochMismatch {
-                expected: self.inner.epoch_id,
+                expected: self.epoch_id,
                 actual: request.epoch_id,
             });
         }
@@ -720,6 +851,16 @@ impl EpochResourceCoordinator {
             let Some(class) = self.select_class(state) else {
                 break;
             };
+            let Ok(reservation) = self.inner.budget.try_reserve(
+                resource_class(class),
+                ResourceAmounts {
+                    running_jobs: 1,
+                    memory_bytes: native_operations::NATIVE_BOOKKEEPING_BYTES,
+                    ..ResourceAmounts::default()
+                },
+            ) else {
+                break;
+            };
             let Some(waiter) = state
                 .queues
                 .get_mut(&class)
@@ -740,16 +881,32 @@ impl EpochResourceCoordinator {
             *state.active_by_class.entry(class).or_default() += 1;
             state.dispatch_sequence = state.dispatch_sequence.saturating_add(1);
             state.next_class_index = (class.protocol_index() + 1) % EpochWorkClass::ALL.len();
+            let coordinator = EpochResourceCoordinator {
+                epoch_id: waiter.epoch_id,
+                inner: Arc::clone(&self.inner),
+            };
+            let ownership = Arc::new(EpochWorkOwnership {
+                reservation: Some(reservation),
+                coordinator: coordinator.clone(),
+                class: waiter.class,
+                released: AtomicBool::new(false),
+            });
+            let native = self
+                .inner
+                .native
+                .operation(waiter.cancellation.clone(), Arc::clone(&ownership));
             let permit = EpochWorkPermit {
-                coordinator: self.clone(),
+                ownership,
+                native,
+                coordinator,
                 principal_id: waiter.principal_id,
                 class: waiter.class,
                 deadline: waiter.deadline,
                 cancellation: waiter.cancellation,
-                released: false,
             };
-            if let Err(mut permit) = waiter.sender.send(permit) {
-                permit.released = true;
+            if let Err(permit) = waiter.sender.send(permit) {
+                // We already hold the scheduler lock; disarm the terminal callback before drop.
+                permit.ownership.released.store(true, Ordering::Release);
                 self.release_active_locked(state, class);
             }
         }
@@ -828,15 +985,57 @@ impl EpochResourceCoordinator {
     }
 }
 
-/// Active work reservation. Dropping it releases capacity and dispatches the
-/// next fair waiter.
+fn resource_class(class: EpochWorkClass) -> ResourceClass {
+    if class == EpochWorkClass::SecurityRecovery {
+        ResourceClass::Control
+    } else {
+        ResourceClass::Data
+    }
+}
+
+#[cfg(test)]
+fn test_scheduler_budget() -> ResourceBudget {
+    use crate::resource_budget::ResourceBudgetPolicy;
+    let policy = ResourceBudgetPolicy {
+        limits: ResourceAmounts {
+            memory_bytes: 2 << 30,
+            disk_bytes: 8 << 30,
+            running_jobs: 1024,
+            queued_jobs: 4096,
+            retained_generations: 64,
+            retained_bytes: 4 << 30,
+            rows: 20_000_000,
+            pages: 65_536,
+        },
+        control_reserve: ResourceAmounts::default(),
+    };
+    ResourceBudget::try_process([71; 16], policy)
+        .unwrap()
+        .workspace([72; 16], policy)
+        .unwrap()
+}
+
+struct QueuedWorkRegistration {
+    coordinator: EpochResourceCoordinator,
+    waiter_id: u64,
+}
+
+impl Drop for QueuedWorkRegistration {
+    fn drop(&mut self) {
+        self.coordinator.remove_waiter(self.waiter_id);
+    }
+}
+
+/// Active work reservation. The terminal owner is also held by every enrolled native
+/// task/stream: dropping the caller cannot recycle its capacity before native termination.
 pub struct EpochWorkPermit {
+    ownership: Arc<EpochWorkOwnership>,
+    native: NativeOperation,
     coordinator: EpochResourceCoordinator,
     principal_id: PrincipalId,
     class: EpochWorkClass,
     deadline: Instant,
     cancellation: Cancellation,
-    released: bool,
 }
 
 impl fmt::Debug for EpochWorkPermit {
@@ -862,7 +1061,7 @@ impl EpochWorkPermit {
     }
 
     /// Fail at explicit synchronous phase boundaries after cancellation or
-    /// deadline. This complements `run`, which drops an in-flight async stream.
+    /// deadline. This complements the bounded native terminal drain in `run`.
     pub fn checkpoint(&self) -> Result<(), EpochResourceError> {
         if self.cancellation.is_cancelled() {
             return Err(EpochResourceError::Cancelled);
@@ -875,37 +1074,77 @@ impl EpochWorkPermit {
         Ok(())
     }
 
-    /// Run one async execution under the admission deadline and cooperative
-    /// cancellation handle. Dropping the selected future is DataFusion's task/
-    /// stream cancellation boundary.
+    /// Execute once under the admission deadline, then observe all enrolled native futures
+    /// destroyed and blocking closures exited. These witnesses supplement DataFusion's own
+    /// joins; they do not claim access to its private Tokio join results. Caller abandonment
+    /// still leaves every native witness holding the admission owner until actual termination.
+    ///
+    /// # Errors
+    /// Returns cancellation, execution deadline, native task capacity, repeated execution, or
+    /// cleanup-reserve exhaustion. Exhausted cleanup leaves live native work capacity-charged.
+    ///
+    /// # Panics
+    /// Resumes an ordinary native/execution panic after observing native termination. The
+    /// private capacity-unwind marker is converted to a typed resource error instead.
     pub async fn run<T>(&self, future: impl Future<Output = T>) -> Result<T, EpochResourceError> {
         self.checkpoint()?;
         let poll =
             Duration::from_millis(self.coordinator.inner.policy.cancellation_poll_millis.get());
-        tokio::pin!(future);
-        loop {
-            tokio::select! {
-                biased;
-                output = &mut future => return Ok(output),
-                () = tokio::time::sleep_until(self.deadline) => {
-                    return Err(EpochResourceError::DeadlineExceeded {
-                        limit_millis: self.coordinator.inner.policy.max_execution_millis.get(),
-                    });
-                }
-                () = tokio::time::sleep(poll) => {
-                    if self.cancellation.is_cancelled() {
-                        return Err(EpochResourceError::Cancelled);
+        let outcome = {
+            let scoped = self.native.scope(future)?;
+            let execution = std::panic::AssertUnwindSafe(scoped).catch_unwind();
+            tokio::pin!(execution);
+            loop {
+                tokio::select! {
+                    biased;
+                    output = &mut execution => break Ok(output),
+                    () = self.native.failed() => {
+                        break Err(EpochResourceError::Native(
+                            self.native.failure().expect("native failure observed"),
+                        ));
+                    }
+                    () = tokio::time::sleep_until(self.deadline) => {
+                        self.native.cancel();
+                        break Err(EpochResourceError::DeadlineExceeded {
+                            limit_millis: self.coordinator.inner.policy.max_execution_millis.get(),
+                        });
+                    }
+                    () = tokio::time::sleep(poll) => {
+                        if self.cancellation.is_cancelled() {
+                            self.native.cancel();
+                            break Err(EpochResourceError::Cancelled);
+                        }
                     }
                 }
             }
+        }; // Destroy native producers under their task-local owner before observing drainage.
+        if tokio::time::timeout(native_operations::CLEANUP_RESERVE, self.native.drain())
+            .await
+            .is_err()
+        {
+            return Err(NativeOperationError::CleanupReserveExhausted.into());
+        }
+        if let Some(failure) = self.native.failure() {
+            return Err(failure.into());
+        }
+        match outcome? {
+            Ok(value) => Ok(value),
+            Err(panic) => std::panic::resume_unwind(panic),
         }
     }
 }
 
-impl Drop for EpochWorkPermit {
+struct EpochWorkOwnership {
+    reservation: Option<ResourceReservation>,
+    coordinator: EpochResourceCoordinator,
+    class: EpochWorkClass,
+    released: AtomicBool,
+}
+
+impl Drop for EpochWorkOwnership {
     fn drop(&mut self) {
-        if !self.released {
-            self.released = true;
+        drop(self.reservation.take());
+        if !self.released.swap(true, Ordering::AcqRel) {
             self.coordinator.release_work(self.class);
         }
     }
@@ -979,6 +1218,10 @@ const fn all_zero<const N: usize>(value: &[u8; N]) -> bool {
 /// Fail-closed resource admission and retention outcomes.
 #[derive(Debug, thiserror::Error)]
 pub enum EpochResourceError {
+    #[error(transparent)]
+    Resource(#[from] ResourceBudgetError),
+    #[error("NATIVE_OPERATION:{0}")]
+    Native(#[from] NativeOperationError),
     #[error("INVALID_EPOCH_RESOURCE_POLICY:{0}")]
     InvalidPolicy(&'static str),
     #[error("INVALID_EPOCH_WORK_CLASS_POLICY:DUPLICATE_CLASS:{0:?}")]
@@ -1117,6 +1360,146 @@ mod tests {
     fn coordinator(policy: EpochResourcePolicy) -> EpochResourceCoordinator {
         EpochResourceCoordinator::try_new(EpochId::from_bytes([0xA5; 16]), [0x33; 32], policy)
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn rt_cpg_wp79_behavior() {
+        let policy = policy(2, 1, 4, 5_000);
+        let runtime = policy.datafusion_resources.runtime_env().unwrap();
+        let workspace = WorkspaceResourceCoordinator::try_new(
+            [3; 32],
+            policy,
+            runtime,
+            test_scheduler_budget(),
+        )
+        .unwrap();
+        let current = workspace.for_epoch(EpochId::from_bytes([1; 16])).unwrap();
+        let candidate = workspace.for_epoch(EpochId::from_bytes([2; 16])).unwrap();
+        let leased = workspace.for_epoch(EpochId::from_bytes([3; 16])).unwrap();
+        let principal = PrincipalId::from_bytes([4; 16]);
+        let work = |epoch_id, class| EpochWorkRequest {
+            epoch_id,
+            principal_id: principal,
+            class,
+            cancellation: Cancellation::with_check_interval(1),
+        };
+        let first = current
+            .admit(work(current.epoch_id(), EpochWorkClass::InteractiveQuery))
+            .await
+            .unwrap();
+        let second_owner = candidate.clone();
+        let waiting = tokio::spawn(async move {
+            second_owner
+                .admit(EpochWorkRequest {
+                    epoch_id: second_owner.epoch_id(),
+                    principal_id: principal,
+                    class: EpochWorkClass::InteractiveQuery,
+                    cancellation: Cancellation::with_check_interval(1),
+                })
+                .await
+                .unwrap()
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while current.observation().unwrap().queued_work != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let update = leased
+            .admit(work(leased.epoch_id(), EpochWorkClass::StrictCurrentUpdate))
+            .await
+            .unwrap();
+        assert_eq!(candidate.observation().unwrap().active_work, 2);
+        drop(first);
+        let second = waiting.await.unwrap();
+        assert_eq!(
+            second.coordinator.epoch_id(),
+            candidate.epoch_id(),
+            "dispatch by the old epoch must retain the queued request's epoch"
+        );
+        drop(second);
+        drop(update);
+        assert_eq!(current.observation().unwrap().active_work, 0);
+
+        let first_runtime = current
+            .child_runtime_env(
+                current.epoch_id(),
+                current.resource_policy(),
+                current.policy().datafusion_resources(),
+            )
+            .unwrap();
+        let second_runtime = candidate
+            .child_runtime_env(
+                candidate.epoch_id(),
+                candidate.resource_policy(),
+                candidate.policy().datafusion_resources(),
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            &first_runtime.memory_pool,
+            &second_runtime.memory_pool
+        ));
+        assert!(Arc::ptr_eq(
+            &first_runtime.disk_manager,
+            &second_runtime.disk_manager
+        ));
+        let first_memory =
+            MemoryConsumer::new("current-test-allocation").register(&first_runtime.memory_pool);
+        let second_memory =
+            MemoryConsumer::new("candidate-test-allocation").register(&second_runtime.memory_pool);
+        first_memory.try_grow(700_000).unwrap();
+        assert!(second_memory.try_grow(700_000).is_err());
+        drop(first_memory);
+        second_memory.try_grow(700_000).unwrap();
+        drop(second_memory);
+
+        let first_lease =
+            ResultResourceLease::try_new(LeaseId::from_bytes([5; 16]), 1_000, 2_000).unwrap();
+        let second_lease =
+            ResultResourceLease::try_new(LeaseId::from_bytes([6; 16]), 1_000, 2_000).unwrap();
+        let retained = current
+            .retain_result_capacity(principal, first_lease, 1_500_000, 1_000)
+            .unwrap();
+        assert!(matches!(
+            candidate.retain_result_capacity(principal, second_lease, 1_000_000, 1_000),
+            Err(EpochResourceError::ResultByteBackpressure { .. })
+        ));
+        assert_eq!(
+            leased.observation().unwrap().retained_result_bytes,
+            1_500_000
+        );
+        drop(retained);
+        let replacement = candidate
+            .retain_result_capacity(principal, second_lease, 1_000_000, 1_000)
+            .unwrap();
+        drop(replacement);
+        assert_eq!(current.observation().unwrap().retained_result_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn dropped_admission_future_releases_its_queued_slot() {
+        let current = coordinator(policy(1, 0, 1, 5_000));
+        let work = EpochWorkRequest {
+            epoch_id: current.epoch_id(),
+            principal_id: PrincipalId::from_bytes([9; 16]),
+            class: EpochWorkClass::InteractiveQuery,
+            cancellation: Cancellation::with_check_interval(1),
+        };
+        let held = current.admit(work.clone()).await.unwrap();
+        let owner = current.clone();
+        let waiting = tokio::spawn(async move { owner.admit(work).await });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while current.observation().unwrap().queued_work != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        waiting.abort();
+        assert!(waiting.await.unwrap_err().is_cancelled());
+        assert_eq!(current.observation().unwrap().queued_work, 0);
+        drop(held);
     }
 
     fn request(

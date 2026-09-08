@@ -175,7 +175,7 @@ impl RelationalQueryAuthorization {
         let table_grants = table_relations
             .iter()
             .map(|relation_id| {
-                baseline.get(relation_id).cloned().cloned().ok_or_else(|| {
+                baseline.get(relation_id).copied().cloned().ok_or_else(|| {
                     RelationalQueryRuntimeError::AuthorizationTableWidened(relation_id.clone())
                 })
             })
@@ -504,6 +504,7 @@ impl StreamedRelationalQueryPublication {
     }
 
     /// Release retained epoch/result capacity after a durable tombstone has won the race.
+    #[must_use]
     pub fn into_released_package(self) -> SealedStreamedResultPackage {
         let Self {
             package,
@@ -753,6 +754,7 @@ impl RelationalQueryRuntime {
                     relation_inputs,
                     result_lease,
                     result_limits,
+                    execution_resources.resource_budget().clone(),
                 )?);
                 Ok::<_, RelationalQueryRuntimeError>((package, observations))
             })
@@ -1468,26 +1470,39 @@ mod tests {
     }
 
     fn resource_coordinator(epoch: &ProgrammaticFabricEpoch) -> Arc<EpochResourceCoordinator> {
+        let policy = super::super::child_session::resource_governance::EpochResourcePolicy::try_new(
+            child_resources(),
+            super::super::child_session::resource_governance::test_lifecycle_work_class_policies(),
+            4, 1, 8, 30_000, 1, 2, 8, 64 * 1024 * 1024, 60_000,
+        ).unwrap();
+        let resource_policy = crate::fabric::workspace_resources::local_resource_policy();
+        let budget = crate::resource_budget::ResourceBudget::try_process(id16(71), resource_policy)
+            .unwrap()
+            .workspace(id16(1), resource_policy)
+            .unwrap();
         Arc::new(
-            EpochResourceCoordinator::try_new(
-                *epoch.identity(),
+            super::super::child_session::resource_governance::WorkspaceResourceCoordinator::try_new(
                 id32(0x33),
-                super::super::child_session::resource_governance::EpochResourcePolicy::try_new(
-                    child_resources(),
-                    super::super::child_session::resource_governance::test_lifecycle_work_class_policies(),
-                    4,
-                    1,
-                    8,
-                    30_000,
-                    1,
-                    2,
-                    8,
-                    64 * 1024 * 1024,
-                    60_000,
-                )
-                .unwrap(),
+                policy.clone(),
+                policy.datafusion_resources().runtime_env().unwrap(),
+                budget,
             )
-            .unwrap(),
+            .unwrap().for_epoch(*epoch.identity()).unwrap(),
+        )
+    }
+
+    fn test_query_runtime(
+        workspace: WorkspaceId,
+        admission: Arc<FabricAdmissionRuntime>,
+        resources: Arc<EpochResourceCoordinator>,
+    ) -> RelationalQueryRuntime {
+        RelationalQueryRuntime::new(
+            workspace,
+            admission,
+            Arc::new(PublishedArrowResultRegistry::new(
+                resources.resource_budget().clone(),
+            )),
+            resources,
         )
     }
 
@@ -1614,10 +1629,9 @@ mod tests {
         let epoch = epoch(EpochId::from_bytes(id16(20))).await;
         let (admission, _) = admitted_runtime(workspace, Arc::clone(&epoch));
         let result_owner = owner(workspace, 0x31);
-        let runtime = RelationalQueryRuntime::new(
+        let runtime = test_query_runtime(
             workspace,
             Arc::clone(&admission),
-            Arc::new(PublishedArrowResultRegistry::new()),
             resource_coordinator(&epoch),
         );
         let publication = runtime
@@ -1670,12 +1684,8 @@ mod tests {
             usize::try_from(expected_rows).unwrap()
         );
 
-        let rebuilt_runtime = RelationalQueryRuntime::new(
-            workspace,
-            admission,
-            Arc::new(PublishedArrowResultRegistry::new()),
-            resource_coordinator(&epoch),
-        );
+        let rebuilt_runtime =
+            test_query_runtime(workspace, admission, resource_coordinator(&epoch));
         let rebuilt = rebuilt_runtime
             .execute_and_publish(
                 Arc::clone(&epoch),
@@ -1705,12 +1715,7 @@ mod tests {
         let workspace = WorkspaceId::from_bytes(id16(1));
         let epoch = epoch(EpochId::from_bytes(id16(20))).await;
         let (admission, _) = admitted_runtime(workspace, Arc::clone(&epoch));
-        let runtime = RelationalQueryRuntime::new(
-            workspace,
-            admission,
-            Arc::new(PublishedArrowResultRegistry::new()),
-            resource_coordinator(&epoch),
-        );
+        let runtime = test_query_runtime(workspace, admission, resource_coordinator(&epoch));
         assert!(matches!(
             runtime
                 .execute_and_publish(
@@ -1821,12 +1826,7 @@ mod tests {
         let epoch = epoch(EpochId::from_bytes(id16(20))).await;
         let (admission, _) = admitted_runtime(workspace, Arc::clone(&epoch));
         let resources = resource_coordinator(&epoch);
-        let runtime = RelationalQueryRuntime::new(
-            workspace,
-            admission,
-            Arc::new(PublishedArrowResultRegistry::new()),
-            Arc::clone(&resources),
-        );
+        let runtime = test_query_runtime(workspace, admission, Arc::clone(&resources));
         let cancellation = Cancellation::with_check_interval(1);
         let mut transaction = transaction(
             &epoch,
@@ -1870,12 +1870,7 @@ mod tests {
         let epoch = epoch(EpochId::from_bytes(id16(20))).await;
         let (admission, _) = admitted_runtime(workspace, Arc::clone(&epoch));
         let resources = resource_coordinator(&epoch);
-        let runtime = RelationalQueryRuntime::new(
-            workspace,
-            admission,
-            Arc::new(PublishedArrowResultRegistry::new()),
-            Arc::clone(&resources),
-        );
+        let runtime = test_query_runtime(workspace, admission, Arc::clone(&resources));
         let cancellation = Cancellation::with_check_interval(1);
         let mut transaction = transaction(
             &epoch,
@@ -1925,12 +1920,7 @@ mod tests {
         let workspace = WorkspaceId::from_bytes(id16(1));
         let epoch = epoch(EpochId::from_bytes(id16(20))).await;
         let (admission, _) = admitted_runtime(workspace, Arc::clone(&epoch));
-        let runtime = RelationalQueryRuntime::new(
-            workspace,
-            admission,
-            Arc::new(PublishedArrowResultRegistry::new()),
-            resource_coordinator(&epoch),
-        );
+        let runtime = test_query_runtime(workspace, admission, resource_coordinator(&epoch));
         let result_owner = owner(workspace, 0x31);
 
         assert!(matches!(
@@ -2069,12 +2059,7 @@ mod tests {
         let workspace = WorkspaceId::from_bytes(id16(1));
         let epoch = epoch(EpochId::from_bytes(id16(20))).await;
         let (admission, _) = admitted_runtime(workspace, Arc::clone(&epoch));
-        let runtime = RelationalQueryRuntime::new(
-            workspace,
-            admission,
-            Arc::new(PublishedArrowResultRegistry::new()),
-            resource_coordinator(&epoch),
-        );
+        let runtime = test_query_runtime(workspace, admission, resource_coordinator(&epoch));
         let result_owner = owner(workspace, 0x31);
         let publication = runtime
             .execute_and_publish(
@@ -2145,10 +2130,9 @@ mod tests {
         let first_weak = Arc::downgrade(&first);
         let second = epoch(second_id).await;
         let (admission, first_event) = admitted_runtime(workspace, Arc::clone(&first));
-        let runtime = RelationalQueryRuntime::new(
+        let runtime = test_query_runtime(
             workspace,
             Arc::clone(&admission),
-            Arc::new(PublishedArrowResultRegistry::new()),
             resource_coordinator(&first),
         );
         let result_owner = owner(workspace, 0x31);
@@ -2220,10 +2204,9 @@ mod tests {
         let second = epoch(second_id).await;
         let (admission, first_event) = admitted_runtime(workspace, Arc::clone(&first));
         let first_resources = resource_coordinator(&first);
-        let runtime = RelationalQueryRuntime::new(
+        let runtime = test_query_runtime(
             workspace,
             Arc::clone(&admission),
-            Arc::new(PublishedArrowResultRegistry::new()),
             Arc::clone(&first_resources),
         );
 

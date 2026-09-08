@@ -19,6 +19,7 @@ pub mod administration_command_effect;
 #[cfg(feature = "daemon")]
 pub mod admission;
 pub mod arrow_result_resource;
+pub mod bounded_encoding;
 pub mod child_session;
 pub mod command;
 #[cfg(feature = "daemon")]
@@ -54,6 +55,9 @@ pub mod epoch_runtime;
 #[cfg(feature = "daemon")]
 pub mod explicit_unknown;
 pub mod graph_program;
+#[cfg(feature = "daemon")]
+pub(crate) mod native_execution_lane;
+pub(crate) mod native_operations;
 #[cfg(feature = "daemon")]
 pub mod production_kernel;
 #[cfg(feature = "daemon")]
@@ -100,6 +104,7 @@ pub mod relation_publication_command_effect;
 pub mod relational_query_runtime;
 #[cfg(feature = "daemon")]
 pub mod request_owned_relation;
+pub(crate) mod resource_ownership;
 mod result_checksum;
 #[cfg(feature = "daemon")]
 pub mod retention_command_effect;
@@ -113,6 +118,10 @@ pub mod source_wave_command_effect;
 pub mod streamed_result_package;
 #[cfg(feature = "daemon")]
 pub mod streamed_result_registry;
+#[cfg(feature = "daemon")]
+pub(crate) mod workspace_native_execution;
+#[cfg(feature = "daemon")]
+pub(crate) mod workspace_resources;
 #[cfg(feature = "daemon")]
 #[cfg(feature = "daemon")]
 pub mod writer_generation_sqlite;
@@ -164,3 +173,6 @@ pub enum FabricError {
     #[error(transparent)]
     Arrow(#[from] ArrowError),
 }
+
+#[cfg(feature = "daemon")]
+pub(crate) mod owned_local_store;

@@ -1708,26 +1708,89 @@ pub fn apply_to_source_inventory(
     source: &mut crate::inventory::SourceInventory,
     store: &mut crate::operational_store::OperationalStore,
 ) -> Result<(), crate::inventory::InventoryError> {
+    use crate::resource_budget::{
+        ChargedSlice, ResourceAmounts, ResourceBudgetError, ResourceClass,
+    };
+
+    let budget = source.records.reservation().owner();
+    let map_bytes = (git.entries.len() as u64)
+        .checked_mul(128)
+        .and_then(|bytes| bytes.checked_add(1024))
+        .ok_or(ResourceBudgetError::Overflow)?;
+    let _map_scratch = crate::inventory::reserve_memory(budget, map_bytes)?;
     let by_path = git
         .entries
         .iter()
         .map(|entry| (entry.repo_path_bytes.as_slice(), entry))
         .collect::<BTreeMap<_, _>>();
-    for record in &mut source.records {
-        let Some(git_entry) = by_path.get(record.path.raw_relative_path_bytes.as_slice()) else {
-            continue;
-        };
-        record.git_repo_path_bytes = Some(git_entry.repo_path_bytes.clone());
-        record.classification = git_entry.classification;
-        record.git_blob_oid = git_entry.blob_oid.as_ref().map(encode_object_id);
+    // The old immutable backing may be leased elsewhere. Admit the replacement and both
+    // transient old/new Git byte copies before cloning, then transfer ownership to the result.
+    let replacement_bytes = source.records.iter().try_fold(1024_u64, |sum, record| {
+        let existing = record
+            .git_repo_path_bytes
+            .as_ref()
+            .map_or(0, |bytes| bytes.len())
+            + record.git_blob_oid.as_ref().map_or(0, |bytes| bytes.len());
+        let incoming = by_path
+            .get(record.path.raw_relative_path_bytes.as_slice())
+            .map_or(0, |entry| {
+                entry.repo_path_bytes.len()
+                    + entry.blob_oid.as_ref().map_or(0, |oid| oid.bytes.len() + 1)
+            });
+        sum.checked_add(std::mem::size_of::<crate::inventory::SourceInventoryRecord>() as u64)
+            .and_then(|bytes| bytes.checked_add(existing as u64))
+            .and_then(|bytes| bytes.checked_add(incoming as u64))
+            .ok_or(ResourceBudgetError::Overflow)
+    })?;
+    let charge = budget.try_reserve(
+        ResourceClass::Data,
+        ResourceAmounts {
+            memory_bytes: replacement_bytes,
+            rows: source.records.len() as u64,
+            ..ResourceAmounts::default()
+        },
+    )?;
+    let _merkle_scratch = crate::inventory::reserve_memory(
+        budget,
+        crate::inventory::merkle_memory_bound(&source.records)?,
+    )?;
+    let mut records = Vec::with_capacity(source.records.len());
+    for original in &source.records {
+        let mut record = original.clone();
+        if let Some(git_entry) = by_path.get(record.path.raw_relative_path_bytes.as_slice()) {
+            record.git_repo_path_bytes = Some(ChargedSlice::try_from_fn(
+                budget,
+                ResourceClass::Data,
+                git_entry.repo_path_bytes.len(),
+                || git_entry.repo_path_bytes.clone(),
+            )?);
+            record.classification = git_entry.classification;
+            record.git_blob_oid = git_entry
+                .blob_oid
+                .as_ref()
+                .map(|oid| {
+                    ChargedSlice::try_from_fn(
+                        budget,
+                        ResourceClass::Data,
+                        oid.bytes.len() + 1,
+                        || encode_object_id(oid),
+                    )
+                })
+                .transpose()?;
+        }
+        records.push(record);
     }
-    source.digest = crate::inventory::merkle_inventory_digest(&source.records);
+    let digest = crate::inventory::merkle_inventory_digest(&records);
+    let records = charge.into_charged_vec(records)?;
     crate::inventory::persist_inventory(
         store,
         source.workspace_id,
         source.source_generation,
-        &source.records,
-    )
+        &records,
+    )?;
+    source.records = records;
+    source.digest = digest;
+    Ok(())
 }
 
 #[cfg(feature = "daemon")]

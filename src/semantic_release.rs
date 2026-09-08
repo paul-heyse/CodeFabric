@@ -558,11 +558,12 @@ struct CompiledProviderLaneProgram {
 pub struct ProviderJobInput {
     pub lane: ProviderLane,
     pub source: ProviderSourceBinding,
-    pub context: ProviderContextBinding,
+    pub context: crate::resource_budget::ChargedValue<ProviderContextBinding>,
     pub run: ProviderRunBinding,
     pub scope: ProviderScopeIdentity,
     pub requested_families: Vec<(ProviderFamilyIdentity, u64)>,
     pub operational_ceilings: ProviderResourceCeilings,
+    pub resource_budget: crate::resource_budget::ResourceBudget,
     pub deadline: Instant,
     pub cancellation: CancellationProbe,
 }
@@ -598,6 +599,22 @@ impl CompiledProviderProgram {
             .get(&input.lane)
             .ok_or(SemanticReleaseError::UnknownProviderLane)?;
         let ceilings = policy.reduce_provider_ceilings(input.lane, input.operational_ceilings)?;
+        if input.requested_families.is_empty()
+            || input.requested_families.len() > lane.families.len()
+            || input.requested_families.len() > ceilings.max_relations()
+        {
+            return Err(ProviderContractError::EmptyOrOversizedRequestSet.into());
+        }
+        let prepare_bytes = input
+            .requested_families
+            .len()
+            .checked_mul(std::mem::size_of::<ProviderFamilyRequest>() + 512)
+            .ok_or(ProviderContractError::ResourceOverflow)?;
+        let _prepare_allocation =
+            crate::provider_contracts::allocation::ProviderAllocation::try_new(
+                &input.resource_budget,
+                prepare_bytes as u64,
+            )?;
         let mut requested = BTreeSet::new();
         let mut requests = Vec::with_capacity(input.requested_families.len());
         for (family, units) in input.requested_families {
@@ -640,6 +657,7 @@ impl CompiledProviderProgram {
             trust: lane.trust,
             requests,
             ceilings,
+            resource_budget: input.resource_budget,
             deadline: input.deadline.min(policy_deadline),
             cancellation,
             provenance,
@@ -1823,9 +1841,16 @@ mod tests {
             .prepare_job(
                 release.policy(),
                 ProviderJobInput {
+                    resource_budget: crate::provider_contracts::fixture_provider_budget(
+                        source_binding().workspace_id(),
+                        run_binding().provider_run_id(),
+                    ),
                     lane: ProviderLane::TreeSitter,
                     source: source_binding(),
-                    context: context_binding(),
+                    context: crate::provider_contracts::fixture_provider_context(
+                        [6; 16],
+                        context_binding(),
+                    ),
                     run: run_binding(),
                     scope: ProviderScopeIdentity::try_new("workspace").unwrap(),
                     requested_families: vec![(
@@ -1932,9 +1957,16 @@ mod tests {
             .prepare_job(
                 release.policy(),
                 ProviderJobInput {
+                    resource_budget: crate::provider_contracts::fixture_provider_budget(
+                        source_binding().workspace_id(),
+                        run_binding().provider_run_id(),
+                    ),
                     lane: ProviderLane::TreeSitter,
                     source: source_binding(),
-                    context: context_binding(),
+                    context: crate::provider_contracts::fixture_provider_context(
+                        [6; 16],
+                        context_binding(),
+                    ),
                     run: run_binding(),
                     scope: ProviderScopeIdentity::try_new("workspace").unwrap(),
                     requested_families: vec![(
@@ -2001,9 +2033,16 @@ mod tests {
             .prepare_job(
                 release.policy(),
                 ProviderJobInput {
+                    resource_budget: crate::provider_contracts::fixture_provider_budget(
+                        source_binding().workspace_id(),
+                        run_binding().provider_run_id(),
+                    ),
                     lane: ProviderLane::TreeSitter,
                     source: source_binding(),
-                    context: context_binding(),
+                    context: crate::provider_contracts::fixture_provider_context(
+                        [6; 16],
+                        context_binding(),
+                    ),
                     run: run_binding(),
                     scope: ProviderScopeIdentity::try_new("workspace").unwrap(),
                     requested_families: vec![(
@@ -2029,12 +2068,16 @@ mod tests {
         )
         .unwrap();
         ProviderRunResult::try_new(ProviderRunResultSpec {
+            resource_budget: job.resource_budget().clone(),
             support: crate::provider_contracts::ProviderRunSupport::conservative(job),
             suite: current_suite_identity().unwrap(),
             provider: ProviderIdentity::try_new("tree-sitter").unwrap(),
             protocol: ProviderProtocolIdentity::try_new("tree-sitter.protocol.v1").unwrap(),
             source: source_binding(),
-            context: context_binding(),
+            context: crate::provider_contracts::fixture_provider_context(
+                [6; 16],
+                context_binding(),
+            ),
             run: run_binding(),
             provenance: ProviderRunProvenance::new(
                 ProviderBuildIdentity::try_new("tree-sitter.build.v1").unwrap(),
@@ -2047,6 +2090,7 @@ mod tests {
                     ProviderSchemaIdentity::try_new("tree-sitter.raw.schema.v1").unwrap(),
                     schema,
                     vec![batch],
+                    job.resource_budget(),
                 )
                 .unwrap(),
             ],

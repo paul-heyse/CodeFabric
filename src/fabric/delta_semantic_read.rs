@@ -432,7 +432,7 @@ pub async fn prepare_exact_delta_semantic_read(
     let expected_schema = contract.project_logical_schema(&logical_projection)?;
     if physical_plan.schema().as_ref() != expected_schema.as_ref() {
         return Err(ExactDeltaSemanticReadError::OutputSchemaMismatch {
-            expected: format!("{:?}", expected_schema),
+            expected: format!("{expected_schema:?}"),
             observed: format!("{:?}", physical_plan.schema()),
         });
     }
@@ -484,8 +484,7 @@ fn validate_feature_posture(
     let configuration = snapshot.metadata().configuration();
     let observed_column_mapping = match configuration
         .get(COLUMN_MAPPING_MODE_KEY)
-        .map(String::as_str)
-        .unwrap_or("none")
+        .map_or("none", String::as_str)
     {
         "" | "none" => ColumnMappingMode::Positional,
         "name" => ColumnMappingMode::Name,

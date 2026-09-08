@@ -1485,9 +1485,20 @@ pub enum RustCompilationCancellationReason {
 #[derive(Clone, Debug, Default)]
 pub struct RustCompilationCancellationSignal {
     requested: Arc<AtomicBool>,
+    scope_cancellation: Option<crate::cancellation::Cancellation>,
 }
 
 impl RustCompilationCancellationSignal {
+    /// Bind the actual registry-owned native worker cancellation without replacing the
+    /// protocol's run-wide cancellation edge or constructing another cancellation root.
+    pub(crate) fn with_scope_cancellation(
+        mut self,
+        cancellation: crate::cancellation::Cancellation,
+    ) -> Self {
+        self.scope_cancellation = Some(cancellation);
+        self
+    }
+
     /// Request run-wide process-group cancellation. Repeated requests are idempotent.
     pub fn request(&self) {
         self.requested.store(true, Ordering::Release);
@@ -1497,6 +1508,10 @@ impl RustCompilationCancellationSignal {
     #[must_use]
     pub fn is_requested(&self) -> bool {
         self.requested.load(Ordering::Acquire)
+            || self
+                .scope_cancellation
+                .as_ref()
+                .is_some_and(crate::cancellation::Cancellation::is_cancelled)
     }
 }
 

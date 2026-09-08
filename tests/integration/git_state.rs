@@ -21,6 +21,7 @@ use codefabric::inventory::{InclusionState, InventoryLimits, InventoryWalker, So
 use codefabric::operational_store::OperationalStore;
 use codefabric::registries::GIT_INVENTORY_CLASSIFICATION_VALUES;
 use codefabric::registries::{GitAccelerationStatus, UpdateCandidateStrategy};
+use codefabric::resource_budget::{ResourceAmounts, ResourceBudget, ResourceBudgetPolicy};
 use codefabric::secure_path::open_workspace_root;
 use codefabric::workspace_registry::{WorkspaceRegistry, WorkspaceSourceRegistration};
 
@@ -33,6 +34,32 @@ const OBSERVATIONS: GitStateObservations = GitStateObservations {
     attributes_fingerprint: [0x32; 32],
     worktree_inventory_digest: [0x33; 32],
 };
+
+fn source_process_budget() -> ResourceBudget {
+    ResourceBudget::try_process(
+        [0x73; 16],
+        ResourceBudgetPolicy {
+            limits: ResourceAmounts {
+                memory_bytes: 256 * 1024 * 1024,
+                disk_bytes: 1024 * 1024 * 1024,
+                running_jobs: 32,
+                queued_jobs: 512,
+                retained_generations: 4,
+                retained_bytes: 256 * 1024 * 1024,
+                rows: 1_000_000,
+                pages: 65_536,
+            },
+            control_reserve: ResourceAmounts::default(),
+        },
+    )
+    .expect("finite integration process envelope")
+}
+
+fn source_workspace_budget(process: &ResourceBudget, workspace: [u8; 16]) -> ResourceBudget {
+    process
+        .workspace(workspace, process.policy())
+        .expect("exact workspace resource owner")
+}
 
 #[derive(Clone, Copy, Debug)]
 struct DisabledGitStateAdapter;
@@ -431,9 +458,13 @@ fn wp17_structural_acceptance() {
         .expect("registered Git workspace");
     let secure_root =
         open_workspace_root(&mut store, workspace.workspace_id).expect("authorized source root");
-    let mut source = InventoryWalker::new(InventoryLimits::default())
-        .walk_and_persist(&secure_root, &mut store, 0, &Cancellation::default())
-        .expect("authoritative inventory");
+    let resources = source_process_budget();
+    let mut source = InventoryWalker::new_governed(
+        InventoryLimits::default(),
+        source_workspace_budget(&resources, workspace.workspace_id),
+    )
+    .walk_and_persist(&secure_root, &mut store, 0, &Cancellation::default())
+    .expect("authoritative inventory");
     let git = adapter
         .inventory(
             &snapshot.selected_worktree,
@@ -928,9 +959,13 @@ fn wp50_behavioral_acceptance() {
         .expect("registered workspace");
     let secure_root =
         open_workspace_root(&mut store, workspace.workspace_id).expect("secure source root");
-    let mut authoritative = InventoryWalker::new(InventoryLimits::default())
-        .walk_and_persist(&secure_root, &mut store, 0, &Cancellation::default())
-        .expect("authoritative inventory");
+    let resources = source_process_budget();
+    let mut authoritative = InventoryWalker::new_governed(
+        InventoryLimits::default(),
+        source_workspace_budget(&resources, workspace.workspace_id),
+    )
+    .walk_and_persist(&secure_root, &mut store, 0, &Cancellation::default())
+    .expect("authoritative inventory");
     apply_to_source_inventory(&git, &mut authoritative, &mut store)
         .expect("advisory classification overlay");
     let tracked = authoritative
@@ -1210,7 +1245,9 @@ fn wp72_operational_acceptance() {
         .add(&root, WorkspaceSourceRegistration::Directory)
         .expect("workspace registration");
     let secure_root = open_workspace_root(&mut store, workspace.workspace_id).expect("secure root");
-    let authoritative = InventoryWalker::new(InventoryLimits::default())
+    let resources = source_process_budget();
+    let budget = source_workspace_budget(&resources, workspace.workspace_id);
+    let authoritative = InventoryWalker::new_governed(InventoryLimits::default(), budget.clone())
         .walk_and_persist(&secure_root, &mut store, 0, &Cancellation::default())
         .expect("authoritative inventory");
 
@@ -1281,7 +1318,12 @@ fn wp72_operational_acceptance() {
         .expect("rebuild workspace registration");
     let rebuilt_root = open_workspace_root(&mut rebuilt_store, rebuilt_workspace.workspace_id)
         .expect("rebuild secure root");
-    let rebuilt = InventoryWalker::new(InventoryLimits::default())
+    let rebuilt_budget = if rebuilt_workspace.workspace_id == budget.owner().id {
+        budget.clone()
+    } else {
+        source_workspace_budget(&resources, rebuilt_workspace.workspace_id)
+    };
+    let rebuilt = InventoryWalker::new_governed(InventoryLimits::default(), rebuilt_budget)
         .walk_and_persist(
             &rebuilt_root,
             &mut rebuilt_store,

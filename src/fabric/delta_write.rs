@@ -446,7 +446,7 @@ impl fmt::Debug for SessionBoundLogicalPlan {
 }
 
 impl SessionBoundLogicalPlan {
-    /// Consume a DataFrame and prove it carries the supplied epoch session identity.
+    /// Consume a `DataFrame` and prove it carries the supplied epoch session identity.
     ///
     /// Session ID, runtime environment, and catalog-list identity are all checked. The latter
     /// two pointer checks distinguish independently constructed states that happen to reuse a
@@ -454,7 +454,7 @@ impl SessionBoundLogicalPlan {
     ///
     /// # Errors
     ///
-    /// Returns [`ControlledDeltaWriteInputError::PlanSessionMismatch`] when the DataFrame did
+    /// Returns [`ControlledDeltaWriteInputError::PlanSessionMismatch`] when the `DataFrame` did
     /// not originate from the supplied epoch state.
     pub fn try_from_dataframe(
         epoch_session: Arc<SessionState>,

@@ -21,6 +21,26 @@ supersedes_on_activation: docs/plans/codefabric_real_time_cpg_implementation_pla
 
 ## 1. Outcome, non-goals and execution boundary
 
+### Execution clarification approved by the user on 2026-09-08
+
+The data-fabric artifact and provenance requirements govern actions performed by the
+running system and their observable results. They do not require an artifact for
+every edit made to this repository. Ordinary Git history, dependency source pins,
+code review and proportionate tests govern development and integration.
+
+This explicit user clarification supersedes the source-packaging procedure in
+planning-contracts v2 §3.1 and this plan's earlier LD-RT08/LD-RT09 packaging language.
+Develop the native corrections and their application consumers together in one Git
+integration branch, using tracked dependency sources and relative Cargo paths. A
+bespoke content-addressed source bundle, ordered patch replay, pre-Cargo artifact
+verification, or a synchronized eight-document suite successor is not a prerequisite
+to editing, compiling or integrating those changes. Preserve exact upstream origins,
+licenses, the selected public type universe, and actual resolved-source checks.
+
+Runtime execution provenance, resource ownership, native behavioral compatibility,
+packet acceptance and final certification remain required. This correction changes
+the development process; it does not mark any implementation packet complete.
+
 ### 1.1 Full realized outcome
 
 One continuously running Rust daemon creates and maintains the selected v2.3 Python and Rust CPG profiles, integrates actual Tree-sitter/Ruff/Pyrefly/rustc facts through owned Arrow and programmatic DataFusion, publishes exact Delta/segment epochs, and serves all eight typed request forms through modern FastMCP. Real source/context changes produce truthful syntax-current and semantic-current successors without daemon restart. Independent semantic expectations, sound withdrawals/unknowns, optimizer-visible native execution, bounded resources, lease/CDF-safe actual reclamation and one-candidate certification are required outcomes.
@@ -40,7 +60,7 @@ The work retains and reproves v7's compiled release, inward feature graph, provi
 
 ### 1.3 Baseline and scope preservation
 
-This approved successor preserves all WP77–WP106, M18–M25 and DB24–DB30 scope, IDs, dependencies and existing acceptance checks. It incorporates the user's 2026-09-07 native-resource approval and the status review v2. WP79 gains native allocation/retention, immutable artifact and versioned pin-transition obligations; WP94 maintenance and WP95 reclamation remain separate. Prior v1/v2 plans and the planning-contract v1 remain immutable history and declared inputs. This revision has no completed-packet implication.
+This approved successor preserves all WP77–WP106, M18–M25 and DB24–DB30 scope, IDs, dependencies and existing acceptance checks. It incorporates the user's 2026-09-07 native-resource approval and the status review v2. WP79 gains native allocation/retention and coherent native/application integration obligations; WP94 maintenance and WP95 reclamation remain separate. Prior v1/v2 plans and the planning-contract v1 remain immutable history and declared inputs. This revision has no completed-packet implication.
 
 WP77/WP78 carry historical proving commits as stale until repaired immediate consumers have coherent current proving lineage. WP79 resumes in progress; WP80–WP106 retain all unfinished work in dependency order. Earlier downstream invalidation was an acceptance dependency on the now-approved design decision. All milestones and decommission exits remain unclosed until their substantive proof succeeds. Preserve deviations and failed approaches in the fresh successor state; clear only the resolved approval blocker.
 The frontmatter records the activation validator's exact whole-worktree snapshot, excluding this plan, its future state and the active pointer. The review's narrower implementation baseline remains independently reproducible with:
@@ -106,11 +126,17 @@ Use review LD-01–LD-07 through their routed reference sections. FAB §2.1 and 
 
 D-RT01–D-RT07 supply closed dependency/admission/control/identity/resource/replacement/maintenance contracts. They advance P9/P10, P12/P15, P19/P20/P25, P27/P28/P30 and P23/P31/P34/P36 while maintaining the existing P3/P22/P35 ownership boundaries. Other principles remain applicable through the actual decision, not a ceremonial conformance score. Bounded exceptions have explicit DB exits; none becomes permanent by convention.
 
-LD-RT08 is a **required native-library amendment deliverable**, not a supposed working API at the current Delta pin. WP94 must supply an actual reproducible certified artifact, approved pin-authority amendment and compatibility proof; WP95 must prove actual reclamation. If that artifact needs unavailable external distribution authority, full completion is blocked pending direction. Denial/backpressure remains correct interim safety but cannot close these packets.
+LD-RT08 remains a required native maintenance correction in WP94; WP95 must prove
+actual reclamation. LD-RT09 remains the approved native resource correction in WP79.
+Neither is satisfied by permanent denial or a source-only checkpoint. Source-derived
+fallible admission, original retained backing, shared receipts, typed exhaustion,
+finite actual execution geometry and complete production integration remain required.
 
-LD-RT09 is the approved native-resource amendment required in WP79. Source-derived fallible admission, original retained backing and shared receipts, typed exhaustion through optional fallbacks, finite actual execution geometry and complete production integration must precede WP79 closure. The new design's §3.1 selects committed content-addressed source artifacts with exact-version Cargo patches and mandatory independent verification. The current FAB pin remains effective until the concrete artifact and synchronized suite/pin-authority successor are issued; no amended revision is invented here. The bounded artifact/authority work is already authorized by the user. A concrete source transition still requires its successor plan and exact declared inputs before dependency resolution changes.
-
-An accepted versioned pin/suite-authority amendment changes a declared target input. Before continuing against that changed authority, issue the required successor plan revision with the same stable IDs, new declared inputs and explicit state transition through the repository workflow. Do not modify this immutable digest table or bypass exact-pin governance. This planned revision is not permission to change CPG meanings or broaden dependency scope.
+Apply the 2026-09-08 execution clarification above to both amendments. Track amended
+dependency sources and application consumers together in Git, select them through
+relative Cargo paths, preserve the recorded upstream versions and verify the resolved
+graph. Update documentation when the supported contract changes; ordinary source
+edits do not require new design, plan or suite versions.
 
 ## 3. Global target invariants and dependency law
 
@@ -322,7 +348,7 @@ Known touch: `src/cancellation.rs`, `src/fabric/epoch_runtime.rs`, `src/fabric/q
 4. Reserve control/status/cancel/read/release capacity separately from heavy admission. Under pressure defer/reject new work without revoking valid leases or reporting partial output complete.
 5. Expose actual budget consumption, queue age, cancellation-to-join and retained bytes as observations. Numerical release profiles remain WP103's measured policy, not guessed optimal defaults.
 6. Implement LD-RT09 on exact native sources: reserve before JSON/CRC/schema/checkpoint/footer/page/dictionary/value decode and cumulative replay growth; preserve typed capacity failures through optional fallback; expose original eager backing and lifetime-shared retained non-Arrow ownership. Include both Delta engine construction routes and all actual worker/channel/fanout limits. Existing native limits are reusable only with a source-derived sufficient bound.
-7. Produce the reviewed portable immutable dependency artifact, pre-Cargo tamper verifier and exact resolved-source checks. Before changing pins, issue the synchronized suite authority and required successor plan/state with unchanged stable IDs. Do not edit Cargo's cache or use a mutable unversioned local dependency. Preserve the Arrow/DataFusion universe and four first-party build domains.
+7. Integrate the amended native sources and their application consumers in one Git branch, with tracked source directories, relative Cargo paths and exact resolved-source checks. Preserve upstream origins, licenses, the Arrow/DataFusion universe and four first-party build domains. Do not edit Cargo's cache or depend on temporary staging directories. Source packaging and suite successor issuance are not integration prerequisites.
 8. Integrate joined native operations, owned stores and continuing native receipts into production control, candidate, reconstructed epoch, query, CDF and maintenance phases. Retain physical file charges through uncertain writes and joined cleanup/reconciliation. DB30 removes all corresponding bypasses; physical census never selects Delta semantic state.
 
 **Legacy disposition and decommission.** Replace isolated full-budget epoch constructors and unowned bridge tasks in the touched route; do not delete sound v7 task-tree infrastructure. DB30 checks absence of alternate ownership.
@@ -361,7 +387,7 @@ Governed criterion: `PC-WP79-OPS`
 
 **Edit-Local Gates.** Use the affected existing domain's `just root-fmt` / `just root-check-fast`, `just sidecar-fmt` / `just sidecar-check`, `just extractor-fmt` / `just extractor-check`, or `just adapter-lint` / `just adapter-type`. Run the named affected unit tests through their recipe owner; no all-domain gate for every micro-edit.
 
-**Packet-Local Gates.** `just native-dependency-artifacts-check`; `just real-time-cpg-native-resource-check`; `just data-fabric-upgrade-check`; `just stable-graph-check`; `just features-each`; `just policy`; `just real-time-cpg-packet-check WP79`; `just cancellation-tree-check`; `just grpc-flow-control-contract-check`; `just grpc-slow-consumer-check`; `just datafusion-cache-resource-operations-check`; `just root-check`. Proposed recipes are identified in §7; they must exist and select substantive cases before completion.
+**Packet-Local Gates.** `just real-time-cpg-native-resource-check`; `just data-fabric-upgrade-check`; `just stable-graph-check`; `just features-each`; `just policy`; `just real-time-cpg-packet-check WP79`; `just cancellation-tree-check`; `just grpc-flow-control-contract-check`; `just grpc-slow-consumer-check`; `just datafusion-cache-resource-operations-check`; `just root-check`. Proposed recipes are identified in §7; they must exist and select substantive cases before completion.
 
 **Integration Milestone.** M18.
 

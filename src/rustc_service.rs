@@ -4,8 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::future::Future;
 use std::io::Cursor;
-use std::num::NonZeroUsize;
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -291,7 +289,7 @@ pub struct AcceptedRustcRelation {
     pub schema_digest: String,
     pub row_count: u64,
     pub arrow_ipc_digest: String,
-    pub arrow_ipc: Vec<u8>,
+    pub arrow_ipc: crate::resource_budget::ChargedSlice<u8>,
     pub batch: RecordBatch,
 }
 
@@ -315,7 +313,7 @@ impl AcceptedRustcRelation {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AcceptedRustcOwner {
     pub control: RustcOwnerControl,
-    pub relations: Vec<AcceptedRustcRelation>,
+    pub relations: crate::resource_budget::ChargedSlice<AcceptedRustcRelation>,
 }
 
 /// One compiler stream admitted for canonical reconciliation.
@@ -323,7 +321,7 @@ pub struct AcceptedRustcOwner {
 pub struct AcceptedRustcCompilation {
     pub admission: RustcRunAdmission,
     pub control: RustcCompilationControl,
-    pub owners: Vec<AcceptedRustcOwner>,
+    pub owners: crate::resource_budget::ChargedSlice<AcceptedRustcOwner>,
     trust_binding: RustCompilationProtocolBinding,
 }
 
@@ -392,6 +390,7 @@ impl RustcProviderRunResult {
                 request.schema_identity().clone(),
                 Arc::clone(request.schema()),
                 relation_batches,
+                job.resource_budget(),
             )?);
             coverage.push(ProviderCoverage::new(
                 request.family().clone(),
@@ -617,7 +616,7 @@ impl AcceptedRustcCompilation {
         Self {
             admission,
             control,
-            owners,
+            owners: crate::resource_budget::ChargedSlice::for_test(owners),
             trust_binding,
         }
     }
@@ -646,6 +645,8 @@ struct OpenOwner {
 
 #[derive(Debug)]
 struct RunValidator {
+    allocation: crate::provider_contracts::allocation::ProviderAllocation,
+    _decode_scratch: crate::resource_budget::ResourceReservation,
     job: ProviderJob,
     admission: RustcRunAdmission,
     policy: RustcProtocolPolicy,
@@ -670,7 +671,16 @@ impl RunValidator {
     ) -> Result<Self, Status> {
         validate_begin(&job, &admission, &policy, &begin)?;
         let header = compilation_header(&job, &policy, &begin)?;
+        let allocation = crate::provider_contracts::allocation::ProviderAllocation::try_new(
+            job.resource_budget(),
+            job.ceilings().max_bytes(),
+        )
+        .map_err(provider_contract_status)?;
+        let decode_scratch = crate::provider_contracts::allocation::reserve_native_state(&job)
+            .map_err(provider_contract_status)?;
         Ok(Self {
+            allocation,
+            _decode_scratch: decode_scratch,
             job,
             admission,
             policy,
@@ -952,7 +962,10 @@ impl RunValidator {
                 .next()
                 .expect("single batch checked above");
             let row_count = u64::try_from(batch.num_rows()).unwrap_or(u64::MAX);
-            let arrow_ipc = assembled.ipc_bytes;
+            let arrow_ipc = self
+                .allocation
+                .retain_measured_vec(assembled.ipc_bytes, |_| 0)
+                .map_err(provider_contract_status)?;
             let accepted_relation = AcceptedRustcRelation {
                 relation,
                 logical_sequence,
@@ -1055,7 +1068,15 @@ impl RunValidator {
         self.owners.push(ValidatedTransportOwner {
             accepted: AcceptedRustcOwner {
                 control,
-                relations: owner.relations,
+                relations: self
+                    .allocation
+                    .retain_measured_vec(owner.relations, |relation| {
+                        relation
+                            .schema_digest
+                            .capacity()
+                            .saturating_add(relation.arrow_ipc_digest.capacity())
+                    })
+                    .map_err(provider_contract_status)?,
             },
             owner_content_digest: end.owner_content_digest,
         });
@@ -1170,6 +1191,18 @@ impl RunValidator {
             })?,
         };
         let control = RustcCompilationControl::try_new(self.header, owner_controls, terminal)
+            .map_err(provider_contract_status)?;
+        self.allocation
+            .claim_new_batches(
+                owners
+                    .iter()
+                    .flat_map(|owner| owner.relations.iter().map(|relation| &relation.batch)),
+                262_144,
+            )
+            .map_err(provider_contract_status)?;
+        let owners = self
+            .allocation
+            .retain_measured_vec(owners, |_| 0)
             .map_err(provider_contract_status)?;
         Ok(AcceptedRustcCompilation {
             admission: self.admission,
@@ -1359,6 +1392,7 @@ impl RustcObservationService {
         policy: RustcProtocolPolicy,
         admission: RustcRunAdmission,
         trust_binding: RustCompilationProtocolBinding,
+        stream_tasks: StructuredCancellationScope,
     ) -> Result<(Self, mpsc::Receiver<AcceptedRustcCompilation>), Status> {
         policy.validate()?;
         validate_job_admission(&job, &admission)?;
@@ -1418,12 +1452,6 @@ impl RustcObservationService {
                     "rustc launch-plan binding differs from protocol admission: {error}"
                 ))
             })?;
-        let stream_tasks = StructuredCancellationScope::try_root(
-            "rustc-provider",
-            NonZeroUsize::new(32).expect("rustc provider stream-task capacity is nonzero"),
-        )
-        .and_then(|root| root.child("observation"))
-        .map_err(|error| Status::internal(format!("rustc stream-task hierarchy: {error}")))?;
         let (accepted, receiver) = mpsc::channel(MAX_OUTSTANDING_FRAMES as usize);
         Ok((
             Self {
@@ -1723,6 +1751,7 @@ impl RustcObservationService {
 /// this transaction compiles their exact launch plan and never accepts a preconstructed compiler
 /// response or a trusted-local fallback.
 pub struct UntrustedRustcProviderLifecycle<'a> {
+    pub(crate) task_scope: StructuredCancellationScope,
     pub provider_job: &'a ProviderJob,
     pub trust_policy: &'a RustCompilationTrustPolicy,
     pub sandbox_capabilities: &'a SandboxCapabilityMatrix,
@@ -1806,35 +1835,62 @@ pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
     let capabilities = lifecycle.sandbox_capabilities.clone();
     let profile = lifecycle.sandbox_profile.clone();
     let private_paths = lifecycle.private_paths.clone();
+    let supervisor_scope = lifecycle
+        .task_scope
+        .child("supervisor")
+        .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?;
+    let native_owner =
+        crate::provider_contracts::allocation::reserve_native_state(lifecycle.provider_job)?;
     execute_prepared_rustc_lifecycle(
         lifecycle.provider_job.clone(),
+        lifecycle.task_scope,
         plan,
         lifecycle.private_paths.extractor_socket_path.clone(),
         lifecycle.protocol_policy,
         lifecycle.run_admission,
         lifecycle.allowed_uid,
         move |plan, cancellation| async move {
-            tokio::task::spawn_blocking(move || {
-                let launcher = ProviderSandboxLauncher::new(capabilities);
-                supervise_rust_compilation(
-                    &plan,
-                    &private_paths,
-                    &launcher,
-                    &profile,
-                    launch_material.as_borrowed(),
-                    &cancellation,
-                )
-            })
-            .await
-            .map_err(RustcProviderLifecycleError::SupervisorTask)?
-            .map_err(Into::into)
+            supervisor_scope
+                .spawn_blocking_owned("compiler-process", native_owner, move |scope_cancel| {
+                    let cancellation = cancellation.with_scope_cancellation(scope_cancel);
+                    let launcher = ProviderSandboxLauncher::new(capabilities);
+                    supervise_rust_compilation(
+                        &plan,
+                        &private_paths,
+                        &launcher,
+                        &profile,
+                        launch_material.as_borrowed(),
+                        &cancellation,
+                    )
+                })
+                .await
+                .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?
+                .wait()
+                .await
+                .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?
+                .map_err(Into::into)
         },
     )
     .await
 }
 
+struct CancelRustcLifecycle {
+    scope: StructuredCancellationScope,
+    process: RustCompilationCancellationSignal,
+}
+
+impl Drop for CancelRustcLifecycle {
+    fn drop(&mut self) {
+        // This guard only signals. The registry-owned blocking supervisor retains the real
+        // process group and native allocation envelope until termination is observed.
+        self.process.request();
+        self.scope.cancel();
+    }
+}
+
 async fn execute_prepared_rustc_lifecycle<F, Fut>(
     provider_job: ProviderJob,
+    task_scope: StructuredCancellationScope,
     plan: RustCompilationLaunchPlan,
     socket: PathBuf,
     protocol_policy: RustcProtocolPolicy,
@@ -1859,61 +1915,95 @@ where
         protocol_policy,
         run_admission,
         binding,
+        task_scope
+            .child("streams")
+            .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?,
     )
     .map_err(RustcProviderLifecycleError::Protocol)?;
-    let listener = bind_rustc_uds(&socket)?;
     let monitor = service.clone();
     let cancellation = service.supervisor_cancellation_signal();
+    let _cancel_on_exit = CancelRustcLifecycle {
+        scope: task_scope.clone(),
+        process: cancellation.clone(),
+    };
+    let listener = bind_rustc_uds(&socket)?;
     let cancellation_probe = provider_job.cancellation().clone();
     let cancellation_signal = cancellation.clone();
     let (cancellation_bridge_stop, mut cancellation_bridge_stopped) = oneshot::channel();
-    let cancellation_bridge = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = &mut cancellation_bridge_stopped => return,
-                () = tokio::time::sleep(std::time::Duration::from_millis(5)) => {
-                    if cancellation_probe.is_cancelled() {
-                        cancellation_signal.request();
-                        return;
+    let cancellation_bridge = task_scope
+        .spawn_async_owned(
+            "cancellation-bridge",
+            crate::cancellation::TaskCancellationMode::AbortableAsync,
+            provider_job.clone(),
+            async move {
+                loop {
+                    tokio::select! {
+                        _ = &mut cancellation_bridge_stopped => return,
+                        () = tokio::time::sleep(std::time::Duration::from_millis(5)) => {
+                            if cancellation_probe.is_cancelled() {
+                                cancellation_signal.request();
+                                return;
+                            }
+                        }
                     }
                 }
-            }
-        }
-    });
+            },
+        )
+        .await
+        .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?;
     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
     let server_socket = socket.clone();
-    let server = tokio::spawn(async move {
-        serve_bound_rustc_uds(listener, &server_socket, allowed_uid, service, async move {
-            let _ = shutdown_receiver.await;
-        })
+    let server = task_scope
+        .spawn_async_owned(
+            "server",
+            crate::cancellation::TaskCancellationMode::AbortableAsync,
+            provider_job.clone(),
+            async move {
+                serve_bound_rustc_uds(listener, &server_socket, allowed_uid, service, async move {
+                    let _ = shutdown_receiver.await;
+                })
+                .await
+            },
+        )
         .await
-    });
-    let collector = tokio::spawn(async move {
-        let mut accepted = Vec::new();
-        while let Some(compilation) = accepted_receiver.recv().await {
-            accepted.push(compilation);
-        }
-        accepted
-    });
+        .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?;
+    let collector = task_scope
+        .spawn_async_owned(
+            "collector",
+            crate::cancellation::TaskCancellationMode::AbortableAsync,
+            provider_job.clone(),
+            async move {
+                let mut accepted = Vec::new();
+                while let Some(compilation) = accepted_receiver.recv().await {
+                    accepted.push(compilation);
+                }
+                accepted
+            },
+        )
+        .await
+        .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?;
 
     let receipt = supervisor(plan.clone(), cancellation).await;
     let _ = cancellation_bridge_stop.send(());
     cancellation_bridge
+        .wait()
         .await
-        .map_err(RustcProviderLifecycleError::CancellationBridgeTask)?;
+        .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?;
     let _ = shutdown_sender.send(());
     monitor
         .drain_stream_tasks()
         .await
         .map_err(RustcProviderLifecycleError::Protocol)?;
     let server_result = server
+        .wait()
         .await
-        .map_err(RustcProviderLifecycleError::ServerTask)?;
+        .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?;
     let terminal_states = monitor.terminal_states().await;
     drop(monitor);
     let mut accepted = collector
+        .wait()
         .await
-        .map_err(RustcProviderLifecycleError::CollectorTask)?;
+        .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?;
     if server_result.is_err() {
         return RustcProviderRunResult::gap(
             &provider_job,
@@ -2000,6 +2090,8 @@ where
 /// Closed lifecycle failures. No variant carries partially accepted semantic output.
 #[derive(Debug, thiserror::Error)]
 pub enum RustcProviderLifecycleError {
+    #[error("owned rustc operation failed: {0}")]
+    OwnedTask(String),
     #[error(transparent)]
     ProviderContract(#[from] ProviderContractError),
     #[error(transparent)]
@@ -2050,27 +2142,33 @@ where
     serve_bound_rustc_uds(listener, socket, allowed_uid, service, shutdown).await
 }
 
-fn bind_rustc_uds(socket: &Path) -> Result<tokio::net::UnixListener, RustcTransportError> {
+struct BoundRustcUds {
+    listener: tokio::net::UnixListener,
+    ownership: crate::owned_unix_socket::OwnedUnixSocket,
+}
+
+fn bind_rustc_uds(socket: &Path) -> Result<BoundRustcUds, RustcTransportError> {
     if socket.exists() {
         return Err(RustcTransportError::SocketExists(socket.to_path_buf()));
     }
-    let listener =
-        tokio::net::UnixListener::bind(socket).map_err(|source| RustcTransportError::Io {
-            path: socket.to_path_buf(),
-            source,
-        })?;
-    fs::set_permissions(socket, fs::Permissions::from_mode(0o600)).map_err(|source| {
-        RustcTransportError::Io {
-            path: socket.to_path_buf(),
-            source,
-        }
+    let root = socket.parent().ok_or_else(|| RustcTransportError::Io {
+        path: socket.to_path_buf(),
+        source: std::io::Error::other("private compiler socket has no parent"),
     })?;
-    Ok(listener)
+    let (listener, ownership) = crate::owned_unix_socket::OwnedUnixSocket::bind(root, socket, 1)
+        .map_err(|source| RustcTransportError::Io {
+            path: socket.to_path_buf(),
+            source: std::io::Error::other(source),
+        })?;
+    Ok(BoundRustcUds {
+        listener,
+        ownership,
+    })
 }
 
 async fn serve_bound_rustc_uds<F>(
-    listener: tokio::net::UnixListener,
-    socket: &Path,
+    bound: BoundRustcUds,
+    _socket: &Path,
     allowed_uid: u32,
     service: RustcObservationService,
     shutdown: F,
@@ -2078,15 +2176,12 @@ async fn serve_bound_rustc_uds<F>(
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    struct RemoveSocket(PathBuf);
-
-    impl Drop for RemoveSocket {
-        fn drop(&mut self) {
-            let _ = fs::remove_file(&self.0);
-        }
-    }
-
-    let _remove_socket = RemoveSocket(socket.to_path_buf());
+    // Ownership already exists before this future is first polled, so rejected task admission
+    // and caller cancellation also release only the exact bound socket generation.
+    let BoundRustcUds {
+        listener,
+        ownership: _ownership,
+    } = bound;
     let incoming = stream::unfold(listener, move |listener| async move {
         let accepted = listener
             .accept()
@@ -2203,7 +2298,16 @@ impl RustcExtractor for RustcObservationService {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
+    fn task_scope() -> crate::cancellation::StructuredCancellationScope {
+        crate::cancellation::StructuredCancellationScope::try_root_with_control_reserve(
+            "rustc-fixture",
+            std::num::NonZeroUsize::new(32).unwrap(),
+            std::num::NonZeroUsize::new(4).unwrap(),
+        )
+        .unwrap()
+    }
+
+    use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
@@ -2324,6 +2428,10 @@ mod tests {
             })
             .collect();
         let job = ProviderJob::try_new(ProviderJobSpec {
+            resource_budget: crate::provider_contracts::fixture_provider_budget(
+                admission.canonical_workspace_id,
+                [5; 16],
+            ),
             suite: SuiteIdentity::try_new("codefabric-relational-data-fabric@2.3.0").unwrap(),
             provider: ProviderIdentity::try_new("rustc-public-mir").unwrap(),
             protocol: ProviderProtocolIdentity::try_new(format!(
@@ -2340,13 +2448,16 @@ mod tests {
                     .unwrap(),
             )
             .unwrap(),
-            context: ProviderContextBinding::try_new(
-                ContextIdentity::try_new(admission.analysis_context_id.clone()).unwrap(),
-                admission.canonical_analysis_context_id,
-                crate::identity::decode_b3_digest(&admission.context_manifest_digest).unwrap(),
-                [4; 32],
-            )
-            .unwrap(),
+            context: crate::provider_contracts::fixture_provider_context(
+                admission.canonical_workspace_id,
+                ProviderContextBinding::try_new(
+                    ContextIdentity::try_new(admission.analysis_context_id.clone()).unwrap(),
+                    admission.canonical_analysis_context_id,
+                    crate::identity::decode_b3_digest(&admission.context_manifest_digest).unwrap(),
+                    [4; 32],
+                )
+                .unwrap(),
+            ),
             run: ProviderRunBinding::try_new(
                 ProviderRunIdentity::try_new(admission.provider_run_id.clone()).unwrap(),
                 [5; 16],
@@ -2360,7 +2471,7 @@ mod tests {
                 max_batches_per_relation: 64,
                 max_input_bytes: 64 * 1024 * 1024,
                 max_rows: 64 * MAX_RELATION_ROWS,
-                max_bytes: 512 * 1024 * 1024,
+                max_bytes: 64 * 1024 * 1024,
                 max_diagnostics: 1_024,
                 max_work_units: 1_000_000,
                 max_wall_millis: 120_000,
@@ -2583,7 +2694,7 @@ mod tests {
             schema_digest: relation.schema_digest(),
             row_count: 0,
             arrow_ipc_digest: arrow_ipc_digest(&arrow_ipc),
-            arrow_ipc,
+            arrow_ipc: crate::resource_budget::ChargedSlice::for_test(arrow_ipc),
             batch,
         }
     }
@@ -2788,6 +2899,7 @@ mod tests {
         let admission = harness.admission.clone();
         execute_prepared_rustc_lifecycle(
             provider_job,
+            task_scope(),
             plan,
             harness.paths.extractor_socket_path.clone(),
             harness.protocol_policy.clone(),
@@ -2979,7 +3091,7 @@ mod tests {
         );
 
         let mut corrupt = typed_relation(RustcRelation::MirBody);
-        corrupt.arrow_ipc.clear();
+        corrupt.arrow_ipc = crate::resource_budget::ChargedSlice::for_test(Vec::new());
         assert_eq!(
             validate_accepted_relation(&corrupt).unwrap_err().code(),
             tonic::Code::InvalidArgument
@@ -2991,8 +3103,14 @@ mod tests {
         let (policy, admission, begin) = fixture();
         let binding = trust_binding(&policy, &admission);
         let job = provider_job(&policy, &admission, &[RustcRelation::MirBody]);
-        let (service, _accepted) =
-            RustcObservationService::new(job, policy.clone(), admission.clone(), binding).unwrap();
+        let (service, _accepted) = RustcObservationService::new(
+            job,
+            policy.clone(),
+            admission.clone(),
+            binding,
+            task_scope(),
+        )
+        .unwrap();
         let hello = ExtractorHello {
             protocol_major: 1,
             protocol_minor: 0,
@@ -3054,7 +3172,9 @@ mod tests {
         );
 
         let job = provider_job(&policy, &admission, &[RustcRelation::MirBody]);
-        let Err(error) = RustcObservationService::new(job, policy, admission, mismatched) else {
+        let Err(error) =
+            RustcObservationService::new(job, policy, admission, mismatched, task_scope())
+        else {
             panic!("a mismatched launch-plan binding must fail before the endpoint is usable");
         };
         assert_eq!(error.code(), tonic::Code::FailedPrecondition);
@@ -3076,9 +3196,14 @@ mod tests {
             let mut changed = admission.clone();
             mutate(&mut changed);
             let binding = trust_binding(&policy, &changed);
-            let error =
-                RustcObservationService::new(job.clone(), policy.clone(), changed.clone(), binding)
-                    .unwrap_err();
+            let error = RustcObservationService::new(
+                job.clone(),
+                policy.clone(),
+                changed.clone(),
+                binding,
+                task_scope(),
+            )
+            .unwrap_err();
             assert_eq!(error.code(), tonic::Code::FailedPrecondition);
             assert!(validate_begin(&job, &changed, &policy, &begin).is_err());
         }
@@ -3112,6 +3237,7 @@ mod tests {
         let observed = Arc::clone(&invoked);
         let result = execute_prepared_rustc_lifecycle(
             job,
+            task_scope(),
             lifecycle_plan(&harness),
             harness.paths.extractor_socket_path.clone(),
             harness.protocol_policy.clone(),
@@ -3143,6 +3269,7 @@ mod tests {
             &[RustcRelation::MirBody],
         );
         let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
+            task_scope: task_scope(),
             provider_job: &provider_job,
             trust_policy: &harness.trust_policy,
             sandbox_capabilities: &harness.capabilities,
@@ -3186,6 +3313,7 @@ mod tests {
             &[RustcRelation::MirBody],
         );
         let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
+            task_scope: task_scope(),
             provider_job: &provider_job,
             trust_policy: &trusted_local,
             sandbox_capabilities: &harness.capabilities,
@@ -3211,6 +3339,143 @@ mod tests {
         ));
         assert!(!harness.launch_marker.exists());
         assert!(!harness.paths.extractor_socket_path.exists());
+    }
+
+    #[test]
+    fn wp79_rustc_native_signal_observes_scope_without_async_bridge() {
+        let scope = task_scope();
+        let protocol = RustCompilationCancellationSignal::default();
+        let bound = protocol.clone().with_scope_cancellation(scope.probe(1));
+        let clone = bound.clone();
+        assert!(!bound.is_requested());
+        scope.cancel();
+        assert!(bound.is_requested());
+        assert!(clone.is_requested());
+        assert!(
+            !protocol.is_requested(),
+            "the supplied scope, not an async protocol bridge, is causal"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn wp79_rustc_caller_drop_signals_and_joins_live_native_owner() {
+        struct ReleaseOnDrop(Arc<AtomicBool>);
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+        let harness = lifecycle_harness();
+        let job = provider_job(
+            &harness.protocol_policy,
+            &harness.admission,
+            &[RustcRelation::MirBody],
+        );
+        let budget = job.resource_budget().clone();
+        let baseline = budget.observation().used.memory_bytes;
+        let tasks = task_scope();
+        let lifecycle_tasks = tasks.child("lifecycle").unwrap();
+        let native_tasks = lifecycle_tasks.child("native").unwrap();
+        let owner = crate::provider_contracts::allocation::reserve_native_state(&job).unwrap();
+        let release = Arc::new(AtomicBool::new(false));
+        let _release_on_exit = ReleaseOnDrop(Arc::clone(&release));
+        let worker_release = Arc::clone(&release);
+        let observed = Arc::new(AtomicBool::new(false));
+        let worker_observed = Arc::clone(&observed);
+        let (started, startup) = oneshot::channel();
+        let mut invocation = Box::pin(execute_prepared_rustc_lifecycle(
+            job.clone(),
+            lifecycle_tasks.clone(),
+            lifecycle_plan(&harness),
+            harness.paths.extractor_socket_path.clone(),
+            harness.protocol_policy.clone(),
+            harness.admission.clone(),
+            harness.allowed_uid,
+            move |_, signal| async move {
+                native_tasks
+                    .spawn_blocking_owned("live-worker", owner, move |cancel| {
+                        let signal = signal.with_scope_cancellation(cancel);
+                        let _ = started.send(());
+                        while !signal.is_requested() {
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                        worker_observed.store(true, Ordering::Release);
+                        while !worker_release.load(Ordering::Acquire) {
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                        Err(RustcProviderLifecycleError::OwnedTask(
+                            "cancelled live fixture".to_owned(),
+                        ))
+                    })
+                    .await
+                    .unwrap()
+                    .wait()
+                    .await
+                    .unwrap()
+            },
+        ));
+        tokio::select! {
+            _ = &mut invocation => panic!("the native worker must remain live until caller drop"),
+            result = startup => result.unwrap(),
+        }
+        drop(invocation);
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while !observed.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(lifecycle_tasks.is_cancelled());
+        assert!(budget.observation().used.memory_bytes > baseline);
+        assert!(
+            lifecycle_tasks
+                .cancel_and_join(std::time::Duration::from_millis(5))
+                .await
+                .is_err()
+        );
+        let health = tasks
+            .child_control("health")
+            .unwrap()
+            .spawn_async_owned(
+                "ping",
+                crate::cancellation::TaskCancellationMode::AbortableAsync,
+                (),
+                async { 7_u8 },
+            )
+            .await
+            .unwrap();
+        assert_eq!(health.wait().await.unwrap(), 7);
+        release.store(true, Ordering::Release);
+        lifecycle_tasks
+            .cancel_and_join(std::time::Duration::from_secs(2))
+            .await
+            .unwrap();
+        lifecycle_tasks
+            .cancel_and_join(std::time::Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert!(!harness.paths.extractor_socket_path.exists());
+        assert_eq!(budget.observation().used.memory_bytes, baseline);
+    }
+
+    #[tokio::test]
+    async fn wp79_rustc_unpolled_socket_owner_preserves_replacements() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = directory.path().join("compiler.sock");
+        let bound = bind_rustc_uds(&socket).unwrap();
+        assert!(socket.exists());
+        drop(bound);
+        assert!(
+            !socket.exists(),
+            "even a never-polled serving future owns cleanup"
+        );
+        let bound = bind_rustc_uds(&socket).unwrap();
+        std::fs::remove_file(&socket).unwrap();
+        std::fs::write(&socket, b"replacement").unwrap();
+        drop(bound);
+        assert_eq!(std::fs::read(socket).unwrap(), b"replacement");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3286,6 +3551,7 @@ mod tests {
         let cancellation_started = std::time::Instant::now();
         let cancelled = execute_prepared_rustc_lifecycle(
             provider_job,
+            task_scope(),
             lifecycle_plan(&cancellation_harness),
             cancellation_harness.paths.extractor_socket_path.clone(),
             cancellation_harness.protocol_policy.clone(),
@@ -3347,6 +3613,7 @@ mod tests {
         );
         let result = execute_prepared_rustc_lifecycle(
             provider_job,
+            task_scope(),
             lifecycle_plan(&harness),
             harness.paths.extractor_socket_path.clone(),
             harness.protocol_policy.clone(),
@@ -3437,7 +3704,8 @@ mod tests {
         let binding = trust_binding(&policy, &admission);
         let job = provider_job(&policy, &admission, &[RustcRelation::MirBody]);
         let (service, _accepted) =
-            RustcObservationService::new(job, policy, admission.clone(), binding).unwrap();
+            RustcObservationService::new(job, policy, admission.clone(), binding, task_scope())
+                .unwrap();
         let (first_sender, mut first_commands) = mpsc::channel(2);
         let (second_sender, mut second_commands) = mpsc::channel(2);
         {

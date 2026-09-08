@@ -1361,7 +1361,7 @@ pub fn issue_access_scope_identity(
             ))
         })
         .collect::<Result<Vec<_>, IdentityError>>()?;
-    source_files.sort_by(|left, right| left.1.cmp(&right.1));
+    source_files.sort_by_key(|left| left.1);
     if source_files.windows(2).any(|pair| pair[0].1 == pair[1].1) {
         return Err(IdentityError::ContainerOrder);
     }

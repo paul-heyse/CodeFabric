@@ -45,7 +45,7 @@ pub enum ProviderSourceSelection {
         file_id: [u8; 16],
         content_digest: [u8; 32],
     },
-    Inventory(ProviderSourceInventory),
+    Inventory(crate::resource_budget::ChargedValue<ProviderSourceInventory>),
 }
 
 /// Exact qualified module identity consumed by an in-process Python frontend.
@@ -123,6 +123,45 @@ pub struct ProviderSourceInventory {
 }
 
 impl ProviderSourceInventory {
+    /// Retained container and nested path capacities; source byte bodies are charged separately.
+    ///
+    /// # Errors
+    /// Rejects arithmetic overflow or a metadata envelope violation.
+    pub fn memory_bytes(&self) -> Result<u64, ProviderContractError> {
+        let mut bytes = std::mem::size_of::<Self>();
+        checked_bytes(
+            &mut bytes,
+            self.members
+                .capacity()
+                .checked_mul(std::mem::size_of::<ProviderInventoryMember>())
+                .ok_or(ProviderContractError::ResourceOverflow)?,
+        )?;
+        checked_bytes(
+            &mut bytes,
+            self.changed
+                .capacity()
+                .checked_mul(std::mem::size_of::<Vec<u8>>())
+                .ok_or(ProviderContractError::ResourceOverflow)?,
+        )?;
+        checked_bytes(
+            &mut bytes,
+            self.withdrawn
+                .capacity()
+                .checked_mul(std::mem::size_of::<WithdrawnMember>())
+                .ok_or(ProviderContractError::ResourceOverflow)?,
+        )?;
+        for path in self
+            .members
+            .iter()
+            .map(|member| &member.relative_path)
+            .chain(self.changed.iter())
+            .chain(self.withdrawn.iter().map(|(_, path)| path))
+        {
+            checked_bytes(&mut bytes, path.capacity())?;
+        }
+        Ok(bytes as u64)
+    }
+
     /// Join a disposition set to the independently authorized full path census.
     ///
     /// The daemon supplies these from its sealed capture bundle, not a dirty work list.
@@ -585,6 +624,18 @@ pub(super) fn effective_context_input_identity(
     let canonical = crate::contracts::jcs::canonicalize_value(&value)
         .map_err(|_| ProviderContractError::SupportMismatch)?;
     Ok(*blake3::hash(&canonical).as_bytes())
+}
+
+pub(super) fn context_memory_bytes(
+    context: &super::ProviderContextBinding,
+) -> Result<u64, ProviderContractError> {
+    let mut bytes = std::mem::size_of::<super::ProviderContextBinding>();
+    checked_bytes(&mut bytes, context.identity.as_str().len())?;
+    checked_bytes(&mut bytes, module_memory_bytes(&context.modules)?)?;
+    for dependency in context.support_obligations() {
+        checked_bytes(&mut bytes, dependency_memory_bytes(dependency)?)?;
+    }
+    Ok(bytes as u64)
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]

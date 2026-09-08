@@ -1650,8 +1650,7 @@ fn execute_owner_fixed_points(
                             flow_event_id(candidate, provenance, bindings) == *definition
                         });
                         let source_node_id = definition_seed
-                            .map(|seed| node_ids[&seed.node_ordinal])
-                            .unwrap_or(node_ids[&node.ordinal]);
+                            .map_or(node_ids[&node.ordinal], |seed| node_ids[&seed.node_ordinal]);
                         result.links.push(FlowLinkRow {
                             edge_id: derived_id(
                                 b"def-use-edge",

@@ -8,10 +8,12 @@ use super::{
 };
 use crate::cancellation::Cancellation;
 use crate::identity::{WorkspacePath, random_registration_nonce, source_file_identity};
+use crate::inventory::reserve_memory;
 use crate::inventory::{
     CompleteSourceInventory, InclusionState, InventoryReadFailure, SourceInventoryRecord,
 };
 use crate::operational_store::OperationalStore;
+use crate::resource_budget::{ChargedValue, ResourceBudgetError, ResourceReservation};
 use crate::secure_path::{PlatformPath, SecurePathError, StableReadError};
 
 /// A release/context-selected disposition. Names alone never classify generated/vendor input.
@@ -53,13 +55,13 @@ pub enum InventoryCaptureDisposition {
 /// An immutable per-path capture observation, including negative outcomes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InventoryCaptureEntry {
-    path: WorkspacePath,
+    path: ChargedValue<WorkspacePath>,
     disposition: InventoryCaptureDisposition,
 }
 
 impl InventoryCaptureEntry {
     #[must_use]
-    pub const fn path(&self) -> &WorkspacePath {
+    pub fn path(&self) -> &WorkspacePath {
         &self.path
     }
 
@@ -77,6 +79,8 @@ pub struct InventoryCaptureBundle {
     dispositions: Vec<InventoryCaptureEntry>,
     images: Vec<SourceImage>,
     fence_current: bool,
+    // Drops after the vectors whose full capacities it admitted before capture.
+    _metadata: ResourceReservation,
 }
 
 impl InventoryCaptureBundle {
@@ -187,11 +191,21 @@ impl SourceImageStore {
             return Err(SourceImageError::InventoryCaptureBound);
         }
         self.refresh_lease_metrics(store)?;
+        let members = inventory.inventory().records.len();
+        let metadata_bytes = members
+            .checked_mul(
+                std::mem::size_of::<InventoryCaptureEntry>()
+                    + std::mem::size_of::<SourceImage>()
+                    + 128,
+            )
+            .ok_or(ResourceBudgetError::Overflow)?;
+        let metadata = reserve_memory(&self.budget, metadata_bytes as u64)?;
         let mut bundle = InventoryCaptureBundle {
             inventory: inventory.clone(),
-            dispositions: Vec::with_capacity(inventory.inventory().records.len()),
-            images: Vec::new(),
+            dispositions: Vec::with_capacity(members),
+            images: Vec::with_capacity(members),
             fence_current: true,
+            _metadata: metadata,
         };
         let result = self.capture_members(
             store,
@@ -261,6 +275,10 @@ impl SourceImageStore {
                         if record.byte_length > remaining {
                             return Err(SourceImageError::InventoryCaptureBound);
                         }
+                        let _request = reserve_memory(
+                            &self.budget,
+                            record.path.raw_relative_path_bytes.len() as u64 * 8 + 1024,
+                        )?;
                         let request = CaptureRequest {
                             workspace_id: inventory.workspace_id,
                             source_generation: inventory.source_generation,
@@ -368,8 +386,10 @@ impl SourceImageStore {
         store: &mut OperationalStore,
         bundle: InventoryCaptureBundle,
     ) -> Result<(), SourceImageError> {
-        let InventoryCaptureBundle { images, .. } = bundle;
-        self.release_images(store, &images)
+        let result = self.release_images(store, &bundle.images);
+        // Keep the vector capacity reservation alive through release and actual destruction.
+        drop(bundle);
+        result
     }
 
     fn release_images(
@@ -403,6 +423,96 @@ mod tests {
         publish_provider_workspace_view,
     };
     use crate::workspace_registry::{WorkspaceRegistry, WorkspaceSourceRegistration};
+
+    #[test]
+    fn rt_cpg_wp79_source_backings_survive_capture_and_store_release() {
+        let (directory, mut store, workspace, root, _) = fixture();
+        fs::write(root.join("source.py"), b"value = '\xc3\xa9'\n").unwrap();
+        let budget = crate::provider_types::source_fixture_budget(workspace);
+        let secure = crate::secure_path::open_workspace_root(&mut store, workspace).unwrap();
+        let inventory = InventoryWalker::new_governed(InventoryLimits::default(), budget.clone())
+            .walk_selected_with_fence(&secure, &mut store, 0, 0, &Cancellation::default(), || {
+                Some(0)
+            })
+            .unwrap();
+        let mut images = SourceImageStore::open_fixture_governed(
+            &directory.path().join("governed-blobs"),
+            SourceCapturePolicy::default(),
+            budget.clone(),
+        )
+        .unwrap();
+        let bundle = capture(&mut store, &mut images, &inventory);
+        let image = bundle.images()[0].clone();
+        let bytes = image.bytes.slice(0..5).unwrap();
+        let text = image.provider_text.as_ref().unwrap().clone();
+        let offsets = image.line_index.offsets.clone();
+        let path = image.path.clone();
+        let before = budget.observation().used.memory_bytes;
+        let other = bytes.clone();
+        assert_eq!(budget.observation().used.memory_bytes, before);
+        images
+            .release_inventory_capture(&mut store, bundle)
+            .unwrap();
+        assert_eq!(durable_lease_count(&store), 0);
+        drop((inventory, images, image));
+        assert!(budget.observation().used.memory_bytes > 0);
+        assert_eq!(bytes.as_ref(), b"value");
+        assert!(text.text.contains('\u{e9}'));
+        assert_eq!(offsets[0], 0);
+        assert_eq!(path.raw_relative_path_bytes, b"source.py");
+        drop((bytes, other, text, offsets, path));
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+        assert_eq!(budget.observation().used.rows, 0);
+    }
+
+    #[test]
+    fn rt_cpg_wp79_complete_ten_thousand_file_governed_capture() {
+        let (directory, mut store, workspace, root, _) = fixture();
+        for index in 0..10_000 {
+            fs::write(root.join(format!("module_{index:05}.py")), b"pass\n").unwrap();
+        }
+        let budget = crate::provider_types::source_fixture_budget(workspace);
+        let secure = crate::secure_path::open_workspace_root(&mut store, workspace).unwrap();
+        let inventory = InventoryWalker::new_governed(InventoryLimits::default(), budget.clone())
+            .walk_selected_with_fence(&secure, &mut store, 0, 0, &Cancellation::default(), || {
+                Some(0)
+            })
+            .unwrap();
+        assert_eq!(inventory.inventory().records.len(), 10_000);
+        let mut images = SourceImageStore::open_fixture_governed(
+            &directory.path().join("governed-blobs"),
+            SourceCapturePolicy::default(),
+            budget.clone(),
+        )
+        .unwrap();
+        let bundle = images
+            .capture_inventory_with_fence(
+                &mut store,
+                &inventory,
+                SourceInventoryCapturePolicy {
+                    maximum_total_bytes: 64 * 1024 * 1024,
+                    holder_kind: SourceBlobHolderKind::ProviderRun,
+                },
+                &Cancellation::default(),
+                |_| SourceSelection::Capture(SourceLanguage::Python),
+                || Some(0),
+            )
+            .unwrap();
+        bundle.require_closed().unwrap();
+        assert_eq!(bundle.images().len(), 10_000);
+        assert_eq!(bundle.dispositions().len(), 10_000);
+        assert_eq!(durable_lease_count(&store), 10_000);
+        assert!(
+            budget.observation().peak.memory_bytes
+                <= u128::from(budget.policy().limits.memory_bytes)
+        );
+        images
+            .release_inventory_capture(&mut store, bundle)
+            .unwrap();
+        assert_eq!(durable_lease_count(&store), 0);
+        drop((inventory, images));
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+    }
 
     fn fixture() -> (
         tempfile::TempDir,

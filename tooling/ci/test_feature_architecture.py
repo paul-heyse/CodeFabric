@@ -19,6 +19,7 @@ def _metadata() -> dict[str, Any]:
     names = {
         "root": "codefabric",
         "array": "arrow-array",
+        "buffer": "arrow-buffer",
         "schema": "arrow-schema",
         "error": "thiserror",
     }
@@ -40,10 +41,11 @@ def _metadata() -> dict[str, Any]:
                             "pkg": package,
                             "dep_kinds": [{"kind": None}],
                         }
-                        for package in ("array", "schema", "error")
+                        for package in ("array", "buffer", "schema", "error")
                     ],
                 },
                 {"id": "array", "features": [], "deps": []},
+                {"id": "buffer", "features": [], "deps": []},
                 {"id": "schema", "features": [], "deps": []},
                 {"id": "error", "features": [], "deps": []},
             ]

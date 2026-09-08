@@ -420,7 +420,8 @@ fn compiled_v2_0_scope_values(
     request: &ParsedSemanticRequest,
 ) -> BTreeMap<&'static str, Vec<SemanticClauseValue>> {
     let request = &request.request;
-    let expected = COMPILED_V2_0_SCOPE_DEFINITIONS
+
+    COMPILED_V2_0_SCOPE_DEFINITIONS
         .into_iter()
         .filter_map(|definition| {
             let operands = request.compiled_v2_0_scope_operands(definition.role);
@@ -434,8 +435,7 @@ fn compiled_v2_0_scope_values(
                 )
             })
         })
-        .collect();
-    expected
+        .collect()
 }
 
 fn validate_compiled_v2_0_scope_handoffs(
@@ -906,7 +906,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             .workspace()
             .query_ports()
             .ingress
-            .prepare_input_requirements(request, answers, workspace.as_ref(), &authority)
+            .prepare_input_requirements(request, answers, workspace.as_ref(), authority)
             .map_err(|error| query_error("programmatic_ingress", error.to_string()))?;
         if requirements.is_empty() {
             Ok(SemanticExecutionPreparation::Ready(
@@ -935,7 +935,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             .workspace()
             .query_ports()
             .ingress
-            .prepare_input_requirements(request, resolved.answers(), workspace.as_ref(), &authority)
+            .prepare_input_requirements(request, resolved.answers(), workspace.as_ref(), authority)
             .map_err(|error| query_error("programmatic_ingress", error.to_string()))?;
         if !remaining.is_empty() {
             return Err(query_error(
@@ -956,7 +956,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         let snapshot = self.project_snapshot(
             &request.request.workspace_id,
             workspace.as_ref(),
-            &authority,
+            authority,
             workspace_lease.workspace().query_ports(),
             FreshnessState::Current,
         )?;
@@ -1019,7 +1019,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         artifacts.set_phase("semantic_binding");
         let ingress = match ports
             .ingress
-            .project_resolved(&request, workspace.as_ref(), &authority)
+            .project_resolved(&request, workspace.as_ref(), authority)
         {
             Ok(ingress) => ingress,
             Err(error) => return failed(&artifacts, "programmatic_ingress", error.to_string()),
@@ -1112,7 +1112,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             request.parsed(),
             context.owner(),
             workspace.as_ref(),
-            &authority,
+            authority,
             &handoff.scopes,
         ) {
             Ok(authorization) => authorization,
@@ -1156,6 +1156,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             let inputs = match RequestOwnedRelationCollection::try_materialize(
                 request_handoffs,
                 authority.request_owned_relation_limits(),
+                authority.resources().resource_budget(),
             ) {
                 Ok(inputs) => inputs,
                 Err(error) => return failed(&artifacts, "request_input", error.to_string()),
@@ -1245,6 +1246,21 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             .await
         {
             Ok(publication) => publication,
+            Err(error) if is_resource_capacity_error(&error) => {
+                return failed_error(
+                    &artifacts,
+                    "physical_execution",
+                    SemanticQueryError::Phase {
+                        code: "RESOURCE_CAPACITY",
+                        phase: "physical_execution",
+                        pointer: "/runtime/resources".to_owned(),
+                        message: "bounded execution capacity is unavailable".to_owned(),
+                    },
+                );
+            }
+            Err(error) if native_cleanup_pending(&error) => {
+                return failed(&artifacts, "physical_execution", error.to_string());
+            }
             Err(error) if cancellation.is_cancelled() => {
                 return cancelled(&artifacts, "physical_execution", error.to_string());
             }
@@ -1348,6 +1364,50 @@ fn record_complete_stage<const N: usize>(
     });
 }
 
+fn is_resource_capacity_error(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = Some(error);
+    // Error wrappers are not trusted to form an acyclic chain; classification is bounded.
+    for _ in 0..32 {
+        let Some(error) = current else {
+            return false;
+        };
+        if matches!(
+            error.downcast_ref::<crate::resource_budget::ResourceBudgetError>(),
+            Some(
+                crate::resource_budget::ResourceBudgetError::Exhausted { .. }
+                    | crate::resource_budget::ResourceBudgetError::ScopeCapacity
+            )
+        ) || matches!(
+            error.downcast_ref::<datafusion::common::DataFusionError>(),
+            Some(datafusion::common::DataFusionError::ResourcesExhausted(_))
+        ) || matches!(
+            error.downcast_ref::<super::native_operations::NativeOperationError>(),
+            Some(super::native_operations::NativeOperationError::TaskCapacity { .. })
+        ) {
+            return true;
+        }
+        current = error.source();
+    }
+    false
+}
+
+fn native_cleanup_pending(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = Some(error);
+    for _ in 0..32 {
+        let Some(error) = current else {
+            return false;
+        };
+        if matches!(
+            error.downcast_ref::<super::native_operations::NativeOperationError>(),
+            Some(super::native_operations::NativeOperationError::CleanupReserveExhausted)
+        ) {
+            return true;
+        }
+        current = error.source();
+    }
+    false
+}
+
 fn failed(
     artifacts: &QueryExecutionArtifactAccumulator,
     stage: &str,
@@ -1408,6 +1468,22 @@ pub enum ProgrammaticSemanticQueryBackendError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_capacity_preserves_its_category_through_runtime_error_wrappers() {
+        use crate::fabric::child_session::resource_governance::EpochResourceError;
+        use crate::fabric::native_operations::NativeOperationError;
+        use crate::fabric::relational_query_runtime::RelationalQueryRuntimeError;
+
+        let capacity: RelationalQueryRuntimeError =
+            EpochResourceError::from(NativeOperationError::TaskCapacity { maximum: 4096 }).into();
+        assert!(super::is_resource_capacity_error(&capacity));
+        assert!(!super::native_cleanup_pending(&capacity));
+        let cleanup: RelationalQueryRuntimeError =
+            EpochResourceError::from(NativeOperationError::CleanupReserveExhausted).into();
+        assert!(!super::is_resource_capacity_error(&cleanup));
+        assert!(super::native_cleanup_pending(&cleanup));
+    }
+
     use super::*;
     use crate::relational_semantic_query::EpochBoundScopeRow;
     use crate::semantic_query_contract::parse_request;
@@ -1632,7 +1708,11 @@ mod tests {
             release,
             Arc::new(WorkspaceSlotRegistry::new()),
             Arc::clone(&lifecycle),
-            StreamedResultPackageBuilder::new(sink, limits),
+            StreamedResultPackageBuilder::new(
+                sink,
+                limits,
+                crate::fabric::workspace_resources::test_workspace_budget(),
+            ),
         );
 
         let error = backend.require_semantic_admission().unwrap_err();

@@ -375,34 +375,31 @@ fn load_nonterminal_page_sync(
     after: Option<OperationId>,
     page_size: CommandRecoveryPageSize,
 ) -> Result<CommandRecoveryPage, CommandPortError> {
-    let mut records = match after {
-        Some(after) => {
-            let mut statement = connection
-                .prepare(
-                    "SELECT operation_id, idempotency_key, workspace_id, revision,
-                            state_kind, is_terminal, record_jcs
-                     FROM fabric_command_record
-                     WHERE operation_id > ?1
-                     ORDER BY operation_id",
-                )
-                .map_err(unavailable)?;
-            let rows = statement
-                .query([after.as_bytes().as_slice()])
-                .map_err(unavailable)?;
-            decode_nonterminal_rows(rows, page_size)?
-        }
-        None => {
-            let mut statement = connection
-                .prepare(
-                    "SELECT operation_id, idempotency_key, workspace_id, revision,
-                            state_kind, is_terminal, record_jcs
-                     FROM fabric_command_record
-                     ORDER BY operation_id",
-                )
-                .map_err(unavailable)?;
-            let rows = statement.query([]).map_err(unavailable)?;
-            decode_nonterminal_rows(rows, page_size)?
-        }
+    let mut records = if let Some(after) = after {
+        let mut statement = connection
+            .prepare(
+                "SELECT operation_id, idempotency_key, workspace_id, revision,
+                        state_kind, is_terminal, record_jcs
+                 FROM fabric_command_record
+                 WHERE operation_id > ?1
+                 ORDER BY operation_id",
+            )
+            .map_err(unavailable)?;
+        let rows = statement
+            .query([after.as_bytes().as_slice()])
+            .map_err(unavailable)?;
+        decode_nonterminal_rows(rows, page_size)?
+    } else {
+        let mut statement = connection
+            .prepare(
+                "SELECT operation_id, idempotency_key, workspace_id, revision,
+                        state_kind, is_terminal, record_jcs
+                 FROM fabric_command_record
+                 ORDER BY operation_id",
+            )
+            .map_err(unavailable)?;
+        let rows = statement.query([]).map_err(unavailable)?;
+        decode_nonterminal_rows(rows, page_size)?
     };
     let has_more = records.len() > usize::from(page_size.get());
     if has_more {

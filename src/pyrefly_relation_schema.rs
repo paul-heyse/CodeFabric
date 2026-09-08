@@ -48,10 +48,12 @@ impl PyreflyRelation {
         Self::Coverage,
     ];
 
+    #[must_use]
     pub const fn family_code(self) -> u32 {
         self as u32
     }
 
+    #[must_use]
     pub const fn relation_id(self) -> &'static str {
         match self {
             Self::ModuleContext => "provider.pyrefly.module_context.v1",

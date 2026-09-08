@@ -266,6 +266,7 @@ impl TableVersionSet {
     }
 
     /// Iterate the canonical relation-ID order used by the reference digest.
+    #[must_use]
     pub fn components(
         &self,
     ) -> impl ExactSizeIterator<Item = (&str, &ExactDeltaPin)> + DoubleEndedIterator {

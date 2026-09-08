@@ -710,7 +710,7 @@ impl GuardedDeltaMaintenance {
                     .retention
                     .active_claims()
                     .iter()
-                    .map(|claim| claim.authority_kind())
+                    .map(super::delta_exact::DeltaRetentionClaim::authority_kind)
                     .collect::<Vec<_>>();
                 authorities.sort();
                 authorities.dedup();
@@ -727,7 +727,7 @@ impl GuardedDeltaMaintenance {
                     })
                     .map(|reference| reference.proof_receipt)
                     .collect::<Vec<_>>();
-                receipts.sort();
+                receipts.sort_unstable();
                 receipts.dedup();
                 if !receipts.is_empty() {
                     return Ok(DeltaMaintenanceOutcome::Rejected(
@@ -754,8 +754,10 @@ impl GuardedDeltaMaintenance {
                 },
             ));
         }
+        let store = loaded_target.log_store().root_object_store(None);
         ValidatedDeltaSnapshot::try_from_loaded_table(loaded_target, target)?;
         let reopened = DeltaTableBuilder::from_url(target.canonical_root().clone())?
+            .with_storage_backend(store, target.canonical_root().clone())
             .with_version(target.version())
             .load()
             .await?;
@@ -915,7 +917,7 @@ fn resolve_activation_head(
         .zip(&child_count)
         .filter_map(|(event, count)| (*count == 0).then_some(event.event_id))
         .collect::<Vec<_>>();
-    terminal_heads.sort();
+    terminal_heads.sort_unstable();
     if terminal_heads.len() != 1 {
         return Err(if terminal_heads.is_empty() {
             DeltaMaintenanceRejection::CyclicOrDisconnectedActivationHistory
@@ -923,7 +925,7 @@ fn resolve_activation_head(
             DeltaMaintenanceRejection::SplitActivationHead { terminal_heads }
         });
     }
-    roots.sort();
+    roots.sort_unstable();
     if roots.len() != 1 {
         return Err(DeltaMaintenanceRejection::AmbiguousActivationRoot { roots });
     }

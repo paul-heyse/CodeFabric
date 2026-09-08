@@ -87,7 +87,7 @@ impl InstalledProductionStack {
             .args([
                 "-I",
                 "-c",
-                r#"import json, pathlib, sys
+                r"import json, pathlib, sys
 from importlib.metadata import distribution, version
 import codefabric_cpg_mcp
 root = pathlib.Path(sys.argv[1]).resolve()
@@ -98,7 +98,7 @@ origin = distribution('codefabric-cpg-mcp').read_text('direct_url.json')
 if origin:
     document = json.loads(origin)
     assert not document.get('dir_info', {}).get('editable', False)
-print(module)"#,
+print(module)",
             ])
             .arg(&venv)
             .output()

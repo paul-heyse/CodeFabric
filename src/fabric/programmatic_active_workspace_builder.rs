@@ -18,7 +18,7 @@ use super::activation_control_delta::DeltaActivationRuntimeAuthority;
 use super::admission::FabricAdmissionRuntime;
 use super::arrow_result_resource::ArrowResultResourceLimits;
 use super::child_session::resource_governance::{
-    EpochResourceCoordinator, EpochResourcePolicy, EpochWorkClass, EpochWorkClassPolicy,
+    EpochResourcePolicy, EpochWorkClass, EpochWorkClassPolicy,
 };
 use super::child_session::{
     ChildObjectStoreGrant, ChildRegistryAllowlist, ChildResourceLimits, ChildTableGrant,
@@ -38,6 +38,7 @@ use super::programmatic_workspace::{
 use super::published_arrow_result::PublishedArrowResultRegistry;
 use super::relational_query_runtime::{RelationalQueryAuthorization, RelationalQueryRuntime};
 use super::request_owned_relation::RequestOwnedRelationLimits;
+use super::workspace_resources::ProductionWorkspaceResources;
 use crate::production_query_recipe::ProductionSemanticQueryRecipeInput;
 use crate::relational_semantic_query::{EpochBoundSemanticIngressLimits, SemanticRequestLimits};
 
@@ -59,6 +60,14 @@ pub(crate) struct ProductionActiveWorkspaceConfig {
 }
 
 impl ProductionActiveWorkspaceConfig {
+    pub(crate) fn epoch_runtime(&self) -> &FabricEpochRuntimeConfig {
+        &self.epoch_runtime
+    }
+
+    pub(crate) fn resource_policy(&self) -> &EpochResourcePolicy {
+        &self.resource_policy
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) const fn new(
         epoch_runtime: FabricEpochRuntimeConfig,
@@ -95,8 +104,8 @@ impl ProductionActiveWorkspaceConfig {
         let child = ChildResourceLimits::try_new(
             256 * 1024 * 1024,
             2 * 1024 * 1024 * 1024,
-            8,
             32,
+            16,
             8_192,
             4,
         )
@@ -189,6 +198,7 @@ pub(crate) struct ProductionActiveWorkspaceBuilder {
     published_results: Arc<PublishedArrowResultRegistry>,
     delta_ports: ProgrammaticDeltaRuntimePorts,
     activation_authority: Arc<DeltaActivationRuntimeAuthority>,
+    resources: ProductionWorkspaceResources,
 }
 
 impl ProductionActiveWorkspaceBuilder {
@@ -204,6 +214,7 @@ impl ProductionActiveWorkspaceBuilder {
         published_results: Arc<PublishedArrowResultRegistry>,
         delta_ports: ProgrammaticDeltaRuntimePorts,
         activation_authority: Arc<DeltaActivationRuntimeAuthority>,
+        resources: ProductionWorkspaceResources,
     ) -> Self {
         Self {
             release,
@@ -212,6 +223,7 @@ impl ProductionActiveWorkspaceBuilder {
             published_results,
             delta_ports,
             activation_authority,
+            resources,
         }
     }
 
@@ -244,7 +256,12 @@ impl ProductionActiveWorkspaceBuilder {
         let cancellation = ProducerClosureCancellation::new();
         let proved = self
             .release
-            .prove_producer_closure(&epoch, self.config.producer_bounds, &cancellation)
+            .prove_producer_closure(
+                &epoch,
+                self.config.producer_bounds,
+                &cancellation,
+                self.resources.budget(),
+            )
             .await
             .map_err(|_| Self::invalid("producer-closure-proof"))?;
         let query_input = ProductionSemanticQueryRecipeInput::try_new(
@@ -270,13 +287,14 @@ impl ProductionActiveWorkspaceBuilder {
             )
             .map_err(|_| Self::invalid("query-ports-compose"))?;
 
+        if pins.resource_envelope != self.resources.policy_ref() {
+            return Err(Self::invalid("resource-policy-substitution"));
+        }
         let resources = Arc::new(
-            EpochResourceCoordinator::try_new(
-                selection.epoch_id(),
-                *pins.resource_envelope.as_bytes(),
-                self.config.resource_policy.clone(),
-            )
-            .map_err(|_| Self::invalid("resource-coordinator"))?,
+            self.resources
+                .scheduler()
+                .for_epoch(selection.epoch_id())
+                .map_err(|_| Self::invalid("resource-coordinator"))?,
         );
         let grants = table_relations
             .into_iter()
@@ -385,9 +403,10 @@ impl ReleaseOwnedActiveWorkspaceBuilder for ProductionActiveWorkspaceBuilder {
         selection: SelectedEpochRecord,
         chain_after_readback: &ActivationChain,
     ) -> Result<Arc<ActiveWorkspace>, ActiveWorkspaceBuildError> {
-        let epoch = ProgrammaticFabricEpochBuilder::try_new(
+        let epoch = ProgrammaticFabricEpochBuilder::try_new_governed(
             selection.epoch_id(),
             self.config.epoch_runtime.clone(),
+            self.resources.native().clone(),
         )
         .map_err(|_| Self::invalid("selected-epoch-builder"))?
         .reopen(Arc::clone(selection.table_versions()))

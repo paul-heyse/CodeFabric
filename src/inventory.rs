@@ -9,6 +9,10 @@ use thiserror::Error;
 use crate::cancellation::Cancellation;
 use crate::identity::{IdentityError, WorkspacePath, source_file_identity};
 use crate::operational_store::{OperationalStore, OperationalStoreError};
+use crate::resource_budget::{
+    ChargedSlice, ChargedValue, ResourceAmounts, ResourceBudget, ResourceBudgetError,
+    ResourceClass, ResourceReservation, ResourceScopeKind,
+};
 use crate::secure_path::{
     PlatformPath, SecureDirectoryEntryKind, SecurePathError, SecureRoot, StableReadError,
 };
@@ -46,8 +50,8 @@ pub use crate::registries::{
 /// All Lifecycle §34 fields, detached from filesystem and Git library types.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceInventoryRecord {
-    pub path: WorkspacePath,
-    pub git_repo_path_bytes: Option<Vec<u8>>,
+    pub path: ChargedValue<WorkspacePath>,
+    pub git_repo_path_bytes: Option<ChargedSlice<u8>>,
     pub filesystem_identity: Option<[u8; 16]>,
     pub file_id: Option<[u8; 16]>,
     pub content_digest: Option<[u8; 32]>,
@@ -56,7 +60,7 @@ pub struct SourceInventoryRecord {
     pub language: Option<&'static str>,
     pub classification: InventoryClassification,
     pub inclusion: InclusionState,
-    pub git_blob_oid: Option<Vec<u8>>,
+    pub git_blob_oid: Option<ChargedSlice<u8>>,
     pub current_file_owner: Option<[u8; 16]>,
 }
 
@@ -65,7 +69,7 @@ pub struct SourceInventoryRecord {
 pub struct SourceInventory {
     pub workspace_id: [u8; 16],
     pub source_generation: u64,
-    pub records: Vec<SourceInventoryRecord>,
+    pub records: ChargedSlice<SourceInventoryRecord>,
     pub digest: [u8; 32],
 }
 
@@ -74,7 +78,7 @@ pub struct SourceInventory {
 pub struct CompleteSourceInventory {
     inventory: SourceInventory,
     change_token: u64,
-    read_failures: BTreeMap<Vec<u8>, InventoryReadFailure>,
+    read_failures: ChargedValue<BTreeMap<Vec<u8>, InventoryReadFailure>>,
 }
 
 /// A member remains in the inventory even when its bytes cannot yet be verified.
@@ -249,6 +253,8 @@ pub struct InventoryMetrics {
 #[derive(Debug, Error)]
 pub enum InventoryError {
     #[error(transparent)]
+    Resource(#[from] ResourceBudgetError),
+    #[error(transparent)]
     SecurePath(#[from] SecurePathError),
     #[error(transparent)]
     StableRead(#[from] StableReadError),
@@ -270,15 +276,22 @@ pub enum InventoryError {
 
 /// Generic non-Git walker. WP17 may replace classification, never authorization.
 pub struct InventoryWalker {
+    budget: ResourceBudget,
+    #[cfg(test)]
+    fixture: bool,
     limits: InventoryLimits,
     metrics: InventoryMetrics,
     read_failures: BTreeMap<Vec<u8>, InventoryReadFailure>,
+    read_failure_charge: Option<ResourceReservation>,
 }
 
 impl InventoryWalker {
     #[must_use]
-    pub const fn new(limits: InventoryLimits) -> Self {
+    pub fn new_governed(limits: InventoryLimits, budget: ResourceBudget) -> Self {
         Self {
+            budget,
+            #[cfg(test)]
+            fixture: false,
             limits,
             metrics: InventoryMetrics {
                 files: 0,
@@ -288,7 +301,18 @@ impl InventoryWalker {
                 duration_micros: 0,
             },
             read_failures: BTreeMap::new(),
+            read_failure_charge: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn new(limits: InventoryLimits) -> Self {
+        let mut walker = Self::new_governed(
+            limits,
+            crate::provider_types::source_fixture_budget([2; 16]),
+        );
+        walker.fixture = true;
+        walker
     }
 
     /// Walk, hash, and persist one coherent inventory.
@@ -341,10 +365,15 @@ impl InventoryWalker {
             source_generation,
             &inventory.records,
         )?;
+        let failures = std::mem::take(&mut self.read_failures);
+        let failure_charge = self
+            .read_failure_charge
+            .take()
+            .ok_or(ResourceBudgetError::InvalidShrink)?;
         Ok(CompleteSourceInventory {
             inventory,
             change_token,
-            read_failures: self.read_failures.clone(),
+            read_failures: failure_charge.into_charged_value(failures),
         })
     }
 
@@ -356,12 +385,27 @@ impl InventoryWalker {
         cancellation: &Cancellation,
         retain_read_failures: bool,
     ) -> Result<SourceInventory, InventoryError> {
+        #[cfg(test)]
+        let check_owner = !self.fixture;
+        #[cfg(not(test))]
+        let check_owner = true;
+        if check_owner
+            && self
+                .budget
+                .ancestor_owner(ResourceScopeKind::Workspace)
+                .is_none_or(|owner| owner.id != root.workspace_id())
+        {
+            return Err(ResourceBudgetError::ForeignOwner.into());
+        }
         require_source_generation(store, root.workspace_id(), source_generation)?;
         let started = Instant::now();
+        let mut retained = reserve_memory(&self.budget, 0)?;
+        let mut traversal = reserve_memory(&self.budget, 256)?;
         let mut records = Vec::new();
         let mut stack = vec![(Vec::<Vec<u8>>::new(), 0_u32)];
         self.metrics = InventoryMetrics::default();
         self.read_failures.clear();
+        self.read_failure_charge = Some(reserve_memory(&self.budget, 0)?);
         while let Some((components, depth)) = stack.pop() {
             self.check_progress(started, cancellation)?;
             self.metrics.directories = self.metrics.directories.saturating_add(1);
@@ -377,12 +421,48 @@ impl InventoryWalker {
                     raw,
                 )?)
             };
-            let entries = root.list_directory(
+            let mut directory_charge = reserve_memory(&self.budget, 0)?;
+            let entries = root.list_directory_with_allocation(
                 platform_path.as_ref(),
                 self.limits.maximum_entries_per_directory,
-            )?;
+                |bytes| {
+                    if cancellation.is_cancelled()
+                        || started.elapsed() > self.limits.maximum_duration
+                    {
+                        return Err(SecurePathError::ResourceExhausted);
+                    }
+                    directory_charge
+                        .try_grow(ResourceAmounts {
+                            memory_bytes: bytes as u64,
+                            ..ResourceAmounts::default()
+                        })
+                        .map_err(|_| SecurePathError::ResourceExhausted)
+                },
+            );
+            self.check_progress(started, cancellation)?;
+            let entries = entries?;
             for entry in entries.into_iter().rev() {
                 self.check_progress(started, cancellation)?;
+                let path_len = components
+                    .iter()
+                    .map(Vec::len)
+                    .sum::<usize>()
+                    .checked_add(components.len() + entry.name.len())
+                    .ok_or(ResourceBudgetError::Overflow)?;
+                // This bounds simultaneous component copies, PlatformPath components and
+                // stack vector replacements. It is based on the observed path, not file bytes.
+                traversal.try_grow(ResourceAmounts {
+                    memory_bytes: (path_len as u64)
+                        .checked_mul(8)
+                        .and_then(|n| {
+                            n.checked_add(
+                                ((components.len() + 1) * 4 * std::mem::size_of::<Vec<u8>>() + 256)
+                                    as u64,
+                            )
+                        })
+                        .ok_or(ResourceBudgetError::Overflow)?,
+                    ..ResourceAmounts::default()
+                })?;
                 let mut child = components.clone();
                 child.push(entry.name.clone());
                 if entry.name == b".git" {
@@ -402,6 +482,7 @@ impl InventoryWalker {
                         stack.push((child, next_depth));
                     }
                     SecureDirectoryEntryKind::RegularFile => {
+                        reserve_record(&mut retained, &mut records)?;
                         self.add_regular(
                             root,
                             &child,
@@ -411,23 +492,30 @@ impl InventoryWalker {
                         )?;
                     }
                     SecureDirectoryEntryKind::Symlink | SecureDirectoryEntryKind::Other => {
+                        reserve_record(&mut retained, &mut records)?;
                         self.add_excluded(root, &child, entry.kind, entry.size, &mut records)?;
                     }
                 }
             }
         }
-        records.sort_by(|left, right| {
+        records.sort_unstable_by(|left, right| {
             left.path
                 .raw_relative_path_bytes
                 .cmp(&right.path.raw_relative_path_bytes)
         });
+        let _merkle = reserve_memory(&self.budget, merkle_memory_bound(&records)?)?;
         let digest = merkle_inventory_digest(&records);
         self.metrics.duration_micros =
             u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        retained.shrink(ResourceAmounts {
+            memory_bytes: retained.amounts().memory_bytes
+                - (records.capacity() * std::mem::size_of::<SourceInventoryRecord>()) as u64,
+            ..ResourceAmounts::default()
+        })?;
         Ok(SourceInventory {
             workspace_id: root.workspace_id(),
             source_generation,
-            records,
+            records: retained.into_charged_vec(records)?,
             digest,
         })
     }
@@ -458,13 +546,20 @@ impl InventoryWalker {
             root.platform_code(),
             join_components(components),
         )?;
-        let workspace_path = root.workspace_path(&path)?;
+        let workspace_path = charged_workspace_path(root, &path, &self.budget)?;
         if self.metrics.bytes_considered > self.limits.maximum_total_bytes_considered {
             return Err(InventoryError::BoundExceeded("total-bytes"));
         }
+        let mut read_charge = reserve_memory(&self.budget, 0)?;
         let (digest, filesystem_identity, inclusion, byte_length) = match root
-            .read_stable_file(&path, ORDINARY_SOURCE_MAXIMUM_BYTES)
-        {
+            .read_stable_file_with_allocation(&path, ORDINARY_SOURCE_MAXIMUM_BYTES, |bytes| {
+                read_charge
+                    .try_grow(ResourceAmounts {
+                        memory_bytes: bytes as u64,
+                        ..ResourceAmounts::default()
+                    })
+                    .map_err(|_| SecurePathError::ResourceExhausted)
+            }) {
             Ok(read) => (
                 Some(crate::integrity::digest_bytes(&read.bytes)),
                 Some(filesystem_identity(
@@ -479,6 +574,7 @@ impl InventoryWalker {
                 (None, None, InclusionState::ExcludedSizeLimit, observed_size)
             }
             Err(StableReadError::ChangedDuringRead) if retain_read_failures => {
+                self.reserve_failure_path(&workspace_path.raw_relative_path_bytes)?;
                 self.read_failures.insert(
                     workspace_path.raw_relative_path_bytes.clone(),
                     InventoryReadFailure::Pending,
@@ -490,6 +586,7 @@ impl InventoryWalker {
                 | SecurePathError::OperatingSystem
                 | SecurePathError::OutsideAuthorizedRoot,
             )) if retain_read_failures => {
+                self.reserve_failure_path(&workspace_path.raw_relative_path_bytes)?;
                 self.read_failures.insert(
                     workspace_path.raw_relative_path_bytes.clone(),
                     InventoryReadFailure::Unreadable,
@@ -535,7 +632,7 @@ impl InventoryWalker {
             join_components(components),
         )?;
         records.push(SourceInventoryRecord {
-            path: root.workspace_path(&platform)?,
+            path: charged_workspace_path(root, &platform, &self.budget)?,
             git_repo_path_bytes: None,
             filesystem_identity: None,
             file_id: None,
@@ -568,6 +665,106 @@ impl InventoryWalker {
         }
         Ok(())
     }
+
+    fn reserve_failure_path(&mut self, path: &[u8]) -> Result<(), ResourceBudgetError> {
+        self.read_failure_charge
+            .as_mut()
+            .ok_or(ResourceBudgetError::InvalidShrink)?
+            .try_grow(ResourceAmounts {
+                memory_bytes: path.len() as u64 + 512,
+                ..ResourceAmounts::default()
+            })
+    }
+}
+
+/// Admission helpers remain application-owned; no filesystem or provider type enters the ledger.
+pub(crate) fn reserve_memory(
+    budget: &ResourceBudget,
+    bytes: u64,
+) -> Result<ResourceReservation, ResourceBudgetError> {
+    budget.try_reserve(
+        ResourceClass::Data,
+        ResourceAmounts {
+            memory_bytes: bytes,
+            ..ResourceAmounts::default()
+        },
+    )
+}
+
+fn reserve_record(
+    charge: &mut ResourceReservation,
+    records: &mut Vec<SourceInventoryRecord>,
+) -> Result<(), ResourceBudgetError> {
+    charge.try_grow(ResourceAmounts {
+        memory_bytes: 0,
+        rows: 1,
+        ..ResourceAmounts::default()
+    })?;
+    if records.len() == records.capacity() {
+        let next = records
+            .capacity()
+            .max(1)
+            .checked_mul(2)
+            .ok_or(ResourceBudgetError::Overflow)?;
+        charge.try_grow(ResourceAmounts {
+            memory_bytes: next
+                .checked_mul(std::mem::size_of::<SourceInventoryRecord>())
+                .ok_or(ResourceBudgetError::Overflow)? as u64,
+            ..ResourceAmounts::default()
+        })?;
+        records.reserve_exact(next - records.len());
+    }
+    Ok(())
+}
+
+/// Bound every current implementation Merkle path copy and directory node before building it.
+pub(crate) fn merkle_memory_bound(
+    records: &[SourceInventoryRecord],
+) -> Result<u64, ResourceBudgetError> {
+    records.iter().try_fold(512_u64, |sum, record| {
+        let path = &record.path.raw_relative_path_bytes;
+        let depth = path.iter().filter(|byte| **byte == b'/').count() as u64 + 1;
+        // Each ancestor can occupy map key, traversal list, and one parent/child pair.
+        let entry = (path.len() as u64 + 512)
+            .checked_mul(depth)
+            .and_then(|n| n.checked_mul(8))
+            .ok_or(ResourceBudgetError::Overflow)?;
+        sum.checked_add(entry).ok_or(ResourceBudgetError::Overflow)
+    })
+}
+
+pub(crate) fn charged_workspace_path(
+    root: &SecureRoot,
+    path: &PlatformPath,
+    budget: &ResourceBudget,
+) -> Result<ChargedValue<WorkspacePath>, InventoryError> {
+    let raw = path.raw_relative_path_bytes();
+    // Percent encoding expands a byte at most 3x. Unicode decomposition/case folding may
+    // expand a scalar; 18 decomposed scalars * 4 UTF-8 bytes, plus all coexisting path
+    // views and vector growth, fit this conservative per-input-byte construction bound.
+    let bound = (raw.len() as u64)
+        .checked_mul(512)
+        .and_then(|n| n.checked_add(2048))
+        .ok_or(ResourceBudgetError::Overflow)?;
+    let mut reservation = reserve_memory(budget, bound)?;
+    let value = root.workspace_path(path)?;
+    let retained = std::mem::size_of::<WorkspacePath>() as u64
+        + value.raw_relative_path_bytes.capacity() as u64
+        + value.canonical_component_bytes.capacity() as u64
+        + value.comparison_key_bytes.capacity() as u64
+        + value.display_string.capacity() as u64;
+    if retained > bound {
+        return Err(ResourceBudgetError::UnchargedAllocation {
+            required: retained,
+            reserved: bound,
+        }
+        .into());
+    }
+    reservation.shrink(ResourceAmounts {
+        memory_bytes: bound - retained,
+        ..ResourceAmounts::default()
+    })?;
+    Ok(reservation.into_charged_value(value))
 }
 
 pub(crate) fn persist_inventory(
@@ -954,6 +1151,48 @@ mod tests {
     use crate::identity::PlatformCode;
     use crate::secure_path::open_workspace_root;
     use crate::workspace_registry::{WorkspaceRegistry, WorkspaceSourceRegistration};
+
+    #[test]
+    fn rt_cpg_wp79_metadata_exhaustion_and_foreign_owner_never_close_inventory() {
+        let (_directory, mut store, workspace, root) = fixture();
+        for index in 0..100 {
+            fs::write(root.join(format!("{index:03}_{}.py", "x".repeat(180))), b"").unwrap();
+        }
+        let secure = open_workspace_root(&mut store, workspace).unwrap();
+        let owner = crate::provider_types::source_fixture_budget(workspace);
+        let mut policy = owner.policy();
+        policy.limits.memory_bytes = 64 * 1024;
+        let operation = owner.operation([7; 16], policy).unwrap();
+        let result = InventoryWalker::new_governed(InventoryLimits::default(), operation.clone())
+            .walk_selected_with_fence(&secure, &mut store, 0, 0, &Cancellation::default(), || {
+                Some(0)
+            });
+        assert!(matches!(
+            result,
+            Err(InventoryError::Resource(_))
+                | Err(InventoryError::SecurePath(
+                    SecurePathError::ResourceExhausted
+                ))
+                | Err(InventoryError::StableRead(StableReadError::Secure(
+                    SecurePathError::ResourceExhausted
+                )))
+        ));
+        assert_eq!(operation.observation().used.memory_bytes, 0);
+        assert!(operation.observation().peak.memory_bytes <= 64 * 1024);
+        let foreign = crate::provider_types::source_fixture_budget([3; 16]);
+        assert!(matches!(
+            InventoryWalker::new_governed(InventoryLimits::default(), foreign)
+                .walk_selected_with_fence(
+                    &secure,
+                    &mut store,
+                    0,
+                    0,
+                    &Cancellation::default(),
+                    || Some(0)
+                ),
+            Err(InventoryError::Resource(ResourceBudgetError::ForeignOwner))
+        ));
+    }
 
     fn fixture() -> (
         tempfile::TempDir,

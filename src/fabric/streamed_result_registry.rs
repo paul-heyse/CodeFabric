@@ -7,6 +7,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
+use crate::resource_budget::{
+    ChargedSlice, ResourceAmounts, ResourceBudget, ResourceClass, ResourceReservation,
+    ResourceScopeKind,
+};
 use object_store::path::Path as ObjectPath;
 use serde::Serialize;
 use thiserror::Error;
@@ -22,6 +26,20 @@ use super::streamed_result_package::{
 };
 
 const MAX_REFERENCE_RESOURCES: usize = 128;
+
+fn validate_budget_workspace(
+    budget: &ResourceBudget,
+    workspace: super::command::WorkspaceId,
+) -> Result<(), StreamedResultRegistryError> {
+    if budget
+        .ancestor_owner(ResourceScopeKind::Workspace)
+        .is_some_and(|owner| owner.id == *workspace.as_bytes())
+    {
+        Ok(())
+    } else {
+        Err(StreamedResultRegistryError::BudgetOwnerMismatch)
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StreamedResultRegistration {
@@ -103,7 +121,7 @@ pub struct StreamedResourceChunk {
     pub next_offset: u64,
     pub total_length: u64,
     pub content_checksum: String,
-    pub bytes: Arc<[u8]>,
+    pub bytes: ChargedSlice<u8>,
     pub complete: bool,
 }
 
@@ -117,7 +135,8 @@ pub enum StreamedReleaseOutcome {
 struct ResultPackageEntry {
     query_id: String,
     manifest_resource_id: String,
-    manifest_bytes: Arc<[u8]>,
+    manifest_bytes: ChargedSlice<u8>,
+    _metadata_charge: ResourceReservation,
     package_id: String,
     resource_handles: BTreeSet<String>,
     total_rows: u64,
@@ -168,12 +187,13 @@ struct ResultRegistryState {
 }
 
 enum ResultReadSource {
-    Manifest(Arc<[u8]>),
+    Manifest(ChargedSlice<u8>),
     Page(SealedStreamedResultPackage, u32),
 }
 
 #[derive(Debug)]
 struct ReferenceEntry {
+    _metadata_charge: ResourceReservation,
     principal_id: PrincipalId,
     workspace_id: super::command::WorkspaceId,
     daemon_generation: u64,
@@ -181,7 +201,7 @@ struct ReferenceEntry {
     revocation_generation: u64,
     selector: StreamedReferenceSelector,
     content_checksum: String,
-    content: Arc<[u8]>,
+    content: ChargedSlice<u8>,
     expires_at_unix_ms: i64,
     release_id: Option<String>,
     released: bool,
@@ -190,6 +210,7 @@ struct ReferenceEntry {
 /// Bounded process-wide owner of all externally reachable streamed query packages.
 #[derive(Debug)]
 pub struct StreamedResultRegistry {
+    budget: ResourceBudget,
     maximum_chunk_bytes: usize,
     package_builder: OnceLock<StreamedResultPackageBuilder>,
     results: Mutex<ResultRegistryState>,
@@ -198,11 +219,18 @@ pub struct StreamedResultRegistry {
 
 impl StreamedResultRegistry {
     /// Construct the registry with the exact transport chunk bound.
-    pub fn try_new(maximum_chunk_bytes: usize) -> Result<Self, StreamedResultRegistryError> {
+    ///
+    /// # Errors
+    /// Rejects a zero chunk limit.
+    pub fn try_new(
+        maximum_chunk_bytes: usize,
+        budget: ResourceBudget,
+    ) -> Result<Self, StreamedResultRegistryError> {
         if maximum_chunk_bytes == 0 {
             return Err(StreamedResultRegistryError::InvalidChunkBound);
         }
         Ok(Self {
+            budget,
             maximum_chunk_bytes,
             package_builder: OnceLock::new(),
             results: Mutex::new(ResultRegistryState::default()),
@@ -217,16 +245,27 @@ impl StreamedResultRegistry {
     }
 
     /// Register one bounded reference projection behind an unpredictable daemon-owned handle.
+    ///
+    /// # Errors
+    /// Rejects invalid identities, expired lifetimes, exhausted capacity, or handle collisions.
     pub async fn publish_reference(
         &self,
         publication: ReferenceResourcePublication,
     ) -> Result<ReferenceResourceRegistration, StreamedResultRegistryError> {
+        validate_budget_workspace(&self.budget, publication.workspace_id)?;
         if publication.daemon_generation == 0
             || publication.policy_generation == 0
             || publication.reference_id.is_empty()
             || publication.media_type.is_empty()
             || publication.content.is_empty()
             || publication.content.len() > 1024 * 1024
+            || publication
+                .reference_id
+                .len()
+                .saturating_add(publication.media_type.len())
+                .saturating_add(publication.selector.kind.len())
+                .saturating_add(publication.selector.version.as_ref().map_or(0, String::len))
+                > 1024 * 1024
             || publication.expires_at_unix_ms <= publication.issued_at_unix_ms
         {
             return Err(StreamedResultRegistryError::InvalidIdentity);
@@ -257,6 +296,24 @@ impl StreamedResultRegistry {
             expires_at_unix_ms: publication.expires_at_unix_ms,
         };
         let entry = ReferenceEntry {
+            _metadata_charge: self.budget.try_reserve(
+                ResourceClass::Data,
+                ResourceAmounts {
+                    memory_bytes: publication
+                        .selector
+                        .kind
+                        .capacity()
+                        .saturating_add(
+                            publication
+                                .selector
+                                .version
+                                .as_ref()
+                                .map_or(0, String::capacity),
+                        )
+                        .saturating_add(1024) as u64,
+                    ..ResourceAmounts::default()
+                },
+            )?,
             principal_id: publication.principal_id,
             workspace_id: publication.workspace_id,
             daemon_generation: publication.daemon_generation,
@@ -264,7 +321,16 @@ impl StreamedResultRegistry {
             revocation_generation: publication.revocation_generation,
             selector: publication.selector,
             content_checksum,
-            content: Arc::from(publication.content),
+            content: self
+                .budget
+                .try_reserve(
+                    ResourceClass::Data,
+                    ResourceAmounts {
+                        memory_bytes: publication.content.capacity() as u64,
+                        ..ResourceAmounts::default()
+                    },
+                )?
+                .into_charged_vec(publication.content)?,
             expires_at_unix_ms: publication.expires_at_unix_ms,
             release_id: None,
             released: false,
@@ -281,6 +347,9 @@ impl StreamedResultRegistry {
     }
 
     /// Register one sealed package after execution has closed successfully.
+    ///
+    /// # Errors
+    /// Rejects invalid identities, exhausted capacity, and package or resource collisions.
     pub async fn publish(
         &self,
         query_id: &str,
@@ -309,6 +378,9 @@ impl StreamedResultRegistry {
     /// Reconstruct a retained package after restart and mint fresh session/generation-bound
     /// public handles. The durable locator is private coordinator state; every object, pin,
     /// checksum, length, lease, and derived package identity is re-proved before admission.
+    ///
+    /// # Errors
+    /// Rejects expired leases, unavailable recovery, resource exhaustion, and retained-locator drift.
     #[allow(clippy::too_many_arguments)]
     pub async fn reissue_retained(
         &self,
@@ -376,10 +448,26 @@ impl StreamedResultRegistry {
         cleanup: ResultCleanup,
         expected_locator: Option<&RetainedPackageLocator>,
     ) -> Result<StreamedResultRegistration, StreamedResultRegistryError> {
+        validate_budget_workspace(&self.budget, workspace_id)?;
+        validate_budget_workspace(package.resource_budget(), workspace_id)?;
+        if !self.budget.same_root(package.resource_budget()) {
+            return Err(StreamedResultRegistryError::BudgetOwnerMismatch);
+        }
         if query_id.is_empty() || daemon_generation == 0 || policy_generation == 0 {
             return Err(StreamedResultRegistryError::InvalidIdentity);
         }
         let manifest = package.manifest();
+        let mut metadata_charge = self.budget.try_reserve(
+            ResourceClass::Data,
+            ResourceAmounts {
+                memory_bytes: package
+                    .manifest_byte_length()
+                    .checked_add(query_id.len() as u64)
+                    .and_then(|n| n.checked_mul(32))
+                    .ok_or(StreamedResultRegistryError::RangeOverflow)?,
+                ..ResourceAmounts::default()
+            },
+        )?;
         let package_id = identity(
             b"codefabric.streamed-result-package.v2",
             &[
@@ -393,8 +481,6 @@ impl StreamedResultRegistry {
             b"codefabric.streamed-result-manifest-resource.v2",
             &[package_id.as_bytes(), package.manifest_checksum()],
         );
-        let sealed_manifest_bytes = serde_json_canonicalizer::to_vec(package.manifest().as_ref())
-            .map_err(StreamedResultRegistryError::Manifest)?;
         let lease = package.lease();
         let retained_locator = RetainedPackageLocator {
             manifest_object_path: package.manifest_path().to_string(),
@@ -408,15 +494,12 @@ impl StreamedResultRegistry {
             lease_id: hex(lease.lease_id().as_bytes()),
             lease_issued_at_unix_ms: lease.issued_at_unix_ms(),
             lease_expires_at_unix_ms: lease.expires_at_unix_ms(),
-            expected_manifest_checksum: checksum(&sealed_manifest_bytes),
-            expected_manifest_byte_length: u64::try_from(sealed_manifest_bytes.len())
-                .map_err(|_| StreamedResultRegistryError::RangeOverflow)?,
+            expected_manifest_checksum: format!("b3:{}", hex(package.manifest_checksum())),
+            expected_manifest_byte_length: package.manifest_byte_length(),
             package_id: package_id.clone(),
             manifest_resource_id: manifest_resource_id.clone(),
         };
-        if checksum(&sealed_manifest_bytes) != format!("b3:{}", hex(package.manifest_checksum()))
-            || expected_locator.is_some_and(|expected| expected != &retained_locator)
-        {
+        if expected_locator.is_some_and(|expected| expected != &retained_locator) {
             return Err(StreamedResultRegistryError::RetainedLocatorMismatch);
         }
         let lease_expires_at_unix_ms = package.lease().expires_at_unix_ms();
@@ -530,7 +613,13 @@ impl StreamedResultRegistry {
         let package_entry = ResultPackageEntry {
             query_id: query_id.to_owned(),
             manifest_resource_id,
-            manifest_bytes: Arc::from(manifest_bytes),
+            manifest_bytes: metadata_charge
+                .split(ResourceAmounts {
+                    memory_bytes: manifest_bytes.capacity() as u64,
+                    ..ResourceAmounts::default()
+                })?
+                .into_charged_vec(manifest_bytes)?,
+            _metadata_charge: metadata_charge,
             package_id: package_id.clone(),
             resource_handles: resource_handles.clone(),
             total_rows: manifest.total_rows,
@@ -597,6 +686,10 @@ impl StreamedResultRegistry {
     }
 
     /// Read one bounded manifest or page range after exact owner, token, and lease checks.
+    ///
+    /// # Errors
+    /// Rejects unauthorized/expired handles, invalid ranges, resource exhaustion, and corruption.
+    #[allow(clippy::too_many_lines)] // Keep authorization, exact read, and response closure adjacent.
     pub async fn read(
         &self,
         request: StreamedResourceRead,
@@ -604,77 +697,100 @@ impl StreamedResultRegistry {
         if request.maximum_bytes == 0 || request.maximum_bytes > self.maximum_chunk_bytes {
             return Err(StreamedResultRegistryError::InvalidChunkBound);
         }
-        let (bytes, checksum) = if let StreamedResourceSelector::Reference(selector) =
-            &request.selector
-        {
-            let references = self.references.lock().await;
-            let entry = references
-                .get(&request.public_handle)
-                .ok_or(StreamedResultRegistryError::UnknownPackage)?;
-            authorize_reference(entry, &request)?;
-            if entry.selector != *selector {
-                return Err(StreamedResultRegistryError::UnknownResource);
-            }
-            (Arc::clone(&entry.content), entry.content_checksum.clone())
-        } else {
-            let (source, expected_length, expected_checksum) = {
-                let state = self.results.lock().await;
-                let resource = state
-                    .resources
+        let _operation = self.budget.try_reserve(
+            ResourceClass::Control,
+            ResourceAmounts {
+                running_jobs: 1,
+                ..ResourceAmounts::default()
+            },
+        )?;
+        let (source, total_length, expected_checksum) =
+            if let StreamedResourceSelector::Reference(selector) = &request.selector {
+                let references = self.references.lock().await;
+                let entry = references
                     .get(&request.public_handle)
                     .ok_or(StreamedResultRegistryError::UnknownPackage)?;
-                authorize_result_resource(resource, &request)?;
-                if resource.selector != request.selector {
+                authorize_reference(entry, &request)?;
+                if entry.selector != *selector {
                     return Err(StreamedResultRegistryError::UnknownResource);
                 }
-                let package = state
-                    .packages
-                    .get(&resource.package_id)
-                    .ok_or(StreamedResultRegistryError::UnknownPackage)?;
-                let source = match resource.selector {
-                    StreamedResourceSelector::Manifest => {
-                        ResultReadSource::Manifest(Arc::clone(&package.manifest_bytes))
-                    }
-                    StreamedResourceSelector::Page(page_ordinal) => ResultReadSource::Page(
-                        package
-                            .package
-                            .as_ref()
-                            .ok_or(StreamedResultRegistryError::Released)?
-                            .clone(),
-                        page_ordinal,
-                    ),
-                    StreamedResourceSelector::Reference(_) => unreachable!("handled above"),
-                };
                 (
-                    source,
-                    resource.byte_length,
-                    resource.content_checksum.clone(),
+                    ResultReadSource::Manifest(entry.content.clone()),
+                    entry.content.len() as u64,
+                    entry.content_checksum.clone(),
                 )
+            } else {
+                let (source, expected_length, expected_checksum) = {
+                    let state = self.results.lock().await;
+                    let resource = state
+                        .resources
+                        .get(&request.public_handle)
+                        .ok_or(StreamedResultRegistryError::UnknownPackage)?;
+                    authorize_result_resource(resource, &request)?;
+                    if resource.selector != request.selector {
+                        return Err(StreamedResultRegistryError::UnknownResource);
+                    }
+                    let package = state
+                        .packages
+                        .get(&resource.package_id)
+                        .ok_or(StreamedResultRegistryError::UnknownPackage)?;
+                    let source = match resource.selector {
+                        StreamedResourceSelector::Manifest => {
+                            ResultReadSource::Manifest(package.manifest_bytes.clone())
+                        }
+                        StreamedResourceSelector::Page(page_ordinal) => ResultReadSource::Page(
+                            package
+                                .package
+                                .as_ref()
+                                .ok_or(StreamedResultRegistryError::Released)?
+                                .clone(),
+                            page_ordinal,
+                        ),
+                        StreamedResourceSelector::Reference(_) => unreachable!("handled above"),
+                    };
+                    (
+                        source,
+                        resource.byte_length,
+                        resource.content_checksum.clone(),
+                    )
+                };
+                (source, expected_length, expected_checksum)
             };
-            let bytes = match source {
-                ResultReadSource::Manifest(bytes) => bytes,
-                ResultReadSource::Page(package, page_ordinal) => Arc::<[u8]>::from(
-                    package
-                        .read_page(u64::from(page_ordinal), request.observed_at_unix_ms)
-                        .await?,
-                ),
-            };
-            if u64::try_from(bytes.len()).map_err(|_| StreamedResultRegistryError::RangeOverflow)?
-                != expected_length
-                || checksum(&bytes) != expected_checksum
-            {
-                return Err(StreamedResultRegistryError::ResourceIntegrity);
-            }
-            (bytes, expected_checksum)
-        };
-        let total_length =
-            u64::try_from(bytes.len()).map_err(|_| StreamedResultRegistryError::RangeOverflow)?;
         if request.offset > total_length {
             return Err(StreamedResultRegistryError::RangeOutsideResource);
         }
         let start = usize::try_from(request.offset)
             .map_err(|_| StreamedResultRegistryError::RangeOverflow)?;
-        let end = start.saturating_add(request.maximum_bytes).min(bytes.len());
+        let length = usize::try_from(total_length)
+            .map_err(|_| StreamedResultRegistryError::RangeOverflow)?;
+        let end = start.saturating_add(request.maximum_bytes).min(length);
+        let bytes = match source {
+            ResultReadSource::Manifest(bytes) => {
+                if bytes.len() != length || checksum(&bytes) != expected_checksum {
+                    return Err(StreamedResultRegistryError::ResourceIntegrity);
+                }
+                ChargedSlice::try_from_fn(
+                    &self.budget,
+                    ResourceClass::Control,
+                    end - start,
+                    || bytes[start..end].to_vec(),
+                )?
+            }
+            ResultReadSource::Page(package, page_ordinal) => {
+                let bytes = package
+                    .read_page_range(
+                        u64::from(page_ordinal),
+                        request.offset,
+                        request.maximum_bytes,
+                        request.observed_at_unix_ms,
+                    )
+                    .await?;
+                if bytes.len() != end - start {
+                    return Err(StreamedResultRegistryError::ResourceIntegrity);
+                }
+                bytes
+            }
+        };
         let next_offset =
             u64::try_from(end).map_err(|_| StreamedResultRegistryError::RangeOverflow)?;
         Ok(StreamedResourceChunk {
@@ -682,13 +798,17 @@ impl StreamedResultRegistry {
             offset: request.offset,
             next_offset,
             total_length,
-            content_checksum: checksum,
-            bytes: Arc::from(&bytes[start..end]),
-            complete: end == bytes.len(),
+            content_checksum: expected_checksum,
+            bytes,
+            complete: end == length,
         })
     }
 
     /// Resolve the live public registration caused by one accepted query and principal.
+    ///
+    /// # Errors
+    /// Rejects absent or unauthorized registrations and invalid resource identities.
+    #[allow(clippy::too_many_arguments)]
     pub async fn registration_for_query(
         &self,
         query_id: &str,
@@ -831,6 +951,10 @@ impl StreamedResultRegistry {
     /// Release one handle and report the owning query only after every sibling is released.
     /// Object deletion is a separate phase and may begin only after the coordinator durably
     /// transitions the query to `cleanup_pending`.
+    ///
+    /// # Errors
+    /// Rejects authorization mismatches, invalid release identities, and unavailable resources.
+    #[allow(clippy::too_many_arguments)]
     pub async fn release(
         &self,
         principal_id: PrincipalId,
@@ -916,6 +1040,9 @@ impl StreamedResultRegistry {
     /// Delete the process-local package object set only after durable reissue revocation wins.
     /// A failed delete remains retry-owned under the exact package identity. Successful cleanup
     /// retains only authorization-bearing release tombstones until their lease expiry.
+    ///
+    /// # Errors
+    /// Rejects cleanup before revocation and propagates retryable object deletion failures.
     pub async fn finalize_released_query(
         &self,
         query_id: &str,
@@ -973,6 +1100,9 @@ impl StreamedResultRegistry {
 
     /// Finish a durable cleanup after restart using only the private exact object set retained in
     /// the coordinator journal. Deletes are idempotent and preserve manifest-last ordering.
+    ///
+    /// # Errors
+    /// Rejects malformed locators, unavailable recovery, or failed object deletion.
     pub async fn cleanup_pending_object_set(
         &self,
         object_set: &PendingResultObjectSet,
@@ -1012,6 +1142,7 @@ impl StreamedResultRegistry {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn release_reference(
         &self,
         principal_id: PrincipalId,
@@ -1038,12 +1169,16 @@ impl StreamedResultRegistry {
         )?;
         let (outcome, idempotent_replay) =
             record_release(&mut entry.release_id, &mut entry.released, release_id);
-        entry.content = Arc::<[u8]>::from([]);
+        entry.content =
+            ChargedSlice::try_from_fn(&self.budget, ResourceClass::Control, 0, Vec::new)?;
         Ok((outcome, None, idempotent_replay))
     }
 
     /// Expire public handles without deleting package objects. Durable coordinator revocation is
     /// the sole authority that may move a retained package into exact object cleanup.
+    ///
+    /// # Errors
+    /// Propagates invalid expiry bookkeeping or retryable cleanup failures.
     pub async fn collect_expired(
         &self,
         observed_at_unix_ms: i64,
@@ -1313,7 +1448,7 @@ fn decode_hex_exact<const N: usize>(value: &str) -> Result<[u8; N], StreamedResu
         return Err(StreamedResultRegistryError::RetainedLocatorMismatch);
     }
     let mut output = [0_u8; N];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         output[index] = (decode_nibble(pair[0])? << 4) | decode_nibble(pair[1])?;
     }
     Ok(output)
@@ -1349,6 +1484,10 @@ const fn decode_nibble(byte: u8) -> Result<u8, StreamedResultRegistryError> {
 
 #[derive(Debug, Error)]
 pub enum StreamedResultRegistryError {
+    #[error("result resource budget is not owned by the selected workspace lineage")]
+    BudgetOwnerMismatch,
+    #[error(transparent)]
+    Resource(#[from] crate::resource_budget::ResourceBudgetError),
     #[error("invalid resource chunk bound")]
     InvalidChunkBound,
     #[error("invalid streamed result identity")]
@@ -1398,7 +1537,15 @@ pub enum StreamedResultRegistryError {
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_lines)] // End-to-end authorization/lifecycle matrices stay in one fixture.
 mod tests {
+    fn test_resource_budget() -> ResourceBudget {
+        thread_local! { static FIXTURE_OWNER: ResourceBudget = {
+            let root = super::super::streamed_result_package::test_resource_budget();
+            root.workspace(*WORKSPACE.as_bytes(), root.policy()).unwrap()
+        }; }
+        FIXTURE_OWNER.with(Clone::clone)
+    }
     use std::io;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
@@ -1476,12 +1623,17 @@ mod tests {
                 .await
         }
 
-        async fn read(
+        async fn size(&self, path: &object_store::path::Path) -> Result<u64, object_store::Error> {
+            ObjectStoreResultSink::new(Arc::clone(&self.store) as Arc<dyn object_store::ObjectStore>).size(path).await
+        }
+
+        async fn read_range(
             &self,
             path: &object_store::path::Path,
+            range: std::ops::Range<u64>,
         ) -> Result<Vec<u8>, object_store::Error> {
             ObjectStoreResultSink::new(Arc::clone(&self.store) as Arc<dyn object_store::ObjectStore>)
-                .read(path)
+                .read_range(path, range)
                 .await
         }
 
@@ -1511,7 +1663,7 @@ mod tests {
             256,
         )
         .unwrap();
-        StreamedResultPackageBuilder::new(sink, limits)
+        StreamedResultPackageBuilder::new(sink, limits, test_resource_budget())
     }
 
     async fn result_package(sink: Arc<dyn ResultObjectSink>) -> SealedStreamedResultPackage {
@@ -1635,7 +1787,7 @@ mod tests {
 
     #[tokio::test]
     async fn reference_handle_reauthorizes_every_binding_and_releases_without_query() {
-        let registry = StreamedResultRegistry::try_new(16).unwrap();
+        let registry = StreamedResultRegistry::try_new(16, test_resource_budget()).unwrap();
         let publication = reference_publication(1, 1);
         let expected_content = publication.content.clone();
         let registration = registry
@@ -1643,7 +1795,9 @@ mod tests {
             .await
             .expect("reference publication");
         assert!(registration.public_handle.starts_with("public:reference:"));
-        assert!(!registration.public_handle.contains("reference:1"));
+        // A random opaque digest may legitimately begin with '1'; a substring assertion would
+        // fail one time in sixteen without indicating disclosure of the private reference id.
+        assert_ne!(registration.public_handle, "public:reference:1");
         let chunk = registry
             .read(reference_read(&registration.public_handle))
             .await
@@ -1815,7 +1969,7 @@ mod tests {
 
     #[tokio::test]
     async fn reference_registry_capacity_is_strict_and_publish_preserves_live_tombstones() {
-        let registry = StreamedResultRegistry::try_new(16).unwrap();
+        let registry = StreamedResultRegistry::try_new(16, test_resource_budget()).unwrap();
         let mut first_handle = None;
         for index in 0..MAX_REFERENCE_RESOURCES {
             let registration = registry
@@ -1931,8 +2085,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wp79_result_live_lease_reads_use_reserved_control_capacity() {
+        let budget = test_resource_budget();
+        let registry = StreamedResultRegistry::try_new(32, budget.clone()).unwrap();
+        let sink = Arc::new(FaultSink::new());
+        let registration = publish_result_fixture(&registry, &sink, "query:pressure").await;
+        let data_limit =
+            budget.policy().limits.memory_bytes - budget.policy().control_reserve.memory_bytes;
+        let fill = data_limit - u64::try_from(budget.observation().used.memory_bytes).unwrap();
+        let pressure = budget
+            .try_reserve(
+                ResourceClass::Data,
+                ResourceAmounts {
+                    memory_bytes: fill,
+                    ..ResourceAmounts::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            budget
+                .try_reserve(
+                    ResourceClass::Data,
+                    ResourceAmounts {
+                        memory_bytes: 1,
+                        ..ResourceAmounts::default()
+                    }
+                )
+                .is_err()
+        );
+        let page = &registration.pages[0];
+        let chunk = registry
+            .read(result_read(
+                &page.public_handle,
+                StreamedResourceSelector::Page(0),
+                0,
+                32,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(chunk.bytes.len(), 32);
+        let used = budget.observation().used.memory_bytes;
+        let alias = chunk.clone();
+        assert_eq!(budget.observation().used.memory_bytes, used);
+        drop(chunk);
+        assert_eq!(budget.observation().used.memory_bytes, used);
+        drop(alias);
+        assert_eq!(budget.observation().used.memory_bytes, used - 32);
+        drop(pressure);
+    }
+
+    #[tokio::test]
+    async fn wp79_result_registry_rejects_forged_workspace_budget_lineage() {
+        let root = super::super::streamed_result_package::test_resource_budget();
+        let foreign = root
+            .workspace(*WORKSPACE.as_bytes(), root.policy())
+            .unwrap();
+        let registry = StreamedResultRegistry::try_new(32, foreign).unwrap();
+        let sink = Arc::new(FaultSink::new());
+        let package = result_package(sink.clone()).await;
+        assert!(matches!(
+            registry
+                .publish_package(
+                    "query:foreign-root",
+                    PRINCIPAL,
+                    WORKSPACE,
+                    7,
+                    8,
+                    9,
+                    package.clone(),
+                    ResultCleanup::Package(package),
+                    None
+                )
+                .await,
+            Err(StreamedResultRegistryError::BudgetOwnerMismatch)
+        ));
+        let budget = test_resource_budget();
+        let operation = budget.operation([0x79; 16], budget.policy()).unwrap();
+        let registry = StreamedResultRegistry::try_new(32, operation).unwrap();
+        registry
+            .publish_reference(reference_publication(0, 10))
+            .await
+            .unwrap();
+        let mut wrong = reference_publication(1, 10);
+        wrong.workspace_id = WorkspaceId::from_bytes([0x23; 16]);
+        assert!(matches!(
+            registry.publish_reference(wrong).await,
+            Err(StreamedResultRegistryError::BudgetOwnerMismatch)
+        ));
+    }
+
+    #[tokio::test]
     async fn wp45_resource_scoped_manifest_pages_release_only_after_last_handle() {
-        let registry = StreamedResultRegistry::try_new(32).unwrap();
+        let registry = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
         let sink = Arc::new(FaultSink::new());
         let registration = publish_result_fixture(&registry, &sink, "query:scoped").await;
         assert_eq!(registration.pages.len(), 3);
@@ -2287,7 +2531,7 @@ mod tests {
     #[tokio::test]
     async fn wp45_resource_scoped_manifest_pages_release_only_after_last_handle_republication_is_isolated()
      {
-        let registry = StreamedResultRegistry::try_new(32).unwrap();
+        let registry = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
         let sink = Arc::new(FaultSink::new());
         let workspaces = BTreeSet::from([WORKSPACE]);
         let original = publish_result_fixture(&registry, &sink, "query:original").await;
@@ -2432,7 +2676,7 @@ mod tests {
     #[tokio::test]
     async fn wp45_restart_reissues_fresh_handles_from_the_durable_package_locator() {
         let sink = Arc::new(FaultSink::new());
-        let initial = StreamedResultRegistry::try_new(32).unwrap();
+        let initial = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
         let registration = publish_result_fixture(&initial, &sink, "query:restart").await;
         let initial_handles = std::iter::once(registration.manifest.public_handle.clone())
             .chain(
@@ -2443,7 +2687,7 @@ mod tests {
             )
             .collect::<BTreeSet<_>>();
 
-        let recovered = StreamedResultRegistry::try_new(32).unwrap();
+        let recovered = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
         recovered.install_package_builder(test_package_builder(
             Arc::clone(&sink) as Arc<dyn ResultObjectSink>
         ));
@@ -2504,7 +2748,7 @@ mod tests {
 
         let mut tampered = registration.retained_locator.clone();
         tampered.expected_manifest_checksum = format!("b3:{}", "00".repeat(32));
-        let rejected = StreamedResultRegistry::try_new(32).unwrap();
+        let rejected = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
         rejected.install_package_builder(test_package_builder(
             Arc::clone(&sink) as Arc<dyn ResultObjectSink>
         ));
@@ -2527,7 +2771,7 @@ mod tests {
 
     #[tokio::test]
     async fn wp45_restart_cleanup_uses_only_pre_result_ready_object_intent_and_retries() {
-        let initial = StreamedResultRegistry::try_new(32).unwrap();
+        let initial = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
         let sink = Arc::new(FaultSink::new());
         let registration = publish_result_fixture(&initial, &sink, "query:intent-only").await;
         let object_set = PendingResultObjectSet {
@@ -2539,7 +2783,7 @@ mod tests {
         assert_eq!(sink.object_count().await, 4);
         drop(initial);
 
-        let recovered = StreamedResultRegistry::try_new(32).unwrap();
+        let recovered = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
         recovered.install_package_builder(test_package_builder(
             Arc::clone(&sink) as Arc<dyn ResultObjectSink>
         ));
@@ -2558,7 +2802,7 @@ mod tests {
 
     #[tokio::test]
     async fn wp45_expiry_reclaims_handles_and_retries_failed_object_cleanup() {
-        let registry = StreamedResultRegistry::try_new(32).unwrap();
+        let registry = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
         let sink = Arc::new(FaultSink::new());
         let registration = publish_result_fixture(&registry, &sink, "query:expiry").await;
         assert_eq!(sink.object_count().await, 4);

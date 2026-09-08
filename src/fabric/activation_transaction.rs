@@ -2957,13 +2957,13 @@ mod tests {
             .count();
 
         assert_eq!(activated, 1);
-        assert!(
+        assert_eq!(
             log.lock()
                 .unwrap()
                 .iter()
                 .filter(|call| **call == "append")
-                .count()
-                == 1
+                .count(),
+            1
         );
     }
 

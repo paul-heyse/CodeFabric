@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use arrow_array::{Array, StringArray};
@@ -18,6 +17,30 @@ use codefabric::provider_native_syntax::{
     ProviderNativeSourceImage, PythonModuleInput,
 };
 use codefabric::provider_types::ProviderText;
+use codefabric::resource_budget::{
+    ChargedSlice, ChargedValue, ResourceAmounts, ResourceBudget, ResourceBudgetPolicy,
+    ResourceClass,
+};
+
+fn workspace_budget() -> ResourceBudget {
+    let policy = ResourceBudgetPolicy {
+        limits: ResourceAmounts {
+            memory_bytes: 2 << 30,
+            disk_bytes: 4 << 30,
+            running_jobs: 16,
+            queued_jobs: 32,
+            retained_generations: 16,
+            retained_bytes: 2 << 30,
+            rows: 2_000_000,
+            pages: 10_000,
+        },
+        control_reserve: ResourceAmounts::default(),
+    };
+    ResourceBudget::try_process([5; 16], policy)
+        .unwrap()
+        .workspace([6; 16], policy)
+        .unwrap()
+}
 
 fn lane(relation: NativeSyntaxRelation) -> ProviderLane {
     match relation {
@@ -72,7 +95,8 @@ fn requests(target: ProviderLane) -> Vec<ProviderFamilyRequest> {
 fn job(
     target: ProviderLane,
     source: &ProviderNativeSourceImage,
-    context: &ProviderContextBinding,
+    context: &ChargedValue<ProviderContextBinding>,
+    workspace: &ResourceBudget,
     pin: u8,
 ) -> ProviderJob {
     let (_, cancellation) = CancellationProbe::pair(64).unwrap();
@@ -103,6 +127,7 @@ fn job(
         trust: ProviderTrustPosture::InProcessConstrained,
         requests: requests(target),
         ceilings: ceilings(),
+        resource_budget: workspace.operation([pin; 16], workspace.policy()).unwrap(),
         deadline: Instant::now() + Duration::from_secs(30),
         cancellation,
         provenance: ProviderRunProvenance::new(
@@ -116,22 +141,19 @@ fn job(
 
 #[test]
 fn isolated_fact_generation_executes_provider_jobs_to_arrow() {
+    let workspace = workspace_budget();
+    let baseline_memory = workspace.observation().used.memory_bytes;
     let text = "from package import value\nresult = value + 1\n";
-    let bytes = Arc::<[u8]>::from(text.as_bytes());
+    let bytes = ChargedSlice::try_from_fn(&workspace, ResourceClass::Data, text.len(), || {
+        text.as_bytes().to_vec()
+    })
+    .unwrap();
     let source = ProviderNativeSourceImage::new(
         [7; 16],
         11,
-        Arc::clone(&bytes),
+        bytes.clone(),
         digest_bytes(&bytes),
-        ProviderText {
-            text: Arc::from(text),
-            original_byte_offsets: Arc::from(
-                text.char_indices()
-                    .map(|(offset, _)| u64::try_from(offset).unwrap())
-                    .chain(std::iter::once(u64::try_from(text.len()).unwrap()))
-                    .collect::<Vec<_>>(),
-            ),
-        },
+        ProviderText::from_validated_utf8(text, &workspace).unwrap(),
     )
     .unwrap();
     let context = ProviderContextBinding::try_new(
@@ -151,10 +173,22 @@ fn isolated_fact_generation_executes_provider_jobs_to_arrow() {
         },
     ])
     .unwrap();
-    let tree_job = job(ProviderLane::TreeSitter, &source, &context, 17);
-    let ruff_job = job(ProviderLane::Ruff, &source, &context, 18);
+    let context = workspace
+        .try_reserve(
+            ResourceClass::Data,
+            ResourceAmounts {
+                memory_bytes: context.memory_bytes().unwrap(),
+                ..ResourceAmounts::default()
+            },
+        )
+        .unwrap()
+        .into_charged_value(context);
+    let tree_job = job(ProviderLane::TreeSitter, &source, &context, &workspace, 17);
+    let ruff_job = job(ProviderLane::Ruff, &source, &context, &workspace, 18);
 
-    let mut runner = ExactPythonSyntaxRunner::new().unwrap();
+    let mut runner =
+        ExactPythonSyntaxRunner::new(InProcessProviderJobs::try_new(&tree_job, &ruff_job).unwrap())
+            .unwrap();
     let result = runner
         .run_full(
             InProcessProviderJobs::try_new(&tree_job, &ruff_job).unwrap(),
@@ -193,4 +227,7 @@ fn isolated_fact_generation_executes_provider_jobs_to_arrow() {
     assert_eq!(ruff.result().coverage().len(), 19);
     assert!(tree.result().gaps().is_empty());
     assert!(ruff.result().gaps().is_empty());
+    assert!(workspace.observation().used.memory_bytes > baseline_memory);
+    drop((tree, ruff, runner, result, source, bytes, context));
+    assert_eq!(workspace.observation().used.memory_bytes, baseline_memory);
 }

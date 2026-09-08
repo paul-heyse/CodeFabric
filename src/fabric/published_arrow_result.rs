@@ -6,6 +6,9 @@
 //! [`FabricQueryLease`] keeps the admitted epoch alive until release or expiry. Semantic relation
 //! IDs remain typed descriptor data; they are never a dispatch registry.
 
+use crate::resource_budget::{
+    ChargedSlice, ResourceAmounts, ResourceBudget, ResourceClass, ResourceScopeKind,
+};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -227,7 +230,7 @@ pub struct PublishedArrowResultDescriptor {
     pub total_ipc_bytes: u64,
     pub lease_expires_at_unix_ms: i64,
     pub manifest: PublishedManifestDescriptor,
-    pub relations: Arc<[PublishedRelationDescriptor]>,
+    pub relations: ChargedSlice<PublishedRelationDescriptor>,
 }
 
 impl PublishedArrowResultDescriptor {
@@ -235,9 +238,29 @@ impl PublishedArrowResultDescriptor {
     ///
     /// This control projection contains identities, bounds, checksums, and completeness only;
     /// semantic rows remain in the separately authorized Arrow IPC resources.
-    pub fn canonical_control_bytes(&self) -> Result<Vec<u8>, PublishedResultRegistryError> {
-        serde_json_canonicalizer::to_vec(&PublishedDescriptorProjection::from(self))
-            .map_err(PublishedResultRegistryError::CanonicalDescriptor)
+    ///
+    /// # Errors
+    ///
+    /// Returns an admission, bounded serialization, or invalid identity error.
+    pub fn canonical_control_bytes(
+        &self,
+    ) -> Result<ChargedSlice<u8>, PublishedResultRegistryError> {
+        let owner = self.relations.reservation().owner();
+        let limit = usize::try_from(self.relations.reservation().amounts().memory_bytes)
+            .map_err(|_| PublishedResultRegistryError::InvalidPublicIdentity)?;
+        let _projection = owner.try_reserve(
+            ResourceClass::Control,
+            ResourceAmounts {
+                memory_bytes: limit as u64,
+                ..ResourceAmounts::default()
+            },
+        )?;
+        Ok(super::arrow_result_resource::encode_canonical_value(
+            &PublishedDescriptorProjection::from(self),
+            limit,
+            owner,
+            ResourceClass::Control,
+        )?)
     }
 }
 
@@ -383,7 +406,7 @@ pub struct PublishedResultChunk {
     pub next_offset: u64,
     pub total_length: u64,
     pub content_checksum: [u8; 32],
-    pub bytes: Arc<[u8]>,
+    pub bytes: ChargedSlice<u8>,
     pub complete: bool,
     pub lease_expires_at_unix_ms: i64,
 }
@@ -396,13 +419,15 @@ pub enum PublishedReleaseOutcome {
 }
 
 /// Immutable package registry with bounded, explicit lifecycle state.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PublishedArrowResultRegistry {
+    budget: ResourceBudget,
     entries: Mutex<BTreeMap<PublishedArtifactId, PublishedEntry>>,
 }
 
 #[derive(Debug)]
 struct PublishedEntry {
+    _index_charge: crate::resource_budget::ResourceReservation,
     owner: PublishedResultOwner,
     lease_token: OpaqueResultLeaseToken,
     internal_lease_id: LeaseId,
@@ -415,8 +440,9 @@ struct PublishedEntry {
 
 impl PublishedArrowResultRegistry {
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new(budget: ResourceBudget) -> Self {
         Self {
+            budget,
             entries: Mutex::new(BTreeMap::new()),
         }
     }
@@ -436,6 +462,16 @@ impl PublishedArrowResultRegistry {
         package: Arc<ArrowResultResourcePackage>,
         observed_at_unix_ms: i64,
     ) -> Result<PublishedArrowResultDescriptor, PublishedResultRegistryError> {
+        let workspace = self.budget.ancestor_owner(ResourceScopeKind::Workspace);
+        if workspace.is_none_or(|workspace| workspace.id != *owner.workspace_id().as_bytes())
+            || workspace
+                != package
+                    .resource_budget()
+                    .ancestor_owner(ResourceScopeKind::Workspace)
+            || !self.budget.same_root(package.resource_budget())
+        {
+            return Err(PublishedResultRegistryError::BudgetOwnerMismatch);
+        }
         let metadata = package.metadata();
         if metadata.epoch_id() != epoch_lease.epoch_id() {
             return Err(PublishedResultRegistryError::EpochPinMismatch {
@@ -459,6 +495,41 @@ impl PublishedArrowResultRegistry {
             return Err(PublishedResultRegistryError::PublicationOutsideLease);
         }
 
+        let descriptor_bytes =
+            metadata
+                .relations()
+                .iter()
+                .try_fold(4096_u64, |total, relation| {
+                    let text = relation
+                        .relation_id()
+                        .as_str()
+                        .len()
+                        .checked_add(
+                            relation
+                                .coverage()
+                                .unknown_cause()
+                                .map_or(0, |cause| cause.as_str().len()),
+                        )
+                        .ok_or(PublishedResultRegistryError::InvalidPublicIdentity)?;
+                    total
+                        .checked_add((text as u64).saturating_mul(8))
+                        .and_then(|n| n.checked_add(2048))
+                        .ok_or(PublishedResultRegistryError::InvalidPublicIdentity)
+                })?;
+        let descriptor_charge = self.budget.try_reserve(
+            ResourceClass::Data,
+            ResourceAmounts {
+                memory_bytes: descriptor_bytes,
+                ..ResourceAmounts::default()
+            },
+        )?;
+        let index_charge = self.budget.try_reserve(
+            ResourceClass::Data,
+            ResourceAmounts {
+                memory_bytes: (metadata.relations().len() as u64 + 1).saturating_mul(512),
+                ..ResourceAmounts::default()
+            },
+        )?;
         let artifact_id = PublishedArtifactId(owner_bound_identity(
             b"published-artifact.v1",
             owner,
@@ -535,9 +606,10 @@ impl PublishedArrowResultRegistry {
                 content_checksum: *metadata.manifest_checksum(),
                 byte_length: metadata.manifest_byte_length(),
             },
-            relations: Arc::from(relations),
+            relations: descriptor_charge.into_charged_vec(relations)?,
         };
         let entry = PublishedEntry {
+            _index_charge: index_charge,
             owner,
             lease_token,
             internal_lease_id: lease.lease_id(),
@@ -565,6 +637,13 @@ impl PublishedArrowResultRegistry {
         &self,
         request: PublishedResultReadRequest,
     ) -> Result<PublishedResultChunk, PublishedResultRegistryError> {
+        let _read = self.budget.try_reserve(
+            ResourceClass::Control,
+            ResourceAmounts {
+                running_jobs: 1,
+                ..ResourceAmounts::default()
+            },
+        )?;
         let entries = self
             .entries
             .lock()
@@ -769,7 +848,7 @@ fn decode_hex<const N: usize>(value: &str) -> Option<[u8; N]> {
         return None;
     }
     let mut decoded = [0_u8; N];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let high = decode_nibble(pair[0])?;
         let low = decode_nibble(pair[1])?;
         decoded[index] = (high << 4) | low;
@@ -788,6 +867,10 @@ const fn decode_nibble(byte: u8) -> Option<u8> {
 /// Stable failures at the owner-bound publication boundary.
 #[derive(Debug, thiserror::Error)]
 pub enum PublishedResultRegistryError {
+    #[error(transparent)]
+    Resource(#[from] crate::resource_budget::ResourceBudgetError),
+    #[error("result package and registry do not share the authorized workspace budget")]
+    BudgetOwnerMismatch,
     #[error("INVALID_REQUEST_SCHEMA:RESULT_PUBLIC_IDENTITY")]
     InvalidPublicIdentity,
     #[error("INVALID_REQUEST_SCHEMA:RESULT_OPAQUE_TOKEN")]
@@ -830,6 +913,15 @@ pub enum PublishedResultRegistryError {
 
 #[cfg(test)]
 mod tests {
+    fn publication_budget() -> crate::resource_budget::ResourceBudget {
+        thread_local! {
+            static BUDGET: crate::resource_budget::ResourceBudget = {
+                let root = crate::fabric::streamed_result_package::test_resource_budget();
+                root.workspace([1; 16], root.policy()).unwrap()
+            };
+        }
+        BUDGET.with(Clone::clone)
+    }
     use std::io::Cursor;
 
     use arrow_array::{RecordBatch, StringArray};
@@ -1004,6 +1096,7 @@ mod tests {
                     17,
                 )
                 .unwrap(),
+                publication_budget(),
             )
             .unwrap(),
         )
@@ -1067,6 +1160,132 @@ mod tests {
         OpaqueResultLeaseToken::try_from_bytes(id32(seed)).unwrap()
     }
 
+    #[tokio::test]
+    async fn wp79_published_package_descriptor_and_control_chunk_keep_shared_ownership() {
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let epoch_id = EpochId::from_bytes(id16(20));
+        let fabric_epoch = epoch(epoch_id).await;
+        let first_command = command(1, workspace, ExpectedHead::Empty, epoch_id, 1);
+        let chain = ActivationChain::derive(
+            workspace,
+            [activation_event(1, &first_command, None, 1, epoch_id)],
+        )
+        .unwrap();
+        let admission =
+            FabricAdmissionRuntime::recover(&chain, |_| Some(fabric_epoch.clone())).unwrap();
+        let budget = publication_budget();
+        let package = package(epoch_id, 0x61);
+        let registry = PublishedArrowResultRegistry::new(budget.clone());
+        let descriptor = publish_governed(
+            &registry,
+            owner(workspace, 0x31),
+            token(0x71),
+            admission.admit_selected(fabric_epoch).unwrap(),
+            package.clone(),
+            1500,
+        )
+        .unwrap();
+        let descriptor_alias = descriptor.clone();
+        let relation_alias = descriptor.relations.clone();
+        let observation = budget.observation();
+        let data_available = observation.policy.limits.memory_bytes
+            - observation.policy.control_reserve.memory_bytes
+            - u64::try_from(observation.data_used.memory_bytes).unwrap();
+        let pressure = budget
+            .try_reserve(
+                ResourceClass::Data,
+                ResourceAmounts {
+                    memory_bytes: data_available,
+                    ..ResourceAmounts::default()
+                },
+            )
+            .unwrap();
+        let chunk = registry
+            .read_chunk(PublishedResultReadRequest {
+                access: PublishedResultAccess {
+                    artifact_id: descriptor.artifact_id,
+                    owner: descriptor.owner,
+                    lease_token: token(0x71),
+                },
+                resource_id: descriptor.manifest.authorization_resource_id,
+                observed_at_unix_ms: 1500,
+                offset: 0,
+                max_bytes: 7,
+            })
+            .unwrap();
+        assert_eq!(chunk.bytes.len(), 7);
+        drop(pressure);
+        assert_eq!(registry.collect_expired(2000).unwrap(), 1);
+        drop(registry);
+        drop(descriptor);
+        drop(descriptor_alias);
+        assert!(
+            budget.observation().used.retained_bytes > 0,
+            "external package Arc retains bytes"
+        );
+        drop(package);
+        assert_eq!(budget.observation().used.retained_bytes, 0);
+        assert!(
+            budget.observation().used.memory_bytes > 7,
+            "escaped descriptor backing remains charged"
+        );
+        drop(relation_alias);
+        assert_eq!(budget.observation().used.memory_bytes, 7);
+        drop(chunk);
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn wp79_publication_rejects_foreign_workspace_and_independent_budget_root() {
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let epoch_id = EpochId::from_bytes(id16(20));
+        let fabric_epoch = epoch(epoch_id).await;
+        let first_command = command(1, workspace, ExpectedHead::Empty, epoch_id, 1);
+        let chain = ActivationChain::derive(
+            workspace,
+            [activation_event(1, &first_command, None, 1, epoch_id)],
+        )
+        .unwrap();
+        let admission =
+            FabricAdmissionRuntime::recover(&chain, |_| Some(fabric_epoch.clone())).unwrap();
+        let package = package(epoch_id, 0x61);
+        let budget = publication_budget();
+        let used = budget.observation().used;
+        let registry = PublishedArrowResultRegistry::new(budget.clone());
+        assert!(matches!(
+            publish_governed(
+                &registry,
+                owner(WorkspaceId::from_bytes(id16(2)), 0x31),
+                token(0x71),
+                admission.admit_selected(fabric_epoch.clone()).unwrap(),
+                package.clone(),
+                1500,
+            ),
+            Err(PublishedResultRegistryError::BudgetOwnerMismatch)
+        ));
+        let independent = crate::fabric::streamed_result_package::test_resource_budget();
+        let independent = independent
+            .workspace(id16(1), independent.policy())
+            .unwrap();
+        let registry = PublishedArrowResultRegistry::new(independent.clone());
+        assert!(matches!(
+            publish_governed(
+                &registry,
+                owner(workspace, 0x31),
+                token(0x71),
+                admission.admit_selected(fabric_epoch).unwrap(),
+                package.clone(),
+                1500,
+            ),
+            Err(PublishedResultRegistryError::BudgetOwnerMismatch)
+        ));
+        assert_eq!(budget.observation().used, used);
+        assert_eq!(independent.observation().used.memory_bytes, 0);
+        assert!(registry.entries.lock().unwrap().is_empty());
+        drop(package);
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+    }
+
     fn read_all(
         registry: &PublishedArrowResultRegistry,
         access: PublishedResultAccess,
@@ -1108,7 +1327,7 @@ mod tests {
         let admitted = runtime.admit_selected(Arc::clone(&first_epoch)).unwrap();
         let first_package = package(epoch_id, 0x61);
         let result_owner = owner(workspace, 0x31);
-        let registry = PublishedArrowResultRegistry::new();
+        let registry = PublishedArrowResultRegistry::new(publication_budget());
         let descriptor = publish_governed(
             &registry,
             result_owner,
@@ -1143,7 +1362,7 @@ mod tests {
         let control: serde_json::Value = serde_json::from_slice(&control_bytes).unwrap();
         assert_eq!(
             serde_json_canonicalizer::to_vec(&control).unwrap(),
-            control_bytes
+            control_bytes.as_ref()
         );
         assert_eq!(control["format"], PUBLISHED_RESULT_FORMAT);
         assert_eq!(control["artifact_id"], descriptor.artifact_id.public_id());
@@ -1168,7 +1387,7 @@ mod tests {
         );
         assert!(PublishedArtifactId::try_from_public_id("b3:NOT-LOWER-HEX").is_err());
 
-        let second_registry = PublishedArrowResultRegistry::new();
+        let second_registry = PublishedArrowResultRegistry::new(publication_budget());
         let rebuilt = publish_governed(
             &second_registry,
             result_owner,
@@ -1180,7 +1399,7 @@ mod tests {
         .unwrap();
         assert_eq!(descriptor, rebuilt);
 
-        let other_registry = PublishedArrowResultRegistry::new();
+        let other_registry = PublishedArrowResultRegistry::new(publication_budget());
         let other_owner = publish_governed(
             &other_registry,
             owner(workspace, 0x32),
@@ -1211,7 +1430,7 @@ mod tests {
         let chain = ActivationChain::derive(workspace, [first_event]).unwrap();
         let runtime =
             FabricAdmissionRuntime::recover(&chain, |_| Some(Arc::clone(&first_epoch))).unwrap();
-        let registry = PublishedArrowResultRegistry::new();
+        let registry = PublishedArrowResultRegistry::new(publication_budget());
         let result_owner = owner(workspace, 0x31);
         let lease_token = token(0x71);
         let descriptor = publish_governed(
@@ -1349,7 +1568,7 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let registry = PublishedArrowResultRegistry::new();
+        let registry = PublishedArrowResultRegistry::new(publication_budget());
         let result_owner = owner(workspace, 0x31);
         let first_package = package(epoch_id, 0x61);
         let retained_bytes = first_package.retained_resource_bytes().unwrap();
@@ -1417,7 +1636,7 @@ mod tests {
         let first_chain = ActivationChain::derive(workspace, [first_event]).unwrap();
         let runtime =
             FabricAdmissionRuntime::recover(&first_chain, |_| Some(Arc::clone(&first))).unwrap();
-        let registry = PublishedArrowResultRegistry::new();
+        let registry = PublishedArrowResultRegistry::new(publication_budget());
         let result_owner = owner(workspace, 0x31);
         let lease_token = token(0x71);
         let descriptor = publish_governed(

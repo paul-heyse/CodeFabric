@@ -31,7 +31,12 @@ use thiserror::Error;
 use tokio::sync::Notify;
 
 use crate::relational_program::{FieldId, RelationId};
+use crate::resource_budget::{
+    ChargedSlice, ChargedValue, ResourceAmounts, ResourceBudget, ResourceClass,
+};
 use crate::schema_contract::SchemaRole;
+
+mod owned_batches;
 
 use super::epoch_runtime::{FABRIC_CATALOG, FabricSchemaRole};
 use super::programmatic_epoch::{
@@ -441,6 +446,7 @@ impl ProducerClosureCancellation {
     /// Mark this request cancelled and wake every in-flight closure stream.
     ///
     /// Returns `true` only for the transition from live to cancelled.
+    #[must_use]
     pub fn cancel(&self) -> bool {
         let transitioned = !self.state.cancelled.swap(true, Ordering::AcqRel);
         if transitioned {
@@ -829,7 +835,7 @@ impl ReleaseClosureLiteralTransformation {
             schema,
             rows: rows
                 .into_iter()
-                .map(|row| Arc::<[ScalarValue]>::from(row))
+                .map(Arc::<[ScalarValue]>::from)
                 .collect::<Vec<_>>()
                 .into(),
         })
@@ -1154,6 +1160,7 @@ impl ReleaseProducerClosureIssue {
 /// It is not constructible from counts, digests, plan text, or caller-authored declarations.
 #[derive(Clone, Debug)]
 pub(crate) struct ReleaseProducerClosureEvidence {
+    _metadata: ChargedValue<()>,
     operation_id: Arc<str>,
     implementation_release: Arc<str>,
     application_authority_id: Arc<str>,
@@ -1295,9 +1302,14 @@ impl CompiledDerivedProducerClosure {
     pub async fn execute(
         &self,
         context: &SessionContext,
+        resource_budget: &ResourceBudget,
     ) -> Result<DerivedProducerClosureExecution, DerivedProducerClosureError> {
-        self.execute_with_cancellation(context, &ProducerClosureCancellation::new())
-            .await
+        self.execute_with_cancellation(
+            context,
+            &ProducerClosureCancellation::new(),
+            resource_budget,
+        )
+        .await
     }
 
     /// Execute under an explicit request cancellation authority.
@@ -1312,8 +1324,14 @@ impl CompiledDerivedProducerClosure {
         &self,
         context: &SessionContext,
         cancellation: &ProducerClosureCancellation,
+        resource_budget: &ResourceBudget,
     ) -> Result<DerivedProducerClosureExecution, DerivedProducerClosureError> {
-        let mut budget = ExecutionBudget::default();
+        let mut budget = ExecutionBudget {
+            resources: resource_budget.clone(),
+            batches: 0,
+            bytes: 0,
+            rows: 0,
+        };
         let family_closure = execute_bounded(
             context,
             &self.family_closure_plan,
@@ -1345,6 +1363,34 @@ impl CompiledDerivedProducerClosure {
         )
         .await?;
 
+        // Row decoding and conformance indexes are a deliberate bounded Arrow-to-proof boundary.
+        // Reserve from actual materialized size/rows, not the configured maximum output budget.
+        let decode_bytes = budget
+            .bytes
+            .checked_mul(16)
+            .and_then(|n| {
+                budget
+                    .rows
+                    .checked_mul(2048)
+                    .and_then(|rows| n.checked_add(rows))
+            })
+            .and_then(|n| {
+                self.input_fields
+                    .len()
+                    .checked_mul(2048)
+                    .and_then(|fields| n.checked_add(fields))
+            })
+            .and_then(|n| n.checked_add(8192))
+            .ok_or(DerivedProducerClosureError::ResourceCounterOverflow(
+                "proof decoding",
+            ))?;
+        let decode_charge = resource_budget.try_reserve(
+            ResourceClass::Data,
+            ResourceAmounts {
+                memory_bytes: decode_bytes as u64,
+                ..ResourceAmounts::default()
+            },
+        )?;
         let release_evidence = decode_release_producer_closure_evidence(
             &family_closure,
             &self.family_closure_fields,
@@ -1356,6 +1402,7 @@ impl CompiledDerivedProducerClosure {
             &self.semantic_identities,
             &self.implementation_release,
             &self.observation,
+            decode_charge.into_charged_value(()),
         )?;
 
         Ok(DerivedProducerClosureExecution {
@@ -1376,11 +1423,11 @@ impl CompiledDerivedProducerClosure {
 #[derive(Clone, Debug)]
 pub struct DerivedProducerClosureExecution {
     family_closure_schema: SchemaRef,
-    family_closure: Vec<RecordBatch>,
+    family_closure: ChargedSlice<RecordBatch>,
     query_requirement_closure_schema: SchemaRef,
-    query_requirement_closure: Vec<RecordBatch>,
+    query_requirement_closure: ChargedSlice<RecordBatch>,
     violation_schema: SchemaRef,
-    violations: Vec<RecordBatch>,
+    violations: ChargedSlice<RecordBatch>,
     family_closure_fields: FamilyClosureFields,
     observation: ProducerClosureCompilationObservation,
     release_evidence: ReleaseProducerClosureEvidence,
@@ -3222,6 +3269,7 @@ fn decode_release_producer_closure_evidence(
     semantic_identities: &ProducerClosureSemanticIdentities,
     implementation_release: &Arc<str>,
     observation: &ProducerClosureCompilationObservation,
+    metadata: ChargedValue<()>,
 ) -> Result<ReleaseProducerClosureEvidence, DerivedProducerClosureError> {
     let mut families = decode_family_closure_rows(family_batches, family_fields)?;
     let mut query_requirements = decode_query_requirement_rows(query_batches, query_fields)?;
@@ -3276,6 +3324,7 @@ fn decode_release_producer_closure_evidence(
     }
 
     Ok(ReleaseProducerClosureEvidence {
+        _metadata: metadata,
         operation_id: Arc::clone(&observation.operation_id),
         implementation_release: Arc::clone(implementation_release),
         application_authority_id: Arc::clone(semantic_identities.application_owned_authority_id()),
@@ -3550,7 +3599,7 @@ fn optional_executed_text(
             relation,
             field: field.as_str().to_owned(),
             row,
-            value: value.to_owned(),
+            value: value.chars().take(128).collect(),
         });
     }
     Ok(Some(Arc::from(value)))
@@ -3950,10 +3999,11 @@ const fn native_operator_identity(operator: ProducerClosureNativeOperator) -> &'
     }
 }
 
-#[derive(Default)]
 struct ExecutionBudget {
+    resources: ResourceBudget,
     batches: usize,
     bytes: usize,
+    rows: usize,
 }
 
 async fn execute_bounded(
@@ -3964,7 +4014,7 @@ async fn execute_bounded(
     relation: &'static str,
     budget: &mut ExecutionBudget,
     cancellation: &ProducerClosureCancellation,
-) -> Result<Vec<RecordBatch>, DerivedProducerClosureError> {
+) -> Result<ChargedSlice<RecordBatch>, DerivedProducerClosureError> {
     if cancellation.is_cancelled() {
         return Err(DerivedProducerClosureError::Cancelled { relation });
     }
@@ -3972,6 +4022,9 @@ async fn execute_bounded(
     let physical = context.state().create_physical_plan(&optimized).await?;
     let mut stream = execute_stream(physical, context.task_ctx())?;
     let mut batches = Vec::new();
+    let mut metadata_charge = budget
+        .resources
+        .try_reserve(ResourceClass::Data, ResourceAmounts::default())?;
     let mut relation_rows = 0_usize;
     loop {
         let next = tokio::select! {
@@ -4023,13 +4076,35 @@ async fn execute_bounded(
                 observed: budget.bytes,
             });
         }
-        batches.push(batch);
+        budget.rows = budget.rows.checked_add(batch.num_rows()).ok_or(
+            DerivedProducerClosureError::ResourceCounterOverflow("total rows"),
+        )?;
+        let additional = batch
+            .num_columns()
+            .checked_mul(256)
+            .and_then(|n| n.checked_add(1024))
+            .ok_or(DerivedProducerClosureError::ResourceCounterOverflow(
+                "batch metadata",
+            ))?;
+        metadata_charge.try_grow(ResourceAmounts {
+            memory_bytes: additional as u64,
+            ..ResourceAmounts::default()
+        })?;
+        batches.push(owned_batches::copy_owned_batch(
+            &batch,
+            &budget.resources,
+            bounds.max_total_bytes(),
+        )?);
     }
     drop(stream);
     if batches.is_empty() {
+        metadata_charge.try_grow(ResourceAmounts {
+            memory_bytes: 1024,
+            ..ResourceAmounts::default()
+        })?;
         batches.push(RecordBatch::new_empty(Arc::clone(expected_schema)));
     }
-    Ok(batches)
+    Ok(metadata_charge.into_charged_vec(batches)?)
 }
 
 /// Fail-closed release-catalog construction and registration errors.
@@ -4062,6 +4137,14 @@ pub(crate) enum ReleaseProducerClosureCatalogError {
 /// Fail-closed binding, planning, execution, and resource errors.
 #[derive(Debug, Error)]
 pub enum DerivedProducerClosureError {
+    #[error(transparent)]
+    Arrow(#[from] arrow_schema::ArrowError),
+    #[error(transparent)]
+    Resource(#[from] crate::resource_budget::ResourceBudgetError),
+    #[error(transparent)]
+    Allocation(#[from] crate::provider_contracts::ProviderContractError),
+    #[error("retained producer closure output exceeds its bounded native allocation profile")]
+    OutputAllocationProfile,
     #[error("invalid compiled {kind} identity {value:?}: {detail}")]
     InvalidCompiledIdentity {
         kind: &'static str,
@@ -4721,6 +4804,56 @@ mod tests {
         ProducerClosureResourceBounds::try_new(16, 4_096, 256, 16 * 1024 * 1024).expect("bounds")
     }
 
+    #[tokio::test]
+    async fn wp79_derived_execution_evidence_and_raw_arrays_keep_their_actual_owners() {
+        let bindings = bindings();
+        let input = inputs(
+            &bindings,
+            &[("family.one", FACT_CLASS)],
+            &[producer("family.one", "provider.one")],
+            &[("query.one", "family.one")],
+            &[],
+        );
+        let compiled = compile_derived_producer_closure(input, &bindings, bounds()).unwrap();
+        let budget = crate::fabric::streamed_result_package::test_resource_budget();
+        let context = SessionContext::new();
+        let execution = compiled.execute(&context, &budget).await.unwrap();
+        let raw = execution
+            .family_closure()
+            .iter()
+            .find(|batch| batch.num_rows() > 0)
+            .unwrap()
+            .column(0)
+            .to_data();
+        let evidence = execution.release_evidence().clone();
+        let used = budget.observation().used.memory_bytes;
+        let clone = execution.clone();
+        assert_eq!(
+            budget.observation().used.memory_bytes,
+            used,
+            "immutable clone has one charge"
+        );
+        drop(execution);
+        drop(clone);
+        assert!(budget.observation().used.memory_bytes > 0);
+        drop(evidence);
+        assert!(
+            budget.observation().used.memory_bytes > 0,
+            "raw Arrow buffer remains charged"
+        );
+        drop(raw);
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+        let cancellation = ProducerClosureCancellation::new();
+        assert!(cancellation.cancel());
+        assert!(matches!(
+            compiled
+                .execute_with_cancellation(&context, &cancellation, &budget)
+                .await,
+            Err(DerivedProducerClosureError::Cancelled { .. })
+        ));
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+    }
+
     async fn execute(
         bindings: &DerivedProducerClosureBindings,
         inputs: DerivedProducerClosureInputs,
@@ -4728,7 +4861,10 @@ mod tests {
         let compiled =
             compile_derived_producer_closure(inputs, bindings, bounds()).expect("compile closure");
         compiled
-            .execute(&SessionContext::new())
+            .execute(
+                &SessionContext::new(),
+                &crate::fabric::streamed_result_package::test_resource_budget(),
+            )
             .await
             .expect("execute closure")
     }
@@ -4862,19 +4998,19 @@ mod tests {
         assert_eq!(
             evidence.families()[0]
                 .authority_id()
-                .map(|value| value.as_ref()),
+                .map(std::convert::AsRef::as_ref),
             Some(APP_AUTHORITY),
         );
         assert_eq!(
             evidence.families()[0]
                 .producer_proof_pin()
-                .map(|value| value.as_ref()),
+                .map(std::convert::AsRef::as_ref),
             Some("proof:b3:44"),
         );
         assert_eq!(
             evidence.families()[0]
                 .completeness_proof_pin()
-                .map(|value| value.as_ref()),
+                .map(std::convert::AsRef::as_ref),
             Some("completeness-proof:b3:40"),
         );
         assert_eq!(evidence.query_requirements().len(), 1);
@@ -4971,7 +5107,7 @@ mod tests {
         assert_eq!(
             execution.release_evidence().families()[0]
                 .authority_id()
-                .map(|value| value.as_ref()),
+                .map(std::convert::AsRef::as_ref),
             Some(APP_AUTHORITY),
         );
     }
@@ -5238,7 +5374,7 @@ mod tests {
         assert!(!execution.is_conformant());
         assert!(execution.release_evidence().issues().iter().any(|issue| {
             issue.code() == "empty_runtime_producer_scope"
-                && issue.subject_id().map(|value| value.as_ref()) == Some("family.empty-scope")
+                && issue.subject_id().map(std::convert::AsRef::as_ref) == Some("family.empty-scope")
         }));
 
         let proof = evaluate_release_producer_closure(
@@ -5274,7 +5410,10 @@ mod tests {
         );
         assert!(compiled.observation.dependencies.remove(&missing));
         let execution = compiled
-            .execute(&SessionContext::new())
+            .execute(
+                &SessionContext::new(),
+                &crate::fabric::streamed_result_package::test_resource_budget(),
+            )
             .await
             .expect("execute closure with incomplete observation");
 
@@ -5335,7 +5474,7 @@ mod tests {
         assert_eq!(
             mutated_proof.families()[0]
                 .authority_id()
-                .map(|value| value.as_ref()),
+                .map(std::convert::AsRef::as_ref),
             Some(PROVIDER_AUTHORITY),
         );
     }

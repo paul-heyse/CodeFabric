@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use arrow_array::RecordBatch;
@@ -18,15 +19,20 @@ use datafusion::catalog::{
 use datafusion::common::TableReference;
 use datafusion::datasource::source_as_provider;
 use datafusion::execution::SessionStateBuilder;
+use datafusion::execution::object_store::ObjectStoreRegistry;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::collect;
 use datafusion::prelude::SessionContext;
 use deltalake::delta_datafusion::planner::DeltaPlanner;
+use object_store::ObjectStore;
 
 use crate::relational_program::{
     CompilationObservations, ProgramBindings, ProgramRelationContract, RelationId, RelationInput,
     RelationalProgram, RelationalProgramCompiler, RelationalProgramError,
+};
+use crate::resource_budget::{
+    ResourceAmounts, ResourceBudgetError, ResourceClass, ResourceReservation,
 };
 
 use super::activation::{TableVersionSet, TableVersionSetRef};
@@ -58,23 +64,169 @@ use super::programmatic_schema::{
     ProgrammaticRelationId, ProgrammaticSchemaAssembly, ProgrammaticSchemaError,
     ProgrammaticTransformation, ProviderInput, SealedRelationBinding,
 };
+use super::resource_ownership::WorkspaceFabricResources;
+
+/// The cache and its generation/capacity retain one lifetime across epoch and child handles.
+/// No bare Arc to the cache is exported, so an escaped cache cannot silently lose its charge.
+#[derive(Clone, Debug)]
+pub(super) struct EpochLogicalPlanCacheHandle {
+    cache: Arc<EpochLogicalPlanCache>,
+    retention: Option<Arc<EpochResourceRetention>>,
+}
+
+impl Deref for EpochLogicalPlanCacheHandle {
+    type Target = EpochLogicalPlanCache;
+    fn deref(&self) -> &Self::Target {
+        &self.cache
+    }
+}
+
+#[derive(Debug)]
+struct EpochResourceRetention {
+    resources: WorkspaceFabricResources,
+    // All cache consumers retain this owner; cache backing drops before this guard.
+    _reservation: ResourceReservation,
+}
+
+/// Opaque linear assembly carrier: consuming admission cannot discard only the generation guard
+/// while retaining its runtime. Its fields are not caller-reconstructible authority.
+pub(crate) struct ProgrammaticEpochRuntimeOwner {
+    runtime: Arc<RuntimeEnv>,
+    logical_plan_cache: EpochLogicalPlanCacheHandle,
+}
+
+impl ProgrammaticEpochRuntimeOwner {
+    fn is_governed(&self) -> bool {
+        self.logical_plan_cache.retention.is_some()
+    }
+}
+
+/// Fixed local-origin capability for the current explicitly local Delta deployment. It has no
+/// lazy URL factories and no registration path that can add another origin or replace this store.
+#[derive(Debug)]
+struct CandidateLocalObjectStoreRegistry {
+    store: Arc<dyn ObjectStore>,
+}
+
+impl CandidateLocalObjectStoreRegistry {
+    fn new(store: Arc<dyn ObjectStore>) -> Self {
+        Self { store }
+    }
+}
+
+/// Fresh registry with only the explicitly selected local filesystem origin; no store discovery.
+pub(crate) fn local_fabric_object_store_registry(
+    store: Arc<dyn ObjectStore>,
+) -> Arc<dyn ObjectStoreRegistry> {
+    Arc::new(CandidateLocalObjectStoreRegistry::new(store))
+}
+
+impl ObjectStoreRegistry for CandidateLocalObjectStoreRegistry {
+    fn register_store(
+        &self,
+        _url: &url::Url,
+        store: Arc<dyn ObjectStore>,
+    ) -> Option<Arc<dyn ObjectStore>> {
+        Some(store)
+    }
+    fn get_store(&self, url: &url::Url) -> datafusion::common::Result<Arc<dyn ObjectStore>> {
+        if url.scheme() == "file"
+            && url.host_str().is_none()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.port().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none()
+        {
+            Ok(Arc::clone(&self.store))
+        } else {
+            Err(datafusion::common::DataFusionError::Plan(
+                "candidate store origin is not the explicitly selected local filesystem".into(),
+            ))
+        }
+    }
+}
 
 /// Mutable owner of one programmatic candidate session.
 pub struct ProgrammaticFabricEpochBuilder {
     identity: FabricEpochId,
     runtime_config: FabricEpochRuntimeConfig,
-    runtime_env: Arc<RuntimeEnv>,
+    runtime_owner: ProgrammaticEpochRuntimeOwner,
     assembly: ProgrammaticSchemaAssembly,
 }
 
 impl ProgrammaticFabricEpochBuilder {
-    /// Create a fresh candidate with the exact runtime and role-schema
-    /// isolation boundary. The legacy `model` schema is intentionally absent.
+    /// Test-only bounded isolated fixture. Production always supplies its one workspace owner.
+    #[cfg(test)]
     pub(crate) fn try_new(
         identity: FabricEpochId,
         runtime_config: FabricEpochRuntimeConfig,
     ) -> Result<Self, ProgrammaticFabricEpochError> {
         let runtime_env = runtime_config.runtime_env()?;
+        let logical_plan_cache = EpochLogicalPlanCacheHandle {
+            cache: Arc::new(EpochLogicalPlanCache::new(
+                runtime_config.cache_policy().logical_plan_entries(),
+                runtime_config.cache_policy().logical_plan_bytes(),
+            )),
+            retention: None,
+        };
+        Self::assemble(
+            identity,
+            runtime_config,
+            ProgrammaticEpochRuntimeOwner {
+                runtime: runtime_env,
+                logical_plan_cache,
+            },
+        )
+    }
+
+    /// Admit one generation against the shared workspace before creating its session/catalog/cache.
+    /// The logical cache reserves its finite backing capacity; entries remain epoch-authorized.
+    pub(crate) fn try_new_governed(
+        identity: FabricEpochId,
+        runtime_config: FabricEpochRuntimeConfig,
+        resources: WorkspaceFabricResources,
+    ) -> Result<Self, ProgrammaticFabricEpochError> {
+        if runtime_config.native_config() != *resources.config() {
+            return Err(ProgrammaticFabricEpochError::ResourcePolicyDrift);
+        }
+        let cache_bytes = u64::try_from(runtime_config.cache_policy().logical_plan_bytes())
+            .map_err(|_| ResourceBudgetError::Overflow)?;
+        let reservation = resources.workspace_budget().try_reserve(
+            ResourceClass::Data,
+            ResourceAmounts {
+                retained_generations: 1,
+                memory_bytes: cache_bytes,
+                retained_bytes: cache_bytes,
+                ..ResourceAmounts::default()
+            },
+        )?;
+        let runtime = resources.runtime_env();
+        let logical_plan_cache = EpochLogicalPlanCacheHandle {
+            cache: Arc::new(EpochLogicalPlanCache::new(
+                runtime_config.cache_policy().logical_plan_entries(),
+                runtime_config.cache_policy().logical_plan_bytes(),
+            )),
+            retention: Some(Arc::new(EpochResourceRetention {
+                resources,
+                _reservation: reservation,
+            })),
+        };
+        Self::assemble(
+            identity,
+            runtime_config,
+            ProgrammaticEpochRuntimeOwner {
+                runtime,
+                logical_plan_cache,
+            },
+        )
+    }
+
+    fn assemble(
+        identity: FabricEpochId,
+        runtime_config: FabricEpochRuntimeConfig,
+        runtime_owner: ProgrammaticEpochRuntimeOwner,
+    ) -> Result<Self, ProgrammaticFabricEpochError> {
         let catalog_list = Arc::new(MemoryCatalogProviderList::new());
         let catalog = Arc::new(MemoryCatalogProvider::new());
         if catalog_list
@@ -96,17 +248,23 @@ impl ProgrammaticFabricEpochBuilder {
                 )));
             }
         }
+        let mut session_config = runtime_config.session_config();
+        if let Some(retention) = &runtime_owner.logical_plan_cache.retention {
+            // SessionState/TaskContext clones and consuming assembly retain this guard even when
+            // an assembly carrier is dropped. It is an owned native configuration extension.
+            session_config = session_config.with_extension(Arc::clone(retention));
+        }
         let state = SessionStateBuilder::new()
             .with_default_features()
-            .with_config(runtime_config.session_config())
-            .with_runtime_env(Arc::clone(&runtime_env))
+            .with_config(session_config)
+            .with_runtime_env(Arc::clone(&runtime_owner.runtime))
             .with_catalog_list(catalog_list)
             .with_query_planner(DeltaPlanner::new())
             .build();
         Ok(Self {
             identity,
             runtime_config,
-            runtime_env,
+            runtime_owner,
             assembly: ProgrammaticSchemaAssembly::new(state),
         })
     }
@@ -142,13 +300,13 @@ impl ProgrammaticFabricEpochBuilder {
     ) -> (
         FabricEpochId,
         FabricEpochRuntimeConfig,
-        Arc<RuntimeEnv>,
+        ProgrammaticEpochRuntimeOwner,
         ProgrammaticSchemaAssembly,
     ) {
         (
             self.identity,
             self.runtime_config,
-            self.runtime_env,
+            self.runtime_owner,
             self.assembly,
         )
     }
@@ -159,13 +317,13 @@ impl ProgrammaticFabricEpochBuilder {
     pub(crate) fn from_assembly_parts(
         identity: FabricEpochId,
         runtime_config: FabricEpochRuntimeConfig,
-        runtime_env: Arc<RuntimeEnv>,
+        runtime_owner: ProgrammaticEpochRuntimeOwner,
         assembly: ProgrammaticSchemaAssembly,
     ) -> Self {
         Self {
             identity,
             runtime_config,
-            runtime_env,
+            runtime_owner,
             assembly,
         }
     }
@@ -200,7 +358,7 @@ impl ProgrammaticFabricEpochBuilder {
         let Self {
             identity,
             runtime_config,
-            runtime_env,
+            runtime_owner,
             assembly,
         } = self;
         let historicized =
@@ -219,7 +377,7 @@ impl ProgrammaticFabricEpochBuilder {
         Self::finish_historicized(
             identity,
             runtime_config,
-            runtime_env,
+            runtime_owner,
             historicized,
             relation_publication,
             table_versions,
@@ -240,7 +398,7 @@ impl ProgrammaticFabricEpochBuilder {
         let Self {
             identity,
             runtime_config,
-            runtime_env,
+            runtime_owner,
             mut assembly,
         } = self;
         let (observation_versions, relation_versions) = split_table_versions(&table_versions)?;
@@ -258,7 +416,7 @@ impl ProgrammaticFabricEpochBuilder {
         Self::finish_historicized(
             identity,
             runtime_config,
-            runtime_env,
+            runtime_owner,
             historicized,
             relation_publication,
             table_versions,
@@ -268,7 +426,7 @@ impl ProgrammaticFabricEpochBuilder {
     fn finish_historicized(
         identity: FabricEpochId,
         runtime_config: FabricEpochRuntimeConfig,
-        runtime_env: Arc<RuntimeEnv>,
+        runtime_owner: ProgrammaticEpochRuntimeOwner,
         historicized: ProgrammaticObservationHistoricization,
         relation_publication: ProgrammaticRelationDeltaPublication,
         table_versions: Arc<TableVersionSet>,
@@ -287,12 +445,8 @@ impl ProgrammaticFabricEpochBuilder {
             })
             .collect::<Result<Vec<_>, RelationalProgramError>>()?;
         let program_bindings = Arc::new(ProgramBindings::try_new(authority_id, contracts)?);
-        let logical_plan_cache = Arc::new(EpochLogicalPlanCache::new(
-            runtime_config.cache_policy().logical_plan_entries(),
-            runtime_config.cache_policy().logical_plan_bytes(),
-        ));
         let state = session.state();
-        if !Arc::ptr_eq(state.runtime_env(), &runtime_env) {
+        if !Arc::ptr_eq(state.runtime_env(), &runtime_owner.runtime) {
             return Err(ProgrammaticFabricEpochError::RuntimeAuthorityDrift);
         }
         let logical_plan_authority = derive_epoch_logical_plan_authority(
@@ -306,7 +460,7 @@ impl ProgrammaticFabricEpochBuilder {
         Ok(ProgrammaticFabricEpoch {
             identity,
             runtime_config,
-            runtime_env,
+            runtime_owner,
             session,
             relations,
             observation_publication,
@@ -314,7 +468,6 @@ impl ProgrammaticFabricEpochBuilder {
             table_versions,
             program_bindings,
             logical_plan_authority,
-            logical_plan_cache,
             #[cfg(test)]
             observation_history_root: None,
         })
@@ -491,12 +644,32 @@ fn candidate_session_authority(identity: FabricEpochId, runtime_identity: &str) 
     )
 }
 
+fn native_cache_backing_shared(left: &RuntimeEnv, right: &RuntimeEnv) -> bool {
+    fn same_optional<T: ?Sized>(left: Option<Arc<T>>, right: Option<Arc<T>>) -> bool {
+        match (left, right) {
+            (Some(left), Some(right)) => Arc::ptr_eq(&left, &right),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+    Arc::ptr_eq(
+        &left.cache_manager.get_file_metadata_cache(),
+        &right.cache_manager.get_file_metadata_cache(),
+    ) && same_optional(
+        left.cache_manager.get_file_statistic_cache(),
+        right.cache_manager.get_file_statistic_cache(),
+    ) && same_optional(
+        left.cache_manager.get_list_files_cache(),
+        right.cache_manager.get_list_files_cache(),
+    )
+}
+
 /// Sealed session authority for one exact set of provider facts and
 /// programmatic transformations.
 pub struct ProgrammaticFabricEpoch {
     identity: FabricEpochId,
     runtime_config: FabricEpochRuntimeConfig,
-    runtime_env: Arc<RuntimeEnv>,
+    runtime_owner: ProgrammaticEpochRuntimeOwner,
     session: SessionContext,
     relations: BTreeMap<ProgrammaticRelationId, SealedRelationBinding>,
     observation_publication: ProgrammaticObservationDeltaPublication,
@@ -504,7 +677,6 @@ pub struct ProgrammaticFabricEpoch {
     table_versions: Arc<TableVersionSet>,
     program_bindings: Arc<ProgramBindings>,
     logical_plan_authority: LogicalPlanAuthorityFingerprint,
-    logical_plan_cache: Arc<EpochLogicalPlanCache>,
     #[cfg(test)]
     observation_history_root: Option<tempfile::TempDir>,
 }
@@ -560,11 +732,21 @@ impl ProgrammaticFabricEpoch {
 
     #[must_use]
     pub fn logical_plan_cache_observation(&self) -> LogicalPlanCacheObservation {
-        self.logical_plan_cache.observation()
+        self.runtime_owner.logical_plan_cache.observation()
     }
 
-    pub(super) const fn logical_plan_cache(&self) -> &Arc<EpochLogicalPlanCache> {
-        &self.logical_plan_cache
+    pub(super) const fn logical_plan_cache(&self) -> &EpochLogicalPlanCacheHandle {
+        &self.runtime_owner.logical_plan_cache
+    }
+
+    /// The actual injected process/workspace owner, absent only for isolated test fixtures.
+    #[must_use]
+    pub fn workspace_resources(&self) -> Option<&WorkspaceFabricResources> {
+        self.runtime_owner
+            .logical_plan_cache
+            .retention
+            .as_ref()
+            .map(|retention| &retention.resources)
     }
 
     pub(super) const fn logical_plan_authority(&self) -> LogicalPlanAuthorityFingerprint {
@@ -577,6 +759,7 @@ impl ProgrammaticFabricEpoch {
     }
 
     /// Enumerate every stable relation identity sealed into this exact session.
+    #[must_use]
     pub fn relation_ids(
         &self,
     ) -> impl ExactSizeIterator<Item = &ProgrammaticRelationId> + DoubleEndedIterator {
@@ -628,15 +811,26 @@ impl ProgrammaticFabricEpoch {
         runtime: &Arc<RuntimeEnv>,
         catalog_list: &Arc<dyn datafusion::catalog::CatalogProviderList>,
     ) -> bool {
-        !Arc::ptr_eq(&self.runtime_env, runtime)
+        let parent = &self.runtime_owner.runtime;
+        let authorities_distinct = !Arc::ptr_eq(parent, runtime)
             && !Arc::ptr_eq(self.session.state().catalog_list(), catalog_list)
-            && !Arc::ptr_eq(&self.runtime_env.memory_pool, &runtime.memory_pool)
-            && !Arc::ptr_eq(&self.runtime_env.disk_manager, &runtime.disk_manager)
-            && !Arc::ptr_eq(&self.runtime_env.cache_manager, &runtime.cache_manager)
             && !Arc::ptr_eq(
-                &self.runtime_env.object_store_registry,
+                &parent.object_store_registry,
                 &runtime.object_store_registry,
-            )
+            );
+        if !authorities_distinct {
+            return false;
+        }
+        if self.runtime_owner.is_governed() {
+            Arc::ptr_eq(&parent.memory_pool, &runtime.memory_pool)
+                && Arc::ptr_eq(&parent.disk_manager, &runtime.disk_manager)
+                && native_cache_backing_shared(parent, runtime)
+        } else {
+            // The isolated constructor is cfg(test), never a production budget alternative.
+            !Arc::ptr_eq(&parent.memory_pool, &runtime.memory_pool)
+                && !Arc::ptr_eq(&parent.disk_manager, &runtime.disk_manager)
+                && !Arc::ptr_eq(&parent.cache_manager, &runtime.cache_manager)
+        }
     }
 
     /// Execute a typed program using catalog scans and schema bindings from
@@ -655,7 +849,8 @@ impl ProgrammaticFabricEpoch {
             LogicalPlanCacheScope::Epoch,
             program,
         );
-        let (cached, cache_outcome) = if let Some(cached) = self.logical_plan_cache.get(&cache_key)
+        let (cached, cache_outcome) = if let Some(cached) =
+            self.logical_plan_cache().get(&cache_key)
         {
             (cached, LogicalPlanCacheOutcome::Hit)
         } else {
@@ -697,7 +892,7 @@ impl ProgrammaticFabricEpoch {
             let schema = Arc::new(compiled.plan.schema().as_arrow().clone());
             let state = context.state();
             let optimized = state.optimize(&compiled.plan)?;
-            let cached = self.logical_plan_cache.try_insert(
+            let cached = self.logical_plan_cache().try_insert(
                 cache_key,
                 CachedLogicalPlan::new(compiled.plan, optimized, schema, compiled.observations),
             )?;
@@ -784,7 +979,7 @@ impl ProgrammaticFabricEpoch {
 
     #[must_use]
     pub fn memory_reserved_bytes(&self) -> usize {
-        self.runtime_env.memory_pool.reserved()
+        self.runtime_owner.runtime.memory_pool.reserved()
     }
 
     pub(super) fn context(&self) -> SessionContext {
@@ -830,6 +1025,10 @@ impl ProgrammaticFabricProgramResult {
 /// Fail-closed candidate construction, sealing, and execution failures.
 #[derive(Debug, thiserror::Error)]
 pub enum ProgrammaticFabricEpochError {
+    #[error("epoch native resource policy differs from its injected workspace owner")]
+    ResourcePolicyDrift,
+    #[error(transparent)]
+    ResourceBudget(#[from] ResourceBudgetError),
     #[error("programmatic candidate catalog is not closed: {0}")]
     CatalogClosure(String),
     #[error("candidate session runtime authority changed during assembly")]
@@ -976,6 +1175,211 @@ mod tests {
         provider_input_with_values(vec![-1_i64, 1, 2])
     }
 
+    fn governed_resources(
+        generations: u64,
+    ) -> (
+        crate::resource_budget::ResourceBudget,
+        WorkspaceFabricResources,
+        FabricEpochRuntimeConfig,
+    ) {
+        use crate::resource_budget::{ResourceBudget, ResourceBudgetPolicy};
+        let policy = ResourceBudgetPolicy {
+            limits: ResourceAmounts {
+                memory_bytes: 2 << 30,
+                disk_bytes: 4 << 30,
+                running_jobs: 16,
+                queued_jobs: 32,
+                retained_generations: generations,
+                retained_bytes: 2 << 30,
+                rows: 1_000_000,
+                pages: 10_000,
+            },
+            control_reserve: ResourceAmounts::default(),
+        };
+        let root = ResourceBudget::try_process([0x91; 16], policy).unwrap();
+        let workspace = root.workspace([0x92; 16], policy).unwrap();
+        let config = FabricEpochRuntimeConfig::default();
+        let resources = WorkspaceFabricResources::try_new(
+            workspace,
+            config.native_config(),
+            local_fabric_object_store_registry(Arc::new(
+                object_store::local::LocalFileSystem::new(),
+            )),
+        )
+        .unwrap();
+        (root, resources, config)
+    }
+
+    /// Assembly conversion and escaped sessions retain one generation charge; neither a second
+    /// full-budget epoch nor a mismatched native policy can bypass the workspace owner.
+    #[test]
+    fn rt_cpg_wp79_integrity() {
+        let (root, resources, config) = governed_resources(1);
+        let native_cache = root.observation().used.memory_bytes;
+        let builder = ProgrammaticFabricEpochBuilder::try_new_governed(
+            FabricEpochId::from_bytes([0x93; 16]),
+            config.clone(),
+            resources.clone(),
+        )
+        .unwrap();
+        assert_eq!(root.observation().used.retained_generations, 1);
+        assert_eq!(
+            root.observation().used.memory_bytes,
+            native_cache + config.cache_policy().logical_plan_bytes() as u128
+        );
+        assert!(matches!(
+            ProgrammaticFabricEpochBuilder::try_new_governed(
+                FabricEpochId::from_bytes([0x94; 16]),
+                config.clone(),
+                resources.clone()
+            ),
+            Err(ProgrammaticFabricEpochError::ResourceBudget(_))
+        ));
+        let (id, config, owner, assembly) = builder.into_assembly_parts();
+        let rebuilt =
+            ProgrammaticFabricEpochBuilder::from_assembly_parts(id, config, owner, assembly);
+        assert_eq!(root.observation().used.retained_generations, 1);
+        let (_, _, owner, assembly) = rebuilt.into_assembly_parts();
+        drop(owner);
+        let escaped_context = assembly.candidate_context();
+        drop(assembly);
+        assert_eq!(root.observation().used.retained_generations, 1);
+        drop(escaped_context);
+        assert_eq!(root.observation().used.retained_generations, 0);
+        assert_eq!(root.observation().used.memory_bytes, native_cache);
+        let changed_config =
+            FabricEpochRuntimeConfig::try_new(1 << 20, 1 << 20, 2, 1, 128, 1, true).unwrap();
+        assert!(matches!(
+            ProgrammaticFabricEpochBuilder::try_new_governed(
+                FabricEpochId::from_bytes([0x95; 16]),
+                changed_config,
+                resources.clone()
+            ),
+            Err(ProgrammaticFabricEpochError::ResourcePolicyDrift)
+        ));
+        drop(resources);
+        assert_eq!(
+            root.observation().used,
+            crate::resource_budget::ResourceUsage::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn rt_cpg_wp79_epoch_seal_reopen_and_escaped_cache_retain_one_charge() {
+        let (root, resources, config) = governed_resources(2);
+        let id = FabricEpochId::from_bytes([0x96; 16]);
+        let mut builder =
+            ProgrammaticFabricEpochBuilder::try_new_governed(id, config.clone(), resources.clone())
+                .unwrap();
+        builder.register_provider(provider_input()).unwrap();
+        let epoch = builder.seal_for_test().await.unwrap();
+        assert_eq!(root.observation().used.retained_generations, 1);
+        assert!(
+            epoch
+                .workspace_resources()
+                .unwrap()
+                .workspace_budget()
+                .same_scope(resources.workspace_budget())
+        );
+        let cache = epoch.logical_plan_cache().clone();
+        let reopened =
+            ProgrammaticFabricEpochBuilder::try_new_governed(id, config.clone(), resources.clone())
+                .unwrap()
+                .reopen(Arc::clone(epoch.table_version_set()))
+                .await
+                .unwrap();
+        assert_eq!(root.observation().used.retained_generations, 2);
+        assert!(Arc::ptr_eq(
+            &epoch.runtime_owner.runtime.memory_pool,
+            &reopened.runtime_owner.runtime.memory_pool
+        ));
+        assert!(Arc::ptr_eq(
+            &epoch.runtime_owner.runtime.disk_manager,
+            &reopened.runtime_owner.runtime.disk_manager
+        ));
+        assert!(native_cache_backing_shared(
+            &epoch.runtime_owner.runtime,
+            &reopened.runtime_owner.runtime
+        ));
+        let rows = reopened
+            .context()
+            .table(TableReference::full(
+                FABRIC_CATALOG,
+                FabricSchemaRole::Fact.as_str(),
+                "input_values",
+            ))
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        assert_eq!(rows.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
+        drop(rows);
+        assert!(
+            ProgrammaticFabricEpochBuilder::try_new_governed(
+                FabricEpochId::from_bytes([0x97; 16]),
+                config,
+                resources.clone()
+            )
+            .is_err()
+        );
+        let child_runtime = resources
+            .runtime_with_registry(Arc::new(CandidateLocalObjectStoreRegistry::new(Arc::new(
+                object_store::local::LocalFileSystem::new(),
+            ))))
+            .unwrap();
+        let child_catalog: Arc<dyn datafusion::catalog::CatalogProviderList> =
+            Arc::new(MemoryCatalogProviderList::new());
+        assert!(epoch.child_authorities_are_distinct(&child_runtime, &child_catalog));
+        assert!(
+            !epoch.child_authorities_are_distinct(&epoch.runtime_owner.runtime, &child_catalog)
+        );
+        assert!(
+            !epoch.child_authorities_are_distinct(
+                &child_runtime,
+                epoch.session.state().catalog_list()
+            )
+        );
+        drop(child_runtime);
+        drop(epoch);
+        assert_eq!(root.observation().used.retained_generations, 2); // escaped cache owns its epoch backing
+        drop(cache);
+        assert_eq!(root.observation().used.retained_generations, 1);
+        let escaped_session = reopened.context();
+        drop(reopened);
+        assert_eq!(root.observation().used.retained_generations, 1);
+        drop(escaped_session);
+        assert_eq!(root.observation().used.retained_generations, 0);
+        drop(resources);
+        assert_eq!(
+            root.observation().used,
+            crate::resource_budget::ResourceUsage::default()
+        );
+    }
+
+    #[test]
+    fn rt_cpg_wp79_epoch_store_registry_has_only_selected_local_origin() {
+        let registry = CandidateLocalObjectStoreRegistry::new(Arc::new(
+            object_store::local::LocalFileSystem::new(),
+        ));
+        let local = url::Url::parse("file:///exact/delta/table").unwrap();
+        let selected = registry.get_store(&local).unwrap();
+        let foreign = url::Url::parse("memory://unselected/table").unwrap();
+        registry.register_store(&foreign, Arc::clone(&selected));
+        assert!(registry.get_store(&foreign).is_err());
+        assert!(
+            registry
+                .get_store(&url::Url::parse("file://unselected-host/table").unwrap())
+                .is_err()
+        );
+        assert!(
+            registry
+                .get_store(&url::Url::parse("file:///exact/table?alternate=1").unwrap())
+                .is_err()
+        );
+        assert!(Arc::ptr_eq(&selected, &registry.get_store(&local).unwrap()));
+    }
+
     fn positive_builder(
         epoch_id: FabricEpochId,
         values: Vec<i64>,
@@ -1119,7 +1523,7 @@ mod tests {
         let second_builder = positive_builder(second_identity.epoch_id(), vec![-1, 7, 8]);
         let second_observations = first
             .observation_publication()
-            .open_targets()
+            .open_targets(&first.context().state())
             .await
             .expect("open first exact observation versions");
         let second = second_builder

@@ -98,7 +98,7 @@ impl LogicalPlanAuthorityBuilder {
     }
 
     pub(super) fn frame_arc_identity<T: ?Sized>(&mut self, capability: &Arc<T>) {
-        let data_address = Arc::as_ptr(capability) as *const () as usize;
+        let data_address = Arc::as_ptr(capability).cast::<()>() as usize;
         self.frame_usize(data_address);
     }
 
@@ -239,7 +239,7 @@ pub(super) fn frame_session_logical_authority(
     builder.frame_usize(state.relation_planners().len());
 
     let mut scalar = state.scalar_functions().iter().collect::<Vec<_>>();
-    scalar.sort_by(|(left, _), (right, _)| left.cmp(right));
+    scalar.sort_by_key(|(left, _)| *left);
     builder.frame_usize(scalar.len());
     for (installed_name, function) in scalar {
         builder.frame_str(installed_name);
@@ -254,7 +254,7 @@ pub(super) fn frame_session_logical_authority(
     }
 
     let mut aggregate = state.aggregate_functions().iter().collect::<Vec<_>>();
-    aggregate.sort_by(|(left, _), (right, _)| left.cmp(right));
+    aggregate.sort_by_key(|(left, _)| *left);
     builder.frame_usize(aggregate.len());
     for (installed_name, function) in aggregate {
         builder.frame_str(installed_name);
@@ -269,7 +269,7 @@ pub(super) fn frame_session_logical_authority(
     }
 
     let mut window = state.window_functions().iter().collect::<Vec<_>>();
-    window.sort_by(|(left, _), (right, _)| left.cmp(right));
+    window.sort_by_key(|(left, _)| *left);
     builder.frame_usize(window.len());
     for (installed_name, function) in window {
         builder.frame_str(installed_name);
@@ -498,12 +498,8 @@ where
         let expired = state
             .entries
             .iter()
-            .filter_map(|(key, entry)| {
-                entry
-                    .expires
-                    .is_some_and(|expiry| expiry <= now)
-                    .then(|| key.clone())
-            })
+            .filter(|&(_key, entry)| entry.expires.is_some_and(|expiry| expiry <= now))
+            .map(|(key, _entry)| key.clone())
             .collect::<Vec<_>>();
         for key in expired {
             if let Some(entry) = state.entries.remove(&key) {
@@ -1042,7 +1038,7 @@ impl RetainedLogicalCapability {
 }
 
 fn arc_data_address<T: ?Sized>(capability: &Arc<T>) -> usize {
-    Arc::as_ptr(capability) as *const () as usize
+    Arc::as_ptr(capability).cast::<()>() as usize
 }
 
 fn retained_logical_capabilities(plan: &LogicalPlan) -> Vec<RetainedLogicalCapability> {
@@ -1469,7 +1465,7 @@ mod tests {
     }
 
     impl UserDefinedLogicalNodeCore for OpaqueTestExtension {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "OpaqueTestExtension"
         }
 

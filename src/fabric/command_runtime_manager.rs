@@ -190,6 +190,7 @@ impl RegisteredWorkspaceFabricCommandRuntimeFactory {
     }
 
     /// Canonical workspace identities admitted by this startup registry.
+    #[must_use]
     pub fn workspace_ids(&self) -> impl ExactSizeIterator<Item = WorkspaceId> + '_ {
         self.registrations.keys().copied()
     }

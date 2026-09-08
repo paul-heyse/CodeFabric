@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use arrow_array::{ArrayRef, BooleanArray, Int64Array, RecordBatch, StringArray, UInt64Array};
+use arrow_array::{ArrayRef, BooleanArray, Int64Array, RecordBatch, UInt64Array};
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::TableProvider;
 use datafusion::common::TableReference;
@@ -17,6 +17,7 @@ use datafusion::datasource::{MemTable, provider_as_source, source_as_provider};
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{LogicalPlan, LogicalPlanBuilder};
 
+use crate::provider_contracts::allocation::ProviderAllocation;
 use crate::relational_program::{
     FieldId, RelationId, RelationInput, RelationalProgramError, SupplementalProgramRelationBinding,
 };
@@ -24,6 +25,7 @@ use crate::relational_semantic_query::{
     CompiledEpochBoundRequestInputHandoff, EpochBoundRequestInputField, EpochBoundRequestInputRow,
     SemanticClauseValue, SemanticValueKind,
 };
+use crate::resource_budget::{ChargedSlice, ChargedValue, ResourceBudget};
 use crate::schema_contract::{FIELD_ID_METADATA_KEY, RELATION_ID_METADATA_KEY};
 
 /// Domain separator used by the epoch-bound compiler for request-input content pins.
@@ -160,7 +162,7 @@ pub struct MaterializedRequestOwnedRelation {
     input_id: Arc<str>,
     relation_id: RelationId,
     table_reference: TableReference,
-    fields: Arc<[EpochBoundRequestInputField]>,
+    fields: ChargedSlice<EpochBoundRequestInputField>,
     schema: SchemaRef,
     batch: RecordBatch,
     provider: Arc<dyn TableProvider>,
@@ -168,6 +170,7 @@ pub struct MaterializedRequestOwnedRelation {
     authority: RequestOwnedRelationAuthority,
     cell_count: usize,
     text_bytes: usize,
+    _metadata: ChargedValue<()>,
 }
 
 impl std::fmt::Debug for MaterializedRequestOwnedRelation {
@@ -336,6 +339,7 @@ impl RequestOwnedRelationCollection {
     pub fn try_materialize(
         handoffs: impl IntoIterator<Item = CompiledEpochBoundRequestInputHandoff>,
         limits: RequestOwnedRelationLimits,
+        resource_budget: &ResourceBudget,
     ) -> Result<Self, RequestOwnedRelationError> {
         let mut relations = BTreeMap::new();
         let mut request_keys = BTreeSet::new();
@@ -350,6 +354,25 @@ impl RequestOwnedRelationCollection {
                         "request-owned relation count",
                     ))?;
             enforce_limit("max_relations", observed_relations, limits.max_relations())?;
+            // Reject cumulative work before constructing the next relation's arrays or validator
+            // maps. The compiler's source allocations are borrowed authority, not reclaimed here.
+            let measured = measure_handoff(&handoff, limits)?;
+            total_rows = checked_add("total request-owned rows", total_rows, handoff.rows.len())?;
+            total_cells = checked_add("total request-owned cells", total_cells, measured.cells)?;
+            total_text_bytes = checked_add(
+                "total request-owned text bytes",
+                total_text_bytes,
+                measured.text_bytes,
+            )?;
+            enforce_limit("max_total_rows", total_rows, limits.max_total_rows())?;
+            enforce_limit("max_total_cells", total_cells, limits.max_total_cells())?;
+            enforce_limit(
+                "max_total_text_bytes",
+                total_text_bytes,
+                limits.max_total_text_bytes(),
+            )?;
+            let allocation =
+                ProviderAllocation::try_new(resource_budget, measured.working_bytes as u64)?;
             let request_key = (Arc::clone(&handoff.query_id), Arc::clone(&handoff.input_id));
             if !request_keys.insert(request_key.clone()) {
                 return Err(RequestOwnedRelationError::DuplicateRequestInput {
@@ -363,29 +386,7 @@ impl RequestOwnedRelationCollection {
                 ));
             }
 
-            let materialized = materialize_relation(handoff, limits)?;
-            total_rows = checked_add(
-                "total request-owned rows",
-                total_rows,
-                materialized.batch.num_rows(),
-            )?;
-            total_cells = checked_add(
-                "total request-owned cells",
-                total_cells,
-                materialized.cell_count,
-            )?;
-            total_text_bytes = checked_add(
-                "total request-owned text bytes",
-                total_text_bytes,
-                materialized.text_bytes,
-            )?;
-            enforce_limit("max_total_rows", total_rows, limits.max_total_rows())?;
-            enforce_limit("max_total_cells", total_cells, limits.max_total_cells())?;
-            enforce_limit(
-                "max_total_text_bytes",
-                total_text_bytes,
-                limits.max_total_text_bytes(),
-            )?;
+            let materialized = materialize_relation(handoff, limits, measured, allocation)?;
             relations.insert(materialized.relation_id.clone(), materialized);
         }
         Ok(Self {
@@ -466,19 +467,147 @@ impl RequestOwnedRelationCollection {
 pub fn compiler_request_input_content_pin(
     handoff: &CompiledEpochBoundRequestInputHandoff,
 ) -> [u8; 32] {
-    let rendered = format!(
-        "{:?}",
-        &(handoff.relation_id.clone(), &handoff.fields, &handoff.rows)
-    );
+    use std::fmt::Write as _;
+    // Count and hash the established Debug framing without materializing its escape expansion.
+    struct FramedDebug<'a> {
+        length: u64,
+        hasher: Option<&'a mut blake3::Hasher>,
+    }
+    impl std::fmt::Write for FramedDebug<'_> {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            self.length = self
+                .length
+                .checked_add(text.len() as u64)
+                .ok_or(std::fmt::Error)?;
+            if let Some(hasher) = &mut self.hasher {
+                hasher.update(text.as_bytes());
+            }
+            Ok(())
+        }
+    }
+    let value = (&handoff.relation_id, &handoff.fields, &handoff.rows);
+    let mut count = FramedDebug {
+        length: 0,
+        hasher: None,
+    };
+    write!(&mut count, "{value:?}").expect("in-memory handoff Debug length fits u64");
     let mut hasher = blake3::Hasher::new();
     hash_part(&mut hasher, REQUEST_INPUT_CONTENT_PIN_DOMAIN);
-    hash_part(&mut hasher, rendered.as_bytes());
+    hasher.update(&count.length.to_be_bytes());
+    write!(
+        &mut FramedDebug {
+            length: 0,
+            hasher: Some(&mut hasher)
+        },
+        "{value:?}"
+    )
+    .expect("previously counted Debug rendering");
     *hasher.finalize().as_bytes()
+}
+
+#[derive(Clone, Copy)]
+struct HandoffAllocation {
+    cells: usize,
+    text_bytes: usize,
+    metadata_bytes: usize,
+    working_bytes: usize,
+}
+
+fn measure_handoff(
+    handoff: &CompiledEpochBoundRequestInputHandoff,
+    limits: RequestOwnedRelationLimits,
+) -> Result<HandoffAllocation, RequestOwnedRelationError> {
+    validate_identity("query", &handoff.query_id)?;
+    validate_identity("program binding", &handoff.program_binding_id)?;
+    validate_identity("request input", &handoff.input_id)?;
+    validate_identity("relation", handoff.relation_id.as_str())?;
+    enforce_limit(
+        "max_fields_per_relation",
+        handoff.fields.len(),
+        limits.max_fields_per_relation(),
+    )?;
+    enforce_limit(
+        "max_rows_per_relation",
+        handoff.rows.len(),
+        limits.max_rows_per_relation(),
+    )?;
+    let cells = checked_mul("request cells", handoff.fields.len(), handoff.rows.len())?;
+    enforce_limit(
+        "max_cells_per_relation",
+        cells,
+        limits.max_cells_per_relation(),
+    )?;
+    let mut metadata_bytes = checked_add(
+        "request metadata",
+        8192,
+        checked_mul("field metadata", handoff.fields.capacity(), 1024)?,
+    )?;
+    for field in &handoff.fields {
+        validate_identity("request input field", field.field_id.as_str())?;
+        metadata_bytes = checked_add(
+            "field identities",
+            metadata_bytes,
+            checked_mul("field identities", field.field_id.as_str().len(), 4)?,
+        )?;
+    }
+    let mut text_bytes = 0;
+    let mut row_storage = checked_mul("row backing", handoff.rows.capacity(), 256)?;
+    for row in &handoff.rows {
+        validate_identity("request row query", &row.query_id)?;
+        validate_identity("request row input", &row.input_id)?;
+        validate_identity("request row", &row.row_id)?;
+        enforce_limit(
+            "max_fields_per_relation",
+            row.fields.len(),
+            limits.max_fields_per_relation(),
+        )?;
+        row_storage = checked_add(
+            "row fields",
+            row_storage,
+            checked_mul("row fields", row.fields.capacity(), 128)?,
+        )?;
+        for value in &row.fields {
+            validate_identity("request row field", value.field_id.as_str())?;
+            if let SemanticClauseValue::Text(text) = &value.value {
+                text_bytes = checked_add("request text", text_bytes, text.len())?;
+                enforce_limit(
+                    "max_total_text_bytes",
+                    text_bytes,
+                    limits.max_total_text_bytes(),
+                )?;
+            }
+        }
+    }
+    // Input-derived envelope, not the configured maximum: validator containers, fresh Arrow
+    // builder capacities (including alignment), and retained schema/provider metadata.
+    let working_bytes = checked_add(
+        "request work",
+        checked_mul("request metadata", metadata_bytes, 4)?,
+        row_storage,
+    )?;
+    let working_bytes = checked_add(
+        "request work",
+        working_bytes,
+        checked_mul("request cells", cells, 64)?,
+    )?;
+    let working_bytes = checked_add(
+        "request work",
+        working_bytes,
+        checked_mul("request text", text_bytes, 4)?,
+    )?;
+    Ok(HandoffAllocation {
+        cells,
+        text_bytes,
+        metadata_bytes,
+        working_bytes,
+    })
 }
 
 fn materialize_relation(
     handoff: CompiledEpochBoundRequestInputHandoff,
     limits: RequestOwnedRelationLimits,
+    measured: HandoffAllocation,
+    mut allocation: ProviderAllocation,
 ) -> Result<MaterializedRequestOwnedRelation, RequestOwnedRelationError> {
     validate_identity("query", &handoff.query_id)?;
     validate_identity("program binding", &handoff.program_binding_id)?;
@@ -487,14 +616,6 @@ fn materialize_relation(
     validate_pin("execution_program_pin", handoff.execution_program_pin)?;
     validate_pin("handoff_pin", handoff.handoff_pin)?;
     validate_pin("content_pin", handoff.content_pin)?;
-    let expected_content_pin = compiler_request_input_content_pin(&handoff);
-    if handoff.content_pin != expected_content_pin {
-        return Err(RequestOwnedRelationError::ContentPinMismatch {
-            relation_id: handoff.relation_id.as_str().to_owned(),
-            declared: handoff.content_pin,
-            computed: expected_content_pin,
-        });
-    }
 
     if handoff.fields.is_empty() {
         return Err(RequestOwnedRelationError::EmptyFieldContract(
@@ -627,13 +748,24 @@ fn materialize_relation(
         }
     }
 
+    let expected_content_pin = compiler_request_input_content_pin(&handoff);
+    if handoff.content_pin != expected_content_pin {
+        return Err(RequestOwnedRelationError::ContentPinMismatch {
+            relation_id: handoff.relation_id.as_str().to_owned(),
+            declared: handoff.content_pin,
+            computed: expected_content_pin,
+        });
+    }
     let schema = request_owned_schema(&handoff.relation_id, &handoff.fields);
     let arrays = handoff
         .fields
         .iter()
         .map(|field| materialize_field(field, &handoff.rows))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
     let batch = RecordBatch::try_new(Arc::clone(&schema), arrays)?;
+    // Fresh private arrays only: native backing owns the charge through provider/plan/raw-data
+    // and slice escapes. Never replace an unknown compiler or DataFusion buffer's prior owner.
+    allocation.claim_new_batches([&batch], limits.max_fields_per_relation())?;
     let provider: Arc<dyn TableProvider> = Arc::new(MemTable::try_new(
         Arc::clone(&schema),
         vec![vec![batch.clone()]],
@@ -655,7 +787,8 @@ fn materialize_relation(
         input_id: handoff.input_id,
         relation_id: handoff.relation_id,
         table_reference,
-        fields: Arc::from(handoff.fields),
+        fields: allocation
+            .retain_measured_vec(handoff.fields, |field| field.field_id.as_str().len())?,
         schema,
         batch,
         provider,
@@ -667,6 +800,7 @@ fn materialize_relation(
         },
         cell_count,
         text_bytes,
+        _metadata: allocation.retain_value(measured.metadata_bytes as u64, ())?,
     };
     materialized.validate_exact_input(&materialized.input)?;
     Ok(materialized)
@@ -702,47 +836,55 @@ fn request_owned_schema(
 fn materialize_field(
     field: &EpochBoundRequestInputField,
     rows: &[EpochBoundRequestInputRow],
-) -> Result<ArrayRef, RequestOwnedRelationError> {
-    let values = rows
-        .iter()
-        .map(|row| {
+) -> ArrayRef {
+    let values = || {
+        rows.iter().map(|row| {
             row.fields
                 .iter()
                 .find(|value| value.field_id == field.field_id)
                 .map(|value| &value.value)
         })
-        .collect::<Vec<_>>();
-    let array: ArrayRef = match field.value_kind {
-        SemanticValueKind::Boolean => Arc::new(BooleanArray::from_iter(values.into_iter().map(
-            |value| match value {
+    };
+    match field.value_kind {
+        SemanticValueKind::Boolean => {
+            Arc::new(BooleanArray::from_iter(values().map(|value| match value {
                 Some(SemanticClauseValue::Boolean(value)) => Some(*value),
                 None => None,
                 _ => unreachable!("value kinds were validated before Arrow construction"),
-            },
-        ))),
-        SemanticValueKind::Int64 => Arc::new(Int64Array::from_iter(values.into_iter().map(
-            |value| match value {
+            })))
+        }
+        SemanticValueKind::Int64 => {
+            Arc::new(Int64Array::from_iter(values().map(|value| match value {
                 Some(SemanticClauseValue::Int64(value)) => Some(*value),
                 None => None,
                 _ => unreachable!("value kinds were validated before Arrow construction"),
-            },
-        ))),
-        SemanticValueKind::UInt64 => Arc::new(UInt64Array::from_iter(values.into_iter().map(
-            |value| match value {
+            })))
+        }
+        SemanticValueKind::UInt64 => {
+            Arc::new(UInt64Array::from_iter(values().map(|value| match value {
                 Some(SemanticClauseValue::UInt64(value)) => Some(*value),
                 None => None,
                 _ => unreachable!("value kinds were validated before Arrow construction"),
-            },
-        ))),
-        SemanticValueKind::Text => Arc::new(StringArray::from_iter(values.into_iter().map(
-            |value| match value {
-                Some(SemanticClauseValue::Text(value)) => Some(value.as_ref()),
-                None => None,
-                _ => unreachable!("value kinds were validated before Arrow construction"),
-            },
-        ))),
-    };
-    Ok(array)
+            })))
+        }
+        SemanticValueKind::Text => {
+            let bytes = values()
+                .filter_map(|value| match value {
+                    Some(SemanticClauseValue::Text(value)) => Some(value.len()),
+                    _ => None,
+                })
+                .sum();
+            let mut builder = arrow_array::builder::StringBuilder::with_capacity(rows.len(), bytes);
+            for value in values() {
+                match value {
+                    Some(SemanticClauseValue::Text(value)) => builder.append_value(value),
+                    None => builder.append_null(),
+                    _ => unreachable!("value kinds were validated before Arrow construction"),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+    }
 }
 
 const fn arrow_type(kind: SemanticValueKind) -> DataType {
@@ -771,7 +913,7 @@ fn validate_identity(kind: &'static str, value: &str) -> Result<(), RequestOwned
     {
         return Err(RequestOwnedRelationError::InvalidIdentity {
             kind,
-            value: value.to_owned(),
+            value: value.chars().take(128).collect(),
         });
     }
     Ok(())
@@ -829,6 +971,8 @@ fn hash_part(hasher: &mut blake3::Hasher, value: &[u8]) {
 /// Fail-closed request-owned relation validation or construction failure.
 #[derive(Debug, thiserror::Error)]
 pub enum RequestOwnedRelationError {
+    #[error(transparent)]
+    Allocation(#[from] crate::provider_contracts::ProviderContractError),
     #[error("request-owned relation resource limit {0} must be non-zero")]
     ZeroLimit(&'static str),
     #[error("invalid {kind} identity {value:?}")]
@@ -922,6 +1066,7 @@ mod tests {
     use datafusion::datasource::source_as_provider;
 
     use super::*;
+    use crate::fabric::streamed_result_package::test_resource_budget;
     use crate::relational_program::FieldId;
     use crate::relational_semantic_query::{
         EpochBoundRequestInputFieldValue, EpochBoundRequestInputRow,
@@ -1010,9 +1155,12 @@ mod tests {
 
     #[test]
     fn materializes_typed_arrow_nulls_and_retains_exact_scan_capability() {
-        let collection =
-            RequestOwnedRelationCollection::try_materialize([handoff("request.within")], limits())
-                .unwrap();
+        let collection = RequestOwnedRelationCollection::try_materialize(
+            [handoff("request.within")],
+            limits(),
+            &test_resource_budget(),
+        )
+        .unwrap();
         let relation_id = relation("request.within");
         let materialized = collection.get(&relation_id).unwrap();
 
@@ -1053,12 +1201,102 @@ mod tests {
     fn changed_row_without_a_new_compiler_pin_is_causally_rejected() {
         let mut changed = handoff("request.within");
         changed.rows[0].fields[0].value = SemanticClauseValue::Text(Arc::from("entity:changed"));
-        let error = RequestOwnedRelationCollection::try_materialize([changed], limits())
-            .expect_err("content drift must fail before Arrow construction");
+        let error = RequestOwnedRelationCollection::try_materialize(
+            [changed],
+            limits(),
+            &test_resource_budget(),
+        )
+        .expect_err("content drift must fail before Arrow construction");
         assert!(matches!(
             error,
             RequestOwnedRelationError::ContentPinMismatch { .. }
         ));
+    }
+
+    #[test]
+    fn wp79_request_pin_streaming_preserves_exact_debug_framing() {
+        let mut input = handoff("request.escaped");
+        input.rows[0].fields[0].value = SemanticClauseValue::Text(Arc::from("\"\\\n\t😀"));
+        let rendered = format!(
+            "{:?}",
+            (input.relation_id.clone(), &input.fields, &input.rows)
+        );
+        let mut expected = blake3::Hasher::new();
+        hash_part(&mut expected, REQUEST_INPUT_CONTENT_PIN_DOMAIN);
+        hash_part(&mut expected, rendered.as_bytes());
+        assert_eq!(
+            compiler_request_input_content_pin(&input),
+            *expected.finalize().as_bytes()
+        );
+    }
+
+    #[tokio::test]
+    async fn wp79_request_native_backing_survives_provider_plan_and_raw_array_escape() {
+        let budget = test_resource_budget();
+        let collection = RequestOwnedRelationCollection::try_materialize(
+            [handoff("request.owned")],
+            limits(),
+            &budget,
+        )
+        .unwrap();
+        let relation = collection.iter().next().unwrap();
+        let provider = relation.provider_capability().clone();
+        let raw = relation.batch().column(0).to_data();
+        let slice = relation.batch().slice(1, 1);
+        let context = datafusion::prelude::SessionContext::new();
+        let physical = provider
+            .scan(&context.state(), None, &[], None)
+            .await
+            .unwrap();
+        drop(collection);
+        assert!(budget.observation().used.memory_bytes > 0);
+        let stream = physical.execute(0, context.task_ctx()).unwrap();
+        drop(provider);
+        drop(physical);
+        assert!(budget.observation().used.memory_bytes > 0);
+        drop(stream);
+        drop(slice);
+        assert!(
+            budget.observation().used.memory_bytes > 0,
+            "raw ArrayData owns its backing charge"
+        );
+        drop(raw);
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+    }
+
+    #[test]
+    fn wp79_request_admission_and_aggregate_limits_precede_new_arrays() {
+        let parent = test_resource_budget();
+        let mut policy = parent.policy();
+        policy.limits.memory_bytes = 1024;
+        policy.control_reserve.memory_bytes = 128;
+        let budget = parent.workspace([7; 16], policy).unwrap();
+        let input = handoff("request.denied");
+        let original = input.clone();
+        assert!(matches!(
+            RequestOwnedRelationCollection::try_materialize([input], limits(), &budget),
+            Err(RequestOwnedRelationError::Allocation(_))
+        ));
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+        assert_eq!(
+            budget.observation().peak.memory_bytes,
+            0,
+            "no output admitted"
+        );
+        assert_eq!(
+            compiler_request_input_content_pin(&original),
+            original.content_pin
+        );
+        let mut oversized = original;
+        oversized.rows[0].fields[0].value = SemanticClauseValue::Text(Arc::from("x".repeat(65536)));
+        assert!(matches!(
+            RequestOwnedRelationCollection::try_materialize([oversized], limits(), &parent),
+            Err(RequestOwnedRelationError::Limit {
+                limit: "max_total_text_bytes",
+                ..
+            })
+        ));
+        assert_eq!(parent.observation().used.memory_bytes, 0);
     }
 
     #[test]
@@ -1067,7 +1305,11 @@ mod tests {
         wrong_kind.rows[0].fields[2].value = SemanticClauseValue::Int64(1);
         wrong_kind.content_pin = compiler_request_input_content_pin(&wrong_kind);
         assert!(matches!(
-            RequestOwnedRelationCollection::try_materialize([wrong_kind], limits()),
+            RequestOwnedRelationCollection::try_materialize(
+                [wrong_kind],
+                limits(),
+                &test_resource_budget()
+            ),
             Err(RequestOwnedRelationError::ValueKindMismatch { .. })
         ));
 
@@ -1077,7 +1319,11 @@ mod tests {
             .retain(|value| value.field_id.as_str() != "request.entity_id");
         missing.content_pin = compiler_request_input_content_pin(&missing);
         assert!(matches!(
-            RequestOwnedRelationCollection::try_materialize([missing], limits()),
+            RequestOwnedRelationCollection::try_materialize(
+                [missing],
+                limits(),
+                &test_resource_budget()
+            ),
             Err(RequestOwnedRelationError::MissingRequiredField { .. })
         ));
 
@@ -1085,7 +1331,11 @@ mod tests {
         ordinal.rows[1].ordinal = 3;
         ordinal.content_pin = compiler_request_input_content_pin(&ordinal);
         assert!(matches!(
-            RequestOwnedRelationCollection::try_materialize([ordinal], limits()),
+            RequestOwnedRelationCollection::try_materialize(
+                [ordinal],
+                limits(),
+                &test_resource_budget()
+            ),
             Err(RequestOwnedRelationError::NonContiguousRowOrdinal { .. })
         ));
     }
@@ -1107,7 +1357,11 @@ mod tests {
         }
         second.content_pin = compiler_request_input_content_pin(&second);
         assert!(matches!(
-            RequestOwnedRelationCollection::try_materialize([first, second], limits()),
+            RequestOwnedRelationCollection::try_materialize(
+                [first, second],
+                limits(),
+                &test_resource_budget()
+            ),
             Err(RequestOwnedRelationError::DuplicateRelation(_))
         ));
 
@@ -1115,7 +1369,8 @@ mod tests {
         assert!(matches!(
             RequestOwnedRelationCollection::try_materialize(
                 [handoff("request.too-many-cells")],
-                tight
+                tight,
+                &test_resource_budget()
             ),
             Err(RequestOwnedRelationError::Limit {
                 limit: "max_total_cells",

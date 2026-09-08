@@ -571,7 +571,7 @@ fn parse_b3_pin(value: &str, label: &'static str) -> Result<[u8; 32], ProviderAd
             detail: format!("{label} is not a b3-32 digest"),
         })?;
     let mut result = [0_u8; 32];
-    for (index, chunk) in encoded.as_bytes().chunks_exact(2).enumerate() {
+    for (index, chunk) in encoded.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         result[index] = u8::from_str_radix(
             std::str::from_utf8(chunk).map_err(|_| {
                 ProviderAdmissionError::InvalidObservedRelation {
@@ -707,7 +707,6 @@ pub struct ExactProgrammaticProviderRuns<'a> {
 }
 
 impl<'a> ExactProgrammaticProviderRuns<'a> {
-    #[must_use]
     pub(crate) fn try_new(
         tree_sitter_plan: &'a ProviderAdmissionPlan,
         ruff_plan: &'a ProviderAdmissionPlan,
@@ -2943,6 +2942,7 @@ fn relation_row_count(relation: Option<&ObservedProviderRelation>) -> usize {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use crate::resource_budget::ChargedSlice;
     use arrow_array::ArrayRef;
     use arrow_array::builder::FixedSizeBinaryBuilder;
     use arrow_ipc::writer::StreamWriter;
@@ -3473,29 +3473,29 @@ pub(crate) mod tests {
                     arrow_ipc_digest: crate::integrity::framed_digest(&arrow_ipc),
                     row_count: 1,
                     batch,
-                    arrow_ipc,
+                    arrow_ipc: ChargedSlice::for_test(arrow_ipc),
                 }
             })
             .collect::<Vec<_>>();
         AcceptedPyreflyRun {
-            removed_module_ids: Vec::new(),
+            removed_module_ids: ChargedSlice::for_test(Vec::new()),
             provider_run_id,
             workspace_id: "workspace:provider-admission".to_owned(),
             analysis_context_id: "context:pyrefly-workspace".to_owned(),
             canonical_workspace_id: [61; 16],
             canonical_analysis_context_id: [62; 16],
             source_generation: 7,
-            modules: vec![AcceptedPyreflyModule {
+            modules: ChargedSlice::for_test(vec![AcceptedPyreflyModule {
                 module_id,
                 module_name,
                 canonical_file_id: [marker; 16],
-                source_bytes,
+                source_bytes: ChargedSlice::for_test(source_bytes),
                 module_digest: digest(marker.wrapping_add(1)),
-                relations,
-            }],
-            capability_codes: Vec::new(),
+                relations: ChargedSlice::for_test(relations),
+            }]),
+            capability_codes: ChargedSlice::for_test(Vec::new()),
             overall_digest: digest(marker.wrapping_add(2)),
-            rechecked_module_ids: Vec::new(),
+            rechecked_module_ids: ChargedSlice::for_test(Vec::new()),
             sandbox_profile_digest: digest(63),
             trust_profile: "UNTRUSTED_SANDBOXED".to_owned(),
         }
@@ -3599,21 +3599,23 @@ pub(crate) mod tests {
             control,
             vec![AcceptedRustcOwner {
                 control: owner_control,
-                relations: relations
-                    .into_iter()
-                    .enumerate()
-                    .map(
-                        |(index, (relation, batch, arrow_ipc))| AcceptedRustcRelation {
-                            relation,
-                            logical_sequence: 2 + u64::try_from(index).unwrap(),
-                            schema_digest: relation.schema_digest(),
-                            row_count: 1,
-                            arrow_ipc_digest: arrow_ipc_digest(&arrow_ipc),
-                            arrow_ipc,
-                            batch,
-                        },
-                    )
-                    .collect(),
+                relations: ChargedSlice::for_test(
+                    relations
+                        .into_iter()
+                        .enumerate()
+                        .map(
+                            |(index, (relation, batch, arrow_ipc))| AcceptedRustcRelation {
+                                relation,
+                                logical_sequence: 2 + u64::try_from(index).unwrap(),
+                                schema_digest: relation.schema_digest(),
+                                row_count: 1,
+                                arrow_ipc_digest: arrow_ipc_digest(&arrow_ipc),
+                                arrow_ipc: ChargedSlice::for_test(arrow_ipc),
+                                batch,
+                            },
+                        )
+                        .collect(),
+                ),
             }],
         );
         TrustQualifiedRustcCompilation::test_only(accepted)
@@ -4084,9 +4086,16 @@ pub(crate) mod tests {
     fn wp34_neg_exact_programmatic_admission_rejects_missing_pyrefly_coverage_relation() {
         let fixture = exact_workspace_fixture();
         let mut missing_coverage = fixture.pyrefly_runs.clone();
-        missing_coverage[0].modules[0]
-            .relations
-            .retain(|relation| relation.relation != PyreflyRelation::Coverage);
+        let mut modules = missing_coverage[0].modules.to_vec();
+        modules[0].relations = ChargedSlice::for_test(
+            modules[0]
+                .relations
+                .iter()
+                .filter(|relation| relation.relation != PyreflyRelation::Coverage)
+                .cloned()
+                .collect(),
+        );
+        missing_coverage[0].modules = ChargedSlice::for_test(modules);
 
         let error = admit_provider_relations_programmatic(
             programmatic_epoch_builder(),
@@ -4294,13 +4303,13 @@ pub(crate) mod tests {
             schema_digest: relation.schema_digest(),
             row_count: 0,
             arrow_ipc_digest: arrow_ipc_digest(&arrow_ipc),
-            arrow_ipc,
+            arrow_ipc: ChargedSlice::for_test(arrow_ipc),
             batch,
         };
         let owner_control = rustc_owner_control(&owner_id, 1, 0);
         let owner = AcceptedRustcOwner {
             control: owner_control.clone(),
-            relations: vec![accepted_relation],
+            relations: ChargedSlice::for_test(vec![accepted_relation]),
         };
         let control =
             rustc_compilation_control(&provider_run_id, &compilation_unit_id, owner_control, 1);

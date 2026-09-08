@@ -5,15 +5,20 @@
 //! registry, or catalog-authoring authority.
 
 use std::num::NonZeroUsize;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use datafusion::common::DataFusionError;
+#[cfg(test)]
 use datafusion::execution::memory_pool::{FairSpillPool, TrackConsumersPool};
+#[cfg(test)]
 use datafusion::execution::runtime_env::{RuntimeEnv, RuntimeEnvBuilder};
 use datafusion::prelude::SessionConfig;
 use thiserror::Error;
 
 use super::datafusion_cache::DataFusionCachePolicy;
+use super::resource_ownership::NativeFabricResourceConfig;
 
 /// The sealed runtime and durable command/activation relations share one canonical epoch type.
 pub use super::command::EpochId as FabricEpochId;
@@ -80,7 +85,7 @@ pub enum FabricEpochRuntimeConfigError {
     Invalid(String),
 }
 
-/// Exact, release-bound execution settings used to create one fresh runtime.
+/// Exact, release-bound session settings and shared native resource requirements.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FabricEpochRuntimeConfig {
     memory_limit_bytes: usize,
@@ -148,6 +153,18 @@ impl FabricEpochRuntimeConfig {
         &self.cache_policy
     }
 
+    /// Explicit resource requirements consumed by the one workspace runtime constructor.
+    #[must_use]
+    pub fn native_config(&self) -> NativeFabricResourceConfig {
+        NativeFabricResourceConfig {
+            memory_limit_bytes: self.memory_limit_bytes,
+            max_spill_bytes: self.max_spill_bytes,
+            max_spill_merge_fan_in: self.max_spill_merge_fan_in,
+            tracked_consumer_count: self.tracked_consumer_count,
+            cache_policy: self.cache_policy.clone(),
+        }
+    }
+
     /// Canonical target-runtime identity.
     #[must_use]
     pub fn identity(&self) -> String {
@@ -181,6 +198,7 @@ impl FabricEpochRuntimeConfig {
             )
     }
 
+    #[cfg(test)]
     pub(super) fn runtime_env(&self) -> Result<Arc<RuntimeEnv>, DataFusionError> {
         self.cache_policy
             .configure_runtime(RuntimeEnvBuilder::new())
