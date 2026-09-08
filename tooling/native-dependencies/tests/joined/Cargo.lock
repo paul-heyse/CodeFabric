@@ -3264,3 +3264,19 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "deltalake"
+version = "1.0.0"
+
+[[patch.unused]]
+name = "deltalake-aws"
+version = "1.0.0"
+
+[[patch.unused]]
+name = "deltalake-core"
+version = "1.0.0"
+
+[[patch.unused]]
+name = "deltalake-derive"
+version = "1.0.0"

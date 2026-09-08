@@ -972,6 +972,19 @@ advisory-policy-check:
 stable-graph-check:
     ./scripts/stable_graph_check.sh
 
+[doc("Run a native assurance harness against the integrated dependency sources")]
+[group('test')]
+native-assurance-test harness *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$1" in
+      joined|kernel|tokio|delta) native_harness="$1" ;;
+      *) printf 'Expected joined, kernel, tokio, or delta.\n' >&2; exit 2 ;;
+    esac
+    shift
+    cargo test --locked --manifest-path "tooling/native-dependencies/tests/$native_harness/Cargo.toml" \
+      --target-dir target/native-assurance "$@"
+
 [doc("Verify installed native dependency bytes, provenance, and amendment replay")]
 [group('gate')]
 native-dependency-artifacts-check: governance-tooling-lint

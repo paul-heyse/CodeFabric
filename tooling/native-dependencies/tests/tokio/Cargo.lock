@@ -214,3 +214,59 @@ checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
 ]
+
+[[patch.unused]]
+name = "arrow-array"
+version = "59.2.0"
+
+[[patch.unused]]
+name = "arrow-buffer"
+version = "59.2.0"
+
+[[patch.unused]]
+name = "arrow-data"
+version = "59.2.0"
+
+[[patch.unused]]
+name = "arrow-json"
+version = "59.2.0"
+
+[[patch.unused]]
+name = "arrow-schema"
+version = "59.2.0"
+
+[[patch.unused]]
+name = "arrow-select"
+version = "59.2.0"
+
+[[patch.unused]]
+name = "buoyant_kernel"
+version = "0.25.1"
+
+[[patch.unused]]
+name = "buoyant_kernel_derive"
+version = "1.1.0"
+
+[[patch.unused]]
+name = "buoyant_kernel_engine"
+version = "0.25.0"
+
+[[patch.unused]]
+name = "deltalake"
+version = "1.0.0"
+
+[[patch.unused]]
+name = "deltalake-aws"
+version = "1.0.0"
+
+[[patch.unused]]
+name = "deltalake-core"
+version = "1.0.0"
+
+[[patch.unused]]
+name = "deltalake-derive"
+version = "1.0.0"
+
+[[patch.unused]]
+name = "parquet"
+version = "59.2.0"
