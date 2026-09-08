@@ -225,19 +225,6 @@ impl EngineData for ArrowEngineData {
     ) -> DeltaResult<()> {
         use crate::engine::arrow_expression::expression_resource as resource;
         resource::check_evaluator_owner(&self.native_owners)?;
-        let selection = visitor.try_selection()?;
-        selection.validate_current()?;
-        let leaf_types = selection.as_ref().1;
-        if leaf_types.len() != leaf_columns.len() {
-            return Err(resource::kernel_diagnostic(
-                Error::MissingColumn,
-                format_args!(
-                    "Visitor expected {} column names, but caller passed {}",
-                    leaf_types.len(),
-                    leaf_columns.len()
-                ),
-            ));
-        }
         let entries = leaf_columns
             .iter()
             .try_fold(0usize, |n, column| {
@@ -262,7 +249,26 @@ impl EngineData for ArrowEngineData {
             }
             .into());
         }
-        let mut column_map = resource::hash_map(entries, "native_visitor_prefix_map")?;
+        // The borrowed paths determine map admission without constructing the
+        // visitor's owned selection. Refusal must precede that constructor too.
+        let map_allocation = resource::prepare_hash_map::<Vec<&str>, ColumnState<'_>>(
+            entries,
+            "native_visitor_prefix_map",
+        )?;
+        let selection = visitor.try_selection()?;
+        selection.validate_current()?;
+        let leaf_types = selection.as_ref().1;
+        if leaf_types.len() != leaf_columns.len() {
+            return Err(resource::kernel_diagnostic(
+                Error::MissingColumn,
+                format_args!(
+                    "Visitor expected {} column names, but caller passed {}",
+                    leaf_types.len(),
+                    leaf_columns.len()
+                ),
+            ));
+        }
+        let mut column_map = map_allocation.allocate()?;
         for (column, data_type) in leaf_columns.iter().zip(leaf_types.iter()) {
             let mut leaf = resource::new_vec(column.path().len(), "native_visitor_leaf_key")?;
             leaf.extend(column.path().iter().map(String::as_str));

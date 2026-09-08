@@ -663,3 +663,55 @@ fn visitor_denied_lookup_and_malformed_names_never_invoke_callback() {
         if deny.is_empty(){assert!(error.to_string().contains("`absent.``leaf`"));}else{assert!(error.is_resource_exhausted());if deny=="native_visitor_prefix_map" {assert_eq!(used,0);}}
     }
 }
+
+#[test]
+fn visitor_map_and_selection_refusals_precede_native_payload_construction() {
+    use arrow_array::{Int32Array, RecordBatch};
+    use arrow_schema::{DataType as ArrowType, Field, Schema};
+    use buoyant_kernel::engine_data::{GetData, OwnedVisitorSelection};
+    use buoyant_kernel::engine::arrow_data::ArrowEngineData;
+    use buoyant_kernel::expressions::ColumnName;
+    use buoyant_kernel::{DeltaResult, EngineData, RowVisitor};
+
+    struct SelectionProbe {
+        selections: Cell<usize>,
+        callbacks: usize,
+    }
+    impl RowVisitor for SelectionProbe {
+        fn selected_column_names_and_types(
+            &self,
+        ) -> (&'static [ColumnName], &'static [DataType]) {
+            panic!("the native owned path must not initialize a legacy selector")
+        }
+        fn try_selection(&self) -> DeltaResult<OwnedVisitorSelection> {
+            self.selections.set(self.selections.get() + 1);
+            OwnedVisitorSelection::try_from_paths(&[&["value"]], &[DataType::INTEGER])
+        }
+        fn visit<'a>(&mut self, _: usize, _: &[&'a dyn GetData<'a>]) -> DeltaResult<()> {
+            self.callbacks += 1;
+            Ok(())
+        }
+    }
+
+    for (deny, expected_selections) in [
+        ("native_visitor_prefix_map", 0),
+        ("native_visitor_owned_selection", 1),
+    ] {
+        let owner = owner(deny);
+        let _guard = enter_resource_owner(owner);
+        let data = ArrowEngineData::new(RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new("value", ArrowType::Int32, false)])),
+            vec![Arc::new(Int32Array::from(vec![7]))],
+        ).unwrap());
+        let names = [ColumnName::new(["value"])];
+        let mut visitor = SelectionProbe { selections: Cell::new(0), callbacks: 0 };
+        let tracking = Tracking::begin();
+        let result = data.visit_rows(&names, &mut visitor);
+        let (allocated, _, early) = tracking.finish();
+        assert!(result.unwrap_err().is_resource_exhausted());
+        assert_eq!(visitor.selections.get(), expected_selections);
+        assert_eq!(visitor.callbacks, 0);
+        assert_eq!(allocated, 0, "{deny} allocated native payload before rejection");
+        assert!(!early);
+    }
+}

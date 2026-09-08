@@ -309,6 +309,38 @@ pub(crate) fn hash_map<K: std::hash::Hash + Eq, V>(
     count: usize,
     kind: &'static str,
 ) -> Result<std::collections::HashMap<K, V>, ArrowError> {
+    prepare_hash_map(count, kind)?.allocate()
+}
+
+/// Admission for a map whose geometry is already known, before other native
+/// constructors run. Construction consumes this ticket under the same owner.
+pub(crate) struct HashMapAllocation<K, V> {
+    count: usize,
+    bytes: usize,
+    kind: &'static str,
+    owner: arrow_schema_59::resource::ResourceOwnerHandle,
+    types: std::marker::PhantomData<fn() -> (K, V)>,
+}
+
+impl<K: std::hash::Hash + Eq, V> HashMapAllocation<K, V> {
+    pub(crate) fn allocate(self) -> Result<std::collections::HashMap<K, V>, ArrowError> {
+        if !self
+            .owner
+            .same_owner(&arrow_schema_59::resource::ResourceOwnerHandle::capture())
+        {
+            return Err(error("native_hash_map_allocation_owner", 1, 0));
+        }
+        let mut map = std::collections::HashMap::new();
+        map.try_reserve(self.count)
+            .map_err(|_| error(self.kind, self.bytes, 0))?;
+        Ok(map)
+    }
+}
+
+pub(crate) fn prepare_hash_map<K: std::hash::Hash + Eq, V>(
+    count: usize,
+    kind: &'static str,
+) -> Result<HashMapAllocation<K, V>, ArrowError> {
     // std/hashbrown's 7/8 table load, next-power-of-two bucket count, control
     // tail and alignment are dominated by eight buckets and 48 tail bytes per
     // requested entry. The zero-entry table owns no allocation.
@@ -322,9 +354,13 @@ pub(crate) fn hash_map<K: std::hash::Hash + Eq, V>(
             .map_err(|_| error(kind, bytes, isize::MAX as usize))?,
         kind,
     )?;
-    let mut map = std::collections::HashMap::new();
-    map.try_reserve(count).map_err(|_| error(kind, bytes, 0))?;
-    Ok(map)
+    Ok(HashMapAllocation {
+        count,
+        bytes,
+        kind,
+        owner: arrow_schema_59::resource::ResourceOwnerHandle::capture(),
+        types: std::marker::PhantomData,
+    })
 }
 
 pub(crate) fn partition_parse(raw: &str) -> Result<(), ArrowError> {
