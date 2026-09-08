@@ -164,6 +164,9 @@ pub(crate) struct NativeLaneJoined {
 /// thread. Construction must already have admitted their finite backing. Even a
 /// late worker starting after failure must install all required policies.
 pub(crate) trait NativeLaneResourcePolicy: Send + Sync + 'static {
+    /// Concrete native policies supply the original operation bank. None is
+    /// retained for the finite standalone lifecycle harness only.
+    fn runtime_admission(&self) -> Option<Arc<dyn tokio::runtime::resource::RuntimeAllocationAdmission>> { None }
     /// Bind an allocation owner to one complete native operation. Concrete
     /// policies reject reuse before any native runtime or worker is constructed.
     fn begin_operation(&self) -> Result<(), NativeResourceFailure> { Ok(()) }
@@ -186,6 +189,20 @@ impl From<NativeResourceFailure> for NativeLaneError {
             kind: failure.kind,
             requested: failure.requested,
             limit: failure.limit,
+        }
+    }
+}
+
+impl From<tokio::runtime::resource::ResourceLayoutError> for NativeLaneError {
+    fn from(error: tokio::runtime::resource::ResourceLayoutError) -> Self {
+        NativeResourceFailure { kind: error.kind, requested: error.requested, limit: error.limit }.into()
+    }
+}
+impl From<tokio::runtime::resource::LocalRuntimeBuildError> for NativeLaneError {
+    fn from(error: tokio::runtime::resource::LocalRuntimeBuildError) -> Self {
+        match error {
+            tokio::runtime::resource::LocalRuntimeBuildError::Resource(error) => error.into(),
+            tokio::runtime::resource::LocalRuntimeBuildError::Io(error) => error.into(),
         }
     }
 }
@@ -484,22 +501,27 @@ impl NativeExecutionLane {
             let _resource_context = NativeResourceThreadContext::enter(resource_policy.clone());
             let worker_start_policy = resource_policy.clone();
             let worker_stop_policy = resource_policy.clone();
-            let runtime = Builder::new_multi_thread()
-                .worker_threads(envelope.worker_threads.get())
-                .max_blocking_threads(envelope.blocking_threads.get())
-                .thread_stack_size(envelope.thread_stack_bytes.get())
-                .thread_name("cf-native-lane")
-                .on_thread_start(move || {
+            let on_start = move || {
                     IN_NATIVE_LANE.set(true);
                     if let Some(policy) = &worker_start_policy { policy.enter_thread(); }
-                })
-                .on_thread_stop(move || {
+                };
+            let on_stop = move || {
                     if let Some(policy) = &worker_stop_policy { policy.exit_thread(); }
                     IN_NATIVE_LANE.set(false);
-                })
-                .enable_all()
-                .build()?;
-            let operation_result = catch_unwind(AssertUnwindSafe(|| runtime.block_on(async {
+                };
+            let runtime = if let Some(native) = resource_policy.as_ref().and_then(|policy| policy.runtime_admission()) {
+                let tasks = usize::try_from(envelope.native_task_slots.get()).map_err(|_| NativeLaneError::InvalidEnvelope("native task count overflow"))?;
+                tokio::runtime::resource::LocalRuntimeProfile {
+                    worker_threads: envelope.worker_threads.get(), blocking_threads: envelope.blocking_threads.get(),
+                    blocking_queue: tasks.max(envelope.worker_threads.get()), thread_stack_bytes: envelope.thread_stack_bytes.get(),
+                    async_tasks: tasks, blocking_tasks: tasks,
+                }.build(native, on_start, on_stop)?
+            } else {
+                Builder::new_multi_thread().worker_threads(envelope.worker_threads.get())
+                    .max_blocking_threads(envelope.blocking_threads.get()).thread_stack_size(envelope.thread_stack_bytes.get())
+                    .thread_name("cf-native-lane").on_thread_start(on_start).on_thread_stop(on_stop).enable_all().build()?
+            };
+            let operation_result = catch_unwind(AssertUnwindSafe(|| runtime.try_block_on(async {
                 if probe.is_cancelled() {
                     return Err(NativeLaneError::Cancelled);
                 }
@@ -521,7 +543,7 @@ impl NativeExecutionLane {
                     },
                 }
                 // select drops the operation future here before any cleanup callback runs.
-            })));
+            }).map_err(NativeLaneError::from).and_then(|result| result)));
             let result = match operation_result {
                 Ok(result) => result,
                 Err(payload) => {
@@ -533,7 +555,8 @@ impl NativeExecutionLane {
                 }
             };
             let cleanup_outcome = catch_unwind(AssertUnwindSafe(|| {
-                runtime.block_on(async { (cleanup.before_join)().await.map_err(|error| diagnostic(&error)) })
+                runtime.try_block_on(async { (cleanup.before_join)().await.map_err(|error| diagnostic(&error)) })
+                    .unwrap_or_else(|error| Err(diagnostic(&error)))
             }));
             let before_join = {
                 let _entered = runtime.enter();

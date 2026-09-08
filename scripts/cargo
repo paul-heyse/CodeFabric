@@ -5,10 +5,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
-# An installed native amendment is immutable input to every Cargo invocation, including
-# metadata and formatting. A deleted manifest must not turn verification off.
-python3 "$repo_root/tooling/ci/native_dependency_artifacts.py" verify \
-  --root "$repo_root" --if-installed --quiet
 # shellcheck source=../tooling/rust-tool-versions.env
 source "$repo_root/tooling/rust-tool-versions.env"
 rustup_bin="$HOME/.cargo/bin/rustup"

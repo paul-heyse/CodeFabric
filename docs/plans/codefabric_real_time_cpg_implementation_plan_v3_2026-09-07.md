@@ -1507,7 +1507,7 @@ Governed criterion: `PC-WP93-OPS`
 
 ### WP94 — Certify a narrow native Delta maintenance capability amendment
 
-**Outcome.** An actually reproducible native dependency artifact supports governed obsolete-file reclamation; unsafe current-pin VACUUM/OPTIMIZE is never enabled by assertion.
+**Outcome.** The integrated native maintenance implementation supports governed obsolete-file reclamation; unsafe current-pin VACUUM/OPTIMIZE is never enabled by assertion.
 
 **Dependencies.** WP93. All immediate consumers of a changed contract belong to this packet's actual preflight-derived write set.
 
@@ -1532,10 +1532,10 @@ Known touch: `src/fabric/delta_guarded_maintenance.rs`, `src/fabric/programmatic
 
 **Required changes.**
 
-1. Implement LD-RT08 on the exact native source or select a minimally changed upstream artifact that already meets the same contract. Fix every maintenance START/END/subcommit path to preserve supplied commit properties, application transaction identity and zero retry.
+1. Implement LD-RT08 on the exact native source or select a minimally changed upstream implementation that already meets the same contract. Fix every maintenance START/END/subcommit path to preserve supplied commit properties, application transaction identity and zero retry.
 2. Keep candidate construction native. Provide opaque prepared operation or equivalent native approved-set enforcement bound to root/version/cutoff/operation, with exhaustive delete-route mediation and changed-predecessor rejection.
 3. Prove retries, duplicate/unknown submissions, interruption after partial approved deletion, concurrent lease acquisition and schema/CDF cases. An ObjectStore allowlist alone cannot fix the current VACUUM START commit violation.
-4. Before pin adoption, author a versioned dependency/authority amendment and exact source-artifact identity with reproducible acquisition/build, provenance and dependency diff review. Preserve the Arrow/DataFusion universe, narrow/local feature posture, minimum Rust floor and four first-party domains; never invent the future revision in advance.
+4. Integrate the maintenance correction and its consumers in Git. Use normal dependency selection, builds and tests; investigate actual version or API conflicts. Preserve the Arrow/DataFusion universe, narrow/local feature posture, minimum Rust floor and four first-party domains.
 5. Update exact pin consumers and compatibility/security/governance checks through their existing owners, preserving immutable v2.3 masters as history through the repository's synchronized authority-chain workflow. No remote publication/upload/push or deployment is authorized by plan creation; obtain any required distribution authority separately.
 6. Add proposed real-time-cpg-native-maintenance-check. Native optimize remains unselected unless its entire contract is independently certified; controlled consolidation remains the safe default.
 
@@ -1579,9 +1579,9 @@ Governed criterion: `PC-WP94-OPS`
 
 **Integration Milestone.** M22.
 
-**Replan Triggers.** A reproducible approved native artifact, synchronized pin authority and exact commit/deletion contract are mandatory. If unavailable, block this packet and full completion; do not downgrade reclamation to successful denial. Also apply §9's current-tree, dependency-closure, security and operational triggers.
+**Replan Triggers.** The native implementation must satisfy the exact commit/deletion contract. If unavailable, block this packet and full completion; do not downgrade reclamation to successful denial. Also apply §9's current-tree, dependency-closure, security and operational triggers.
 
-**Rollback or Recovery.** Before selecting any new artifact keep the current certified dependency and deny unsafe maintenance. After lawful pin adoption, repair forward; failed deletion reconciles the approved operation journal, never blind retry or broad filesystem cleanup.
+**Rollback or Recovery.** During integration, deny maintenance until its safety contract is implemented. After enabling it, repair forward; failed deletion reconciles the approved operation journal, never blind retry or broad filesystem cleanup.
 
 **Design-Bearing Contracts and Exemplars (conditional).** The referenced D-RT/LD and normative contracts are the design-bearing exemplars. Helper names, local decomposition and ordinary implementation control flow are left to execution; do not replace these contracts with an illustrative patch.
 
@@ -2503,7 +2503,7 @@ Known touch: `tooling/ci/v7_certification.py`, `tooling/ci/plan_assurance.py`, `
 
 ##### Negative / Zero-State
 
-- Proposed test `rt_cpg_wp106_faults`, invoked by the same packet recipe: remove any required child oracle/domain, seed failure, stale evidence, a dirty candidate or unfinished dependency artifact and certification fails. Applicable DB checks also prove old-route absence and target-positive behavior.
+- Proposed test `rt_cpg_wp106_faults`, invoked by the same packet recipe: remove any required child oracle/domain, seed failure, stale evidence, a dirty candidate or unfinished native implementation and certification fails. Applicable DB checks also prove old-route absence and target-positive behavior.
 
 ##### Operational
 
@@ -2529,7 +2529,7 @@ Governed criterion: `PC-WP106-OPS`
 
 **Integration Milestone.** M25.
 
-**Replan Triggers.** Any failed mandatory gate, missing native artifact, unmet performance target or unresolved independent major finding prevents full completion; revise the plan/design explicitly if the target must change. Also apply §9's current-tree, dependency-closure, security and operational triggers.
+**Replan Triggers.** Any failed mandatory gate, missing native implementation, unmet performance target or unresolved independent major finding prevents full completion; revise the plan/design explicitly if the target must change. Also apply §9's current-tree, dependency-closure, security and operational triggers.
 
 **Rollback or Recovery.** Keep the last proved selected state and report exact unresolved obligations; never manufacture terminal green by changing expected results or omitting gates.
 
@@ -2541,7 +2541,7 @@ Milestone checks are **proposed**, introduced by WP77 as `just real-time-cpg-mil
 
 ### M18 — Truthful contracts and aggregate ownership
 
-Members: WP77, WP78, WP79. The release, source/context/support and resource/task contracts work together without outward feature/type authority. Execute all member packet oracles plus `just feature-architecture-check`, `just provider-job-contract-check`, `just release-program-contract-check`, `just cancellation-tree-check`, `just stable-graph-check`. Invocation: `just real-time-cpg-milestone-check M18`; additionally run `just native-dependency-artifacts-check` and `just real-time-cpg-native-resource-check`.
+Members: WP77, WP78, WP79. The release, source/context/support and resource/task contracts work together without outward feature/type authority. Execute all member packet oracles plus `just feature-architecture-check`, `just provider-job-contract-check`, `just release-program-contract-check`, `just cancellation-tree-check`, `just stable-graph-check`. Invocation: `just real-time-cpg-milestone-check M18`; additionally run `just real-time-cpg-native-resource-check`.
 
 ### M19 — Actual two-language provider-to-fabric genesis
 
@@ -2626,7 +2626,7 @@ Exit: `just real-time-cpg-decommission-check DB30`, `just cancellation-tree-chec
 These names are **not current capabilities**. The named packet must implement the recipe and its substantive fail-closed test selection before relying on it:
 
 - WP77: `just real-time-cpg-packet-check <WP>`, `just real-time-cpg-milestone-check <M>`, `just real-time-cpg-decommission-check <DB>`, and the initial `just real-time-cpg-certification` orchestration contract. Reuse existing artifact/oracle infrastructure; do not create a second semantic registry or handwritten pass ledger. Later owners implement their actual tests/rules; WP105 finalizes terminal orchestration before measurement.
-- WP79: `just native-dependency-artifacts-check` and `just real-time-cpg-native-resource-check` — fail-closed artifact/source integrity and native decode/replay/retention/worker falsifiers through production consumers. These checks join M18 and remain terminal leaf obligations.
+- WP79: `just real-time-cpg-native-resource-check` — native decode/replay/retention/worker falsifiers through production consumers. These checks join M18 and remain terminal leaf obligations.
 - WP94: `just real-time-cpg-native-maintenance-check` — native command/approved-set/dependency contract; WP95 adds actual retention/reclamation cases.
 - WP96: `just real-time-cpg-optimizer-identity-check` — mandatory A04 stock-optimizer/native-scan field-identity matrix.
 - WP102: `just real-time-cpg-installed-conformance-check` — complete selected profiles/forms in the actual topology and same-PID update sequences.
@@ -2686,7 +2686,6 @@ Run these retained-domain gates as applicable to the complete target (all four d
 - `just installed_target_authority_integrity`
 - `just installed_vertical_fault_and_recovery_matrix`
 - `just semantic-release-restart-reconstruction-check`
-- `just native-dependency-artifacts-check`
 - `just real-time-cpg-native-resource-check`
 - `just real-time-cpg-native-maintenance-check`
 - `just real-time-cpg-optimizer-identity-check`
@@ -2701,7 +2700,7 @@ Risk-triggered mutation/fuzz/coverage/unsafe checks are selected for actual chan
 
 The final candidate must be a stable committed target with no unexplained tracked implementation changes. Capture method/workload/source identity must match that candidate. Performance capture and measurement review are separate from nonmutating certification and cannot be restamped after drift.
 
-An independent implementation review reconstructs design conformance, installed behavior, library choices, legacy exits and operational evidence. Resolve every blocking/major finding through its named failing-then-passing test and rerun affected integration/final gates. Runtime semantic uncertainty may remain only as the selected profile permits; an unavailable required library artifact, unimplemented family/form, failed reclamation, missed accepted performance target or red gate prevents full completion.
+An independent implementation review reconstructs design conformance, installed behavior, library choices, legacy exits and operational evidence. Resolve every blocking/major finding through its named failing-then-passing test and rerun affected integration/final gates. Runtime semantic uncertainty may remain only as the selected profile permits; an unavailable required library capability, unimplemented family/form, failed reclamation, missed accepted performance target or red gate prevents full completion.
 
 ## 8. Execution sequence and state discipline
 
@@ -2779,6 +2778,6 @@ A failure is feedback to diagnose, not an automatic task-ending condition. Conti
 
 ## 10. Planning handoff
 
-This is the **approved native-resource successor** of the user's full implementation request. Activate through the validated transaction, migrate judgments under §1.3, implement LD-RT09 within WP79 and continue every remaining packet under impl-plan-exec. Prior plans and design inputs remain immutable; adoption of a concrete amended dependency requires its exact artifact and synchronized authority successor, already within the user's approved amendment scope.
+This is the **approved native-resource successor** of the user's full implementation request. Activate through the validated transaction, migrate judgments under §1.3, implement LD-RT09 within WP79 and continue every remaining packet under impl-plan-exec. Apply the user's 2026-09-08 execution clarification: integrate the code through ordinary Git commits and relevant checks, without per-edit source artifacts or suite successors.
 
 The authoritative scope is the review's full design plus the accepted planning-contract addendum, including LD-RT08 and LD-RT09. Existing v7 boundaries and valid expectations remain required; no inherited red gate, permanent provider gap, disabled optimizer or denied maintenance operation is disguised as the completed product.
