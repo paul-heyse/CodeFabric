@@ -3,6 +3,11 @@ name = "codefabric-native-joined-probe"
 version = "0.0.0"
 edition = "2024"
 publish = false
+# The root package owns its colocated tests; this harness owns the external native tests.
+[lib]
+test = false
+doctest = false
+
 [dependencies]
 buoyant_kernel = { version = "=0.25.1", path = "../../../../third_party/native/buoyant_kernel", features = ["arrow-59", "internal-api"] }
 buoyant_kernel_engine = { version = "=0.25.0", path = "../../../../third_party/native/buoyant_kernel_engine", features = ["arrow-59", "rustls"] }

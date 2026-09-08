@@ -1,7 +1,6 @@
 #![allow(dead_code, unused_imports)]
 #[path = "../../../../../src/resource_budget.rs"]
 mod resource_budget;
-#[path = "../../../../../src/cancellation.rs"]
 mod cancellation;
 mod fabric;
 use std::num::{NonZeroU64, NonZeroUsize};
