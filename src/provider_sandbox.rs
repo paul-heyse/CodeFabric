@@ -502,8 +502,10 @@ fn probe_linux_bubblewrap() -> SandboxProbeObservation {
         .output()
         .ok()
         .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-        .unwrap_or_else(|| "unavailable".into());
+        .map_or_else(
+            || "unavailable".into(),
+            |output| String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+        );
     let namespace_launch = probe_linux_namespace_launch(&executable);
     let user_namespace_enabled = fs::read_to_string("/proc/sys/user/max_user_namespaces")
         .ok()
@@ -648,17 +650,15 @@ fn probe_linux_namespace_launch(executable: &Path) -> bool {
 
 #[cfg(target_os = "linux")]
 fn linux_cgroup_v2_mounted() -> bool {
-    fs::read_to_string("/proc/self/mountinfo")
-        .ok()
-        .is_some_and(|mountinfo| {
-            mountinfo.lines().any(|line| {
-                let Some((mount, filesystem)) = line.split_once(" - ") else {
-                    return false;
-                };
-                mount.split_whitespace().nth(4) == Some("/sys/fs/cgroup")
-                    && filesystem.split_whitespace().next() == Some("cgroup2")
-            })
+    fs::read_to_string("/proc/self/mountinfo").is_ok_and(|mountinfo| {
+        mountinfo.lines().any(|line| {
+            let Some((mount, filesystem)) = line.split_once(" - ") else {
+                return false;
+            };
+            mount.split_whitespace().nth(4) == Some("/sys/fs/cgroup")
+                && filesystem.split_whitespace().next() == Some("cgroup2")
         })
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -1240,11 +1240,10 @@ impl ProviderProcessGroupChild {
     pub fn kernel_usage(&self) -> std::io::Result<Option<ProviderKernelUsage>> {
         #[cfg(target_os = "linux")]
         {
-            return self
-                .run_cgroup
+            self.run_cgroup
                 .as_ref()
                 .map(LinuxRunCgroup::usage)
-                .transpose();
+                .transpose()
         }
         #[cfg(not(target_os = "linux"))]
         Ok(None)
@@ -1541,12 +1540,12 @@ impl ProviderSandboxLauncher {
                 let _ = child.wait();
                 return Err(SandboxError::ResourceLimit);
             }
-            return ProviderProcessGroupChild::new(
+            ProviderProcessGroupChild::new(
                 child,
                 run_cgroup,
                 profile.trust_profile,
                 profile.sha256_digest.clone(),
-            );
+            )
         }
         #[cfg(not(target_os = "linux"))]
         ProviderProcessGroupChild::new(child, profile.trust_profile, profile.sha256_digest.clone())

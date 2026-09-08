@@ -30,10 +30,10 @@ use datafusion::physical_expr::expressions::{cast, col as physical_col};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::projection::{ProjectionExec, ProjectionExpr};
 use datafusion::prelude::{SessionContext, col, lit};
+use deltalake::DeltaTable;
 use deltalake::kernel::engine::arrow_conversion::TryIntoKernel as _;
 use deltalake::operations::create::CreateBuilder;
 use deltalake::protocol::SaveMode;
-use deltalake::{DeltaTable, DeltaTableBuilder};
 use thiserror::Error;
 use url::Url;
 
@@ -462,6 +462,7 @@ pub fn activation_control_schema_contract() -> Result<SchemaContract, Activation
 /// subsequent open must use an application-owned exact pin.
 pub async fn provision_activation_control_history(
     root: Url,
+    session: &datafusion::execution::SessionState,
 ) -> Result<(ExactDeltaPin, DeltaTable), ActivationControlError> {
     let codec = ActivationControlRowCodec::try_new()?;
     let kernel: deltalake::kernel::StructType = codec
@@ -470,8 +471,12 @@ pub async fn provision_activation_control_history(
         .as_ref()
         .try_into_kernel()
         .map_err(|source| ActivationControlError::Delta(source.to_string()))?;
+    let store = super::delta_exact::session_delta_table_builder(root.clone(), session)
+        .and_then(|builder| builder.build_storage())
+        .map_err(|source| ActivationControlError::Delta(source.to_string()))?;
     CreateBuilder::new()
         .with_location(root.to_string())
+        .with_log_store(store)
         .with_table_name("activation_control")
         .with_comment("CodeFabric append-only execution-proved activation history")
         .with_save_mode(SaveMode::ErrorIfExists)
@@ -484,7 +489,7 @@ pub async fn provision_activation_control_history(
         ])
         .await
         .map_err(|source| ActivationControlError::Delta(source.to_string()))?;
-    let table = DeltaTableBuilder::from_url(root.clone())
+    let table = super::delta_exact::session_delta_table_builder(root.clone(), session)
         .map_err(|source| ActivationControlError::Delta(source.to_string()))?
         .with_version(0)
         .load()
@@ -1160,12 +1165,15 @@ impl ActivationControlDeltaProvider {
             persisted.control_commit_version,
         )
         .map_err(|error| ActivationControlError::ExactDelta(error.to_string()))?;
-        let table = DeltaTableBuilder::from_url(committed.canonical_root().clone())
-            .map_err(|error| ActivationControlError::Delta(error.to_string()))?
-            .with_version(committed.version())
-            .load()
-            .await
-            .map_err(|error| ActivationControlError::Delta(error.to_string()))?;
+        let table = super::delta_exact::session_delta_table_builder(
+            committed.canonical_root().clone(),
+            &self.session,
+        )
+        .map_err(|error| ActivationControlError::Delta(error.to_string()))?
+        .with_version(committed.version())
+        .load()
+        .await
+        .map_err(|error| ActivationControlError::Delta(error.to_string()))?;
         let spec = ControlledDeltaWriteSpec::new(
             persisted.control_predecessor.table().clone(),
             row.operation_id,
@@ -1282,8 +1290,9 @@ impl ActivationControlDeltaProvider {
                                 .to_owned(),
                         ));
                     }
-                    let predecessor = DeltaTableBuilder::from_url(
+                    let predecessor = super::delta_exact::session_delta_table_builder(
                         request.control_relation.table().canonical_root().clone(),
+                        &self.session,
                     )
                     .map_err(|error| ActivationControlError::Delta(error.to_string()))?
                     .with_version(request.control_relation.table().version())
@@ -1368,7 +1377,6 @@ impl DeltaActivationRuntimeAuthority {
         self.workspace_id
     }
 
-    #[must_use]
     pub(crate) fn current_control(
         &self,
     ) -> Result<Arc<ActivationControlDeltaProvider>, DeltaActivationRuntimeAuthoritySnapshotError>
@@ -1406,20 +1414,23 @@ impl DeltaActivationRuntimeAuthority {
                 ),
             ));
         }
-        let table = DeltaTableBuilder::from_url(selected.table().canonical_root().clone())
-            .map_err(|error| {
-                DeltaActivationRuntimeAuthoritySnapshotError::Control(
-                    ActivationControlError::Delta(error.to_string()),
-                )
-            })?
-            .with_version(selected.table().version())
-            .load()
-            .await
-            .map_err(|error| {
-                DeltaActivationRuntimeAuthoritySnapshotError::Control(
-                    ActivationControlError::Delta(error.to_string()),
-                )
-            })?;
+        let table = super::delta_exact::session_delta_table_builder(
+            selected.table().canonical_root().clone(),
+            &current.session,
+        )
+        .map_err(|error| {
+            DeltaActivationRuntimeAuthoritySnapshotError::Control(ActivationControlError::Delta(
+                error.to_string(),
+            ))
+        })?
+        .with_version(selected.table().version())
+        .load()
+        .await
+        .map_err(|error| {
+            DeltaActivationRuntimeAuthoritySnapshotError::Control(ActivationControlError::Delta(
+                error.to_string(),
+            ))
+        })?;
         let successor = Arc::new(
             ActivationControlDeltaProvider::try_from_loaded_table(
                 Arc::clone(&current.session),
@@ -3218,11 +3229,11 @@ fn required_u64(
     Ok(array.value(row))
 }
 
-fn required_string<'a>(
-    batch: &'a RecordBatch,
+fn required_string(
+    batch: &RecordBatch,
     column: usize,
     row: usize,
-) -> Result<&'a str, ActivationControlError> {
+) -> Result<&str, ActivationControlError> {
     let array = batch
         .column(column)
         .as_any()
@@ -3978,9 +3989,11 @@ mod tests {
         fs::create_dir_all(&table_path).unwrap();
         let root = Url::from_directory_path(&table_path).unwrap();
         let provision_started = std::time::Instant::now();
-        let (predecessor, table) = provision_activation_control_history(root.clone())
-            .await
-            .unwrap();
+        let provision_session = SessionStateBuilder::new().with_default_features().build();
+        let (predecessor, table) =
+            provision_activation_control_history(root.clone(), &provision_session)
+                .await
+                .unwrap();
         let provision_millis = provision_started.elapsed().as_secs_f64() * 1_000.0;
         let epoch_id = EpochId::from_bytes(bytes16(0xa1));
         let selected_epoch =

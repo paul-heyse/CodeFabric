@@ -19,10 +19,10 @@ use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use arrow_select::concat::concat_batches;
 use arrow_select::take::take;
 use datafusion::prelude::SessionContext;
+use deltalake::DeltaTable;
 use deltalake::kernel::engine::arrow_conversion::TryIntoKernel as _;
 use deltalake::operations::create::CreateBuilder;
 use deltalake::protocol::SaveMode;
-use deltalake::{DeltaTable, DeltaTableBuilder};
 use serde_json::Value;
 use thiserror::Error;
 use url::Url;
@@ -306,6 +306,7 @@ pub enum ProofRelationsDeltaError {
 /// Create all nine append-only/CDF-enabled histories at exact version zero.
 pub async fn provision_proof_relation_histories(
     workspace: ProofDeltaWorkspaceRoot,
+    session: &datafusion::execution::SessionState,
 ) -> Result<ProofDeltaHistoryTargets, ProofRelationsDeltaError> {
     let mut targets = BTreeMap::new();
     for kind in ProofRelationKind::ALL {
@@ -327,6 +328,12 @@ pub async fn provision_proof_relation_histories(
                     detail: source.to_string(),
                 }
             })?;
+        let store = crate::fabric::delta_exact::session_delta_table_builder(root.clone(), session)
+            .and_then(|builder| builder.build_storage())
+            .map_err(|source| ProofRelationsDeltaError::Delta {
+                relation: kind,
+                detail: source.to_string(),
+            })?;
         ControlledDeltaHistoryProperties::try_new(format!(
             "{PROOF_SET_FIELD},{ROW_ORDINAL_FIELD},epoch_id"
         ))
@@ -337,6 +344,7 @@ pub async fn provision_proof_relation_histories(
         .apply_to(
             CreateBuilder::new()
                 .with_location(root.to_string())
+                .with_log_store(store)
                 .with_table_name(kind.history_slug())
                 .with_comment(format!(
                     "CodeFabric append-only history for {}",
@@ -350,7 +358,7 @@ pub async fn provision_proof_relation_histories(
             relation: kind,
             detail: source.to_string(),
         })?;
-        let table = DeltaTableBuilder::from_url(root.clone())
+        let table = crate::fabric::delta_exact::session_delta_table_builder(root.clone(), session)
             .map_err(|source| ProofRelationsDeltaError::Delta {
                 relation: kind,
                 detail: source.to_string(),
@@ -450,19 +458,22 @@ pub async fn reopen_proof_relations(
     for kind in ProofRelationKind::ALL {
         let pin = publication.exact_pin(kind);
         publication.workspace.validate_pin(kind, pin)?;
-        let table = DeltaTableBuilder::from_url(pin.canonical_root().clone())
-            .map_err(|source| ProofRelationsDeltaError::Delta {
-                relation: kind,
-                detail: source.to_string(),
-            })?
-            .with_skip_stats(false)
-            .with_version(pin.version())
-            .load()
-            .await
-            .map_err(|source| ProofRelationsDeltaError::Delta {
-                relation: kind,
-                detail: source.to_string(),
-            })?;
+        let table = crate::fabric::delta_exact::session_delta_table_builder(
+            pin.canonical_root().clone(),
+            &session,
+        )
+        .map_err(|source| ProofRelationsDeltaError::Delta {
+            relation: kind,
+            detail: source.to_string(),
+        })?
+        .with_skip_stats(false)
+        .with_version(pin.version())
+        .load()
+        .await
+        .map_err(|source| ProofRelationsDeltaError::Delta {
+            relation: kind,
+            detail: source.to_string(),
+        })?;
         let evidence = read_commit_evidence(kind, publication, &table).await?;
         let snapshot =
             ValidatedDeltaSnapshot::try_from_loaded_table(table, pin).map_err(|source| {
@@ -843,10 +854,7 @@ fn validate_provider_schema(
         if !crate::schema_contract::delta_provider_field_compatible(expected, observed) {
             return row_error(
                 kind,
-                format!(
-                    "exact provider field {:?} differs from expected {:?}",
-                    observed, expected
-                ),
+                format!("exact provider field {observed:?} differs from expected {expected:?}"),
             );
         }
     }
@@ -1249,7 +1257,7 @@ fn parse_lower_hex<const N: usize>(encoded: &str) -> Result<[u8; N], String> {
         return Err(format!("expected {} lowercase hexadecimal bytes", N * 2));
     }
     let mut output = [0_u8; N];
-    for (index, pair) in encoded.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in encoded.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let high = hex_nibble(pair[0]).ok_or_else(|| "invalid lowercase hexadecimal".to_owned())?;
         let low = hex_nibble(pair[1]).ok_or_else(|| "invalid lowercase hexadecimal".to_owned())?;
         output[index] = (high << 4) | low;
@@ -1269,7 +1277,7 @@ const fn hex_nibble(byte: u8) -> Option<u8> {
 mod activation_port {
     use async_trait::async_trait;
 
-    use super::*;
+    use super::{Arc, ProofCandidatePins, ProofDeltaHistoryPublication, reopen_proof_relations};
     use crate::fabric::activation::FabricEpochPins;
     use crate::fabric::activation_transaction::CandidateProofRequest;
     use crate::fabric::command::{DiagnosticRef, ProofReceiptRef};
@@ -1377,6 +1385,7 @@ pub use activation_port::DeltaActivationCandidateProofRelations;
 mod tests {
     use datafusion::execution::SessionStateBuilder;
     use datafusion::prelude::SessionConfig;
+    use deltalake::DeltaTableBuilder;
     use deltalake::delta_datafusion::planner::DeltaPlanner;
     use tempfile::TempDir;
 
@@ -1459,10 +1468,10 @@ mod tests {
         let workspace =
             ProofDeltaWorkspaceRoot::try_new(WorkspaceId::from_bytes([0x21; 16]), workspace_url)
                 .expect("canonical workspace proof root");
-        let targets = provision_proof_relation_histories(workspace)
+        let session = session();
+        let targets = provision_proof_relation_histories(workspace, &session)
             .await
             .expect("provision all nine proof histories");
-        let session = session();
         let relations = relations(0x31);
         let publication = persist_proof_relations(
             Arc::clone(&session),

@@ -18,7 +18,7 @@ use datafusion::logical_expr::{cast, col};
 use deltalake::kernel::engine::arrow_conversion::TryIntoKernel;
 use deltalake::operations::create::CreateBuilder;
 use deltalake::protocol::SaveMode;
-use deltalake::{DeltaTable, DeltaTableBuilder, DeltaTableError};
+use deltalake::{DeltaTable, DeltaTableError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -27,7 +27,7 @@ use url::Url;
 use super::command::{EpochId, OperationId, TransactionRef, WriterGeneration};
 use super::delta_exact::{
     ExactDeltaPin, ExactDeltaProviderError, ValidatedDeltaSnapshot,
-    provider_read_from_validated_snapshot,
+    provider_read_from_validated_snapshot, session_delta_table_builder,
 };
 use super::delta_write::{
     ApplicationTransactionMarker, ControlledDeltaWriteMode, ControlledDeltaWriteOutcome,
@@ -461,6 +461,7 @@ impl ProgrammaticRelationDeltaPublication {
         &self.table_versions
     }
 
+    #[must_use]
     pub fn table_versions(
         &self,
     ) -> impl ExactSizeIterator<Item = (&str, &ExactDeltaPin)> + DoubleEndedIterator {
@@ -471,6 +472,7 @@ impl ProgrammaticRelationDeltaPublication {
 
     pub async fn open_targets(
         &self,
+        session: &datafusion::execution::SessionState,
     ) -> Result<ProgrammaticRelationDeltaTargets, ProgrammaticRelationDeltaError> {
         let mut targets = BTreeMap::new();
         for (relation_id, descriptor) in self.descriptors.iter() {
@@ -478,7 +480,7 @@ impl ProgrammaticRelationDeltaPublication {
                 .table_versions
                 .get(relation_id)
                 .ok_or(ProgrammaticRelationDeltaError::RelationSetMismatch)?;
-            let table = load_exact(pin).await?;
+            let table = load_exact(pin, session).await?;
             let spec = RelationSnapshotSpec::from_stored(descriptor.clone())?;
             validate_loaded_descriptor(&table, &spec)?;
             targets.insert(
@@ -511,9 +513,9 @@ pub async fn persist_programmatic_relation_snapshots(
                 .map(|spec| (relation_id.clone(), spec))
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
-    let mut targets = prepare_targets(&specs, preparation).await?;
     let context = sealed.session().clone();
     let session = Arc::new(context.state());
+    let mut targets = prepare_targets(&specs, preparation, &session).await?;
     let mut pins = BTreeMap::new();
     let mut descriptors = BTreeMap::new();
     for (relation_id, spec) in specs {
@@ -545,7 +547,7 @@ pub async fn persist_programmatic_relation_snapshots(
             expressions.push(expression.alias(storage_field.name()));
         }
         let dataframe = dataframe.select(expressions)?;
-        validate_storage_plan_schema(&relation_id, &dataframe.schema().as_arrow(), &spec.contract)?;
+        validate_storage_plan_schema(&relation_id, dataframe.schema().as_arrow(), &spec.contract)?;
         let delta_schema = target.table.snapshot()?.snapshot().arrow_schema();
         validate_storage_plan_schema(&relation_id, delta_schema.as_ref(), &spec.contract)?;
         let provider = Arc::new(IdentityPreservingViewTable::with_schema(
@@ -610,7 +612,7 @@ pub async fn reopen_programmatic_relation_snapshots(
     let mut descriptors = BTreeMap::new();
     let mut providers = Vec::with_capacity(table_versions.len());
     for (relation_id, pin) in table_versions {
-        let table = load_exact(&pin).await?;
+        let table = load_exact(&pin, &session).await?;
         let descriptor = read_descriptor(&table)?;
         if descriptor.relation_id != relation_id.as_str() {
             return Err(ProgrammaticRelationDeltaError::DescriptorRelationMismatch {
@@ -643,13 +645,14 @@ pub async fn reopen_programmatic_relation_snapshots(
 async fn prepare_targets(
     specs: &BTreeMap<ProgrammaticRelationId, RelationSnapshotSpec>,
     preparation: ProgrammaticRelationDeltaPreparation,
+    session: &datafusion::execution::SessionState,
 ) -> Result<ProgrammaticRelationDeltaTargets, ProgrammaticRelationDeltaError> {
     match preparation {
         ProgrammaticRelationDeltaPreparation::Genesis(layout) => {
-            provision_targets(specs, &layout).await
+            provision_targets(specs, &layout, session).await
         }
         ProgrammaticRelationDeltaPreparation::Advance { selected, layout } => {
-            let mut opened = selected.open_targets().await?.targets;
+            let mut opened = selected.open_targets(session).await?.targets;
             let mut targets = BTreeMap::new();
             for (relation_id, spec) in specs {
                 if let Some(target) = opened.remove(relation_id) {
@@ -660,7 +663,7 @@ async fn prepare_targets(
                     }
                     targets.insert(relation_id.clone(), target);
                 } else {
-                    let target = provision_target(spec.clone(), &layout).await?;
+                    let target = provision_target(spec.clone(), &layout, session).await?;
                     targets.insert(relation_id.clone(), target);
                 }
             }
@@ -674,12 +677,13 @@ async fn prepare_targets(
 async fn provision_targets(
     specs: &BTreeMap<ProgrammaticRelationId, RelationSnapshotSpec>,
     layout: &ProgrammaticRelationDeltaLayout,
+    session: &datafusion::execution::SessionState,
 ) -> Result<ProgrammaticRelationDeltaTargets, ProgrammaticRelationDeltaError> {
     let mut targets = BTreeMap::new();
     for (relation_id, spec) in specs {
         targets.insert(
             relation_id.clone(),
-            provision_target(spec.clone(), layout).await?,
+            provision_target(spec.clone(), layout, session).await?,
         );
     }
     Ok(ProgrammaticRelationDeltaTargets { targets })
@@ -688,6 +692,7 @@ async fn provision_targets(
 async fn provision_target(
     spec: RelationSnapshotSpec,
     layout: &ProgrammaticRelationDeltaLayout,
+    session: &datafusion::execution::SessionState,
 ) -> Result<ProgrammaticRelationDeltaTarget, ProgrammaticRelationDeltaError> {
     let root = layout.relation_root(&spec.relation_id)?;
     if root.scheme() == "file" {
@@ -717,6 +722,7 @@ async fn provision_target(
     }
     CreateBuilder::new()
         .with_location(root.to_string())
+        .with_log_store(session_delta_table_builder(root.clone(), session)?.build_storage()?)
         .with_table_name(spec.table_reference.table())
         .with_comment(format!("{DESCRIPTOR_PREFIX}{}", spec.descriptor_json))
         .with_save_mode(SaveMode::ErrorIfExists)
@@ -740,7 +746,7 @@ async fn provision_target(
             ),
         ])
         .await?;
-    let table = DeltaTableBuilder::from_url(root.clone())?
+    let table = session_delta_table_builder(root.clone(), session)?
         .with_skip_stats(false)
         .with_version(0)
         .load()
@@ -811,12 +817,17 @@ fn read_descriptor(
     Ok(descriptor)
 }
 
-async fn load_exact(pin: &ExactDeltaPin) -> Result<DeltaTable, ProgrammaticRelationDeltaError> {
-    Ok(DeltaTableBuilder::from_url(pin.canonical_root().clone())?
-        .with_skip_stats(false)
-        .with_version(pin.version())
-        .load()
-        .await?)
+async fn load_exact(
+    pin: &ExactDeltaPin,
+    session: &datafusion::execution::SessionState,
+) -> Result<DeltaTable, ProgrammaticRelationDeltaError> {
+    Ok(
+        session_delta_table_builder(pin.canonical_root().clone(), session)?
+            .with_skip_stats(false)
+            .with_version(pin.version())
+            .load()
+            .await?,
+    )
 }
 
 /// Programmatic observation storage/view relations have their own exact append-only subsystem.

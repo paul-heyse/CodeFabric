@@ -14,8 +14,8 @@ use arrow_select::concat::concat_batches;
 use async_trait::async_trait;
 use datafusion::execution::SessionState;
 use datafusion::execution::context::SessionContext;
+use deltalake::DeltaTable;
 use deltalake::table::config::TablePropertiesExt as _;
-use deltalake::{DeltaTable, DeltaTableBuilder};
 use thiserror::Error;
 
 use super::administration_command_effect::{
@@ -388,12 +388,15 @@ impl DeltaProgrammaticMaintenanceCommandRelation {
             .ok_or(DeltaProgrammaticMaintenanceRelationError::VersionOverflow)?;
         let pin = ExactDeltaPin::new(predecessor.canonical_root(), version)
             .map_err(|error| DeltaProgrammaticMaintenanceRelationError::Exact(error.to_string()))?;
-        let table = DeltaTableBuilder::from_url(pin.canonical_root().clone())
-            .map_err(|error| DeltaProgrammaticMaintenanceRelationError::Delta(error.to_string()))?
-            .with_version(pin.version())
-            .load()
-            .await
-            .map_err(|error| DeltaProgrammaticMaintenanceRelationError::Delta(error.to_string()))?;
+        let table = super::delta_exact::session_delta_table_builder(
+            pin.canonical_root().clone(),
+            &self.session,
+        )
+        .map_err(|error| DeltaProgrammaticMaintenanceRelationError::Delta(error.to_string()))?
+        .with_version(pin.version())
+        .load()
+        .await
+        .map_err(|error| DeltaProgrammaticMaintenanceRelationError::Delta(error.to_string()))?;
         ValidatedDeltaSnapshot::try_from_loaded_table(table.clone(), &pin)
             .map_err(|error| DeltaProgrammaticMaintenanceRelationError::Exact(error.to_string()))?;
         Ok(RelationState { pin, table })

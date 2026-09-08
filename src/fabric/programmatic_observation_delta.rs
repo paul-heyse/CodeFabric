@@ -31,7 +31,7 @@ use deltalake::kernel::transaction::{PROTOCOL, TransactionError};
 use deltalake::operations::create::CreateBuilder;
 use deltalake::protocol::SaveMode;
 use deltalake::table::config::TablePropertiesExt as _;
-use deltalake::{DeltaTable, DeltaTableBuilder, DeltaTableError};
+use deltalake::{DeltaTable, DeltaTableError};
 use serde_json::Value;
 use thiserror::Error;
 use url::Url;
@@ -174,6 +174,7 @@ impl ProgrammaticObservationHistoryRegistry {
         self.histories.is_empty()
     }
 
+    #[must_use]
     pub fn relation_ids(&self) -> impl ExactSizeIterator<Item = &ProgrammaticRelationId> {
         self.histories.keys()
     }
@@ -585,6 +586,7 @@ impl ProgrammaticObservationDeltaPublication {
         self.table_versions.pin(relation_id.as_str())
     }
 
+    #[must_use]
     pub fn table_versions(
         &self,
     ) -> impl ExactSizeIterator<Item = (&str, &ExactDeltaPin)> + DoubleEndedIterator {
@@ -599,6 +601,7 @@ impl ProgrammaticObservationDeltaPublication {
 
     /// Exact per-relation row-count and empty-materialization evidence read
     /// back from the selected Delta commits.
+    #[must_use]
     pub fn materializations(
         &self,
     ) -> impl ExactSizeIterator<
@@ -637,6 +640,7 @@ impl ProgrammaticObservationDeltaPublication {
 
     /// Complete exact-provider statistics evidence for the published history
     /// vector, in stable relation-id order.
+    #[must_use]
     pub fn provider_statistics_inspections(
         &self,
     ) -> impl ExactSizeIterator<Item = (&ProgrammaticRelationId, &ExactDeltaStatisticsInspection)>
@@ -657,11 +661,13 @@ impl ProgrammaticObservationDeltaPublication {
     /// the materialization evidence from each exact commit.
     pub async fn open_targets(
         &self,
+        session: &datafusion::execution::SessionState,
     ) -> Result<ProgrammaticObservationDeltaTargets, ProgrammaticObservationDeltaOpenError> {
         let (targets, materializations) = load_published_targets(
             self.epoch_id,
             &self.table_versions,
             Arc::clone(&self.registry),
+            session,
         )
         .await?;
         if materializations != self.materializations.as_ref().clone() {
@@ -677,6 +683,7 @@ async fn load_published_targets(
     epoch_id: EpochId,
     table_versions: &TableVersionSet,
     registry: Arc<ProgrammaticObservationHistoryRegistry>,
+    session: &datafusion::execution::SessionState,
 ) -> Result<
     (
         ProgrammaticObservationDeltaTargets,
@@ -693,22 +700,23 @@ async fn load_published_targets(
                 relation_id: relation_id.clone(),
             }
         })?;
-        let table = DeltaTableBuilder::from_url(pin.canonical_root().clone())
-            .map_err(|source| ProgrammaticObservationDeltaOpenError::Delta {
-                relation_id: relation_id.clone(),
-                source,
-            })?
-            // Query-serving snapshots require active files and parsed add-action
-            // statistics. At the pinned delta-rs revision, `skip_stats=true`
-            // disables both statistics and partition pruning.
-            .with_skip_stats(false)
-            .with_version(pin.version())
-            .load()
-            .await
-            .map_err(|source| ProgrammaticObservationDeltaOpenError::Delta {
-                relation_id: relation_id.clone(),
-                source,
-            })?;
+        let table =
+            super::delta_exact::session_delta_table_builder(pin.canonical_root().clone(), session)
+                .map_err(|source| ProgrammaticObservationDeltaOpenError::Delta {
+                    relation_id: relation_id.clone(),
+                    source,
+                })?
+                // Query-serving snapshots require active files and parsed add-action
+                // statistics. At the pinned delta-rs revision, `skip_stats=true`
+                // disables both statistics and partition pruning.
+                .with_skip_stats(false)
+                .with_version(pin.version())
+                .load()
+                .await
+                .map_err(|source| ProgrammaticObservationDeltaOpenError::Delta {
+                    relation_id: relation_id.clone(),
+                    source,
+                })?;
         let target = ProgrammaticObservationDeltaTarget::try_new(registration, pin.clone(), table)?;
         let materialization = read_materialization_evidence(
             epoch_id,
@@ -1019,8 +1027,18 @@ pub async fn provision_programmatic_observation_histories(
                 relation_id: relation_id.clone(),
                 source: DeltaTableError::Arrow { source },
             })?;
+        let store = super::delta_exact::session_delta_table_builder(
+            root.clone(),
+            &assembly.candidate_state(),
+        )
+        .and_then(|builder| builder.build_storage())
+        .map_err(|source| ProgrammaticObservationProvisionError::Delta {
+            relation_id: relation_id.clone(),
+            source,
+        })?;
         CreateBuilder::new()
             .with_location(root.to_string())
+            .with_log_store(store)
             .with_table_name(history.history_reference.table())
             .with_comment(format!(
                 "CodeFabric append-only history for {}",
@@ -1052,19 +1070,22 @@ pub async fn provision_programmatic_observation_histories(
                 relation_id: relation_id.clone(),
                 source,
             })?;
-        let table = DeltaTableBuilder::from_url(root.clone())
-            .map_err(|source| ProgrammaticObservationProvisionError::Delta {
-                relation_id: relation_id.clone(),
-                source,
-            })?
-            .with_skip_stats(false)
-            .with_version(0)
-            .load()
-            .await
-            .map_err(|source| ProgrammaticObservationProvisionError::Delta {
-                relation_id: relation_id.clone(),
-                source,
-            })?;
+        let table = super::delta_exact::session_delta_table_builder(
+            root.clone(),
+            &assembly.candidate_state(),
+        )
+        .map_err(|source| ProgrammaticObservationProvisionError::Delta {
+            relation_id: relation_id.clone(),
+            source,
+        })?
+        .with_skip_stats(false)
+        .with_version(0)
+        .load()
+        .await
+        .map_err(|source| ProgrammaticObservationProvisionError::Delta {
+            relation_id: relation_id.clone(),
+            source,
+        })?;
         let pin = ExactDeltaPin::new(&root, 0).map_err(|source| {
             ProgrammaticObservationProvisionError::Configuration(
                 ProgrammaticObservationDeltaConfigurationError::ExactTargetIdentity {
@@ -1162,8 +1183,13 @@ pub async fn reopen_programmatic_observations(
         &assembly,
     )?);
     validate_publication_relations(&table_versions, &registry)?;
-    let (targets, materializations) =
-        load_published_targets(epoch_id, &table_versions, Arc::clone(&registry)).await?;
+    let (targets, materializations) = load_published_targets(
+        epoch_id,
+        &table_versions,
+        Arc::clone(&registry),
+        &assembly.candidate_state(),
+    )
+    .await?;
     assembly.install_transformations().await?;
     let session = Arc::new(assembly.candidate_state());
     let context = assembly.candidate_context();
@@ -1386,7 +1412,7 @@ fn history_spec(
     let system_storage = system.contract.storage_schema();
     let mut fields = Vec::with_capacity(system_storage.fields().len() + 2);
     fields.push(history_field(
-        system_storage.field(0).as_ref(),
+        system_storage.field(0),
         relation_identity,
         EPOCH_FIELD,
     ));
@@ -2166,7 +2192,7 @@ fn parse_lower_hex<const N: usize>(encoded: &str) -> Result<[u8; N], String> {
         ));
     }
     let mut output = [0_u8; N];
-    for (index, pair) in encoded.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in encoded.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let high = hex_nibble(pair[0]).ok_or_else(|| {
             format!(
                 "invalid lowercase hexadecimal character at byte {}",
@@ -2194,6 +2220,7 @@ const fn hex_nibble(byte: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    use deltalake::DeltaTableBuilder;
     use std::fs;
 
     use arrow_array::{Array as _, BinaryArray, FixedSizeBinaryArray, StringArray, UInt64Array};
@@ -2573,7 +2600,7 @@ mod tests {
 
         let second_targets = first
             .observation_publication()
-            .open_targets()
+            .open_targets(&first.context().state())
             .await
             .expect("reopen only the registered exact predecessor versions");
         for target in second_targets.targets.values() {
@@ -2621,7 +2648,7 @@ mod tests {
 
         let retained_first_targets = first
             .observation_publication()
-            .open_targets()
+            .open_targets(&first.context().state())
             .await
             .expect("reopen retained first materialization after newer heads exist");
         assert!(

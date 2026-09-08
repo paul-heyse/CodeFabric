@@ -47,14 +47,16 @@ use crate::relational_program::{
 use crate::schema_contract::SchemaContract;
 
 use super::datafusion_cache::{
-    CachedLogicalPlan, DataFusionCachePolicy, EpochLogicalPlanCache, LogicalPlanAuthorityBuilder,
+    CachedLogicalPlan, DataFusionCachePolicy, LogicalPlanAuthorityBuilder,
     LogicalPlanAuthorityFingerprint, LogicalPlanCacheError, LogicalPlanCacheKey,
     LogicalPlanCacheObservation, LogicalPlanCacheOutcome, LogicalPlanCacheScope,
     LogicalPlanExecutionObservation, execution_observation, frame_schema_contract,
     frame_session_logical_authority, validate_logical_plan_references,
 };
 use super::epoch_runtime::{FABRIC_CATALOG, FabricEpochId, FabricSchemaRole};
-use super::programmatic_epoch::{ProgrammaticFabricEpoch, ProgrammaticFabricEpochError};
+use super::programmatic_epoch::{
+    EpochLogicalPlanCacheHandle, ProgrammaticFabricEpoch, ProgrammaticFabricEpochError,
+};
 use super::programmatic_schema::registered_view_logical_plan;
 use super::programmatic_schema::{IdentityPreservingViewTable, ProgrammaticRelationId};
 #[cfg(feature = "daemon")]
@@ -228,7 +230,8 @@ impl ChildResourceLimits {
             )
     }
 
-    fn runtime_env(&self) -> Result<Arc<RuntimeEnv>, DataFusionError> {
+    #[cfg(test)]
+    pub(in crate::fabric) fn runtime_env(&self) -> Result<Arc<RuntimeEnv>, DataFusionError> {
         self.cache_policy
             .configure_runtime(RuntimeEnvBuilder::new())
             .with_object_store_registry(Arc::new(ClosedObjectStoreRegistry))
@@ -413,6 +416,7 @@ impl ChildVariableProviderGrant {
         &self.variable_type
     }
 
+    #[must_use]
     pub fn variables(
         &self,
     ) -> impl ExactSizeIterator<Item = &ChildVariableReference> + DoubleEndedIterator {
@@ -1116,7 +1120,7 @@ pub struct AuthorizedChildSession {
     table_versions: super::activation::TableVersionSetRef,
     runtime_configuration: Arc<str>,
     logical_plan_authority: LogicalPlanAuthorityFingerprint,
-    logical_plan_cache: Arc<EpochLogicalPlanCache>,
+    logical_plan_cache: EpochLogicalPlanCacheHandle,
 }
 
 impl fmt::Debug for AuthorizedChildSession {
@@ -1192,7 +1196,7 @@ fn derive_child_logical_plan_authority(
 
     authority.frame_usize(policy.registries.object_stores.len());
     for origin in policy.registries.object_stores.keys() {
-        authority.frame_str(&origin.to_string());
+        authority.frame_str(origin.as_ref());
         let installed = state
             .runtime_env()
             .object_store_registry
@@ -1406,7 +1410,7 @@ impl AuthorizedChildSession {
             table_versions: epoch.table_version_set_ref(),
             runtime_configuration: Arc::from(epoch.runtime_configuration_identity()),
             logical_plan_authority,
-            logical_plan_cache: Arc::clone(epoch.logical_plan_cache()),
+            logical_plan_cache: epoch.logical_plan_cache().clone(),
         })
     }
 
@@ -1417,6 +1421,7 @@ impl AuthorizedChildSession {
 
     /// Enumerate only granted stable relation identities. No DataFusion
     /// catalog/schema/provider handle is returned.
+    #[must_use]
     pub fn allowed_tables(
         &self,
     ) -> impl ExactSizeIterator<Item = &ProgrammaticRelationId> + DoubleEndedIterator {
@@ -1432,6 +1437,7 @@ impl AuthorizedChildSession {
     ///
     /// The observation contains identity and Arrow type metadata only; it does not expose a
     /// provider, catalog, session, runtime, or mutation capability.
+    #[must_use]
     pub fn table_contracts(
         &self,
     ) -> impl ExactSizeIterator<Item = ChildTableContractObservation<'_>> + DoubleEndedIterator
@@ -1657,7 +1663,10 @@ impl AuthorizedChildSession {
                 actual: physical_plan.schema(),
             });
         }
-        let stream = execute_stream(physical_plan, self.state.task_ctx())?;
+        let stream = super::native_operations::bind_stream(execute_stream(
+            physical_plan,
+            self.state.task_ctx(),
+        )?);
         Ok(ChildProgramStream {
             schema: expected_schema,
             stream,
@@ -1802,16 +1811,16 @@ impl AuthorizedChildSession {
             });
         }
 
-        if let Some(request_inputs) = request_inputs {
-            if consumed_request_relations.len() != request_inputs.len() {
-                let unused = request_inputs
-                    .iter()
-                    .find(|input| !consumed_request_relations.contains(input.relation_id()))
-                    .expect("different request relation counts imply one unused relation");
-                return Err(ChildSessionError::UnusedRequestOwnedRelation(
-                    unused.relation_id().as_str().to_owned(),
-                ));
-            }
+        if let Some(request_inputs) = request_inputs
+            && consumed_request_relations.len() != request_inputs.len()
+        {
+            let unused = request_inputs
+                .iter()
+                .find(|input| !consumed_request_relations.contains(input.relation_id()))
+                .expect("different request relation counts imply one unused relation");
+            return Err(ChildSessionError::UnusedRequestOwnedRelation(
+                unused.relation_id().as_str().to_owned(),
+            ));
         }
 
         let compiled =
@@ -1852,7 +1861,10 @@ impl AuthorizedChildSession {
                 actual: physical_plan.schema(),
             });
         }
-        let stream = execute_stream(physical_plan, self.state.task_ctx())?;
+        let stream = super::native_operations::bind_stream(execute_stream(
+            physical_plan,
+            self.state.task_ctx(),
+        )?);
         Ok(ChildProgramStream {
             schema: expected_schema,
             stream,
@@ -2486,7 +2498,7 @@ where
                     kind: family,
                     name: name.clone(),
                 })?;
-        if !Arc::ptr_eq(expected_function, &actual_function) {
+        if !Arc::ptr_eq(expected_function, actual_function) {
             return Err(ChildSessionError::RegistryInstallationDrift {
                 kind: family,
                 name: name.clone(),

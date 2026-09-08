@@ -2036,8 +2036,7 @@ may invoke it after the executor pauses with the immutable review bundle.
 
 The normative direct dependency edges are exactly the packets' declared
 **Dependencies** lines, restated here as an edge list (parallel branches may
-interleave under the subagent-orchestration policy provided every edge is
-respected):
+interleave provided every edge is respected):
 
 ```text
 WP73 → WP54                          WP62 → WP75

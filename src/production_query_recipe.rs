@@ -1884,10 +1884,10 @@ fn validate_row_authority(
     observed: &Arc<str>,
     row: usize,
 ) -> Result<(), ProductionQueryRecipeError> {
-    if expected != observed {
-        closure_row_error(row, "row authority differs from compiler authority")
-    } else {
+    if expected == observed {
         Ok(())
+    } else {
+        closure_row_error(row, "row authority differs from compiler authority")
     }
 }
 

@@ -82,7 +82,7 @@ pub struct PythonModuleInput<'a> {
 pub struct ProviderNativeSourceImage {
     pub file_id: [u8; 16],
     pub source_generation: u64,
-    pub bytes: Arc<[u8]>,
+    pub bytes: crate::resource_budget::ChargedSlice<u8>,
     pub content_digest: [u8; 32],
     pub provider_text: ProviderText,
 }
@@ -96,7 +96,7 @@ impl ProviderNativeSourceImage {
     pub fn new(
         file_id: [u8; 16],
         source_generation: u64,
-        bytes: Arc<[u8]>,
+        bytes: crate::resource_budget::ChargedSlice<u8>,
         content_digest: [u8; 32],
         provider_text: ProviderText,
     ) -> Result<Self, ProviderNativeSyntaxError> {
@@ -125,7 +125,7 @@ impl TryFrom<&SourceImage> for ProviderNativeSourceImage {
         Self::new(
             source.file_id,
             source.source_generation,
-            Arc::clone(&source.bytes),
+            source.bytes.clone(),
             source.digest,
             source
                 .provider_text
@@ -368,10 +368,10 @@ impl ExactPythonSyntaxRunner {
     ///
     /// Returns provider/API errors when the current pinned runtime cannot execute its documented
     /// exact parser, grammar, token, trivia, index, or typed-AST surfaces.
-    pub fn new() -> Result<Self, ProviderNativeSyntaxError> {
+    pub fn new(jobs: InProcessProviderJobs<'_>) -> Result<Self, ProviderNativeSyntaxError> {
         Ok(Self {
-            tree_sitter: TreeSitterAdapter::new(TreeSitterLanguage::Python)?,
-            ruff: RuffAdapter::new()?,
+            tree_sitter: TreeSitterAdapter::new(TreeSitterLanguage::Python, jobs.tree_sitter)?,
+            ruff: RuffAdapter::new(jobs.ruff)?,
         })
     }
 
@@ -396,8 +396,8 @@ impl ExactPythonSyntaxRunner {
             .tree_sitter
             .parse_full(jobs.tree_sitter, revision, text.clone())?;
         let ruff = self.ruff.parse(jobs.ruff, revision, text, &tree)?;
-        let semantics = semantic_result(&self.ruff, revision, module)?;
-        finish_run(jobs, source, pins, &tree, &ruff, semantics.as_ref())
+        let semantics = semantic_result(&self.ruff, jobs.ruff, revision, module)?;
+        finish_run(jobs, source, pins, &tree, &ruff, semantics.as_deref())
     }
 
     /// Apply one exact edit to the retained Tree-sitter tree, reparse Ruff in full, and emit the
@@ -423,8 +423,8 @@ impl ExactPythonSyntaxRunner {
             self.tree_sitter
                 .parse_incremental(jobs.tree_sitter, revision, text.clone(), edit)?;
         let ruff = self.ruff.parse(jobs.ruff, revision, text, &tree)?;
-        let semantics = semantic_result(&self.ruff, revision, module)?;
-        finish_run(jobs, source, pins, &tree, &ruff, semantics.as_ref())
+        let semantics = semantic_result(&self.ruff, jobs.ruff, revision, module)?;
+        finish_run(jobs, source, pins, &tree, &ruff, semantics.as_deref())
     }
 
     #[must_use]
@@ -445,6 +445,21 @@ fn validate_job_source(
     source: &ProviderNativeSourceImage,
 ) -> Result<(), ProviderNativeSyntaxError> {
     let binding = jobs.tree_sitter.source();
+    for budget in [
+        source.bytes.reservation().owner(),
+        source.provider_text.text.reservation().owner(),
+        source
+            .provider_text
+            .original_byte_offsets
+            .reservation()
+            .owner(),
+        jobs.ruff.resource_budget(),
+    ] {
+        crate::provider_contracts::allocation::require_native_workspace(
+            budget,
+            jobs.tree_sitter.resource_budget(),
+        )?;
+    }
     if binding.file_id() != Some(source.file_id)
         || binding.generation() != source.source_generation
         || binding.content_digest() != source.content_digest
@@ -487,10 +502,14 @@ fn validate_job_module(
 
 fn semantic_result(
     ruff: &RuffAdapter,
+    job: &ProviderJob,
     revision: u64,
     module: PythonModuleInput<'_>,
-) -> Result<Option<PythonFrontendBatch>, ProviderNativeSyntaxError> {
-    match ruff.semantic_batch(revision, module.module_name, module.module_path, false) {
+) -> Result<
+    Option<crate::resource_budget::ChargedValue<PythonFrontendBatch>>,
+    ProviderNativeSyntaxError,
+> {
+    match ruff.semantic_batch(job, revision, module.module_name, module.module_path, false) {
         Ok(batch) => Ok(Some(batch)),
         Err(PythonSemanticError::UnavailableParse(_)) => Ok(None),
         Err(error) => Err(error.into()),
@@ -741,7 +760,33 @@ fn finish_run(
     ruff: &RuffSnapshot,
     semantics: Option<&PythonFrontendBatch>,
 ) -> Result<ProviderNativeSyntaxRun, ProviderNativeSyntaxError> {
+    // Both lane envelopes are admitted before constructing any Arrow output. Claims below are
+    // private, one-time claims of newly built buffers, never a reclaim of arbitrary input arrays.
+    let mut tree_allocation = crate::provider_contracts::allocation::ProviderAllocation::try_new(
+        jobs.tree_sitter.resource_budget(),
+        jobs.tree_sitter.ceilings().max_bytes(),
+    )?;
+    let mut ruff_allocation = crate::provider_contracts::allocation::ProviderAllocation::try_new(
+        jobs.ruff.resource_budget(),
+        jobs.ruff.ceilings().max_bytes(),
+    )?;
     let relations = project_relations(source, pins, tree, ruff, semantics)?;
+    let is_tree =
+        |relation: &NativeSyntaxRelation| relation.as_str().starts_with("provider.tree_sitter.");
+    tree_allocation.claim_new_batches(
+        relations
+            .iter()
+            .filter(|(key, _)| is_tree(key))
+            .map(|(_, batch)| batch),
+        65_536,
+    )?;
+    ruff_allocation.claim_new_batches(
+        relations
+            .iter()
+            .filter(|(key, _)| !is_tree(key))
+            .map(|(_, batch)| batch),
+        65_536,
+    )?;
     let tree_sitter = provider_result(jobs.tree_sitter, &relations)?;
     let ruff = provider_result(jobs.ruff, &relations)?;
     Ok(ProviderNativeSyntaxRun {
@@ -779,6 +824,7 @@ fn provider_result(
             request.schema_identity().clone(),
             Arc::clone(request.schema()),
             vec![relations[&relation].clone()],
+            job.resource_budget(),
         )?);
         coverage.push(ProviderCoverage::new(
             request.family().clone(),
@@ -2559,21 +2605,24 @@ pub(crate) mod job_tests {
     }
 
     fn source_with_marker(text: &str, generation: u64, marker: u8) -> ProviderNativeSourceImage {
-        let bytes = Arc::<[u8]>::from(text.as_bytes());
+        let budget = crate::provider_contracts::fixture_provider_budget([6; 16], [254; 16]);
+        let bytes = budget
+            .try_reserve(
+                crate::resource_budget::ResourceClass::Data,
+                crate::resource_budget::ResourceAmounts {
+                    memory_bytes: text.len() as u64,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .into_charged_vec(text.as_bytes().to_vec())
+            .unwrap();
         ProviderNativeSourceImage::new(
             [marker; 16],
             generation,
-            Arc::clone(&bytes),
+            bytes.clone(),
             crate::integrity::digest_bytes(&bytes),
-            ProviderText {
-                text: Arc::from(text),
-                original_byte_offsets: Arc::from(
-                    text.char_indices()
-                        .map(|(offset, _)| u64::try_from(offset).unwrap())
-                        .chain(std::iter::once(u64::try_from(text.len()).unwrap()))
-                        .collect::<Vec<_>>(),
-                ),
-            },
+            ProviderText::from_validated_utf8(text, &budget).unwrap(),
         )
         .unwrap()
     }
@@ -2584,7 +2633,7 @@ pub(crate) mod job_tests {
             max_batches_per_relation: 8,
             max_input_bytes: 1 << 20,
             max_rows: 2_000_000,
-            max_bytes: 1 << 28,
+            max_bytes: 1 << 26,
             max_diagnostics: 10_000,
             max_work_units: 10_000_000,
             max_wall_millis: 30_000,
@@ -2691,7 +2740,7 @@ pub(crate) mod job_tests {
                 source.content_digest,
             )
             .unwrap(),
-            context,
+            context: crate::provider_contracts::fixture_provider_context([6; 16], context),
             run: ProviderRunBinding::try_new(
                 ProviderRunIdentity::try_new(format!("{provider}.run")).unwrap(),
                 run_pin,
@@ -2701,6 +2750,7 @@ pub(crate) mod job_tests {
             trust: ProviderTrustPosture::InProcessConstrained,
             requests: requests(target),
             ceilings: ProviderResourceCeilings::try_new(spec).unwrap(),
+            resource_budget: crate::provider_contracts::fixture_provider_budget([6; 16], run_pin),
             deadline: Instant::now() + Duration::from_secs(30),
             cancellation,
             provenance: ProviderRunProvenance::new(
@@ -2743,7 +2793,7 @@ pub(crate) mod job_tests {
     pub(crate) fn run_fixture(text: &str, generation: u64, marker: u8) -> ProviderNativeSyntaxRun {
         let source = source_with_marker(text, generation, marker);
         let jobs = jobs_with_marker(&source, marker);
-        ExactPythonSyntaxRunner::new()
+        ExactPythonSyntaxRunner::new(jobs.borrowed())
             .unwrap()
             .run_full(jobs.borrowed(), 1, &source, module())
             .unwrap()
@@ -2761,6 +2811,62 @@ pub(crate) mod job_tests {
         for relation in NativeSyntaxRelation::ALL {
             assert!(!relation.schema().fields().is_empty());
         }
+    }
+
+    #[test]
+    fn wp79_native_raw_arrow_clone_retains_backing_after_result_and_runner_drop() {
+        let input = source("answer = 42\n", 1);
+        let jobs = jobs(&input);
+        let budget = jobs.ruff.resource_budget().clone();
+        let baseline = budget.observation().used.memory_bytes;
+        let mut runner = ExactPythonSyntaxRunner::new(jobs.borrowed()).unwrap();
+        let run = runner
+            .run_full(jobs.borrowed(), 1, &input, module())
+            .unwrap();
+        let raw = run.relation(NativeSyntaxRelation::RuffToken).slice(0, 1);
+        drop(run);
+        drop(runner);
+        let retained = budget.observation().used.memory_bytes;
+        assert!(
+            retained > baseline,
+            "raw Arrow slice must retain its native claims"
+        );
+        assert!(
+            retained < u128::from(jobs.ruff.ceilings().max_bytes()),
+            "tiny finished output must not retain the whole work envelope"
+        );
+        drop(raw);
+        assert_eq!(budget.observation().used.memory_bytes, baseline);
+    }
+
+    #[test]
+    fn wp79_native_admission_rejects_pressure_and_foreign_source_authority() {
+        use crate::resource_budget::{ResourceAmounts, ResourceClass};
+        let input = source("answer = 42\n", 1);
+        let jobs = jobs(&input);
+        let budget = jobs.ruff.resource_budget();
+        let pressure = budget
+            .try_reserve(
+                ResourceClass::Data,
+                ResourceAmounts {
+                    memory_bytes: 1_000_000_000,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(ExactPythonSyntaxRunner::new(jobs.borrowed()).is_err());
+        drop(pressure);
+        let mut runner = ExactPythonSyntaxRunner::new(jobs.borrowed()).unwrap();
+        let mut foreign = input.clone();
+        foreign.bytes = crate::resource_budget::ChargedSlice::for_test(input.bytes.to_vec());
+        assert!(matches!(
+            runner.run_full(jobs.borrowed(), 1, &foreign, module()),
+            Err(ProviderNativeSyntaxError::Contract(
+                ProviderContractError::ResourceOwnerMismatch
+            ))
+        ));
+        assert_eq!(runner.lifecycle_observation().tree_sitter_completed_runs, 0);
+        assert_eq!(runner.lifecycle_observation().ruff_completed_runs, 0);
     }
 
     #[test]
@@ -2840,7 +2946,7 @@ pub(crate) mod job_tests {
     fn native_context_module_binding_is_a_causal_provider_input() {
         let input = source("value = 1\n", 1);
         let jobs = jobs(&input);
-        let mut runner = ExactPythonSyntaxRunner::new().unwrap();
+        let mut runner = ExactPythonSyntaxRunner::new(jobs.borrowed()).unwrap();
         for module in [
             PythonModuleInput {
                 module_name: "wrong.module",
@@ -2935,7 +3041,7 @@ pub(crate) mod job_tests {
             vec![module_binding],
         );
         let jobs = InProcessProviderJobs::try_new(&tree, &ruff).unwrap();
-        let mut runner = ExactPythonSyntaxRunner::new().unwrap();
+        let mut runner = ExactPythonSyntaxRunner::new(jobs).unwrap();
         let run = runner
             .run_full(
                 jobs,
@@ -2968,7 +3074,7 @@ pub(crate) mod job_tests {
     fn tree_sitter_ruff_arrow_job_semantics() {
         let source = source("from pkg import value\nresult = value + 1\n", 1);
         let jobs = jobs(&source);
-        let run = ExactPythonSyntaxRunner::new()
+        let run = ExactPythonSyntaxRunner::new(jobs.borrowed())
             .unwrap()
             .run_full(jobs.borrowed(), 1, &source, module())
             .unwrap();
@@ -3013,7 +3119,7 @@ pub(crate) mod job_tests {
         let input = source("value = 1\n", 1);
         let jobs = jobs(&input);
         jobs.tree_owner.cancel();
-        let error = ExactPythonSyntaxRunner::new()
+        let error = ExactPythonSyntaxRunner::new(jobs.borrowed())
             .unwrap()
             .run_full(jobs.borrowed(), 1, &input, module())
             .unwrap_err();
@@ -3023,7 +3129,7 @@ pub(crate) mod job_tests {
         ));
 
         let wrong_source = source("value = 2\n", 2);
-        let error = ExactPythonSyntaxRunner::new()
+        let error = ExactPythonSyntaxRunner::new(jobs.borrowed())
             .unwrap()
             .run_full(jobs.borrowed(), 1, &wrong_source, module())
             .unwrap_err();
@@ -3035,7 +3141,7 @@ pub(crate) mod job_tests {
     fn inprocess_provider_incremental_lifecycle() {
         let first_source = source("value = 1\n", 1);
         let first_jobs = jobs(&first_source);
-        let mut incremental = ExactPythonSyntaxRunner::new().unwrap();
+        let mut incremental = ExactPythonSyntaxRunner::new(first_jobs.borrowed()).unwrap();
         incremental
             .run_full(first_jobs.borrowed(), 1, &first_source, module())
             .unwrap();
@@ -3055,7 +3161,7 @@ pub(crate) mod job_tests {
                 module(),
             )
             .unwrap();
-        let clean_run = ExactPythonSyntaxRunner::new()
+        let clean_run = ExactPythonSyntaxRunner::new(second_jobs.borrowed())
             .unwrap()
             .run_full(second_jobs.borrowed(), 2, &second_source, module())
             .unwrap();
@@ -3094,7 +3200,7 @@ pub(crate) mod job_tests {
 
         let first_source = source_with_marker(&first_text, 1, 0x65);
         let first_jobs = jobs_with_marker(&first_source, 0x65);
-        let mut retained = ExactPythonSyntaxRunner::new().unwrap();
+        let mut retained = ExactPythonSyntaxRunner::new(first_jobs.borrowed()).unwrap();
         let initial_started = Instant::now();
         let initial = retained
             .run_full(first_jobs.borrowed(), 1, &first_source, module())
@@ -3120,7 +3226,7 @@ pub(crate) mod job_tests {
         let incremental_millis = incremental_started.elapsed().as_secs_f64() * 1_000.0;
 
         let clean_started = Instant::now();
-        let clean = ExactPythonSyntaxRunner::new()
+        let clean = ExactPythonSyntaxRunner::new(second_jobs.borrowed())
             .unwrap()
             .run_full(second_jobs.borrowed(), 2, &second_source, module())
             .unwrap();

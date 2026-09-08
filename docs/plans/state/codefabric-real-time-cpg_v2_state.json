@@ -3,23 +3,26 @@
   "plan_path": "docs/plans/codefabric_real_time_cpg_implementation_plan_v2_2026-09-04.md",
   "design_path": "docs/designs/codefabric_real_time_cpg_planning_contracts_design_v1_2026-09-04.md",
   "baseline_commit": "df1c50c684a5e005c4b76ada9cd19d8030d9d7dd",
-  "status": "executing",
+  "status": "blocked",
   "current_packet": "WP79",
   "packets": {
     "WP77": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "7ca5407a128c6384b33eba7e1f49b8382853d8a6",
       "deviations": [
         "Integrate carefully with the pre-existing provider/admission/derived-analysis edits; preserve unrelated work. The execution preflight snapshot is recoverable under /tmp/codefabric-rt-cpg-exec-jbqlfs and no inherited completion is assumed.",
-        "The seven required Python analysis implementations are deliberately unavailable until WP84/WP85. Immutable target fixtures and successful required-gap validation establish truthful interim capability, not selected-profile conformance. Existing activation pin-proof fault synthesis remains a later proof-realization obligation; no semantic end-to-end certification is claimed here."
+        "The seven required Python analysis implementations are deliberately unavailable until WP84/WP85. Immutable target fixtures and successful required-gap validation establish truthful interim capability, not selected-profile conformance. Existing activation pin-proof fault synthesis remains a later proof-realization obligation; no semantic end-to-end certification is claimed here.",
+        "Status reconciliation 2026-09-07: docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v1.md. Prior current-complete judgment is reopened because WP79 changed immediate provider/resource consumers after the recorded proof. Focused local behavior does not close the full named acceptance boundary; preserve the original proving commit as historical provenance."
       ],
       "failed_approaches": [
         "Direct repo-shell.sh invocation takes one command string, not an argv vector. Passing rustfmt and separate arguments silently ran rustfmt without file targets; use repo-shell.sh -c with a quoted full command and verify through just root-fmt."
       ],
-      "blockers": []
+      "blockers": [
+        "Restore current proving lineage for the repaired immediate provider/resource consumers in a coherent committed candidate. Preserve the historical proving commit; working-tree checks alone do not replace that lineage."
+      ]
     },
     "WP78": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "0dd1fe19568164fc63da5bba8db9df789df274f7",
       "deviations": [
         "The preflight expanded closure to inventory, fresh startup, source images, Pyrefly job/wire consumers and the Rust compilation-context boundary. It found bypassed effective discovery, dropped capture outcomes and conflated workspace/file and canonical context/fingerprint identities. Preserve the pre-existing source-image and service edits while closing these immediate consumers.",
@@ -27,7 +30,8 @@
         "The complete source and shared support contract now binds a separate canonical context ID, manifest fingerprint, and effective invocation-input identity. Producer identity includes the behavior-bearing program, build and policy. Common dependencies are shared once per run rather than cloned into every family/owner partition; provider result admission charges their memory and validates negative search authority.",
         "Fresh startup uses one logical operational writer and an independent query-only reader for live generation fences, with a second descriptor-relative inventory census until WP88 supplies watcher sequence tokens. Uncaptured configuration candidates remain incomplete support. Native syntax consumes discovered version and qualified module mapping; configured external checker construction and complete two-language/empty lane composition remain WP81-WP83 obligations, never current completeness claims.",
         "Selected Pyrefly preparation rejects unproved bundle/root authority before allocating a semantic context. The pinned Query API also ignores ConfigFile runtime selection and constructs handles from private default SysInfo; nondefault version/platform selection is explicitly unavailable until WP81 supplies an effective Handle/State seam. Test-only containment or protocol fixture authority is not a production bypass.",
-        "Input/support observations are installed as typed Arrow relations in the actual candidate before sealing. Source lease observations are batch-scoped, and durable lease ownership is retained or released even if subsequent metrics or member admission fail. CPG withdrawal keys remain distinct from the private checker's actual removal census."
+        "Input/support observations are installed as typed Arrow relations in the actual candidate before sealing. Source lease observations are batch-scoped, and durable lease ownership is retained or released even if subsequent metrics or member admission fail. CPG withdrawal keys remain distinct from the private checker's actual removal census.",
+        "Status reconciliation 2026-09-07: docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v1.md. Prior current-complete judgment is reopened because WP79 changed immediate provider/resource consumers after the recorded proof. Focused local behavior does not close the full named acceptance boundary; preserve the original proving commit as historical provenance."
       ],
       "failed_approaches": [
         "Opening a second OperationalStore for a source fence is invalid because it requests another logical writer. Use the existing writer's independent reader factory and current_source_generation_from_reader instead; fixture writers must release ownership before startup acquires it.",
@@ -35,325 +39,434 @@
         "Adding a native Arrow header field requires updating the behavior-bearing descriptor's explicit field-role classification, not only its schema. The production candidate seal rejects an otherwise valid field that has no compiled role.",
         "A post-acquisition metrics read can fail after the lease is committed and hide the ownership token from cleanup. Observe before acquisition, derive counts from committed lease-state deltas, and attempt all batch releases before reporting a metrics failure."
       ],
-      "blockers": []
+      "blockers": [
+        "Restore current proving lineage for the repaired immediate provider/resource consumers in a coherent committed candidate. Preserve the historical proving commit; working-tree checks alone do not replace that lineage."
+      ]
     },
     "WP79": {
-      "status": "in_progress",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [
-        "Preflight expands immediate closure from the named resource/task files to fresh and reconstructed candidate builders, selected workspace composition, activation control sessions, provider/source buffers, graph execution, result packaging and retained caches. Existing per-epoch pool and scheduler constructors multiply budgets, and activation currently gets a default runtime. Preserve fairness, authorization-isolated catalogs, reserved control capacity and lawful existing leases; no process-RSS guarantee follows from DataFusion accounting alone."
+        "Preflight expands immediate closure from the named resource/task files to fresh and reconstructed candidate builders, selected workspace composition, activation control sessions, provider/source buffers, graph execution, result packaging and retained caches. Existing per-epoch pool and scheduler constructors multiply budgets, and activation currently gets a default runtime. Preserve fairness, authorization-isolated catalogs, reserved control capacity and lawful existing leases; no process-RSS guarantee follows from DataFusion accounting alone.",
+        "The common owner admits finite capacity, not allocator-complete RSS. Native DataFusion infallible grow records debt separately from checked admission. Arrow 59 claim replaces an existing reservation, so only proven fresh buffers are claimed; unknown shared input ownership is preserved with explicit conservative additional residency until a provenance-aware optimization is proved in WP84/WP85/WP103. Retained source slices and provider results carry shared backing ownership, not bare Arc escape.",
+        "Source capture and native preparation execute in an owned blocking operation; the enclosing startup future must also be registry-owned so dropping its observer cannot unlock the writer lease while native work continues. Exact joined termination, not cancellation intent, releases task reservations. Persistent source/result storage ownership survives temporary capture/package owners and uncertain writes until confirmed deletion or reconciliation.",
+        "Material durable Delta I/O and hidden local-object-store blocking/cleanup tasks remain an immediate WP79 closure obligation. The pinned DeltaTableBuilder custom storage backend and CreateBuilder LogStore injection preserve native transaction semantics; a resource wrapper may account physical files but must not infer semantic table state from its census. Physical free-space samples retain a cleanup floor and cannot guarantee space against other processes. Do not mark WP79 complete while these paths or retained query materializations bypass the common owner.",
+        "Status reconciliation 2026-09-07: docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v1.md. Shared budget, source/result ownership and joined-task primitives are coherent in-progress work; retained native Delta/local-object-store allocation and blocking/cleanup ownership remains an immediate closure obligation. Current packet proof additionally requires migrating the fact-generation integration consumer and replacing the integrity oracle single-call alias with direct substantive assertions without weakening oracle governance.",
+        "User authorized execution of the entire remaining scope from the 2026-09-07 implementation-status review. Resume the overlapping pre-existing resource work as one coherent packet, preserving unrelated changes; the private pre-edit snapshot is /tmp/codefabric-rt-exec-20260907-8hy8_m98. Resolve immediate provider fixture/oracle failures first, then complete material resource ownership before M18.",
+        "Execution adaptation: pinned Delta has direct Tokio/kernel workers outside DataFusion JoinSetTracer. Native operations therefore require finite workspace-owned multithread execution lanes, fully polled in their lane and destroyed before terminal release. Share the existing DataFusion RuntimeEnv pool/cache/spill owner. Serialize physical mutation lanes through a runtime-bound store lease; concurrent read lanes retain read allocations and cannot acquire write authority. Cleanup precedes runtime destruction and physical accounting reconciliation follows its joined token. No asynchronous stream, selected IORuntime or uncharged native result may escape a closed lane. These are conservative resource profiles, subject to WP103 calibration.",
+        "Native execution and physical-store primitives are preserved independently of the reopened library decision. Their production phase integration and retained Delta output admission remain prohibited as aggregate-complete claims until that decision closes. Local-store recovery must preserve abandoned native staging bytes and read-held deleted inodes until confirmed physical release; listing census remains physical accounting only. Classified failure and panic payloads must not escape native lifetime ownership."
       ],
-      "failed_approaches": [],
-      "blockers": []
+      "failed_approaches": [
+        "RuntimeEnvBuilder::from_runtime_env followed by with_max_spill_merge_fan_in rebuilds DiskManager, even for an unchanged value. Preserve inherited shared native managers and validate child policy against the common runtime configuration instead; the isolated-setter approach breaks production child authority proof.",
+        "Per-file retained provider buffers keep operation scopes alive after jobs finish. Capacity therefore includes bounded retained/page dimensions, not only running and queued jobs; use indexed scope lookup and pre-admitted scope bookkeeping instead of an unbounded or quadratic owner map.",
+        "The initial retained_generations=4 local profile incorrectly assumed epoch-only units. Native parser/process owners also retain generation-bearing envelopes: serial Tree-sitter/Ruff peaks at six owners before epoch/process retention. The combined provisional profile is sixteen; WP103 must calibrate combined workloads and refine conservative native working-envelope geometry, not erase counts to pass startup.",
+        "A default-feature library check did not expose shared bounded Arrow encoding importing the daemon-only streamed result package. The narrow data-fabric feature boundary requires an independent encoding module and error type; preserve the same allocation preflight and native encoding behavior rather than enabling daemon dependencies to make the build pass.",
+        "Finite native runtime thread/task reservations and owned local reads solve specific ownership paths but do not establish bounds for native JSON/CRC/schema/checkpoint expansion or the private retained eager snapshot. Post-decode checks, projected/replayed batches, compressed-size limits, inactive log_batch_size and DataFusion target_partitions are insufficient substitutes. The native-lane adaptation remains useful but cannot itself close this contract."
+      ],
+      "blockers": [
+        "Native resource/library decision reopening: the current pinned Delta/kernel path has no established reserve-before-decode and complete retained-snapshot ownership envelope. docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md records exact source evidence, the challenged bounded-input alternative and the proposed narrow amendment. Do not substitute a guessed reservation or a restricted-history deployment for the accepted resource contract.",
+        "Preserve and validate the bounded ownership primitives; complete production phase integration, retained native ownership and cleanup only under an accepted resource decision. WP79/M18 and terminal proof remain open."
+      ]
     },
     "WP80": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP81": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [
         "WP78 established that pinned Query constructs private default SysInfo and cannot consume selected runtime or source_db. WP81 must use the public retained State/Transaction and selected Handle boundary or reopen the exact provider API decision. Bulk Query type/callee extraction is private, so preserving those capabilities requires an explicit adapter design. Actual bundled content is publicly enumerable; dependency roots must precede typeshed as declared, and ambient PYREFLY_STDLIB_SEARCH_PATH must be controlled."
       ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP82": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP83": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP84": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP85": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP86": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP87": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP88": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP89": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP90": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP91": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP92": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP93": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP94": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP95": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP96": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP97": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP98": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP99": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP100": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP101": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP102": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP103": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP104": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP105": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     },
     "WP106": {
-      "status": "not_started",
+      "status": "invalidated",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Acceptance dependency invalidated by the WP79 native resource/library reopening; preserve this packet's entire existing scope and stable ID in the successor. No implementation or accepted CPG semantics is discarded. See docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+      ]
     }
   },
   "milestones": {
     "M18": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
-      "deviations": [],
+      "deviations": [
+        "Status reconciliation 2026-09-07: docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v1.md. Member release/source/resource implementations and focused interaction evidence exist, but stale WP77/WP78 acceptance and unfinished WP79 prevent milestone completion. Revalidate the complete milestone after member closure."
+      ],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "M19": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "M20": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "M21": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "M22": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "M23": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "M24": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "M25": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     }
   },
   "decommission_batches": {
     "DB24": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "DB25": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "DB26": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "DB27": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "DB28": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "DB29": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     },
     "DB30": {
-      "status": "not_started",
+      "status": "blocked",
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Required real-time CPG packet closure depends on the WP79 native resource decision and accepted successor authority. No exit or proof obligation is waived."
+      ]
     }
   },
   "baseline_failures": [
     "The pre-edit just ci-fast run stops at root-clippy on the existing broad Clippy diagnostics, including similar_names and too_many_lines. No baseline waiver is granted; WP105 owns full quality closure and each earlier packet must keep its local obligations passing."
   ],
-  "discovered_obligations": [],
+  "discovered_obligations": [
+    "Status reconciliation 2026-09-07: docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v1.md. Repair tests/integration/fact_generation_build.rs under the current charged-input/resource-owner contracts; revalidate WP77 and WP78 because their named acceptance shares this integration target.",
+    "WP79 must make rt_cpg_wp79_integrity directly substantive while preserving its assembly-lifetime and policy-drift falsifiers; do not weaken the established single-call-alias rejection.",
+    "Retain the conditional WP94 native-artifact and versioned pin/plan-authority transition, unclosed successor milestone/decommission obligations, and WP105 baseline-quality closure. No earlier packet proof or direct library test waives these obligations.",
+    "Resolve the native resource-admission/retained-state decision before WP79 closure. An amended dependency requires the versioned design/plan/pin-authority transition of plan sections 2.1 and 9.2; the existing LD-RT08 maintenance amendment is not a blanket resource amendment. Preserve WP94 maintenance and WP95 actual reclamation independently. Decision proposal: docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md."
+  ],
   "plan_deviations": [
     "Approval/activation uses v2 with unchanged WP77-WP106 scope, IDs and dependency/proof contracts: v1 lacked the activation validator's mandatory whole-worktree digest mode. V1 and design inputs are retained unchanged; the user authorized the entire v1 implementation."
   ],
-  "next_action": "WP79: implement the common process/workspace resource and joined-operation ownership contracts, wire all immediate runtime constructors and material allocation consumers, then run packet and M18 evidence before releasing independent provider lanes. Preflight and preservation snapshots are under /tmp/codefabric-rt-cpg-exec-jbqlfs; do not stage unrelated baseline edits. WP81 must resolve the selected State/Handle bulk-extraction seam, not revive Query default configuration as authority.",
-  "updated_at": "2026-09-04T23:55:11Z"
+  "next_action": "Obtain acceptance of the concrete native resource-amendment request in docs/reviews/implementation_status_codefabric_real_time_cpg_implementation_plan_v2_2026-09-04_2026-09-07_v2.md. Issue the required versioned design/plan/pin-authority successor with unchanged stable IDs and explicit dispositions before continuing dependent implementation. Preserve the tested native/store primitives and root snapshot /tmp/codefabric-rt-exec-20260907-8hy8_m98; restore coherent proving lineage for upstream repairs. No full WP79/M18 or terminal proof exists.",
+  "updated_at": "2026-09-07T22:59:04+00:00"
 }

@@ -18,7 +18,6 @@ Read only the shared references needed for this invocation:
 - `../_shared/evidence-policy.md`
 - `../_shared/code-intelligence.md`
 - `../_shared/doctrine-policy.md`
-- `../_shared/subagent-orchestration.md`
 - the design-dossier section of `../_shared/artifact-schemas.md`
 
 ## Invocation

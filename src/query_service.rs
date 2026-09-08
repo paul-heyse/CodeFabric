@@ -88,7 +88,7 @@ type ResourceStream = Pin<Box<dyn Stream<Item = Result<ResourceChunk, Status>> +
 const RPC_MINOR: u32 = 0;
 const SEMANTIC_PROFILE: &str = "codefabric.semantic-query.v2";
 const MAX_EXECUTION_BUDGET: Duration = Duration::from_secs(300);
-const RESULT_LEASE_GRACE: Duration = Duration::from_secs(1_800);
+const RESULT_LEASE_GRACE: Duration = Duration::from_mins(30);
 const MAX_REFERENCE_COMPLETION_CANDIDATES: u32 = 100;
 const MAX_VALIDATION_ISSUES: u32 = 64;
 const MAX_CHALLENGES: usize = 128;
@@ -524,21 +524,11 @@ enum ChallengeContinuationOutcome<A> {
     Closed(StartOutcome),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct StartState {
     challenges: BTreeMap<[u8; 32], ChallengeRecord>,
     challenge_tombstones: BTreeMap<[u8; 32], ChallengeTombstone>,
     outcomes: BTreeMap<StartScope, StartOutcomeRecord>,
-}
-
-impl Default for StartState {
-    fn default() -> Self {
-        Self {
-            challenges: BTreeMap::new(),
-            challenge_tombstones: BTreeMap::new(),
-            outcomes: BTreeMap::new(),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -777,7 +767,7 @@ impl<B: SemanticQueryBackend> QueryApplicationService<B> {
         observed_at_unix_ms: i64,
         correlation_id: &str,
     ) -> Result<StartOutcome, Status> {
-        let token = random32().map_err(|_| public_status(Code::Internal, "CHALLENGE_ENTROPY"))?;
+        let token = random32().map_err(|()| public_status(Code::Internal, "CHALLENGE_ENTROPY"))?;
         let challenge_id = format!("challenge:{}", hex(blake3::hash(&token).as_bytes()));
         let ttl_millis = challenge_ttl_millis(session);
         let expires_at_unix_ms = observed_at_unix_ms
@@ -944,36 +934,33 @@ impl<B: SemanticQueryBackend> QueryApplicationService<B> {
             .try_into()
             .map_err(|_| public_status(Code::InvalidArgument, "CHALLENGE_CONTINUATION"))?;
         let mut starts = self.starts.lock().await;
-        let record = match starts.challenges.get(&token).cloned() {
-            Some(record) => record,
-            None => {
-                let tombstone = starts
-                    .challenge_tombstones
-                    .get(&token)
-                    .cloned()
-                    .ok_or_else(|| {
-                        public_status(Code::InvalidArgument, "CHALLENGE_CONTINUATION")
-                    })?;
-                if !challenge_tombstone_authorizes(&tombstone, &continuation, session) {
-                    return Err(public_status(Code::PermissionDenied, "CHALLENGE_BINDING"));
-                }
-                return match tombstone.disposition {
-                    ChallengeTombstoneDisposition::Used => {
-                        Err(public_status(Code::InvalidArgument, "CHALLENGE_REPLAY"))
-                    }
-                    ChallengeTombstoneDisposition::Expired => {
-                        let status = public_status(Code::InvalidArgument, "CHALLENGE_EXPIRED");
-                        Ok(close_tombstoned_challenge_rejection(
-                            &mut starts,
-                            &tombstone,
-                            token,
-                            session,
-                            &status,
-                            correlation_id,
-                        ))
-                    }
-                };
+        let record = if let Some(record) = starts.challenges.get(&token).cloned() {
+            record
+        } else {
+            let tombstone = starts
+                .challenge_tombstones
+                .get(&token)
+                .cloned()
+                .ok_or_else(|| public_status(Code::InvalidArgument, "CHALLENGE_CONTINUATION"))?;
+            if !challenge_tombstone_authorizes(&tombstone, &continuation, session) {
+                return Err(public_status(Code::PermissionDenied, "CHALLENGE_BINDING"));
             }
+            return match tombstone.disposition {
+                ChallengeTombstoneDisposition::Used => {
+                    Err(public_status(Code::InvalidArgument, "CHALLENGE_REPLAY"))
+                }
+                ChallengeTombstoneDisposition::Expired => {
+                    let status = public_status(Code::InvalidArgument, "CHALLENGE_EXPIRED");
+                    Ok(close_tombstoned_challenge_rejection(
+                        &mut starts,
+                        &tombstone,
+                        token,
+                        session,
+                        &status,
+                        correlation_id,
+                    ))
+                }
+            };
         };
         if record.used {
             return Err(public_status(Code::InvalidArgument, "CHALLENGE_REPLAY"));
@@ -1083,7 +1070,7 @@ impl<B: SemanticQueryBackend> QueryApplicationService<B> {
             }
         };
         let next_token =
-            random32().map_err(|_| public_status(Code::Internal, "CHALLENGE_ENTROPY"))?;
+            random32().map_err(|()| public_status(Code::Internal, "CHALLENGE_ENTROPY"))?;
         let next_challenge_id = format!("challenge:{}", hex(blake3::hash(&next_token).as_bytes()));
         let ttl_millis = challenge_ttl_millis(session);
         let expires_at_unix_ms = observed_at_unix_ms
@@ -1737,17 +1724,16 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                     .workspace_slots
                     .slot(workspace_id)
                     .and_then(|slot| slot.lease().ok());
-                let references = match workspace_lease.as_ref() {
-                    Some(lease) => LiveReferenceProjection::from_workspace(
+                let references = if let Some(lease) = workspace_lease.as_ref() {
+                    LiveReferenceProjection::from_workspace(
                         self.release.as_ref(),
                         lease.workspace().runtime().query_authority(),
                         projection.phase(),
                         projection.sequence(),
-                    )?,
-                    None => {
-                        missing_reference_query_forms(projection.phase())?;
-                        LiveReferenceProjection::default()
-                    }
+                    )?
+                } else {
+                    missing_reference_query_forms(projection.phase())?;
+                    LiveReferenceProjection::default()
                 };
                 let result = match request
                     .operation
@@ -2635,13 +2621,13 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>)
         context,
         artifacts,
     );
-    let outcome = match tokio::time::timeout_at(execution_deadline, execution).await {
-        Ok(outcome) => outcome,
-        Err(_) => {
-            close_query_at_deadline(&coordinator, &query_id).await;
-            permit.complete();
-            return;
-        }
+    let outcome = if let Ok(outcome) = tokio::time::timeout_at(execution_deadline, execution).await
+    {
+        outcome
+    } else {
+        close_query_at_deadline(&coordinator, &query_id).await;
+        permit.complete();
+        return;
     };
     match outcome {
         SemanticBackendOutcome::PublishedArrow(success) => {
@@ -2711,12 +2697,23 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>)
                 }
             }
         }
-        SemanticBackendOutcome::Failed { .. } => {
+        SemanticBackendOutcome::Failed { error, .. } => {
+            let public_code = if matches!(
+                error,
+                SemanticQueryError::Phase {
+                    code: "RESOURCE_CAPACITY",
+                    ..
+                }
+            ) {
+                "RESOURCE_CAPACITY"
+            } else {
+                "QUERY_EXECUTION_FAILED"
+            };
             let _ = coordinator
                 .terminal(
                     &query_id,
                     QueryTerminalState::Failed,
-                    Some("QUERY_EXECUTION_FAILED".to_owned()),
+                    Some(public_code.to_owned()),
                     None,
                     now_millis(),
                 )
@@ -2742,17 +2739,16 @@ async fn await_running_until(
     query_id: &str,
     deadline: Instant,
 ) -> Result<QueryExecutionPermit, QueryCoordinatorError> {
-    match tokio::time::timeout_at(
+    if let Ok(outcome) = tokio::time::timeout_at(
         tokio::time::Instant::from_std(deadline),
         coordinator.await_running(query_id),
     )
     .await
     {
-        Ok(outcome) => outcome,
-        Err(_) => {
-            close_query_at_deadline(coordinator, query_id).await;
-            Err(QueryCoordinatorError::DeadlineElapsed)
-        }
+        outcome
+    } else {
+        close_query_at_deadline(coordinator, query_id).await;
+        Err(QueryCoordinatorError::DeadlineElapsed)
     }
 }
 
@@ -3090,11 +3086,16 @@ async fn event_to_wire(
             Event::Terminal(TerminalEvent {
                 header: Some(header()),
                 state: terminal_state(state) as i32,
-                error: public_code.map(|_| {
+                error: public_code.map(|public_code| {
+                    let capacity = public_code == "RESOURCE_CAPACITY";
                     safe_error(
-                        terminal_safe_code(state),
+                        if capacity {
+                            SafeErrorCode::CapacityUnavailable
+                        } else {
+                            terminal_safe_code(state)
+                        },
                         SafeErrorLayer::Query,
-                        false,
+                        capacity,
                         "query.terminal",
                         "",
                     )
@@ -3243,7 +3244,7 @@ fn execution_budget(value: Option<prost_types::Duration>) -> Result<Duration, St
 
 fn request_budget(context: Option<&RequestContext>) -> Result<RpcBudget, Status> {
     let context = context.ok_or_else(|| public_status(Code::InvalidArgument, "REQUEST_CONTEXT"))?;
-    RpcBudget::from_duration(execution_budget(context.remaining_budget.clone())?)
+    RpcBudget::from_duration(execution_budget(context.remaining_budget)?)
 }
 
 fn budget_expiry_unix_ms(budget: RpcBudget) -> Result<i64, Status> {
@@ -3256,7 +3257,7 @@ fn handshake_budget(request: &HandshakeRequest) -> Result<RpcBudget, Status> {
     if !safe_key(&request.correlation_id, 128) {
         return Err(public_status(Code::InvalidArgument, "REQUEST_CONTEXT"));
     }
-    RpcBudget::from_duration(execution_budget(request.remaining_budget.clone())?)
+    RpcBudget::from_duration(execution_budget(request.remaining_budget)?)
 }
 
 fn validate_context(
@@ -3267,7 +3268,7 @@ fn validate_context(
     if !safe_key(&context.correlation_id, 128) {
         return Err(public_status(Code::PermissionDenied, "REQUEST_CONTEXT"));
     }
-    execution_budget(context.remaining_budget.clone())
+    execution_budget(context.remaining_budget)
 }
 
 fn authority(session: &AuthorizedSession) -> AuthorityGeneration {
@@ -3399,7 +3400,7 @@ fn validate_requirements(requirements: &[SemanticInputRequirement]) -> Result<()
             requirement.input_kind,
             SemanticInputKind::Enum | SemanticInputKind::EnumCollection
         );
-        if !constraint_matches || choices_required != !requirement.authorized_choices.is_empty() {
+        if !constraint_matches || choices_required == requirement.authorized_choices.is_empty() {
             return Err(public_status(
                 Code::InvalidArgument,
                 "CHALLENGE_REQUIREMENT",
@@ -3832,8 +3833,8 @@ fn reference_completion(
         .into_iter()
         .take(usize::try_from(request.maximum_candidates).unwrap_or(usize::MAX))
         .map(|(value, presentation_key)| ReferenceCompletionCandidate {
-            value: value.to_owned(),
-            presentation_key: presentation_key.to_owned(),
+            value: value.clone(),
+            presentation_key: presentation_key.clone(),
         })
         .collect::<Vec<_>>();
     Ok(ReferenceCompletion {
@@ -4002,6 +4003,10 @@ fn semantic_status(error: SemanticQueryError) -> Status {
         SemanticQueryError::Invalid(_) | SemanticQueryError::Canonical(_) => {
             (Code::InvalidArgument, "SEMANTIC_REQUEST")
         }
+        SemanticQueryError::Phase {
+            code: "RESOURCE_CAPACITY",
+            ..
+        } => (Code::ResourceExhausted, "RESOURCE_CAPACITY"),
         SemanticQueryError::Phase { .. } => (Code::FailedPrecondition, "SEMANTIC_REQUEST"),
     };
     public_status(code, public_code)
@@ -4029,6 +4034,10 @@ fn coordinator_status(error: QueryCoordinatorError) -> Status {
         | QueryCoordinatorError::ResultCapacityBackpressure
         | QueryCoordinatorError::TaskCapacity
         | QueryCoordinatorError::JournalCapacity => (Code::ResourceExhausted, "QUERY_CAPACITY"),
+        QueryCoordinatorError::Resource(
+            crate::resource_budget::ResourceBudgetError::Exhausted { .. }
+            | crate::resource_budget::ResourceBudgetError::ScopeCapacity,
+        ) => (Code::ResourceExhausted, "QUERY_CAPACITY"),
         QueryCoordinatorError::UnknownQuery(_) => (Code::NotFound, "QUERY_NOT_FOUND"),
         QueryCoordinatorError::QueryOwnerMismatch
         | QueryCoordinatorError::CursorBinding
@@ -4057,7 +4066,9 @@ fn result_status(error: StreamedResultRegistryError) -> Status {
     let (code, public_code) = match error {
         StreamedResultRegistryError::UnknownPackage
         | StreamedResultRegistryError::UnknownResource => (Code::NotFound, "RESOURCE_NOT_FOUND"),
-        StreamedResultRegistryError::WrongOwner | StreamedResultRegistryError::WrongWorkspace => {
+        StreamedResultRegistryError::WrongOwner
+        | StreamedResultRegistryError::WrongWorkspace
+        | StreamedResultRegistryError::BudgetOwnerMismatch => {
             (Code::PermissionDenied, "RESOURCE_BINDING")
         }
         StreamedResultRegistryError::GenerationMismatch => {
@@ -4070,6 +4081,10 @@ fn result_status(error: StreamedResultRegistryError) -> Status {
             (Code::ResourceExhausted, "RESOURCE_CAPACITY")
         }
         StreamedResultRegistryError::Expired => (Code::DeadlineExceeded, "RESOURCE_EXPIRED"),
+        StreamedResultRegistryError::Resource(
+            crate::resource_budget::ResourceBudgetError::Exhausted { .. }
+            | crate::resource_budget::ResourceBudgetError::ScopeCapacity,
+        ) => (Code::ResourceExhausted, "RESOURCE_CAPACITY"),
         StreamedResultRegistryError::Released => (Code::FailedPrecondition, "RESOURCE_RELEASED"),
         StreamedResultRegistryError::InvalidChunkBound => (Code::InvalidArgument, "RESOURCE_BOUND"),
         StreamedResultRegistryError::RangeOutsideResource
@@ -4464,7 +4479,17 @@ mod tests {
         let journal = Arc::new(
             SqliteQueryCoordinatorJournal::open(&temp.path().join("query.sqlite")).unwrap(),
         );
-        Arc::new(QueryCoordinator::try_new(policy, 7, [0x71; 32], journal, 100).unwrap())
+        Arc::new(
+            QueryCoordinator::try_new(
+                policy,
+                7,
+                [0x71; 32],
+                journal,
+                100,
+                crate::fabric::workspace_resources::test_workspace_budget(),
+            )
+            .unwrap(),
+        )
     }
 
     fn coordinator_operation(key: &str, marker: u8) -> NormalizedQueryOperation {
@@ -4508,7 +4533,13 @@ mod tests {
             Arc::new(WorkspaceSlotRegistry::new()),
             test_coordinator(temp),
             sessions,
-            Arc::new(StreamedResultRegistry::try_new(1_024).unwrap()),
+            Arc::new(
+                StreamedResultRegistry::try_new(
+                    1_024,
+                    crate::fabric::workspace_resources::test_workspace_budget(),
+                )
+                .unwrap(),
+            ),
             "daemon:guard-ledger",
         )
         .unwrap();
@@ -4531,7 +4562,13 @@ mod tests {
             Arc::new(WorkspaceSlotRegistry::new()),
             test_coordinator(&temp),
             sessions,
-            Arc::new(StreamedResultRegistry::try_new(32).unwrap()),
+            Arc::new(
+                StreamedResultRegistry::try_new(
+                    32,
+                    crate::fabric::workspace_resources::test_workspace_budget(),
+                )
+                .unwrap(),
+            ),
             "daemon:injected-release-oracle",
         )
         .unwrap();
@@ -4565,7 +4602,13 @@ mod tests {
             Arc::new(WorkspaceSlotRegistry::new()),
             test_coordinator(&temp),
             sessions,
-            Arc::new(StreamedResultRegistry::try_new(32).unwrap()),
+            Arc::new(
+                StreamedResultRegistry::try_new(
+                    32,
+                    crate::fabric::workspace_resources::test_workspace_budget(),
+                )
+                .unwrap(),
+            ),
             "daemon:single-release-oracle",
         )
         .unwrap();
@@ -4598,7 +4641,13 @@ mod tests {
             Arc::new(WorkspaceSlotRegistry::new()),
             test_coordinator(&temp),
             sessions,
-            Arc::new(StreamedResultRegistry::try_new(32).unwrap()),
+            Arc::new(
+                StreamedResultRegistry::try_new(
+                    32,
+                    crate::fabric::workspace_resources::test_workspace_budget(),
+                )
+                .unwrap(),
+            ),
             "daemon:mismatch-oracle",
         );
         assert!(matches!(
@@ -5529,7 +5578,13 @@ mod tests {
         execute_accepted_query(ExecutionTask {
             backend,
             coordinator: Arc::clone(&coordinator),
-            results: Arc::new(StreamedResultRegistry::try_new(1_024).unwrap()),
+            results: Arc::new(
+                StreamedResultRegistry::try_new(
+                    1_024,
+                    crate::fabric::workspace_resources::test_workspace_budget(),
+                )
+                .unwrap(),
+            ),
             query_id: queued.query_id.clone(),
             prepared,
             principal_id: PrincipalId::from_bytes([0x11; 16]),
@@ -5570,7 +5625,13 @@ mod tests {
         let state = WatchState {
             sessions,
             coordinator: test_coordinator(&temp),
-            results: Arc::new(StreamedResultRegistry::try_new(1_024).unwrap()),
+            results: Arc::new(
+                StreamedResultRegistry::try_new(
+                    1_024,
+                    crate::fabric::workspace_resources::test_workspace_budget(),
+                )
+                .unwrap(),
+            ),
             peer,
             session_token: session.token().to_vec(),
             query_id: "query:blocked-watch".to_owned(),
@@ -5615,7 +5676,13 @@ mod tests {
         let (_keep_blocked, blocker) = tokio::sync::oneshot::channel();
         let state = ReadState {
             sessions,
-            results: Arc::new(StreamedResultRegistry::try_new(1_024).unwrap()),
+            results: Arc::new(
+                StreamedResultRegistry::try_new(
+                    1_024,
+                    crate::fabric::workspace_resources::test_workspace_budget(),
+                )
+                .unwrap(),
+            ),
             peer,
             session_token: session.token().to_vec(),
             principal_id: session.principal_id(),

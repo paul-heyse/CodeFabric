@@ -19,16 +19,23 @@ use crate::identity::{
     IdentityDomain, IdentityError, WorkspacePath, encode_public_id, random_registration_nonce,
     source_file_identity,
 };
+use crate::inventory::{charged_workspace_path, reserve_memory};
 use crate::operational_store::{OperationalStore, OperationalStoreError};
 pub use crate::provider_types::ProviderText;
 pub use crate::registries::NewlineKind;
+use crate::resource_budget::{
+    ChargedSlice, ChargedValue, ResourceAmounts, ResourceBudget, ResourceBudgetError,
+    ResourceReservation, ResourceScopeKind,
+};
 use crate::secure_path::{
     PlatformPath, SecurePathError, StableFileMetadata, StableFileRead, StableReadError,
     open_workspace_root,
 };
 use crate::workspace_registry::{WorkspaceRegistry, WorkspaceRegistryError};
 
+mod disk_ledger;
 mod inventory_capture;
+pub use disk_ledger::{SourceBlobDiskLedger, SourceBlobDiskObservation};
 pub use inventory_capture::{
     InventoryCaptureBundle, InventoryCaptureDisposition, InventoryCaptureEntry,
     SourceInventoryCapturePolicy, SourceSelection,
@@ -69,7 +76,9 @@ pub enum SourceEncoding {
     Utf8,
     Utf8Bom,
     PythonLatin1,
-    Unsupported { declared: Option<String> },
+    Unsupported {
+        declared: Option<ChargedValue<String>>,
+    },
 }
 
 impl SourceEncoding {
@@ -86,8 +95,8 @@ impl SourceEncoding {
 /// Little-endian `u64` line-start artifact and its content identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LineIndex {
-    pub offsets: Arc<[u64]>,
-    pub serialized: Arc<[u8]>,
+    pub offsets: ChargedSlice<u64>,
+    pub serialized: ChargedSlice<u8>,
     pub digest: [u8; 32],
     pub format_version: u16,
     pub newline_kind: NewlineKind,
@@ -108,13 +117,13 @@ pub struct SourceImage {
     pub worktree_id: Option<[u8; 16]>,
     pub source_generation: u64,
     pub file_id: [u8; 16],
-    pub path: WorkspacePath,
+    pub path: ChargedValue<WorkspacePath>,
     pub language: SourceLanguage,
-    pub bytes: Arc<[u8]>,
+    pub bytes: ChargedSlice<u8>,
     pub digest: [u8; 32],
     pub byte_length: u64,
     pub file_kind: SourceFileKind,
-    pub blob: BlobReference,
+    pub blob: ChargedValue<BlobReference>,
     pub lease: SourceBlobLease,
     pub encoding: SourceEncoding,
     pub provider_text: Option<ProviderText>,
@@ -266,7 +275,7 @@ pub fn publish_provider_workspace_view(
                     byte_length: image.byte_length,
                     mode,
                 },
-                Arc::clone(&image.bytes),
+                image.bytes.clone(),
             ))
         })
         .collect::<Result<Vec<_>, SourceImageError>>()?;
@@ -461,6 +470,12 @@ pub struct GarbageCollectionReport {
 /// Failures from capture, persistence, and immutable-blob operations.
 #[derive(Debug, Error)]
 pub enum SourceImageError {
+    #[error("physical source-blob growth was not admitted")]
+    PhysicalDisk,
+    #[error(transparent)]
+    Resource(#[from] ResourceBudgetError),
+    #[error(transparent)]
+    Inventory(#[from] crate::inventory::InventoryError),
     #[error(transparent)]
     SecurePath(#[from] SecurePathError),
     #[error(transparent)]
@@ -525,6 +540,8 @@ pub struct CaptureRequest {
 pub struct BlobStore {
     root: PathBuf,
     descriptor: OwnedFd,
+    #[cfg(test)]
+    publication_fault: u8,
 }
 
 impl BlobStore {
@@ -553,6 +570,8 @@ impl BlobStore {
         Ok(Self {
             root: root.to_owned(),
             descriptor,
+            #[cfg(test)]
+            publication_fault: 0,
         })
     }
 
@@ -562,26 +581,16 @@ impl BlobStore {
         self.root.join(digest_name(digest))
     }
 
-    fn put(&self, bytes: &[u8]) -> Result<BlobReference, SourceImageError> {
-        let digest = crate::integrity::digest_bytes(bytes);
-        let name = digest_name(&digest);
-        match self.read_named(&name) {
-            Ok(existing) => {
-                if existing != bytes {
-                    return Err(SourceImageError::BlobDigestMismatch);
-                }
-            }
-            Err(SourceImageError::BlobIo) => self.publish(&name, bytes)?,
-            Err(error) => return Err(error),
-        }
-        Ok(BlobReference {
-            digest,
-            relative_name: name,
-            byte_length: u64::try_from(bytes.len()).map_err(|_| SourceImageError::BlobIo)?,
-        })
+    fn put_governed(
+        &self,
+        bytes: &[u8],
+        budget: &ResourceBudget,
+        ledger: &SourceBlobDiskLedger,
+    ) -> Result<BlobReference, SourceImageError> {
+        ledger.put(self, bytes, budget)
     }
 
-    fn read_named(&self, name: &str) -> Result<Vec<u8>, SourceImageError> {
+    fn read_named(&self, name: &str, expected_size: usize) -> Result<Vec<u8>, SourceImageError> {
         let descriptor = openat(
             &self.descriptor,
             name,
@@ -597,11 +606,14 @@ impl BlobStore {
         })?;
         let mut file = fs::File::from(descriptor);
         let metadata = file.metadata().map_err(|_| SourceImageError::BlobIo)?;
-        if !metadata.is_file() || metadata.permissions().mode() & 0o777 != 0o400 {
+        if !metadata.is_file()
+            || metadata.permissions().mode() & 0o777 != 0o400
+            || metadata.len() != expected_size as u64
+        {
             return Err(SourceImageError::BlobDigestMismatch);
         }
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
+        let mut bytes = vec![0; expected_size];
+        file.read_exact(&mut bytes)
             .map_err(|_| SourceImageError::BlobIo)?;
         if digest_name(&crate::integrity::digest_bytes(&bytes)) != name {
             return Err(SourceImageError::BlobDigestMismatch);
@@ -609,15 +621,10 @@ impl BlobStore {
         Ok(bytes)
     }
 
-    fn publish(&self, name: &str, bytes: &[u8]) -> Result<(), SourceImageError> {
-        let temporary = format!(
-            ".tmp-{}-{}",
-            std::process::id(),
-            u128::from_be_bytes(random_registration_nonce()?)
-        );
+    fn publish(&self, name: &str, bytes: &[u8], temporary: &str) -> Result<(), SourceImageError> {
         let descriptor = openat(
             &self.descriptor,
-            &temporary,
+            temporary,
             OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW,
             Mode::RUSR | Mode::WUSR,
         )
@@ -626,15 +633,23 @@ impl BlobStore {
         let result = (|| {
             file.write_all(bytes)
                 .map_err(|_| SourceImageError::BlobIo)?;
+            #[cfg(test)]
+            if self.publication_fault != 0 {
+                return Err(SourceImageError::BlobIo);
+            }
             file.sync_all().map_err(|_| SourceImageError::BlobIo)?;
             fchmod(&file, Mode::RUSR).map_err(|_| SourceImageError::BlobIo)?;
-            renameat(&self.descriptor, &temporary, &self.descriptor, name)
+            renameat(&self.descriptor, temporary, &self.descriptor, name)
                 .map_err(|_| SourceImageError::BlobIo)?;
             fsync(&self.descriptor).map_err(|_| SourceImageError::BlobIo)?;
             Ok(())
         })();
-        if result.is_err() {
-            let _ = unlinkat(&self.descriptor, &temporary, rustix::fs::AtFlags::empty());
+        #[cfg(test)]
+        let cleanup_allowed = self.publication_fault != 2;
+        #[cfg(not(test))]
+        let cleanup_allowed = true;
+        if result.is_err() && cleanup_allowed {
+            let _ = unlinkat(&self.descriptor, temporary, rustix::fs::AtFlags::empty());
         }
         result
     }
@@ -655,6 +670,10 @@ impl BlobStore {
 
 /// Daemon lifecycle-owned source capture, lease, and garbage-collection service.
 pub struct SourceImageStore {
+    budget: ResourceBudget,
+    disk: SourceBlobDiskLedger,
+    #[cfg(test)]
+    fixture: bool,
     blobs: BlobStore,
     policy: SourceCapturePolicy,
     metrics: SourceImageMetrics,
@@ -662,10 +681,11 @@ pub struct SourceImageStore {
     lease_metric_reads: u64,
     #[cfg(test)]
     fail_next_lease_metric_read: bool,
+    _store_metadata: ResourceReservation,
 }
 
 enum StableCapture {
-    Stable(StableFileRead),
+    Stable(StableFileRead, ResourceReservation),
     Terminal(CaptureOutcome),
 }
 
@@ -675,19 +695,76 @@ impl SourceImageStore {
     /// # Errors
     ///
     /// Returns an immutable blob-directory validation failure.
-    pub fn open(root: &Path, policy: SourceCapturePolicy) -> Result<Self, SourceImageError> {
+    pub fn open_governed(
+        root: &Path,
+        policy: SourceCapturePolicy,
+        budget: ResourceBudget,
+        disk: SourceBlobDiskLedger,
+        cancellation: &crate::cancellation::Cancellation,
+    ) -> Result<Self, SourceImageError> {
+        disk.validate_owner(&budget)?;
+        if budget
+            .ancestor_owner(ResourceScopeKind::Workspace)
+            .is_none()
+        {
+            return Err(ResourceBudgetError::ForeignOwner.into());
+        }
         if policy.maximum_bytes == 0 || policy.maximum_bytes > EXPLICIT_SOURCE_MAXIMUM_BYTES {
             return Err(SourceImageError::BlobIo);
         }
+        let metadata = reserve_memory(
+            &budget,
+            root.as_os_str().as_bytes().len() as u64 + std::mem::size_of::<Self>() as u64,
+        )?;
+        let blobs = BlobStore::open(root)?;
+        disk.reconcile(&blobs, cancellation)?;
         Ok(Self {
-            blobs: BlobStore::open(root)?,
+            budget,
+            disk,
+            #[cfg(test)]
+            fixture: false,
+            blobs,
             policy,
             metrics: SourceImageMetrics::default(),
             #[cfg(test)]
             lease_metric_reads: 0,
             #[cfg(test)]
             fail_next_lease_metric_read: false,
+            _store_metadata: metadata,
         })
+    }
+
+    #[cfg(test)]
+    pub fn open(root: &Path, policy: SourceCapturePolicy) -> Result<Self, SourceImageError> {
+        Self::open_fixture_governed(
+            root,
+            policy,
+            crate::provider_types::source_fixture_budget([2; 16]),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_fixture_governed(
+        root: &Path,
+        policy: SourceCapturePolicy,
+        budget: ResourceBudget,
+    ) -> Result<Self, SourceImageError> {
+        let disk = SourceBlobDiskLedger::try_new(
+            budget.clone(),
+            crate::disk_headroom::LocalDiskHeadroom::open(
+                root.parent().ok_or(SourceImageError::BlobIo)?,
+            )
+            .map_err(|_| SourceImageError::PhysicalDisk)?,
+        )?;
+        let mut value = Self::open_governed(
+            root,
+            policy,
+            budget,
+            disk,
+            &crate::cancellation::Cancellation::default(),
+        )?;
+        value.fixture = true;
+        Ok(value)
     }
 
     /// Capture and lease one coherent source snapshot.
@@ -728,16 +805,29 @@ impl SourceImageStore {
         mut observe_change_token: impl FnMut() -> Option<u64>,
     ) -> Result<CaptureOutcome, SourceImageError> {
         let started = Instant::now();
+        #[cfg(test)]
+        let check_owner = !self.fixture;
+        #[cfg(not(test))]
+        let check_owner = true;
+        if check_owner
+            && self
+                .budget
+                .ancestor_owner(ResourceScopeKind::Workspace)
+                .is_none_or(|owner| owner.id != request.workspace_id)
+        {
+            return Err(ResourceBudgetError::ForeignOwner.into());
+        }
         self.metrics.capture_attempts = self.metrics.capture_attempts.saturating_add(1);
         if current_source_generation(store, request.workspace_id)? != request.source_generation {
             return Err(SourceImageError::GenerationChanged);
         }
         let root = open_workspace_root(store, request.workspace_id)?;
-        let workspace_path = root.workspace_path(&request.path)?;
-        let stable = match self.stable_read(&root, request, &mut observe_change_token, started)? {
-            StableCapture::Stable(read) => read,
-            StableCapture::Terminal(outcome) => return Ok(outcome),
-        };
+        let workspace_path = charged_workspace_path(&root, &request.path, &self.budget)?;
+        let (stable, mut read_charge) =
+            match self.stable_read(&root, request, &mut observe_change_token, started)? {
+                StableCapture::Stable(read, charge) => (read, charge),
+                StableCapture::Terminal(outcome) => return Ok(outcome),
+            };
         if current_source_generation(store, request.workspace_id)? != request.source_generation {
             return Err(SourceImageError::GenerationChanged);
         }
@@ -747,11 +837,22 @@ impl SourceImageStore {
             return Ok(CaptureOutcome::Deferred);
         }
         let digest = crate::integrity::digest_bytes(&stable.bytes);
-        let blob = self.blobs.put(&stable.bytes)?;
-        let line_index = build_line_index(&stable.bytes);
-        let line_blob = self.blobs.put(&line_index.serialized)?;
+        let blob_charge = reserve_memory(
+            &self.budget,
+            std::mem::size_of::<BlobReference>() as u64 + 64,
+        )?;
+        let blob = blob_charge.into_charged_value(self.blobs.put_governed(
+            &stable.bytes,
+            &self.budget,
+            &self.disk,
+        )?);
+        let line_index = build_line_index_governed(&stable.bytes, &self.budget)?;
+        let line_blob =
+            self.blobs
+                .put_governed(&line_index.serialized, &self.budget, &self.disk)?;
         debug_assert_eq!(line_blob.digest, line_index.digest);
-        let (encoding, provider_text) = classify_encoding(request.language, &stable.bytes);
+        let (encoding, provider_text) =
+            classify_encoding_governed(request.language, &stable.bytes, &self.budget)?;
         let file_id = source_file_identity(&workspace_path)?.id;
         let record = WorkspaceRegistry::new(store).show(request.workspace_id)?;
         persist_blob(
@@ -791,7 +892,12 @@ impl SourceImageStore {
             file_id,
             path: workspace_path,
             language: request.language,
-            bytes: Arc::from(stable.bytes),
+            bytes: read_charge
+                .split(ResourceAmounts {
+                    memory_bytes: stable.bytes.capacity() as u64,
+                    ..ResourceAmounts::default()
+                })?
+                .into_charged_vec(stable.bytes)?,
             digest,
             byte_length: blob.byte_length,
             file_kind: SourceFileKind::Regular,
@@ -815,9 +921,21 @@ impl SourceImageStore {
             if observe_change_token() != Some(request.change_token) {
                 return Ok(StableCapture::Terminal(self.deferred(started)));
             }
-            match root.read_stable_file(&request.path, self.policy.maximum_bytes) {
+            let mut charge = reserve_memory(&self.budget, 0)?;
+            match root.read_stable_file_with_allocation(
+                &request.path,
+                self.policy.maximum_bytes,
+                |bytes| {
+                    charge
+                        .try_grow(ResourceAmounts {
+                            memory_bytes: bytes as u64,
+                            ..ResourceAmounts::default()
+                        })
+                        .map_err(|_| SecurePathError::ResourceExhausted)
+                },
+            ) {
                 Ok(read) if observe_change_token() == Some(request.change_token) => {
-                    return Ok(StableCapture::Stable(read));
+                    return Ok(StableCapture::Stable(read, charge));
                 }
                 Ok(_) | Err(StableReadError::ChangedDuringRead)
                     if attempt < self.policy.stable_read_retries =>
@@ -1042,7 +1160,7 @@ impl SourceImageStore {
                 if protected {
                     return Ok::<bool, SourceImageError>(false);
                 }
-                self.blobs.remove(&digest)?;
+                self.disk.remove(&self.blobs, &digest)?;
                 transaction.execute(
                     "DELETE FROM source_blob_lease_member WHERE blob_digest=?1",
                     [digest.as_slice()],
@@ -1064,7 +1182,7 @@ impl SourceImageStore {
                     |row| row.get(0),
                 )?;
                 if !line_referenced {
-                    self.blobs.remove(&line_digest)?;
+                    self.disk.remove(&self.blobs, &line_digest)?;
                 }
                 Ok(true)
             })?;
@@ -1395,8 +1513,23 @@ fn acquire_source_blob_lease(
     ))
 }
 
-fn build_line_index(bytes: &[u8]) -> LineIndex {
-    let mut offsets = vec![0_u64];
+fn build_line_index_governed(
+    bytes: &[u8],
+    budget: &ResourceBudget,
+) -> Result<LineIndex, ResourceBudgetError> {
+    let capacity = bytes
+        .iter()
+        .filter(|byte| matches!(byte, b'\r' | b'\n'))
+        .count()
+        + 1;
+    let mut charge = reserve_memory(
+        budget,
+        (capacity as u64)
+            .checked_mul(16)
+            .ok_or(ResourceBudgetError::Overflow)?,
+    )?;
+    let mut offsets = Vec::with_capacity(capacity);
+    offsets.push(0_u64);
     let mut saw_lf = false;
     let mut saw_crlf = false;
     let mut saw_cr = false;
@@ -1427,69 +1560,106 @@ fn build_line_index(bytes: &[u8]) -> LineIndex {
         (1, _, _, true) => NewlineKind::Cr,
         _ => NewlineKind::Mixed,
     };
-    let serialized = offsets
-        .iter()
-        .flat_map(|offset| offset.to_le_bytes())
-        .collect::<Vec<_>>();
-    LineIndex {
-        offsets: Arc::from(offsets),
+    let mut serialized = Vec::with_capacity(offsets.len() * 8);
+    for offset in &offsets {
+        serialized.extend_from_slice(&offset.to_le_bytes());
+    }
+    Ok(LineIndex {
+        offsets: charge
+            .split(ResourceAmounts {
+                memory_bytes: (offsets.capacity() * 8) as u64,
+                ..ResourceAmounts::default()
+            })?
+            .into_charged_vec(offsets)?,
         digest: crate::integrity::digest_bytes(&serialized),
-        serialized: Arc::from(serialized),
+        serialized: charge.into_charged_vec(serialized)?,
         format_version: 1,
         newline_kind,
-    }
+    })
 }
 
-fn classify_encoding(
+#[cfg(test)]
+fn build_line_index(bytes: &[u8]) -> LineIndex {
+    build_line_index_governed(
+        bytes,
+        &crate::provider_types::source_fixture_budget([2; 16]),
+    )
+    .unwrap()
+}
+
+fn classify_encoding_governed(
     language: SourceLanguage,
     bytes: &[u8],
-) -> (SourceEncoding, Option<ProviderText>) {
+    budget: &ResourceBudget,
+) -> Result<(SourceEncoding, Option<ProviderText>), ResourceBudgetError> {
     let bom = bytes.starts_with(&[0xef, 0xbb, 0xbf]);
     let payload = if bom { &bytes[3..] } else { bytes };
     if let Ok(text) = std::str::from_utf8(payload) {
-        let offsets = text
-            .char_indices()
-            .map(|(offset, _)| u64::try_from(offset + usize::from(bom) * 3).unwrap_or(u64::MAX))
-            .chain(std::iter::once(
-                u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-            ))
-            .collect::<Vec<_>>();
-        return (
+        return Ok((
             if bom {
                 SourceEncoding::Utf8Bom
             } else {
                 SourceEncoding::Utf8
             },
-            Some(ProviderText {
-                text: Arc::from(text),
-                original_byte_offsets: Arc::from(offsets),
-            }),
-        );
+            Some(ProviderText::from_validated_utf8_with_offset(
+                text,
+                u64::from(bom) * 3,
+                budget,
+            )?),
+        ));
     }
     if language == SourceLanguage::Python {
+        let cookie_charge = reserve_memory(
+            budget,
+            (bytes.len() as u64)
+                .checked_mul(2)
+                .and_then(|n| n.checked_add(std::mem::size_of::<String>() as u64))
+                .ok_or(ResourceBudgetError::Overflow)?,
+        )?;
         let declared = python_encoding_cookie(bytes);
         if declared
             .as_deref()
             .is_some_and(|name| matches!(name, "latin-1" | "latin1" | "iso-8859-1" | "iso-latin-1"))
         {
-            let text = bytes
-                .iter()
-                .map(|byte| char::from(*byte))
-                .collect::<String>();
+            let text_charge = reserve_memory(
+                budget,
+                bytes.len() as u64 * 2 + std::mem::size_of::<String>() as u64,
+            )?;
+            let offsets_charge = reserve_memory(budget, (bytes.len() as u64 + 1) * 8)?;
+            let mut text = String::with_capacity(bytes.len() * 2);
+            text.extend(bytes.iter().map(|byte| char::from(*byte)));
             let offsets = (0..=bytes.len())
-                .map(|offset| u64::try_from(offset).unwrap_or(u64::MAX))
+                .map(|offset| offset as u64)
                 .collect::<Vec<_>>();
-            return (
+            return Ok((
                 SourceEncoding::PythonLatin1,
                 Some(ProviderText {
-                    text: Arc::from(text),
-                    original_byte_offsets: Arc::from(offsets),
+                    text: text_charge.into_charged_value(text),
+                    original_byte_offsets: offsets_charge.into_charged_vec(offsets)?,
                 }),
-            );
+            ));
         }
-        return (SourceEncoding::Unsupported { declared }, None);
+        return Ok((
+            SourceEncoding::Unsupported {
+                declared: declared.map(|value| cookie_charge.into_charged_value(value)),
+            },
+            None,
+        ));
     }
-    (SourceEncoding::Unsupported { declared: None }, None)
+    Ok((SourceEncoding::Unsupported { declared: None }, None))
+}
+
+#[cfg(test)]
+fn classify_encoding(
+    language: SourceLanguage,
+    bytes: &[u8],
+) -> (SourceEncoding, Option<ProviderText>) {
+    classify_encoding_governed(
+        language,
+        bytes,
+        &crate::provider_types::source_fixture_budget([2; 16]),
+    )
+    .unwrap()
 }
 
 fn python_encoding_cookie(bytes: &[u8]) -> Option<String> {
@@ -1610,9 +1780,9 @@ fn make_tree_read_only(root: &Path) -> Result<(), SourceImageError> {
         .map_err(|_| SourceImageError::ProviderWorkspaceView)
 }
 
-fn verify_published_provider_tree(
+fn verify_published_provider_tree<B: AsRef<[u8]>>(
     root: &Path,
-    entries: &[(ProviderWorkspaceManifestEntry, Arc<[u8]>)],
+    entries: &[(ProviderWorkspaceManifestEntry, B)],
 ) -> Result<(), SourceImageError> {
     let root_metadata =
         fs::symlink_metadata(root).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
@@ -2101,17 +2271,17 @@ mod tests {
             worktree_id: None,
             source_generation: 9,
             file_id: source_file_identity(&path).unwrap().id,
-            path,
+            path: ChargedValue::for_test(path),
             language: SourceLanguage::Rust,
-            bytes: Arc::clone(&bytes),
+            bytes: ChargedSlice::for_test(bytes.to_vec()),
             digest,
             byte_length: u64::try_from(bytes.len()).unwrap(),
             file_kind: SourceFileKind::Regular,
-            blob: BlobReference {
+            blob: ChargedValue::for_test(BlobReference {
                 digest,
                 relative_name: digest_name(&digest),
                 byte_length: u64::try_from(bytes.len()).unwrap(),
-            },
+            }),
             lease: SourceBlobLease {
                 lease_id: [0x62; 16],
                 blob_digest: digest,
@@ -2120,8 +2290,8 @@ mod tests {
             encoding: SourceEncoding::Utf8,
             provider_text: None,
             line_index: LineIndex {
-                offsets: Arc::from([0, u64::try_from(bytes.len()).unwrap()]),
-                serialized: Arc::from(line_bytes.clone()),
+                offsets: ChargedSlice::for_test(vec![0, u64::try_from(bytes.len()).unwrap()]),
+                serialized: ChargedSlice::for_test(line_bytes.clone()),
                 digest: crate::integrity::digest_bytes(&line_bytes),
                 format_version: 1,
                 newline_kind: NewlineKind::Lf,

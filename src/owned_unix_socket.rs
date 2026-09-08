@@ -300,7 +300,7 @@ fn open_root_authority(root: &Path) -> Result<OwnedFd, OwnedUnixSocketError> {
 }
 
 fn validate_root_descriptor(root: &Path, descriptor: &OwnedFd) -> Result<(), OwnedUnixSocketError> {
-    let metadata = fstat(&descriptor).map_err(|source| OwnedUnixSocketError::Io {
+    let metadata = fstat(descriptor).map_err(|source| OwnedUnixSocketError::Io {
         path: root.to_owned(),
         source: source.into(),
     })?;

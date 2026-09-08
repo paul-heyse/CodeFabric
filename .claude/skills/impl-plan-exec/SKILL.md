@@ -18,8 +18,7 @@ Read:
 
 - `../_shared/evidence-policy.md`
 - `../_shared/code-intelligence.md`
-- `../_shared/validation-policy.md`
-- `../_shared/subagent-orchestration.md`
+- `../_shared/validation-policy.md` §§1–4 and §6
 - the plan and execution-state sections of
   `../_shared/artifact-schemas.md`
 
@@ -276,36 +275,6 @@ re-running the packet's named checks (`artifact-schemas.md` §8).
 Set packet `complete`, release dependent packets to `ready`, and update
 `next_action`.
 
-## Subagent execution
-
-Delegate only packets satisfying the shared criteria.
-
-### Parallel writers
-
-Use isolated worktrees for simultaneous writers. Do not run two agents against
-overlapping files or the same contract boundary. The lead owns merge order and
-conflict resolution.
-
-### Handoff
-
-Use the compact handoff from `../_shared/subagent-orchestration.md`. Generic
-constraints belong in the subagent definition.
-
-### Validation ownership
-
-Subagents must run edit-local and packet-local checks. Their return must
-include the checks run — name plus exit status for each. Do not instruct
-them to "implement only" or disregard their tests.
-
-After merge, the lead:
-
-- inspects the diff;
-- reconciles state;
-- reruns integration-sensitive packet checks;
-- runs the next milestone when ready.
-
-A subagent's completion claim is evidence to inspect, not automatic state.
-
 ## Phase 4 — Integration milestones
 
 When all prerequisite packets for `M*` are complete:
@@ -391,5 +360,4 @@ memory as the only resume mechanism.
 - Leaving old and new authorities active without an accepted bounded
   transition.
 - Rewriting the immutable plan to match implementation.
-- Claiming final success while required checks were skipped or only subagent
-  summaries were reviewed.
+- Claiming final success without verified results for all required checks.

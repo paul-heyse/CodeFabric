@@ -5,7 +5,6 @@
 //! byte coordinates.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ruff_python_ast::token::TokenKind;
@@ -334,7 +333,7 @@ pub struct RuffDiagnosticFact {
     pub message: String,
     pub start_byte: u64,
     pub end_byte: u64,
-    pub tree_sitter_recovery_ids: Arc<[SyntaxOccurrenceId]>,
+    pub tree_sitter_recovery_ids: Vec<SyntaxOccurrenceId>,
 }
 
 /// Smallest compatible named Tree-sitter node for one Ruff AST occurrence.
@@ -374,21 +373,23 @@ pub struct RuffSnapshot {
     pub catalog_id: &'static str,
     pub provider_version: &'static str,
     pub runtime_inventory_fingerprint: &'static str,
-    pub tokens: Arc<[RuffTokenFact]>,
-    pub ast: Arc<[RuffAstFact]>,
-    pub comments: Arc<[RuffCommentFact]>,
-    pub directives: Arc<[RuffDirectiveFact]>,
-    pub strings: Arc<[RuffStringRegion]>,
-    pub docstrings: Arc<[RuffDocstringFact]>,
-    pub continuation_line_starts: Arc<[u64]>,
-    pub diagnostics: Arc<[RuffDiagnosticFact]>,
-    pub correspondences: Arc<[RuffTreeCorrespondence]>,
+    pub tokens: crate::resource_budget::ChargedSlice<RuffTokenFact>,
+    pub ast: crate::resource_budget::ChargedSlice<RuffAstFact>,
+    pub comments: crate::resource_budget::ChargedSlice<RuffCommentFact>,
+    pub directives: crate::resource_budget::ChargedSlice<RuffDirectiveFact>,
+    pub strings: crate::resource_budget::ChargedSlice<RuffStringRegion>,
+    pub docstrings: crate::resource_budget::ChargedSlice<RuffDocstringFact>,
+    pub continuation_line_starts: crate::resource_budget::ChargedSlice<u64>,
+    pub diagnostics: crate::resource_budget::ChargedSlice<RuffDiagnosticFact>,
+    pub correspondences: crate::resource_budget::ChargedSlice<RuffTreeCorrespondence>,
     pub metrics: RuffRunMetrics,
 }
 
 /// Closed adapter errors; no Ruff-owned error escapes this module.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum RuffAdapterError {
+    #[error(transparent)]
+    Resource(#[from] crate::provider_contracts::ProviderContractError),
     #[error("Ruff provider version mismatch: {0}")]
     ProviderVersionMismatch(String),
     #[error("provider text boundary map is invalid: {0}")]
@@ -495,7 +496,24 @@ fn ruff_python_token_kind_entry(kind: TokenKind) -> RuffTokenKindEntry {
 
 #[allow(clippy::too_many_lines)] // Exhaustiveness is the deliberate Ruff upgrade sentinel.
 const fn ruff_python_normalized_kind_code(kind: NodeKind) -> u16 {
-    use NodeKind::*;
+    use NodeKind::{
+        Alias, Arguments, BytesLiteral, Comprehension, Decorator, ElifElseClause,
+        ExceptHandlerExceptHandler, ExprAttribute, ExprAwait, ExprBinOp, ExprBoolOp,
+        ExprBooleanLiteral, ExprBytesLiteral, ExprCall, ExprCompare, ExprDict, ExprDictComp,
+        ExprEllipsisLiteral, ExprFString, ExprGenerator, ExprIf, ExprIpyEscapeCommand, ExprLambda,
+        ExprList, ExprListComp, ExprName, ExprNamed, ExprNoneLiteral, ExprNumberLiteral, ExprSet,
+        ExprSetComp, ExprSlice, ExprStarred, ExprStringLiteral, ExprSubscript, ExprTString,
+        ExprTuple, ExprUnaryOp, ExprYield, ExprYieldFrom, FString, Identifier, InterpolatedElement,
+        InterpolatedStringFormatSpec, InterpolatedStringLiteralElement, Keyword, MatchCase,
+        ModExpression, ModModule, Parameter, ParameterWithDefault, Parameters, PatternArguments,
+        PatternKeyword, PatternMatchAs, PatternMatchClass, PatternMatchMapping, PatternMatchOr,
+        PatternMatchSequence, PatternMatchSingleton, PatternMatchStar, PatternMatchValue,
+        StmtAnnAssign, StmtAssert, StmtAssign, StmtAugAssign, StmtBreak, StmtClassDef,
+        StmtContinue, StmtDelete, StmtExpr, StmtFor, StmtFunctionDef, StmtGlobal, StmtIf,
+        StmtImport, StmtImportFrom, StmtIpyEscapeCommand, StmtMatch, StmtNonlocal, StmtPass,
+        StmtRaise, StmtReturn, StmtTry, StmtTypeAlias, StmtWhile, StmtWith, StringLiteral, TString,
+        TypeParamParamSpec, TypeParamTypeVar, TypeParamTypeVarTuple, TypeParams, WithItem,
+    };
 
     match kind {
         ModModule | ModExpression => 90,
@@ -552,6 +570,7 @@ struct RetainedRuffRevision {
     indexer: Indexer,
     line_index: LineIndex,
     snapshot: RuffSnapshot,
+    _native_envelope: crate::resource_budget::ResourceReservation,
 }
 
 /// One worker-owned Ruff frontend with exactly one atomically published parse.
@@ -559,6 +578,7 @@ pub struct RuffAdapter {
     inventory: &'static RuffPythonInventory,
     retained: Option<RetainedRuffRevision>,
     metrics: RuffAdapterMetrics,
+    native_envelope: crate::resource_budget::ResourceReservation,
 }
 
 impl RuffAdapter {
@@ -568,12 +588,14 @@ impl RuffAdapter {
     ///
     /// Returns a version mismatch if the release identity or profile is not the exact supported
     /// Ruff frontend.
-    pub(crate) fn new() -> Result<Self, RuffAdapterError> {
+    pub(crate) fn new(job: &ProviderJob) -> Result<Self, RuffAdapterError> {
+        let native_envelope = crate::provider_contracts::allocation::reserve_native_state(job)?;
         validate_runtime_inventory(&RUFF_PYTHON_FRONTEND)?;
         Ok(Self {
             inventory: &RUFF_PYTHON_FRONTEND,
             retained: None,
             metrics: RuffAdapterMetrics::default(),
+            native_envelope,
         })
     }
 
@@ -587,11 +609,25 @@ impl RuffAdapter {
     /// Rejects a missing/stale retained revision or an injected cleanup fault.
     pub fn semantic_batch(
         &self,
+        job: &ProviderJob,
         revision: u64,
         module_name: &str,
         module_path: &std::path::Path,
         inject_cleanup_failure: bool,
-    ) -> Result<PythonFrontendBatch, PythonSemanticError> {
+    ) -> Result<crate::resource_budget::ChargedValue<PythonFrontendBatch>, PythonSemanticError>
+    {
+        crate::provider_contracts::allocation::require_native_workspace(
+            self.native_envelope.owner(),
+            job.resource_budget(),
+        )?;
+        if job.cancellation().is_cancelled() {
+            return Err(PythonSemanticError::Cancelled);
+        }
+        let _native_work = crate::provider_contracts::allocation::reserve_native_state(job)?;
+        let mut allocation = crate::provider_contracts::allocation::ProviderAllocation::try_new(
+            job.resource_budget(),
+            job.ceilings().max_bytes(),
+        )?;
         let retained = self
             .retained
             .as_ref()
@@ -608,14 +644,22 @@ impl RuffAdapter {
                 parse_diagnostic_count,
             ));
         }
-        semantic::project_python_semantics(
+        let batch = semantic::project_python_semantics(
             &retained.text.text,
             retained.parsed.syntax().body.as_slice(),
             module_name,
             module_path,
             &retained.snapshot.source.provider_image_fingerprint,
             inject_cleanup_failure,
-        )
+        )?;
+        if job.cancellation().is_cancelled() {
+            return Err(PythonSemanticError::Cancelled);
+        }
+        if job.remaining().is_none() {
+            return Err(crate::provider_contracts::ProviderContractError::ExpiredJob.into());
+        }
+        let bytes = batch.memory_bytes()?;
+        Ok(allocation.retain_value(bytes, batch)?)
     }
 
     /// Parse a Python source image once, build all Ruff indexes once, then
@@ -634,6 +678,24 @@ impl RuffAdapter {
         tree_sitter: &TreeSitterSnapshot,
     ) -> Result<RuffSnapshot, RuffAdapterError> {
         let limits = RuffLimits::from_job(job)?;
+        crate::provider_contracts::allocation::require_native_workspace(
+            self.native_envelope.owner(),
+            job.resource_budget(),
+        )?;
+        let native_envelope = crate::provider_contracts::allocation::reserve_native_state(job)?;
+        let mut dto_allocation =
+            crate::provider_contracts::allocation::ProviderAllocation::try_new(
+                job.resource_budget(),
+                job.ceilings().max_bytes(),
+            )?;
+        crate::provider_contracts::allocation::require_native_workspace(
+            text.text.reservation().owner(),
+            job.resource_budget(),
+        )?;
+        crate::provider_contracts::allocation::require_native_workspace(
+            text.original_byte_offsets.reservation().owner(),
+            job.resource_budget(),
+        )?;
         let (major, minor) = job.context().python_version().ok_or_else(|| {
             RuffAdapterError::ProjectionInvariant(
                 "Python language version is absent from the effective provider context".into(),
@@ -838,15 +900,33 @@ impl RuffAdapter {
             catalog_id: self.inventory.catalog_id,
             provider_version: self.inventory.provider_version,
             runtime_inventory_fingerprint: self.inventory.runtime_inventory_fingerprint,
-            tokens: tokens.into(),
-            ast: ast.into(),
-            comments: comments.into(),
-            directives: directives.into(),
-            strings: strings.into(),
-            docstrings: docstrings.into(),
-            continuation_line_starts: continuation_line_starts.into(),
-            diagnostics: diagnostics.into(),
-            correspondences: correspondences.into(),
+            tokens: dto_allocation.retain_measured_vec(tokens, |token| {
+                token
+                    .raw_kind
+                    .capacity()
+                    .saturating_add(match &token.spelling {
+                        Some(
+                            RuffTokenSpelling::Slice(value) | RuffTokenSpelling::Blake3(value),
+                        ) => value.capacity(),
+                        None => 0,
+                    })
+            })?,
+            ast: dto_allocation.retain_measured_vec(ast, |node| node.raw_kind.capacity())?,
+            comments: dto_allocation.retain_measured_vec(comments, |_| 0)?,
+            directives: dto_allocation.retain_measured_vec(directives, |_| 0)?,
+            strings: dto_allocation.retain_measured_vec(strings, |_| 0)?,
+            docstrings: dto_allocation.retain_measured_vec(docstrings, |_| 0)?,
+            continuation_line_starts: dto_allocation
+                .retain_measured_vec(continuation_line_starts, |_| 0)?,
+            diagnostics: dto_allocation.retain_measured_vec(diagnostics, |diagnostic| {
+                diagnostic.message.capacity().saturating_add(
+                    diagnostic
+                        .tree_sitter_recovery_ids
+                        .len()
+                        .saturating_mul(std::mem::size_of::<SyntaxOccurrenceId>()),
+                )
+            })?,
+            correspondences: dto_allocation.retain_measured_vec(correspondences, |_| 0)?,
             metrics: run_metrics,
         };
         self.retained = Some(RetainedRuffRevision {
@@ -857,6 +937,7 @@ impl RuffAdapter {
             indexer,
             line_index,
             snapshot: snapshot.clone(),
+            _native_envelope: native_envelope,
         });
         self.metrics.completed_runs = self.metrics.completed_runs.saturating_add(1);
         self.metrics.retained_revisions = 1;
@@ -1737,7 +1818,7 @@ fn diagnostic(
         message,
         start_byte,
         end_byte,
-        tree_sitter_recovery_ids: tree_sitter_recovery_ids.into(),
+        tree_sitter_recovery_ids,
     })
 }
 
@@ -1926,15 +2007,11 @@ mod job_tests {
     use crate::tree_sitter_adapter::{TreeSitterAdapter, TreeSitterLanguage};
 
     fn provider_text(text: &str) -> ProviderText {
-        ProviderText {
-            text: Arc::from(text),
-            original_byte_offsets: Arc::from(
-                text.char_indices()
-                    .map(|(offset, _)| u64::try_from(offset).unwrap())
-                    .chain(std::iter::once(u64::try_from(text.len()).unwrap()))
-                    .collect::<Vec<_>>(),
-            ),
-        }
+        ProviderText::from_validated_utf8(
+            text,
+            &crate::provider_contracts::fixture_provider_budget([6; 16], [254; 16]),
+        )
+        .unwrap()
     }
 
     fn limits() -> ProviderResourceCeilingSpec {
@@ -1984,15 +2061,18 @@ mod job_tests {
                 [2; 32],
             )
             .unwrap(),
-            context: ProviderContextBinding::try_new(
-                ContextIdentity::try_new("context-1").unwrap(),
-                [3; 16],
-                [3; 32],
-                [4; 32],
-            )
-            .unwrap()
-            .with_python_version(3, 14)
-            .unwrap(),
+            context: crate::provider_contracts::fixture_provider_context(
+                [6; 16],
+                ProviderContextBinding::try_new(
+                    ContextIdentity::try_new("context-1").unwrap(),
+                    [3; 16],
+                    [3; 32],
+                    [4; 32],
+                )
+                .unwrap()
+                .with_python_version(3, 14)
+                .unwrap(),
+            ),
             run: ProviderRunBinding::try_new(
                 ProviderRunIdentity::try_new(format!("{provider}.run-1")).unwrap(),
                 if lane == ProviderLane::Ruff {
@@ -2016,6 +2096,14 @@ mod job_tests {
                 .unwrap(),
             ],
             ceilings: ProviderResourceCeilings::try_new(spec).unwrap(),
+            resource_budget: crate::provider_contracts::fixture_provider_budget(
+                [6; 16],
+                if lane == ProviderLane::Ruff {
+                    [6; 16]
+                } else {
+                    [5; 16]
+                },
+            ),
             deadline: Instant::now() + Duration::from_secs(30),
             cancellation,
             provenance: ProviderRunProvenance::new(
@@ -2030,7 +2118,7 @@ mod job_tests {
 
     fn tree(text: &str, revision: u64) -> TreeSitterSnapshot {
         let (_, job) = job_for_lane(ProviderLane::TreeSitter, limits());
-        TreeSitterAdapter::new(TreeSitterLanguage::Python)
+        TreeSitterAdapter::new(TreeSitterLanguage::Python, &job)
             .unwrap()
             .parse_full(&job, revision, provider_text(text))
             .unwrap()
@@ -2038,8 +2126,8 @@ mod job_tests {
 
     #[test]
     fn ruff_job_drives_owned_snapshot_and_honest_whole_file_reparse() {
-        let mut adapter = RuffAdapter::new().unwrap();
         let (_, first_job) = job_for_lane(ProviderLane::Ruff, limits());
+        let mut adapter = RuffAdapter::new(&first_job).unwrap();
         let first_text = provider_text("value = 1\n");
         let first = adapter
             .parse(&first_job, 1, first_text, &tree("value = 1\n", 1))
@@ -2065,8 +2153,8 @@ mod job_tests {
     fn ruff_job_limits_cancellation_and_lane_are_causal() {
         let text = "value = 1\n";
         let evidence = tree(text, 1);
-        let mut adapter = RuffAdapter::new().unwrap();
         let (owner, cancelled_job) = job_for_lane(ProviderLane::Ruff, limits());
+        let mut adapter = RuffAdapter::new(&cancelled_job).unwrap();
         owner.cancel();
         assert_eq!(
             adapter.parse(&cancelled_job, 1, provider_text(text), &evidence),

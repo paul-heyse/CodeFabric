@@ -308,9 +308,94 @@ pub struct PythonFrontendBatch {
     pub terminal: PythonSemanticTerminal,
 }
 
+impl PythonFrontendBatch {
+    /// Owned vector capacities and nested string storage, excluding opaque native arenas.
+    pub(super) fn memory_bytes(
+        &self,
+    ) -> Result<u64, crate::provider_contracts::ProviderContractError> {
+        use crate::provider_contracts::ProviderContractError;
+        fn add<T>(
+            bytes: &mut usize,
+            values: &Vec<T>,
+            nested: impl Fn(&T) -> usize,
+        ) -> Result<(), ProviderContractError> {
+            *bytes = bytes
+                .checked_add(
+                    values
+                        .capacity()
+                        .checked_mul(std::mem::size_of::<T>())
+                        .ok_or(ProviderContractError::ResourceOverflow)?,
+                )
+                .ok_or(ProviderContractError::ResourceOverflow)?;
+            for value in values {
+                *bytes = bytes
+                    .checked_add(nested(value))
+                    .ok_or(ProviderContractError::ResourceOverflow)?;
+            }
+            Ok(())
+        }
+        let mut bytes = std::mem::size_of::<Self>()
+            .checked_add(self.module_name.capacity())
+            .and_then(|size| size.checked_add(self.provider_image_fingerprint.capacity()))
+            .ok_or(ProviderContractError::ResourceOverflow)?;
+        add(&mut bytes, &self.scopes, |row| {
+            row.name.as_ref().map_or(0, String::capacity)
+        })?;
+        add(&mut bytes, &self.bindings, |row| row.name.capacity())?;
+        add(&mut bytes, &self.references, |row| {
+            row.name.capacity() + row.unknown_reason_code.as_ref().map_or(0, String::capacity)
+        })?;
+        add(&mut bytes, &self.unknown_symbols, |row| {
+            row.name.capacity() + row.reason_code.capacity()
+        })?;
+        add(&mut bytes, &self.edges, |_| 0)?;
+        add(&mut bytes, &self.imports, |row| {
+            row.source_name.capacity()
+                + row.alias_name.as_ref().map_or(0, String::capacity)
+                + row.target_module_name.as_ref().map_or(0, String::capacity)
+                + row.ruff_qualified_name.as_ref().map_or(0, String::capacity)
+                + row.imported_name.as_ref().map_or(0, String::capacity)
+                + row.unknown_reason_code.as_ref().map_or(0, String::capacity)
+        })?;
+        add(&mut bytes, &self.exports, |row| row.name.capacity())?;
+        add(&mut bytes, &self.callables, |row| {
+            row.name.capacity() + row.qualified_name.capacity()
+        })?;
+        add(&mut bytes, &self.parameters, |row| row.name.capacity())?;
+        add(&mut bytes, &self.callable_syntax, |row| row.text.capacity())?;
+        add(&mut bytes, &self.call_sites, |_| 0)?;
+        add(&mut bytes, &self.call_arguments, |row| {
+            row.keyword_name.as_ref().map_or(0, String::capacity)
+        })?;
+        add(&mut bytes, &self.unknown_argument_sets, |_| 0)?;
+        add(&mut bytes, &self.members, |row| row.name.capacity())?;
+        add(&mut bytes, &self.call_diagnostics, |row| {
+            row.message.capacity()
+        })?;
+        add(&mut bytes, &self.cfgs, |_| 0)?;
+        add(&mut bytes, &self.cfg_nodes, |_| 0)?;
+        add(&mut bytes, &self.cfg_edges, |row| {
+            row.case_value_text.as_ref().map_or(0, String::capacity)
+        })?;
+        add(&mut bytes, &self.values, |_| 0)?;
+        add(&mut bytes, &self.operations, |_| 0)?;
+        add(&mut bytes, &self.dataflow_events, |_| 0)?;
+        add(&mut bytes, &self.memory_locations, |row| {
+            row.display_path.as_ref().map_or(0, String::capacity)
+        })?;
+        add(&mut bytes, &self.access_path_components, |_| 0)?;
+        add(&mut bytes, &self.dataflow_relations, |_| 0)?;
+        u64::try_from(bytes).map_err(|_| ProviderContractError::ResourceOverflow)
+    }
+}
+
 /// Closed adapter failures. Ruff-owned failure types never escape.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum PythonSemanticError {
+    #[error(transparent)]
+    Resource(#[from] crate::provider_contracts::ProviderContractError),
+    #[error("Ruff semantic projection was cancelled")]
+    Cancelled,
     #[error("Ruff semantic projection has no retained revision {0}")]
     MissingRevision(u64),
     #[error("RUFF_SEMANTIC_UNAVAILABLE_PARSE: {0} source-invalid diagnostics")]

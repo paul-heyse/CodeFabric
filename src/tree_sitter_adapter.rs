@@ -6,7 +6,6 @@
 
 use std::collections::{BTreeSet, VecDeque};
 use std::ops::ControlFlow;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
@@ -131,14 +130,16 @@ pub struct TreeSitterSnapshot {
     pub provider_image_fingerprint: String,
     pub catalog_id: &'static str,
     pub grammar_fingerprint: &'static str,
-    pub facts: Arc<[RawSyntaxFact]>,
-    pub changed_ranges: Arc<[ChangedRange]>,
+    pub facts: crate::resource_budget::ChargedSlice<RawSyntaxFact>,
+    pub changed_ranges: crate::resource_budget::ChargedSlice<ChangedRange>,
     pub metrics: TreeSitterRunMetrics,
 }
 
 /// Closed adapter failures; no parser-owned error type escapes this boundary.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum TreeSitterAdapterError {
+    #[error(transparent)]
+    Resource(#[from] crate::provider_contracts::ProviderContractError),
     #[error("Tree-sitter provider version mismatch: {0}")]
     ProviderVersionMismatch(String),
     #[error("Tree-sitter recovery query is invalid: {0}")]
@@ -257,6 +258,8 @@ struct RetainedRevision {
     text: ProviderText,
     tree: Tree,
     snapshot: TreeSitterSnapshot,
+    // Dropped after its native tree and DTO owners, never on mere result observation.
+    _native_envelope: crate::resource_budget::ResourceReservation,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -325,6 +328,8 @@ pub struct TreeSitterAdapter {
     inventory: &'static ProviderGrammarInventory,
     retained: VecDeque<RetainedRevision>,
     metrics: TreeSitterAdapterMetrics,
+    // Covers parser/query/cursor state, including capacity retained after a failed parse.
+    native_envelope: crate::resource_budget::ResourceReservation,
 }
 
 impl TreeSitterAdapter {
@@ -336,7 +341,11 @@ impl TreeSitterAdapter {
     /// Returns a version mismatch for any ABI, node, field, source metadata, or
     /// fingerprint drift, and `InvalidQuery` if the governed recovery query no
     /// longer compiles for the exact grammar.
-    pub(crate) fn new(language_choice: TreeSitterLanguage) -> Result<Self, TreeSitterAdapterError> {
+    pub(crate) fn new(
+        language_choice: TreeSitterLanguage,
+        job: &ProviderJob,
+    ) -> Result<Self, TreeSitterAdapterError> {
+        let native_envelope = crate::provider_contracts::allocation::reserve_native_state(job)?;
         let (language, node_types, inventory) = language_choice.runtime();
         validate_runtime_inventory(&language, node_types, inventory)?;
         let mut parser = Parser::new();
@@ -353,6 +362,7 @@ impl TreeSitterAdapter {
             inventory,
             retained: VecDeque::new(),
             metrics: TreeSitterAdapterMetrics::default(),
+            native_envelope,
         })
     }
 
@@ -369,7 +379,18 @@ impl TreeSitterAdapter {
         revision: u64,
         text: ProviderText,
     ) -> Result<TreeSitterSnapshot, TreeSitterAdapterError> {
-        self.parse_candidate(job, revision, text, None)
+        for owner in [
+            self.native_envelope.owner(),
+            text.text.reservation().owner(),
+            text.original_byte_offsets.reservation().owner(),
+        ] {
+            crate::provider_contracts::allocation::require_native_workspace(
+                owner,
+                job.resource_budget(),
+            )?;
+        }
+        let envelope = crate::provider_contracts::allocation::reserve_native_state(job)?;
+        self.parse_candidate(job, revision, text, None, envelope)
     }
 
     /// Apply one exact edit to the active tree, parse incrementally, surface
@@ -386,6 +407,17 @@ impl TreeSitterAdapter {
         text: ProviderText,
         edit: TreeSitterEdit,
     ) -> Result<TreeSitterSnapshot, TreeSitterAdapterError> {
+        for owner in [
+            self.native_envelope.owner(),
+            text.text.reservation().owner(),
+            text.original_byte_offsets.reservation().owner(),
+        ] {
+            crate::provider_contracts::allocation::require_native_workspace(
+                owner,
+                job.resource_budget(),
+            )?;
+        }
+        let envelope = crate::provider_contracts::allocation::reserve_native_state(job)?;
         let prior = self
             .retained
             .back()
@@ -403,7 +435,7 @@ impl TreeSitterAdapter {
             old_end_position: point_at(&prior.text.text, edit.old_end_byte)?,
             new_end_position: point_at(&text.text, edit.new_end_byte)?,
         });
-        self.parse_candidate(job, revision, text, Some(&edited_tree))
+        self.parse_candidate(job, revision, text, Some(&edited_tree), envelope)
     }
 
     /// Last atomically committed complete revision.
@@ -440,8 +472,26 @@ impl TreeSitterAdapter {
         revision: u64,
         text: ProviderText,
         edited_old_tree: Option<&Tree>,
+        native_envelope: crate::resource_budget::ResourceReservation,
     ) -> Result<TreeSitterSnapshot, TreeSitterAdapterError> {
+        crate::provider_contracts::allocation::require_native_workspace(
+            text.text.reservation().owner(),
+            job.resource_budget(),
+        )?;
+        crate::provider_contracts::allocation::require_native_workspace(
+            text.original_byte_offsets.reservation().owner(),
+            job.resource_budget(),
+        )?;
         let limits = TreeSitterLimits::from_job(job)?;
+        crate::provider_contracts::allocation::require_native_workspace(
+            self.native_envelope.owner(),
+            job.resource_budget(),
+        )?;
+        let mut dto_allocation =
+            crate::provider_contracts::allocation::ProviderAllocation::try_new(
+                job.resource_budget(),
+                job.ceilings().max_bytes(),
+            )?;
         let cancellation = job.cancellation();
         if self
             .retained
@@ -572,8 +622,12 @@ impl TreeSitterAdapter {
             provider_image_fingerprint: text.provider_image_fingerprint(),
             catalog_id: self.inventory.catalog_id,
             grammar_fingerprint: self.inventory.runtime_inventory_fingerprint,
-            facts: facts.into(),
-            changed_ranges: changed_ranges.into(),
+            facts: dto_allocation.retain_measured_vec(facts, |fact| {
+                fact.raw_kind
+                    .capacity()
+                    .saturating_add(fact.field_name.as_ref().map_or(0, String::capacity))
+            })?,
+            changed_ranges: dto_allocation.retain_measured_vec(changed_ranges, |_| 0)?,
             metrics,
         };
         self.retained.push_back(RetainedRevision {
@@ -581,6 +635,7 @@ impl TreeSitterAdapter {
             text,
             tree,
             snapshot: snapshot.clone(),
+            _native_envelope: native_envelope,
         });
         while exceeds_limit(
             u64::try_from(self.retained.len()).unwrap_or(u64::MAX),
@@ -637,9 +692,9 @@ fn validate_runtime_inventory(
             .field_name_for_id(id)
             .ok_or_else(|| version_mismatch("live field"))?;
         if name.is_empty()
-            || !language
+            || language
                 .field_id_for_name(name)
-                .is_some_and(|observed| observed.get() == id)
+                .is_none_or(|observed| observed.get() != id)
         {
             return Err(version_mismatch("live field identity"));
         }
@@ -964,15 +1019,11 @@ mod job_tests {
     };
 
     fn provider_text(text: &str) -> ProviderText {
-        ProviderText {
-            text: Arc::from(text),
-            original_byte_offsets: Arc::from(
-                text.char_indices()
-                    .map(|(offset, _)| u64::try_from(offset).unwrap())
-                    .chain(std::iter::once(u64::try_from(text.len()).unwrap()))
-                    .collect::<Vec<_>>(),
-            ),
-        }
+        ProviderText::from_validated_utf8(
+            text,
+            &crate::provider_contracts::fixture_provider_budget([6; 16], [254; 16]),
+        )
+        .unwrap()
     }
 
     fn limits() -> ProviderResourceCeilingSpec {
@@ -1021,13 +1072,16 @@ mod job_tests {
                 [2; 32],
             )
             .unwrap(),
-            context: ProviderContextBinding::try_new(
-                ContextIdentity::try_new("context-1").unwrap(),
-                [3; 16],
-                [3; 32],
-                [4; 32],
-            )
-            .unwrap(),
+            context: crate::provider_contracts::fixture_provider_context(
+                [6; 16],
+                ProviderContextBinding::try_new(
+                    ContextIdentity::try_new("context-1").unwrap(),
+                    [3; 16],
+                    [3; 32],
+                    [4; 32],
+                )
+                .unwrap(),
+            ),
             run: ProviderRunBinding::try_new(
                 ProviderRunIdentity::try_new("tree-run-1").unwrap(),
                 [5; 16],
@@ -1047,6 +1101,7 @@ mod job_tests {
                 .unwrap(),
             ],
             ceilings: ProviderResourceCeilings::try_new(spec).unwrap(),
+            resource_budget: crate::provider_contracts::fixture_provider_budget([6; 16], [5; 16]),
             deadline: Instant::now() + Duration::from_secs(30),
             cancellation,
             provenance: ProviderRunProvenance::new(
@@ -1061,8 +1116,8 @@ mod job_tests {
 
     #[test]
     fn tree_sitter_job_drives_exact_parse_and_bounded_revisions() {
-        let mut adapter = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
         let (_, first_job) = job(limits());
+        let mut adapter = TreeSitterAdapter::new(TreeSitterLanguage::Python, &first_job).unwrap();
         let first = adapter
             .parse_full(&first_job, 1, provider_text("value = 1\n"))
             .unwrap();
@@ -1087,8 +1142,9 @@ mod job_tests {
 
     #[test]
     fn tree_sitter_job_limits_and_cancellation_are_causal() {
-        let mut adapter = TreeSitterAdapter::new(TreeSitterLanguage::Python).unwrap();
         let (owner, cancelled_job) = job(limits());
+        let mut adapter =
+            TreeSitterAdapter::new(TreeSitterLanguage::Python, &cancelled_job).unwrap();
         owner.cancel();
         assert_eq!(
             adapter.parse_full(&cancelled_job, 1, provider_text("value = 1\n")),
@@ -1108,7 +1164,7 @@ mod job_tests {
     fn tree_sitter_job_rejects_wrong_lane_before_library_execution() {
         let (_, wrong) = job_for_lane(limits(), ProviderLane::Ruff);
         assert!(matches!(
-            TreeSitterAdapter::new(TreeSitterLanguage::Python)
+            TreeSitterAdapter::new(TreeSitterLanguage::Python, &wrong)
                 .unwrap()
                 .parse_full(&wrong, 1, provider_text("value = 1\n")),
             Err(TreeSitterAdapterError::ProviderVersionMismatch(_))

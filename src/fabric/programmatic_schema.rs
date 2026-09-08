@@ -971,7 +971,7 @@ impl DisplayAs for SchemaIdentityExec {
 }
 
 impl ExecutionPlan for SchemaIdentityExec {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "SchemaIdentityExec"
     }
 
@@ -1272,7 +1272,11 @@ pub(super) fn registered_view_logical_plan(provider: &dyn TableProvider) -> Opti
     provider
         .downcast_ref::<IdentityPreservingViewTable>()
         .map(|view| view.logical_plan().clone())
-        .or_else(|| provider.get_logical_plan().map(|plan| plan.into_owned()))
+        .or_else(|| {
+            provider
+                .get_logical_plan()
+                .map(std::borrow::Cow::into_owned)
+        })
 }
 
 const OBSERVATION_SOURCE_IDENTITY: &str = "programmatic-schema-assembly-v1";

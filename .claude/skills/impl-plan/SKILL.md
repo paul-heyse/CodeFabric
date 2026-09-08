@@ -19,7 +19,6 @@ Read:
 - `../_shared/code-intelligence.md`
 - `../_shared/doctrine-policy.md`
 - `../_shared/validation-policy.md`
-- `../_shared/subagent-orchestration.md`
 - the implementation-plan section of `../_shared/artifact-schemas.md`
 
 ## Inputs and output

@@ -708,12 +708,7 @@ impl ApplicationOwnedSemanticIngressPort {
             &mut consumed,
             ProgrammaticFormIngressField::Label,
             query_id,
-            clause
-                .label()
-                .map(|value| text(value))
-                .transpose()?
-                .into_iter()
-                .collect(),
+            clause.label().map(text).transpose()?.into_iter().collect(),
             projection,
         )?;
         match clause {
@@ -2116,8 +2111,7 @@ fn insert_target_id(
     validate_text_identity(family, value)?;
     if !target_ids.insert((family, value.to_string())) {
         return Err(rejected(format!(
-            "{family} mapping {} is ambiguous within one form",
-            value
+            "{family} mapping {value} is ambiguous within one form"
         )));
     }
     Ok(())

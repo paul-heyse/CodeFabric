@@ -854,7 +854,7 @@ impl ReleasedCommonDerivedFamilyRole {
         }
     }
 
-    fn semantic_identity<'a>(self, families: &'a CommonAnalysisFamilies) -> Option<&'a str> {
+    fn semantic_identity(self, families: &CommonAnalysisFamilies) -> Option<&str> {
         match self {
             Self::Dominator => Some(&families.dominator),
             Self::PostDominator => Some(&families.post_dominator),
@@ -1924,11 +1924,11 @@ impl ReleasedDerivedAnalysisCensus {
         let (provider_authorities, _) = provider_relation_authorities(provider_reports)?;
         let mut complete_relations = provider_authorities
             .iter()
-            .filter_map(|(relation_id, relation)| {
-                (relation.available
-                    && relation.observation.completeness == DerivedInputCompleteness::Complete)
-                    .then(|| relation_id.clone())
+            .filter(|&(_relation_id, relation)| {
+                relation.available
+                    && relation.observation.completeness == DerivedInputCompleteness::Complete
             })
+            .map(|(relation_id, _relation)| relation_id.clone())
             .collect::<BTreeSet<_>>();
         let mut evidence_by_relation = provider_authorities
             .iter()
@@ -1944,10 +1944,10 @@ impl ReleasedDerivedAnalysisCensus {
             let family_id = role.family_identity(&bindings)?;
             let dependencies =
                 role.released_dependency_contract(&bindings.python, &bindings.rust_mir);
-            let implementation = native
-                .remove(&role)
-                .map(ReleasedApplicationAnalysisImplementation::Native)
-                .unwrap_or_else(|| released_unavailable_implementation(role, &bindings));
+            let implementation = native.remove(&role).map_or_else(
+                || released_unavailable_implementation(role, &bindings),
+                ReleasedApplicationAnalysisImplementation::Native,
+            );
             let output_relation =
                 role.released_output_relation(&bindings.python, &bindings.rust_mir);
             let declaration = match implementation {
@@ -6211,12 +6211,16 @@ fn rust_mir_cfg_edge_identity_udf() -> Arc<ScalarUDF> {
                     source.value(row).to_be_bytes().as_slice(),
                     target.value(row).to_be_bytes().as_slice(),
                     kind.value(row).as_bytes(),
-                    (!branch.is_null(row))
-                        .then(|| branch.value(row).as_bytes())
-                        .unwrap_or_default(),
-                    (!unwind.is_null(row))
-                        .then(|| unwind.value(row).as_bytes())
-                        .unwrap_or_default(),
+                    if branch.is_null(row) {
+                        Default::default()
+                    } else {
+                        branch.value(row).as_bytes()
+                    },
+                    if unwind.is_null(row) {
+                        Default::default()
+                    } else {
+                        unwind.value(row).as_bytes()
+                    },
                 ] {
                     frame(&mut hasher, part);
                 }
@@ -6262,9 +6266,11 @@ fn rust_mir_control_input_identity_udf() -> Arc<ScalarUDF> {
                     owner.value(row).as_bytes(),
                     block.value(row).to_be_bytes().as_slice(),
                     edge.value(row),
-                    (!predicate.is_null(row))
-                        .then(|| predicate.value(row))
-                        .unwrap_or_default(),
+                    if predicate.is_null(row) {
+                        Default::default()
+                    } else {
+                        predicate.value(row)
+                    },
                     kind.value(row).as_bytes(),
                 ] {
                     frame(&mut hasher, part);
@@ -6308,19 +6314,27 @@ fn rust_mir_projection_component_udf() -> Arc<ScalarUDF> {
                     continue;
                 }
                 let number = |array: &UInt64Array| {
-                    (!array.is_null(row))
-                        .then(|| array.value(row).to_string())
-                        .unwrap_or_else(|| "-".to_owned())
+                    if array.is_null(row) {
+                        "-".to_owned()
+                    } else {
+                        array.value(row).to_string()
+                    }
                 };
-                let ordinal = (!ordinal.is_null(row))
-                    .then(|| ordinal.value(row).to_string())
-                    .unwrap_or_else(|| "base".to_owned());
-                let from_end = (!from_end.is_null(row))
-                    .then(|| if from_end.value(row) { "1" } else { "0" })
-                    .unwrap_or("-");
-                let type_key = (!type_key.is_null(row))
-                    .then(|| hex_bytes(type_key.value(row)))
-                    .unwrap_or_else(|| "-".to_owned());
+                let ordinal = if ordinal.is_null(row) {
+                    "base".to_owned()
+                } else {
+                    ordinal.value(row).to_string()
+                };
+                let from_end = if from_end.is_null(row) {
+                    "-"
+                } else {
+                    if from_end.value(row) { "1" } else { "0" }
+                };
+                let type_key = if type_key.is_null(row) {
+                    "-".to_owned()
+                } else {
+                    hex_bytes(type_key.value(row))
+                };
                 builder.append_value(format!(
                     "{ordinal}:{}:{}:{}:{}:{}:{from_end}:{type_key}",
                     kind.value(row),
@@ -6574,9 +6588,11 @@ fn rust_mir_unsafe_identity_udf() -> Arc<ScalarUDF> {
                     slot_index.value(row).to_be_bytes().as_slice(),
                     observation_kind.value(row).as_bytes(),
                     raw_kind.value(row).as_bytes(),
-                    (!instance.is_null(row))
-                        .then(|| instance.value(row))
-                        .unwrap_or_default(),
+                    if instance.is_null(row) {
+                        Default::default()
+                    } else {
+                        instance.value(row)
+                    },
                 ] {
                     frame(&mut hasher, part);
                 }
@@ -6831,9 +6847,10 @@ pub(crate) fn compose_programmatic_derived_analyses(
     )?;
     let produced_family_ids = dispositions_by_id
         .iter()
-        .filter_map(|(family_id, disposition)| {
-            matches!(disposition, DerivedFamilyDisposition::Producer(_)).then(|| family_id.clone())
+        .filter(|&(_family_id, disposition)| {
+            matches!(disposition, DerivedFamilyDisposition::Producer(_))
         })
+        .map(|(family_id, _disposition)| family_id.clone())
         .collect::<BTreeSet<_>>();
     // Remainder-only semantic families may share the physical relation they would inhabit after
     // migration (the current common analysis multiplexes ten fact families into one table). Only
@@ -7287,9 +7304,10 @@ fn producer_topological_order(
 ) -> Result<Vec<DerivedFamilyId>, ProgrammaticDerivedAnalysisError> {
     let producer_ids = dispositions
         .iter()
-        .filter_map(|(family_id, disposition)| {
-            matches!(disposition, DerivedFamilyDisposition::Producer(_)).then(|| family_id.clone())
+        .filter(|&(_family_id, disposition)| {
+            matches!(disposition, DerivedFamilyDisposition::Producer(_))
         })
+        .map(|(family_id, _disposition)| family_id.clone())
         .collect::<BTreeSet<_>>();
     let mut indegree = producer_ids
         .iter()
@@ -7324,7 +7342,8 @@ fn producer_topological_order(
     }
     let mut ready = indegree
         .iter()
-        .filter_map(|(family_id, count)| (*count == 0).then(|| family_id.clone()))
+        .filter(|&(_family_id, count)| *count == 0)
+        .map(|(family_id, _count)| family_id.clone())
         .collect::<BTreeSet<_>>();
     let mut order = Vec::with_capacity(producer_ids.len());
     while let Some(family_id) = ready.pop_first() {
@@ -7422,7 +7441,7 @@ fn validate_producer(
         .output()
         .fields()
         .iter()
-        .map(|field| field.field_id())
+        .map(super::fabric::programmatic_schema::TransformationFieldIdentity::field_id)
         .collect::<BTreeSet<_>>();
     for column in metadata.ordered() {
         if original_fields.contains(&column.field_id) {
@@ -7497,10 +7516,8 @@ fn resolve_remainder_inputs(
         .dependencies()
         .iter()
         .map(|relation_id| {
-            authorities
-                .get(relation_id)
-                .map(|authority| authority.observation.clone())
-                .unwrap_or_else(|| DerivedInputObservation {
+            authorities.get(relation_id).map_or_else(
+                || DerivedInputObservation {
                     relation_id: relation_id.clone(),
                     source: DerivedInputAuthoritySource::DeclaredRemainder(
                         family.family_id.clone(),
@@ -7511,7 +7528,9 @@ fn resolve_remainder_inputs(
                         relation_id,
                     ),
                     completeness: DerivedInputCompleteness::Unknown,
-                })
+                },
+                |authority| authority.observation.clone(),
+            )
         })
         .collect()
 }
@@ -8155,7 +8174,7 @@ fn precision_identity(precision: &DerivedPrecisionPolicy) -> [u8; 32] {
             hasher.update(&[3]);
             hasher.update(&max_steps.get().to_be_bytes());
         }
-    };
+    }
     *hasher.finalize().as_bytes()
 }
 
@@ -8172,7 +8191,7 @@ fn frame_completeness(hasher: &mut blake3::Hasher, completeness: &DerivedComplet
             hasher.update(&[2]);
             frame(hasher, unknown_family.as_str().as_bytes());
         }
-    };
+    }
 }
 
 fn frame_disposition(hasher: &mut blake3::Hasher, disposition: &ProviderRegistrationDisposition) {
@@ -10981,8 +11000,14 @@ mod tests {
         let bounds = ProducerClosureResourceBounds::try_new(16, 4_096, 256, 16 * 1024 * 1024)
             .expect("production-shaped closure bounds");
         let reserved_before = epoch.memory_reserved_bytes();
+        let resource_budget = crate::fabric::workspace_resources::test_workspace_budget();
         let first = release
-            .prove_producer_closure(&epoch, bounds, &ProducerClosureCancellation::new())
+            .prove_producer_closure(
+                &epoch,
+                bounds,
+                &ProducerClosureCancellation::new(),
+                &resource_budget,
+            )
             .await
             .expect("decoded catalog rows prove the release closure");
         assert_eq!(first.proof().terminal(), ProofTerminalStatus::Pass);
@@ -10999,7 +11024,12 @@ mod tests {
         );
 
         let restarted = release
-            .prove_producer_closure(&epoch, bounds, &ProducerClosureCancellation::new())
+            .prove_producer_closure(
+                &epoch,
+                bounds,
+                &ProducerClosureCancellation::new(),
+                &resource_budget,
+            )
             .await
             .expect("same exact epoch re-executes deterministically after transient state drops");
         assert_eq!(
@@ -11019,7 +11049,12 @@ mod tests {
             .expect("one-row bound remains structurally valid");
         assert!(matches!(
             release
-                .prove_producer_closure(&epoch, constrained, &ProducerClosureCancellation::new(),)
+                .prove_producer_closure(
+                    &epoch,
+                    constrained,
+                    &ProducerClosureCancellation::new(),
+                    &resource_budget
+                )
                 .await,
             Err(CompiledProducerClosureProofError::Closure(
                 DerivedProducerClosureError::OutputRowsExceeded { .. }
@@ -11031,7 +11066,7 @@ mod tests {
         assert!(!cancelled.cancel());
         assert!(matches!(
             release
-                .prove_producer_closure(&epoch, bounds, &cancelled)
+                .prove_producer_closure(&epoch, bounds, &cancelled, &resource_budget)
                 .await,
             Err(CompiledProducerClosureProofError::Closure(
                 DerivedProducerClosureError::Cancelled { .. }

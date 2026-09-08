@@ -101,6 +101,11 @@ pub mod registries;
 pub mod relation_ipc;
 #[cfg(feature = "data-fabric")]
 pub(crate) mod relation_ipc_contract;
+#[cfg(feature = "provider-contracts")]
+pub mod resource_budget;
+
+#[cfg(feature = "daemon")]
+pub(crate) mod disk_headroom;
 #[cfg(feature = "daemon")]
 pub(crate) mod semantic_query_contract;
 #[cfg(feature = "release-compiler")]

@@ -20,7 +20,12 @@ use thiserror::Error;
 use tokio::sync::{Mutex, Notify};
 
 #[cfg(feature = "daemon")]
-use crate::cancellation::{Cancellation, StructuredCancellationScope, StructuredTaskError};
+use crate::cancellation::{
+    Cancellation, StructuredCancellationScope, StructuredTaskError, TaskCancellationMode,
+};
+use crate::resource_budget::{
+    ResourceAmounts, ResourceBudget, ResourceBudgetError, ResourceClass, ResourceReservation,
+};
 
 use super::command::{PrincipalId, WorkspaceId};
 use super::streamed_result_package::PendingResultObjectSet;
@@ -309,7 +314,7 @@ pub enum QueryControlEventPayload {
         completed: u64,
         total: Option<u64>,
     },
-    /// Exact private object set durably declared before the first page write.
+    /// Monotonic private object set durably extended before each additional page write.
     PublicationPending { object_set: PendingResultObjectSet },
     ResultReady {
         package_id: String,
@@ -429,8 +434,11 @@ pub struct QueryAcceptance {
     pub phase: QueryExecutionPhase,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueryCoordinatorSnapshot {
+    pub owned_operations: crate::cancellation::StructuredOperationObservation,
+    pub process_resources: crate::resource_budget::ResourceObservation,
+    pub workspace_resources: crate::resource_budget::ResourceObservation,
     pub running: usize,
     pub queued: usize,
     pub accepted: usize,
@@ -471,10 +479,20 @@ pub(crate) struct DurableQueryRecord {
 
 /// Persistent control journal. Implementations must serialize writes through one logical owner.
 pub(crate) trait QueryCoordinatorJournal: fmt::Debug + Send + Sync + 'static {
-    fn load(&self, maximum: usize) -> Result<Vec<DurableQueryRecord>, QueryCoordinatorError>;
+    fn load(
+        &self,
+        maximum: usize,
+        maximum_record_bytes: usize,
+        budget: &ResourceBudget,
+    ) -> Result<Vec<LoadedQueryRecord>, QueryCoordinatorError>;
     fn create(&self, record: &DurableQueryRecord) -> Result<(), QueryCoordinatorError>;
     fn replace(&self, record: &DurableQueryRecord) -> Result<(), QueryCoordinatorError>;
     fn delete(&self, query_id: &str) -> Result<(), QueryCoordinatorError>;
+}
+
+pub(crate) struct LoadedQueryRecord {
+    record: DurableQueryRecord,
+    reservation: ResourceReservation,
 }
 
 /// SQLite implementation storing one canonical record per query and no result bytes.
@@ -511,6 +529,8 @@ impl SqliteQueryCoordinatorJournal {
              PRAGMA synchronous=FULL;
              PRAGMA foreign_keys=ON;
              PRAGMA trusted_schema=OFF;
+             PRAGMA cache_size=-2048;
+             PRAGMA mmap_size=0;
              CREATE TABLE IF NOT EXISTS query_coordinator_record (
                query_id TEXT PRIMARY KEY NOT NULL,
                record_bytes BLOB NOT NULL,
@@ -529,27 +549,66 @@ impl SqliteQueryCoordinatorJournal {
 }
 
 impl QueryCoordinatorJournal for SqliteQueryCoordinatorJournal {
-    fn load(&self, maximum: usize) -> Result<Vec<DurableQueryRecord>, QueryCoordinatorError> {
+    fn load(
+        &self,
+        maximum: usize,
+        maximum_record_bytes: usize,
+        budget: &ResourceBudget,
+    ) -> Result<Vec<LoadedQueryRecord>, QueryCoordinatorError> {
+        // Reserve the bounded SQLite row and canonicalization workspace before asking SQLite
+        // to materialize any BLOB. The CASE expression never returns an oversized record.
+        let _scratch = budget.try_reserve(
+            ResourceClass::Control,
+            ResourceAmounts {
+                memory_bytes: u64::try_from(maximum_record_bytes)?
+                    .checked_mul(3)
+                    .ok_or(QueryCoordinatorError::CounterOverflow)?,
+                ..ResourceAmounts::default()
+            },
+        )?;
         let connection = self
             .connection
             .lock()
             .map_err(|_| QueryCoordinatorError::JournalState)?;
         let mut statement = connection.prepare(
-            "SELECT record_bytes FROM query_coordinator_record ORDER BY query_id LIMIT ?1",
+            "SELECT length(record_bytes), CASE WHEN length(record_bytes)<=?2 THEN record_bytes ELSE NULL END
+             FROM query_coordinator_record ORDER BY query_id LIMIT ?1",
         )?;
-        let maximum = i64::try_from(maximum).unwrap_or(i64::MAX);
-        statement
-            .query_map([maximum], |row| row.get::<_, Vec<u8>>(0))?
-            .map(|row| {
-                let bytes = row?;
-                let record: DurableQueryRecord = serde_json::from_slice(&bytes)
-                    .map_err(QueryCoordinatorError::JournalEncoding)?;
-                if Self::canonical_record(&record)? != bytes {
-                    return Err(QueryCoordinatorError::NonCanonicalJournalRecord);
-                }
-                Ok(record)
-            })
-            .collect()
+        let mut rows = statement.query(params![
+            i64::try_from(maximum)?,
+            i64::try_from(maximum_record_bytes)?
+        ])?;
+        let mut output = Vec::new();
+        while let Some(row) = rows.next()? {
+            let length = usize::try_from(row.get::<_, i64>(0)?)?;
+            if length > maximum_record_bytes {
+                return Err(QueryCoordinatorError::JournalCapacity);
+            }
+            let reservation = budget.try_reserve(
+                ResourceClass::Data,
+                ResourceAmounts {
+                    memory_bytes: u64::try_from(length)?
+                        .checked_mul(8)
+                        .and_then(|value| value.checked_add(128 * 1024))
+                        .ok_or(QueryCoordinatorError::CounterOverflow)?,
+                    ..ResourceAmounts::default()
+                },
+            )?;
+            let bytes = row
+                .get_ref(1)?
+                .as_blob()
+                .map_err(|_| QueryCoordinatorError::JournalState)?;
+            let record: DurableQueryRecord =
+                serde_json::from_slice(bytes).map_err(QueryCoordinatorError::JournalEncoding)?;
+            if Self::canonical_record(&record)? != bytes {
+                return Err(QueryCoordinatorError::NonCanonicalJournalRecord);
+            }
+            output.push(LoadedQueryRecord {
+                record,
+                reservation,
+            });
+        }
+        Ok(output)
     }
 
     fn create(&self, record: &DurableQueryRecord) -> Result<(), QueryCoordinatorError> {
@@ -612,6 +671,7 @@ struct IdempotencyScope {
 }
 
 struct QueryHandle {
+    metadata_reservation: Arc<ResourceReservation>,
     operation: NormalizedQueryOperation,
     acceptance: QueryAcceptance,
     fingerprint: [u8; 32],
@@ -636,6 +696,7 @@ impl fmt::Debug for QueryHandle {
     }
 }
 
+#[derive(Default)]
 struct CoordinatorState {
     handles: BTreeMap<String, QueryHandle>,
     idempotency: BTreeMap<IdempotencyScope, String>,
@@ -649,26 +710,10 @@ struct CoordinatorState {
     attached_tasks: BTreeSet<String>,
 }
 
-impl Default for CoordinatorState {
-    fn default() -> Self {
-        Self {
-            handles: BTreeMap::new(),
-            idempotency: BTreeMap::new(),
-            queue: VecDeque::new(),
-            running: 0,
-            running_by_workspace: BTreeMap::new(),
-            running_by_principal: BTreeMap::new(),
-            reserved_result_bytes: 0,
-            reserved_result_pages: 0,
-            task_reservations: BTreeSet::new(),
-            attached_tasks: BTreeSet::new(),
-        }
-    }
-}
-
 /// One daemon-wide coordinator. Clones share all scheduling and durability state.
 #[derive(Clone)]
 pub struct QueryCoordinator {
+    budget: ResourceBudget,
     policy: QueryCoordinatorPolicy,
     generation: u64,
     cursor_secret: [u8; 32],
@@ -709,8 +754,12 @@ impl QueryCoordinator {
 
     /// Cheap control-only observation used by status and admission diagnostics.
     pub async fn snapshot(&self) -> QueryCoordinatorSnapshot {
+        let owned_operations = self.task_scope.process_operation_observation().await;
         let state = self.state.lock().await;
         QueryCoordinatorSnapshot {
+            owned_operations,
+            process_resources: self.budget.process_observation(),
+            workspace_resources: self.budget.observation(),
             running: state.running,
             queued: state.queue.len(),
             accepted: state.handles.len(),
@@ -726,6 +775,7 @@ impl QueryCoordinator {
         cursor_secret: [u8; 32],
         journal: Arc<dyn QueryCoordinatorJournal>,
         observed_at_unix_ms: i64,
+        budget: ResourceBudget,
     ) -> Result<Self, QueryCoordinatorError> {
         if generation == 0 || cursor_secret.iter().all(|byte| *byte == 0) {
             return Err(QueryCoordinatorError::InvalidCoordinatorIdentity);
@@ -744,6 +794,7 @@ impl QueryCoordinator {
             journal,
             observed_at_unix_ms,
             task_scope,
+            budget,
         );
         #[cfg(not(feature = "daemon"))]
         {
@@ -753,6 +804,7 @@ impl QueryCoordinator {
                 cursor_secret,
                 journal,
                 observed_at_unix_ms,
+                budget,
             )
         }
     }
@@ -766,6 +818,7 @@ impl QueryCoordinator {
         journal: Arc<dyn QueryCoordinatorJournal>,
         observed_at_unix_ms: i64,
         task_scope: StructuredCancellationScope,
+        budget: ResourceBudget,
     ) -> Result<Self, QueryCoordinatorError> {
         Self::try_new_inner(
             policy,
@@ -774,6 +827,7 @@ impl QueryCoordinator {
             journal,
             observed_at_unix_ms,
             task_scope,
+            budget,
         )
     }
 
@@ -785,6 +839,7 @@ impl QueryCoordinator {
         journal: Arc<dyn QueryCoordinatorJournal>,
         observed_at_unix_ms: i64,
         task_scope: StructuredCancellationScope,
+        budget: ResourceBudget,
     ) -> Result<Self, QueryCoordinatorError> {
         if generation == 0 || cursor_secret.iter().all(|byte| *byte == 0) {
             return Err(QueryCoordinatorError::InvalidCoordinatorIdentity);
@@ -796,6 +851,7 @@ impl QueryCoordinator {
             journal,
             observed_at_unix_ms,
             task_scope,
+            budget,
         )
     }
 
@@ -806,6 +862,7 @@ impl QueryCoordinator {
         cursor_secret: [u8; 32],
         journal: Arc<dyn QueryCoordinatorJournal>,
         observed_at_unix_ms: i64,
+        budget: ResourceBudget,
     ) -> Result<Self, QueryCoordinatorError> {
         if generation == 0 || cursor_secret.iter().all(|byte| *byte == 0) {
             return Err(QueryCoordinatorError::InvalidCoordinatorIdentity);
@@ -816,6 +873,7 @@ impl QueryCoordinator {
             cursor_secret,
             journal,
             observed_at_unix_ms,
+            budget,
         )
     }
 
@@ -826,13 +884,27 @@ impl QueryCoordinator {
         journal: Arc<dyn QueryCoordinatorJournal>,
         observed_at_unix_ms: i64,
         #[cfg(feature = "daemon")] task_scope: StructuredCancellationScope,
+        budget: ResourceBudget,
     ) -> Result<Self, QueryCoordinatorError> {
-        let recovered = journal.load(policy.max_recovery_records.get().saturating_add(1))?;
+        let maximum_record_bytes = policy
+            .max_event_bytes_per_query
+            .get()
+            .checked_add(128 * 1024)
+            .ok_or(QueryCoordinatorError::CounterOverflow)?;
+        let recovered = journal.load(
+            policy.max_recovery_records.get().saturating_add(1),
+            maximum_record_bytes,
+            &budget,
+        )?;
         if recovered.len() > policy.max_recovery_records.get() {
             return Err(QueryCoordinatorError::RecoveryLimit);
         }
         let mut state = CoordinatorState::default();
-        for mut durable in recovered {
+        for LoadedQueryRecord {
+            record: mut durable,
+            reservation,
+        } in recovered
+        {
             let workspace_id = WorkspaceId::from_bytes(decode_hex16(&durable.workspace_id)?);
             let principal_id = PrincipalId::from_bytes(decode_hex16(&durable.principal_id)?);
             QuerySessionAuthority::try_new(
@@ -938,6 +1010,7 @@ impl QueryCoordinator {
             state.handles.insert(
                 query_id,
                 QueryHandle {
+                    metadata_reservation: Arc::new(reservation),
                     operation,
                     acceptance: durable.acceptance,
                     fingerprint,
@@ -953,6 +1026,7 @@ impl QueryCoordinator {
             );
         }
         Ok(Self {
+            budget,
             policy,
             generation,
             cursor_secret,
@@ -1022,7 +1096,26 @@ impl QueryCoordinator {
         };
         #[cfg(feature = "daemon")]
         let query_task_scope = self.task_scope.child("query")?.child(&query_id)?;
+        // This covers live journal structures, bounded serialization copies and request storage.
+        // Result bytes have separate physical charges in the manifest-last package owner; the
+        // coordinator's maximum-result counters are logical admission commitments, not RSS.
+        let metadata_bytes = self
+            .policy
+            .max_event_bytes_per_query
+            .get()
+            .checked_mul(8)
+            .and_then(|value| value.checked_add(operation.canonical_request.len().checked_mul(2)?))
+            .and_then(|value| value.checked_add(128 * 1024))
+            .ok_or(QueryCoordinatorError::CounterOverflow)?;
+        let metadata_reservation = Arc::new(self.budget.try_reserve(
+            ResourceClass::Data,
+            ResourceAmounts {
+                memory_bytes: u64::try_from(metadata_bytes)?,
+                ..ResourceAmounts::default()
+            },
+        )?);
         let handle = QueryHandle {
+            metadata_reservation,
             operation,
             acceptance: acceptance.clone(),
             fingerprint,
@@ -1098,12 +1191,20 @@ impl QueryCoordinator {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let scope = {
+        let (scope, metadata) = {
             let mut state = self.state.lock().await;
             let (phase, scope) = state
                 .handles
                 .get(query_id)
-                .map(|handle| (handle.acceptance.phase, handle.task_scope.clone()))
+                .map(|handle| {
+                    (
+                        handle.acceptance.phase,
+                        (
+                            handle.task_scope.clone(),
+                            Arc::clone(&handle.metadata_reservation),
+                        ),
+                    )
+                })
                 .ok_or_else(|| QueryCoordinatorError::UnknownQuery(query_id.to_owned()))?;
             if matches!(phase, QueryExecutionPhase::Terminal(_))
                 || !state.task_reservations.contains(query_id)
@@ -1113,7 +1214,15 @@ impl QueryCoordinator {
             }
             scope
         };
-        if let Err(error) = scope.spawn("execution", future).await {
+        if let Err(error) = scope
+            .spawn_async_owned(
+                "execution",
+                TaskCancellationMode::AbortableAsync,
+                metadata,
+                future,
+            )
+            .await
+        {
             self.state.lock().await.attached_tasks.remove(query_id);
             return Err(error.into());
         }
@@ -1137,7 +1246,8 @@ impl QueryCoordinator {
         Ok(())
     }
 
-    /// Append a control event, coalescing adjacent progress before sequence allocation.
+    /// Append a control event, coalescing progress and the private publication checkpoint.
+    /// The latter grows only by a validated page-path prefix and is never a public event.
     pub async fn append_event(
         &self,
         query_id: &str,
@@ -1161,10 +1271,25 @@ impl QueryCoordinator {
         }
         match &payload {
             QueryControlEventPayload::PublicationPending { object_set } => {
-                if cleanup_object_set(&handle.events).is_some() {
+                if object_set.page_object_paths.len() as u64 > handle.operation.maximum_result_pages
+                {
+                    return Err(QueryCoordinatorError::JournalCapacity);
+                }
+                if retained_locator(&handle.events).is_some() {
                     return Err(QueryCoordinatorError::PublicationIntentConflict);
                 }
-                validate_pending_result_object_set(object_set)?;
+                if let Some(previous) = publication_intent(&handle.events) {
+                    if previous.manifest_object_path != object_set.manifest_object_path
+                        || previous.epoch_id != object_set.epoch_id
+                        || previous.query_execution != object_set.query_execution
+                        || object_set.page_object_paths.len() <= previous.page_object_paths.len()
+                        || !object_set
+                            .page_object_paths
+                            .starts_with(&previous.page_object_paths)
+                    {
+                        return Err(QueryCoordinatorError::PublicationIntentConflict);
+                    }
+                }
             }
             QueryControlEventPayload::ResultReady {
                 retained_locator: locator,
@@ -1183,15 +1308,29 @@ impl QueryCoordinator {
             }
             _ => {}
         }
-        let coalesced = payload.is_progress()
+        // Keep one private cleanup checkpoint, even when public progress intervenes.
+        // Retaining every cumulative prefix would consume quadratic journal memory.
+        let replacement = if matches!(payload, QueryControlEventPayload::PublicationPending { .. })
+        {
+            handle.events.iter().rposition(|event| {
+                matches!(
+                    event.payload,
+                    QueryControlEventPayload::PublicationPending { .. }
+                )
+            })
+        } else if payload.is_progress()
             && handle
                 .events
                 .last()
-                .is_some_and(|event| event.payload.is_progress());
-        let sequence = if coalesced {
-            handle.events.last().map_or(1, |event| event.sequence)
+                .is_some_and(|event| event.payload.is_progress())
+        {
+            handle.events.len().checked_sub(1)
         } else {
-            next_sequence(&handle.events)?
+            None
+        };
+        let sequence = match replacement {
+            Some(index) => handle.events[index].sequence,
+            None => next_sequence(&handle.events)?,
         };
         let event = QueryControlEvent {
             sequence,
@@ -1200,21 +1339,15 @@ impl QueryCoordinator {
         };
         let encoded = serde_json_canonicalizer::to_vec(&event)
             .map_err(QueryCoordinatorError::JournalEncoding)?;
-        let replaced_bytes = if coalesced {
-            handle
-                .events
-                .last()
-                .map(|previous| {
-                    serde_json_canonicalizer::to_vec(previous)
-                        .map(|bytes| bytes.len())
-                        .map_err(QueryCoordinatorError::JournalEncoding)
-                })
-                .transpose()?
-                .unwrap_or(0)
-        } else {
-            0
-        };
-        let next_count = handle.events.len() + usize::from(!coalesced);
+        let replaced_bytes = replacement
+            .map(|index| {
+                serde_json_canonicalizer::to_vec(&handle.events[index])
+                    .map(|bytes| bytes.len())
+                    .map_err(QueryCoordinatorError::JournalEncoding)
+            })
+            .transpose()?
+            .unwrap_or(0);
+        let next_count = handle.events.len() + usize::from(replacement.is_none());
         let next_bytes = handle
             .event_bytes
             .checked_sub(replaced_bytes)
@@ -1226,11 +1359,8 @@ impl QueryCoordinator {
         {
             return Err(QueryCoordinatorError::JournalCapacity);
         }
-        if coalesced {
-            *handle
-                .events
-                .last_mut()
-                .ok_or(QueryCoordinatorError::CoordinatorState)? = event.clone();
+        if let Some(index) = replacement {
+            handle.events[index] = event.clone();
         } else {
             handle.events.push(event.clone());
         }
@@ -1783,11 +1913,11 @@ impl QueryCoordinator {
         let expired = state
             .handles
             .iter()
-            .filter_map(|(query_id, handle)| {
-                (handle.acceptance.lease_expires_at_unix_ms <= observed_at_unix_ms
-                    && handle.result_retention != ResultRetentionState::CleanupPending)
-                    .then(|| query_id.clone())
+            .filter(|&(_query_id, handle)| {
+                handle.acceptance.lease_expires_at_unix_ms <= observed_at_unix_ms
+                    && handle.result_retention != ResultRetentionState::CleanupPending
             })
+            .map(|(query_id, _handle)| query_id.clone())
             .collect::<Vec<_>>();
         for query_id in &expired {
             let stage_result_cleanup = state.handles.get(query_id).is_some_and(|handle| {
@@ -2141,7 +2271,7 @@ fn validate_pending_result_object_set(
     let page_prefix = format!("{package_root}/pages/");
     let page_paths = &object_set.page_object_paths;
     let valid_pages = !page_paths.is_empty()
-        && page_paths.len() <= 1_024
+        && page_paths.len() <= 4_096
         && page_paths.iter().all(|page| {
             page.is_ascii()
                 && page.len() <= 1_024
@@ -2267,12 +2397,14 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>, QueryCoordinatorError> {
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return Err(QueryCoordinatorError::InvalidHex);
     }
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| Ok((decode_nibble(pair[0])? << 4) | decode_nibble(pair[1])?))
         .collect()
 }
@@ -2308,6 +2440,10 @@ fn constant_time_equal(left: &[u8; 32], right: &[u8; 32]) -> bool {
 
 #[derive(Debug, Error)]
 pub enum QueryCoordinatorError {
+    #[error(transparent)]
+    Resource(#[from] ResourceBudgetError),
+    #[error("query resource quantity does not fit this platform")]
+    IntegerRange(#[from] std::num::TryFromIntError),
     #[error("invalid query coordinator policy {0}")]
     InvalidPolicy(&'static str),
     #[error("invalid query coordinator identity")]
@@ -2485,8 +2621,90 @@ mod tests {
             SqliteQueryCoordinatorJournal::open(&temp.path().join("query.sqlite"))
                 .expect("open journal"),
         );
-        QueryCoordinator::try_new(policy, generation, [0x71; 32], journal, observed_at_unix_ms)
-            .expect("open coordinator")
+        QueryCoordinator::try_new(
+            policy,
+            generation,
+            [0x71; 32],
+            journal,
+            observed_at_unix_ms,
+            crate::fabric::workspace_resources::test_workspace_budget(),
+        )
+        .expect("open coordinator")
+    }
+
+    #[tokio::test]
+    async fn wp79_query_admission_reserves_metadata_before_journal_or_task() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("bounded.sqlite");
+        let journal = Arc::new(SqliteQueryCoordinatorJournal::open(&path).unwrap());
+        let budget = crate::fabric::workspace_resources::test_workspace_budget();
+        let coordinator = QueryCoordinator::try_new(
+            policy(1, 1024, 64),
+            1,
+            [7; 32],
+            journal,
+            100,
+            budget.clone(),
+        )
+        .unwrap();
+        let policy = budget.policy();
+        let pressure = budget
+            .try_reserve(
+                ResourceClass::Data,
+                ResourceAmounts {
+                    memory_bytes: policy.limits.memory_bytes - policy.control_reserve.memory_bytes,
+                    ..ResourceAmounts::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            coordinator.accept(operation("budgeted", 1), 100).await,
+            Err(QueryCoordinatorError::Resource(
+                ResourceBudgetError::Exhausted { .. }
+            ))
+        ));
+        assert_eq!(coordinator.snapshot().await.accepted, 0);
+        let connection = Connection::open(&path).unwrap();
+        let count: i64 = connection
+            .query_row("SELECT count(*) FROM query_coordinator_record", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        drop(pressure);
+        assert!(
+            coordinator
+                .accept(operation("budgeted", 1), 100)
+                .await
+                .is_ok()
+        );
+        assert!(budget.observation().used.memory_bytes > 0);
+        drop(coordinator);
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+    }
+
+    #[test]
+    fn wp79_query_recovery_rejects_oversized_blob_before_json_decode() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("oversized.sqlite");
+        let journal = Arc::new(SqliteQueryCoordinatorJournal::open(&path).unwrap());
+        let policy = policy(1, 1024, 64);
+        let limit = policy.max_event_bytes_per_query.get() + 128 * 1024;
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "INSERT INTO query_coordinator_record VALUES ('oversized', zeroblob(?1), 10000)",
+                [i64::try_from(limit + 1).unwrap()],
+            )
+            .unwrap();
+        let budget = crate::fabric::workspace_resources::test_workspace_budget();
+        let result = QueryCoordinator::try_new(policy, 1, [7; 32], journal, 100, budget.clone());
+        assert!(matches!(
+            result,
+            Err(QueryCoordinatorError::JournalCapacity)
+        ));
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+        assert_eq!(budget.observation().peak.memory_bytes, (limit * 3) as u128);
     }
 
     fn retained_locator() -> RetainedPackageLocator {
@@ -3533,6 +3751,92 @@ mod tests {
                 QueryControlEventPayload::PublicationPending { .. }
             )
         }));
+    }
+
+    #[tokio::test]
+    async fn wp79_publication_prefix_is_bounded_private_and_recoverable() {
+        let temp = tempfile::tempdir().unwrap();
+        let limits = policy(1, 1_024, 64);
+        let expected = pending_object_set(&retained_locator());
+        let mut first = expected.clone();
+        first.page_object_paths.truncate(1);
+        let query_id = {
+            let coordinator = coordinator(&temp, limits, 7, 1_000);
+            let accepted = acceptance(
+                coordinator
+                    .accept(operation("growing-publication", 1), 1_000)
+                    .await
+                    .unwrap(),
+            );
+            let payload = |object_set| QueryControlEventPayload::PublicationPending { object_set };
+            coordinator
+                .append_event(&accepted.query_id, payload(first.clone()), 1_001)
+                .await
+                .unwrap();
+            coordinator
+                .append_event(
+                    &accepted.query_id,
+                    QueryControlEventPayload::Progress {
+                        stage: "one-page-durable".to_owned(),
+                        completed: 1,
+                        total: Some(2),
+                    },
+                    1_002,
+                )
+                .await
+                .unwrap();
+            let public_before = coordinator
+                .events_after(&accepted.query_id, 0)
+                .await
+                .unwrap();
+            coordinator
+                .append_event(&accepted.query_id, payload(expected.clone()), 1_003)
+                .await
+                .unwrap();
+            assert_eq!(
+                coordinator
+                    .events_after(&accepted.query_id, 0)
+                    .await
+                    .unwrap(),
+                public_before
+            );
+            for invalid in [first.clone(), expected.clone()] {
+                assert!(matches!(
+                    coordinator
+                        .append_event(&accepted.query_id, payload(invalid), 1_004)
+                        .await,
+                    Err(QueryCoordinatorError::PublicationIntentConflict)
+                ));
+            }
+            let mut replaced = expected.clone();
+            replaced.page_object_paths.reverse();
+            assert!(
+                coordinator
+                    .append_event(&accepted.query_id, payload(replaced), 1_005)
+                    .await
+                    .is_err()
+            );
+            let state = coordinator.state.lock().await;
+            let handle = &state.handles[&accepted.query_id];
+            assert_eq!(
+                handle
+                    .events
+                    .iter()
+                    .filter(|event| matches!(
+                        event.payload,
+                        QueryControlEventPayload::PublicationPending { .. }
+                    ))
+                    .count(),
+                1
+            );
+            assert_eq!(publication_intent(&handle.events), Some(expected.clone()));
+            accepted.query_id
+        };
+        let restarted = coordinator(&temp, limits, 8, 1_100);
+        assert_eq!(
+            restarted.pending_result_cleanups().await,
+            [(query_id, expected)]
+        );
     }
 
     #[tokio::test]

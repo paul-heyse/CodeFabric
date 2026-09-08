@@ -190,10 +190,11 @@ impl CompiledSemanticRelease {
         epoch: &ProgrammaticFabricEpoch,
         bounds: ProducerClosureResourceBounds,
         cancellation: &ProducerClosureCancellation,
+        resource_budget: &crate::resource_budget::ResourceBudget,
     ) -> Result<ProvedDerivedProducerClosure, CompiledProducerClosureProofError> {
         let compiled = self.compile_producer_closure(epoch, bounds).await?;
         let execution = compiled
-            .execute_with_cancellation(&epoch.context(), cancellation)
+            .execute_with_cancellation(&epoch.context(), cancellation, resource_budget)
             .await?;
         let proof = evaluate_release_producer_closure(
             ReleaseProducerClosureProofInput::try_from_execution(&execution)?,

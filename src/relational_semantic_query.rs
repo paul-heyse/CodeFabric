@@ -234,8 +234,8 @@ pub fn issue_objective_group_identity(
     .chain(
         input
             .canonical_group_key
-            .iter()
-            .map(|(key, _)| key.as_ref()),
+            .keys()
+            .map(std::convert::AsRef::as_ref),
     )
     .chain([
         input.aggregate_function.as_ref(),
@@ -1621,10 +1621,10 @@ enum ClosureStatus<'a> {
     Remainder(&'a UnsupportedFamilyRemainder),
 }
 
-fn validate_program_catalog<'a>(
-    catalog: &'a SemanticQueryProgramCatalog,
+fn validate_program_catalog(
+    catalog: &SemanticQueryProgramCatalog,
     limits: SemanticRequestLimits,
-) -> Result<ValidatedProgramCatalog<'a>, RelationalSemanticQueryError> {
+) -> Result<ValidatedProgramCatalog<'_>, RelationalSemanticQueryError> {
     validate_pin("program_catalog_pin", catalog.program_catalog_pin)?;
     validate_pin("program_release_pin", catalog.program_release_pin)?;
     let authority_id = match &catalog.authority {
@@ -2401,10 +2401,10 @@ fn request_dependency_order(
             }
         }
     }
-    if order.len() != blocks.len() {
-        Err(RelationalSemanticQueryError::QueryDependencyCycle)
-    } else {
+    if order.len() == blocks.len() {
         Ok(order)
+    } else {
+        Err(RelationalSemanticQueryError::QueryDependencyCycle)
     }
 }
 
@@ -3114,7 +3114,7 @@ fn validate_epoch_ordinals(
         .iter()
         .copied()
         .enumerate()
-        .any(|(index, ordinal)| usize::try_from(ordinal).map_or(true, |ordinal| ordinal != index))
+        .any(|(index, ordinal)| usize::try_from(ordinal) != Ok(index))
     {
         return Err(EpochBoundSemanticIngressError::Ordinal {
             family,
@@ -3162,10 +3162,10 @@ pub fn epoch_bound_semantic_ingress_limits_pin(
     *hasher.finalize().as_bytes()
 }
 
-fn validate_epoch_bound_ingress_catalog<'a>(
-    catalog: &'a EpochBoundSemanticIngressCatalog,
+fn validate_epoch_bound_ingress_catalog(
+    catalog: &EpochBoundSemanticIngressCatalog,
     limits: EpochBoundSemanticIngressLimits,
-) -> Result<ValidatedEpochBoundIngressCatalog<'a>, EpochBoundSemanticIngressError> {
+) -> Result<ValidatedEpochBoundIngressCatalog<'_>, EpochBoundSemanticIngressError> {
     for (kind, pin) in [
         ("catalog.fabric_epoch_pin", catalog.fabric_epoch_pin),
         ("catalog.program_catalog_pin", catalog.program_catalog_pin),
@@ -4838,10 +4838,10 @@ fn validate_epoch_execution_catalog<'a>(
     Ok(validated)
 }
 
-fn validate_epoch_compile_closure<'a>(
-    proof: &'a ProducerClosureProof,
+fn validate_epoch_compile_closure(
+    proof: &ProducerClosureProof,
     expected_pin: [u8; 32],
-) -> Result<BTreeMap<Arc<str>, ClosureStatus<'a>>, EpochBoundSemanticCompileError> {
+) -> Result<BTreeMap<Arc<str>, ClosureStatus<'_>>, EpochBoundSemanticCompileError> {
     epoch_compile_pin("producer closure proof", proof.proof_pin)?;
     if proof.proof_pin != expected_pin {
         return Err(EpochBoundSemanticCompileError::PinMismatch(
@@ -4993,7 +4993,7 @@ fn compile_epoch_runtime_handoff(
             content_pin,
         });
     }
-    for ((program_binding_id, input_id), _) in &catalog.request_inputs {
+    for (program_binding_id, input_id) in catalog.request_inputs.keys() {
         let used_program = blocks
             .values()
             .any(|block| block.program_binding_id == *program_binding_id);

@@ -340,7 +340,7 @@ impl ProgrammaticDeltaMaintenanceAdministrationAdapter {
             .runtime
             .maintain(selection.relation_id(), selection.maintenance())
             .await
-            .map_err(|_| self.backend_failure())?;
+            .map_err(|()| self.backend_failure())?;
         match (&selection.action, &outcome) {
             (
                 AdministrationAction::InspectDeltaRetention,

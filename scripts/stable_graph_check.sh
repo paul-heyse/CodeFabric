@@ -92,7 +92,7 @@ printf '%s' "$root_shape" | jq -e '
   and (.features | has("tempfile") | not)
   and .features["contract-models"] == ["canonical-json", "dep:serde_yaml_ng"]
   and (.features["provider-contracts"] | sort) == ([
-    "contract-models", "dep:arrow-array", "dep:arrow-schema", "dep:thiserror"
+    "contract-models", "dep:arrow-array", "dep:arrow-buffer", "dep:arrow-schema", "dep:thiserror"
   ] | sort)
   and .features["release-compiler"] == ["provider-contracts"]
   and (.features | has("repository-state") | not)
@@ -107,6 +107,7 @@ printf '%s' "$root_shape" | jq -e '
   and (.features["data-fabric"] | index("repository-input")) == null
   and (.features["data-fabric"] | index("operational-state")) == null
   and (.features["data-fabric"] | index("dep:petgraph")) != null
+  and (.features["data-fabric"] | index("dep:bytes")) != null
   and (.features["fact-generation"] | sort) == ([
     "provider-contracts", "dep:blake3", "dep:petgraph", "dep:rayon", "dep:ruff_python_ast",
     "dep:ruff_python_index", "dep:ruff_python_parser", "dep:ruff_python_semantic", "dep:ruff_python_trivia",
@@ -221,6 +222,7 @@ forbid_in_tree "$contract_tree" 'datafusion.*|deltalake.*|arrow.*|pyo3|tonic|rus
 
 provider_contract_tree="$(cargo_tree --no-default-features --features provider-contracts)"
 require_in_tree "$provider_contract_tree" arrow-array 'provider-contracts graph'
+require_in_tree "$provider_contract_tree" arrow-buffer 'provider-contracts graph'
 require_in_tree "$provider_contract_tree" arrow-schema 'provider-contracts graph'
 forbid_in_tree "$provider_contract_tree" \
   'datafusion.*|deltalake.*|pyo3|tonic|prost.*|tokio|rusqlite|gix|rayon|tree-sitter|ruff_python_.*' \

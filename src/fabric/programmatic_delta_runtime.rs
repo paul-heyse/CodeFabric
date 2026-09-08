@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use deltalake::{DeltaTable, DeltaTableBuilder, DeltaTableError};
+use deltalake::{DeltaTable, DeltaTableError};
 use thiserror::Error;
 
 use super::activation::{TableVersionSet, TableVersionSetRef};
@@ -172,7 +172,7 @@ impl ProgrammaticDeltaRuntime {
         let contract = self.contracts.get(relation_id).cloned().ok_or_else(|| {
             ProgrammaticDeltaRuntimeError::MissingSchemaContract(Arc::from(relation_id))
         })?;
-        let table = load_exact(selected).await?;
+        let table = load_exact(selected, &self.session).await?;
         Ok(
             prepare_exact_delta_semantic_read(table, request, contract, Arc::clone(&self.session))
                 .await?,
@@ -197,7 +197,7 @@ impl ProgrammaticDeltaRuntime {
         downstream: &D,
     ) -> Result<ExactDeltaCdfConsumptionOutcome, ProgrammaticDeltaRuntimeError> {
         let selected = self.require_selected(relation_id, request.through_pin())?;
-        let table = load_exact(selected).await?;
+        let table = load_exact(selected, &self.session).await?;
         Ok(self
             .cdf
             .consume(request, &table, Arc::clone(&self.session), downstream)
@@ -211,7 +211,7 @@ impl ProgrammaticDeltaRuntime {
         request: &UncertainDeltaCommitRequest,
     ) -> Result<UncertainDeltaCommitOutcome, ProgrammaticDeltaRuntimeError> {
         let selected = self.require_selected(relation_id, request.write().predecessor())?;
-        let authority = load_exact(selected).await?;
+        let authority = load_exact(selected, &self.session).await?;
         Ok(reconcile_uncertain_delta_commit(&authority, request).await)
     }
 
@@ -222,7 +222,7 @@ impl ProgrammaticDeltaRuntime {
         request: &GuardedDeltaMaintenanceRequest,
     ) -> Result<DeltaMaintenanceOutcome, ProgrammaticDeltaRuntimeError> {
         let selected = self.require_selected(relation_id, request.target())?;
-        let table = load_exact(selected).await?;
+        let table = load_exact(selected, &self.session).await?;
         Ok(self.maintenance.execute(request, table).await?)
     }
 
@@ -267,8 +267,11 @@ impl ProgrammaticDeltaRuntime {
     }
 }
 
-async fn load_exact(pin: &ExactDeltaPin) -> Result<DeltaTable, DeltaTableError> {
-    DeltaTableBuilder::from_url(pin.canonical_root().clone())?
+async fn load_exact(
+    pin: &ExactDeltaPin,
+    session: &datafusion::execution::SessionState,
+) -> Result<DeltaTable, DeltaTableError> {
+    super::delta_exact::session_delta_table_builder(pin.canonical_root().clone(), session)?
         .with_version(pin.version())
         .load()
         .await

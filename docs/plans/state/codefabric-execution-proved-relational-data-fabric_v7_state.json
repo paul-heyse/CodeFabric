@@ -4,7 +4,7 @@
   "design_path": "docs/designs/codefabric_compiled_release_provider_fabric_runtime_boundary_design_v1_2026-09-02.md",
   "baseline_commit": "de5db65c2834458eb57c7133183b8cef67a2491a",
   "status": "executing",
-  "current_packet": "WP66",
+  "current_packet": "WP57",
   "packets": {
     "WP53": {
       "status": "complete",
@@ -14,46 +14,68 @@
       "blockers": []
     },
     "WP54": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "bdfaeed30edf3b2d4bb2d9c4784b1266c748a7b6",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Revalidate exact Delta and operational-state behavior after the outstanding provider/runtime integration and current state/activation edits; retain prior implementation provenance."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP55": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "bdfaeed30edf3b2d4bb2d9c4784b1266c748a7b6",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Revalidate the generic fabric, structured scan, schema/cache, and streamed-query boundary after current fabric edits and renewed provider-lane closure."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP56": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "dd893553c04396e9d239b852aa813817dcb0dca7",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Revalidate the owned cancellation/task tree after current cancellation, coordinator, supervisor, and query-service edits, including the externally integrated provider lifecycles."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP57": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "dd893553c04396e9d239b852aa813817dcb0dca7",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Revalidate the full job-driven in-process provider gate set and attribute the current adapter edits before renewing packet closure."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP58": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "be0062d02eaf478f9230214da27bb776bbb4926d",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Revalidate application-owned rustc results together with their real production consumer; standalone conversion and fault oracles do not close the missing production dispatch obligation."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP59": {
-      "status": "complete",
+      "status": "in_progress",
       "proving_commit": "79fc756d023a64f638886c91c09266ed3758ac26",
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Complete supervisor-owned Pyrefly context construction and generation dispatch in the production workspace, then prove same-process generations, cancellation survival, crash recovery, and joined drain through that owner."
+      ]
     },
     "WP60": {
       "status": "complete",
@@ -63,39 +85,54 @@
       "blockers": []
     },
     "WP61": {
-      "status": "complete",
+      "status": "in_progress",
       "proving_commit": "185859530ce2466f091d76970b27cb209ece9489",
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Complete the sole production composition's Pyrefly and rustc dispatch, input/context capture, and accepted-result admission; unconditional absent-input lanes do not satisfy the four-provider target."
+      ]
     },
     "WP62": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "fc3a8bd3c94d3b823cba8600a5000b3a702c5704",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Renew retained behavior and package/feature proof after WP61 closes the external-provider integration; physical legacy absence alone does not close the packet."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP63": {
-      "status": "complete",
+      "status": "in_progress",
       "proving_commit": "489345314121b493ec563a3988fe21015dd55ecf",
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Extend installed correctness/recovery proof through all four real provider lanes, including external-provider faults and recovery. Python declaration-query causality alone does not close this outcome."
+      ]
     },
     "WP64": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "197c104cc952b956c5538d91d23e39ddc34faf32",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Repeat FreshActivation, exact restart, and forward repair on the corrected four-provider production candidate after WP63 closure."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "WP65": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "81355b61af2ec027d0eb4766494f2903ae145d1a",
       "deviations": [
         {
           "summary": "The preregistered method advanced to revision v4 before accepted evidence: explicit Cargo target arguments survive the repository shell boundary, process-tree sampling moved to 100 ms to bound observer interference, and the interop registry/session share one 64 KiB chunk capability. Workloads, sample counts, deadlines, and resource/performance bounds were not relaxed."
+        },
+        {
+          "summary": "Replace obsolete candidate measurements only after the final integrated topology, correctness, FreshActivation, and frozen method are re-established; do not restamp or relax old performance evidence."
         }
       ],
       "failed_approaches": [
@@ -116,7 +153,9 @@
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Finish release validation and independent implementation review at one clean committed candidate after affected packet, FreshActivation, and performance evidence is renewed; certification tooling already exists."
+      ]
     }
   },
   "milestones": {
@@ -128,23 +167,35 @@
       "blockers": []
     },
     "M14": {
-      "status": "complete",
+      "status": "in_progress",
       "proving_commit": "79fc756d023a64f638886c91c09266ed3758ac26",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Reopened for the missing production external-provider lifecycle/composition and dependent acceptance proof; implemented local boundaries and prior proving commit remain evidence."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "M15": {
-      "status": "complete",
+      "status": "in_progress",
       "proving_commit": "dd893553c04396e9d239b852aa813817dcb0dca7",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Reopened for the missing production external-provider lifecycle/composition and dependent acceptance proof; implemented local boundaries and prior proving commit remain evidence."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "M16": {
-      "status": "complete",
+      "status": "in_progress",
       "proving_commit": "489345314121b493ec563a3988fe21015dd55ecf",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Reopened for the missing production external-provider lifecycle/composition and dependent acceptance proof; implemented local boundaries and prior proving commit remain evidence."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
@@ -153,42 +204,64 @@
       "proving_commit": null,
       "deviations": [],
       "failed_approaches": [],
-      "blockers": []
+      "blockers": [
+        "Requires corrected installed topology, refreshed performance evidence, all final gates, and an accepted independent implementation review at one committed candidate."
+      ]
     }
   },
   "decommission_batches": {
     "DB19": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "fc3a8bd3c94d3b823cba8600a5000b3a702c5704",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Physical deletion evidence is retained; batch completion must be renewed with its replacement-consumer prerequisites and target behavior after the production-provider integration is complete."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "DB20": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "fc3a8bd3c94d3b823cba8600a5000b3a702c5704",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Physical deletion evidence is retained; batch completion must be renewed with its replacement-consumer prerequisites and target behavior after the production-provider integration is complete."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "DB21": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "fc3a8bd3c94d3b823cba8600a5000b3a702c5704",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Physical deletion evidence is retained; batch completion must be renewed with its replacement-consumer prerequisites and target behavior after the production-provider integration is complete."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "DB22": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "fc3a8bd3c94d3b823cba8600a5000b3a702c5704",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Physical deletion evidence is retained; batch completion must be renewed with its replacement-consumer prerequisites and target behavior after the production-provider integration is complete."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     },
     "DB23": {
-      "status": "complete",
+      "status": "stale",
       "proving_commit": "197c104cc952b956c5538d91d23e39ddc34faf32",
-      "deviations": [],
+      "deviations": [
+        {
+          "summary": "Physical deletion evidence is retained; batch completion must be renewed with its replacement-consumer prerequisites and target behavior after the production-provider integration is complete."
+        }
+      ],
       "failed_approaches": [],
       "blockers": []
     }
@@ -222,6 +295,39 @@
       "kind": "wp61_test_migration_completion",
       "packet": "WP61",
       "summary": "Complete every release-aware constructor and test-helper migration so default all-target and lib-test compilation is restored before packet proof."
+    },
+    {
+      "kind": "production_external_provider_integration",
+      "packets": [
+        "WP58",
+        "WP59",
+        "WP61",
+        "WP63"
+      ],
+      "summary": "Wire real Pyrefly and rustc jobs into the sole workspace startup/update path, capture the required Rust and Python semantic inputs, and admit actual results. Preserve explicit gaps for genuine missing inputs or capability failures, not as the unconditional production lane implementation."
+    },
+    {
+      "kind": "provider_lifecycle_oracle_coverage",
+      "packets": [
+        "WP59",
+        "WP63"
+      ],
+      "summary": "Prove the supervised Pyrefly owner across generations, cancellation, context replacement, crash, and joined reconstruction; extend installed semantic expectations to discriminate real Pyrefly and rustc execution."
+    },
+    {
+      "kind": "candidate_revalidation",
+      "packets": [
+        "WP54",
+        "WP55",
+        "WP56",
+        "WP57",
+        "WP58",
+        "WP62",
+        "WP64",
+        "WP65",
+        "WP66"
+      ],
+      "summary": "Attribute and finish existing edits under their owning packets, close release lint and remaining terminal obligations, then regenerate dependent correctness, activation, performance, and independent review evidence without altering the accepted design or plan."
     }
   ],
   "plan_deviations": [
@@ -237,8 +343,12 @@
       "from": "49d50fb95fda6e1cc271b72b931b4ca845a61b4e",
       "to": "49d50fb2592a492d9df0b50e447b9f00493cbdae",
       "summary": "The prior value did not identify a Git object; the corrected value is the ancestral commit titled implement v7 WP54 state authority split."
+    },
+    {
+      "kind": "implementation_status_reconciliation",
+      "summary": "The 2026-09-04 impl-status assessment preserves WP53/WP60 substrate closure, reopens production external-provider integration and dependent proofs, and replaces the obsolete instruction to implement already-existing WP66 tooling. See the separate versioned implementation-status report; all earlier judgments and proving commits are preserved."
     }
   ],
-  "next_action": "Implement WP66 aggregate certification tooling and exact oracles, run the complete successor matrix at one committed candidate, produce the independent implementation review, and only then close M17 and v7 state.",
-  "updated_at": "2026-09-03T13:41:10Z"
+  "next_action": "Revalidate and commit the current WP57 adapter work under the existing WP53/WP60 contracts, then finish WP58/WP59 production-provider closure and the WP61 single-composition integration. Restore dependency-ordered fabric/state/task and retained-package proof, extend WP63 to all four installed provider lanes, rerun WP64 and measure WP65 on the final candidate, then run the existing WP66 aggregate and obtain independent implementation review. Resolve the current root-clippy barrier in owning packets; do not hide repairs or stale measurements inside certification.",
+  "updated_at": "2026-09-04T20:01:18Z"
 }

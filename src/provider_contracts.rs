@@ -8,15 +8,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use thiserror::Error;
 
+use crate::cancellation::Cancellation;
+use crate::resource_budget::{
+    ResourceBudget, ResourceBudgetError, ResourceOwner, ResourceScopeKind,
+};
+
 mod inputs;
 pub use inputs::*;
+pub(crate) mod allocation;
 
 const MAX_IDENTITY_BYTES: usize = 512;
 const MAX_DIAGNOSTIC_BYTES: usize = 8 * 1024;
@@ -149,7 +154,10 @@ impl ProviderSourceBinding {
 
     /// Bind a context-wide job to the complete captured inventory, never a dirty subset.
     #[must_use]
-    pub fn from_inventory(identity: SourceIdentity, inventory: ProviderSourceInventory) -> Self {
+    pub fn from_inventory(
+        identity: SourceIdentity,
+        inventory: crate::resource_budget::ChargedValue<ProviderSourceInventory>,
+    ) -> Self {
         Self {
             identity,
             workspace_id: inventory.workspace_id(),
@@ -187,7 +195,7 @@ impl ProviderSourceBinding {
     }
 
     #[must_use]
-    pub const fn content_digest(&self) -> [u8; 32] {
+    pub fn content_digest(&self) -> [u8; 32] {
         match &self.selection {
             ProviderSourceSelection::File { content_digest, .. } => *content_digest,
             ProviderSourceSelection::Inventory(inventory) => inventory.identity(),
@@ -287,6 +295,14 @@ impl ProviderContextBinding {
     #[must_use]
     pub fn support_obligations(&self) -> &[ProviderSupportDependency] {
         &self.support_obligations
+    }
+
+    /// Retained context containers and nested allocation capacities; native state is separate.
+    ///
+    /// # Errors
+    /// Rejects arithmetic overflow or a metadata envelope violation.
+    pub fn memory_bytes(&self) -> Result<u64, ProviderContractError> {
+        inputs::context_memory_bytes(self)
     }
 
     /// Bind the selected module map without inventing names from file identities.
@@ -604,18 +620,18 @@ impl ProviderResourceCeilings {
 
 /// Owner-side cancellation handle. It is not carried by a provider job.
 #[derive(Clone, Debug)]
-pub struct CancellationHandle(Arc<AtomicBool>);
+pub struct CancellationHandle(Cancellation);
 
 impl CancellationHandle {
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
+        self.0.cancel();
     }
 }
 
 /// Bounded synchronous view of an outward-owned cancellation source.
 #[derive(Clone, Debug)]
 pub struct CancellationProbe {
-    cancelled: Arc<AtomicBool>,
+    cancellation: Cancellation,
     max_work_units_between_polls: NonZeroUsize,
 }
 
@@ -631,19 +647,39 @@ impl CancellationProbe {
         let interval = NonZeroUsize::new(max_work_units_between_polls)
             .filter(|value| value.get() <= MAX_WORK_UNITS_BETWEEN_POLLS)
             .ok_or(ProviderContractError::InvalidCancellationProbe)?;
-        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancellation = Cancellation::with_check_interval(
+            u32::try_from(max_work_units_between_polls)
+                .map_err(|_| ProviderContractError::InvalidCancellationProbe)?,
+        );
         Ok((
-            CancellationHandle(Arc::clone(&cancelled)),
+            CancellationHandle(cancellation.clone()),
             Self {
-                cancelled,
+                cancellation,
                 max_work_units_between_polls: interval,
             },
         ))
     }
 
+    /// Bind the provider probe to the caller's existing cancellation authority.
+    ///
+    /// # Errors
+    /// Rejects a zero or application-unbounded polling interval.
+    pub fn from_cancellation(
+        cancellation: Cancellation,
+        max_work_units_between_polls: usize,
+    ) -> Result<Self, ProviderContractError> {
+        let interval = NonZeroUsize::new(max_work_units_between_polls)
+            .filter(|value| value.get() <= MAX_WORK_UNITS_BETWEEN_POLLS)
+            .ok_or(ProviderContractError::InvalidCancellationProbe)?;
+        Ok(Self {
+            cancellation,
+            max_work_units_between_polls: interval,
+        })
+    }
+
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
+        self.cancellation.is_cancelled()
     }
 
     #[must_use]
@@ -654,7 +690,7 @@ impl CancellationProbe {
     pub(crate) fn restricted_to(&self, maximum: usize) -> Result<Self, ProviderContractError> {
         let interval = self.max_work_units_between_polls().min(maximum);
         Ok(Self {
-            cancelled: Arc::clone(&self.cancelled),
+            cancellation: self.cancellation.clone(),
             max_work_units_between_polls: NonZeroUsize::new(interval)
                 .ok_or(ProviderContractError::InvalidCancellationProbe)?,
         })
@@ -776,12 +812,13 @@ pub struct ProviderJob {
     provider: ProviderIdentity,
     protocol: ProviderProtocolIdentity,
     source: ProviderSourceBinding,
-    context: ProviderContextBinding,
+    context: crate::resource_budget::ChargedValue<ProviderContextBinding>,
     run: ProviderRunBinding,
     lane: ProviderLane,
     trust: ProviderTrustPosture,
-    requests: Vec<ProviderFamilyRequest>,
+    requests: crate::resource_budget::ChargedSlice<ProviderFamilyRequest>,
     ceilings: ProviderResourceCeilings,
+    resource_budget: ResourceBudget,
     deadline: Instant,
     cancellation: CancellationProbe,
     provenance: ProviderRunProvenance,
@@ -795,12 +832,14 @@ pub struct ProviderJobSpec {
     pub provider: ProviderIdentity,
     pub protocol: ProviderProtocolIdentity,
     pub source: ProviderSourceBinding,
-    pub context: ProviderContextBinding,
+    pub context: crate::resource_budget::ChargedValue<ProviderContextBinding>,
     pub run: ProviderRunBinding,
     pub lane: ProviderLane,
     pub trust: ProviderTrustPosture,
     pub requests: Vec<ProviderFamilyRequest>,
     pub ceilings: ProviderResourceCeilings,
+    /// Exact operation scope under the selected workspace's existing aggregate budget.
+    pub resource_budget: ResourceBudget,
     pub deadline: Instant,
     pub cancellation: CancellationProbe,
     pub provenance: ProviderRunProvenance,
@@ -814,6 +853,31 @@ impl ProviderJob {
     /// Rejects expired jobs, empty/oversized request sets, duplicate family/relation identities,
     /// and requests that exceed the effective relation ceiling.
     pub fn try_new(spec: ProviderJobSpec) -> Result<Self, ProviderContractError> {
+        if spec.resource_budget.owner()
+            != (ResourceOwner {
+                kind: ResourceScopeKind::Operation,
+                id: spec.run.provider_run_id(),
+            })
+            || spec
+                .resource_budget
+                .ancestor_owner(ResourceScopeKind::Workspace)
+                != Some(ResourceOwner {
+                    kind: ResourceScopeKind::Workspace,
+                    id: spec.source.workspace_id(),
+                })
+        {
+            return Err(ProviderContractError::ResourceOwnerMismatch);
+        }
+        allocation::require_native_workspace(
+            spec.context.reservation().owner(),
+            &spec.resource_budget,
+        )?;
+        if let ProviderSourceSelection::Inventory(inventory) = spec.source.selection() {
+            allocation::require_native_workspace(
+                inventory.reservation().owner(),
+                &spec.resource_budget,
+            )?;
+        }
         if spec.deadline <= Instant::now() {
             return Err(ProviderContractError::ExpiredJob);
         }
@@ -840,6 +904,14 @@ impl ProviderJob {
         }
         inputs::validate_job_input_bounds(&spec)?;
         let producer_release_identity = spec.provenance.producer_release_identity()?;
+        let metadata = spec
+            .requests
+            .capacity()
+            .checked_mul(std::mem::size_of::<ProviderFamilyRequest>())
+            .ok_or(ProviderContractError::ResourceOverflow)?;
+        let mut allocation =
+            allocation::ProviderAllocation::try_new(&spec.resource_budget, metadata as u64)?;
+        let requests = allocation.retain_measured_vec(spec.requests, |_| 0)?;
         Ok(Self {
             suite: spec.suite,
             provider: spec.provider,
@@ -849,13 +921,19 @@ impl ProviderJob {
             run: spec.run,
             lane: spec.lane,
             trust: spec.trust,
-            requests: spec.requests,
+            requests,
             ceilings: spec.ceilings,
+            resource_budget: spec.resource_budget,
             deadline: spec.deadline,
             cancellation: spec.cancellation,
             provenance: spec.provenance,
             producer_release_identity,
         })
+    }
+
+    #[must_use]
+    pub const fn resource_budget(&self) -> &ResourceBudget {
+        &self.resource_budget
     }
 
     #[must_use]
@@ -884,7 +962,7 @@ impl ProviderJob {
     }
 
     #[must_use]
-    pub const fn context(&self) -> &ProviderContextBinding {
+    pub fn context(&self) -> &ProviderContextBinding {
         &self.context
     }
 
@@ -1076,7 +1154,7 @@ pub struct ProviderRelationOutput {
     relation: ProviderRelationIdentity,
     schema_identity: ProviderSchemaIdentity,
     schema: SchemaRef,
-    batches: Vec<RecordBatch>,
+    batches: crate::resource_budget::ChargedSlice<RecordBatch>,
 }
 
 impl ProviderRelationOutput {
@@ -1090,6 +1168,7 @@ impl ProviderRelationOutput {
         schema_identity: ProviderSchemaIdentity,
         schema: SchemaRef,
         batches: Vec<RecordBatch>,
+        resource_budget: &ResourceBudget,
     ) -> Result<Self, ProviderContractError> {
         if batches.is_empty() {
             return Err(ProviderContractError::EmptyRelationOutput);
@@ -1097,6 +1176,29 @@ impl ProviderRelationOutput {
         if batches.iter().any(|batch| batch.schema() != schema) {
             return Err(ProviderContractError::ArrowSchemaMismatch);
         }
+        let metadata_bytes = batches
+            .capacity()
+            .saturating_mul(std::mem::size_of::<RecordBatch>())
+            .saturating_add(
+                schema
+                    .fields()
+                    .iter()
+                    .map(|field| field.size())
+                    .sum::<usize>(),
+            )
+            .saturating_add(
+                schema
+                    .metadata()
+                    .iter()
+                    .map(|(key, value)| key.capacity().saturating_add(value.capacity()))
+                    .sum::<usize>(),
+            )
+            .saturating_add(std::mem::size_of::<Self>());
+        let mut allocation = allocation::ProviderAllocation::try_new(
+            resource_budget,
+            u64::try_from(metadata_bytes).map_err(|_| ProviderContractError::ResourceOverflow)?,
+        )?;
+        let batches = allocation.retain_vec(metadata_bytes as u64, batches)?;
         Ok(Self {
             relation,
             schema_identity,
@@ -1189,27 +1291,28 @@ pub struct ProviderRunResult {
     provider: ProviderIdentity,
     protocol: ProviderProtocolIdentity,
     source: ProviderSourceBinding,
-    context: ProviderContextBinding,
+    context: crate::resource_budget::ChargedValue<ProviderContextBinding>,
     run: ProviderRunBinding,
     provenance: ProviderRunProvenance,
-    relations: Vec<ProviderRelationOutput>,
-    coverage: Vec<ProviderCoverage>,
-    gaps: Vec<ProviderGap>,
-    diagnostics: Vec<ProviderDiagnostic>,
+    relations: crate::resource_budget::ChargedSlice<ProviderRelationOutput>,
+    coverage: crate::resource_budget::ChargedSlice<ProviderCoverage>,
+    gaps: crate::resource_budget::ChargedSlice<ProviderGap>,
+    diagnostics: crate::resource_budget::ChargedSlice<ProviderDiagnostic>,
     trust: ProviderTrustOutcome,
     terminal: ProviderTerminalStatus,
     resources: ProviderResourceOutcome,
-    support: ProviderRunSupport,
+    support: crate::resource_budget::ChargedValue<ProviderRunSupport>,
 }
 
 /// Identity and evidence arguments for one provider result.
 #[derive(Clone, Debug)]
 pub struct ProviderRunResultSpec {
+    pub resource_budget: ResourceBudget,
     pub suite: SuiteIdentity,
     pub provider: ProviderIdentity,
     pub protocol: ProviderProtocolIdentity,
     pub source: ProviderSourceBinding,
-    pub context: ProviderContextBinding,
+    pub context: crate::resource_budget::ChargedValue<ProviderContextBinding>,
     pub run: ProviderRunBinding,
     pub provenance: ProviderRunProvenance,
     pub relations: Vec<ProviderRelationOutput>,
@@ -1247,6 +1350,7 @@ impl ProviderRunResult {
         evidence: ProviderRunEvidenceSpec,
     ) -> Result<Self, ProviderContractError> {
         Self::try_new(ProviderRunResultSpec {
+            resource_budget: job.resource_budget.clone(),
             suite: job.suite.clone(),
             provider: job.provider.clone(),
             protocol: job.protocol.clone(),
@@ -1271,6 +1375,28 @@ impl ProviderRunResult {
     /// Rejects duplicate relations/coverage, missing or contradictory gaps, false terminal status,
     /// and unbounded arithmetic.
     pub fn try_new(spec: ProviderRunResultSpec) -> Result<Self, ProviderContractError> {
+        allocation::require_native_workspace(
+            spec.context.reservation().owner(),
+            &spec.resource_budget,
+        )?;
+        if spec.resource_budget.owner()
+            != (ResourceOwner {
+                kind: ResourceScopeKind::Operation,
+                id: spec.run.provider_run_id(),
+            })
+        {
+            return Err(ProviderContractError::ResourceOwnerMismatch);
+        }
+        for relation in &spec.relations {
+            if !relation
+                .batches
+                .reservation()
+                .owner()
+                .same_scope(&spec.resource_budget)
+            {
+                return Err(ProviderContractError::ResourceOwnerMismatch);
+            }
+        }
         if spec.coverage.is_empty() || spec.coverage.len() > MAX_REQUESTED_FAMILIES {
             return Err(ProviderContractError::MissingCoverage);
         }
@@ -1341,6 +1467,59 @@ impl ProviderRunResult {
             bytes,
             diagnostics: spec.diagnostics.len(),
         };
+        Self::retain_owned(spec, resources)
+    }
+
+    fn retain_owned(
+        spec: ProviderRunResultSpec,
+        resources: ProviderResourceOutcome,
+    ) -> Result<Self, ProviderContractError> {
+        let support_bytes = spec.support.memory_bytes()?;
+        let metadata = support_bytes
+            .checked_add(
+                (spec
+                    .relations
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<ProviderRelationOutput>())
+                    + spec
+                        .coverage
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<ProviderCoverage>())
+                    + spec
+                        .gaps
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<ProviderGap>())
+                    + spec
+                        .diagnostics
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<ProviderDiagnostic>()))
+                    as u64,
+            )
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    spec.gaps
+                        .iter()
+                        .map(|gap| gap.detail.len() as u64)
+                        .sum::<u64>(),
+                )
+            })
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    spec.diagnostics
+                        .iter()
+                        .map(|diagnostic| diagnostic.message.len() as u64)
+                        .sum::<u64>(),
+                )
+            })
+            .ok_or(ProviderContractError::ResourceOverflow)?;
+        let mut allocation =
+            allocation::ProviderAllocation::try_new(&spec.resource_budget, metadata)?;
+        let relations = allocation.retain_measured_vec(spec.relations, |_| 0)?;
+        let coverage = allocation.retain_measured_vec(spec.coverage, |_| 0)?;
+        let gaps = allocation.retain_measured_vec(spec.gaps, |gap| gap.detail.len())?;
+        let diagnostics = allocation
+            .retain_measured_vec(spec.diagnostics, |diagnostic| diagnostic.message.len())?;
+        let support = allocation.retain_value(support_bytes, spec.support)?;
         Ok(Self {
             suite: spec.suite,
             provider: spec.provider,
@@ -1349,14 +1528,14 @@ impl ProviderRunResult {
             context: spec.context,
             run: spec.run,
             provenance: spec.provenance,
-            relations: spec.relations,
-            coverage: spec.coverage,
-            gaps: spec.gaps,
-            diagnostics: spec.diagnostics,
+            relations,
+            coverage,
+            gaps,
+            diagnostics,
             trust: spec.trust,
             terminal: spec.terminal,
             resources,
-            support: spec.support,
+            support,
         })
     }
 
@@ -1366,7 +1545,7 @@ impl ProviderRunResult {
     }
 
     #[must_use]
-    pub const fn support(&self) -> &ProviderRunSupport {
+    pub fn support(&self) -> &ProviderRunSupport {
         &self.support
     }
 
@@ -1695,8 +1874,12 @@ impl RustcCompilationControl {
 }
 
 /// Closed provider-contract validation failures.
-#[derive(Debug, Error, Eq, PartialEq)]
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum ProviderContractError {
+    #[error("provider resource budget differs from its exact operation or workspace")]
+    ResourceOwnerMismatch,
+    #[error(transparent)]
+    ResourceBudget(#[from] ResourceBudgetError),
     #[error(
         "provider input dispositions or changed/withdrawn membership do not close the authorized inventory"
     )]
@@ -1758,6 +1941,85 @@ pub enum ProviderContractError {
 }
 
 #[cfg(test)]
+pub(crate) fn fixture_provider_budget(workspace: [u8; 16], run: [u8; 16]) -> ResourceBudget {
+    use crate::resource_budget::{ResourceAmounts, ResourceBudgetPolicy};
+    let policy = ResourceBudgetPolicy {
+        limits: ResourceAmounts {
+            memory_bytes: 1 << 30,
+            disk_bytes: 1 << 30,
+            running_jobs: 64,
+            queued_jobs: 64,
+            retained_generations: 128,
+            retained_bytes: 1 << 30,
+            rows: 1_000_000_000,
+            pages: 65_536,
+        },
+        control_reserve: ResourceAmounts::default(),
+    };
+    thread_local! {
+        static SCOPES: std::cell::RefCell<BTreeMap<([u8; 16], [u8; 16]), ResourceBudget>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+    }
+    SCOPES.with(|scopes| {
+        let mut scopes = scopes.borrow_mut();
+        if let Some(scope) = scopes.get(&(workspace, run)) {
+            return scope.clone();
+        }
+        let workspace_scope = if let Some(scope) = scopes.get(&(workspace, [0; 16])) {
+            scope.clone()
+        } else {
+            let scope = ResourceBudget::try_process([231; 16], policy)
+                .unwrap()
+                .workspace(workspace, policy)
+                .unwrap();
+            scopes.insert((workspace, [0; 16]), scope.clone());
+            scope
+        };
+        let operation = workspace_scope.operation(run, policy).unwrap();
+        scopes.insert((workspace, run), operation.clone());
+        operation
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_provider_context(
+    workspace: [u8; 16],
+    context: ProviderContextBinding,
+) -> crate::resource_budget::ChargedValue<ProviderContextBinding> {
+    let budget = fixture_provider_budget(workspace, [254; 16]);
+    budget
+        .try_reserve(
+            crate::resource_budget::ResourceClass::Data,
+            crate::resource_budget::ResourceAmounts {
+                memory_bytes: context.memory_bytes().unwrap(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .into_charged_value(context)
+}
+
+#[cfg(test)]
+impl ProviderSourceBinding {
+    pub(crate) fn from_inventory_fixture(
+        identity: SourceIdentity,
+        inventory: ProviderSourceInventory,
+    ) -> Self {
+        let budget = fixture_provider_budget(inventory.workspace_id(), [254; 16]);
+        let charged = budget
+            .try_reserve(
+                crate::resource_budget::ResourceClass::Data,
+                crate::resource_budget::ResourceAmounts {
+                    memory_bytes: inventory.memory_bytes().unwrap(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .into_charged_value(inventory);
+        Self::from_inventory(identity, charged)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -1807,6 +2069,7 @@ mod tests {
                         request.schema_identity().clone(),
                         Arc::clone(request.schema()),
                         vec![RecordBatch::new_empty(Arc::clone(request.schema()))],
+                        &crate::provider_contracts::fixture_provider_budget([6; 16], [19; 16]),
                     )
                     .unwrap(),
                 ],
@@ -1829,10 +2092,13 @@ mod tests {
     #[test]
     fn rt_cpg_wp78_behavior() {
         let (_, mut original) = job();
-        original.context = original
-            .context
-            .with_support_obligations(vec![missing_import()])
-            .unwrap();
+        original.context = fixture_provider_context(
+            [6; 16],
+            (*original.context)
+                .clone()
+                .with_support_obligations(vec![missing_import()])
+                .unwrap(),
+        );
         let old = ProviderSourceInventory::try_new(
             [6; 16],
             7,
@@ -1845,7 +2111,7 @@ mod tests {
         .unwrap();
         assert_eq!(old.selected_files().count(), 2);
         assert_eq!(old.changed_paths().len(), 1);
-        original.source = ProviderSourceBinding::from_inventory(
+        original.source = ProviderSourceBinding::from_inventory_fixture(
             SourceIdentity::try_new("closed-inventory-7").unwrap(),
             old.clone(),
         );
@@ -1867,15 +2133,18 @@ mod tests {
         let mut lookup = missing_import();
         lookup.scope.ordered_roots.reverse();
         lookup.scope.effective_context = [32; 32];
-        changed.context = ProviderContextBinding::try_new(
-            ContextIdentity::try_new("selected-stubs-first").unwrap(),
-            [31; 16],
-            [32; 32],
-            [33; 32],
-        )
-        .unwrap()
-        .with_support_obligations(vec![lookup])
-        .unwrap();
+        changed.context = fixture_provider_context(
+            [6; 16],
+            ProviderContextBinding::try_new(
+                ContextIdentity::try_new("selected-stubs-first").unwrap(),
+                [31; 16],
+                [32; 32],
+                [33; 32],
+            )
+            .unwrap()
+            .with_support_obligations(vec![lookup])
+            .unwrap(),
+        );
         assert_eq!(
             original.source, changed.source,
             "source bytes did not change"
@@ -1895,11 +2164,13 @@ mod tests {
                 .unwrap();
         assert_eq!(empty.withdrawn().len(), 2);
         let mut deleted = original;
-        deleted.source = ProviderSourceBinding::from_inventory(
+        deleted.source = ProviderSourceBinding::from_inventory_fixture(
             SourceIdentity::try_new("closed-empty-8").unwrap(),
             empty,
         );
-        deleted.requests[0].requested_units = 0;
+        let mut requests = deleted.requests.to_vec();
+        requests[0].requested_units = 0;
+        deleted.requests = crate::resource_budget::ChargedSlice::for_test(requests);
         let support = ProviderRunSupport::from_job_inputs(&deleted, true);
         assert_eq!(
             support
@@ -1952,10 +2223,13 @@ mod tests {
             );
         }
         let (_, mut job) = job();
-        job.context = job
-            .context
-            .with_support_obligations(vec![missing_import()])
-            .unwrap();
+        job.context = fixture_provider_context(
+            [6; 16],
+            (*job.context)
+                .clone()
+                .with_support_obligations(vec![missing_import()])
+                .unwrap(),
+        );
         let mut incomplete = ProviderRunSupport::from_job_inputs(&job, true);
         incomplete.common_dependencies = incomplete
             .common_dependencies
@@ -1987,10 +2261,13 @@ mod tests {
         unknown_lookup.outcome = ProviderLookupOutcome::Incomplete {
             observed_universe: [22; 32],
         };
-        job.context = job
-            .context
-            .with_support_obligations(vec![unknown_lookup])
-            .unwrap();
+        job.context = fixture_provider_context(
+            [6; 16],
+            (*job.context)
+                .clone()
+                .with_support_obligations(vec![unknown_lookup])
+                .unwrap(),
+        );
         let support = ProviderRunSupport::from_job_inputs(&job, true);
         assert!(support.requires_context_invalidation());
         admit_provider_result(job.clone(), complete_with_support(&job, support)).unwrap();
@@ -2081,8 +2358,7 @@ mod tests {
             qualified_name: "a".into(),
             relative_path: b"a.py".to_vec(),
         };
-        let with_module = original
-            .context
+        let with_module = (*original.context)
             .clone()
             .with_modules(vec![module.clone()])
             .unwrap();
@@ -2090,13 +2366,15 @@ mod tests {
             &with_module.modules,
             &with_module.clone().modules
         ));
-        let with_version = original.context.clone().with_python_version(3, 14).unwrap();
+        let with_version = (*original.context)
+            .clone()
+            .with_python_version(3, 14)
+            .unwrap();
         let mut renamed = module;
         renamed.qualified_name = "different_module".into();
         assert_ne!(
             with_module.effective_input_identity(),
-            original
-                .context
+            (*original.context)
                 .clone()
                 .with_modules(vec![renamed])
                 .unwrap()
@@ -2104,8 +2382,7 @@ mod tests {
         );
         assert_ne!(
             with_version.effective_input_identity(),
-            original
-                .context
+            (*original.context)
                 .clone()
                 .with_python_version(3, 13)
                 .unwrap()
@@ -2125,7 +2402,7 @@ mod tests {
                 original.context.effective_input_identity()
             );
             changed = original.clone();
-            changed.context = context;
+            changed.context = fixture_provider_context([6; 16], context);
             assert_eq!(
                 admit_provider_result(
                     changed.clone(),
@@ -2140,10 +2417,13 @@ mod tests {
     #[test]
     fn rt_cpg_wp78_extra_lookup_authority_is_not_self_attested() {
         let (_, mut job) = job();
-        job.context = job
-            .context
-            .with_support_obligations(vec![missing_import()])
-            .unwrap();
+        job.context = fixture_provider_context(
+            [6; 16],
+            (*job.context)
+                .clone()
+                .with_support_obligations(vec![missing_import()])
+                .unwrap(),
+        );
         let mut extra = missing_import();
         extra.key = ProviderLookupKey::Import {
             qualified_name: b"another_dependency".to_vec(),
@@ -2204,14 +2484,17 @@ mod tests {
         let (_, original) = job();
         for inventory_source in [false, true] {
             let mut job = original.clone();
-            job.context = job
-                .context
-                .with_support_obligations(vec![missing_import()])
-                .unwrap();
+            job.context = fixture_provider_context(
+                [6; 16],
+                (*job.context)
+                    .clone()
+                    .with_support_obligations(vec![missing_import()])
+                    .unwrap(),
+            );
             if inventory_source {
                 let mut configuration = input_member(b"config.py", 8);
                 configuration.selected_for_provider = false;
-                job.source = ProviderSourceBinding::from_inventory(
+                job.source = ProviderSourceBinding::from_inventory_fixture(
                     SourceIdentity::try_new("inventory").unwrap(),
                     ProviderSourceInventory::try_new(
                         [6; 16],
@@ -2341,8 +2624,9 @@ mod tests {
             run: job.run,
             lane: job.lane,
             trust: job.trust,
-            requests: job.requests,
+            requests: job.requests.to_vec(),
             ceilings: job.ceilings,
+            resource_budget: job.resource_budget,
             deadline: job.deadline,
             cancellation: job.cancellation,
             provenance: job.provenance,
@@ -2360,7 +2644,7 @@ mod tests {
                 .iter()
                 .map(|member| member.relative_path.clone())
                 .collect::<Vec<_>>();
-            job.source = ProviderSourceBinding::from_inventory(
+            job.source = ProviderSourceBinding::from_inventory_fixture(
                 SourceIdentity::try_new("inventory").unwrap(),
                 ProviderSourceInventory::try_new(
                     [6; 16],
@@ -2373,7 +2657,8 @@ mod tests {
                 )
                 .unwrap(),
             );
-            job.requests.push(
+            let mut requests = job.requests.to_vec();
+            requests.push(
                 ProviderFamilyRequest::try_new(
                     ProviderFamilyIdentity::try_new("syntax.names").unwrap(),
                     ProviderRelationIdentity::try_new("raw.names").unwrap(),
@@ -2384,6 +2669,7 @@ mod tests {
                 )
                 .unwrap(),
             );
+            job.requests = crate::resource_budget::ChargedSlice::for_test(requests);
             rebuild_job(job).unwrap()
         };
         let small = ProviderRunSupport::from_job_inputs(&build(16), true);
@@ -2470,7 +2756,7 @@ mod tests {
                 1 => limited.ceilings.bytes = NonZeroU64::new(1).unwrap(),
                 _ => {
                     limited.ceilings.input_bytes = NonZeroU64::new(1).unwrap();
-                    limited.source = ProviderSourceBinding::from_inventory(
+                    limited.source = ProviderSourceBinding::from_inventory_fixture(
                         SourceIdentity::try_new("inventory").unwrap(),
                         ProviderSourceInventory::try_new(
                             [6; 16],
@@ -2602,12 +2888,16 @@ mod tests {
             provider: identity("tree-sitter", ProviderIdentity::try_new),
             protocol: identity("in-process-arrow@1", ProviderProtocolIdentity::try_new),
             source: source_binding(),
-            context: context_binding(),
+            context: crate::provider_contracts::fixture_provider_context(
+                [6; 16],
+                context_binding(),
+            ),
             run: run_binding("run-19", 19),
             lane: ProviderLane::TreeSitter,
             trust: ProviderTrustPosture::InProcessConstrained,
             requests: vec![request()],
             ceilings: ceilings(2, 8),
+            resource_budget: fixture_provider_budget([6; 16], [19; 16]),
             deadline: Instant::now() + Duration::from_secs(30),
             cancellation: probe,
             provenance: provenance(),
@@ -2628,6 +2918,7 @@ mod tests {
             identity("raw.calls.v1", ProviderSchemaIdentity::try_new),
             schema,
             vec![batch],
+            &crate::provider_contracts::fixture_provider_budget([6; 16], [19; 16]),
         )
         .unwrap()
     }
@@ -2645,6 +2936,7 @@ mod tests {
             _ => Vec::new(),
         };
         ProviderRunResult::try_new(ProviderRunResultSpec {
+            resource_budget: crate::provider_contracts::fixture_provider_budget([6; 16], [19; 16]),
             support: ProviderRunSupport::conservative(&job().1),
             suite: identity(
                 "codefabric-relational-data-fabric@2.3.0",
@@ -2653,8 +2945,11 @@ mod tests {
             provider: identity("tree-sitter", ProviderIdentity::try_new),
             protocol: identity("in-process-arrow@1", ProviderProtocolIdentity::try_new),
             source: source_binding(),
-            context: context_binding(),
-            run: run_binding(run, if run == "run-19" { 19 } else { 20 }),
+            context: crate::provider_contracts::fixture_provider_context(
+                [6; 16],
+                context_binding(),
+            ),
+            run: run_binding(run, 19),
             provenance: provenance(),
             relations: vec![relation()],
             coverage: vec![ProviderCoverage::new(family, coverage)],
@@ -2735,6 +3030,7 @@ mod tests {
             request.schema_identity().clone(),
             Arc::clone(request.schema()),
             vec![RecordBatch::new_empty(Arc::clone(request.schema()))],
+            &crate::provider_contracts::fixture_provider_budget([6; 16], [19; 16]),
         )
         .unwrap();
         let admitted = admit_provider_result(job.clone(), complete(vec![empty])).unwrap();
@@ -2818,15 +3114,16 @@ mod tests {
             vec![Arc::new(Int64Array::from(vec![1_i64, 2]))],
         )
         .unwrap();
-        candidate.relations = vec![
+        candidate.relations = crate::resource_budget::ChargedSlice::for_test(vec![
             ProviderRelationOutput::try_new(
                 identity("raw.calls", ProviderRelationIdentity::try_new),
                 identity("raw.calls.v1", ProviderSchemaIdentity::try_new),
                 different_schema,
                 vec![different_batch],
+                &crate::provider_contracts::fixture_provider_budget([6; 16], [19; 16]),
             )
             .unwrap(),
-        ];
+        ]);
 
         assert_eq!(
             admit_provider_result(job, candidate).unwrap_err(),
@@ -2853,6 +3150,7 @@ mod tests {
     fn unknown_output_requires_an_explicit_matching_gap_and_terminal() {
         let family = identity("syntax.calls", ProviderFamilyIdentity::try_new);
         let error = ProviderRunResult::try_new(ProviderRunResultSpec {
+            resource_budget: crate::provider_contracts::fixture_provider_budget([6; 16], [19; 16]),
             support: ProviderRunSupport::conservative(&job().1),
             suite: identity(
                 "codefabric-relational-data-fabric@2.3.0",
@@ -2861,7 +3159,10 @@ mod tests {
             provider: identity("tree-sitter", ProviderIdentity::try_new),
             protocol: identity("in-process-arrow@1", ProviderProtocolIdentity::try_new),
             source: source_binding(),
-            context: context_binding(),
+            context: crate::provider_contracts::fixture_provider_context(
+                [6; 16],
+                context_binding(),
+            ),
             run: run_binding("run-19", 19),
             provenance: provenance(),
             relations: Vec::new(),
@@ -3050,5 +3351,31 @@ mod tests {
             RustcCompilationControl::try_new(header, Vec::new(), wrong_terminal).unwrap_err(),
             ProviderContractError::RustcControlMismatch
         );
+    }
+
+    #[test]
+    fn wp79_provider_job_charge_clones_and_same_name_foreign_root_are_causal() {
+        let (_, original) = job();
+        let budget = original.resource_budget().clone();
+        let charged = budget.observation().used.memory_bytes;
+        assert!(charged > 0);
+        let clone = original.clone();
+        assert_eq!(budget.observation().used.memory_bytes, charged);
+        let mut foreign = original.clone();
+        let policy = budget.policy();
+        foreign.resource_budget = ResourceBudget::try_process([231; 16], policy)
+            .unwrap()
+            .workspace([6; 16], policy)
+            .unwrap()
+            .operation([19; 16], policy)
+            .unwrap();
+        assert!(matches!(
+            rebuild_job(foreign),
+            Err(ProviderContractError::ResourceOwnerMismatch)
+        ));
+        drop(original);
+        assert_eq!(budget.observation().used.memory_bytes, charged);
+        drop(clone);
+        assert_eq!(budget.observation().used.memory_bytes, 0);
     }
 }

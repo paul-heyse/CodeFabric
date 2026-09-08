@@ -26,9 +26,25 @@ use deltalake::delta_datafusion::cdf::{CHANGE_TYPE_COL, COMMIT_VERSION_COL};
 use deltalake::kernel::{Action, CommitInfo, EagerSnapshot, Transaction};
 use deltalake::logstore::{LogStoreRef, get_actions};
 use deltalake::table::normalize_table_url;
-use deltalake::{DeltaTable, DeltaTableError};
+use deltalake::{DeltaTable, DeltaTableBuilder, DeltaTableError};
 use thiserror::Error;
 use url::Url;
+
+/// Open native Delta state through the exact session's installed storage capability.
+/// The backend is filesystem-root addressed: Delta owns table prefixing and transaction rules.
+/// Production sessions install the workspace owner before any table construction; an unknown
+/// origin is an error, never a request for Delta's independent default filesystem factory.
+pub(crate) fn session_delta_table_builder(
+    root: Url,
+    session: &SessionState,
+) -> Result<DeltaTableBuilder, DeltaTableError> {
+    let store = session
+        .runtime_env()
+        .object_store_registry
+        .get_store(&root)
+        .map_err(|error| DeltaTableError::Generic(error.to_string()))?;
+    Ok(DeltaTableBuilder::from_url(root.clone())?.with_storage_backend(store, root))
+}
 
 /// Application-owned identity of one exact Delta table state.
 ///

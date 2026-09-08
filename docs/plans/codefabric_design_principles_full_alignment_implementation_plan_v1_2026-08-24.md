@@ -1467,8 +1467,7 @@ body replacing the dependency-only recipe.
 
 The normative direct dependency edges are exactly the packets' declared
 **Dependencies** lines, restated here as an edge list (parallel branches may
-interleave under the subagent-orchestration policy provided every edge is
-respected):
+interleave provided every edge is respected):
 
 ```text
 WP54 → WP55, WP69, WP70              WP62 → WP63, WP64

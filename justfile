@@ -207,7 +207,7 @@ lib-outline *args:
 [doc("Check formatting of stable-domain Rust sources")]
 [group('static')]
 root-fmt:
-    cargo fmt --all -- --check
+    cargo fmt --package codefabric -- --check
 
 # The default local profile and the featureless substrate are both load-bearing.
 
@@ -972,11 +972,18 @@ advisory-policy-check:
 stable-graph-check:
     ./scripts/stable_graph_check.sh
 
+[doc("Verify installed native dependency bytes, provenance, and amendment replay")]
+[group('gate')]
+native-dependency-artifacts-check: governance-tooling-lint
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_native_dependency_artifacts.py
+    python3 tooling/ci/native_dependency_artifacts.py verify --replay
+
 [doc("Run repository structural governance rules")]
 [group('gate')]
 governance-scan:
     ast-grep test
     ast-grep scan \
+      --globs '!third_party/native/**' \
       --globs '!contracts/generated/**' \
       --globs '!src/generated/**' \
       --globs '!codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/**' \
@@ -992,7 +999,7 @@ root-ci-fast: root-fmt root-check root-clippy root-test typos deps-fast stable-g
 [doc("Format-check the dated-nightly rustc extractor")]
 [group('extractor')]
 extractor-fmt:
-    cd rustc-extractor && cargo fmt --all -- --check
+    cd rustc-extractor && cargo fmt --package codefabric-rustc-extractor -- --check
 
 [doc("Compile and lint the dated-nightly rustc extractor")]
 [group('extractor')]
@@ -1025,7 +1032,7 @@ extractor-ci-fast: extractor-fmt extractor-check extractor-test extractor-identi
 [doc("Format-check the stable Pyrefly sidecar")]
 [group('sidecar')]
 sidecar-fmt:
-    cd pyrefly-sidecar && cargo fmt --all -- --check
+    cd pyrefly-sidecar && cargo fmt --package codefabric-pyrefly-sidecar -- --check
 
 [doc("Compile and lint the stable Pyrefly sidecar")]
 [group('sidecar')]
@@ -1345,7 +1352,7 @@ plan-activate plan:
 [doc("MUTATES: rewrite Rust formatting in place")]
 [group('mutating')]
 root-fmt-write:
-    cargo fmt --all
+    cargo fmt --package codefabric
 
 [confirm("Regenerate the released descriptor census and Rust/Python Protobuf bindings. Continue?")]
 [doc("MUTATES: regenerate released Protobuf outputs without changing the compatibility baseline")]

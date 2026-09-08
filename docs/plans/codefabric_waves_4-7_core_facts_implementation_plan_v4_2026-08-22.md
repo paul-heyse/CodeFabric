@@ -4050,8 +4050,7 @@ measurements without storing claims in execution state (v5 D-21).
 ## 15. Execution sequence
 
 Declared dependency edges govern; `||` marks permitted parallelism with disjoint
-write sets (parallel packets follow `subagent-orchestration.md` §3: isolated
-worktrees, lead-merged integration).
+write sets.
 
 ~~~text
 Wave 4

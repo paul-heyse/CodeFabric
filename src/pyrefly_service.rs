@@ -93,6 +93,9 @@ pub struct PyreflyWorkspaceInput {
 /// Transport-local request derived exclusively from a provider job plus operational source input.
 #[derive(Clone, Debug)]
 struct PyreflyRunRequest {
+    resource_budget: crate::resource_budget::ResourceBudget,
+    max_input_bytes: u64,
+    max_output_bytes: u64,
     provider_run_id: String,
     workspace_id: String,
     analysis_context_id: String,
@@ -117,17 +120,17 @@ pub struct AcceptedPyreflyModule {
     pub module_id: String,
     pub module_name: String,
     pub canonical_file_id: [u8; 16],
-    pub source_bytes: Vec<u8>,
+    pub source_bytes: crate::resource_budget::ChargedSlice<u8>,
     pub module_digest: String,
     /// Complete target-route application-owned relation set.
-    pub relations: Vec<AcceptedPyreflyRelation>,
+    pub relations: crate::resource_budget::ChargedSlice<AcceptedPyreflyRelation>,
 }
 
 /// One independently schema-validated relation-scoped Arrow stream.
 #[derive(Clone, Debug)]
 pub struct AcceptedPyreflyRelation {
     pub relation: PyreflyRelation,
-    pub arrow_ipc: Vec<u8>,
+    pub arrow_ipc: crate::resource_budget::ChargedSlice<u8>,
     pub batch: RecordBatch,
     pub schema_digest: String,
     pub arrow_ipc_digest: String,
@@ -138,7 +141,7 @@ struct PendingPyreflyModule {
     module_id: String,
     module_name: String,
     canonical_file_id: [u8; 16],
-    source_bytes: Vec<u8>,
+    source_bytes: crate::resource_budget::ChargedSlice<u8>,
     relations: BTreeMap<PyreflyRelation, AcceptedPyreflyRelation>,
     relation_by_stream: BTreeMap<StreamId, PyreflyRelation>,
     next_ack_sequence: BTreeMap<StreamId, u64>,
@@ -154,11 +157,11 @@ pub struct AcceptedPyreflyRun {
     pub canonical_workspace_id: [u8; 16],
     pub canonical_analysis_context_id: [u8; 16],
     pub source_generation: u64,
-    pub modules: Vec<AcceptedPyreflyModule>,
-    pub capability_codes: Vec<u32>,
+    pub modules: crate::resource_budget::ChargedSlice<AcceptedPyreflyModule>,
+    pub capability_codes: crate::resource_budget::ChargedSlice<u32>,
     pub overall_digest: String,
-    pub rechecked_module_ids: Vec<String>,
-    pub removed_module_ids: Vec<String>,
+    pub rechecked_module_ids: crate::resource_budget::ChargedSlice<String>,
+    pub removed_module_ids: crate::resource_budget::ChargedSlice<String>,
     pub sandbox_profile_digest: String,
     pub trust_profile: String,
 }
@@ -333,6 +336,7 @@ impl PyreflyProviderRunResult {
                 request.schema_identity().clone(),
                 Arc::clone(request.schema()),
                 batches,
+                job.resource_budget(),
             )?);
             coverage.push(ProviderCoverage::new(
                 request.family().clone(),
@@ -461,7 +465,7 @@ fn checker_removals(
 /// corruption, trust loss, or unresponsive cancellation consumes the child and requires a clean
 /// replacement from immutable inputs.
 pub(crate) struct SupervisedPyreflyWorkspace {
-    child: Option<ProviderProcessGroupChild>,
+    process: Arc<PyreflyProcessState>,
     socket: PathBuf,
     cancellation_grace: Duration,
     maximum_wall_time: Duration,
@@ -473,30 +477,78 @@ pub(crate) struct SupervisedPyreflyWorkspace {
     completed_generations: u64,
     // None means a failed/cancelled run may have changed private checker state.
     local_module_inventory: Option<std::collections::BTreeSet<String>>,
+    cleanup_tasks: crate::cancellation::StructuredCancellationScope,
+}
+
+#[derive(Default)]
+struct PyreflyProcessState {
+    alive: AtomicBool,
+    drain_requested: AtomicBool,
+    terminal: std::sync::Mutex<Option<Result<(), String>>>,
+}
+
+// Constructor cancellation must close the already admitted worker even when readiness was sent
+// immediately before the observing future disappeared. The worker, never this guard, owns the PID.
+struct CancelPyreflyConstruction(Option<crate::cancellation::StructuredCancellationScope>);
+
+impl Drop for CancelPyreflyConstruction {
+    fn drop(&mut self) {
+        if let Some(scope) = self.0.take() {
+            scope.cancel();
+        }
+    }
 }
 
 impl SupervisedPyreflyWorkspace {
-    /// Bind one launcher-owned process group to the exact release-prepared Pyrefly job and UDS.
-    pub(crate) fn try_new(
+    /// Admit the process owner before invoking the launcher. The supplied control task scope
+    /// reserves cleanup execution capacity; the process residency reservation remains Data.
+    pub(crate) async fn try_new<F>(
         job: &ProviderJob,
-        child: ProviderProcessGroupChild,
         socket: PathBuf,
-    ) -> Result<Self, PyreflyServiceError> {
-        let sandbox_profile_digest = child.sandbox_profile_digest().to_owned();
+        cleanup_tasks: crate::cancellation::StructuredCancellationScope,
+        launch: F,
+    ) -> Result<Self, PyreflyServiceError>
+    where
+        F: FnOnce() -> Result<ProviderProcessGroupChild, crate::provider_sandbox::SandboxError>
+            + Send
+            + 'static,
+    {
         validate_pyrefly_job(job)?;
         if job.ceilings().max_workers() == 0 || !socket.is_absolute() {
             return Err(PyreflyServiceError::Invalid(
                 "release-prepared Pyrefly job or private socket is invalid".to_owned(),
             ));
         }
-        if child.trust_profile()
-            != crate::provider_sandbox::ProviderTrustProfile::UntrustedSandboxed
-            || !valid_sandbox_profile_digest(&sandbox_profile_digest)
-        {
-            return Err(PyreflyServiceError::TrustUnavailable);
-        }
+        let native_envelope = crate::provider_contracts::allocation::reserve_native_state(job)?;
+        let process = Arc::new(PyreflyProcessState::default());
+        let mut construction = CancelPyreflyConstruction(Some(cleanup_tasks.clone()));
+        let (ready, readiness) = tokio::sync::oneshot::channel();
+        let worker_state = Arc::clone(&process);
+        let worker_socket = socket.clone();
+        let grace = Duration::from_millis(job.ceilings().cancellation_ack_millis());
+        cleanup_tasks
+            .spawn_blocking_owned("process-owner", native_envelope, move |cancel| {
+                run_owned_pyrefly_process(
+                    launch,
+                    &cancel,
+                    &worker_socket,
+                    grace,
+                    &worker_state,
+                    ready,
+                );
+            })
+            .await
+            .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?;
+        let sandbox_profile_digest = tokio::time::timeout(
+            Duration::from_millis(job.ceilings().max_wall_millis()),
+            readiness,
+        )
+        .await
+        .map_err(|_| PyreflyServiceError::TimedOut)?
+        .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))??;
+        construction.0 = None;
         Ok(Self {
-            child: Some(child),
+            process,
             socket,
             cancellation_grace: Duration::from_millis(job.ceilings().cancellation_ack_millis()),
             maximum_wall_time: Duration::from_millis(job.ceilings().max_wall_millis()),
@@ -507,6 +559,7 @@ impl SupervisedPyreflyWorkspace {
             context_handle: None,
             completed_generations: 0,
             local_module_inventory: Some(std::collections::BTreeSet::new()),
+            cleanup_tasks,
         })
     }
 
@@ -523,9 +576,7 @@ impl SupervisedPyreflyWorkspace {
 
     #[must_use]
     pub(crate) fn is_healthy(&mut self) -> bool {
-        self.child
-            .as_mut()
-            .is_some_and(|child| child.try_wait().is_ok_and(|status| status.is_none()))
+        !self.cleanup_tasks.is_cancelled() && self.process.alive.load(Ordering::Acquire)
     }
 
     async fn connect_and_validate(
@@ -584,29 +635,28 @@ impl SupervisedPyreflyWorkspace {
     }
 
     async fn force_join(&mut self) -> Result<(), PyreflyServiceError> {
-        let Some(mut child) = self.child.take() else {
-            return Ok(());
-        };
-        let grace = self.cancellation_grace;
-        let socket = self.socket.clone();
-        tokio::task::spawn_blocking(move || {
-            child.terminate_group()?;
-            if !child.wait_group_empty(grace)? {
-                child.kill_group()?;
-            }
-            if !child.wait_group_empty(grace)? {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "Pyrefly process group remained live after bounded termination",
-                ));
-            }
-            let _ = child.wait();
-            let _ = std::fs::remove_file(socket);
-            Ok::<(), std::io::Error>(())
-        })
-        .await
-        .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?
-        .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))
+        self.join_process(false).await
+    }
+
+    async fn join_process(&mut self, drain_first: bool) -> Result<(), PyreflyServiceError> {
+        self.process
+            .drain_requested
+            .store(drain_first, Ordering::Release);
+        self.cleanup_tasks
+            .cancel_and_join(self.cancellation_grace.saturating_mul(4))
+            .await
+            .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?;
+        self.process
+            .terminal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| {
+                PyreflyServiceError::ProcessTermination(
+                    "process owner has no observed terminal outcome".to_owned(),
+                )
+            })?
+            .map_err(PyreflyServiceError::ProcessTermination)
     }
 
     async fn invalidate_and_join(&mut self) -> Result<(), PyreflyServiceError> {
@@ -648,49 +698,99 @@ impl SupervisedPyreflyWorkspace {
             }
         }
         self.compatibility = None;
-        let Some(mut child) = self.child.take() else {
-            return Ok(());
-        };
-        let grace = self.cancellation_grace;
-        let socket = self.socket.clone();
-        tokio::task::spawn_blocking(move || {
-            if !child.wait_group_empty(grace)? {
-                child.terminate_group()?;
+        self.join_process(true).await
+    }
+}
+
+fn run_owned_pyrefly_process<F>(
+    launch: F,
+    cancel: &crate::cancellation::Cancellation,
+    socket: &std::path::Path,
+    grace: Duration,
+    state: &PyreflyProcessState,
+    ready: tokio::sync::oneshot::Sender<Result<String, PyreflyServiceError>>,
+) where
+    F: FnOnce() -> Result<ProviderProcessGroupChild, crate::provider_sandbox::SandboxError>,
+{
+    let terminal = if cancel.is_cancelled() {
+        let _ = ready.send(Err(PyreflyServiceError::Cancelled));
+        Ok(())
+    } else {
+        match launch() {
+            Err(error) => {
+                let detail = error.to_string();
+                let _ = ready.send(Err(PyreflyServiceError::ProcessTermination(detail.clone())));
+                Err(detail)
             }
-            if !child.wait_group_empty(grace)? {
-                child.kill_group()?;
+            Ok(mut child) => {
+                let digest = child.sandbox_profile_digest().to_owned();
+                let trusted = child.trust_profile() == ProviderTrustProfile::UntrustedSandboxed
+                    && valid_sandbox_profile_digest(&digest);
+                if trusted {
+                    state.alive.store(true, Ordering::Release);
+                    let observed = ready.send(Ok(digest)).is_ok();
+                    while observed && !cancel.is_cancelled() {
+                        if !matches!(child.try_wait(), Ok(None)) {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    state.alive.store(false, Ordering::Release);
+                    finish_pyrefly_process_group(
+                        child,
+                        socket,
+                        grace,
+                        state.drain_requested.load(Ordering::Acquire),
+                    )
+                    .map_err(|error| error.to_string())
+                } else {
+                    let joined = finish_pyrefly_process_group(child, socket, grace, false)
+                        .map_err(|error| error.to_string());
+                    let _ = ready.send(Err(PyreflyServiceError::TrustUnavailable));
+                    joined
+                }
             }
-            if !child.wait_group_empty(grace)? {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "Pyrefly process group remained live after drain escalation",
-                ));
-            }
-            let _ = child.wait();
-            let _ = std::fs::remove_file(socket);
-            Ok::<(), std::io::Error>(())
-        })
-        .await
-        .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?
-        .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))
+        }
+    };
+    *state
+        .terminal
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(terminal);
+}
+
+// This owned worker may outlive an observation timeout. Resource/task ownership is deliberately
+// retained until kernel observation proves the complete group empty; retry failure is not death.
+fn finish_pyrefly_process_group(
+    mut child: ProviderProcessGroupChild,
+    socket: &std::path::Path,
+    grace: Duration,
+    drain_first: bool,
+) -> std::io::Result<()> {
+    let mut empty = drain_first && child.wait_group_empty(grace).unwrap_or(false);
+    while !empty {
+        let _ = child.terminate_group();
+        empty = child.wait_group_empty(grace).unwrap_or(false);
+        if !empty {
+            let _ = child.kill_group();
+            empty = child.wait_group_empty(grace).unwrap_or(false);
+        }
+        if !empty {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    child.wait()?;
+    match std::fs::remove_file(socket) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
 }
 
 impl Drop for SupervisedPyreflyWorkspace {
     fn drop(&mut self) {
-        let Some(mut child) = self.child.take() else {
-            return;
-        };
-        let _ = child.terminate_group();
-        if !child
-            .wait_group_empty(self.cancellation_grace)
-            .unwrap_or(false)
-        {
-            let _ = child.kill_group();
-            let _ = child.wait_group_empty(self.cancellation_grace);
-        }
-        let _ = child.wait();
-        let _ = std::fs::remove_file(&self.socket);
+        // No blocking work or fresh task admission at Drop. The pre-admitted worker owns the
+        // child and its Data residency charge through actual process-group termination.
+        self.cleanup_tasks.cancel();
     }
 }
 
@@ -849,6 +949,9 @@ fn request_from_job(
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(PyreflyRunRequest {
+        resource_budget: job.resource_budget().clone(),
+        max_input_bytes: job.ceilings().max_input_bytes(),
+        max_output_bytes: job.ceilings().max_bytes(),
         provider_run_id: job.run().identity().as_str().to_owned(),
         workspace_id: input.workspace_id.clone(),
         analysis_context_id: job.context().identity().as_str().to_owned(),
@@ -1015,7 +1118,7 @@ fn parse_digest(value: &str) -> Result<[u8; 32], PyreflyServiceError> {
         .filter(|encoded| encoded.len() == 64)
         .ok_or_else(|| PyreflyServiceError::Protocol("digest is not b3-32".to_owned()))?;
     let mut result = [0_u8; 32];
-    for (index, chunk) in encoded.as_bytes().chunks_exact(2).enumerate() {
+    for (index, chunk) in encoded.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let high = hex_nibble(chunk[0])
             .ok_or_else(|| PyreflyServiceError::Protocol("digest is not hexadecimal".to_owned()))?;
         let low = hex_nibble(chunk[1])
@@ -1115,29 +1218,40 @@ fn header_matches(header: &AnalyzeEventHeader, request: &PyreflyRunRequest, sequ
 
 struct AdmittedImmutableBlob {
     reference: BlobReference,
-    bytes: Arc<[u8]>,
+    bytes: crate::resource_budget::ChargedSlice<u8>,
 }
 
 fn read_immutable_blob(
     input: &PyreflyModuleInput,
+    allocation: &mut crate::provider_contracts::allocation::ProviderAllocation,
 ) -> Result<AdmittedImmutableBlob, PyreflyServiceError> {
+    use std::io::Read;
+
     if !input.source_blob_path.is_absolute()
         || !input.source_blob_path.is_file()
-        || input
-            .source_blob_path
-            .metadata()
-            .map(|metadata| metadata.len() > MAX_SOURCE_BYTES_PER_MODULE)
-            .unwrap_or(true)
+        || input.source_blob_path.metadata().map_or(true, |metadata| {
+            metadata.len() > MAX_SOURCE_BYTES_PER_MODULE
+        })
     {
         return Err(PyreflyServiceError::Invalid(
             "module source blob path or bounded size is invalid".to_owned(),
         ));
     }
-    let bytes =
-        std::fs::read(&input.source_blob_path).map_err(|source| PyreflyServiceError::Io {
+    let mut bytes = Vec::new();
+    std::fs::File::open(&input.source_blob_path)
+        .and_then(|file| {
+            file.take(MAX_SOURCE_BYTES_PER_MODULE + 1)
+                .read_to_end(&mut bytes)
+        })
+        .map_err(|source| PyreflyServiceError::Io {
             path: input.source_blob_path.clone(),
             source,
         })?;
+    if bytes.len() as u64 > MAX_SOURCE_BYTES_PER_MODULE {
+        return Err(PyreflyServiceError::Invalid(
+            "source blob grew beyond the admitted bound".to_owned(),
+        ));
+    }
     if b3(&bytes) != input.content_digest {
         return Err(PyreflyServiceError::Invalid(
             "immutable source blob digest differs".to_owned(),
@@ -1150,7 +1264,7 @@ fn read_immutable_blob(
             byte_length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
             read_only_uri: format!("file://{}", input.source_blob_path.display()),
         },
-        bytes: Arc::from(bytes),
+        bytes: allocation.retain_measured_vec(bytes, |_| 0)?,
     })
 }
 
@@ -1166,6 +1280,10 @@ pub(crate) async fn analyze_pyrefly_uds(
     job: &ProviderJob,
     input: &PyreflyWorkspaceInput,
 ) -> Result<PyreflyProviderRunResult, PyreflyServiceError> {
+    let _request_work = crate::provider_contracts::allocation::ProviderAllocation::try_new(
+        job.resource_budget(),
+        job.ceilings().max_bytes(),
+    )?;
     let mut request = request_from_job(
         job,
         input,
@@ -1401,6 +1519,19 @@ async fn analyze_pyrefly_uds_inner(
     cancellation_requested: Arc<AtomicBool>,
     analysis_started: Option<Arc<AtomicBool>>,
 ) -> Result<AcceptedPyreflyRun, PyreflyServiceError> {
+    let maximum = request
+        .max_input_bytes
+        .checked_add(request.max_output_bytes)
+        .ok_or(crate::provider_contracts::ProviderContractError::ResourceOverflow)?;
+    let mut allocation = crate::provider_contracts::allocation::ProviderAllocation::try_new(
+        &request.resource_budget,
+        maximum,
+    )?;
+    // IPC assembly and decoding are opaque working storage, released on every terminal path.
+    let _decode_scratch = crate::provider_contracts::allocation::ProviderAllocation::try_new(
+        &request.resource_budget,
+        request.max_output_bytes,
+    )?;
     if request.modules.len() > MAX_MODULES_PER_RUN
         || request.provider_run_id.is_empty()
         || request.workspace_id.is_empty()
@@ -1418,7 +1549,7 @@ async fn analyze_pyrefly_uds_inner(
     let admitted_blobs = request
         .modules
         .iter()
-        .map(read_immutable_blob)
+        .map(|module| read_immutable_blob(module, &mut allocation))
         .collect::<Result<Vec<_>, _>>()?;
     let admitted_source_total = admitted_blobs.iter().try_fold(0_u64, |total, blob| {
         total.checked_add(blob.reference.byte_length)
@@ -1436,7 +1567,7 @@ async fn analyze_pyrefly_uds_inner(
         .modules
         .iter()
         .zip(&admitted_blobs)
-        .map(|(module, blob)| (module.module_id.clone(), Arc::clone(&blob.bytes)))
+        .map(|(module, blob)| (module.module_id.clone(), blob.bytes.clone()))
         .collect::<BTreeMap<_, _>>();
     let context_digest = b3(&request.context_manifest);
     let lease = SourceSnapshotLease {
@@ -1587,8 +1718,7 @@ async fn analyze_pyrefly_uds_inner(
                             "provider returned a module without admitted source bytes".to_owned(),
                         )
                     })?
-                    .as_ref()
-                    .to_vec();
+                    .clone();
                 let limits = RelationIpcLimits {
                     max_registered_streams: PyreflyRelation::ALL.len(),
                     max_frames_per_stream: 64,
@@ -1804,7 +1934,7 @@ async fn analyze_pyrefly_uds_inner(
                         })?;
                     validate_relation_pins(&batch, request, requested_module)?;
                     let row_count = u64::try_from(batch.num_rows()).unwrap_or(u64::MAX);
-                    let arrow_ipc = assembled.ipc_bytes;
+                    let arrow_ipc = allocation.retain_measured_vec(assembled.ipc_bytes, |_| 0)?;
                     let accepted = AcceptedPyreflyRelation {
                         relation,
                         schema_digest: relation.schema_digest(),
@@ -1895,7 +2025,12 @@ async fn analyze_pyrefly_uds_inner(
                     canonical_file_id: module.canonical_file_id,
                     source_bytes: module.source_bytes,
                     module_digest: event.module_digest,
-                    relations,
+                    relations: allocation.retain_measured_vec(relations, |relation| {
+                        relation
+                            .schema_digest
+                            .capacity()
+                            .saturating_add(relation.arrow_ipc_digest.capacity())
+                    })?,
                 });
             }
             Event::RunTerminal(event) => {
@@ -2035,6 +2170,12 @@ async fn analyze_pyrefly_uds_inner(
             "accepted module or capability census differs".to_owned(),
         ));
     }
+    allocation.claim_new_batches(
+        accepted
+            .iter()
+            .flat_map(|module| module.relations.iter().map(|relation| &relation.batch)),
+        262_144,
+    )?;
     Ok(AcceptedPyreflyRun {
         provider_run_id: request.provider_run_id.clone(),
         workspace_id: request.workspace_id.clone(),
@@ -2042,11 +2183,18 @@ async fn analyze_pyrefly_uds_inner(
         canonical_workspace_id: request.canonical_workspace_id,
         canonical_analysis_context_id: request.canonical_analysis_context_id,
         source_generation: request.source_generation,
-        modules: accepted,
-        capability_codes,
+        modules: allocation.retain_measured_vec(accepted, |module| {
+            module
+                .module_id
+                .capacity()
+                .saturating_add(module.module_name.capacity())
+                .saturating_add(module.module_digest.capacity())
+        })?,
+        capability_codes: allocation.retain_measured_vec(capability_codes, |_| 0)?,
         overall_digest,
-        rechecked_module_ids,
-        removed_module_ids,
+        rechecked_module_ids: allocation
+            .retain_measured_vec(rechecked_module_ids, String::capacity)?,
+        removed_module_ids: allocation.retain_measured_vec(removed_module_ids, String::capacity)?,
         sandbox_profile_digest,
         trust_profile,
     })
@@ -2065,6 +2213,94 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
+
+    #[tokio::test]
+    async fn wp79_pyrefly_cancelled_join_cannot_turn_missing_child_into_joined_absence() {
+        struct ReleaseOnDrop(Arc<AtomicBool>);
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+        let (job, _cancel) = test_job(b"{}", 7, 7);
+        let budget = job.resource_budget().clone();
+        let baseline = budget.observation().used.memory_bytes;
+        let root = crate::cancellation::StructuredCancellationScope::try_root_with_control_reserve(
+            "provider-fixture",
+            std::num::NonZeroUsize::new(1).unwrap(),
+            std::num::NonZeroUsize::new(2).unwrap(),
+        )
+        .unwrap();
+        let cleanup_tasks = root.child_control("pyrefly").unwrap();
+        let native_envelope =
+            crate::provider_contracts::allocation::reserve_native_state(&job).unwrap();
+        let state = Arc::new(PyreflyProcessState::default());
+        let worker_state = Arc::clone(&state);
+        let live = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let _release_on_exit = ReleaseOnDrop(Arc::clone(&release));
+        let worker_live = Arc::clone(&live);
+        let worker_release = Arc::clone(&release);
+        let operation = cleanup_tasks
+            .spawn_blocking_owned("process-owner", native_envelope, move |_| {
+                worker_live.store(true, Ordering::Release);
+                while !worker_release.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                worker_live.store(false, Ordering::Release);
+                *worker_state.terminal.lock().unwrap() = Some(Ok(()));
+            })
+            .await
+            .unwrap();
+        while !live.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(5), operation.wait())
+                .await
+                .is_err()
+        );
+        let mut process = SupervisedPyreflyWorkspace {
+            process: state,
+            socket: PathBuf::new(),
+            cancellation_grace: Duration::from_millis(5),
+            maximum_wall_time: Duration::from_secs(1),
+            analysis_started: Arc::new(AtomicBool::new(false)),
+            sandbox_profile_digest: b3(b"fixture"),
+            client: None,
+            compatibility: None,
+            context_handle: None,
+            completed_generations: 0,
+            local_module_inventory: None,
+            cleanup_tasks,
+        };
+        assert!(process.join_process(true).await.is_err());
+        assert!(live.load(Ordering::Acquire));
+        assert!(budget.observation().used.memory_bytes > baseline);
+        let health = root
+            .child_control("health")
+            .unwrap()
+            .spawn_async_owned(
+                "ping",
+                crate::cancellation::TaskCancellationMode::AbortableAsync,
+                (),
+                async { 7_u8 },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(50), health.wait())
+                .await
+                .unwrap()
+                .unwrap(),
+            7
+        );
+        release.store(true, Ordering::Release);
+        process.join_process(true).await.unwrap();
+        assert!(!live.load(Ordering::Acquire));
+        drop(process);
+        assert_eq!(budget.observation().used.memory_bytes, baseline);
+    }
 
     #[test]
     fn pyrefly_preparation_unavailable_has_an_exact_typed_status() {
@@ -2218,23 +2454,31 @@ mod tests {
             cancellation_ack_millis: 2_000,
         })
         .unwrap();
+        let workspace_id = inventory.workspace_id();
         let job = ProviderJob::try_new(ProviderJobSpec {
+            resource_budget: crate::provider_contracts::fixture_provider_budget(
+                inventory.workspace_id(),
+                [run_marker; 16],
+            ),
             suite: SuiteIdentity::try_new("codefabric-relational-data-fabric@2.3").unwrap(),
             provider: ProviderIdentity::try_new("pyrefly-python").unwrap(),
             protocol: ProviderProtocolIdentity::try_new("codefabric.pyrefly.provider.v1").unwrap(),
-            source: ProviderSourceBinding::from_inventory(
+            source: ProviderSourceBinding::from_inventory_fixture(
                 SourceIdentity::try_new(format!("source:{generation}")).unwrap(),
                 inventory,
             ),
-            context: ProviderContextBinding::try_new(
-                ContextIdentity::try_new("context:test").unwrap(),
-                [3; 16],
-                [3; 32],
-                *blake3::hash(context_manifest).as_bytes(),
-            )
-            .unwrap()
-            .with_modules(modules)
-            .unwrap(),
+            context: crate::provider_contracts::fixture_provider_context(
+                workspace_id,
+                ProviderContextBinding::try_new(
+                    ContextIdentity::try_new("context:test").unwrap(),
+                    [3; 16],
+                    [3; 32],
+                    *blake3::hash(context_manifest).as_bytes(),
+                )
+                .unwrap()
+                .with_modules(modules)
+                .unwrap(),
+            ),
             run: ProviderRunBinding::try_new(
                 ProviderRunIdentity::try_new(format!("run:{run_marker}")).unwrap(),
                 [run_marker; 16],
@@ -2533,6 +2777,9 @@ mod tests {
         let source = root.join("module.py");
         std::fs::write(&source, b"value: int = 1\n").unwrap();
         PyreflyRunRequest {
+            resource_budget: crate::provider_contracts::fixture_provider_budget([1; 16], [1; 16]),
+            max_input_bytes: 64 * 1024 * 1024,
+            max_output_bytes: 128 * 1024 * 1024,
             changed_module_ids: vec!["module-malformed".to_owned()],
             expected_removed_module_ids: Vec::new(),
             provider_run_id: "11111111111111111111111111111111".to_owned(),
@@ -2749,11 +2996,15 @@ mod tests {
             canonical_workspace_id: request.canonical_workspace_id,
             canonical_analysis_context_id: request.canonical_analysis_context_id,
             source_generation: request.source_generation,
-            modules: vec![],
-            capability_codes: request.requested_capability_codes,
+            modules: crate::resource_budget::ChargedSlice::for_test(vec![]),
+            capability_codes: crate::resource_budget::ChargedSlice::for_test(
+                request.requested_capability_codes,
+            ),
             overall_digest: b3(b""),
-            rechecked_module_ids: vec![],
-            removed_module_ids: request.expected_removed_module_ids,
+            rechecked_module_ids: crate::resource_budget::ChargedSlice::for_test(vec![]),
+            removed_module_ids: crate::resource_budget::ChargedSlice::for_test(
+                request.expected_removed_module_ids,
+            ),
             sandbox_profile_digest: sandbox,
             trust_profile: TRUST_PROFILE.to_owned(),
         };
@@ -2879,8 +3130,23 @@ mod tests {
         );
     }
 
-    #[test]
-    fn wp34_neg_trusted_local_pyrefly_process_substitution_is_rejected() {
+    #[tokio::test]
+    async fn wp34_neg_trusted_local_pyrefly_process_substitution_is_rejected() {
+        rejected_process_construction(false).await;
+    }
+
+    #[tokio::test]
+    async fn wp79_pyrefly_cancelled_construction_retains_actual_process_group() {
+        rejected_process_construction(true).await;
+    }
+
+    async fn rejected_process_construction(cancel_construction: bool) {
+        struct ReleaseOnDrop(Arc<AtomicBool>);
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
         let root = tempfile::tempdir().unwrap();
         let workspace = root.path().join("workspace");
         let dependencies = root.path().join("dependencies");
@@ -2896,28 +3162,95 @@ mod tests {
             &output,
         )
         .unwrap();
-        let child = ProviderSandboxLauncher::new(SandboxCapabilityMatrix::probe_current_host())
-            .launch(
-                &ProviderLaunchRequest {
-                    host_executable: "/bin/sleep".into(),
-                    contained_executable: "/bin/sleep".into(),
-                    arguments: vec!["30".to_owned()],
-                    environment: BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]),
-                    output_root: profile.output_root.clone(),
-                    limits: ProviderProcessLimits {
-                        cpu_seconds: 30,
-                        open_files: 16,
-                        address_space_bytes: 64 * 1024 * 1024,
-                        output_file_bytes: 1024,
-                        process_count: 4,
-                    },
-                },
-                &profile,
-                ProviderSandboxLaunchMaterial::None,
-            )
-            .unwrap();
+        let launcher = ProviderSandboxLauncher::new(SandboxCapabilityMatrix::probe_current_host());
         let (job, _cancellation) = test_job(b"{\"python\":\"3.14\"}", 1, 1);
-        let result = SupervisedPyreflyWorkspace::try_new(&job, child, output.join("pyrefly.sock"));
-        assert!(matches!(result, Err(PyreflyServiceError::TrustUnavailable)));
+        let cleanup =
+            crate::cancellation::StructuredCancellationScope::try_root_with_control_reserve(
+                "pyrefly-fixture",
+                std::num::NonZeroUsize::new(8).unwrap(),
+                std::num::NonZeroUsize::new(2).unwrap(),
+            )
+            .unwrap()
+            .child_control("cleanup")
+            .unwrap();
+        let budget = job.resource_budget().clone();
+        let baseline = budget.observation().used.memory_bytes;
+        let child_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let observed_pid = Arc::clone(&child_pid);
+        let release = Arc::new(AtomicBool::new(false));
+        let _release_on_exit = ReleaseOnDrop(Arc::clone(&release));
+        let worker_release = Arc::clone(&release);
+        let mut construction = Box::pin(SupervisedPyreflyWorkspace::try_new(
+            &job,
+            output.join("pyrefly.sock"),
+            cleanup.clone(),
+            move || {
+                let child = launcher.launch(
+                    &ProviderLaunchRequest {
+                        host_executable: "/bin/sleep".into(),
+                        contained_executable: "/bin/sleep".into(),
+                        arguments: vec!["30".to_owned()],
+                        environment: BTreeMap::from([(
+                            "PATH".to_owned(),
+                            "/usr/bin:/bin".to_owned(),
+                        )]),
+                        output_root: profile.output_root.clone(),
+                        limits: ProviderProcessLimits {
+                            cpu_seconds: 30,
+                            open_files: 16,
+                            address_space_bytes: 64 * 1024 * 1024,
+                            output_file_bytes: 1024,
+                            process_count: 4,
+                        },
+                    },
+                    &profile,
+                    ProviderSandboxLaunchMaterial::None,
+                )?;
+                observed_pid.store(child.id(), Ordering::Release);
+                while cancel_construction && !worker_release.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Ok(child)
+            },
+        ));
+        if cancel_construction {
+            tokio::select! {
+                _ = &mut construction => panic!("readiness cannot escape while launcher is live"),
+                () = async { while child_pid.load(Ordering::Acquire) == 0 { tokio::task::yield_now().await; } } => {},
+            }
+            drop(construction);
+            assert!(cleanup.is_cancelled());
+            assert!(budget.observation().used.memory_bytes > baseline);
+            assert!(
+                cleanup
+                    .cancel_and_join(Duration::from_millis(5))
+                    .await
+                    .is_err()
+            );
+            release.store(true, Ordering::Release);
+        } else {
+            assert!(matches!(
+                construction.await,
+                Err(PyreflyServiceError::TrustUnavailable)
+            ));
+        }
+        cleanup
+            .cancel_and_join(Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_ne!(
+            child_pid.load(Ordering::Acquire),
+            0,
+            "a live process was actually launched and rejected"
+        );
+        let pid = rustix::process::Pid::from_raw(
+            i32::try_from(child_pid.load(Ordering::Acquire)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            rustix::process::test_kill_process_group(pid),
+            Err(rustix::io::Errno::SRCH)
+        );
+        assert_eq!(budget.observation().used.memory_bytes, baseline);
     }
 }

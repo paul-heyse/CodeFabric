@@ -1,4 +1,4 @@
-//! FreshActivation and exact selected-epoch recovery for one supervisor-owned workspace.
+//! `FreshActivation` and exact selected-epoch recovery for one supervisor-owned workspace.
 //!
 //! This is the production composition root between operational registration, the held OS writer
 //! lease, source capture, compiled provider/analysis authority, exact Delta histories, the
@@ -17,7 +17,6 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use datafusion::execution::SessionStateBuilder;
-use deltalake::DeltaTableBuilder;
 use deltalake::delta_datafusion::planner::DeltaPlanner;
 use thiserror::Error;
 use url::Url;
@@ -35,9 +34,8 @@ use super::command::{
     CommandOwnership, CommandPins, CommandResult, DiagnosticRef, DurableCommandState, EpochId,
     ExpectedHead, FabricCommand, FabricCommandPayload, IdempotencyKey, InputReleaseRef,
     OperationId, OperationSelectionRef, PrincipalId, ProgramReleaseRef, ProofReceiptRef,
-    ProviderReleaseRef, ProviderSetRef, ResourceEnvelopeRef, RetentionPolicyRef,
-    SourceAuthorityRef, SourceGeneration, SourceImageSetRef, TransactionRef, UnknownCommitReason,
-    WorkspaceId,
+    ProviderReleaseRef, ProviderSetRef, RetentionPolicyRef, SourceAuthorityRef, SourceGeneration,
+    SourceImageSetRef, TransactionRef, UnknownCommitReason, WorkspaceId,
 };
 use super::command_actor::{CommandPortError, FabricCommandActorConfig};
 use super::command_record_sqlite::CommandRecoveryPageSize;
@@ -55,7 +53,6 @@ use super::delta_guarded_maintenance::{
     DeltaMaintenanceAuthorityError, DeltaMaintenanceSafetyEvidence, DeltaMaintenanceSafetyPort,
 };
 use super::delta_write::ControlledDeltaWriteAssuranceFault;
-use super::epoch_runtime::FabricEpochRuntimeConfig;
 use super::production_kernel::{
     ActiveWorkspaceError, CompiledSemanticRelease, SelectedEpochRecord, WorkspaceSlot,
 };
@@ -68,9 +65,7 @@ use super::programmatic_activation_command_sqlite::{
     ActivationCommandCandidateRebuilderPort, ActivationReconciliationIdentityPolicy,
     ExactDeltaActivationCommandCandidateRebuilder, SqliteProgrammaticActivationCommandStateStore,
 };
-use super::programmatic_active_workspace_builder::{
-    ProductionActiveWorkspaceBuilder, ProductionActiveWorkspaceConfig,
-};
+use super::programmatic_active_workspace_builder::ProductionActiveWorkspaceBuilder;
 use super::programmatic_command_capability::ProgrammaticCommandCapabilityDisposition;
 use super::programmatic_command_runtime_factory::{
     ExactProgrammaticCommandEffectClosure, ProgrammaticActivationCommandEffects,
@@ -93,8 +88,10 @@ use super::proof::{
     ProofDeltaWriteIdentity, persist_proof_relations, provision_proof_relation_histories,
 };
 use super::published_arrow_result::PublishedArrowResultRegistry;
+use super::workspace_resources::ProductionWorkspaceResources;
 use super::writer_generation_sqlite::SqliteWriterGenerationStore;
 use super::writer_lease::WorkspaceWriterLease;
+use crate::cancellation::StructuredCancellationScope;
 use crate::operational_store::OperationalStore;
 use crate::production_provider_recipe::{
     ExactProviderLaneAuthority, ProductionProviderAuthority, ProductionProviderRuns,
@@ -122,6 +119,8 @@ pub(crate) struct ProductionWorkspaceStartup {
     command_runtime: FabricCommandRuntime,
     selected_epoch: EpochId,
     fresh_activation: bool,
+    resources: ProductionWorkspaceResources,
+    task_scope: StructuredCancellationScope,
 }
 
 /// Bounded assurance interruption admitted only by the daemon's debug-build configuration.
@@ -131,6 +130,10 @@ pub(crate) enum ProductionWorkspaceStartupAssuranceFault {
 }
 
 impl ProductionWorkspaceStartup {
+    pub(crate) fn resources(&self) -> &ProductionWorkspaceResources {
+        &self.resources
+    }
+
     #[must_use]
     pub(crate) const fn selected_epoch(&self) -> EpochId {
         self.selected_epoch
@@ -142,6 +145,12 @@ impl ProductionWorkspaceStartup {
     }
 
     pub(crate) async fn shutdown(self) -> Result<(), ProductionWorkspaceStartupError> {
+        // A failed native join must not release the writer lease in-process. In that case
+        // FabricCommandRuntime's fail-closed Drop keeps the OS fence until process teardown.
+        self.task_scope
+            .cancel_and_join(Duration::from_secs(2))
+            .await
+            .map_err(|error| step("workspace-operation-join", error))?;
         self.command_runtime
             .shutdown()
             .await
@@ -294,17 +303,31 @@ async fn open_activation_authority(
     workspace_id: WorkspaceId,
     generations: Arc<SqliteWriterGenerationStore>,
     assurance_fault: Option<ProductionWorkspaceStartupAssuranceFault>,
+    resources: &ProductionWorkspaceResources,
 ) -> Result<Arc<DeltaActivationRuntimeAuthority>, ProductionWorkspaceStartupError> {
     let control_path = workspace_root.join("activation-control");
-    private_directory(&control_path)?;
     let root = Url::from_directory_path(&control_path).map_err(|()| {
         step(
             "activation-control-root",
             "path is not an absolute file URL",
         )
     })?;
+    let session = Arc::new(
+        SessionStateBuilder::new()
+            .with_default_features()
+            .with_runtime_env(
+                resources
+                    .native()
+                    .control_runtime_with_registry(Arc::clone(
+                        &resources.native().runtime_env().object_store_registry,
+                    ))
+                    .map_err(|error| step("activation-control-resources", error))?,
+            )
+            .with_query_planner(DeltaPlanner::new())
+            .build(),
+    );
     let (pin, table) = if control_path.join("_delta_log").exists() {
-        let discovered = DeltaTableBuilder::from_url(root.clone())
+        let discovered = super::delta_exact::session_delta_table_builder(root.clone(), &session)
             .map_err(|error| step("activation-control-discovery", error))?
             .load()
             .await
@@ -319,7 +342,7 @@ async fn open_activation_authority(
             u64::try_from(version).map_err(|error| step("activation-control-version", error))?;
         let pin = ExactDeltaPin::new(&root, version)
             .map_err(|error| step("activation-control-pin", error))?;
-        let table = DeltaTableBuilder::from_url(root.clone())
+        let table = super::delta_exact::session_delta_table_builder(root.clone(), &session)
             .map_err(|error| step("activation-control-open", error))?
             .with_version(version)
             .load()
@@ -327,16 +350,10 @@ async fn open_activation_authority(
             .map_err(|error| step("activation-control-open", error))?;
         (pin, table)
     } else {
-        provision_activation_control_history(root)
+        provision_activation_control_history(root, &session)
             .await
             .map_err(|error| step("activation-control-provision", error))?
     };
-    let session = Arc::new(
-        SessionStateBuilder::new()
-            .with_default_features()
-            .with_query_planner(DeltaPlanner::new())
-            .build(),
-    );
     let mut provider = ActivationControlDeltaProvider::try_from_loaded_table(session, pin, table)
         .await
         .map_err(|error| step("activation-control-provider", error))?;
@@ -432,14 +449,28 @@ fn inprocess_operational_ceilings() -> Result<ProviderResourceCeilings, Provider
     })
 }
 
-async fn build_fresh_candidate(
+struct FreshNativeSource {
+    builder: ProgrammaticFabricEpochBuilder,
+    workspace_root: PathBuf,
+    generation: u64,
+    epoch_id: EpochId,
+    source_images: SourceImageSetRef,
+    inventory_digest: [u8; 32],
+    analysis_context: [u8; 32],
+    semantic_environment: [u8; 32],
+    native_pin: SourcePin,
+}
+
+/// One owned blocking operation carries source capture, parser owners, and exact admission.
+/// A dropped async observer cannot detach the native work or release its running reservation.
+fn build_fresh_native_source(
     state_root: &Path,
     operational_database: &Path,
     record: &WorkspaceRecord,
     release: &CompiledSemanticRelease,
-    fence: super::command::WriterFence,
-) -> Result<FreshCandidate, ProductionWorkspaceStartupError> {
-    let workspace_id = WorkspaceId::from_bytes(record.workspace_id);
+    workspace_resources: &ProductionWorkspaceResources,
+    cancellation: crate::cancellation::Cancellation,
+) -> Result<FreshNativeSource, ProductionWorkspaceStartupError> {
     let workspace_root = state_root
         .join("fabric")
         .join(lower_hex(&record.workspace_id));
@@ -453,8 +484,15 @@ async fn build_fresh_candidate(
             .map_err(|error| step("source-generation-genesis", error))?;
     }
     drop(store);
-    let prepared_inputs =
-        inputs::capture_inputs(&workspace_root, operational_database, record, generation)?;
+    let prepared_inputs = inputs::capture_inputs(
+        &workspace_root,
+        operational_database,
+        record,
+        generation,
+        workspace_resources.budget().clone(),
+        cancellation.clone(),
+        workspace_resources.source_blob_disk().clone(),
+    )?;
     let inventory_digest = prepared_inputs.inventory.identity();
     let context_product = inputs::discover_python_inputs(&prepared_inputs, record)?;
     let prepared_context = inputs::provider_context(&context_product)?;
@@ -468,8 +506,23 @@ async fn build_fresh_candidate(
     ));
     let analysis_context = prepared_context.context_fingerprint();
     let semantic_environment = prepared_context.semantic_environment_id();
-    let mut sources = Vec::new();
-    let mut module_paths = Vec::new();
+    let source_count = prepared_inputs.capture()?.images().len();
+    let working_bytes =
+        prepared_inputs
+            .capture()?
+            .images()
+            .iter()
+            .try_fold(8192_u64, |sum, image| {
+                sum.checked_add(8192)
+                    .and_then(|bytes| {
+                        bytes.checked_add(image.path.raw_relative_path_bytes.len() as u64 * 2)
+                    })
+                    .ok_or_else(|| step("provider-container-memory", "size overflow"))
+            })?;
+    let _working = crate::inventory::reserve_memory(workspace_resources.budget(), working_bytes)
+        .map_err(|error| step("provider-container-memory", error))?;
+    let mut sources = Vec::with_capacity(source_count);
+    let mut module_paths = Vec::with_capacity(source_count);
     for image in prepared_inputs
         .capture()?
         .images()
@@ -493,14 +546,22 @@ async fn build_fresh_candidate(
             &inventory_digest,
         ],
     ));
-    let builder =
-        ProgrammaticFabricEpochBuilder::try_new(epoch_id, FabricEpochRuntimeConfig::default())
-            .map_err(|error| step("epoch-builder", error))?;
-    let mut runner =
-        ExactPythonSyntaxRunner::new().map_err(|error| step("native-provider-open", error))?;
+    let builder = ProgrammaticFabricEpochBuilder::try_new_governed(
+        epoch_id,
+        workspace_resources.config().epoch_runtime().clone(),
+        workspace_resources.native().clone(),
+    )
+    .map_err(|error| step("epoch-builder", error))?;
+    let mut runner = None;
     let mut native_runs = Vec::with_capacity(sources.len());
     let mut admitted_runs = Vec::with_capacity(sources.len().saturating_mul(2));
     for (index, (source, module_path)) in sources.iter().zip(&module_paths).enumerate() {
+        if cancellation.is_cancelled() {
+            return Err(step(
+                "native-provider-cancelled",
+                "cancelled before provider run",
+            ));
+        }
         let revision =
             u64::try_from(index + 1).map_err(|error| step("native-provider-revision", error))?;
         let tree_run = digest16(
@@ -540,10 +601,18 @@ async fn build_fresh_candidate(
             lower_hex(&source.file_id)
         ))
         .map_err(|error| step("provider-scope", error))?;
-        let (_tree_cancel_owner, tree_cancellation) = CancellationProbe::pair(1_024)
+        let tree_cancellation = CancellationProbe::from_cancellation(cancellation.clone(), 1_024)
             .map_err(|error| step("tree-sitter-cancellation", error))?;
-        let (_ruff_cancel_owner, ruff_cancellation) =
-            CancellationProbe::pair(1_024).map_err(|error| step("ruff-cancellation", error))?;
+        let ruff_cancellation = CancellationProbe::from_cancellation(cancellation.clone(), 1_024)
+            .map_err(|error| step("ruff-cancellation", error))?;
+        let tree_budget = workspace_resources
+            .budget()
+            .operation(tree_run, workspace_resources.budget().policy())
+            .map_err(|error| step("tree-sitter-resource-owner", error))?;
+        let ruff_budget = workspace_resources
+            .budget()
+            .operation(ruff_run, workspace_resources.budget().policy())
+            .map_err(|error| step("ruff-resource-owner", error))?;
         let operational_ceilings = inprocess_operational_ceilings()
             .map_err(|error| step("in-process-provider-ceilings", error))?;
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -575,6 +644,7 @@ async fn build_fresh_candidate(
                     operational_ceilings,
                     deadline,
                     cancellation: tree_cancellation,
+                    resource_budget: tree_budget,
                 },
             )
             .map_err(|error| step("tree-sitter-job", error))?;
@@ -606,11 +676,18 @@ async fn build_fresh_candidate(
                     operational_ceilings,
                     deadline,
                     cancellation: ruff_cancellation,
+                    resource_budget: ruff_budget,
                 },
             )
             .map_err(|error| step("ruff-job", error))?;
         let jobs = InProcessProviderJobs::try_new(tree_prepared.job(), ruff_prepared.job())
             .map_err(|error| step("in-process-provider-jobs", error))?;
+        if runner.is_none() {
+            runner = Some(
+                ExactPythonSyntaxRunner::new(jobs)
+                    .map_err(|error| step("native-provider-open", error))?,
+            );
+        }
         let module_name = &prepared_context
             .module_for_file(source.file_id)
             .ok_or_else(|| {
@@ -621,6 +698,8 @@ async fn build_fresh_candidate(
             })?
             .qualified_name;
         let run = runner
+            .as_mut()
+            .expect("native runner initialized")
             .run_full(
                 jobs,
                 revision,
@@ -694,6 +773,109 @@ async fn build_fresh_candidate(
     )?;
     // Registered batches own their buffers; source leases are no longer needed after providers join.
     prepared_inputs.release()?;
+    Ok(FreshNativeSource {
+        builder,
+        workspace_root,
+        generation,
+        epoch_id,
+        source_images,
+        inventory_digest,
+        analysis_context,
+        semantic_environment,
+        native_pin,
+    })
+}
+
+fn source_operation_metadata_bytes(
+    state_root: &Path,
+    operational_database: &Path,
+    record: &WorkspaceRecord,
+) -> Result<u64, ProductionWorkspaceStartupError> {
+    let parts = [
+        state_root.as_os_str().as_encoded_bytes(),
+        operational_database.as_os_str().as_encoded_bytes(),
+        record.administrative_key.as_slice(),
+        record.root_path_bytes.as_slice(),
+        record.root_path_display.as_bytes(),
+        record.root_directory_file_identity.as_slice(),
+        record.case_sensitivity_mode.as_bytes(),
+        record.created_at.as_bytes(),
+        record.updated_at.as_bytes(),
+    ];
+    parts
+        .into_iter()
+        .chain(
+            record
+                .allowed_source_disclosure_rules
+                .iter()
+                .map(|rule| rule.as_bytes()),
+        )
+        .try_fold(128 * 1024_u64, |sum, bytes| {
+            sum.checked_add(bytes.len() as u64 * 4 + 128)
+                .ok_or_else(|| step("source-operation-memory", "size overflow"))
+        })
+}
+
+async fn build_fresh_candidate(
+    state_root: &Path,
+    operational_database: &Path,
+    record: &WorkspaceRecord,
+    release: &Arc<CompiledSemanticRelease>,
+    fence: super::command::WriterFence,
+    workspace_resources: &ProductionWorkspaceResources,
+    task_scope: &StructuredCancellationScope,
+) -> Result<FreshCandidate, ProductionWorkspaceStartupError> {
+    let workspace_id = WorkspaceId::from_bytes(record.workspace_id);
+    let guard = workspace_resources
+        .budget()
+        .try_reserve(
+            crate::resource_budget::ResourceClass::Data,
+            crate::resource_budget::ResourceAmounts {
+                memory_bytes: source_operation_metadata_bytes(
+                    state_root,
+                    operational_database,
+                    record,
+                )?,
+                running_jobs: 1,
+                ..crate::resource_budget::ResourceAmounts::default()
+            },
+        )
+        .map_err(|error| step("source-operation-admission", error))?;
+    let source_scope = task_scope
+        .child("source-providers")
+        .map_err(|error| step("source-operation-scope", error))?;
+    let operation_state_root = state_root.to_owned();
+    let operation_database = operational_database.to_owned();
+    let operation_record = record.clone();
+    let operation_release = Arc::clone(release);
+    let operation_resources = workspace_resources.clone();
+    let operation = source_scope
+        .spawn_blocking_owned("capture-and-providers", guard, move |cancellation| {
+            build_fresh_native_source(
+                &operation_state_root,
+                &operation_database,
+                &operation_record,
+                &operation_release,
+                &operation_resources,
+                cancellation,
+            )
+        })
+        .await
+        .map_err(|error| step("source-operation-start", error))?;
+    let FreshNativeSource {
+        builder,
+        workspace_root,
+        generation,
+        epoch_id,
+        source_images,
+        inventory_digest,
+        analysis_context,
+        semantic_environment,
+        native_pin,
+    } = operation
+        .wait()
+        .await
+        .map_err(|error| step("source-operation-join", error))??;
     let observation_root = workspace_root
         .join("epochs")
         .join(lower_hex(epoch_id.as_bytes()))
@@ -774,10 +956,7 @@ async fn build_fresh_candidate(
         b"codefabric.policy-set.local-workstation.v1\0",
         &[&record.authorization_fingerprint],
     ));
-    let resources = ResourceEnvelopeRef::from_bytes(digest32(
-        b"codefabric.resource-envelope.local-workstation.v1\0",
-        &[&record.workspace_id],
-    ));
+    let resources = workspace_resources.policy_ref();
     let proof_candidate = ProofCandidatePins {
         epoch: epoch_id,
         input_release,
@@ -810,14 +989,14 @@ async fn build_fresh_candidate(
             .map_err(|()| step("proof-root", "path is not an absolute file URL"))?,
     )
     .map_err(|error| step("proof-root", error))?;
-    let proof_targets = provision_proof_relation_histories(proof_root)
+    let session = Arc::new(candidate.context().state());
+    let proof_targets = provision_proof_relation_histories(proof_root, &session)
         .await
         .map_err(|error| step("proof-history-provision", error))?;
     let proof_set = TransactionRef::from_bytes(digest32(
         b"codefabric.proof-set.v1\0",
         &[epoch_id.as_bytes(), proof_receipt.as_bytes()],
     ));
-    let session = Arc::new(candidate.context().state());
     let publication = persist_proof_relations(
         Arc::clone(&session),
         proof_targets,
@@ -876,6 +1055,73 @@ pub(crate) async fn start_production_workspace(
     generations: Arc<SqliteWriterGenerationStore>,
     writer_lease: WorkspaceWriterLease,
     assurance_fault: Option<ProductionWorkspaceStartupAssuranceFault>,
+    workspace_resources: ProductionWorkspaceResources,
+    task_scope: StructuredCancellationScope,
+) -> Result<ProductionWorkspaceStartup, ProductionWorkspaceStartupError> {
+    let guard = workspace_resources
+        .budget()
+        .try_reserve(
+            crate::resource_budget::ResourceClass::Control,
+            crate::resource_budget::ResourceAmounts {
+                memory_bytes: source_operation_metadata_bytes(
+                    state_root,
+                    operational_database,
+                    record,
+                )?,
+                running_jobs: 1,
+                ..crate::resource_budget::ResourceAmounts::default()
+            },
+        )
+        .map_err(|error| step("startup-operation-admission", error))?;
+    let state_root = state_root.to_owned();
+    let operational_database = operational_database.to_owned();
+    let record = record.clone();
+    let startup_scope = task_scope
+        .child_control("workspace-startup")
+        .map_err(|error| step("startup-operation-scope", error))?;
+    // The registry-owned future retains the lease if its caller drops the observation while
+    // native source or Delta work is active. Intent to cancel is not writer-lock release.
+    let operation = startup_scope
+        .spawn_async_owned(
+            "compose",
+            crate::cancellation::TaskCancellationMode::Cooperative,
+            guard,
+            async move {
+                compose_production_workspace(
+                    &state_root,
+                    &operational_database,
+                    &record,
+                    release,
+                    slot,
+                    generations,
+                    writer_lease,
+                    assurance_fault,
+                    workspace_resources,
+                    task_scope,
+                )
+                .await
+            },
+        )
+        .await
+        .map_err(|error| step("startup-operation-start", error))?;
+    operation
+        .wait()
+        .await
+        .map_err(|error| step("startup-operation-join", error))?
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn compose_production_workspace(
+    state_root: &Path,
+    operational_database: &Path,
+    record: &WorkspaceRecord,
+    release: Arc<CompiledSemanticRelease>,
+    slot: Arc<WorkspaceSlot>,
+    generations: Arc<SqliteWriterGenerationStore>,
+    writer_lease: WorkspaceWriterLease,
+    assurance_fault: Option<ProductionWorkspaceStartupAssuranceFault>,
+    workspace_resources: ProductionWorkspaceResources,
+    task_scope: StructuredCancellationScope,
 ) -> Result<ProductionWorkspaceStartup, ProductionWorkspaceStartupError> {
     let workspace_id = WorkspaceId::from_bytes(record.workspace_id);
     if slot.workspace_id() != workspace_id || writer_lease.workspace_id() != workspace_id {
@@ -884,15 +1130,22 @@ pub(crate) async fn start_production_workspace(
             "slot or writer lease was substituted",
         ));
     }
+    // Physical directory ownership is established before any Delta engine or
+    // mutation lease exists. This join retains the original store through a
+    // dropped observer and preserves partial-failure charges for retry.
+    workspace_resources
+        .bootstrap_local_store_owned(&task_scope)
+        .await
+        .map_err(|error| step("workspace-physical-bootstrap", error))?;
     let workspace_root = state_root
         .join("fabric")
         .join(lower_hex(&record.workspace_id));
-    private_directory(&workspace_root)?;
     let activation = open_activation_authority(
         &workspace_root,
         workspace_id,
         Arc::clone(&generations),
         assurance_fault,
+        &workspace_resources,
     )
     .await?;
     let selection = activation
@@ -910,15 +1163,16 @@ pub(crate) async fn start_production_workspace(
             .map_err(|error| step("selected-admission-recovery", error))?,
         ),
     };
-    let published_results = Arc::new(PublishedArrowResultRegistry::new());
+    let published_results = Arc::new(PublishedArrowResultRegistry::new(
+        workspace_resources.budget().clone(),
+    ));
     let checkpoint_store = Arc::new(
         SqliteDeltaCdfCheckpointStore::open(&workspace_root.join("cdf-checkpoints.sqlite3"))
             .map_err(|error| step("cdf-checkpoint-store", error))?,
     );
     let delta_ports =
         ProgrammaticDeltaRuntimePorts::new(checkpoint_store, Arc::new(DenyMaintenance));
-    let active_config = ProductionActiveWorkspaceConfig::bounded_local_workstation()
-        .map_err(|error| step("active-workspace-resource-policy", error))?;
+    let active_config = workspace_resources.config().clone();
     let active_builder: Arc<dyn ReleaseOwnedActiveWorkspaceBuilder> =
         Arc::new(ProductionActiveWorkspaceBuilder::new(
             Arc::clone(&release),
@@ -927,6 +1181,7 @@ pub(crate) async fn start_production_workspace(
             Arc::clone(&published_results),
             delta_ports,
             Arc::clone(&activation),
+            workspace_resources.clone(),
         ));
 
     let fresh = match &selection {
@@ -944,8 +1199,10 @@ pub(crate) async fn start_production_workspace(
                     state_root,
                     operational_database,
                     record,
-                    release.as_ref(),
+                    &release,
                     writer_lease.fence(),
+                    &workspace_resources,
+                    &task_scope,
                 )
                 .await?,
             )
@@ -970,9 +1227,14 @@ pub(crate) async fn start_production_workspace(
         }
     };
 
+    let candidate_resources = workspace_resources.clone();
     let candidate_rebuilder: Arc<dyn ActivationCommandCandidateRebuilderPort> = Arc::new(
-        ExactDeltaActivationCommandCandidateRebuilder::new(workspace_id, |epoch_id| {
-            ProgrammaticFabricEpochBuilder::try_new(epoch_id, FabricEpochRuntimeConfig::default())
+        ExactDeltaActivationCommandCandidateRebuilder::new(workspace_id, move |epoch_id| {
+            ProgrammaticFabricEpochBuilder::try_new_governed(
+                epoch_id,
+                candidate_resources.config().epoch_runtime().clone(),
+                candidate_resources.native().clone(),
+            )
         }),
     );
     let control_binding = activation
@@ -1273,5 +1535,7 @@ pub(crate) async fn start_production_workspace(
         command_runtime,
         selected_epoch,
         fresh_activation,
+        resources: workspace_resources,
+        task_scope,
     })
 }

@@ -969,6 +969,22 @@ async fn finish_writer_fenced_v2(
     finish_writer_fenced(startup, drained, primary)
 }
 
+fn production_query_coordinator_policy() -> Result<QueryCoordinatorPolicy, DaemonError> {
+    QueryCoordinatorPolicy::try_new(
+        16,
+        8,
+        4,
+        128,
+        256,
+        1_024,
+        4 * 1024 * 1024,
+        4 * 1024 * 1024 * 1024,
+        65_536,
+        10_000,
+    )
+    .map_err(|error| DaemonError::Config(format!("query coordinator policy: {error}")))
+}
+
 #[allow(clippy::too_many_lines)]
 async fn serve_writer_fenced_v2(
     mut startup: ProductionStartupCoordinator<WriterFenced>,
@@ -993,6 +1009,47 @@ async fn serve_writer_fenced_v2(
         return finish_writer_fenced(startup, false, Some(error));
     }
     let workspace_id = crate::fabric::command::WorkspaceId::from_bytes(record.workspace_id);
+    let policy = match production_query_coordinator_policy() {
+        Ok(policy) => policy,
+        Err(error) => return finish_writer_fenced(startup, false, Some(error)),
+    };
+    let process_id = match daemon_random32() {
+        Ok(value) => value[..16]
+            .try_into()
+            .expect("sixteen-byte process identity"),
+        Err(error) => return finish_writer_fenced(startup, false, Some(error)),
+    };
+    let workspace_resources = match crate::resource_budget::ResourceBudget::try_process(
+        process_id,
+        crate::fabric::workspace_resources::local_resource_policy(),
+    )
+    .map_err(|error| error.to_string())
+    .and_then(|process| {
+        crate::fabric::workspace_resources::ProductionWorkspaceResources::try_new(
+            &process,
+            workspace_id,
+            &startup.config.static_config.state_root,
+        )
+    }) {
+        Ok(resources) => resources,
+        Err(error) => {
+            return finish_writer_fenced(startup, false, Some(DaemonError::Config(error)));
+        }
+    };
+    let daemon_task_scope = match StructuredCancellationScope::try_root_with_control_reserve(
+        "daemon",
+        policy.structured_task_capacity(),
+        std::num::NonZeroUsize::new(16).expect("control task reserve is positive"),
+    ) {
+        Ok(scope) => scope,
+        Err(error) => {
+            return finish_writer_fenced(
+                startup,
+                false,
+                Some(DaemonError::Config(error.to_string())),
+            );
+        }
+    };
     let Some(slot) = startup.workspace_slots.slot(workspace_id) else {
         let error =
             DaemonError::Config("operational workspace has no closed authority slot".into());
@@ -1022,15 +1079,22 @@ async fn serve_writer_fenced_v2(
                 }
                 ActivationStartupAssuranceFault::ExitBeforeReadyAcknowledgement => None,
             }),
+        workspace_resources,
+        daemon_task_scope.clone(),
     )
     .await
     {
         Ok(workspace) => workspace,
         Err(error) => {
+            let joined = daemon_task_scope.cancel_and_join(Duration::from_secs(2)).await;
+            let detail = match joined {
+                Ok(()) => error.to_string(),
+                Err(join) => format!("{error}; startup operation join: {join}"),
+            };
             return finish_writer_fenced(
                 startup,
                 false,
-                Some(DaemonError::Config(error.to_string())),
+                Some(DaemonError::Config(detail)),
             );
         }
     };
@@ -1109,32 +1173,8 @@ async fn serve_writer_fenced_v2(
     let package_builder = StreamedResultPackageBuilder::new(
         Arc::new(ObjectStoreResultSink::new(object_store)),
         package_limits,
+        workspace.resources().budget().clone(),
     );
-    let policy = match QueryCoordinatorPolicy::try_new(
-        16,
-        8,
-        4,
-        128,
-        256,
-        1_024,
-        4 * 1024 * 1024,
-        4 * 1024 * 1024 * 1024,
-        65_536,
-        10_000,
-    ) {
-        Ok(policy) => policy,
-        Err(error) => {
-            return finish_writer_fenced_v2(
-                startup,
-                workspace,
-                false,
-                Some(DaemonError::Config(format!(
-                    "query coordinator policy: {error}"
-                ))),
-            )
-            .await;
-        }
-    };
     let journal = match SqliteQueryCoordinatorJournal::open(
         &startup
             .config
@@ -1169,21 +1209,6 @@ async fn serve_writer_fenced_v2(
             return finish_writer_fenced_v2(startup, workspace, false, Some(error)).await;
         }
     };
-    let daemon_task_scope =
-        match StructuredCancellationScope::try_root("daemon", policy.structured_task_capacity()) {
-            Ok(scope) => scope,
-            Err(error) => {
-                return finish_writer_fenced_v2(
-                    startup,
-                    workspace,
-                    false,
-                    Some(DaemonError::Config(format!(
-                        "daemon task hierarchy: {error}"
-                    ))),
-                )
-                .await;
-            }
-        };
     let query_task_scope = match daemon_task_scope
         .child("workspace")
         .and_then(|scope| scope.child("primary"))
@@ -1209,6 +1234,7 @@ async fn serve_writer_fenced_v2(
         journal,
         observed_at,
         query_task_scope,
+        workspace.resources().budget().clone(),
     ) {
         Ok(coordinator) => Arc::new(coordinator),
         Err(error) => {
@@ -1240,7 +1266,10 @@ async fn serve_writer_fenced_v2(
             .await;
         }
     };
-    let results = match StreamedResultRegistry::try_new(crate::rpc::MAX_PAYLOAD_CHUNK_BYTES) {
+    let results = match StreamedResultRegistry::try_new(
+        crate::rpc::MAX_PAYLOAD_CHUNK_BYTES,
+        workspace.resources().budget().clone(),
+    ) {
         Ok(registry) => Arc::new(registry),
         Err(error) => {
             return finish_writer_fenced_v2(
@@ -1352,7 +1381,7 @@ async fn serve_writer_fenced_v2(
         .set_serving::<CpgQueryServiceServer<ProductionQueryService<ProgrammaticSemanticQueryBackend>>>()
         .await;
     let (query_shutdown_tx, mut query_shutdown_rx) = watch::channel(false);
-    let mut query_task = tokio::spawn(async move {
+    let query_future = async move {
         Server::builder()
             .max_concurrent_streams(Some(crate::rpc::MAX_QUERY_TRANSPORT_STREAMS))
             .add_service(health_server)
@@ -1365,7 +1394,41 @@ async fn serve_writer_fenced_v2(
                 }
             })
             .await
-    });
+    };
+    let query_owner = async {
+        let reservation = workspace
+            .resources()
+            .budget()
+            .try_reserve(
+                crate::resource_budget::ResourceClass::Control,
+                crate::resource_budget::ResourceAmounts {
+                    running_jobs: 1,
+                    memory_bytes: 64 * 1024,
+                    ..crate::resource_budget::ResourceAmounts::default()
+                },
+            )
+            .map_err(|error| DaemonError::Config(error.to_string()))?;
+        daemon_task_scope
+            .child_control("query-server")
+            .map_err(|error| DaemonError::Config(error.to_string()))?
+            .spawn_async_owned(
+                "transport",
+                crate::cancellation::TaskCancellationMode::AbortableAsync,
+                reservation,
+                query_future,
+            )
+            .await
+            .map_err(|error| DaemonError::Config(error.to_string()))
+    }
+    .await;
+    let query_owner = match query_owner {
+        Ok(owner) => owner,
+        Err(error) => {
+            let _ = query_socket.retire();
+            return finish_writer_fenced_v2(startup, workspace, false, Some(error)).await;
+        }
+    };
+    let mut query_task = Box::pin(query_owner.wait());
     if matches!(
         startup
             .config
@@ -1879,6 +1942,22 @@ maintenance_schedule = "daily-idle"
             Arc::clone(&startup.phase.generation_store),
             writer_lease,
             None,
+            crate::fabric::workspace_resources::ProductionWorkspaceResources::try_new(
+                &crate::resource_budget::ResourceBudget::try_process(
+                    [91; 16],
+                    crate::fabric::workspace_resources::local_resource_policy(),
+                )
+                .unwrap(),
+                workspace_id,
+                &config.static_config.state_root,
+            )
+            .unwrap(),
+            StructuredCancellationScope::try_root_with_control_reserve(
+                "daemon",
+                std::num::NonZeroUsize::new(64).unwrap(),
+                std::num::NonZeroUsize::new(8).unwrap(),
+            )
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -1996,6 +2075,7 @@ maintenance_schedule = "daily-idle"
                 4 * 1024 * 1024,
             )
             .unwrap(),
+            workspace.resources().budget().clone(),
         );
         let backend = ProgrammaticSemanticQueryBackend::new(
             Arc::clone(&startup.release),

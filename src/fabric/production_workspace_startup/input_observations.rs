@@ -37,7 +37,7 @@ pub(super) fn install_input_observations(
     for run in runs {
         let source = run.job().source();
         let selected = match source.selection() {
-            ProviderSourceSelection::Inventory(bound) => bound == inventory,
+            ProviderSourceSelection::Inventory(bound) => &**bound == inventory,
             ProviderSourceSelection::File {
                 file_id,
                 content_digest,
@@ -917,7 +917,7 @@ mod tests {
     }
 
     fn source(inventory: &ProviderSourceInventory) -> ProviderSourceBinding {
-        ProviderSourceBinding::from_inventory(
+        ProviderSourceBinding::from_inventory_fixture(
             SourceIdentity::try_new("inventory-7").unwrap(),
             inventory.clone(),
         )
@@ -929,6 +929,7 @@ mod tests {
         obligations: Vec<ProviderSupportDependency>,
         local: &[ProviderSupportDependency],
     ) -> AdmittedProviderResult {
+        let workspace_id = source.workspace_id();
         let requested_units = match source.selection() {
             ProviderSourceSelection::File { .. } => 1,
             ProviderSourceSelection::Inventory(inventory) => {
@@ -954,15 +955,18 @@ mod tests {
             provider: ProviderIdentity::try_new("tree-sitter").unwrap(),
             protocol: ProviderProtocolIdentity::try_new("in-process-arrow@1").unwrap(),
             source,
-            context: ProviderContextBinding::try_new(
-                ContextIdentity::try_new("python-context").unwrap(),
-                [3; 16],
-                [3; 32],
-                [4; 32],
-            )
-            .unwrap()
-            .with_support_obligations(obligations)
-            .unwrap(),
+            context: crate::provider_contracts::fixture_provider_context(
+                workspace_id,
+                ProviderContextBinding::try_new(
+                    ContextIdentity::try_new("python-context").unwrap(),
+                    [3; 16],
+                    [3; 32],
+                    [4; 32],
+                )
+                .unwrap()
+                .with_support_obligations(obligations)
+                .unwrap(),
+            ),
             run: ProviderRunBinding::try_new(
                 ProviderRunIdentity::try_new(format!("run-{run}")).unwrap(),
                 [run; 16],
@@ -990,6 +994,10 @@ mod tests {
             .unwrap(),
             deadline: Instant::now() + Duration::from_secs(30),
             cancellation: CancellationProbe::pair(128).unwrap().1,
+            resource_budget: crate::provider_contracts::fixture_provider_budget(
+                workspace_id,
+                [run; 16],
+            ),
             provenance: ProviderRunProvenance::new(
                 ProviderBuildIdentity::try_new("tree-sitter-build").unwrap(),
                 ProviderPolicyIdentity::try_new("policy.v1").unwrap(),
@@ -1011,6 +1019,7 @@ mod tests {
                         request.schema_identity().clone(),
                         Arc::clone(&schema),
                         vec![RecordBatch::new_empty(schema)],
+                        job.resource_budget(),
                     )
                     .unwrap(),
                 ],

@@ -6,16 +6,16 @@
 //! typed artifact metadata; it never transforms or duplicates semantic rows as JSON.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io;
 use std::sync::{Arc, Mutex};
 
 use arrow_array::RecordBatch;
-use arrow_ipc::writer::StreamWriter;
 use arrow_schema::{ArrowError, SchemaRef};
 use serde::Serialize;
 use thiserror::Error;
 
+use super::bounded_encoding::{BoundedEncodingError, CappedWriter, encode_page, page_size};
 use crate::relational_program::RelationId;
+use crate::resource_budget::{ChargedSlice, ResourceAmounts, ResourceBudget, ResourceClass};
 
 use super::command::{EpochId, LeaseId};
 
@@ -413,7 +413,7 @@ pub struct ArrowResultPackageMetadata {
     total_schema_bytes: u64,
     total_ipc_bytes: u64,
     completion: ResultCompleteness,
-    relations: Arc<[RelationArtifactMetadata]>,
+    relations: ChargedSlice<RelationArtifactMetadata>,
 }
 
 impl ArrowResultPackageMetadata {
@@ -486,7 +486,7 @@ pub struct ResultResourceChunk {
     pub next_offset: u64,
     pub total_length: u64,
     pub content_checksum: [u8; 32],
-    pub bytes: Arc<[u8]>,
+    pub bytes: ChargedSlice<u8>,
     pub complete: bool,
 }
 
@@ -496,6 +496,7 @@ pub struct ResultResourceChunk {
 /// `ResultResourceId` values without gaining schema, query, or row-transformation authority.
 #[derive(Debug)]
 pub struct ArrowResultResourcePackage {
+    budget: ResourceBudget,
     metadata: ArrowResultPackageMetadata,
     limits: ArrowResultResourceLimits,
     lease: ResultResourceLease,
@@ -506,7 +507,7 @@ pub struct ArrowResultResourcePackage {
 
 #[derive(Debug)]
 struct StoredResource {
-    bytes: Arc<[u8]>,
+    bytes: ChargedSlice<u8>,
     checksum: [u8; 32],
 }
 
@@ -524,6 +525,7 @@ impl ArrowResultResourcePackage {
         mut relations: Vec<ResultRelationInput>,
         lease: ResultResourceLease,
         limits: ArrowResultResourceLimits,
+        budget: ResourceBudget,
     ) -> Result<Self, ArrowResultResourceError> {
         if epoch_id.as_bytes().iter().all(|byte| *byte == 0)
             || query_execution.as_bytes().iter().all(|byte| *byte == 0)
@@ -539,6 +541,38 @@ impl ArrowResultResourcePackage {
                 limit: limits.max_relations,
             });
         }
+        let metadata_bytes = relations.iter().try_fold(
+            relations
+                .len()
+                .checked_mul(2048)
+                .ok_or(ArrowResultResourceError::CounterOverflow)?,
+            |total, relation| {
+                let text = relation
+                    .relation_id
+                    .as_str()
+                    .len()
+                    .checked_add(
+                        relation
+                            .coverage
+                            .unknown_cause()
+                            .map_or(0, |cause| cause.as_str().len()),
+                    )
+                    .ok_or(ArrowResultResourceError::CounterOverflow)?;
+                total
+                    .checked_add(
+                        text.checked_mul(8)
+                            .ok_or(ArrowResultResourceError::CounterOverflow)?,
+                    )
+                    .ok_or(ArrowResultResourceError::CounterOverflow)
+            },
+        )?;
+        let metadata_charge = budget.try_reserve(
+            ResourceClass::Data,
+            ResourceAmounts {
+                memory_bytes: metadata_bytes as u64,
+                ..ResourceAmounts::default()
+            },
+        )?;
         relations.sort_by(|left, right| left.relation_id.cmp(&right.relation_id));
 
         let mut seen = BTreeSet::new();
@@ -562,25 +596,34 @@ impl ArrowResultResourcePackage {
             let effective_schema_limit = limits
                 .max_schema_bytes_per_relation
                 .min(remaining_schema_bytes);
-            let (schema_bytes, schema_limit_exceeded) =
-                encode_canonical_schema(&relation.schema, effective_schema_limit);
-            let schema_bytes = match schema_bytes {
+            let schema_bytes = match super::bounded_encoding::preflight_schema(
+                &relation.schema,
+                effective_schema_limit.saturating_mul(2),
+            )
+            .map_err(|_| ArrowResultResourceError::EncodingByteLimit)
+            .and_then(|()| {
+                encode_canonical_value(
+                    relation.schema.as_ref(),
+                    effective_schema_limit,
+                    &budget,
+                    ResourceClass::Data,
+                )
+            }) {
                 Ok(bytes) => bytes,
-                Err(_source)
-                    if schema_limit_exceeded
-                        && remaining_schema_bytes < limits.max_schema_bytes_per_relation =>
+                Err(ArrowResultResourceError::EncodingByteLimit)
+                    if remaining_schema_bytes < limits.max_schema_bytes_per_relation =>
                 {
                     return Err(ArrowResultResourceError::TotalSchemaByteLimitExceeded {
                         limit: limits.max_total_schema_bytes,
                     });
                 }
-                Err(_) if schema_limit_exceeded => {
+                Err(ArrowResultResourceError::EncodingByteLimit) => {
                     return Err(ArrowResultResourceError::SchemaByteLimitExceeded {
                         relation: relation.relation_id.as_str().to_owned(),
                         limit: limits.max_schema_bytes_per_relation,
                     });
                 }
-                Err(source) => return Err(ArrowResultResourceError::CanonicalManifest(source)),
+                Err(source) => return Err(source),
             };
             total_schema_bytes = total_schema_bytes
                 .checked_add(schema_bytes.len())
@@ -639,29 +682,28 @@ impl ArrowResultResourcePackage {
                 .checked_sub(total_ipc_bytes)
                 .ok_or(ArrowResultResourceError::CounterOverflow)?;
             let effective_limit = limits.max_ipc_bytes_per_relation.min(remaining_total);
-            let (ipc_bytes, limit_exceeded) =
-                encode_ipc(&relation.schema, &relation.batches, effective_limit);
-            let ipc_bytes = match ipc_bytes {
+            let ipc_bytes = match encode_ipc(
+                &relation.schema,
+                &relation.batches,
+                effective_limit,
+                schema_bytes.len(),
+                &budget,
+            ) {
                 Ok(bytes) => bytes,
-                Err(_source)
-                    if limit_exceeded && remaining_total < limits.max_ipc_bytes_per_relation =>
+                Err(ArrowResultResourceError::EncodingByteLimit)
+                    if remaining_total < limits.max_ipc_bytes_per_relation =>
                 {
                     return Err(ArrowResultResourceError::TotalIpcByteLimitExceeded {
                         limit: limits.max_total_ipc_bytes,
                     });
                 }
-                Err(_) if limit_exceeded => {
+                Err(ArrowResultResourceError::EncodingByteLimit) => {
                     return Err(ArrowResultResourceError::IpcByteLimitExceeded {
                         relation: relation.relation_id.as_str().to_owned(),
                         limit: limits.max_ipc_bytes_per_relation,
                     });
                 }
-                Err(source) => {
-                    return Err(ArrowResultResourceError::IpcEncoding {
-                        relation: relation.relation_id.as_str().to_owned(),
-                        source,
-                    });
-                }
+                Err(source) => return Err(source),
             };
             total_ipc_bytes = total_ipc_bytes
                 .checked_add(ipc_bytes.len())
@@ -697,7 +739,7 @@ impl ArrowResultResourcePackage {
             resources.insert(
                 resource_id,
                 StoredResource {
-                    bytes: Arc::from(ipc_bytes),
+                    bytes: ipc_bytes,
                     checksum: content_checksum,
                 },
             );
@@ -733,14 +775,21 @@ impl ArrowResultResourcePackage {
             completion,
             &artifacts,
         )?;
-        let manifest_bytes = serde_json_canonicalizer::to_vec(&manifest)
-            .map_err(ArrowResultResourceError::CanonicalManifest)?;
-        if manifest_bytes.len() > limits.max_manifest_bytes {
-            return Err(ArrowResultResourceError::ManifestByteLimitExceeded {
-                observed: manifest_bytes.len(),
-                limit: limits.max_manifest_bytes,
-            });
-        }
+        let manifest_bytes = encode_canonical_value(
+            &manifest,
+            limits.max_manifest_bytes,
+            &budget,
+            ResourceClass::Data,
+        )
+        .map_err(|error| match error {
+            ArrowResultResourceError::EncodingByteLimit => {
+                ArrowResultResourceError::ManifestByteLimitExceeded {
+                    observed: limits.max_manifest_bytes.saturating_add(1),
+                    limit: limits.max_manifest_bytes,
+                }
+            }
+            other => other,
+        })?;
         let manifest_checksum = digest_framed([b"result-manifest.v1".as_slice(), &manifest_bytes]);
         let manifest_resource_id = ResultResourceId(digest_framed([
             b"manifest-resource.v1".as_slice(),
@@ -752,7 +801,7 @@ impl ArrowResultResourcePackage {
         resources.insert(
             manifest_resource_id,
             StoredResource {
-                bytes: Arc::from(manifest_bytes),
+                bytes: manifest_bytes,
                 checksum: manifest_checksum,
             },
         );
@@ -768,9 +817,10 @@ impl ArrowResultResourcePackage {
             total_schema_bytes: total_schema_bytes_u64,
             total_ipc_bytes: total_ipc_bytes_u64,
             completion,
-            relations: Arc::from(artifacts),
+            relations: metadata_charge.into_charged_vec(artifacts)?,
         };
         Ok(Self {
+            budget,
             metadata,
             limits,
             lease,
@@ -784,6 +834,10 @@ impl ArrowResultResourcePackage {
     #[must_use]
     pub const fn metadata(&self) -> &ArrowResultPackageMetadata {
         &self.metadata
+    }
+
+    pub(crate) const fn resource_budget(&self) -> &ResourceBudget {
+        &self.budget
     }
 
     /// Return the exact lease control metadata supplied at package construction.
@@ -860,7 +914,12 @@ impl ArrowResultResourcePackage {
             next_offset,
             total_length,
             content_checksum: resource.checksum,
-            bytes: Arc::from(&resource.bytes[offset..end]),
+            bytes: ChargedSlice::try_from_fn(
+                &self.budget,
+                ResourceClass::Control,
+                end - offset,
+                || resource.bytes[offset..end].to_vec(),
+            )?,
             complete: end == resource.bytes.len(),
         })
     }
@@ -1102,67 +1161,97 @@ fn hex(bytes: &[u8]) -> String {
     output
 }
 
-fn encode_canonical_schema(
-    schema: &SchemaRef,
+pub(in crate::fabric) fn encode_canonical_value(
+    value: &impl Serialize,
     byte_limit: usize,
-) -> (Result<Vec<u8>, serde_json::Error>, bool) {
-    let mut output = BoundedVecWriter::new(byte_limit);
-    let result = serde_json_canonicalizer::to_writer(schema.as_ref(), &mut output);
-    let exceeded = output.exceeded;
-    (result.map(|()| output.bytes), exceeded)
+    budget: &ResourceBudget,
+    class: ResourceClass,
+) -> Result<ChargedSlice<u8>, ArrowResultResourceError> {
+    // Count ordinary JSON before the canonicalizer allocates its sorted object containers.
+    // These schema/manifest projections contain strings and bounded integer counters, not
+    // arbitrary-precision floating-point inputs. The final canonical length is checked too.
+    let mut count = CappedWriter::counting(byte_limit);
+    serde_json::to_writer(&mut count, value)
+        .map_err(|_| ArrowResultResourceError::EncodingByteLimit)?;
+    let envelope = count
+        .count()
+        .checked_mul(32)
+        .and_then(|n| n.checked_add(1024))
+        .ok_or(ArrowResultResourceError::CounterOverflow)?;
+    let mut charge = budget.try_reserve(
+        class,
+        ResourceAmounts {
+            memory_bytes: envelope as u64,
+            retained_bytes: count.count() as u64,
+            ..ResourceAmounts::default()
+        },
+    )?;
+    let bytes = serde_json_canonicalizer::to_vec(value)
+        .map_err(ArrowResultResourceError::CanonicalManifest)?;
+    if bytes.len() > byte_limit || bytes.len() > count.count() {
+        return Err(ArrowResultResourceError::EncodingByteLimit);
+    }
+    let backing = charge.split(ResourceAmounts {
+        memory_bytes: bytes.capacity() as u64,
+        retained_bytes: bytes.len() as u64,
+        ..ResourceAmounts::default()
+    })?;
+    Ok(backing.into_charged_vec(bytes)?)
 }
 
 fn encode_ipc(
     schema: &SchemaRef,
     batches: &[RecordBatch],
     byte_limit: usize,
-) -> (Result<Vec<u8>, ArrowError>, bool) {
-    let mut output = BoundedVecWriter::new(byte_limit);
-    let result = (|| {
-        let mut writer = StreamWriter::try_new(&mut output, schema.as_ref())?;
-        for batch in batches {
-            writer.write(batch)?;
-        }
-        writer.finish()
-    })();
-    let exceeded = output.exceeded;
-    (result.map(|()| output.bytes), exceeded)
-}
-
-struct BoundedVecWriter {
-    bytes: Vec<u8>,
-    limit: usize,
-    exceeded: bool,
-}
-
-impl BoundedVecWriter {
-    fn new(limit: usize) -> Self {
-        Self {
-            bytes: Vec::new(),
-            limit,
-            exceeded: false,
-        }
-    }
-}
-
-impl io::Write for BoundedVecWriter {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
-            self.exceeded = true;
-            return Err(io::Error::other("Arrow result IPC byte limit exceeded"));
-        }
-        self.bytes.extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
+    schema_bytes: usize,
+    budget: &ResourceBudget,
+) -> Result<ChargedSlice<u8>, ArrowResultResourceError> {
+    let input = batches
+        .iter()
+        .try_fold(0usize, |total, batch| {
+            total.checked_add(batch.get_array_memory_size())
+        })
+        .ok_or(ArrowResultResourceError::CounterOverflow)?;
+    let envelope = input
+        .checked_mul(4)
+        .and_then(|n| n.checked_add(batches.len().checked_mul(1024)?))
+        .and_then(|n| n.checked_add(schema_bytes.checked_mul(32)?))
+        .and_then(|n| n.checked_add(65_536))
+        .ok_or(ArrowResultResourceError::CounterOverflow)?;
+    // Additional source/scratch envelope, not a claim to reclaim unknown upstream Arrow owners.
+    let _scratch = budget.try_reserve(
+        ResourceClass::Data,
+        ResourceAmounts {
+            memory_bytes: envelope as u64,
+            ..ResourceAmounts::default()
+        },
+    )?;
+    let map_error = |error| match error {
+        BoundedEncodingError::PageByteLimit { .. } => ArrowResultResourceError::EncodingByteLimit,
+        other => ArrowResultResourceError::BoundedIpc(Box::new(other)),
+    };
+    let size = page_size(schema, batches, byte_limit).map_err(map_error)?;
+    let charge = budget.try_reserve(
+        ResourceClass::Data,
+        ResourceAmounts {
+            memory_bytes: size as u64,
+            retained_bytes: size as u64,
+            ..ResourceAmounts::default()
+        },
+    )?;
+    let bytes = encode_page(schema, batches, byte_limit).map_err(map_error)?;
+    Ok(charge.into_charged_vec(bytes)?)
 }
 
 /// Stable failures at the immutable Arrow result-resource boundary.
 #[derive(Debug, Error)]
 pub enum ArrowResultResourceError {
+    #[error(transparent)]
+    Resource(#[from] crate::resource_budget::ResourceBudgetError),
+    #[error("bounded result encoding exceeds its released byte profile")]
+    EncodingByteLimit,
+    #[error("bounded native result IPC encoding failed: {0}")]
+    BoundedIpc(#[source] Box<BoundedEncodingError>),
     #[error("INVALID_REQUEST_SCHEMA:RESULT_RESOURCE_LIMITS")]
     InvalidLimits,
     #[error("INVALID_REQUEST_SCHEMA:RESULT_RESOURCE_PINS")]
@@ -1240,6 +1329,96 @@ pub enum ArrowResultResourceError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wp79_legacy_package_and_chunk_ownership_survive_all_external_clones() {
+        use crate::resource_budget::test_resource_budget;
+        use crate::provider_contracts::allocation::ProviderAllocation;
+        let source_budget = test_resource_budget();
+        let target_budget = test_resource_budget();
+        let relation = string_relation("result.owned", &["alpha", "beta"]);
+        let source = relation.batches[0].clone();
+        let mut source_allocation = ProviderAllocation::try_new(&source_budget, 65536).unwrap();
+        source_allocation.claim_new_batches([&source], 16).unwrap();
+        drop(source_allocation);
+        let source_bytes = source_budget.observation().used.memory_bytes;
+        let package = Arc::new(
+            ArrowResultResourcePackage::try_new(
+                epoch(),
+                query(),
+                vec![relation],
+                lease(),
+                limits(),
+                target_budget.clone(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(source_budget.observation().used.memory_bytes, source_bytes);
+        let alias = package.clone();
+        let metadata = package.metadata().clone();
+        let retained = target_budget.observation().used.retained_bytes;
+        assert!(retained > 0);
+        let chunk = package
+            .read_chunk(
+                lease().lease_id(),
+                1500,
+                metadata.manifest_resource_id(),
+                0,
+                7,
+            )
+            .unwrap();
+        let chunk_alias = chunk.clone();
+        drop(source);
+        assert_eq!(source_budget.observation().used.memory_bytes, 0);
+        drop(package);
+        assert_eq!(target_budget.observation().used.retained_bytes, retained);
+        drop(alias);
+        assert_eq!(target_budget.observation().used.retained_bytes, 0);
+        assert!(
+            target_budget.observation().used.memory_bytes > 7,
+            "escaped metadata retains its charge"
+        );
+        drop(metadata);
+        assert_eq!(target_budget.observation().used.memory_bytes, 7);
+        drop(chunk);
+        assert_eq!(target_budget.observation().used.memory_bytes, 7);
+        assert_eq!(chunk_alias.bytes.len(), 7);
+        drop(chunk_alias);
+        assert_eq!(target_budget.observation().used.memory_bytes, 0);
+    }
+
+    #[test]
+    fn wp79_legacy_package_rejects_admission_before_encoding_and_matches_native_ipc() {
+        let root = crate::resource_budget::test_resource_budget();
+        let mut policy = root.policy();
+        policy.limits.memory_bytes = 1024;
+        policy.control_reserve.memory_bytes = 128;
+        let small = root.workspace([9; 16], policy).unwrap();
+        assert!(matches!(
+            ArrowResultResourcePackage::try_new(
+                epoch(),
+                query(),
+                vec![string_relation("result.denied", &["data"])],
+                lease(),
+                limits(),
+                small.clone()
+            ),
+            Err(ArrowResultResourceError::Resource(_))
+        ));
+        assert_eq!(small.observation().peak.memory_bytes, 0);
+        let relation = string_relation("result.parity", &["one", "two"]);
+        let mut expected = Vec::new();
+        {
+            let mut writer =
+                arrow_ipc::writer::StreamWriter::try_new(&mut expected, relation.schema.as_ref())
+                    .unwrap();
+            for batch in &relation.batches {
+                writer.write(batch).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        let bytes = encode_ipc(&relation.schema, &relation.batches, 65536, 4096, &root).unwrap();
+        assert_eq!(&*bytes, expected);
+    }
     use std::collections::HashMap;
     use std::io::Cursor;
 
@@ -1419,6 +1598,7 @@ mod tests {
             vec![claim_015_relation(claim)],
             lease(),
             claim_015_limits(rows, bytes),
+            crate::resource_budget::test_resource_budget(),
         )
     }
 
@@ -1438,7 +1618,15 @@ mod tests {
     }
 
     fn package(relations: Vec<ResultRelationInput>) -> ArrowResultResourcePackage {
-        ArrowResultResourcePackage::try_new(epoch(), query(), relations, lease(), limits()).unwrap()
+        ArrowResultResourcePackage::try_new(
+            epoch(),
+            query(),
+            relations,
+            lease(),
+            limits(),
+            crate::resource_budget::test_resource_budget(),
+        )
+        .unwrap()
     }
 
     fn read_all(
@@ -1688,6 +1876,7 @@ mod tests {
             )],
             lease(),
             limits(),
+            crate::resource_budget::test_resource_budget(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -1718,6 +1907,7 @@ mod tests {
             vec![string_relation("public.schema_bytes", &["row"])],
             lease(),
             relation_limits,
+            crate::resource_budget::test_resource_budget(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -1751,6 +1941,7 @@ mod tests {
             ],
             lease(),
             package_limits,
+            crate::resource_budget::test_resource_budget(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -1781,6 +1972,7 @@ mod tests {
             vec![string_relation("public.rows", &["a", "b"])],
             lease(),
             row_limits,
+            crate::resource_budget::test_resource_budget(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -1808,6 +2000,7 @@ mod tests {
             vec![string_relation("public.bytes", &["semantic bytes"])],
             lease(),
             byte_limits,
+            crate::resource_budget::test_resource_budget(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -1852,6 +2045,7 @@ mod tests {
             )],
             lease(),
             batch_limits,
+            crate::resource_budget::test_resource_budget(),
         )
         .unwrap_err();
         assert!(matches!(

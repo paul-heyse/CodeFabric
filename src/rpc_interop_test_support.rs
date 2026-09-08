@@ -407,7 +407,7 @@ impl ProductionRpcInteropControl {
             .expect("interop owned task observation")
     }
 
-    /// Seal and register one real manifest-last result, append the production ResultReady event,
+    /// Seal and register one real manifest-last result, append the production `ResultReady` event,
     /// and durably close the query as succeeded.
     pub async fn publish_result(&self, query_id: &str) -> StreamedResultRegistration {
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -567,7 +567,19 @@ pub async fn production_rpc_interop_fixture(
         64 * 1_024,
     )
     .expect("interop package limits");
-    let package_builder = StreamedResultPackageBuilder::new(sink, limits);
+    let fixture_process = crate::resource_budget::ResourceBudget::try_process(
+        [111; 16],
+        crate::fabric::workspace_resources::local_resource_policy(),
+    )
+    .expect("interop process resource policy");
+    let fixture_resources = fixture_process
+        .workspace(
+            *INTEROP_WORKSPACE.as_bytes(),
+            crate::fabric::workspace_resources::local_resource_policy(),
+        )
+        .expect("interop workspace resource owner");
+    let package_builder =
+        StreamedResultPackageBuilder::new(sink, limits, fixture_resources.clone());
     let backend = Arc::new(InteropSemanticBackend::new(package_builder.clone()));
     let coordinator_policy =
         QueryCoordinatorPolicy::try_new(2, 2, 2, 4, 4, 32, 64 * 1_024, 64 << 20, 1_024, 16)
@@ -582,6 +594,7 @@ pub async fn production_rpc_interop_fixture(
             [0x71; 32],
             journal,
             now_millis(),
+            fixture_resources.clone(),
         )
         .expect("interop coordinator"),
     );
@@ -637,6 +650,7 @@ pub async fn production_rpc_interop_fixture(
         StreamedResultRegistry::try_new(
             usize::try_from(INTEROP_MAXIMUM_RESOURCE_CHUNK_BYTES)
                 .expect("interop resource chunk bound fits usize"),
+            fixture_resources,
         )
         .expect("interop result registry"),
     );

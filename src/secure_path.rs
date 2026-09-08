@@ -26,6 +26,11 @@ const PATH_OUTSIDE_AUTHORIZED_ROOT: u16 = 2_010;
 const SOURCE_ACCESS_DENIED: u16 = 2_020;
 const BLOCKED_PATH_COLLISION: u16 = 2_030;
 
+// Pinned rustix 1.1.4 grows its Linux getdents buffer only below 1024 dirent64
+// records. This conservative transient envelope covers old/new buffer overlap,
+// the owned current entry name, and the iterator itself; it is not a job limit.
+pub(crate) const DIRECTORY_ITERATION_MEMORY_BOUND: usize = 128 * 1024;
+
 /// A stable, redaction-safe diagnostic emitted for every rejected path operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -37,6 +42,8 @@ pub struct SecurePathDiagnostic {
 /// Stable secure-path failures. No variant carries source bytes or host paths.
 #[derive(Debug, Error)]
 pub enum SecurePathError {
+    #[error("RESOURCE_EXHAUSTED: source allocation was not admitted")]
+    ResourceExhausted,
     #[error("WORKSPACE_NOT_AUTHORIZED: root authorization no longer matches")]
     RootAuthorizationChanged,
     #[error("PATH_OUTSIDE_AUTHORIZED_ROOT: invalid workspace-relative path ({0})")]
@@ -86,6 +93,7 @@ impl SecurePathError {
                 name: "BLOCKED_PATH_COLLISION",
             },
             Self::SourceAccessDenied
+            | Self::ResourceExhausted
             | Self::OperatingSystem
             | Self::Store(_)
             | Self::Registry(_)
@@ -569,6 +577,20 @@ impl SecureRoot {
         path: &PlatformPath,
         maximum_bytes: u64,
     ) -> Result<StableFileRead, StableReadError> {
+        self.read_stable_file_with_allocation(path, maximum_bytes, |_| Ok(()))
+    }
+
+    /// Reserve each complete read backing before allocation. The caller retains the
+    /// reservations until both comparison buffers have been destroyed or transferred.
+    ///
+    /// # Errors
+    /// Also rejects the read when the caller cannot admit either backing allocation.
+    pub fn read_stable_file_with_allocation(
+        &self,
+        path: &PlatformPath,
+        maximum_bytes: u64,
+        mut reserve: impl FnMut(usize) -> Result<(), SecurePathError>,
+    ) -> Result<StableFileRead, StableReadError> {
         let descriptor = self.open_file(path)?;
         let mut file = std::fs::File::from(descriptor);
         let before = stable_metadata(&file)?;
@@ -583,10 +605,12 @@ impl SecureRoot {
                 observed: before.size,
                 limit: maximum_bytes,
             })?;
+        reserve(capacity)?;
         let first = read_bounded(&mut file, capacity)?;
         let middle = stable_metadata(&file)?;
         file.seek(SeekFrom::Start(0))
             .map_err(|_| SecurePathError::OperatingSystem)?;
+        reserve(capacity)?;
         let second = read_bounded(&mut file, capacity)?;
         let after = stable_metadata(&file)?;
         if before != middle || middle != after || first != second {
@@ -609,6 +633,22 @@ impl SecureRoot {
         path: Option<&PlatformPath>,
         maximum_entries: usize,
     ) -> Result<Vec<SecureDirectoryEntry>, SecurePathError> {
+        self.list_directory_with_allocation(path, maximum_entries, |_| Ok(()))
+    }
+
+    /// Admit directory entry names and every vector replacement before allocating them.
+    /// The callback accounts overlapping old/new vector capacity during growth. Its owner
+    /// must survive the returned entries; a rejected entry never becomes a complete census.
+    ///
+    /// # Errors
+    /// Returns enumeration failures or a caller's resource admission rejection.
+    pub fn list_directory_with_allocation(
+        &self,
+        path: Option<&PlatformPath>,
+        maximum_entries: usize,
+        mut reserve: impl FnMut(usize) -> Result<(), SecurePathError>,
+    ) -> Result<Vec<SecureDirectoryEntry>, SecurePathError> {
+        reserve(DIRECTORY_ITERATION_MEMORY_BOUND)?;
         self.revalidate_root()?;
         let descriptor = match path {
             Some(path) => self.open_directory_beneath(path)?,
@@ -650,6 +690,20 @@ impl SecureRoot {
             } else {
                 SecureDirectoryEntryKind::Other
             };
+            if entries.len() == entries.capacity() {
+                let next = entries
+                    .capacity()
+                    .max(1)
+                    .checked_mul(2)
+                    .ok_or(SecurePathError::SourceAccessDenied)?
+                    .min(maximum_entries);
+                reserve(
+                    next.checked_mul(std::mem::size_of::<SecureDirectoryEntry>())
+                        .ok_or(SecurePathError::SourceAccessDenied)?,
+                )?;
+                entries.reserve_exact(next - entries.len());
+            }
+            reserve(name.len())?;
             entries.push(SecureDirectoryEntry {
                 name: name.to_vec(),
                 kind,
@@ -659,7 +713,7 @@ impl SecureRoot {
                     .map_err(|_| SecurePathError::OperatingSystem)?,
             });
         }
-        entries.sort_by(|left, right| left.name.cmp(&right.name));
+        entries.sort_unstable_by(|left, right| left.name.cmp(&right.name));
         self.revalidate_root()?;
         Ok(entries)
     }
@@ -899,15 +953,21 @@ fn read_bounded(
     file: &mut std::fs::File,
     expected_size: usize,
 ) -> Result<Vec<u8>, StableReadError> {
-    let mut bytes = Vec::with_capacity(expected_size);
-    file.take(
-        u64::try_from(expected_size)
-            .unwrap_or(u64::MAX)
-            .saturating_add(1),
-    )
-    .read_to_end(&mut bytes)
-    .map_err(|_| SecurePathError::OperatingSystem)?;
-    if bytes.len() != expected_size {
+    // A stack probe detects growth without read_to_end's hidden spare-capacity growth.
+    let mut bytes = vec![0; expected_size];
+    if let Err(error) = file.read_exact(&mut bytes) {
+        return Err(if error.kind() == std::io::ErrorKind::UnexpectedEof {
+            StableReadError::ChangedDuringRead
+        } else {
+            SecurePathError::OperatingSystem.into()
+        });
+    }
+    let mut probe = [0];
+    if file
+        .read(&mut probe)
+        .map_err(|_| SecurePathError::OperatingSystem)?
+        != 0
+    {
         return Err(StableReadError::ChangedDuringRead);
     }
     Ok(bytes)

@@ -755,7 +755,7 @@ Twenty-one skills plus `_shared/`, discoverable by both agents: `.codex/skills` 
 `_shared/` holds the policy every workflow skill loads: `code-intelligence.md` (research),
 `evidence-policy.md` (the governing principle — executable beats derived beats recorded —
 plus claim → required evidence), `validation-policy.md` (gates), `doctrine-policy.md`,
-`subagent-orchestration.md`, `artifact-schemas.md` (artifact paths, frontmatter, the ID
+`artifact-schemas.md` (artifact paths, frontmatter, the ID
 minting rule, status vocabularies, and the §8 validation/derivation contract).
 
 ---
