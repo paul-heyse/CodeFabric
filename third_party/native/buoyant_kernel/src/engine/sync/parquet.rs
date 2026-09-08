@@ -105,7 +105,7 @@ impl ParquetHandler for SyncParquetHandler {
         let mut writer = ArrowWriter::try_new_with_options(
             &mut buf,
             first_record_batch.record_batch().schema(),
-            writer_options(),
+            writer_options()?,
         )?;
         writer.write(first_record_batch.record_batch())?;
         for result in data {

@@ -140,7 +140,7 @@ pub(crate) fn type_copy_bytes(data_type: &DataType) -> DeltaResult<usize> {
         Ok(payload)
     }
     fn copy(data_type: &DataType, depth: usize) -> DeltaResult<usize> {
-        let limit = crate::resource::current_resource_scope().map_or(64, |scope| scope.json_limits().max_depth);
+        let limit = crate::resource::current_resource_scope().map_or(64, |scope| crate::resource::current_json_resource_limits().map_or(64, |limits| limits.max_depth));
         if depth > limit { return Err(ResourceExhausted { kind: "native derived type copy depth", requested: depth, limit }.into()); }
         match data_type {
             DataType::Primitive(_) => Ok(0),
