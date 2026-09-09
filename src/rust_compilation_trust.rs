@@ -522,9 +522,8 @@ enum RustPreparationAuthority {
 
 /// Immutable selected invocation preparation, not evidence that Cargo metadata or MIR exists.
 ///
-/// Production construction requires validated discovery and preserves its unresolved authority.
-/// WP82 must install the independent Cargo unit/dependency/build evidence before launch can be
-/// enabled. No deserializer or public field can manufacture a resolved preparation.
+/// Discovery selects settings; Cargo metadata and an installed sysroot make them executable.
+/// Successful preparation permits compilation, without claiming that compilation succeeded.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SelectedRustCompilationPreparation {
     manifest_relative_path: PathBuf,
@@ -532,6 +531,8 @@ pub struct SelectedRustCompilationPreparation {
     selected_environment: BTreeMap<String, String>,
     remainders: Vec<RustCompilationPreparationRemainder>,
     authority: RustPreparationAuthority,
+    cargo_metadata_digest: Option<String>,
+    sysroot: Option<PathBuf>,
 }
 
 impl SelectedRustCompilationPreparation {
@@ -621,6 +622,8 @@ impl SelectedRustCompilationPreparation {
             selected_environment,
             remainders,
             authority: RustPreparationAuthority::Unresolved(Box::new(product.clone())),
+            cargo_metadata_digest: None,
+            sysroot: None,
         })
     }
 
@@ -637,6 +640,121 @@ impl SelectedRustCompilationPreparation {
     #[must_use]
     pub fn remainders(&self) -> &[RustCompilationPreparationRemainder] {
         &self.remainders
+    }
+
+    /// Bind actual Cargo metadata and the selected installed sysroot before compilation.
+    /// Other missing inputs stay explicit; metadata is not evidence that MIR was produced.
+    ///
+    /// # Errors
+    /// Rejects malformed/mismatched package or target metadata, unresolved dependencies,
+    /// conflicting sysroot flags, or a sysroot outside the selected dependency view.
+    pub fn with_cargo_metadata(
+        mut self,
+        inputs: &RustCompilationInputs,
+        metadata_bytes: &[u8],
+    ) -> Result<Self, RustCompilationTrustError> {
+        let product = match &self.authority {
+            RustPreparationAuthority::Unresolved(product) => product,
+            #[cfg(test)]
+            RustPreparationAuthority::ContainmentFixture => {
+                return Err(RustCompilationTrustError::SelectedContextMismatch);
+            }
+        };
+        if metadata_bytes.len() > 64 * 1024 * 1024 {
+            return Err(RustCompilationTrustError::SelectedContextMismatch);
+        }
+        let metadata: serde_json::Value = serde_json::from_slice(metadata_bytes)
+            .map_err(|_| RustCompilationTrustError::SelectedContextMismatch)?;
+        let settings = &product.settings;
+        let manifest = PathBuf::from(std::ffi::OsString::from_vec(settings.manifest_path.clone()));
+        let matches_path = |value: &serde_json::Value, relative: &Path| {
+            value.as_str().is_some_and(|value| {
+                let path = Path::new(value);
+                path == Path::new("/workspace").join(relative)
+                    || path == inputs.workspace_view.join(relative)
+            })
+        };
+        let package = metadata
+            .get("packages")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|packages| {
+                packages.iter().find(|package| {
+                    package["name"] == settings.package_name
+                        && package["version"] == settings.package_version
+                        && matches_path(&package["manifest_path"], &manifest)
+                })
+            })
+            .ok_or(RustCompilationTrustError::SelectedContextMismatch)?;
+        let crate_root = PathBuf::from(std::ffi::OsString::from_vec(
+            settings.target.crate_root.clone(),
+        ));
+        let expected_kind = match settings.target.kind {
+            RustTargetKind::Library => "lib",
+            RustTargetKind::ProcMacro => "proc-macro",
+            RustTargetKind::Binary => "bin",
+            RustTargetKind::Example => "example",
+            RustTargetKind::Test => "test",
+            RustTargetKind::Benchmark => "bench",
+        };
+        if metadata["version"] != 1
+            || !package["targets"].as_array().is_some_and(|targets| {
+                targets.iter().any(|target| {
+                    target["name"] == settings.target.name
+                        && matches_path(&target["src_path"], &crate_root)
+                        && target["kind"]
+                            .as_array()
+                            .is_some_and(|kinds| kinds.iter().any(|kind| kind == expected_kind))
+                })
+            })
+            || !package["dependencies"]
+                .as_array()
+                .is_some_and(|dependencies| {
+                    dependencies.is_empty()
+                        || metadata["resolve"]["nodes"]
+                            .as_array()
+                            .is_some_and(|nodes| {
+                                nodes.iter().any(|node| node["id"] == package["id"])
+                            })
+                })
+        {
+            return Err(RustCompilationTrustError::SelectedContextMismatch);
+        }
+        if settings.configured_rustflags.as_ref().is_some_and(|flags| {
+            flags
+                .iter()
+                .any(|flag| flag == "--sysroot" || flag.starts_with("--sysroot="))
+        }) {
+            return Err(RustCompilationTrustError::InvalidInvocationToken);
+        }
+        let sysroot = inputs
+            .rustc_executable
+            .parent()
+            .and_then(Path::parent)
+            .ok_or(RustCompilationTrustError::ExecutableEscapesDependencies)?;
+        let sysroot = canonical_unaliased_directory(sysroot)?;
+        let target_lib = canonical_unaliased_directory(
+            &sysroot
+                .join("lib/rustlib")
+                .join(&settings.target_triple)
+                .join("lib"),
+        )?;
+        if !sysroot.starts_with(&inputs.dependency_view) || !target_lib.starts_with(&sysroot) {
+            return Err(RustCompilationTrustError::ExecutableEscapesDependencies);
+        }
+        self.cargo_metadata_digest = Some(crate::integrity::frame_digest(
+            crate::integrity::digest_bytes(metadata_bytes),
+        ));
+        self.sysroot = Some(sysroot);
+        self.remainders.retain(|reason| {
+            !matches!(
+                reason,
+                RustCompilationPreparationRemainder::SysrootMappingRequired
+                    | RustCompilationPreparationRemainder::Context(
+                        RustContextRemainder::CargoMetadataRequired
+                    )
+            )
+        });
+        Ok(self)
     }
 
     fn require_available(
@@ -656,9 +774,20 @@ impl SelectedRustCompilationPreparation {
                 {
                     return Err(RustCompilationTrustError::SelectedContextMismatch);
                 }
-                Err(RustCompilationTrustError::PreparationUnavailable(
-                    self.remainders.clone(),
-                ))
+                if !self.remainders.is_empty()
+                    || self.sysroot.is_none()
+                    || self.cargo_metadata_digest.is_none()
+                {
+                    return Err(RustCompilationTrustError::PreparationUnavailable(
+                        self.remainders.clone(),
+                    ));
+                }
+                if self.cargo_metadata_digest.as_deref()
+                    != Some(request.cargo_metadata_digest.as_str())
+                {
+                    return Err(RustCompilationTrustError::SelectedContextMismatch);
+                }
+                Ok(())
             }
             #[cfg(test)]
             RustPreparationAuthority::ContainmentFixture => Ok(()),
@@ -685,6 +814,8 @@ impl SelectedRustCompilationPreparation {
             selected_environment: BTreeMap::new(),
             remainders: Vec::new(),
             authority: RustPreparationAuthority::ContainmentFixture,
+            cargo_metadata_digest: None,
+            sysroot: None,
         }
     }
 }
@@ -919,6 +1050,29 @@ impl RustCompilationEnvironment {
         // modules, proxies, credential stores, or agent sockets.
         variables.insert("LC_ALL".into(), "C".into());
         variables.extend(request.preparation.selected_environment.clone());
+        if let Some(sysroot) = &request.preparation.sysroot {
+            let sysroot = if mechanism == SandboxMechanism::LinuxBubblewrap {
+                Path::new("/dependencies").join(
+                    sysroot
+                        .strip_prefix(&inputs.dependency_view)
+                        .map_err(|_| RustCompilationTrustError::ExecutableEscapesDependencies)?,
+                )
+            } else {
+                sysroot.clone()
+            };
+            let flags = variables
+                .entry("CARGO_ENCODED_RUSTFLAGS".to_owned())
+                .or_default();
+            if !flags.is_empty() {
+                flags.push('\u{1f}');
+            }
+            flags.push_str("--sysroot\u{1f}");
+            flags.push_str(
+                sysroot
+                    .to_str()
+                    .ok_or(RustCompilationTrustError::UnrepresentableInvocationPath)?,
+            );
+        }
         validate_environment_variables(&variables)?;
         let environment_digest = canonical_digest(&variables)?;
         Ok(Self {
@@ -3433,6 +3587,90 @@ mod tests {
         let mut forged = *product;
         forged.remainders.clear();
         assert!(SelectedRustCompilationPreparation::from_discovered(&forged).is_err());
+    }
+
+    #[test]
+    fn actual_cargo_metadata_and_sysroot_mapping_allow_selected_compilation() {
+        let mut harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
+        let mut request = selected_context_request(&harness);
+        request.selection.dependency_inputs = Some(Vec::new());
+        request.selection.build_inputs = Some(Vec::new());
+        let product = discover_selected(&request);
+        let metadata = std::process::Command::new("cargo")
+            .args([
+                "metadata",
+                "--offline",
+                "--no-deps",
+                "--format-version",
+                "1",
+                "--manifest-path",
+            ])
+            .arg(harness.inputs.workspace_view.join("Cargo.toml"))
+            .output()
+            .unwrap();
+        assert!(
+            metadata.status.success(),
+            "{}",
+            String::from_utf8_lossy(&metadata.stderr)
+        );
+        // This test checks preparation, not compiler success. The actual extractor callback
+        // and contained compilation cases own the latter observation.
+        let sysroot = harness
+            .inputs
+            .rustc_executable
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        fs::create_dir_all(sysroot.join("lib/rustlib/x86_64-unknown-linux-gnu/lib")).unwrap();
+        bind_selected_context(&mut harness, &product);
+        harness.request.context.cargo_metadata_digest =
+            crate::integrity::frame_digest(crate::integrity::digest_bytes(&metadata.stdout));
+        harness.request.preparation = harness
+            .request
+            .preparation
+            .clone()
+            .with_cargo_metadata(&harness.inputs, &metadata.stdout)
+            .unwrap();
+        assert!(harness.request.preparation.remainders().is_empty());
+        let plan = compile_untrusted(&harness);
+        let expected_sysroot = if harness.profile.mechanism == SandboxMechanism::LinuxBubblewrap {
+            PathBuf::from("/dependencies/toolchain")
+        } else {
+            harness
+                .inputs
+                .rustc_executable
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .to_owned()
+        };
+        assert!(
+            plan.environment.variables["CARGO_ENCODED_RUSTFLAGS"]
+                .ends_with(&format!("--sysroot\u{1f}{}", expected_sysroot.display()))
+        );
+        harness.request.context.cargo_metadata_digest = digest(99);
+        assert!(matches!(
+            compile_rust_compilation_launch_plan(
+                &untrusted_policy(),
+                &harness.capabilities,
+                &harness.profile,
+                &harness.inputs,
+                &harness.paths,
+                &harness.request,
+                None,
+            ),
+            Err(RustCompilationTrustError::SelectedContextMismatch)
+        ));
+        let mut wrong: Value = serde_json::from_slice(&metadata.stdout).unwrap();
+        wrong["packages"][0]["targets"][0]["src_path"] = Value::from("/workspace/not-selected.rs");
+        assert!(
+            SelectedRustCompilationPreparation::from_discovered(&product)
+                .unwrap()
+                .with_cargo_metadata(&harness.inputs, &serde_json::to_vec(&wrong).unwrap())
+                .is_err()
+        );
     }
 
     #[test]

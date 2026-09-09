@@ -4,7 +4,7 @@ Updated 2026-09-09. Current work is in `/home/paul/CodeFabric` on `master`.
 
 ## Current handoff
 
-**Production implementation is active. Outcomes 1–3 are implemented for the current Linux workflow; outcome 4 is in progress and outcomes 5–8 remain open.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). The four existing golden cases pass. Pyrefly now honors selected Python version/platform settings through its real sidecar protocol; daemon publication still needs semantic-provider integration. These checks do not establish mixed-language or full-product completion.
+**Production implementation is active. Outcomes 1–3 are implemented for the current Linux workflow; outcome 4 is in progress and outcomes 5–8 remain open.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). The four existing golden cases pass. Pyrefly honors selected Python version/platform settings and publishes semantic facts during fresh daemon startup. Real contained Rust compilation now passes its provider-boundary test; Rust daemon publication remains next. These checks do not establish mixed-language or full-product completion.
 
 Current production work, 2026-09-08–09:
 
@@ -170,6 +170,30 @@ dependency/stub inputs, larger complete inventories, retained checker reuse acro
 Rust semantics, and the other first-release query forms remain work. Provider input views are
 currently retained beneath workspace state; their reclamation belongs to outcome 8. The new
 raw call-target assertion is not a claim that public call/relationship querying is complete.
+
+## Real contained Rust compiler boundary
+
+Selected Rust preparation now accepts actual Cargo metadata matching the selected package,
+target and source path, and maps the installed sysroot into the read-only dependency view.
+Other missing dependency/build/configuration inputs remain explicit. The real Linux fixture
+runs offline locked Cargo with the dated-nightly compiler and actual extractor through
+Bubblewrap, seccomp, cgroup accounting and UDS/Arrow admission. It asserts the expected direct
+call to `target` and an explicit missing structured-diagnostics relation while preserving the
+successfully extracted facts.
+
+That run found and fixed two production blockers: the sandbox rejected application-generated
+encoded compiler flags, and the extractor held stderr locked while the compiler thread tried
+to emit Cargo artifact notifications. Compiler identity no longer hardcodes a Darwin host.
+`just rust-provider-test` builds the current extractor and runs this real boundary; the regular
+root Rust test recipe also builds its required extractor.
+
+Validation on 2026-09-09: all 53 affected launcher/preparation/protocol tests pass, including
+the real contained call in about 4.6 seconds. All 14 extractor tests and its strict Clippy/check
+pass. Root library Clippy completes with the existing warning backlog; it is not a strict pass.
+This is provider execution, not Rust daemon publication. Captured source-file identity mapping,
+production dependency/context preparation and compiler scheduling remain next. The real fixture
+uses its own no-dependency sources and a private copy of the installed nightly sysroot; it does
+not demonstrate arbitrary Cargo workspaces or complete Rust fact families.
 
 ## Completed preparation
 

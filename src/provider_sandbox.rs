@@ -1577,9 +1577,10 @@ fn validate_launch_environment(
             ));
         }
     }
-    const FORBIDDEN_EXACT: [&str; 9] = [
+    // Encoded Rust flags are assembled from the selected context by the compiler launcher.
+    // They are explicit input after env_clear, including the contained sysroot mapping.
+    const FORBIDDEN_EXACT: [&str; 8] = [
         "CODEFABRIC_SANDBOX_PROFILE_DIGEST",
-        "CARGO_ENCODED_RUSTFLAGS",
         "DYLD_INSERT_LIBRARIES",
         "LD_PRELOAD",
         "RUSTFLAGS",
@@ -1935,6 +1936,10 @@ mod tests {
         let allowed = BTreeMap::from([
             ("LC_ALL".to_owned(), "C".to_owned()),
             ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+            (
+                "CARGO_ENCODED_RUSTFLAGS".to_owned(),
+                "--sysroot\u{1f}/dependencies/toolchain".to_owned(),
+            ),
         ]);
         assert!(validate_launch_environment(&allowed, &profile).is_ok());
 

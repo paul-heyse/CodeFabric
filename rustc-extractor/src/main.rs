@@ -62,7 +62,9 @@ fn run(args: impl IntoIterator<Item = OsString>, stderr: &mut impl Write) -> Res
 }
 
 fn main() -> ExitCode {
-    let mut stderr = io::stderr().lock();
+    // The compiler writes diagnostics from its own thread. Holding StderrLock across
+    // wrapper execution deadlocks that thread while this one waits for it to finish.
+    let mut stderr = io::stderr();
     match run(std::env::args_os().skip(1), &mut stderr) {
         Ok(code) => ExitCode::from(u8::try_from(code.clamp(0, 255)).unwrap_or(1)),
         Err(message) => {

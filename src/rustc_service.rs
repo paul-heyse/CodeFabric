@@ -378,13 +378,23 @@ impl RustcProviderRunResult {
 
         let mut relations = Vec::with_capacity(job.requests().len());
         let mut coverage = Vec::with_capacity(job.requests().len());
+        let mut gaps = Vec::new();
         for request in job.requests() {
-            let relation_batches =
-                batches.remove(request.relation().as_str()).ok_or_else(|| {
-                    RustcProviderLifecycleError::MissingRequestedRelation(
-                        request.relation().as_str().to_owned(),
-                    )
-                })?;
+            let Some(relation_batches) = batches.remove(request.relation().as_str()) else {
+                coverage.push(ProviderCoverage::new(
+                    request.family().clone(),
+                    ProviderCoverageState::Unknown {
+                        completed_units: 0,
+                        cause: ProviderUnknownCause::MissingOutput,
+                    },
+                ));
+                gaps.push(ProviderGap::try_new(
+                    request.family().clone(),
+                    ProviderUnknownCause::MissingOutput,
+                    "compiler completed without this requested native relation; inspect compiler coverage and remainders",
+                )?);
+                continue;
+            };
             relations.push(ProviderRelationOutput::try_new(
                 request.relation().clone(),
                 request.schema_identity().clone(),
@@ -404,16 +414,21 @@ impl RustcProviderRunResult {
                 unrequested,
             ));
         }
+        let terminal = if gaps.is_empty() {
+            ProviderTerminalStatus::Complete
+        } else {
+            ProviderTerminalStatus::Unknown
+        };
         let result = ProviderRunResult::try_from_job(
             job,
             ProviderRunEvidenceSpec {
                 support: crate::provider_contracts::ProviderRunSupport::conservative(job),
                 relations,
                 coverage,
-                gaps: Vec::new(),
+                gaps,
                 diagnostics: Vec::new(),
                 trust: ProviderTrustOutcome::Trusted,
-                terminal: ProviderTerminalStatus::Complete,
+                terminal,
             },
         )?;
         Ok(Self {
@@ -425,7 +440,7 @@ impl RustcProviderRunResult {
     fn gap(
         job: &ProviderJob,
         cause: ProviderUnknownCause,
-        detail: &'static str,
+        detail: &str,
     ) -> Result<Self, RustcProviderLifecycleError> {
         let coverage = job
             .requests()
@@ -2019,11 +2034,11 @@ where
             | RustcProviderLifecycleError::CollectorTask(_)
             | RustcProviderLifecycleError::CancellationBridgeTask(_)),
         ) => return Err(error),
-        Err(RustcProviderLifecycleError::Trust(_)) => {
+        Err(RustcProviderLifecycleError::Trust(error)) => {
             return RustcProviderRunResult::gap(
                 &provider_job,
                 ProviderUnknownCause::TrustLoss,
-                "rustc provider launcher failed trust qualification",
+                &format!("rustc provider launcher failed trust qualification: {error}"),
             );
         }
         Err(_) => {
@@ -2117,8 +2132,6 @@ pub enum RustcProviderLifecycleError {
     CancellationBridgeTask(tokio::task::JoinError),
     #[error("rustc lifecycle observed a duplicate compilation-unit identity")]
     DuplicateCompilationUnit,
-    #[error("rustc lifecycle did not emit requested relation {0}")]
-    MissingRequestedRelation(String),
     #[error("rustc lifecycle emitted unrequested relation {0}")]
     UnrequestedRelation(String),
 }
@@ -2298,6 +2311,9 @@ impl RustcExtractor for RustcObservationService {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    mod contained_compiler;
+
     fn task_scope() -> crate::cancellation::StructuredCancellationScope {
         crate::cancellation::StructuredCancellationScope::try_root_with_control_reserve(
             "rustc-fixture",

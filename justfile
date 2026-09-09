@@ -250,7 +250,7 @@ typos:
 
 [doc("Rust tests via nextest (does NOT include doctests)")]
 [group('test')]
-root-test-rust:
+root-test-rust: extractor-identity
     cargo build --locked --manifest-path pyrefly-sidecar/Cargo.toml --bin codefabric-pyrefly-sidecar
     CODEFABRIC_PYREFLY_SIDECAR_BIN="$CF_ROOT/target/debug/codefabric-pyrefly-sidecar" cargo nextest run --locked
 
@@ -258,6 +258,11 @@ root-test-rust:
 [group('test')]
 root-test-incremental *args:
     ./scripts/cargo-check-mode.sh cargo nextest run --locked "$@"
+
+[doc("Real contained Cargo/compiler/Arrow boundary with the current extractor")]
+[group('test')]
+rust-provider-test: extractor-identity
+    ./scripts/cargo-check-mode.sh cargo nextest run --locked --lib -E 'test(contained_cargo_extracts_real_selected_rust_call)' --no-tests=fail
 
 # nextest does not run doctests. This is a separate, mandatory step -- never report "all
 # Rust tests passed" from nextest alone (spec sections 18.2 and 62.2).

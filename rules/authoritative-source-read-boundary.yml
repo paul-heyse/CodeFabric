@@ -6,6 +6,8 @@ note: Configuration, contract, database, entropy, and Git-advisory boundaries ar
 files:
   - src/**/*.rs
 ignores:
+  # File-backed #[cfg(test)] compiler fixtures have no production source ingress.
+  - src/rustc_service/tests/**/*.rs
   - src/secure_path.rs
   - src/daemon.rs
   - src/identity.rs

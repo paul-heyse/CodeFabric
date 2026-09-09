@@ -104,6 +104,14 @@ Rust contributions and the remaining first-release public forms remain open; thi
 launcher now has an application-compiled sealed seccomp policy and real containment probes;
 39 affected sandbox/provider tests pass, including owned descendant cleanup.
 
+The real Rust provider boundary now runs selected offline locked Cargo under Linux containment,
+using matching Cargo metadata and a mapped nightly sysroot. Its independent assertion observes
+the expected direct call, retaining emitted facts with an explicit missing diagnostics relation.
+The test exposed and fixed the extractor stderr-lock deadlock and encoded-flags launch conflict.
+All 53 affected root tests, 14 extractor tests and strict extractor check/Clippy pass on
+2026-09-09. Rust daemon publication, application source identities, dependency preparation and
+all first-release query forms remain work; successful provider execution is not outcome 4 closure.
+
 ## 6. Outcome 5 — Query-relevant progress and unfinished scope
 
 Build with outcome 4. Reuse actual processing/coverage/publication state in provider admission/input observations, query/status paths, lifecycle and adapter projections. Do not create an independent status authority.
