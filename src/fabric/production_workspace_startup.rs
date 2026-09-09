@@ -58,9 +58,9 @@ use super::production_kernel::{
 };
 use super::programmatic_activation_admission::ReleaseOwnedActiveWorkspaceBuilder;
 use super::programmatic_activation_command_ports::{
-    ActivationCandidateProofRelationsPort, ActivationCommandRequestKey,
-    ActivationCommandRequestMaterial,
+    ActivationCommandRequestKey, ActivationCommandRequestMaterial,
 };
+use super::activation_transaction::PublishedCandidateValidation;
 use super::programmatic_activation_command_sqlite::{
     ActivationCommandCandidateRebuilderPort, ActivationReconciliationIdentityPolicy,
     ExactDeltaActivationCommandCandidateRebuilder, SqliteProgrammaticActivationCommandStateStore,
@@ -82,10 +82,6 @@ use super::programmatic_schema::{
     DEPENDENCY_OBSERVATION_RELATION_ID, FIELD_OBSERVATION_RELATION_ID,
     PROVENANCE_OBSERVATION_RELATION_ID, ProgrammaticRelationId, RELATION_OBSERVATION_RELATION_ID,
     SCHEMA_OBSERVATION_RELATION_ID,
-};
-use super::proof::{
-    DeltaActivationCandidateProofRelations, ProofCandidatePins, ProofDeltaWorkspaceRoot,
-    ProofDeltaWriteIdentity, persist_proof_relations, provision_proof_relation_histories,
 };
 use super::published_arrow_result::PublishedArrowResultRegistry;
 use super::workspace_resources::ProductionWorkspaceResources;
@@ -281,23 +277,6 @@ impl InterruptedCommitDiagnosticRelationPort for FailClosedInterruptionDiagnosti
     }
 }
 
-struct UnavailableProofRelations {
-    diagnostic: DiagnosticRef,
-}
-
-#[async_trait]
-impl ActivationCandidateProofRelationsPort for UnavailableProofRelations {
-    async fn observe_candidate(
-        &self,
-        request: super::activation_transaction::CandidateProofRequest,
-    ) -> super::programmatic_activation_command_ports::ActivationCandidateProofObservation {
-        super::programmatic_activation_command_ports::ActivationCandidateProofObservation::Unavailable {
-            request,
-            diagnostic: self.diagnostic,
-        }
-    }
-}
-
 async fn open_activation_authority(
     workspace_root: &Path,
     workspace_id: WorkspaceId,
@@ -455,7 +434,7 @@ fn observation_roots(
 
 struct FreshCandidate {
     candidate: Arc<ProgrammaticFabricEpoch>,
-    proof: Arc<dyn ActivationCandidateProofRelationsPort>,
+    validation: Arc<PublishedCandidateValidation>,
     proof_receipt: ProofReceiptRef,
     pins: FabricEpochPins,
     source_images: SourceImageSetRef,
@@ -465,7 +444,6 @@ struct FreshCandidate {
 // Delta tables, sessions, executors and streams are reconstructed after it joins.
 struct FreshCandidatePublication {
     table_versions: Arc<super::activation::TableVersionSet>,
-    proof: super::proof::ProofDeltaHistoryPublication,
     pins: FabricEpochPins,
     source_images: SourceImageSetRef,
 }
@@ -951,19 +929,18 @@ async fn build_fresh_candidate(
     );
     let proof_receipt = publication.pins.proof_receipt;
     let integrity_diagnostic = DiagnosticRef::from_bytes(digest32(
-        b"codefabric.proof-integrity-diagnostic.v1\0",
+        b"codefabric.candidate-validation-diagnostic.v1\0",
         &[publication.pins.epoch.as_bytes()],
     ));
-    let proof = Arc::new(DeltaActivationCandidateProofRelations::new(
-        publication.proof,
-        Arc::new(candidate.context().state()),
-        Some(proof_receipt),
-        None,
+    let validation = Arc::new(PublishedCandidateValidation::for_published(
+        WorkspaceId::from_bytes(record.workspace_id),
+        publication.pins,
+        &candidate,
         integrity_diagnostic,
-    ));
+    ).map_err(|error| step("candidate-validation", error))?);
     Ok(FreshCandidate {
         candidate,
-        proof,
+        validation,
         proof_receipt,
         pins: publication.pins,
         source_images: publication.source_images,
@@ -1070,61 +1047,23 @@ async fn publish_fresh_candidate(
         &[&record.authorization_fingerprint],
     ));
     let resources = workspace_resources.policy_ref();
-    let proof_candidate = ProofCandidatePins {
-        epoch: epoch_id,
-        input_release,
-        program_release,
-        application_release,
-        source_authority,
-        source_generation: SourceGeneration::new(generation),
-        source_images,
-        provider_release,
-        provider_set,
-        table_versions: candidate.table_version_set_ref(),
-        overlay_segments,
-        policy_set,
-        resource_envelope: resources,
-    };
-    let proof_relations = release
-        .prove_activation_candidate(proof_candidate)
-        .map_err(|error| step("activation-proof", error))?;
-    let proof_receipt = proof_relations
-        .receipt()
-        .map_err(|error| step("activation-proof-receipt", error))?;
-    let proof_root_path = workspace_root
-        .join("epochs")
-        .join(lower_hex(epoch_id.as_bytes()))
-        .join("proof");
-    private_directory(&proof_root_path)?;
-    let proof_root = ProofDeltaWorkspaceRoot::try_new(
-        workspace_id,
-        Url::from_directory_path(proof_root_path)
-            .map_err(|()| step("proof-root", "path is not an absolute file URL"))?,
-    )
-    .map_err(|error| step("proof-root", error))?;
-    let session = Arc::new(candidate.context().state());
-    let proof_targets = provision_proof_relation_histories(proof_root, &session)
-        .await
-        .map_err(|error| step("proof-history-provision", error))?;
-    let proof_set = TransactionRef::from_bytes(digest32(
-        b"codefabric.proof-set.v1\0",
-        &[epoch_id.as_bytes(), proof_receipt.as_bytes()],
+    // Compact identity for this published candidate. The wire field retains its
+    // historical name, but no proof language or independent histories are executed.
+    let table_versions = candidate.table_version_set_ref();
+    let proof_receipt = ProofReceiptRef::from_bytes(digest32(
+        b"codefabric.published-candidate-record.v1\0",
+        &[
+            workspace_id.as_bytes(), epoch_id.as_bytes(),
+            input_release.as_bytes(), program_release.as_bytes(),
+            application_release.as_bytes(), source_authority.as_bytes(),
+            &generation.to_be_bytes(), source_images.as_bytes(),
+            provider_release.as_bytes(), provider_set.as_bytes(),
+            table_versions.as_bytes(), overlay_segments.as_bytes(),
+            policy_set.as_bytes(), resources.as_bytes(),
+        ],
     ));
-    let publication = persist_proof_relations(
-        Arc::clone(&session),
-        proof_targets,
-        ProofDeltaWriteIdentity {
-            operation_id: activation_operation,
-            writer_generation: fence.generation,
-            proof_set_id: proof_set,
-        },
-        &proof_relations,
-    )
-    .await
-    .map_err(|error| step("proof-history-persist", error))?;
     Ok(FreshCandidatePublication {
         table_versions: Arc::clone(candidate.table_version_set()),
-        proof: publication,
         pins: FabricEpochPins {
             epoch: epoch_id,
             input_release,
@@ -1134,7 +1073,7 @@ async fn publish_fresh_candidate(
             source_generation: SourceGeneration::new(generation),
             provider_release,
             provider_set,
-            table_versions: proof_candidate.table_versions,
+            table_versions,
             overlay_segments,
             policy_set,
             resource_envelope: resources,
@@ -1366,16 +1305,14 @@ async fn compose_production_workspace(
         )
         .map_err(|error| step("activation-command-state", error))?,
     );
-    let proof: Arc<dyn ActivationCandidateProofRelationsPort> = fresh.as_ref().map_or_else(
-        || {
-            Arc::new(UnavailableProofRelations {
-                diagnostic: DiagnosticRef::from_bytes(digest32(
-                    b"codefabric.proof-publication-required.v1\0",
-                    &[workspace_id.as_bytes()],
-                )),
-            }) as Arc<dyn ActivationCandidateProofRelationsPort>
-        },
-        |fresh| Arc::clone(&fresh.proof),
+    let validation = fresh.as_ref().map_or_else(
+        || Arc::new(PublishedCandidateValidation::unavailable(
+            DiagnosticRef::from_bytes(digest32(
+                b"codefabric.published-candidate-required.v1\0",
+                &[workspace_id.as_bytes()],
+            )),
+        )),
+        |fresh| Arc::clone(&fresh.validation),
     );
     let gaps = |family: &'static [u8]| {
         ProgrammaticCommandCapabilityGapInput::new(
@@ -1398,11 +1335,7 @@ async fn compose_production_workspace(
     let effects = ExactProgrammaticCommandEffectClosure::new(
         ProgrammaticActivationCommandEffects::new(
             Arc::clone(&state_store) as Arc<_>,
-            proof,
-            DiagnosticRef::from_bytes(digest32(
-                b"codefabric.activation-proof-integrity.v1\0",
-                &[workspace_id.as_bytes()],
-            )),
+            validation,
             Arc::clone(&active_builder),
         ),
         non_activation,

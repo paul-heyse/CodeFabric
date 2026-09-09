@@ -993,9 +993,10 @@ fn installed_vertical_observation(
         .join(&epoch_id)
         .join("proof");
     assert!(
-        proof_root.is_dir(),
-        "proof relations are not durably published"
+        !proof_root.exists(),
+        "ordinary activation must not produce generalized proof histories"
     );
+    assert_ne!(row.pins.proof_receipt.as_bytes(), &[0; 32], "activation retains its candidate record identity");
     assert_no_modern_secret_projection(&report, &fixture);
     let reference_blob = modern_step(&report, "reference_bytes")[0]["blob"]
         .as_str()

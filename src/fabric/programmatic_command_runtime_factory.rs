@@ -42,9 +42,9 @@ use super::programmatic_activation_admission::{
     ProgrammaticActivationAdmission, ReleaseOwnedActiveWorkspaceBuilder,
 };
 use super::programmatic_activation_command_ports::{
-    ActivationCandidateProofRelationsPort, ActivationCommandStateStore,
-    ExactActivationCandidateProof, ExactActivationCommandState,
+    ActivationCommandStateStore, ExactActivationCommandState,
 };
+use super::activation_transaction::PublishedCandidateValidation;
 use super::programmatic_command_capability::{
     ProgrammaticAdministrationCapabilityGap, ProgrammaticCommandCapabilityDisposition,
     ProgrammaticCommandCapabilityError, ProgrammaticCompactionCapabilityGap,
@@ -316,7 +316,7 @@ impl ProgrammaticNonActivationCommandEffects {
 #[derive(Clone)]
 pub(crate) struct ProgrammaticActivationCommandEffects {
     state: Arc<ExactActivationCommandState>,
-    proof: Arc<ExactActivationCandidateProof>,
+    proof: Arc<PublishedCandidateValidation>,
     active_workspace_builder: Arc<dyn ReleaseOwnedActiveWorkspaceBuilder>,
 }
 
@@ -325,7 +325,7 @@ impl fmt::Debug for ProgrammaticActivationCommandEffects {
         formatter
             .debug_struct("ProgrammaticActivationCommandEffects")
             .field("state", &"exact-store-adapter")
-            .field("proof", &"exact-proof-relation-adapter")
+            .field("candidate_validation", &"published-candidate")
             .field("active_workspace_builder", &"release-owned")
             .finish_non_exhaustive()
     }
@@ -335,16 +335,12 @@ impl ProgrammaticActivationCommandEffects {
     #[must_use]
     pub(crate) fn new(
         state_store: Arc<dyn ActivationCommandStateStore>,
-        proof_relations: Arc<dyn ActivationCandidateProofRelationsPort>,
-        proof_integrity_diagnostic: super::command::DiagnosticRef,
+        validation: Arc<PublishedCandidateValidation>,
         active_workspace_builder: Arc<dyn ReleaseOwnedActiveWorkspaceBuilder>,
     ) -> Self {
         Self {
             state: Arc::new(ExactActivationCommandState::new(state_store)),
-            proof: Arc::new(ExactActivationCandidateProof::new(
-                proof_relations,
-                proof_integrity_diagnostic,
-            )),
+            proof: validation,
             active_workspace_builder,
         }
     }
@@ -697,7 +693,7 @@ mod tests {
     use crate::fabric::production_kernel::{ActiveWorkspace, SelectedEpochRecord};
     use crate::fabric::programmatic_activation_admission::ActiveWorkspaceBuildError;
     use crate::fabric::programmatic_activation_command_ports::{
-        ActivationCandidateProofObservation, ActivationCommandRequestKey,
+        ActivationCommandRequestKey,
         ActivationCommandRequestMaterial, ActivationNotSelectedClassification,
         ActivationNotSelectedClassificationQuery, ActivationReconciliationRead,
         ActivationReconciliationRecord, ActivationReconciliationWrite,
@@ -789,21 +785,6 @@ mod tests {
         }
     }
 
-    struct MissingProofRelations;
-
-    #[async_trait]
-    impl ActivationCandidateProofRelationsPort for MissingProofRelations {
-        async fn observe_candidate(
-            &self,
-            request: super::super::activation_transaction::CandidateProofRequest,
-        ) -> ActivationCandidateProofObservation {
-            ActivationCandidateProofObservation::Missing {
-                request,
-                diagnostic: DiagnosticRef::from_bytes(id32(0x41)),
-            }
-        }
-    }
-
     struct MissingActiveWorkspaceBuilder;
 
     #[async_trait]
@@ -845,8 +826,9 @@ mod tests {
         ExactProgrammaticCommandEffectClosure::new(
             ProgrammaticActivationCommandEffects::new(
                 Arc::new(MissingActivationState),
-                Arc::new(MissingProofRelations),
-                DiagnosticRef::from_bytes(id32(0x57)),
+                Arc::new(PublishedCandidateValidation::unavailable(
+                    DiagnosticRef::from_bytes(id32(0x57)),
+                )),
                 Arc::new(MissingActiveWorkspaceBuilder),
             ),
             unavailable,

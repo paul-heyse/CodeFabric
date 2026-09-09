@@ -55,6 +55,46 @@ pub trait ActivationCandidateProofPort: Send + Sync {
     async fn prove_candidate(&self, request: CandidateProofRequest) -> CandidateProofOutcome;
 }
 
+/// Ordinary activation validation against the candidate actually published by this daemon.
+/// The persisted `proof_receipt` field remains a compatible opaque record identity;
+/// it no longer implies a generalized proof program or separate proof histories.
+pub(crate) struct PublishedCandidateValidation {
+    candidate: Option<(WorkspaceId, FabricEpochPins)>,
+    diagnostic: DiagnosticRef,
+}
+
+impl PublishedCandidateValidation {
+    pub(crate) fn for_published(
+        workspace_id: WorkspaceId,
+        pins: FabricEpochPins,
+        epoch: &ProgrammaticFabricEpoch,
+        diagnostic: DiagnosticRef,
+    ) -> Result<Self, &'static str> {
+        if epoch.identity() != &pins.epoch
+            || epoch.table_version_set_ref() != pins.table_versions
+            || pins.proof_receipt.as_bytes() == &[0; 32]
+        {
+            return Err("published candidate and activation record disagree");
+        }
+        Ok(Self { candidate: Some((workspace_id, pins)), diagnostic })
+    }
+
+    pub(crate) const fn unavailable(diagnostic: DiagnosticRef) -> Self {
+        Self { candidate: None, diagnostic }
+    }
+}
+
+#[async_trait]
+impl ActivationCandidateProofPort for PublishedCandidateValidation {
+    async fn prove_candidate(&self, request: CandidateProofRequest) -> CandidateProofOutcome {
+        if self.candidate == Some((request.workspace_id, request.pins)) {
+            CandidateProofOutcome::Proved { proof_receipt: request.pins.proof_receipt }
+        } else {
+            CandidateProofOutcome::Unknown { diagnostic: self.diagnostic }
+        }
+    }
+}
+
 /// Validated durable activation history plus the current OS-backed writer fence, reread only
 /// after admission has closed.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2378,6 +2418,42 @@ mod tests {
 
     fn record(log: &CallLog, call: &'static str) {
         log.lock().unwrap().push(call);
+    }
+
+    #[tokio::test]
+    async fn published_candidate_validation_rejects_substituted_workspace_generation_and_versions() {
+        let candidate = candidate(EpochId::from_bytes(id16(0x31))).await;
+        let pins = request(Arc::clone(&candidate)).pins();
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let command = command(workspace, pins.epoch);
+        let diagnostic = DiagnosticRef::from_bytes(id32(0x61));
+        let validation = PublishedCandidateValidation::for_published(
+            workspace, pins, &candidate, diagnostic,
+        ).unwrap();
+        let valid = CandidateProofRequest {
+            workspace_id: workspace,
+            operation_id: command.identity.operation_id,
+            expected_head: command.expected_head,
+            execution_fence: command.writer_fence,
+            pins,
+        };
+        assert_eq!(validation.prove_candidate(valid).await,
+            CandidateProofOutcome::Proved { proof_receipt: pins.proof_receipt });
+        let mut wrong_workspace = valid;
+        wrong_workspace.workspace_id = WorkspaceId::from_bytes(id16(0x72));
+        let mut wrong_generation = valid;
+        wrong_generation.pins.source_generation = SourceGeneration::new(999);
+        let mut wrong_versions = valid;
+        wrong_versions.pins.table_versions = TableVersionSetRef::from_bytes(id32(0x73));
+        for substituted in [wrong_workspace, wrong_generation, wrong_versions] {
+            assert_eq!(validation.prove_candidate(substituted).await,
+                CandidateProofOutcome::Unknown { diagnostic });
+        }
+        assert!(PublishedCandidateValidation::for_published(
+            workspace, wrong_versions.pins, &candidate, diagnostic,
+        ).is_err());
+        assert_eq!(PublishedCandidateValidation::unavailable(diagnostic)
+            .prove_candidate(valid).await, CandidateProofOutcome::Unknown { diagnostic });
     }
 
     #[tokio::test]

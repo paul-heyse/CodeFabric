@@ -32,7 +32,7 @@ use super::programmatic_query_backend::{
 use super::programmatic_schema::ProgrammaticRelationId;
 use super::programmatic_workspace::ProgrammaticWorkspaceRuntime;
 use super::proof::{
-    ProofCandidatePins, ProofError, ProofRelations, ProofTerminalStatus,
+    ProofError, ProofTerminalStatus,
     ReleaseProducerClosureProofInput, ReleaseProducerClosureProofResult,
     evaluate_release_producer_closure,
 };
@@ -207,18 +207,6 @@ impl CompiledSemanticRelease {
             });
         }
         Ok(ProvedDerivedProducerClosure { execution, proof })
-    }
-
-    /// Evaluate the release-owned activation proof program over exact candidate pins.
-    ///
-    /// Expected values, causal-fault program, ownership, and provenance requirements are compiled
-    /// under the non-forgeable proof capability. Operational code supplies only the candidate's
-    /// exact typed pins.
-    pub(crate) fn prove_activation_candidate(
-        &self,
-        pins: ProofCandidatePins,
-    ) -> Result<ProofRelations, ProofError> {
-        super::proof::evaluate_compiled_activation_candidate(self.proof(), pins)
     }
 
     /// Compose the exact ingress, authorization, and snapshot ports for one compiled query recipe.

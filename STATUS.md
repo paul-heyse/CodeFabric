@@ -4,7 +4,7 @@ Updated 2026-09-09. Current work is in `/home/paul/CodeFabric` on `master`.
 
 ## Current handoff
 
-**Production implementation is active; outcome 1 is complete.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). All four existing golden cases pass: startup, Python serving, persisted reopen and cancellation. All 33 affected store/executor and lost-acknowledgement recovery tests pass. Next is outcome 2, removing generalized runtime proof execution at its consumers. Outcomes 2–8 remain open; these tests do not establish mixed-language semantic completeness.
+**Production implementation is active; outcome 1 is complete and outcome 2 is in progress.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). All four existing golden cases pass: startup, Python serving, persisted reopen and cancellation. All 33 affected store/executor and lost-acknowledgement recovery tests pass. New activation uses compact published-candidate validation instead of nine proof histories. Outcomes 2–8 remain open; these tests do not establish mixed-language semantic completeness.
 
 Current production work, 2026-09-08–09:
 
@@ -15,6 +15,8 @@ Current production work, 2026-09-08–09:
 - Completed head/error/range/list reads release their pending-operation entries. Previously these entries survived until host-runtime shutdown and prevented a joined writer lease from releasing. Cancelled unfinished native IO still retains its entry through runtime join.
 - `just root-check-fast` passes for the startup/resource changes. `just golden --timeout 360` passes all four real cases on 2026-09-09. Focused store/executor regressions and lost-acknowledgement recovery pass: 33 tests, 1,021 unrelated tests filtered out. Generalized runtime proof machinery, provider completeness and live-update gaps remain production work.
 - uv was correctly upgraded on the host. Commit `fe5615f` aligns the environment manifest and all three CI setup sites with 0.12.11. Both tool-version checks pass; refreshed session context reports 13 ok, no warnings or failures.
+
+Outcome 1 is committed as `a940930`. Outcome 2's first slice removes the activation proof evaluator and its nine newly written histories. The existing activation record retains exact input/provider/source/table references and an opaque candidate identity in the compatible `proof_receipt` field. Validation rejects substituted workspace, source generation and table versions. All four golden cases still pass, including the assertion that no proof directory is created; five focused candidate/factory tests pass. Historical proof data is preserved but no longer required by new activations. Next: remove the frozen unimplemented-analysis admission gate and remaining generalized proof execution, retaining actual coverage and binding checks.
 
 The [consolidated review](docs/reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md) and [selected domain documents](docs/spec_index/README.md) define the revised target. All Python/Rust fact families and eight query forms remain scope. First-release delivery, complete-product delivery and preparation readiness are different claims.
 
