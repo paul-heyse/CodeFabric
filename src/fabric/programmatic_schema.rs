@@ -793,7 +793,7 @@ pub struct SealedRelationBinding {
 pub struct SealedProgrammaticSchemaAssembly {
     session: SessionContext,
     relations: BTreeMap<ProgrammaticRelationId, SealedRelationBinding>,
-    observation_fixed_point: ObservationFixedPointEvidence,
+    observation_materialization: ObservationMaterializationStats,
     #[cfg(test)]
     observations: CandidateAssemblyObservations,
 }
@@ -820,10 +820,10 @@ impl SealedProgrammaticSchemaAssembly {
         &self.observations
     }
 
-    /// Iteration and conservatively measured resources for the self-observed catalog fixed point.
+    /// Conservatively measured rows and bytes for the catalog observations.
     #[must_use]
-    pub const fn observation_fixed_point(&self) -> ObservationFixedPointEvidence {
-        self.observation_fixed_point
+    pub const fn observation_materialization(&self) -> ObservationMaterializationStats {
+        self.observation_materialization
     }
 
     /// Resolve a stable relation identity directly to its table and executable contract.
@@ -1308,7 +1308,7 @@ pub(crate) struct PreparedObservationRelationSpec {
     pub(crate) contract: Arc<SchemaContract>,
 }
 
-/// Deterministic resource envelope for self-observed catalog fixed-point materialization.
+/// Deterministic resource envelope for catalog observation materialization.
 ///
 /// Every bound is nonzero. Rows and Arrow array-size bytes are limited both per relation and
 /// across the complete observation family so a single large relation and many individually-small
@@ -1316,36 +1316,32 @@ pub(crate) struct PreparedObservationRelationSpec {
 /// [`RecordBatch::get_array_memory_size`], a conservative estimate that can count shared buffers
 /// more than once; overestimation is intentional for this fail-closed envelope.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ObservationFixedPointPolicy {
-    max_iterations: u32,
+pub struct ObservationMaterializationPolicy {
     max_rows_per_relation: u64,
     max_total_rows: u64,
     max_bytes_per_relation: u64,
     max_total_bytes: u64,
 }
 
-impl ObservationFixedPointPolicy {
-    /// Construct a complete nonzero fixed-point and materialization envelope.
+impl ObservationMaterializationPolicy {
+    /// Construct nonzero row and byte limits.
     pub fn try_new(
-        max_iterations: u32,
         max_rows_per_relation: u64,
         max_total_rows: u64,
         max_bytes_per_relation: u64,
         max_total_bytes: u64,
-    ) -> Result<Self, ObservationFixedPointPolicyError> {
+    ) -> Result<Self, ObservationMaterializationPolicyError> {
         for (field, value) in [
-            ("max_iterations", u64::from(max_iterations)),
             ("max_rows_per_relation", max_rows_per_relation),
             ("max_total_rows", max_total_rows),
             ("max_bytes_per_relation", max_bytes_per_relation),
             ("max_total_bytes", max_total_bytes),
         ] {
             if value == 0 {
-                return Err(ObservationFixedPointPolicyError::ZeroBound { field });
+                return Err(ObservationMaterializationPolicyError::ZeroBound { field });
             }
         }
         Ok(Self {
-            max_iterations,
             max_rows_per_relation,
             max_total_rows,
             max_bytes_per_relation,
@@ -1356,13 +1352,8 @@ impl ObservationFixedPointPolicy {
     /// Stable workstation policy used by the target epoch builder.
     #[must_use]
     pub fn production() -> Self {
-        Self::try_new(8, 1_000_000, 5_000_000, 256 << 20, 512 << 20)
+        Self::try_new(1_000_000, 5_000_000, 256 << 20, 512 << 20)
             .expect("the static production observation policy is nonzero")
-    }
-
-    #[must_use]
-    pub const fn max_iterations(self) -> u32 {
-        self.max_iterations
     }
 
     #[must_use]
@@ -1386,28 +1377,22 @@ impl ObservationFixedPointPolicy {
     }
 }
 
-/// Invalid observation fixed-point policy rejected before a candidate session exists.
+/// Invalid observation materialization policy rejected before a candidate session exists.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum ObservationFixedPointPolicyError {
-    #[error("observation fixed-point policy bound {field} must be nonzero")]
+pub enum ObservationMaterializationPolicyError {
+    #[error("observation materialization policy bound {field} must be nonzero")]
     ZeroBound { field: &'static str },
 }
 
-/// Iteration and conservatively measured resource evidence for the observation fixed point.
+/// Conservatively measured rows and bytes for catalog observations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ObservationFixedPointEvidence {
-    iterations: u32,
+pub struct ObservationMaterializationStats {
     relation_count: usize,
     total_rows: u64,
     total_bytes: u64,
 }
 
-impl ObservationFixedPointEvidence {
-    #[must_use]
-    pub const fn iterations(self) -> u32 {
-        self.iterations
-    }
-
+impl ObservationMaterializationStats {
     #[must_use]
     pub const fn relation_count(self) -> usize {
         self.relation_count
@@ -1427,7 +1412,7 @@ impl ObservationFixedPointEvidence {
 /// Mutable builder for one dependency-closed candidate catalog.
 pub struct ProgrammaticSchemaAssembly {
     session: SessionContext,
-    observation_policy: ObservationFixedPointPolicy,
+    observation_policy: ObservationMaterializationPolicy,
     registered: BTreeMap<ProgrammaticRelationId, RegisteredRelation>,
     pending: BTreeMap<ProgrammaticRelationId, Arc<dyn ProgrammaticTransformation>>,
     transformations: BTreeMap<ProgrammaticTransformationId, ProgrammaticRelationId>,
@@ -1438,14 +1423,14 @@ impl ProgrammaticSchemaAssembly {
     /// Start from the exact candidate `SessionState` later transferred to the epoch.
     #[must_use]
     pub(crate) fn new(candidate_state: SessionState) -> Self {
-        Self::with_observation_policy(candidate_state, ObservationFixedPointPolicy::production())
+        Self::with_observation_policy(candidate_state, ObservationMaterializationPolicy::production())
     }
 
-    /// Start a candidate with an explicit validated observation fixed-point envelope.
+    /// Start a candidate with explicit validated observation materialization limits.
     #[must_use]
     pub(crate) fn with_observation_policy(
         candidate_state: SessionState,
-        observation_policy: ObservationFixedPointPolicy,
+        observation_policy: ObservationMaterializationPolicy,
     ) -> Self {
         // DataFusion 55's logical `optimize_projections` and physical
         // `ProjectionPushdown` rules treat a metadata-only identity projection
@@ -1837,7 +1822,7 @@ impl ProgrammaticSchemaAssembly {
         let specs = self.observation_relation_specs()?;
         let (_, observations) = self.observe_live_catalog().await?;
         let batches = build_observation_batches(epoch_id, &observations, &specs)?;
-        enforce_observation_materialization(&self.observation_policy, 1, &batches)?;
+        enforce_observation_materialization(&self.observation_policy, &batches)?;
         specs
             .into_iter()
             .map(|spec| {
@@ -1857,39 +1842,14 @@ impl ProgrammaticSchemaAssembly {
             .collect()
     }
 
+    /// Validate the published catalog once, using the same schema and dependency checks as reopen.
     pub(crate) async fn finish_seal(
         self,
         epoch_id: EpochId,
         installed_observation_batches: BTreeMap<ProgrammaticRelationId, RecordBatch>,
     ) -> Result<SealedProgrammaticSchemaAssembly, ProgrammaticSchemaError> {
-        enforce_observation_materialization(
-            &self.observation_policy,
-            1,
-            &installed_observation_batches,
-        )?;
-        let specs = self.observation_relation_specs()?;
-        let mut previous = installed_observation_batches;
-        for iteration in 2..=self.observation_policy.max_iterations() {
-            let (relations, observations) = self.observe_live_catalog().await?;
-            let current = build_observation_batches(epoch_id, &observations, &specs)?;
-            let fixed_point =
-                enforce_observation_materialization(&self.observation_policy, iteration, &current)?;
-            if previous == current {
-                return Ok(SealedProgrammaticSchemaAssembly {
-                    session: self.session,
-                    relations,
-                    observation_fixed_point: fixed_point,
-                    #[cfg(test)]
-                    observations,
-                });
-            }
-            previous = current;
-        }
-        Err(
-            ProgrammaticSchemaError::ObservationFixedPointIterationsExceeded {
-                limit: self.observation_policy.max_iterations(),
-            },
-        )
+        self.finish_exact_reconstruction(epoch_id, installed_observation_batches)
+            .await
     }
 
     /// Seal an exact-version reconstruction from the durable self-observation relations.
@@ -1898,20 +1858,20 @@ impl ProgrammaticSchemaAssembly {
     /// does not rerun provider acquisition or replay a serialized logical plan. The durable
     /// relation/field/schema observations are therefore checked against the newly opened catalog,
     /// while durable dependency/provenance rows are checked for complete selected-relation closure.
-    /// Release-owned producer and proof closure is re-executed by the active-workspace builder.
+    /// Producer coverage validation is executed by the active-workspace builder.
     pub(crate) async fn finish_exact_reconstruction(
         self,
         epoch_id: EpochId,
         durable_observation_batches: BTreeMap<ProgrammaticRelationId, RecordBatch>,
     ) -> Result<SealedProgrammaticSchemaAssembly, ProgrammaticSchemaError> {
-        let fixed_point = enforce_observation_materialization(
+        let materialization = enforce_observation_materialization(
             &self.observation_policy,
-            1,
             &durable_observation_batches,
         )?;
         let specs = self.observation_relation_specs()?;
         let (relations, observations) = self.observe_live_catalog().await?;
         let live_batches = build_observation_batches(epoch_id, &observations, &specs)?;
+        enforce_observation_materialization(&self.observation_policy, &live_batches)?;
         validate_exact_reconstruction_observations(
             &relations,
             &live_batches,
@@ -1920,7 +1880,7 @@ impl ProgrammaticSchemaAssembly {
         Ok(SealedProgrammaticSchemaAssembly {
             session: self.session,
             relations,
-            observation_fixed_point: fixed_point,
+            observation_materialization: materialization,
             #[cfg(test)]
             observations,
         })
@@ -2136,7 +2096,7 @@ impl ProgrammaticSchemaAssembly {
         let (_, mut observations) = self.observe_live_catalog().await?;
         append_system_observations(&mut observations, &specs)?;
         let batches = build_observation_batches(epoch_id, &observations, &specs)?;
-        enforce_observation_materialization(&self.observation_policy, 1, &batches)?;
+        enforce_observation_materialization(&self.observation_policy, &batches)?;
         Ok(specs
             .into_iter()
             .map(|spec| PreparedObservationRelation {
@@ -3561,17 +3521,9 @@ fn append_system_observations(
 }
 
 fn enforce_observation_materialization(
-    policy: &ObservationFixedPointPolicy,
-    iteration: u32,
+    policy: &ObservationMaterializationPolicy,
     batches: &BTreeMap<ProgrammaticRelationId, RecordBatch>,
-) -> Result<ObservationFixedPointEvidence, ProgrammaticSchemaError> {
-    if iteration == 0 || iteration > policy.max_iterations() {
-        return Err(
-            ProgrammaticSchemaError::ObservationFixedPointIterationsExceeded {
-                limit: policy.max_iterations(),
-            },
-        );
-    }
+) -> Result<ObservationMaterializationStats, ProgrammaticSchemaError> {
     let mut total_rows = 0_u64;
     let mut total_bytes = 0_u64;
     for (relation_id, batch) in batches {
@@ -3612,8 +3564,7 @@ fn enforce_observation_materialization(
             observed: total_bytes,
         });
     }
-    Ok(ObservationFixedPointEvidence {
-        iterations: iteration,
+    Ok(ObservationMaterializationStats {
         relation_count: batches.len(),
         total_rows,
         total_bytes,
@@ -4316,8 +4267,6 @@ pub enum ProgrammaticSchemaError {
     ViewPlanDrift { relation_id: ProgrammaticRelationId },
     #[error("transformation relation {relation_id:?} unexpectedly carries SQL authority")]
     SqlViewDefinition { relation_id: ProgrammaticRelationId },
-    #[error("system observation fixed point did not converge within {limit} iterations")]
-    ObservationFixedPointIterationsExceeded { limit: u32 },
     #[error("system observation resource counter overflowed")]
     ObservationResourceCounterOverflow,
     #[error(
@@ -4671,14 +4620,12 @@ mod tests {
     }
 
     fn observation_policy(
-        max_iterations: u32,
         max_rows_per_relation: u64,
         max_total_rows: u64,
         max_bytes_per_relation: u64,
         max_total_bytes: u64,
-    ) -> ObservationFixedPointPolicy {
-        ObservationFixedPointPolicy::try_new(
-            max_iterations,
+    ) -> ObservationMaterializationPolicy {
+        ObservationMaterializationPolicy::try_new(
             max_rows_per_relation,
             max_total_rows,
             max_bytes_per_relation,
@@ -4772,7 +4719,7 @@ mod tests {
         include_active: bool,
         assertion: Option<SchemaRef>,
         contract: ProgrammaticTransformationContract,
-        observation_policy: ObservationFixedPointPolicy,
+        observation_policy: ObservationMaterializationPolicy,
     ) -> Result<SealedProgrammaticSchemaAssembly, ProgrammaticSchemaError> {
         let input_id = ProgrammaticRelationId::new("provider.events");
         let output_id = ProgrammaticRelationId::new("derived.active_events");
@@ -4823,7 +4770,7 @@ mod tests {
                 "filter-active-events",
                 TransformationSemanticVersion::new(1, 0, 0),
             ),
-            ObservationFixedPointPolicy::production(),
+            ObservationMaterializationPolicy::production(),
         )
         .await
     }
@@ -4921,11 +4868,10 @@ mod tests {
     #[tokio::test]
     async fn provider_filter_projection_derives_and_registers_its_schema() {
         let sealed = fixture(false, 2, false, None).await.unwrap();
-        let fixed_point = sealed.observation_fixed_point();
-        assert_eq!(fixed_point.iterations(), 2);
-        assert_eq!(fixed_point.relation_count(), 5);
-        assert!(fixed_point.total_rows() > 0);
-        assert!(fixed_point.total_bytes() > 0);
+        let materialization = sealed.observation_materialization();
+        assert_eq!(materialization.relation_count(), 5);
+        assert!(materialization.total_rows() > 0);
+        assert!(materialization.total_bytes() > 0);
         let output_id = ProgrammaticRelationId::new("derived.active_events");
         let binding = sealed.relation(&output_id).unwrap();
         assert_eq!(binding.contract.logical_schema().fields().len(), 1);
@@ -5158,46 +5104,59 @@ mod tests {
     }
 
     #[test]
-    fn observation_fixed_point_policy_rejects_every_zero_bound() {
+    fn observation_materialization_policy_rejects_every_zero_bound() {
         for (expected, values) in [
-            ("max_iterations", (0, 1, 1, 1, 1)),
-            ("max_rows_per_relation", (1, 0, 1, 1, 1)),
-            ("max_total_rows", (1, 1, 0, 1, 1)),
-            ("max_bytes_per_relation", (1, 1, 1, 0, 1)),
-            ("max_total_bytes", (1, 1, 1, 1, 0)),
+            ("max_rows_per_relation", (0, 1, 1, 1)),
+            ("max_total_rows", (1, 0, 1, 1)),
+            ("max_bytes_per_relation", (1, 1, 0, 1)),
+            ("max_total_bytes", (1, 1, 1, 0)),
         ] {
-            let (iterations, per_rows, total_rows, per_bytes, total_bytes) = values;
+            let (per_rows, total_rows, per_bytes, total_bytes) = values;
             assert_eq!(
-                ObservationFixedPointPolicy::try_new(
-                    iterations,
+                ObservationMaterializationPolicy::try_new(
                     per_rows,
                     total_rows,
                     per_bytes,
                     total_bytes,
                 ),
-                Err(ObservationFixedPointPolicyError::ZeroBound { field: expected })
+                Err(ObservationMaterializationPolicyError::ZeroBound { field: expected })
             );
         }
     }
 
     #[tokio::test]
-    async fn observation_fixed_point_iteration_bound_fails_closed() {
-        let error = fixture_with_contract(
-            false,
-            2,
-            false,
-            None,
-            test_transformation_contract(
-                "filter-active-events",
-                TransformationSemanticVersion::new(1, 0, 0),
-            ),
-            observation_policy(1, 10_000, 50_000, 1 << 20, 5 << 20),
-        )
-        .await
-        .unwrap_err();
+    async fn published_catalog_rejects_relations_added_after_observation() {
+        let mut assembly = ProgrammaticSchemaAssembly::new(candidate_state());
+        assembly
+            .register_provider(provider_input("provider.events", table("provider_events"), false))
+            .unwrap();
+        let prepared = assembly
+            .prepare_observation_relations(observation_epoch())
+            .await
+            .unwrap();
+        let published = prepared
+            .iter()
+            .map(|relation| (relation.relation_id.clone(), relation.batch.clone()))
+            .collect();
+        for relation in prepared {
+            let provider = Arc::new(
+                MemTable::try_new(
+                    Arc::clone(relation.contract.logical_schema()),
+                    vec![vec![relation.batch.clone()]],
+                )
+                .unwrap(),
+            );
+            assembly
+                .register_system_observation_provider(relation, provider)
+                .unwrap();
+        }
+        // A later catalog change must not become valid by comparing two equal live scans.
+        assembly
+            .register_provider(provider_input("provider.late", table("late_events"), false))
+            .unwrap();
         assert!(matches!(
-            error,
-            ProgrammaticSchemaError::ObservationFixedPointIterationsExceeded { limit: 1 }
+            assembly.finish_seal(observation_epoch(), published).await,
+            Err(ProgrammaticSchemaError::ExactReconstructionObservationMismatch { .. })
         ));
     }
 
@@ -5212,7 +5171,7 @@ mod tests {
                 "filter-active-events",
                 TransformationSemanticVersion::new(1, 0, 0),
             ),
-            observation_policy(8, 1, 50_000, 1 << 20, 5 << 20),
+            observation_policy(1, 50_000, 1 << 20, 5 << 20),
         )
         .await
         .unwrap_err();
@@ -5237,7 +5196,7 @@ mod tests {
                 "filter-active-events",
                 TransformationSemanticVersion::new(1, 0, 0),
             ),
-            observation_policy(8, 10_000, 50_000, 1, 5 << 20),
+            observation_policy(10_000, 50_000, 1, 5 << 20),
         )
         .await
         .unwrap_err();
@@ -5262,7 +5221,7 @@ mod tests {
                 "filter-active-events",
                 TransformationSemanticVersion::new(1, 0, 0),
             ),
-            observation_policy(8, 10_000, 1, 1 << 20, 5 << 20),
+            observation_policy(10_000, 1, 1 << 20, 5 << 20),
         )
         .await
         .unwrap_err();
@@ -5286,7 +5245,7 @@ mod tests {
                 "filter-active-events",
                 TransformationSemanticVersion::new(1, 0, 0),
             ),
-            observation_policy(8, 10_000, 50_000, 1 << 20, 1),
+            observation_policy(10_000, 50_000, 1 << 20, 1),
         )
         .await
         .unwrap_err();
@@ -5391,7 +5350,7 @@ mod tests {
                 "filter-active-events",
                 TransformationSemanticVersion::new(1, 0, 0),
             ),
-            ObservationFixedPointPolicy::production(),
+            ObservationMaterializationPolicy::production(),
         )
         .await
         .unwrap();
@@ -5404,7 +5363,7 @@ mod tests {
                 "filter-active-events",
                 TransformationSemanticVersion::new(1, 0, 1),
             ),
-            ObservationFixedPointPolicy::production(),
+            ObservationMaterializationPolicy::production(),
         )
         .await
         .unwrap();

@@ -1,6 +1,6 @@
 # CodeFabric pragmatic production implementation plan
 
-Updated 2026-09-08. This is the editable production backlog following [non-production preparation](codefabric_pragmatic_delivery_nonproduction_preparation_plan_2026-09-08.md), derived from the [consolidated review](../reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md) and [selected suite](../spec_index/README.md). [STATUS](../../STATUS.md) records demonstrated behavior and next work. No activation pointer, packet state, proving chain or second audit workflow selects this plan.
+Updated 2026-09-09. This is the editable production backlog following [non-production preparation](codefabric_pragmatic_delivery_nonproduction_preparation_plan_2026-09-08.md), derived from the [consolidated review](../reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md) and [selected suite](../spec_index/README.md). [STATUS](../../STATUS.md) records demonstrated behavior and next work. No activation pointer, packet state, proving chain or second audit workflow selects this plan.
 
 Production implementation is the next phase, not work completed by preparation. Keep the canonical tree, integrate coherent changes frequently, preserve existing useful implementation and choose tests by behavior and risk. Do not conduct another process migration before starting outcome 1.
 
@@ -40,6 +40,8 @@ Runtime actions retain compact operation/snapshot/input/provider identities, req
 Replace consumers before deleting code or changing persisted contracts. Classify existing proof data by actual readers: recovery input, explanation, diagnostic, obsolete process. Preserve required durable compatibility or make an explicit forward migration. Update tests of the retired runtime contract with meaningful behavioral replacements; do not delete unrelated failing product assertions.
 
 **Done:** useful supported results publish without generalized proof execution, query completeness remains truthful, and recovery/explanation use compact records. Validate real corpus answers, publication failure/reopen and affected schema/wire compatibility. Track removed production/support code as an observation, not a quota.
+
+**Progress, 2026-09-09:** new activation uses compact published-candidate validation; proof-program construction and the nine mandatory activation proof histories are removed. Producer coverage validates its existing execution directly. Catalog publication validates schemas, identities and dependencies once instead of iterating to a self-observation fixed point. All four existing golden cases pass, as do the affected producer and catalog tests. Historical proof APIs and remaining observation-history consumers still require retirement or migration; outcome 2 is not yet complete.
 
 ## 4. Outcome 3 — Implement the reduced resource contract and shrink native patches
 

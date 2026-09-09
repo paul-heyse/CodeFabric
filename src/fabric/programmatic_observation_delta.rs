@@ -1221,8 +1221,7 @@ pub async fn reopen_programmatic_observations(
 }
 
 /// Append every registered history, rebind exact committed providers and native
-/// current-epoch views in the original candidate session, prove fixed-point
-/// equality, and only then seal the candidate.
+/// current-epoch views in the candidate session, and validate schema and dependency consistency.
 pub async fn historicize_programmatic_observations(
     mut assembly: ProgrammaticSchemaAssembly,
     identity: ProgrammaticObservationWriteIdentity,

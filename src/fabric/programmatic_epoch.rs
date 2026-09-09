@@ -340,7 +340,7 @@ impl ProgrammaticFabricEpochBuilder {
 
     /// Build all transformations, append the candidate's five observation
     /// relations to their stable Delta histories, rebind the exact committed
-    /// versions in this same session, and seal only after fixed-point proof.
+    /// versions in this same session, and validate schema and dependency consistency.
     pub(crate) async fn seal(
         self,
         write_identity: ProgrammaticObservationWriteIdentity,
