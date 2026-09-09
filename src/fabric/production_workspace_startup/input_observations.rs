@@ -121,6 +121,14 @@ fn install_provider_progress(
         "provider_run_scope",
         vec![
             ("provider_run_id", false, id16_array(ids.iter().map(Some))),
+            (
+                "provider_run_identity",
+                false,
+                strings(
+                    runs.iter()
+                        .map(|run| Some(run.job().run().identity().as_str())),
+                ),
+            ),
             ("context_id", false, id16_array(contexts.iter().map(Some))),
             (
                 "context_fingerprint",

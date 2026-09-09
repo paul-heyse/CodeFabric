@@ -2063,6 +2063,15 @@ fn pragmatic_python_semantics_publish_real_call_targets() {
         }
     }
     assert_eq!(targets, BTreeSet::from(["sample.current".to_owned()]));
+    let entities = canonical_entity_names(&fixture);
+    assert!(
+        entities.contains(&("python".to_owned(), "current".to_owned())),
+        "{entities:?}"
+    );
+    assert!(
+        entities.contains(&("python".to_owned(), "legacy".to_owned())),
+        "{entities:?}"
+    );
     supervisor.stop();
 }
 
@@ -2148,6 +2157,18 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         .unwrap();
     }
     let supervisor = fixture.start_supervisor();
+    let entities = canonical_entity_names(&fixture);
+    assert!(
+        entities.contains(&("python".to_owned(), "answer".to_owned())),
+        "{entities:?}"
+    );
+    assert!(
+        entities
+            .iter()
+            .any(|(language, name)| language == "rust" && name.ends_with("caller")),
+        "{entities:?}"
+    );
+    assert_canonical_rust_declaration(&fixture);
     let mut targets = BTreeSet::new();
     for batch in fresh_activation_relation_batches(&fixture, "provider.rustc.call.v1") {
         let values = batch
@@ -2298,6 +2319,85 @@ fn fresh_activation_relation_batches(
         }
     }
     batches
+}
+
+fn canonical_entity_names(fixture: &ProductionFixture) -> BTreeSet<(String, String)> {
+    use arrow::array::StringArray;
+    let mut names = BTreeSet::new();
+    for batch in fresh_activation_relation_batches(fixture, "fact.code_entity") {
+        let language = batch
+            .column_by_name("language")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let name = batch
+            .column_by_name("name")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            names.insert((language.value(row).to_owned(), name.value(row).to_owned()));
+        }
+    }
+    names
+}
+
+fn assert_canonical_rust_declaration(fixture: &ProductionFixture) {
+    use arrow::array::{BinaryArray, Decimal128Array, StringArray};
+    let mut found = 0;
+    for batch in fresh_activation_relation_batches(fixture, "fact.code_declaration") {
+        let text = |name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+        };
+        let bytes = |name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .unwrap()
+        };
+        let number = |name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Decimal128Array>()
+                .unwrap()
+        };
+        for row in 0..batch.num_rows() {
+            if text("language").value(row) != "rust" || !text("name").value(row).ends_with("caller")
+            {
+                continue;
+            }
+            found += 1;
+            assert_eq!(text("entity_kind").value(row), "function");
+            assert_eq!(text("identity_state").value(row), "canonical");
+            assert_eq!(text("provider").value(row), "rustc");
+            assert_eq!(number("start_byte").value(row), 11);
+            // rustc_public's item span is the declaration header, separate from MIR body span.
+            assert_eq!(number("end_byte").value(row), 33);
+            assert_eq!(
+                bytes("content_digest").value(row),
+                blake3::hash(b"mod other; pub fn caller() -> u32 { other::target(4) }\n")
+                    .as_bytes()
+            );
+            assert_eq!(bytes("entity_id").value(row).len(), 16);
+            assert_eq!(bytes("declaration_id").value(row).len(), 16);
+            assert_ne!(
+                bytes("entity_id").value(row),
+                bytes("declaration_id").value(row)
+            );
+        }
+    }
+    assert!(found > 0, "expected source-owned caller declaration");
 }
 
 #[test]

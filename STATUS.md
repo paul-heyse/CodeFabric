@@ -135,6 +135,27 @@ mapping, retained compiler build caches, configurable feature/target profiles an
 scoped status still remain. The target rows' `processed` state means that compiler output returned;
 per-family rows retain incomplete or unknown semantics, including missing structured diagnostics.
 
+## Outcome 4D — canonical source, entity and declaration relations
+
+Fresh startup now installs native DataFusion transformations for `source.code_file`,
+`fact.code_entity` and `fact.code_declaration`. The source relation selects the captured base
+inventory once, preserving raw path bytes and capture dispositions. Normalization joins exact
+file, content digest and generation; Rust observations also join their admitted run/context.
+Python scope/name bindings and Rust stable compiler keys feed application CBEF identity recipes.
+Declaration occurrences retain their source ranges, raw kind, provider run and separate identity.
+Missing stable compiler keys retain a declaration with an explicit identity gap; they do not
+produce an invented entity. Builtin references are not treated as source declarations.
+
+Real Python and mixed Python/Rust daemon publication/readback pass on 2026-09-09, including the
+expected function names, exact Rust declaration-header span and content digest, and distinct
+entity/declaration IDs. Focused native-plan checks cover repeated assignments, identical names
+in separate files, stale digests, missing providers and contextual compiler identities. The
+stable library check and Clippy command complete; the existing broad warning backlog remains.
+All four `just golden --timeout 360` scenarios pass, including exact reopen and cancellation.
+No dependency versions changed. Public search still uses its preceding Ruff source while
+query-scoped coverage and canonical query binding are connected together. Types, references,
+imports, call sites/dispatch and the rest of the canonical families remain active 4D work.
+
 ## Outcome 4 — selected Pyrefly context preparation
 
 Pyrefly 1.2.0's Query ignored configured runtime selection by retaining default system

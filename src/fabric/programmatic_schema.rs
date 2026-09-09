@@ -536,6 +536,7 @@ pub struct TransformationOutput {
     table_reference: TableReference,
     fields: Arc<[TransformationFieldIdentity]>,
     schema_assertion: Option<SchemaRef>,
+    semantic_role: Option<Arc<str>>,
 }
 
 impl TransformationOutput {
@@ -551,7 +552,15 @@ impl TransformationOutput {
             table_reference,
             fields: fields.into(),
             schema_assertion: None,
+            semantic_role: None,
         }
+    }
+
+    /// Assign application semantics to this output without inheriting an input's role.
+    #[must_use]
+    pub fn with_semantic_role(mut self, role: impl Into<Arc<str>>) -> Self {
+        self.semantic_role = Some(role.into());
+        self
     }
 
     /// Add an exact assertion checked against the schema derived from the plan.
@@ -2946,6 +2955,12 @@ fn output_identity_boundary(
         RELATION_ID_METADATA_KEY.to_owned(),
         output.relation_id().as_str().to_owned(),
     );
+    if let Some(role) = &output.semantic_role {
+        schema_metadata.insert(
+            RELATION_SEMANTIC_ROLE_METADATA_KEY.to_owned(),
+            role.to_string(),
+        );
+    }
     let mut expressions = Vec::with_capacity(plan.schema().fields().len());
     let mut fields = Vec::with_capacity(plan.schema().fields().len());
     for ((qualifier, field), identity) in plan.schema().iter().zip(output.fields()) {

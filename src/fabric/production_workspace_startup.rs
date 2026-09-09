@@ -107,6 +107,7 @@ use crate::semantic_release::ProviderJobInput;
 use crate::source_image::{SourceLanguage, advance_source_generation, current_source_generation};
 use crate::workspace_registry::WorkspaceRecord;
 
+mod canonical;
 mod input_observations;
 mod inputs;
 mod pyrefly;
@@ -811,6 +812,7 @@ fn build_fresh_native_source(
         .map_err(|error| step("provider-derived-composition", error))?;
     let (derived, _) = outcome.into_parts();
     let (mut builder, _, _) = derived.into_parts();
+    let rustc_available = matches!(rustc.lane(), ExactProviderLaneRuns::Accepted(_));
     if let Some(admitted) = pyrefly.admitted {
         admitted_runs.push(admitted);
     }
@@ -820,6 +822,12 @@ fn build_fresh_native_source(
         &mut builder,
         &prepared_inputs.inventory,
         &admitted_runs,
+    )?;
+    canonical::install(
+        &mut builder,
+        &prepared_inputs.inventory,
+        !native_runs.is_empty(),
+        rustc_available,
     )?;
     // Registered batches own their buffers; source leases are no longer needed after providers join.
     prepared_inputs.release()?;
