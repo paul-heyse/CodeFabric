@@ -1781,7 +1781,7 @@ fn wp47_beh_real_installed_wheel_guard_query_resource_and_completion() {
         guard["requested_schema"]["properties"]["value"]["enum"]
             .as_array()
             .map(Vec::len),
-        Some(3)
+        Some(4)
     );
     assert_no_modern_secret_projection(&report, &fixture);
     supervisor.stop();
@@ -2096,6 +2096,10 @@ fn pragmatic_rust_target_failure_retains_other_targets() {
 #[cfg(target_os = "linux")]
 fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
     let fixture = ProductionFixture::new();
+    let stack = with_failure.then(InstalledProductionStack::build);
+    if let Some(stack) = &stack {
+        fixture.bind_installed_adapter(stack, "policy-one", 0x11);
+    }
     let workspace = Path::new(&fixture.workspace.root_path_display);
     fs::create_dir(workspace.join("src")).unwrap();
     fs::write(
@@ -2156,7 +2160,10 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         )
         .unwrap();
     }
-    let supervisor = fixture.start_supervisor();
+    let supervisor = stack.as_ref().map_or_else(
+        || fixture.start_supervisor(),
+        |stack| fixture.start_supervisor_with(&stack.codefabric),
+    );
     let entities = canonical_entity_names(&fixture);
     assert!(
         entities.contains(&("python".to_owned(), "answer".to_owned())),
@@ -2218,6 +2225,7 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         );
         assert_eq!(states.get("working").map(String::as_str), Some("processed"));
         assert_eq!(states.get("fixture").map(String::as_str), Some("processed"));
+        assert_mixed_public_entity_queries(&fixture, stack.as_ref().unwrap());
     }
     supervisor.stop();
 }
@@ -2319,6 +2327,114 @@ fn fresh_activation_relation_batches(
         }
     }
     batches
+}
+
+fn assert_mixed_public_entity_queries(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+) {
+    let mut python = semantic_request(
+        &fixture.workspace.public_id(),
+        "request:canonical-python",
+        "function declarations",
+    );
+    python["scope"]["languages"] = json!(["python"]);
+    python["queries"][0]["return"]["limit"]["maximum_results"] = json!(1);
+    let rust = semantic_request(
+        &fixture.workspace.public_id(),
+        "request:canonical-rust",
+        "Rust function declarations",
+    );
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "python", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": python, "delivery": "resource"}},
+            {"id": "python_manifest", "operation": "read_resource", "uri": {"$ref": "python.structured_content.manifest.uri"}},
+            {"id": "python_page", "operation": "read_resource", "uri": {"$ref": "python.structured_content.pages.0.uri"}},
+            {"id": "rust", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": rust, "delivery": "resource"}},
+            {"id": "rust_manifest", "operation": "read_resource", "uri": {"$ref": "rust.structured_content.manifest.uri"}},
+            {"id": "rust_page", "operation": "read_resource", "uri": {"$ref": "rust.structured_content.pages.0.uri"}},
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, "canonical-mixed", &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let bytes = |step: &str| {
+        STANDARD
+            .decode(modern_step(&report, step)[0]["blob"].as_str().unwrap())
+            .unwrap()
+    };
+    let python_manifest: Value = serde_json::from_slice(&bytes("python_manifest")).unwrap();
+    let rust_manifest: Value = serde_json::from_slice(&bytes("rust_manifest")).unwrap();
+    assert_eq!(
+        modern_structured(modern_step(&report, "python"))["execution_state"],
+        "SUCCEEDED",
+        "{report}"
+    );
+    assert_eq!(
+        modern_structured(modern_step(&report, "rust"))["execution_state"],
+        "SUCCEEDED",
+        "{report}"
+    );
+    let python_scope =
+        &python_manifest["canonical_semantic_response"]["query_scope"]["q1"]["processing"];
+    let rust_scope =
+        &rust_manifest["canonical_semantic_response"]["query_scope"]["q1"]["processing"];
+    assert_eq!(python_scope["requested_partitions"], 1, "{python_manifest}");
+    assert_eq!(python_scope["remaining_partitions"], 0, "{python_manifest}");
+    assert_eq!(
+        python_manifest["relations"][0]["coverage_state"], "complete",
+        "{python_manifest}"
+    );
+    assert_eq!(rust_scope["requested_partitions"], 3, "{rust_manifest}");
+    assert_eq!(rust_scope["remaining_partitions"], 1, "{rust_manifest}");
+    assert_eq!(
+        rust_scope["remainder"][0]["target"], "broken",
+        "{rust_manifest}"
+    );
+    assert_eq!(
+        rust_manifest["relations"][0]["coverage_state"], "partial",
+        "{rust_manifest}"
+    );
+    let names = |step: &str, expected_language: &str| {
+        let reader =
+            arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes(step)), None)
+                .unwrap();
+        let mut names = BTreeSet::new();
+        for batch in reader {
+            let batch = batch.unwrap();
+            let languages = batch
+                .column_by_name("language")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap();
+            let column = batch
+                .column_by_name("name")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap();
+            assert!(
+                languages
+                    .iter()
+                    .all(|value| value == Some(expected_language))
+            );
+            names.extend(column.iter().flatten().map(ToOwned::to_owned));
+        }
+        names
+    };
+    assert_eq!(
+        names("python_page", "python"),
+        BTreeSet::from(["answer".to_owned()])
+    );
+    assert!(
+        names("rust_page", "rust")
+            .iter()
+            .any(|name| name.ends_with("caller"))
+    );
 }
 
 fn canonical_entity_names(fixture: &ProductionFixture) -> BTreeSet<(String, String)> {

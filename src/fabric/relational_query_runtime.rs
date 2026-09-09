@@ -259,6 +259,32 @@ impl SelectedQueryOutput {
     pub const fn coverage(&self) -> Option<&ResultCoverage> {
         self.coverage.as_ref()
     }
+
+    pub(crate) fn with_processing_coverage(mut self, coverage: ResultCoverage) -> Self {
+        self.coverage = Some(coverage);
+        self
+    }
+
+    /// Apply an authorized typed scope before the request's result bound. DataFusion can
+    /// push it through the projection; limiting a different scope first would lose answers.
+    pub(crate) fn with_scope_filter(
+        mut self,
+        predicate: crate::relational_program::ScalarExpression,
+    ) -> Self {
+        use crate::relational_program::RelationalExpression;
+        self.program.root = match self.program.root {
+            RelationalExpression::Limit { input, skip, fetch } => RelationalExpression::Limit {
+                input: Box::new(RelationalExpression::Filter { input, predicate }),
+                skip,
+                fetch,
+            },
+            root => RelationalExpression::Filter {
+                input: Box::new(root),
+                predicate,
+            },
+        };
+        self
+    }
 }
 
 /// Complete input to one admit-authorize-execute-package-publish transaction.

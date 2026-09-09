@@ -59,6 +59,8 @@ pub mod graph_program;
 pub(crate) mod native_execution_lane;
 pub(crate) mod native_operations;
 #[cfg(feature = "daemon")]
+pub(crate) mod processing_status;
+#[cfg(feature = "daemon")]
 pub mod production_kernel;
 #[cfg(feature = "daemon")]
 pub(crate) mod production_workspace_startup;

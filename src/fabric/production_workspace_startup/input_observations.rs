@@ -310,7 +310,7 @@ pub(super) fn install_rust_target_progress(
 type Column = (&'static str, bool, ArrayRef);
 
 /// Observe the native Arrow columns; field/relation identities remain explicit and stable.
-fn register(
+pub(super) fn register(
     builder: &mut ProgrammaticFabricEpochBuilder,
     role: FabricSchemaRole,
     table: &'static str,
@@ -578,7 +578,7 @@ fn collect_inventory_members(
     )
 }
 
-const fn disposition(value: &ProviderInputDisposition) -> &'static str {
+pub(super) const fn disposition(value: &ProviderInputDisposition) -> &'static str {
     match value {
         ProviderInputDisposition::Captured { .. } => "captured",
         ProviderInputDisposition::ExcludedPolicy => "excluded_policy",

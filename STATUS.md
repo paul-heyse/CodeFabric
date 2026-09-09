@@ -4,14 +4,32 @@ Updated 2026-09-09. Current work is in `/home/paul/CodeFabric` on `master`.
 
 ## Current handoff
 
-**Production implementation is active. Outcomes 1–3 are implemented for the current Linux workflow; outcome 4 is in progress and outcomes 5–8 remain open.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). The four existing golden cases pass. Pyrefly honors selected Python version/platform settings and publishes semantic facts during fresh daemon startup. Real contained Rust compilation and mixed-language daemon publication now pass for a dependency-free, two-file Cargo package. These checks do not establish mixed-language or full-product completion.
+**Production implementation is active. Outcomes 1–3 are implemented for the current Linux workflow; outcomes 4–5 are in progress and outcomes 6–8 remain open.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). Startup publishes real Python/Rust facts, including captured Cargo path dependencies and multiple targets. Canonical function queries work through the installed FastMCP client and explain incomplete target processing. These checks do not establish full-product completion.
 
 The [detailed outcomes 4–8 plan](docs/plans/codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md)
 now expands that same backlog with the full fact-family/query scope, library API choices,
 dependency order and acceptance criteria. Implementation of that detailed plan is active.
-The first 4A slice publishes actual Rust compiler relations during daemon startup; remaining
-4A work is dependency materialization, multiple targets/contexts and reusable compiler inputs,
-followed by canonical normalization and public queries.
+Implemented slices include contained Rust compilation, captured path dependencies, multiple
+targets/contexts, reusable immutable input blobs, canonical declarations/entities and public
+function queries. External/generated compiler inputs, Rust syntax publication, the other query
+forms and full coverage/freshness delivery remain active work.
+
+The latest 4E/5A slice serves Python, Rust or combined function declarations from native
+DataFusion canonical transformations. Language/context filters apply before the row limit;
+name and entity ID define stable default ordering. Exact-epoch processing partitions come
+from requested Python inputs and selected Cargo targets, independently of emitted fact rows.
+A failed target retains other target facts and identifies the unfinished target. Python-only
+queries remain complete when only Rust compilation failed. Missing capture, unsupported work,
+provider timeout, cancellation and resource limits retain distinct reason codes. Processing
+coverage and result-row bounds are separate; actual truncation observation, public remainder
+pagination, typed wire projection and broader scope/freshness semantics are still pending.
+
+Validation on 2026-09-09: 14 focused query/scope tests pass; the installed-client mixed-language
+query and guarded-input/resource scenario both pass after the final ordering/filter changes.
+The mixed case checks actual function names/languages and one failed target, not just counts.
+Root library Clippy completes with the existing warning backlog; strict root lint cleanliness
+is not claimed. All four golden cases pass, including exact reopen and cancellation. Changes
+remain in the canonical working tree and are integrated in small commits.
 
 Current production work, 2026-09-08–09:
 

@@ -42,6 +42,7 @@ pub struct WorkspaceEpochQueryAuthority {
     request_owned_relation_limits: RequestOwnedRelationLimits,
     result_limits: ArrowResultResourceLimits,
     result_lease_millis: NonZeroU64,
+    entity_processing: Option<Arc<super::processing_status::EntityProcessingSnapshot>>,
 }
 
 impl fmt::Debug for WorkspaceEpochQueryAuthority {
@@ -125,7 +126,31 @@ impl WorkspaceEpochQueryAuthority {
             request_owned_relation_limits,
             result_limits,
             result_lease_millis,
+            entity_processing: None,
         })
+    }
+
+    pub(crate) fn with_entity_processing(
+        mut self,
+        processing: Option<Arc<super::processing_status::EntityProcessingSnapshot>>,
+    ) -> Result<Self, ProgrammaticWorkspaceCompositionError> {
+        if processing.as_ref().is_some_and(|processing| {
+            !processing.matches(
+                *self.workspace_id.as_bytes(),
+                *self.epoch.identity(),
+                self.activation_pins.source_generation.get(),
+            )
+        }) {
+            return Err(ProgrammaticWorkspaceCompositionError::SelectedAuthorityMismatch);
+        }
+        self.entity_processing = processing;
+        Ok(self)
+    }
+
+    pub(crate) fn entity_processing(
+        &self,
+    ) -> Option<&super::processing_status::EntityProcessingSnapshot> {
+        self.entity_processing.as_deref()
     }
 
     #[must_use]

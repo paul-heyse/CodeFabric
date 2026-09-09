@@ -334,6 +334,17 @@ impl ProductionActiveWorkspaceBuilder {
             registries,
         )
         .map_err(|_| Self::invalid("query-authorization"))?;
+        let entity_processing = super::processing_status::EntityProcessingSnapshot::load(
+            &epoch,
+            *selection.workspace_id().as_bytes(),
+            pins.source_generation.get(),
+            self.resources.budget(),
+        )
+        .await
+        .map_err(|error| {
+            tracing::warn!(%error, "cannot reconstruct selected processing scope");
+            Self::invalid("processing-scope")
+        })?;
         let query_authority = Arc::new(
             WorkspaceEpochQueryAuthority::try_new(
                 selection.workspace_id(),
@@ -348,7 +359,9 @@ impl ProductionActiveWorkspaceBuilder {
                 self.config.result_limits,
                 self.config.result_lease_millis,
             )
-            .map_err(|_| Self::invalid("query-authority"))?,
+            .map_err(|_| Self::invalid("query-authority"))?
+            .with_entity_processing(entity_processing)
+            .map_err(|_| Self::invalid("processing-scope-binding"))?,
         );
         let query_runtime = Arc::new(RelationalQueryRuntime::new(
             selection.workspace_id(),

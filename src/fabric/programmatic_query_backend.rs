@@ -1055,6 +1055,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
 
         let (compiled, handoff) = compiled.into_parts();
         let mut outputs = Vec::with_capacity(compiled.blocks().len());
+        let mut output_queries = Vec::with_capacity(compiled.blocks().len());
         let mut output_by_query = BTreeMap::new();
         for block in compiled.blocks() {
             if block.disposition() != SemanticBlockDisposition::Compiled {
@@ -1093,6 +1094,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 );
             }
             outputs.push(output);
+            output_queries.push(Arc::clone(block.query_id()));
         }
         if outputs.is_empty() {
             return failed(
@@ -1131,6 +1133,72 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "scope_authorization",
                 "scope authorization returned a resource-policy identity outside the admitted epoch",
             );
+        }
+        let mut processing_by_query = serde_json::Map::new();
+        if let Some(processing) = authority.entity_processing() {
+            use super::processing_status::{ENTITY_PROCESSING_RELATION, EntityQueryScope};
+            if !authorization
+                .table_relations()
+                .any(|id| id.as_str() == ENTITY_PROCESSING_RELATION)
+            {
+                return failed(
+                    &artifacts,
+                    "scope_authorization",
+                    "processing scope is not authorized",
+                );
+            }
+            for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
+                if !output
+                    .program()
+                    .output_fields
+                    .iter()
+                    .any(|field| field.as_str() == "query.result.semantic-entities.entity-language")
+                {
+                    continue;
+                }
+                let selector = validated.ingress().selections.iter().find(|selection| {
+                    selection.query_id == *query_id
+                        && selection.selection_id.as_ref() == "selection.looking-for"
+                });
+                let Some(SemanticClauseValue::Text(selector)) =
+                    selector.map(|selection| &selection.value)
+                else {
+                    return failed(
+                        &artifacts,
+                        "processing_scope",
+                        "canonical entity selector is missing",
+                    );
+                };
+                let scope =
+                    match EntityQueryScope::from_request(&request.parsed().request, selector) {
+                        Ok(scope) => scope,
+                        Err(error) => return failed(&artifacts, "processing_scope", error),
+                    };
+                let predicate = match scope.predicate() {
+                    Ok(predicate) => predicate,
+                    Err(error) => return failed(&artifacts, "processing_scope", error),
+                };
+                let summary = processing.summarize(&scope, 0);
+                let coverage = match summary.coverage() {
+                    Ok(coverage) => coverage,
+                    Err(error) => return failed(&artifacts, "processing_scope", error),
+                };
+                *output = output
+                    .clone()
+                    .with_scope_filter(predicate)
+                    .with_processing_coverage(coverage);
+                let maximum = request
+                    .parsed()
+                    .request
+                    .queries
+                    .iter()
+                    .find(|clause| clause.query_id() == query_id.as_ref())
+                    .map(crate::semantic_query_contract::SemanticQueryClause::maximum_results);
+                processing_by_query.insert(query_id.to_string(), serde_json::json!({
+                    "processing": summary,
+                    "result_bound": {"maximum_rows": maximum, "additional_rows": "not_reported"},
+                }));
+            }
         }
         let mut handoffs_by_output = BTreeMap::new();
         for request_input in handoff.request_inputs {
@@ -1218,6 +1286,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             "format": "codefabric.semantic-query-response.v2",
             "semantic_request_id": request.parsed().request.semantic_request_id,
             "snapshot": &snapshot,
+            "query_scope": processing_by_query,
         });
         let canonical_response = match serde_json_canonicalizer::to_vec(&response) {
             Ok(response) => response,

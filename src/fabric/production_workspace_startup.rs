@@ -110,6 +110,7 @@ use crate::workspace_registry::WorkspaceRecord;
 mod canonical;
 mod input_observations;
 mod inputs;
+mod processing;
 mod pyrefly;
 mod rustc;
 
@@ -818,6 +819,12 @@ fn build_fresh_native_source(
     }
     input_observations::install_rust_target_progress(&mut builder, generation, &rustc.progress)?;
     admitted_runs.extend(rustc.admitted);
+    processing::install(
+        &mut builder,
+        &prepared_inputs.inventory,
+        &admitted_runs,
+        &rustc.progress,
+    )?;
     input_observations::install_input_observations(
         &mut builder,
         &prepared_inputs.inventory,

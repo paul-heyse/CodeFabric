@@ -35,6 +35,7 @@ use crate::rustc_relation_schema::RustcRelation;
 const SOURCE: &str = "source.code_file";
 const DECLARATION: &str = "fact.code_declaration";
 const ENTITY: &str = "fact.code_entity";
+const SELECTOR: &str = "fact.code_entity_selector";
 const INPUT: &str = "source.input_inventory";
 const RUN: &str = "system.provider_run_scope";
 
@@ -48,6 +49,7 @@ pub(super) fn install(
         Kind::Source,
         Kind::Declaration { python, rust },
         Kind::Entity,
+        Kind::EntitySelector,
     ] {
         builder
             .add_transformation(Arc::new(Canonical::new(kind, inventory)))
@@ -61,6 +63,7 @@ enum Kind {
     Source,
     Declaration { python: bool, rust: bool },
     Entity,
+    EntitySelector,
 }
 
 struct Canonical {
@@ -88,6 +91,11 @@ impl Canonical {
                 },
             ),
             Kind::Entity => (ENTITY, entity_fields(), vec![DECLARATION]),
+            Kind::EntitySelector => {
+                let mut fields = entity_fields();
+                fields.push(("selector", DataType::Utf8, false));
+                (SELECTOR, fields, vec![ENTITY])
+            }
         };
         if let Kind::Declaration { python, rust } = kind {
             if python {
@@ -108,6 +116,8 @@ impl Canonical {
                     "entity_id" => field.with_semantic_role("semantic.entity.identity"),
                     "entity_kind" => field.with_semantic_role("semantic.entity.kind"),
                     "name" => field.with_semantic_role("semantic.entity.name"),
+                    "language" => field.with_semantic_role("semantic.entity.language"),
+                    "selector" => field.with_semantic_role("semantic.entity.selector"),
                     "file_id" => field.with_semantic_role("semantic.provenance.source-file"),
                     "context_id" => {
                         field.with_semantic_role("semantic.provenance.analysis-context")
@@ -130,6 +140,9 @@ impl Canonical {
             // Kept distinct from the predecessor Ruff-only role until scoped public queries
             // consume this relation and its processing coverage together.
             output = output.with_semantic_role("canonical.entity-source");
+        }
+        if matches!(kind, Kind::EntitySelector) {
+            output = output.with_semantic_role("canonical.entity-selector");
         }
         let identity =
             *blake3::hash(format!("codefabric.canonical-code.v1:{id}").as_bytes()).as_bytes();
@@ -301,6 +314,26 @@ impl ProgrammaticTransformation for Canonical {
     fn build(&self, inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
         match self.kind {
             Kind::Source => self.source(inputs),
+            Kind::EntitySelector => {
+                let input = plan(inputs, ENTITY)?;
+                let project = |selector: Expr| -> Result<LogicalPlan, TransformationPlanError> {
+                    Ok(LogicalPlanBuilder::from(input.clone())
+                        .project(
+                            entity_fields()
+                                .iter()
+                                .map(|(name, _, _)| col(*name))
+                                .chain([selector.alias("selector")]),
+                        )?
+                        .build()?)
+                };
+                let generic = project(col("entity_kind"))?;
+                let language = project(datafusion::functions::string::expr_fn::concat(vec![
+                    col("language"),
+                    lit(":"),
+                    col("entity_kind"),
+                ]))?;
+                Ok(LogicalPlanBuilder::from(generic).union(language)?.build()?)
+            }
             Kind::Entity => Ok(LogicalPlanBuilder::from(plan(inputs, DECLARATION)?)
                 .filter(col("entity_id").is_not_null())?
                 .project(entity_fields().iter().map(|(name, _, _)| col(*name)))?

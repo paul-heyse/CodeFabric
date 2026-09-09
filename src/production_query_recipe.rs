@@ -473,6 +473,9 @@ struct EpochSemanticRelation {
     entity_id: FieldId,
     entity_kind: FieldId,
     entity_name: FieldId,
+    selector: FieldId,
+    canonical: bool,
+    scope_fields: Vec<(FieldId, &'static str)>,
 }
 
 fn compiled_released_form_programs(
@@ -480,6 +483,19 @@ fn compiled_released_form_programs(
     closure: &ProducerClosureProof,
 ) -> Result<BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>, ProductionQueryRecipeError>
 {
+    if let Some(source) = epoch_semantic_relation(epoch, "canonical.entity-selector")? {
+        if epoch
+            .relation(&ProgrammaticRelationId::new(
+                crate::fabric::processing_status::ENTITY_PROCESSING_RELATION,
+            ))
+            .is_none()
+        {
+            return Err(ProductionQueryRecipeError::InvalidCompiledRelease {
+                detail: "canonical entity selection requires selected processing scope".to_owned(),
+            });
+        }
+        return validate_form_coverage(vec![compiled_find_entities_program(source)?]);
+    }
     let binding_family = NativeSyntaxRelation::RuffBinding.as_str();
     let binding_available = closure.families.iter().any(|row| {
         row.family_id.as_ref() == binding_family
@@ -664,6 +680,30 @@ fn epoch_semantic_relation(
             entity_id: semantic_field(SEMANTIC_ENTITY_ID_ROLE)?,
             entity_kind: semantic_field(SEMANTIC_ENTITY_KIND_ROLE)?,
             entity_name: semantic_field(SEMANTIC_ENTITY_NAME_ROLE)?,
+            selector: semantic_field(if semantic_role == "canonical.entity-selector" {
+                "semantic.entity.selector"
+            } else {
+                SEMANTIC_ENTITY_KIND_ROLE
+            })?,
+            canonical: semantic_role == "canonical.entity-selector",
+            scope_fields: if semantic_role == "canonical.entity-selector" {
+                vec![
+                    (
+                        semantic_field("semantic.entity.language")?,
+                        "entity-language",
+                    ),
+                    (
+                        semantic_field("semantic.provenance.analysis-context")?,
+                        "analysis-context-id",
+                    ),
+                    (
+                        semantic_field("semantic.provenance.source-file")?,
+                        "source-file-id",
+                    ),
+                ]
+            } else {
+                Vec::new()
+            },
         });
     }
     match matched.as_slice() {
@@ -678,17 +718,41 @@ fn epoch_semantic_relation(
 fn compiled_find_entities_program(
     source: EpochSemanticRelation,
 ) -> Result<ProductionSemanticFormProgram, ProductionQueryRecipeError> {
+    let canonical = source.canonical;
     let program_binding_id = released_program_binding_id(ReleasedSemanticForm::FindCodeEntities);
     let output_relation = release_relation_id("query.result.semantic-entities")?;
     let output_id = release_field_id("query.result.semantic-entities.entity-id")?;
     let output_kind = release_field_id("query.result.semantic-entities.entity-kind")?;
     let output_name = release_field_id("query.result.semantic-entities.entity-name")?;
-    let output_fields = vec![output_id.clone(), output_kind.clone(), output_name.clone()];
+    let mut projections = vec![
+        ProgramProjectionField {
+            input_field_id: source.entity_id,
+            output_field_id: output_id,
+        },
+        ProgramProjectionField {
+            input_field_id: source.entity_kind,
+            output_field_id: output_kind,
+        },
+        ProgramProjectionField {
+            input_field_id: source.entity_name,
+            output_field_id: output_name,
+        },
+    ];
+    for (input_field_id, name) in source.scope_fields {
+        projections.push(ProgramProjectionField {
+            input_field_id,
+            output_field_id: release_field_id(&format!("query.result.semantic-entities.{name}"))?,
+        });
+    }
+    let output_fields = projections
+        .iter()
+        .map(|field| field.output_field_id.clone())
+        .collect::<Vec<_>>();
     let input_node_id: Arc<str> = Arc::from(format!("{program_binding_id}.input"));
     let filter_node_id: Arc<str> = Arc::from(format!("{program_binding_id}.filter"));
     let project_node_id: Arc<str> = Arc::from(format!("{program_binding_id}.project"));
     let limit_node_id: Arc<str> = Arc::from(format!("{program_binding_id}.limit"));
-    Ok(ProductionSemanticFormProgram {
+    let mut program = ProductionSemanticFormProgram {
         form: ReleasedSemanticForm::FindCodeEntities,
         program_binding_id: Arc::from(program_binding_id),
         output_role_id: Arc::from(ResultRole::Entities.released_id()),
@@ -729,20 +793,7 @@ fn compiled_find_entities_program(
                 ordinal: 2,
                 input_node_ids: vec![Arc::clone(&filter_node_id)],
                 operator: ProgramRelationalOperator::Projection {
-                    fields: vec![
-                        ProgramProjectionField {
-                            input_field_id: source.entity_id,
-                            output_field_id: output_id,
-                        },
-                        ProgramProjectionField {
-                            input_field_id: source.entity_kind.clone(),
-                            output_field_id: output_kind,
-                        },
-                        ProgramProjectionField {
-                            input_field_id: source.entity_name,
-                            output_field_id: output_name,
-                        },
-                    ],
+                    fields: projections,
                 },
                 output_fields: output_fields.clone(),
             },
@@ -764,14 +815,23 @@ fn compiled_find_entities_program(
             minimum_values: 1,
             maximum_values: RELEASE_SELECTION_MAXIMUM_VALUES,
             operator_node_id: Arc::clone(&filter_node_id),
-            input_field_id: source.entity_kind,
+            input_field_id: source.selector,
             scalar_operator: ScalarOperator::Equal,
             fold: EpochBoundSelectionFold::Any,
-            resolutions: [
-                ("Python function declarations", "function"),
-                ("function declarations", "function"),
-                ("function", "function"),
-            ]
+            resolutions: if canonical {
+                vec![
+                    ("Python function declarations", "python:function"),
+                    ("Rust function declarations", "rust:function"),
+                    ("function declarations", "function"),
+                    ("function", "function"),
+                ]
+            } else {
+                vec![
+                    ("Python function declarations", "function"),
+                    ("function declarations", "function"),
+                    ("function", "function"),
+                ]
+            }
             .into_iter()
             .map(|(request, execution)| EpochBoundSelectionValueResolution {
                 request_value: SemanticClauseValue::Text(Arc::from(request)),
@@ -782,8 +842,40 @@ fn compiled_find_entities_program(
         returns: Vec::new(),
         request_inputs: Vec::new(),
         consumer_slots: Vec::new(),
-        required_fact_families: vec![Arc::from(NativeSyntaxRelation::RuffBinding.as_str())],
-    })
+        // The installed canonical transformation establishes executability. Processing coverage
+        // is selected after authorization, not admitted by a global complete-producer gate.
+        required_fact_families: if canonical {
+            Vec::new()
+        } else {
+            vec![Arc::from(NativeSyntaxRelation::RuffBinding.as_str())]
+        },
+    };
+    if canonical {
+        let sort_node_id: Arc<str> = Arc::from(format!("{program_binding_id}.sort"));
+        let projection = program.operators[2].node_id.clone();
+        program.operators[3].ordinal = 4;
+        program.operators[3].input_node_ids = vec![Arc::clone(&sort_node_id)];
+        program.operators.insert(
+            3,
+            ProductionOperatorDefinition {
+                node_id: sort_node_id,
+                ordinal: 3,
+                input_node_ids: vec![projection],
+                operator: ProgramRelationalOperator::Sort {
+                    fields: [2, 0]
+                        .into_iter()
+                        .map(|index| crate::relational_semantic_query::ProgramSortField {
+                            input_field_id: program.output_fields[index].clone(),
+                            ascending: true,
+                            nulls_first: false,
+                        })
+                        .collect(),
+                },
+                output_fields: program.output_fields.clone(),
+            },
+        );
+    }
+    Ok(program)
 }
 
 fn compiled_program_result_bindings(
