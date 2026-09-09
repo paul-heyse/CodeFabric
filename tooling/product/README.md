@@ -22,3 +22,12 @@ The [mixed-language fixture](../../tests/fixtures/pragmatic_cpg/README.md) provi
 Use fixture repetition/generated modules at increasing sizes while preserving known call/import structure; record file/owner counts, source bytes, machine, revision, settings and samples. Do not claim 100 ms/500 ms thresholds or missing phase metrics. Add runtime instrumentation and scenario assertions as those production behaviors land.
 
 Generate deterministic scale sources with `uv run --frozen --project codefabric-cpg-mcp python -m tooling.product.workload --output target/product/workspace-100 --modules 100`. The destination must be new. Generated module counts, source bytes and known call relationships are recorded beside the source; these are workload inputs, not measured runtime results. Register that workspace through the existing fixture/supervisor when the corresponding production adapter is wired.
+
+`just golden --case python-live` exercises one running daemon through Python source changes.
+`just golden --case mixed-clean-live` compares four implemented public query forms against independent
+clean Python/Rust builds after call-target edits, compiler failure and repair. Separate state and
+provider caches preserve the same authorized source identity; canonical IDs and semantic facts remain
+in the comparison. Operational generations/provider runs and the snapshot-bound source-context handle
+are excluded. This measured case has a 600 s default deadline; `--timeout` overrides it explicitly.
+Contained providers require delegated cgroups and the configured provider binaries, as recorded in
+[STATUS.md](../../STATUS.md). Broader edit/context and semantic coverage remain open.

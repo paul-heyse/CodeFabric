@@ -337,8 +337,9 @@ Git inclusion, excluded native watch topology, explicit polling and root/config 
 **Current status — partial.** Monotonic source generations, whole-context replacement and immediate
 stale observation are wired into live updates. Providers and activation reuse exact source/context
 pins; new events cancel or invalidate older candidate work. Python edit/delete/atomic-save scenarios
-pass. Full mixed-language/configuration/negative-dependency and delayed-completion acceptance, and
-independent clean comparison, remain open.
+pass. Mixed Python/Rust call-target edits and compiler failure/repair now match independent clean
+state for the four implemented query forms. Configuration/negative-dependency and delayed-completion
+acceptance remain open.
 
 **Surfaces:** source/context relations, provider/analysis scheduling, owner-replacement normalization and activation inputs.
 
@@ -375,8 +376,13 @@ state, unchanged-version reuse and update scheduling remain open.
 
 **Current status — partial live acceptance.** An installed-client persistent Python daemon case uses
 actual strict freshness waits for edits, additions, deletion, atomic save and reopen; the retained source
-page case spans a live successor. Independent clean-state runtime comparison, mixed-language edits,
-full identity/coverage comparisons and deterministic delayed-completion scenarios remain open.
+page case spans a live successor. `mixed-clean-live` keeps one daemon running through Python/Rust
+call-target edits, Rust compilation failure and repair while independent clean daemons use separate
+state and provider caches. Four-form comparisons preserve canonical identity/relationships, facts,
+positions, precision, order, coverage and source bytes; operational generations/provider runs and
+the explicitly snapshot-bound source-context handle differ. Independent names/call pairs and the
+repaired-to-original comparison pass (259.56 s, 2026-09-09). The broader edit corpus, all-family
+coverage, configuration/negative imports and deterministic delayed completion remain open.
 
 **Surfaces:** `tooling/product/corpus.py`, `edits.json`, daemon integration fixture, modern driver and golden case selection.
 

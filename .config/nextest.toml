@@ -42,3 +42,13 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 #   [[profile.default.overrides]]
 #   filter = 'test(database_)'
 #   test-group = 'database'
+
+# This scenario runs four public forms across edits, failure and repair and independent clean
+# Rust/Python provider builds. The ordinary two-minute bound interrupts expected work.
+[[profile.default.overrides]]
+filter = 'test(mixed_live_updates_equal_independent_clean_public_queries)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
+[[profile.ci.overrides]]
+filter = 'test(mixed_live_updates_equal_independent_clean_public_queries)'
+slow-timeout = { period = "60s", terminate-after = 10 }

@@ -18,6 +18,8 @@ CASES = {
     "python-serving": "wp63_beh_real_source_to_installed_fastmcp_is_causal_and_epoch_coherent",
     "reopen": "wp63_ops_installed_restart_reconstructs_only_exact_activation_authority",
     "cancellation": "wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation",
+    "python-live": "pragmatic_live_python_edits_converge_without_restart",
+    "mixed-clean-live": "live_updates::mixed_live_updates_equal_independent_clean_public_queries",
 }
 
 
@@ -32,7 +34,11 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", action="append", choices=CASES)
     parser.add_argument("--list", action="store_true")
-    parser.add_argument("--timeout", type=float, default=240)
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        help="per-case deadline; defaults to 240s, or 600s for mixed clean/live builds",
+    )
     parser.add_argument(
         "--output", type=Path, default=ROOT / "target/product/golden.json"
     )
@@ -86,7 +92,12 @@ def main(argv=None) -> int:
     for name, command in commands:
         print(f"product case: {name}", flush=True)
         try:
-            outcome = run(command, cwd=ROOT, timeout=args.timeout)
+            timeout = (
+                args.timeout
+                if args.timeout is not None
+                else (600 if name == "mixed-clean-live" else 240)
+            )
+            outcome = run(command, cwd=ROOT, timeout=timeout)
             observation = {"case": name, **asdict(outcome)}
             success = outcome.returncode == 0
             if success and args.expect:
@@ -117,7 +128,7 @@ def main(argv=None) -> int:
         "selected": [name for name, _ in commands],
         "not_run": [name for name, _ in commands[len(observations) :]],
         "observations": observations,
-        "remaining_target": "Mixed-language semantic coverage, fine-grained remainder and differential runtime adapters remain production work; passing these selected cases does not claim that scope.",
+        "remaining_target": "All-family semantics, complete query meanings/composition, fine-grained remainder, broader context/edit coverage and sustained operation remain open; selected static/live/clean comparisons do not certify the entire product.",
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")

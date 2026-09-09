@@ -1,7 +1,7 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `46e260a9` (`Serve exact source spans with live disclosure authorization`).
+Last production commit: `a6d8569a` (`Reconcile live sources and enforce query freshness`).
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -154,8 +154,18 @@ strict lint remains open. Changed Rust files pass formatting except pre-existing
 `activation_transaction.rs`. The final installed live regression passes after the future-ownership
 refactor (67.12 s). This is a limited live slice, not closure of outcomes 5 or 6.
 
-Remaining live work includes mixed-language and independent clean-build comparison, syntax-first
-publication, retained provider/parser/compiler state, external roots, Git inclusion, an explicit polling
+A persistent mixed Python/Rust daemon now passes independent clean-state comparison for the four
+implemented forms through call-target edits, compiler failure and repair (259.56 s on 2026-09-09).
+Each clean daemon uses separate durable state and provider caches with the same authorized source
+identity. Comparison retains canonical IDs, relationships, facts, positions, precision, ordering,
+source bytes and coverage; it excludes generation/run/observation IDs and the explicitly snapshot-bound
+source-context handle. Independent expected names and call pairs prevent equal empty results from
+passing. Compiler failure removes current Rust declarations/calls and reports one incomplete target
+while Python queries remain usable. The repaired result also matches the original semantic result.
+`just golden --case mixed-clean-live` selects this case; its 600 s bound covers the repeated contained
+builds. The accompanying harness checks pass with all 188 tooling tests.
+
+Remaining live work includes broader clean/edit/context cases, syntax-first publication, retained provider/parser/compiler state, external roots, Git inclusion, an explicit polling
 profile, root replacement recovery, configuration/negative-dependency and delayed-completion cases.
 Current policies conservatively await the complete workspace provider pass; target/family-specific
 barriers and all-family scope remain open. Reconciliation currently rebuilds all selected relations;

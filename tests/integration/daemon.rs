@@ -4639,3 +4639,6 @@ fn wp37_neg_codefabricd_rejects_direct_start_without_supervisor_control() {
     assert!(!fixture.runtime.join("daemon.json").exists());
     assert!(!fixture.runtime.join("admin.sock").exists());
 }
+
+#[cfg(target_os = "linux")]
+mod live_updates;

@@ -158,4 +158,31 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         "python-serving",
         "reopen",
         "cancellation",
+        "python-live",
+        "mixed-clean-live",
     ]
+
+
+@pytest.mark.parametrize(("override", "expected"), [(None, 600), (0.25, 0.25)])
+def test_clean_live_case_has_a_bounded_default_and_honors_explicit_deadline(
+    tmp_path, monkeypatch, override, expected
+):
+    from tooling.product import golden
+    from tooling.product.process import Outcome
+
+    observed = []
+
+    def execute(command, *, cwd, timeout):
+        observed.append((command, timeout))
+        return Outcome(command, 0, 0.1, "", "", False, False)
+
+    monkeypatch.setattr(golden, "run", execute)
+    args = ["--case", "mixed-clean-live", "--output", str(tmp_path / "result.json")]
+    if override is not None:
+        args.extend(["--timeout", str(override)])
+    assert golden.main(args) == 0
+    assert len(observed) == 1 and observed[0][1] == expected
+    assert (
+        "test(=integration::daemon::live_updates::mixed_live_updates_equal_independent_clean_public_queries)"
+        in observed[0][0]
+    )
