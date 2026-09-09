@@ -539,12 +539,8 @@ fn validate_source(
         ));
     }
     let path = source_path(&blob.read_only_uri)?;
-    let bytes = fs::read(&path).map_err(|_| Status::data_loss("read Pyrefly source blob"))?;
-    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != blob.byte_length
-        || b3(&bytes) != blob.content_digest
-    {
-        return Err(Status::data_loss("Pyrefly source blob digest differs"));
-    }
+    // The semantic worker reads once, bounds the actual bytes and verifies this
+    // digest before changing checker state or emitting any fact.
     Ok(path)
 }
 
@@ -558,7 +554,7 @@ impl PyreflySidecar for Service {
             protocol_minor: 0,
             negotiated_feature_bits: REQUIRED_FEATURE_BITS
                 | (hello.optional_feature_bits & OPTIONAL_FEATURE_BITS),
-            sidecar_build: "codefabric-pyrefly-sidecar 0.1.0".to_owned(),
+            sidecar_build: "codefabric-pyrefly-sidecar 0.1.0+configured-context-v1".to_owned(),
             pyrefly_source_digest: PYREFLY_SOURCE_DIGEST.to_owned(),
             supported_python_versions: hello.supported_python_versions,
             observation_schema_digests: crate::pyrefly_link::schema_digests(),
@@ -797,6 +793,11 @@ impl PyreflySidecar for Service {
                             file_id: module.file_id.clone(),
                             source_path,
                             source_digest: module.source_digest.clone(),
+                            source_byte_length: module
+                                .source_blob
+                                .as_ref()
+                                .expect("validated blob")
+                                .byte_length,
                         }
                     })
                 })
@@ -1443,7 +1444,7 @@ mod tests {
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&state_root);
-        let mut service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
+        let service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
         let shutdown = service.shutdown_receiver();
 
         let mut mismatch = hello();
@@ -1490,8 +1491,14 @@ mod tests {
             maximum_memory_mib: MAX_MEMORY_MIB,
             sandbox_profile_digest: TEST_SANDBOX_PROFILE_DIGEST.to_owned(),
         };
+        let mut unsupported = open(2);
+        let mut unsupported_manifest: serde_json::Value =
+            serde_json::from_slice(&manifest).unwrap();
+        unsupported_manifest["typeshed_bundle_digest"] = serde_json::json!(b3(b"different stubs"));
+        unsupported.immutable_context_manifest = serde_json::to_vec(&unsupported_manifest).unwrap();
+        unsupported.context_manifest_digest = b3(&unsupported.immutable_context_manifest);
         let unavailable = service
-            .open_context(Request::new(open(2)))
+            .open_context(Request::new(unsupported))
             .await
             .unwrap_err();
         assert_eq!(unavailable.code(), tonic::Code::FailedPrecondition);
@@ -1512,9 +1519,7 @@ mod tests {
         assert!(invalid.details().is_empty());
         assert!(service.contexts.lock().unwrap().is_empty());
         assert!(!state_root.join("contexts").exists());
-        // This explicit unit-fixture authority is absent from the deployed sidecar.
-        // Containment/protocol checks below do not prove real bundle installation.
-        service.test_only_preparation_authority = true;
+        // Exercise the same selected context preparation used by the deployed service.
         let opened = service
             .open_context(Request::new(open(2)))
             .await

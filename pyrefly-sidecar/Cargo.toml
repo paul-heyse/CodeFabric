@@ -10,10 +10,11 @@ arrow-ipc = "=59.2.0"
 arrow-schema = "=59.2.0"
 blake3 = "=1.8.2"
 prost = "=0.14.4"
-pyrefly = { version = "=1.2.0", git = "https://github.com/facebook/pyrefly", rev = "1933169ad8ee9e4d4114112eb56ef0811fb0a094", default-features = false }
+pyrefly = { version = "=1.2.0", path = "../third_party/pyrefly", default-features = false }
 pyrefly_config = { version = "=1.2.0", git = "https://github.com/facebook/pyrefly", rev = "1933169ad8ee9e4d4114112eb56ef0811fb0a094" }
 pyrefly_python = { version = "=1.2.0", git = "https://github.com/facebook/pyrefly", rev = "1933169ad8ee9e4d4114112eb56ef0811fb0a094" }
 pyrefly_util = { version = "=1.2.0", git = "https://github.com/facebook/pyrefly", rev = "1933169ad8ee9e4d4114112eb56ef0811fb0a094" }
+rustix = { version = "=1.1.4", features = ["fs"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "net", "sync", "time"] }

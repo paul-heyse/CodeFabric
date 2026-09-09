@@ -80,6 +80,13 @@ Wire `tests/fixtures/pragmatic_cpg/workspace` and independently justified `expec
 
 **Done:** a real mixed-language demonstration answers all first-release questions, including at least one semantic observation from each compiler/type provider. Validate the changed provider protocols/schema boundaries and public answers, not just successful process exit or nonzero row counts.
 
+**Progress, 2026-09-09:** selected Pyrefly version/platform settings now affect actual
+checker answers, using a small local fix to the pinned Query handle construction. Supported
+production context preparation and bounded immutable source reads pass all 29 sidecar tests,
+strict sidecar Clippy, and 10 root service tests. The real sidecar UDS test validates a Python
+3.14-dependent call target and joined shutdown. Daemon publication, external context roots,
+Rust contributions and mixed-language public answers remain open; this does not close outcome 4.
+
 ## 6. Outcome 5 — Query-relevant progress and unfinished scope
 
 Build with outcome 4. Reuse actual processing/coverage/publication state in provider admission/input observations, query/status paths, lifecycle and adapter projections. Do not create an independent status authority.
@@ -181,7 +188,7 @@ Old identifiers are navigation only. Preserve semantic and operational obligatio
 
 Outcomes 1–3 are implemented for the current Linux workflow. Continue outcome 4 with
 actual Pyrefly/rustc contributions, then query-relevant remainder, live updates, remaining
-analyses/forms and sustained operation in outcomes 5–8. Pyrefly currently rejects production
-context preparation, and its upstream Query ignores configured runtime settings; fix those
-actual boundaries while preserving exact input/context identity. No additional review cycle
+analyses/forms and sustained operation in outcomes 5–8. Pyrefly now accepts supported production
+contexts and honors configured runtime settings. Continue with actual provider scheduling,
+external context inputs and production containment while preserving exact input/context identity. No additional review cycle
 is required. Other-platform RSS sampling remains an explicit deployment limitation.

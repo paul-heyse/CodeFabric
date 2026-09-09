@@ -570,6 +570,7 @@ dependencies = [
  "pyrefly_config",
  "pyrefly_python",
  "pyrefly_util",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "tokio",
@@ -2333,7 +2334,6 @@ dependencies = [
 [[package]]
 name = "pyrefly"
 version = "1.2.0"
-source = "git+https://github.com/facebook/pyrefly?rev=1933169ad8ee9e4d4114112eb56ef0811fb0a094#1933169ad8ee9e4d4114112eb56ef0811fb0a094"
 dependencies = [
  "anstream 0.6.21",
  "anyhow",

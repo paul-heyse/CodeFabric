@@ -1,0 +1,157 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+use std::collections::HashMap;
+use std::env;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::LazyLock;
+
+use anyhow::anyhow;
+use dupe::Dupe;
+use pyrefly_bundled::bundled_typeshed;
+use pyrefly_config::error_kind::ErrorKind;
+use pyrefly_config::error_kind::Severity;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_util::arc_id::ArcId;
+
+use crate::config::config::ConfigFile;
+use crate::module::bundled::Bundle;
+use crate::module::bundled::BundleFile;
+use crate::module::bundled::BundledStub;
+use crate::module::bundled::create_bundled_stub_config;
+
+#[derive(Debug, Clone)]
+pub struct BundledTypeshedStdlib {
+    bundle: Bundle,
+}
+
+impl BundledStub for BundledTypeshedStdlib {
+    fn new() -> anyhow::Result<Self> {
+        let contents = bundled_typeshed()?;
+        let provider = contents
+            .into_iter()
+            .map(|(relative_path, contents)| BundleFile {
+                import_path: relative_path.clone(),
+                storage_path: relative_path,
+                contents,
+            });
+        Ok(Self {
+            bundle: Bundle::new(provider)?,
+        })
+    }
+
+    fn find(&self, module: ModuleName) -> Option<ModulePath> {
+        self.bundle
+            .find(module)
+            .map(|path| ModulePath::bundled_typeshed(path.clone()))
+    }
+
+    fn load(&self, path: &Path) -> Option<Arc<String>> {
+        self.bundle.load(path)
+    }
+
+    fn load_map(&self) -> impl Iterator<Item = (&PathBuf, &Arc<String>)> {
+        self.bundle.load_map()
+    }
+
+    fn modules(&self) -> impl Iterator<Item = ModuleName> {
+        self.bundle.modules()
+    }
+
+    fn get_path_name(&self) -> String {
+        format!(
+            "pyrefly_bundled_typeshed_{}",
+            faster_hex::hex_string(&pyrefly_bundled::BUNDLED_TYPESHED_DIGEST[0..6])
+        )
+    }
+
+    fn config() -> ArcId<ConfigFile> {
+        static CONFIG: LazyLock<ArcId<ConfigFile>> = LazyLock::new(|| {
+            let search_paths = match stdlib_search_path() {
+                Some(path) => vec![path],
+                None => Vec::new(),
+            };
+            let config_file = create_bundled_stub_config(
+                Some(search_paths),
+                Some(stdlib_error_overrides()),
+                Some(true),
+            );
+            ArcId::new(config_file)
+        });
+        CONFIG.dupe()
+    }
+}
+
+/// Error kinds that must be ignored when type-checking the stdlib stubs themselves.
+/// The stdlib deliberately contains incorrect overrides and variance violations
+/// (e.g. in `typing.pyi`) that are not real errors for our purposes.
+fn stdlib_error_overrides() -> HashMap<ErrorKind, Severity> {
+    HashMap::from([
+        (ErrorKind::BadOverride, Severity::Ignore),
+        (ErrorKind::BadOverrideParamName, Severity::Ignore),
+        (ErrorKind::InvalidVariance, Severity::Ignore),
+    ])
+}
+
+/// Config used to load the `Stdlib` from a user-provided typeshed directory from the
+/// `typeshed_path` config option. Stdlib modules will be resolved from
+/// `<typeshed_path>/stdlib` on disk; missing modules fall back to the bundled typeshed,
+/// matching how `typeshed_path` already behaves for ordinary import resolution.
+pub fn custom_typeshed_stdlib_config(typeshed_path: PathBuf) -> ArcId<ConfigFile> {
+    let mut config_file =
+        create_bundled_stub_config(None, Some(stdlib_error_overrides()), Some(true));
+    config_file.typeshed_path = Some(typeshed_path);
+    config_file.configure();
+    ArcId::new(config_file)
+}
+
+static BUNDLED_TYPESHED: LazyLock<anyhow::Result<BundledTypeshedStdlib>> =
+    LazyLock::new(BundledTypeshedStdlib::new);
+
+pub fn typeshed() -> anyhow::Result<&'static BundledTypeshedStdlib> {
+    match &*BUNDLED_TYPESHED {
+        Ok(typeshed) => Ok(typeshed),
+        Err(error) => Err(anyhow!("{error:#}")),
+    }
+}
+
+/// This is a workaround for bundled typeshed incorrectly taking precedence over
+/// stubs manually put at the beginning of the search path.
+/// See https://typing.python.org/en/latest/spec/distributing.html#import-resolution-ordering.
+/// Note that you need to set both the PYREFLY_STDLIB_SEARCH_PATH environment variable AND
+/// --search-path/SEARCH_PATH for this workaround to be effective.
+pub fn stdlib_search_path() -> Option<PathBuf> {
+    env::var_os("PYREFLY_STDLIB_SEARCH_PATH").map(|path| Path::new(&path).to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::module::bundled::assert_bundle_order_independent;
+
+    #[test]
+    fn test_typeshed_materialize() {
+        let typeshed = typeshed().unwrap();
+        let path = typeshed.materialized_path_on_disk().unwrap();
+        // Do it twice, to check that works.
+        typeshed.materialized_path_on_disk().unwrap();
+        typeshed.write(&path).unwrap();
+    }
+
+    #[test]
+    fn test_typeshed_lookup_is_file_order_independent() {
+        let typeshed = typeshed().unwrap();
+        assert_bundle_order_independent(typeshed.load_map().map(|(path, contents)| BundleFile {
+            import_path: path.clone(),
+            storage_path: path.clone(),
+            contents: contents.as_str().to_owned(),
+        }));
+    }
+}

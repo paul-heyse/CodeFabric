@@ -1098,7 +1098,7 @@ async fn validate_handshake(
     if acknowledgement.protocol_major != 1
         || acknowledgement.protocol_minor != 0
         || acknowledgement.negotiated_feature_bits != REQUIRED_FEATURE_BITS | OPTIONAL_FEATURE_BITS
-        || acknowledgement.sidecar_build != "codefabric-pyrefly-sidecar 0.1.0"
+        || acknowledgement.sidecar_build != "codefabric-pyrefly-sidecar 0.1.0+configured-context-v1"
         || acknowledgement.pyrefly_source_digest != PYREFLY_SOURCE_DIGEST
         || acknowledgement.observation_schema_digests != relation_schema_digests
         || acknowledgement.maximum_frame_bytes != 4 * 1024 * 1024
@@ -2880,6 +2880,44 @@ mod tests {
         validate_handshake(&mut client, &sandbox_profile_digest)
             .await
             .unwrap();
+        // Cross the real deployed context and Arrow protocol boundaries; process startup
+        // alone cannot detect a checker which ignores the configured Python version.
+        let source = b"import sys\ndef previous() -> int:\n    return 1\ndef current() -> str:\n    return 'current'\nif sys.version_info < (3, 14):\n    selected = previous\nelse:\n    selected = current\nvalue = selected()\n";
+        let mut input = test_workspace_input(directory.path(), b"{}");
+        std::fs::write(&input.modules[0].source_blob_path, source).unwrap();
+        input.modules[0].content_digest = b3(source);
+        let manifest = serde_json::to_vec(&serde_json::json!({
+            "context_kind": "python", "python_language_version": "3.14",
+            "implementation_profile": "cpython-semantics", "platform_tag": "linux",
+            "module_roots": ["workspace"], "source_roots": [], "stub_roots": [], "dependency_roots": [],
+            "namespace_package_policy": "pep420", "import_precedence": ["explicit-stub-roots", "workspace-module-roots", "workspace-source-roots", "authorized-dependency-roots", "typeshed-stdlib", "typeshed-third-party"],
+            "typeshed_bundle_digest": null, "lockfile_artifacts": [], "project_config_artifacts": [],
+            "pyrefly_bundle_digest": null, "ruff_bundle_digest": b3(b"fixture-ruff"),
+            "provider_bundle_version": "configured-context-v1", "platforms": ["linux"],
+            "root_bindings": [{"root_id": "workspace", "relative_path": [46]}],
+            "module_map": [{"module_name": "module", "file_id": input.modules[0].file_id,
+                "relative_path": b"module.py".as_slice(), "root_id": "workspace", "is_stub": false, "is_package": false}],
+            "configuration_namespace": [46], "configuration_roots": [{"root_id": "workspace", "relative_path": [46]}],
+            "configuration_policy_identity": vec![1; 32]
+        })).unwrap();
+        input.context_manifest = manifest.clone();
+        let inventory = crate::provider_contracts::ProviderSourceInventory::try_new(
+            [1; 16], 1, [2; 32], &[b"module.py".to_vec()],
+            vec![crate::provider_contracts::ProviderInventoryMember {
+                relative_path: b"module.py".to_vec(),
+                disposition: crate::provider_contracts::ProviderInputDisposition::Captured {
+                    file_id: [4; 16], digest: *blake3::hash(source).as_bytes(), byte_length: source.len() as u64,
+                }, selected_for_provider: true,
+            }], vec![b"module.py".to_vec()], None,
+        ).unwrap();
+        let (job, _cancel) = test_inventory_job(&manifest, 1, inventory);
+        let request = request_from_job(&job, &input, &sandbox_profile_digest, Duration::from_secs(30)).unwrap();
+        let accepted = analyze_pyrefly_uds_inner(client.clone(), &request, Arc::new(AtomicBool::new(false)), None).await.unwrap();
+        assert_eq!(accepted.modules.len(), 1);
+        let targets = accepted.modules[0].relations.iter().find(|r| r.relation == PyreflyRelation::CallTarget).unwrap();
+        let targets = targets.batch.column_by_name("qualified_target").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(targets.iter().collect::<Vec<_>>(), [Some("module.current")]);
+        PyreflyProviderRunResult::try_new(&job, accepted).unwrap();
         assert!(
             client
                 .shutdown(ShutdownRequest {

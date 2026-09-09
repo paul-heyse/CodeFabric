@@ -52,6 +52,7 @@ pub(crate) struct ModuleInput {
     pub file_id: String,
     pub source_path: PathBuf,
     pub source_digest: String,
+    pub source_byte_length: u64,
 }
 
 /// Complete selected modules, distinct from optional changed-work hints.
@@ -252,6 +253,61 @@ fn provider_module_path(root: &Path, module_name: &str) -> Result<PathBuf, Strin
     Ok(path)
 }
 
+fn read_module_source(module: &ModuleInput) -> Result<Vec<u8>, String> {
+    use rustix::fs::{Mode, OFlags};
+    use std::io::Read as _;
+    let invalid = || "Pyrefly source is not a bounded immutable regular file".to_owned();
+    if module.file_id.is_empty()
+        || !module.source_path.is_absolute()
+        || module.source_byte_length > 8 * 1024 * 1024
+    {
+        return Err(invalid());
+    }
+    let mut directory = rustix::fs::open(
+        "/",
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::DIRECTORY,
+        Mode::empty(),
+    )
+    .map_err(|_| invalid())?;
+    let parent = module.source_path.parent().ok_or_else(invalid)?;
+    for component in parent.components() {
+        match component {
+            std::path::Component::RootDir => {}
+            std::path::Component::Normal(name) => {
+                directory = rustix::fs::openat(
+                    &directory,
+                    name,
+                    OFlags::RDONLY | OFlags::CLOEXEC | OFlags::DIRECTORY | OFlags::NOFOLLOW,
+                    Mode::empty(),
+                )
+                .map_err(|_| invalid())?;
+            }
+            _ => return Err(invalid()),
+        }
+    }
+    let descriptor = rustix::fs::openat(
+        &directory,
+        module.source_path.file_name().ok_or_else(invalid)?,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|_| invalid())?;
+    let file = std::fs::File::from(descriptor);
+    let metadata = file.metadata().map_err(|_| invalid())?;
+    if !metadata.is_file() || metadata.len() != module.source_byte_length {
+        return Err(invalid());
+    }
+    let mut bytes =
+        Vec::with_capacity(usize::try_from(module.source_byte_length).map_err(|_| invalid())?);
+    file.take(module.source_byte_length + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| invalid())?;
+    if bytes.len() as u64 != module.source_byte_length || b3(&bytes) != module.source_digest {
+        return Err(invalid());
+    }
+    Ok(bytes)
+}
+
 fn write_provider_source(target: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = target
         .parent()
@@ -365,18 +421,22 @@ impl SemanticContext {
         if run.provider_run_id.is_empty() || run.analysis_context_id.is_empty() {
             return Err("Pyrefly run identity is incomplete".to_owned());
         }
-        if modules.iter().any(|module| {
-            module.file_id.is_empty()
-                || !module.source_path.is_absolute()
-                || !module.source_path.is_file()
-                || b3(&std::fs::read(&module.source_path).unwrap_or_default())
-                    != module.source_digest
-        }) {
-            return Err(
-                "Pyrefly source paths and digests must identify existing immutable files"
-                    .to_owned(),
-            );
+        if modules.len() > 64
+            || modules
+                .iter()
+                .try_fold(0_u64, |sum, module| {
+                    sum.checked_add(module.source_byte_length)
+                })
+                .is_none_or(|bytes| bytes > 64 * 1024 * 1024)
+        {
+            return Err("Pyrefly complete source inventory exceeds its byte/module bound".into());
         }
+        // Capture each immutable input once, before mutating retained checker state.
+        // The same verified bytes feed the private source view and result positions.
+        let source_bytes = modules
+            .iter()
+            .map(read_module_source)
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Resolve the complete selected module map before any retained-state mutation.
         let provider_paths = modules
@@ -418,9 +478,7 @@ impl SemanticContext {
         let mut created = Vec::new();
         let mut modified = Vec::new();
         let mut resolved = Vec::with_capacity(modules.len());
-        for (module, target) in modules.iter().zip(&provider_paths) {
-            let bytes = std::fs::read(&module.source_path)
-                .map_err(|error| format!("read admitted Pyrefly source: {error}"))?;
+        for ((module, target), bytes) in modules.iter().zip(&provider_paths).zip(&source_bytes) {
             match self.loaded.get(&module.module_name) {
                 Some(loaded)
                     if loaded.module_id != module.module_id || loaded.provider_path != *target =>
@@ -432,11 +490,11 @@ impl SemanticContext {
                 }
                 Some(loaded) if loaded.source_digest == module.source_digest => {}
                 Some(_) => {
-                    write_provider_source(target, &bytes)?;
+                    write_provider_source(target, bytes)?;
                     modified.push(target.clone());
                 }
                 None => {
-                    write_provider_source(target, &bytes)?;
+                    write_provider_source(target, bytes)?;
                     created.push(target.clone());
                 }
             }
@@ -468,15 +526,14 @@ impl SemanticContext {
             .iter()
             .zip(resolved)
             .zip(provider_paths)
-            .map(|((module, (name, path)), provider_path)| {
-                let source = std::fs::read(&module.source_path)
-                    .map_err(|error| format!("read admitted Pyrefly source: {error}"))?;
+            .zip(&source_bytes)
+            .map(|(((module, (name, path)), provider_path), source)| {
                 analyze_loaded_module(LoadedModuleAnalysisInput {
                     query: &self.query,
                     run,
                     diagnostics: &diagnostics,
                     module,
-                    source: &source,
+                    source,
                     provider_path: &provider_path,
                     name,
                     path,
@@ -1360,7 +1417,54 @@ mod tests {
             file_id: format!("file:{name}"),
             source_path,
             source_digest: b3(source),
+            source_byte_length: source.len() as u64,
         }
+    }
+
+    #[test]
+    fn immutable_source_rejection_precedes_checker_mutation() {
+        use std::os::unix::fs::symlink;
+        let root = claim_001_temp_root("bounded-source");
+        std::fs::create_dir_all(&root).unwrap();
+        let module = inventory_module(&root, "main", b"value = 1\n");
+        assert_eq!(read_module_source(&module).unwrap(), b"value = 1\n");
+        let mut context = SemanticContext::test_only_fixture(&root, "source-check").unwrap();
+        context
+            .analyze_modules(&inventory_run(1), &complete([module.clone()]))
+            .unwrap();
+        let mut changed = module.clone();
+        changed.source_digest = b3(b"different");
+        assert!(
+            context
+                .analyze_modules(&inventory_run(2), &complete([changed.clone()]))
+                .is_err()
+        );
+        assert_eq!(context.loaded["main"].source_digest, module.source_digest);
+        changed = module.clone();
+        changed.source_byte_length += 1;
+        assert!(read_module_source(&changed).is_err());
+        changed.source_byte_length = 8 * 1024 * 1024 + 1;
+        assert!(read_module_source(&changed).is_err());
+        changed = module.clone();
+        changed.source_path = root.join("linked.py");
+        symlink(&module.source_path, &changed.source_path).unwrap();
+        assert!(read_module_source(&changed).is_err());
+        let parent_link = root.join("linked-parent");
+        symlink(&root, &parent_link).unwrap();
+        changed.source_path = parent_link.join(module.source_path.file_name().unwrap());
+        assert!(read_module_source(&changed).is_err());
+        changed.source_path = root.clone();
+        assert!(read_module_source(&changed).is_err());
+        changed.source_path = root.join("pipe");
+        rustix::fs::mkfifoat(
+            rustix::fs::CWD,
+            &changed.source_path,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .unwrap();
+        assert!(read_module_source(&changed).is_err());
+        drop(context);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn inventory_run(generation: u64) -> AnalysisRunIdentity {
@@ -1409,7 +1513,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_python_runtime_rejects_unsupported_and_retains_explicit_selection() {
+    fn selected_python_runtime_changes_real_call_targets_and_survives_reconstruction() {
         let source = b"import sys\ndef previous() -> int:\n    return 1\ndef current_linux() -> str:\n    return 'linux'\ndef current_darwin() -> bool:\n    return True\nif sys.version_info < (3, 14):\n    selected = previous\nelif sys.platform == 'darwin':\n    selected = current_darwin\nelse:\n    selected = current_linux\nvalue = selected()\n";
         for (version, platform, expected) in [
             ("3.13", "linux", "main.previous"),
@@ -1420,17 +1524,8 @@ mod tests {
             let root = claim_001_temp_root(&format!("selected-{version}-{platform}"));
             std::fs::create_dir_all(&root).unwrap();
             let manifest = selected_fixture_manifest(version, platform);
-            let preparation = SelectedPyreflyPreparation::test_only_from_manifest(
-                &serde_json::to_vec(&manifest).unwrap(),
-            );
-            if version != "3.13" || platform != "linux" {
-                assert!(
-                    matches!(preparation, Err(preparation::PreparationError::Unavailable(ref reasons)) if reasons.contains(&preparation::PreparationRemainder::QueryRuntimeSelectionUnavailable))
-                );
-                assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
-                std::fs::remove_dir_all(root).unwrap();
-                continue;
-            }
+            let preparation =
+                SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap());
             let preparation = preparation.unwrap();
             let mut context = SemanticContext::new(&root, "selected-context", preparation).unwrap();
             let module = inventory_module(&root, "main", source);
@@ -1682,6 +1777,7 @@ mod tests {
                 .expect("Claim 001 file ID")
                 .to_owned(),
             source_path: admitted_path.to_owned(),
+            source_byte_length: std::fs::metadata(admitted_path).unwrap().len(),
             source_digest: source["content_digest"]
                 .as_str()
                 .expect("Claim 001 content digest")
@@ -1867,6 +1963,7 @@ mod tests {
             file_id: "file:incremental".to_owned(),
             source_path: source_path.clone(),
             source_digest: b3(source),
+            source_byte_length: source.len() as u64,
         };
         let run_for = |generation| AnalysisRunIdentity {
             provider_run_id: format!("run:incremental:{generation}"),
@@ -1945,6 +2042,7 @@ mod tests {
             file_id: "file:wp65-retained".to_owned(),
             source_path: source_path.clone(),
             source_digest: b3(source),
+            source_byte_length: source.len() as u64,
         };
         let run_for = |generation| AnalysisRunIdentity {
             provider_run_id: format!("run:wp65-retained:{generation}"),
@@ -2072,6 +2170,7 @@ mod tests {
             file_id: "file:C".to_owned(),
             source_path,
             source_digest: b3(source),
+            source_byte_length: source.len() as u64,
         };
         let mut context = SemanticContext::test_only_fixture(&root, "fixture-context").unwrap();
         let result = context.analyze_modules(&run, &complete([module])).unwrap();

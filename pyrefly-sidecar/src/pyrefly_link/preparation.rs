@@ -1,7 +1,5 @@
-//! Selected context ingress and the unresolved provider-installation boundary.
-//!
-//! A manifest digest proves bytes, not installed bundles or filesystem authority. WP81
-//! must supply those authorities before this boundary can construct a production context.
+//! Selected context ingress for the pinned checker and its embedded stub bundles.
+//! Source lease and per-module digest checks are enforced by the serving boundary.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -9,7 +7,7 @@ use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
 use pyrefly_config::config::{ConfigFile, ConfigSource};
-use pyrefly_python::sys_info::{PythonPlatform, PythonVersion, SysInfo};
+use pyrefly_python::sys_info::{PythonPlatform, PythonVersion};
 use serde::Deserialize;
 
 const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
@@ -30,14 +28,12 @@ pub(crate) const UNAVAILABLE_DETAILS: &[u8] = b"codefabric.pyrefly.preparation-u
 pub(crate) enum PreparationRemainder {
     TypeshedBundleAuthorityUnavailable,
     PyreflyBundleAuthorityUnavailable,
-    SourceRootLeaseAuthorityUnavailable,
     CheckerConfigurationAuthorityUnavailable,
     DependencyRootAuthorityUnavailable,
     UnsupportedImplementationProfile,
     UnsupportedNamespaceOrImportPolicy,
     UnsupportedPythonVersion,
     UnsupportedPlatforms,
-    QueryRuntimeSelectionUnavailable,
     AmbiguousModuleSelection,
 }
 
@@ -132,13 +128,29 @@ impl SelectedPyreflyPreparation {
     pub(crate) fn from_manifest(bytes: &[u8]) -> Result<Self, PreparationError> {
         let selected = Self::parse(bytes)?;
         let mut remainders = selected.unsupported_settings();
-        // Neither a caller-supplied b3 label nor an upstream SHA256 constant proves
-        // the BLAKE3 bundle identity in this manifest. No production bypass exists.
-        remainders.extend([
-            PreparationRemainder::TypeshedBundleAuthorityUnavailable,
-            PreparationRemainder::PyreflyBundleAuthorityUnavailable,
-            PreparationRemainder::SourceRootLeaseAuthorityUnavailable,
-        ]);
+        // None explicitly selects the pinned checker's embedded defaults. An
+        // external digest must match the actual selected bundle, never a claimed
+        // source label. Runtime provider identity also binds the checker release.
+        if selected
+            .manifest
+            .typeshed_bundle_digest
+            .as_ref()
+            .is_some_and(|expected| {
+                bundled_typeshed_digest() != Ok(expected)
+            })
+        {
+            remainders.push(PreparationRemainder::TypeshedBundleAuthorityUnavailable);
+        }
+        if selected
+            .manifest
+            .pyrefly_bundle_digest
+            .as_ref()
+            .is_some_and(|expected| {
+                expected != &format!("b3:{}", crate::PYREFLY_LOCK_SOURCE_BLAKE3)
+            })
+        {
+            remainders.push(PreparationRemainder::PyreflyBundleAuthorityUnavailable);
+        }
         if !selected.manifest.project_config_artifacts.is_empty() {
             remainders.push(PreparationRemainder::CheckerConfigurationAuthorityUnavailable);
         }
@@ -148,7 +160,11 @@ impl SelectedPyreflyPreparation {
         {
             remainders.push(PreparationRemainder::DependencyRootAuthorityUnavailable);
         }
-        Err(PreparationError::Unavailable(remainders))
+        if remainders.is_empty() {
+            Ok(selected)
+        } else {
+            Err(PreparationError::Unavailable(remainders))
+        }
     }
 
     fn parse(bytes: &[u8]) -> Result<Self, PreparationError> {
@@ -218,15 +234,6 @@ impl SelectedPyreflyPreparation {
                 && self.manifest.platforms.iter().any(|p| p == "all"))
         {
             result.push(PreparationRemainder::UnsupportedPlatforms);
-        }
-        // Query 1.2.0 owns a private default SysInfo and makes every Handle from it,
-        // ignoring ConfigFile's runtime. The selected Handle/State bridge is WP81.
-        if SysInfo::new(
-            self.version,
-            PythonPlatform::new_many(self.manifest.platforms.clone()),
-        ) != SysInfo::default()
-        {
-            result.push(PreparationRemainder::QueryRuntimeSelectionUnavailable);
         }
         let mut names = BTreeSet::new();
         if self
@@ -327,6 +334,40 @@ impl SelectedPyreflyPreparation {
         selected.synthetic_fixture_modules = true;
         selected
     }
+}
+
+fn bundled_typeshed_digest() -> Result<&'static String, &'static str> {
+    use pyrefly::module::bundled::BundledStub;
+    static DIGEST: std::sync::OnceLock<Result<String, &'static str>> = std::sync::OnceLock::new();
+    DIGEST
+        .get_or_init(|| {
+            let stdlib =
+                pyrefly::module::typeshed::typeshed().map_err(|_| "bundled stdlib unavailable")?;
+            let third_party = pyrefly::module::typeshed_third_party::typeshed_third_party()
+                .map_err(|_| "bundled third-party stubs unavailable")?;
+            let mut hash = blake3::Hasher::new();
+            hash.update(b"codefabric.pyrefly.embedded-typeshed.v1\0");
+            for (kind, mut files) in [
+                (b"stdlib".as_slice(), stdlib.load_map().collect::<Vec<_>>()),
+                (
+                    b"third-party".as_slice(),
+                    third_party.load_map().collect::<Vec<_>>(),
+                ),
+            ] {
+                files.sort_by_key(|(path, _)| *path);
+                hash.update(kind);
+                for (path, contents) in files {
+                    let name = path.to_string_lossy();
+                    hash.update(&(name.len() as u64).to_be_bytes());
+                    hash.update(name.as_bytes());
+                    hash.update(&(contents.len() as u64).to_be_bytes());
+                    hash.update(contents.as_bytes());
+                }
+            }
+            Ok(format!("b3:{}", hash.finalize().to_hex()))
+        })
+        .as_ref()
+        .map_err(|error| *error)
 }
 
 fn valid_path(path: &[u8], directory: bool) -> bool {
@@ -497,21 +538,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selected_context_rejects_missing_and_unproved_bundle_authority() {
+    fn selected_context_accepts_embedded_bundles_and_rejects_substitution() {
         let mut manifest: serde_json::Value =
             serde_json::from_slice(&test_manifest("3.14", "darwin")).unwrap();
-        for supplied in [false, true] {
-            if supplied {
-                manifest["typeshed_bundle_digest"] = super::super::b3(b"unproved-typeshed").into();
-                manifest["pyrefly_bundle_digest"] = super::super::b3(b"unproved-pyrefly").into();
-            }
-            let error =
-                SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
-                    .unwrap_err();
-            assert!(
-                matches!(error, PreparationError::Unavailable(ref reasons) if reasons.contains(&PreparationRemainder::TypeshedBundleAuthorityUnavailable) && reasons.contains(&PreparationRemainder::PyreflyBundleAuthorityUnavailable) && reasons.contains(&PreparationRemainder::SourceRootLeaseAuthorityUnavailable))
-            );
-        }
+        assert!(
+            SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                .is_ok()
+        );
+        manifest["typeshed_bundle_digest"] = bundled_typeshed_digest().unwrap().clone().into();
+        manifest["pyrefly_bundle_digest"] =
+            format!("b3:{}", crate::PYREFLY_LOCK_SOURCE_BLAKE3).into();
+        assert!(
+            SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                .is_ok()
+        );
+        manifest["typeshed_bundle_digest"] = super::super::b3(b"different-typeshed").into();
+        manifest["pyrefly_bundle_digest"] = super::super::b3(b"different-pyrefly").into();
+        assert!(
+            matches!(SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap()),
+            Err(PreparationError::Unavailable(ref reasons)) if reasons.contains(&PreparationRemainder::TypeshedBundleAuthorityUnavailable) && reasons.contains(&PreparationRemainder::PyreflyBundleAuthorityUnavailable))
+        );
     }
 
     #[test]
@@ -580,8 +626,6 @@ mod tests {
         let root = super::super::tests::claim_001_temp_root("selected-config-projection");
         std::fs::create_dir_all(root.join("typings")).unwrap();
         for (version, platform) in [("3.13", "linux"), ("3.14", "darwin")] {
-            // Inspect the configuration projection independently of Query's unsupported
-            // runtime seam. This does not grant authority to create a semantic context.
             let selected =
                 SelectedPyreflyPreparation::parse(&test_manifest(version, platform)).unwrap();
             let config = selected.config_for_root(&root).unwrap();

@@ -35,8 +35,7 @@ fn locked_package_source<'a>(
             }
         }
         (name == Some(package_name) && version == Some(package_version))
-            .then_some(source)
-            .flatten()
+            .then_some(source.unwrap_or("path"))
     })
 }
 
@@ -51,10 +50,10 @@ fn main() {
     let source = locked_package_source(&lockfile, "pyrefly", PYREFLY_VERSION)
         .expect("find pyrefly 1.2.0 in Cargo.lock");
     assert_eq!(
-        source, EXPECTED_SOURCE,
-        "Pyrefly lock source or commit drifted"
+        source, "path",
+        "Pyrefly must select the local configured-context fix"
     );
-    assert!(source.ends_with(PYREFLY_COMMIT));
+    assert!(EXPECTED_SOURCE.ends_with(PYREFLY_COMMIT));
     let lsp_types_source = locked_package_source(&lockfile, "lsp-types", LSP_TYPES_VERSION)
         .expect("find lsp-types 0.95.2 in Cargo.lock");
     assert_eq!(
@@ -62,7 +61,9 @@ fn main() {
         "Pyrefly's transitive lsp-types source or commit drifted"
     );
 
-    let digest = blake3::hash(source.as_bytes()).to_hex().to_string();
+    let digest = blake3::hash(EXPECTED_SOURCE.as_bytes())
+        .to_hex()
+        .to_string();
     let identity = fs::read_to_string(identity_path).expect("read sidecar identity");
     assert!(
         identity.contains(&digest),

@@ -4,7 +4,7 @@ Updated 2026-09-09. Current work is in `/home/paul/CodeFabric` on `master`.
 
 ## Current handoff
 
-**Production implementation is active; outcomes 1–2 are complete and outcome 3 is next.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). All four existing golden cases pass: startup, Python serving, persisted reopen and cancellation. All 33 affected store/executor and lost-acknowledgement recovery tests pass. New activation uses compact published-candidate validation instead of nine proof histories. Outcomes 3–8 remain open; these tests do not establish mixed-language semantic completeness.
+**Production implementation is active. Outcomes 1–3 are implemented for the current Linux workflow; outcome 4 is in progress and outcomes 5–8 remain open.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). The four existing golden cases pass. Pyrefly now honors selected Python version/platform settings through its real sidecar protocol; daemon publication still needs semantic-provider integration. These checks do not establish mixed-language or full-product completion.
 
 Current production work, 2026-09-08–09:
 
@@ -28,7 +28,7 @@ Outcome 2 is complete. The unused activation proof adapters, nine-history reader
 
 Validation on 2026-09-09: 69 affected provider/admission/reconciliation/catalog/child-view/producer tests and all four golden daemon scenarios pass. The isolated `data-fabric` compile and `just feature-architecture-check data-fabric` pass. Its existing native dependency expectations were aligned with `arrow-json` and `buoyant_kernel`; no dependency was changed or downgraded. All 20 feature-architecture tooling tests pass. Structural rule fixtures pass (30), but `just governance-scan` still reports two unchanged direct source reads at `source_image.rs:1805` and `pyrefly_service.rs:1241`. These remain open for source/provider boundary work; the full suite is not claimed green.
 
-Next: outcome 3's reduced resource ownership and native-patch cleanup, including the source-read findings, followed by actual Python/Rust semantic-provider integration, scoped progress and live updates. Retained catalog histories are recovery/explanation inputs; reducing redundant history writes belongs to outcome 8. All full-product fact families and query forms remain required.
+The resource and source-read work described below supersedes those earlier findings. Next is actual Python/Rust semantic-provider integration, scoped progress and live updates. Retained catalog histories are recovery/explanation inputs; reducing redundant history writes belongs to outcome 8. All full-product fact families and query forms remain required.
 
 The [consolidated review](docs/reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md) and [selected domain documents](docs/spec_index/README.md) define the revised target. All Python/Rust fact families and eight query forms remain scope. First-release delivery, complete-product delivery and preparation readiness are different claims.
 
@@ -63,6 +63,29 @@ golden cases pass with this behavior. RSS is sampled on Linux; other platforms r
 unavailable, not zero. Sampling cannot guarantee immunity from OOM. Provider containment,
 shared pools, work/result bounds and physical disk headroom remain in place. Full mixed-language
 provider wiring and sustained retention/performance are outcomes 4–8, still open.
+
+## Outcome 4 — selected Pyrefly context preparation
+
+Pyrefly 1.2.0's Query ignored configured runtime selection by retaining default system
+information. A narrow local dependency fix now creates handles with the selected file
+configuration's system information. The sidecar keeps the same pinned sibling dependencies;
+its handshake identifies the configured-context implementation so an old binary is rejected.
+A null bundle selection uses the pinned embedded bundles; an explicit mismatching bundle is
+rejected. External dependency/stub roots and project configuration preparation remain open.
+
+The deployed context path now accepts supported contexts. Source blobs are read once with
+bounded size, no-follow components, regular-file and exact digest checks before checker-state
+mutation. The same bytes drive checker input and result positions. Source substitution,
+symlinks and FIFOs cannot silently change a selected input.
+
+Validation on 2026-09-09: all 29 sidecar tests and `just sidecar-check` (compile and strict
+Clippy) pass. All 10 root Pyrefly service tests pass with the rebuilt sidecar binary. The
+real-process test now analyzes a version-dependent call through UDS and validates the Arrow
+answer `module.current` for Python 3.14 before joined shutdown. Sidecar tests independently
+cover 3.13/3.14 and Linux/Darwin selection, deletion/recreation and rejected source mutation.
+This demonstrates the provider boundary, not daemon catalog publication or containment.
+The Linux sandbox's compiled seccomp/escape-probe path remains unimplemented; production
+provider wiring must preserve that distinction. Outcomes 4–8 remain open.
 
 ## Completed preparation
 
@@ -102,6 +125,6 @@ The earlier closeout at `0cc7242` recorded a passing root check and 1,038 root t
 
 ## Remaining production work
 
-Replace generalized runtime proof/resource machinery at its consumers, complete actual semantic contributions from Python and Rust, implement query-relevant processing remainder, live invalidation/publication and quiet convergence, then finish all analyses/forms and sustained bounded operation with safe retention and measured performance.
+Complete actual semantic contributions from Python and Rust, implement query-relevant processing remainder, live invalidation/publication and quiet convergence, then finish all analyses/forms and sustained bounded operation with safe retention and measured performance.
 
-The mixed-language public-answer adapter, real convergence/rebuild callbacks, obsolete-completion controls and phase-specific runtime telemetry are tied to these production changes and explicitly scheduled in the production plan. Prepared fixtures and harness unit tests do not imply those behaviors work. Existing native patches remain selected until production consumers are replaced and useful fixes preserved.
+The mixed-language public-answer adapter, real convergence/rebuild callbacks, obsolete-completion controls and phase-specific runtime telemetry are tied to these production changes and explicitly scheduled in the production plan. Prepared fixtures and harness unit tests do not imply those behaviors work. Native receipt forks have been removed; the new Pyrefly context fix remains a selected local dependency.
