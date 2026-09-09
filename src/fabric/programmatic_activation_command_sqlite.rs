@@ -1,8 +1,8 @@
 //! Durable activation-command inputs and temporal reconciliation state.
 //!
 //! SQLite owns command-scoped immutable input rows and reconciliation progress only. It never
-//! owns semantic current. Candidate and proof authority remain the exact sealed programmatic
-//! epoch (whose relation versions are Delta pins) and its computed Arrow proof relations.
+//! owns semantic current. The candidate is the exact sealed programmatic epoch with its
+//! Delta version pins; publication validation belongs to the activation coordinator.
 
 use std::fs::{self, File};
 use std::num::TryFromIntError;
@@ -28,7 +28,7 @@ use super::activation::{
 use super::activation_transaction::{
     ActivationAdmissionPosture, ActivationAppendUnknownReason, ActivationReadbackViolation,
     ActivationReconciliationReason, ActivationReconciliationTicket, ActivationTransactionStage,
-    CandidateProofRequest, DurableSelectionKnowledge,
+    DurableSelectionKnowledge,
 };
 use super::admission::AdmissionError;
 use super::command::{
@@ -39,14 +39,11 @@ use super::command::{
 use super::command_actor::CommandPortError;
 use super::delta_exact::ExactDeltaPin;
 use super::programmatic_activation_command_ports::{
-    ActivationCandidateProofEvidence, ActivationCandidateProofObservation,
-    ActivationCandidateProofRelationsPort, ActivationCommandRequestKey,
-    ActivationCommandRequestMaterial, ActivationCommandStateStore,
+    ActivationCommandRequestKey, ActivationCommandRequestMaterial, ActivationCommandStateStore,
     ActivationNotSelectedClassification, ActivationNotSelectedClassificationQuery,
     ActivationReconciliationRead, ActivationReconciliationRecord, ActivationReconciliationWrite,
 };
 use super::programmatic_epoch::{ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder};
-use super::proof::{ProofRelations, ProofTerminalStatus};
 
 /// Exact schema version for the dedicated temporal activation-command store.
 pub const ACTIVATION_COMMAND_STATE_SCHEMA_VERSION: u32 = 2;
@@ -79,133 +76,6 @@ CREATE TABLE activation_command_reconciliation (
 ) WITHOUT ROWID, STRICT;
 PRAGMA application_id = 1128677715;
 PRAGMA user_version = 2;";
-
-/// Failure while binding one sealed candidate and computed proof relation census.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-pub enum ExactProgrammaticActivationInputError {
-    #[error("candidate epoch identity differs from activation pins")]
-    CandidateEpochMismatch,
-    #[error("candidate exact Delta version-set reference differs from activation pins")]
-    CandidateTableVersionMismatch,
-    #[error("computed proof relations differ from activation candidate pins")]
-    ProofCandidateMismatch,
-    #[error("passing proof relations require the exact nonzero proof receipt")]
-    PassingProofReceiptMismatch,
-    #[error("non-passing proof relations require one explicit diagnostic and no receipt")]
-    NonPassingProofPosture,
-    #[error("integrity diagnostic uses the all-zero sentinel")]
-    ZeroIntegrityDiagnostic,
-}
-
-/// One immutable production authority over computed Arrow proof rows for exact candidate pins.
-///
-/// This is deliberately not a mutable registry. Candidate epoch reconstruction is a separate
-/// exact-Delta port so a process restart never depends on retaining an `Arc` from the prior
-/// process.
-pub struct ExactProgrammaticActivationProofAuthority {
-    workspace_id: WorkspaceId,
-    pins: FabricEpochPins,
-    relations: Arc<ProofRelations>,
-    proof_receipt: Option<super::command::ProofReceiptRef>,
-    proof_diagnostic: Option<DiagnosticRef>,
-    integrity_diagnostic: DiagnosticRef,
-}
-
-impl std::fmt::Debug for ExactProgrammaticActivationProofAuthority {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ExactProgrammaticActivationProofAuthority")
-            .field("workspace_id", &self.workspace_id)
-            .field("candidate_epoch", &self.pins.epoch)
-            .field("terminal", &self.relations.terminal())
-            .finish_non_exhaustive()
-    }
-}
-
-impl ExactProgrammaticActivationProofAuthority {
-    /// Bind the exact candidate pins, computed proof rows, and terminal projection.
-    ///
-    /// # Errors
-    ///
-    /// Rejects any candidate/Delta/proof pin drift or an invalid receipt/diagnostic posture.
-    #[allow(clippy::too_many_arguments)]
-    pub fn try_new(
-        workspace_id: WorkspaceId,
-        pins: FabricEpochPins,
-        relations: Arc<ProofRelations>,
-        proof_receipt: Option<super::command::ProofReceiptRef>,
-        proof_diagnostic: Option<DiagnosticRef>,
-        integrity_diagnostic: DiagnosticRef,
-    ) -> Result<Self, ExactProgrammaticActivationInputError> {
-        if !proof_pins_match(&relations, pins) {
-            return Err(ExactProgrammaticActivationInputError::ProofCandidateMismatch);
-        }
-        match relations.terminal() {
-            ProofTerminalStatus::Pass
-                if proof_receipt == Some(pins.proof_receipt) && proof_diagnostic.is_none() => {}
-            ProofTerminalStatus::Pass => {
-                return Err(ExactProgrammaticActivationInputError::PassingProofReceiptMismatch);
-            }
-            ProofTerminalStatus::Fail | ProofTerminalStatus::Unknown
-                if proof_receipt.is_none() && proof_diagnostic.is_some() => {}
-            ProofTerminalStatus::Fail | ProofTerminalStatus::Unknown => {
-                return Err(ExactProgrammaticActivationInputError::NonPassingProofPosture);
-            }
-        }
-        if integrity_diagnostic
-            .as_bytes()
-            .iter()
-            .all(|byte| *byte == 0)
-        {
-            return Err(ExactProgrammaticActivationInputError::ZeroIntegrityDiagnostic);
-        }
-        Ok(Self {
-            workspace_id,
-            pins,
-            relations,
-            proof_receipt,
-            proof_diagnostic,
-            integrity_diagnostic,
-        })
-    }
-
-    #[must_use]
-    pub const fn workspace_id(&self) -> WorkspaceId {
-        self.workspace_id
-    }
-
-    #[must_use]
-    pub const fn pins(&self) -> FabricEpochPins {
-        self.pins
-    }
-}
-
-#[async_trait]
-impl ActivationCandidateProofRelationsPort for ExactProgrammaticActivationProofAuthority {
-    async fn observe_candidate(
-        &self,
-        request: CandidateProofRequest,
-    ) -> ActivationCandidateProofObservation {
-        if request.workspace_id != self.workspace_id || request.pins != self.pins {
-            return ActivationCandidateProofObservation::Unavailable {
-                request,
-                diagnostic: self.integrity_diagnostic,
-            };
-        }
-        match ActivationCandidateProofEvidence::try_new(
-            request,
-            Arc::clone(&self.relations),
-            self.proof_receipt,
-            self.proof_diagnostic,
-        ) {
-            Ok(evidence) => ActivationCandidateProofObservation::Evaluated(evidence),
-            Err(_) => ActivationCandidateProofObservation::Unavailable {
-                request,
-                diagnostic: self.integrity_diagnostic,
-            },
-        }
-    }
-}
 
 /// Exact durable inputs needed to reconstruct a forward activation candidate after restart.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -269,22 +139,6 @@ where
         }
         Ok(Arc::new(candidate))
     }
-}
-
-fn proof_pins_match(relations: &ProofRelations, activation: FabricEpochPins) -> bool {
-    let proof = relations.candidate_pins();
-    proof.epoch == activation.epoch
-        && proof.input_release == activation.input_release
-        && proof.program_release == activation.program_release
-        && proof.application_release == activation.application_release
-        && proof.source_authority == activation.source_authority
-        && proof.source_generation == activation.source_generation
-        && proof.provider_release == activation.provider_release
-        && proof.provider_set == activation.provider_set
-        && proof.table_versions == activation.table_versions
-        && proof.overlay_segments == activation.overlay_segments
-        && proof.policy_set == activation.policy_set
-        && proof.resource_envelope == activation.resource_envelope
 }
 
 /// Stable policy for deriving command-scoped temporal diagnostic/evidence identities.

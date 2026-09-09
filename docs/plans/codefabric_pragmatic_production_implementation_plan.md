@@ -31,7 +31,7 @@ Reuse `tests/integration/daemon.rs` and the current `tooling/fastmcp4_modern_cli
 
 ## 3. Outcome 2 — Replace generalized proof execution with compact runtime records
 
-Depends on a working startup boundary; work alongside resource simplification where callers overlap. Inspect `src/semantic_release.rs`, `src/fabric/proof.rs` and `proof/`, `programmatic_schema.rs`, `programmatic_epoch.rs`, `programmatic_observation_delta.rs`, query/publication admission and their consumers.
+Depends on a working startup boundary; work alongside resource simplification where callers overlap. The legacy `src/fabric/proof.rs` and `proof/` are now removed. Relevant consumers are `src/semantic_release.rs`, `programmatic_schema.rs`, `programmatic_epoch.rs`, `programmatic_observation_delta.rs`, query/publication admission and their consumers.
 
 Use ordinary typed Rust builders, Arrow schemas, DataFusion plans and explicit configuration. Remove mandatory double execution, generalized expectation/fault/proof histories, fixed-point self-description and proof-language dependencies from startup/update/query acceptance. Keep boundary checks for schema, generation/context, identity endpoints, authorization, coverage and publication consistency.
 
@@ -41,7 +41,7 @@ Replace consumers before deleting code or changing persisted contracts. Classify
 
 **Done:** useful supported results publish without generalized proof execution, query completeness remains truthful, and recovery/explanation use compact records. Validate real corpus answers, publication failure/reopen and affected schema/wire compatibility. Track removed production/support code as an observation, not a quota.
 
-**Progress, 2026-09-09:** new activation uses compact published-candidate validation; proof-program construction and the nine mandatory activation proof histories are removed. Producer coverage validates its existing execution directly. Catalog publication validates schemas, identities and dependencies once instead of iterating to a self-observation fixed point. All four existing golden cases pass, as do the affected producer and catalog tests. Historical proof APIs and remaining observation-history consumers still require retirement or migration; outcome 2 is not yet complete.
+**Completed, 2026-09-09:** new activation uses compact candidate validation; the proof-program compiler, generalized proof engine, nine proof histories and obsolete proof-qualified capability APIs are removed. Producer coverage validates its existing execution directly. Catalog sealing validates the published schemas, identities and dependencies once. Transformation installation plans but does not execute; real reads enforce row/memory/spill limits with fresh execution state and preserve them through authorized view rebuilding. All four golden daemon cases, 69 affected Rust tests, the isolated data-fabric compile/feature check and 20 feature-validator tests pass. Catalog histories remain actual recovery/explanation inputs, with redundant-write reduction scheduled in outcome 8. This is completion of proof removal, not mixed-language semantic completeness or full-product certification.
 
 ## 4. Outcome 3 — Implement the reduced resource contract and shrink native patches
 
@@ -168,4 +168,4 @@ Old identifiers are navigation only. Preserve semantic and operational obligatio
 
 ## 12. Next action
 
-Outcome 1 is complete. Continue outcome 2 by replacing generalized activation proof histories with compact candidate validation records, then remove remaining generalized proof execution and resource consumers. Resolve engineering choices directly in this editable plan when new evidence matters. Another design, plan review or status-artifact cycle is not a prerequisite.
+Outcomes 1–2 are complete. Continue outcome 3: simplify native receipt/resource consumers while preserving real budgets, ownership, cancellation and cleanup, then retire admission-only patches. Fix the two source-read structural findings in `source_image.rs` and `pyrefly_service.rs` as those provider boundaries are integrated. Outcomes 4–8 remain required. Resolve engineering choices directly in this editable plan when new evidence matters. Another design, plan review or status-artifact cycle is not a prerequisite.

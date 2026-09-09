@@ -7,7 +7,6 @@ files:
   - src/fabric/programmatic_schema.rs
   - src/fabric/programmatic_epoch.rs
   - src/fabric/derived_producer_closure.rs
-  - src/fabric/proof.rs
   - src/fabric/delta_exact.rs
   - src/fabric/delta_write.rs
 rule:

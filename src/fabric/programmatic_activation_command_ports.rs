@@ -1,16 +1,14 @@
-//! Production activation-command resolution over explicit typed state and proof ports.
+//! Production activation-command resolution over explicit typed state.
 //!
 //! The adapters in this module deliberately do not own activation transaction sequencing.
 //! [`super::activation_transaction::ActivationTransactionCoordinator`] remains the only forward
 //! coordinator, and its recovery counterpart remains the only marker-driven recovery
-//! coordinator. This module supplies the two missing application-owned boundaries: immutable
-//! command/request and reconciliation state, and exact candidate proof relations.
+//! coordinator. This module supplies immutable command requests and reconciliation state.
 
 use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use thiserror::Error;
 
 use super::activation::{
     ActivationAttempt, ActivationControlRelationPin, ActivationEventId, CompatibilityClassRef,
@@ -21,19 +19,16 @@ use super::activation_command_effect::{
     PersistedActivationReconciliation, ResolvedActivationRecovery, ResolvedActivationTransaction,
 };
 use super::activation_transaction::{
-    ActivationCandidateProofPort, ActivationNotSelected, ActivationReconciliationTicket,
-    ActivationRecoveryRequest, ActivationTransactionRequest, CandidateProofOutcome,
-    CandidateProofRequest,
+    ActivationNotSelected, ActivationReconciliationTicket, ActivationRecoveryRequest,
+    ActivationTransactionRequest,
 };
 use super::command::{
-    CommandFailure, CommandRecord, DiagnosticRef, DurableCommandState, ExecutionOwner,
-    FabricCommand, ReconciliationEvidenceRef, ReductionContext, RetentionPolicyRef, TransactionRef,
-    UnknownCommit,
+    CommandFailure, CommandRecord, DurableCommandState, ExecutionOwner, FabricCommand,
+    ReconciliationEvidenceRef, ReductionContext, RetentionPolicyRef, TransactionRef, UnknownCommit,
 };
 use super::command_actor::CommandPortError;
 use super::command_effect_contract::reconciliation_attempt;
 use super::programmatic_epoch::ProgrammaticFabricEpoch;
-use super::proof::{ProofCandidatePins, ProofRelations, ProofTerminalStatus};
 
 /// Exact immutable command key used to resolve one activation candidate.
 ///
@@ -671,226 +666,6 @@ impl ActivationCommandStatePort for ExactActivationCommandState {
     }
 }
 
-/// A completed proof evaluation bound to one exact activation request.
-///
-/// A passing evaluation must carry the exact receipt already pinned by the candidate. Failed and
-/// unknown evaluations must carry an application-owned diagnostic and cannot carry a receipt.
-#[derive(Clone, Debug)]
-pub struct ActivationCandidateProofEvidence {
-    request: CandidateProofRequest,
-    relations: Arc<ProofRelations>,
-    proof_receipt: Option<super::command::ProofReceiptRef>,
-    diagnostic: Option<DiagnosticRef>,
-}
-
-impl ActivationCandidateProofEvidence {
-    /// Bind computed Arrow proof relations and their exact receipt/diagnostic projection.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ActivationCandidateProofEvidenceError`] when relation pins, terminal status,
-    /// proof receipt, or diagnostic posture contradict the activation request.
-    pub fn try_new(
-        request: CandidateProofRequest,
-        relations: Arc<ProofRelations>,
-        proof_receipt: Option<super::command::ProofReceiptRef>,
-        diagnostic: Option<DiagnosticRef>,
-    ) -> Result<Self, ActivationCandidateProofEvidenceError> {
-        if !proof_pins_match_request(&relations.candidate_pins(), &request.pins) {
-            return Err(ActivationCandidateProofEvidenceError::CandidatePinsMismatch);
-        }
-        match relations.terminal() {
-            ProofTerminalStatus::Pass => {
-                if proof_receipt != Some(request.pins.proof_receipt) {
-                    return Err(ActivationCandidateProofEvidenceError::ProofReceiptMismatch);
-                }
-                if diagnostic.is_some() {
-                    return Err(ActivationCandidateProofEvidenceError::UnexpectedDiagnostic);
-                }
-            }
-            ProofTerminalStatus::Fail | ProofTerminalStatus::Unknown => {
-                if proof_receipt.is_some() {
-                    return Err(ActivationCandidateProofEvidenceError::UnexpectedProofReceipt);
-                }
-                if diagnostic.is_none() {
-                    return Err(ActivationCandidateProofEvidenceError::MissingDiagnostic);
-                }
-            }
-        }
-        Ok(Self {
-            request,
-            relations,
-            proof_receipt,
-            diagnostic,
-        })
-    }
-
-    #[must_use]
-    pub const fn request(&self) -> CandidateProofRequest {
-        self.request
-    }
-
-    #[must_use]
-    pub const fn relations(&self) -> &Arc<ProofRelations> {
-        &self.relations
-    }
-}
-
-/// Rejected binding between an activation request and proof relations.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-pub enum ActivationCandidateProofEvidenceError {
-    #[error("proof relations were evaluated for different candidate pins")]
-    CandidatePinsMismatch,
-    #[error("passing proof relations do not carry the candidate's exact proof receipt")]
-    ProofReceiptMismatch,
-    #[error("a passing proof relation unexpectedly carries a failure diagnostic")]
-    UnexpectedDiagnostic,
-    #[error("a non-passing proof relation unexpectedly carries a proof receipt")]
-    UnexpectedProofReceipt,
-    #[error("a non-passing proof relation has no application-owned diagnostic")]
-    MissingDiagnostic,
-}
-
-/// Exact observation returned by the candidate-proof relation authority.
-///
-/// Missing and unavailable states carry explicit diagnostic relation identities. There is no
-/// `Option` whose absence could be mistaken for proof success.
-#[derive(Clone, Debug)]
-pub enum ActivationCandidateProofObservation {
-    Evaluated(ActivationCandidateProofEvidence),
-    Missing {
-        request: CandidateProofRequest,
-        diagnostic: DiagnosticRef,
-    },
-    Unavailable {
-        request: CandidateProofRequest,
-        diagnostic: DiagnosticRef,
-    },
-    Cancelled {
-        request: CandidateProofRequest,
-        diagnostic: DiagnosticRef,
-    },
-}
-
-/// Read-only authority over exact candidate proof relations and receipt bindings.
-#[async_trait]
-pub trait ActivationCandidateProofRelationsPort: Send + Sync {
-    async fn observe_candidate(
-        &self,
-        request: CandidateProofRequest,
-    ) -> ActivationCandidateProofObservation;
-}
-
-/// Concrete proof adapter consumed by the ordered activation coordinator.
-pub struct ExactActivationCandidateProof {
-    relations: Arc<dyn ActivationCandidateProofRelationsPort>,
-    integrity_diagnostic: DiagnosticRef,
-}
-
-impl fmt::Debug for ExactActivationCandidateProof {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ExactActivationCandidateProof")
-            .field("relations", &"installed")
-            .field("integrity_diagnostic", &self.integrity_diagnostic)
-            .finish()
-    }
-}
-
-impl ExactActivationCandidateProof {
-    /// Install the proof relation authority and the explicit diagnostic fact used for a
-    /// contradictory authority response. Neither has a default.
-    #[must_use]
-    pub const fn new(
-        relations: Arc<dyn ActivationCandidateProofRelationsPort>,
-        integrity_diagnostic: DiagnosticRef,
-    ) -> Self {
-        Self {
-            relations,
-            integrity_diagnostic,
-        }
-    }
-
-    fn unknown_integrity(&self) -> CandidateProofOutcome {
-        CandidateProofOutcome::Unknown {
-            diagnostic: self.integrity_diagnostic,
-        }
-    }
-}
-
-#[async_trait]
-impl ActivationCandidateProofPort for ExactActivationCandidateProof {
-    async fn prove_candidate(&self, request: CandidateProofRequest) -> CandidateProofOutcome {
-        match self.relations.observe_candidate(request).await {
-            ActivationCandidateProofObservation::Evaluated(evidence) => {
-                if evidence.request != request
-                    || !proof_pins_match_request(
-                        &evidence.relations.candidate_pins(),
-                        &request.pins,
-                    )
-                {
-                    return self.unknown_integrity();
-                }
-                match evidence.relations.terminal() {
-                    ProofTerminalStatus::Pass => match evidence.proof_receipt {
-                        Some(proof_receipt) if proof_receipt == request.pins.proof_receipt => {
-                            CandidateProofOutcome::Proved { proof_receipt }
-                        }
-                        _ => self.unknown_integrity(),
-                    },
-                    ProofTerminalStatus::Fail => match evidence.diagnostic {
-                        Some(diagnostic) => CandidateProofOutcome::Failed { diagnostic },
-                        None => self.unknown_integrity(),
-                    },
-                    ProofTerminalStatus::Unknown => match evidence.diagnostic {
-                        Some(diagnostic) => CandidateProofOutcome::Unknown { diagnostic },
-                        None => self.unknown_integrity(),
-                    },
-                }
-            }
-            ActivationCandidateProofObservation::Missing {
-                request: observed,
-                diagnostic,
-            }
-            | ActivationCandidateProofObservation::Unavailable {
-                request: observed,
-                diagnostic,
-            } => {
-                if observed == request {
-                    CandidateProofOutcome::Unknown { diagnostic }
-                } else {
-                    self.unknown_integrity()
-                }
-            }
-            ActivationCandidateProofObservation::Cancelled {
-                request: observed,
-                diagnostic,
-            } => {
-                if observed == request {
-                    CandidateProofOutcome::Cancelled { diagnostic }
-                } else {
-                    self.unknown_integrity()
-                }
-            }
-        }
-    }
-}
-
-fn proof_pins_match_request(proof: &ProofCandidatePins, activation: &FabricEpochPins) -> bool {
-    proof.epoch == activation.epoch
-        && proof.input_release == activation.input_release
-        && proof.program_release == activation.program_release
-        && proof.application_release == activation.application_release
-        && proof.source_authority == activation.source_authority
-        && proof.source_generation == activation.source_generation
-        && proof.provider_release == activation.provider_release
-        && proof.provider_set == activation.provider_set
-        && proof.table_versions == activation.table_versions
-        && proof.overlay_segments == activation.overlay_segments
-        && proof.policy_set == activation.policy_set
-        && proof.resource_envelope == activation.resource_envelope
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -906,16 +681,13 @@ mod tests {
     };
     use crate::fabric::command::{
         ActorId, AdmissionContext, AuthorizationDecision, AuthorizationRef, CommandEvent,
-        CommandIdentity, CommandOwnership, CommandPins, CommandReducer, EpochId, ExpectedHead,
-        FabricCommandPayload, IdempotencyKey, InputReleaseRef, LeaseId, OperationId,
+        CommandIdentity, CommandOwnership, CommandPins, CommandReducer, DiagnosticRef, EpochId,
+        ExpectedHead, FabricCommandPayload, IdempotencyKey, InputReleaseRef, LeaseId, OperationId,
         OperationSelectionRef, PrincipalId, ProgramReleaseRef, ProofReceiptRef, ProviderSetRef,
         ResourceEnvelopeRef, SourceGeneration, UnknownCommitReason, WorkspaceId, WriterFence,
         WriterGeneration,
     };
     use crate::fabric::delta_exact::ExactDeltaPin;
-    use crate::fabric::proof::{
-        OracleId, OracleImplementationRef, ProofRunId, test_relations_with_oracle,
-    };
     use url::Url;
 
     const fn id16(seed: u8) -> [u8; 16] {
@@ -931,146 +703,6 @@ mod tests {
             lease_id: LeaseId::from_bytes(id16(seed)),
             generation: WriterGeneration::new(generation).expect("nonzero generation"),
         }
-    }
-
-    fn proof_request(epoch: EpochId, receipt: ProofReceiptRef) -> CandidateProofRequest {
-        CandidateProofRequest {
-            workspace_id: WorkspaceId::from_bytes(id16(20)),
-            operation_id: OperationId::from_bytes(id16(21)),
-            expected_head: ExpectedHead::Empty,
-            execution_fence: fence(22, 1),
-            pins: FabricEpochPins {
-                epoch,
-                input_release: InputReleaseRef::from_bytes(id32(1)),
-                program_release: ProgramReleaseRef::from_bytes(id32(2)),
-                application_release: crate::fabric::command::ApplicationReleaseRef::from_bytes(
-                    id32(2),
-                ),
-                source_authority: crate::fabric::command::SourceAuthorityRef::from_bytes(id32(2)),
-                provider_release: crate::fabric::command::ProviderReleaseRef::from_bytes(id32(2)),
-                source_generation: SourceGeneration::new(1),
-                provider_set: ProviderSetRef::from_bytes(id32(4)),
-                table_versions: TableVersionSetRef::from_bytes(id32(5)),
-                overlay_segments: OverlaySegmentSetRef::from_bytes(id32(6)),
-                policy_set: PolicySetRef::from_bytes(id32(7)),
-                resource_envelope: ResourceEnvelopeRef::from_bytes(id32(8)),
-                proof_receipt: receipt,
-            },
-        }
-    }
-
-    #[derive(Clone)]
-    struct StaticProofRelations(ActivationCandidateProofObservation);
-
-    #[async_trait]
-    impl ActivationCandidateProofRelationsPort for StaticProofRelations {
-        async fn observe_candidate(
-            &self,
-            _request: CandidateProofRequest,
-        ) -> ActivationCandidateProofObservation {
-            self.0.clone()
-        }
-    }
-
-    #[tokio::test]
-    async fn passing_relations_require_the_exact_candidate_receipt() {
-        let epoch = EpochId::from_bytes(id16(30));
-        let receipt = ProofReceiptRef::from_bytes(id32(31));
-        let request = proof_request(epoch, receipt);
-        let relations = Arc::new(test_relations_with_oracle(
-            epoch,
-            OracleId::new(id16(32)).unwrap(),
-            OracleImplementationRef::new(id32(33)).unwrap(),
-            Some(ProofRunId::new(id16(34)).unwrap()),
-            ProofTerminalStatus::Pass,
-        ));
-        let evidence =
-            ActivationCandidateProofEvidence::try_new(request, relations, Some(receipt), None)
-                .expect("exact passing proof evidence");
-        let proof = ExactActivationCandidateProof::new(
-            Arc::new(StaticProofRelations(
-                ActivationCandidateProofObservation::Evaluated(evidence),
-            )),
-            DiagnosticRef::from_bytes(id32(35)),
-        );
-
-        assert_eq!(
-            proof.prove_candidate(request).await,
-            CandidateProofOutcome::Proved {
-                proof_receipt: receipt
-            }
-        );
-    }
-
-    #[tokio::test]
-    async fn missing_or_mismatched_proof_evidence_is_never_success() {
-        let epoch = EpochId::from_bytes(id16(40));
-        let request = proof_request(epoch, ProofReceiptRef::from_bytes(id32(41)));
-        let missing_diagnostic = DiagnosticRef::from_bytes(id32(42));
-        let integrity_diagnostic = DiagnosticRef::from_bytes(id32(43));
-        let missing = ExactActivationCandidateProof::new(
-            Arc::new(StaticProofRelations(
-                ActivationCandidateProofObservation::Missing {
-                    request,
-                    diagnostic: missing_diagnostic,
-                },
-            )),
-            integrity_diagnostic,
-        );
-        assert_eq!(
-            missing.prove_candidate(request).await,
-            CandidateProofOutcome::Unknown {
-                diagnostic: missing_diagnostic
-            }
-        );
-
-        let mut another = request;
-        another.operation_id = OperationId::from_bytes(id16(44));
-        let mismatched = ExactActivationCandidateProof::new(
-            Arc::new(StaticProofRelations(
-                ActivationCandidateProofObservation::Missing {
-                    request: another,
-                    diagnostic: missing_diagnostic,
-                },
-            )),
-            integrity_diagnostic,
-        );
-        assert_eq!(
-            mismatched.prove_candidate(request).await,
-            CandidateProofOutcome::Unknown {
-                diagnostic: integrity_diagnostic
-            }
-        );
-    }
-
-    #[test]
-    fn proof_evidence_rejects_relation_pin_and_receipt_drift() {
-        let epoch = EpochId::from_bytes(id16(50));
-        let receipt = ProofReceiptRef::from_bytes(id32(51));
-        let mut request = proof_request(epoch, receipt);
-        let relations = Arc::new(test_relations_with_oracle(
-            epoch,
-            OracleId::new(id16(52)).unwrap(),
-            OracleImplementationRef::new(id32(53)).unwrap(),
-            None,
-            ProofTerminalStatus::Pass,
-        ));
-        assert_eq!(
-            ActivationCandidateProofEvidence::try_new(
-                request,
-                Arc::clone(&relations),
-                Some(ProofReceiptRef::from_bytes(id32(54))),
-                None,
-            )
-            .unwrap_err(),
-            ActivationCandidateProofEvidenceError::ProofReceiptMismatch
-        );
-        request.pins.provider_set = ProviderSetRef::from_bytes(id32(55));
-        assert_eq!(
-            ActivationCandidateProofEvidence::try_new(request, relations, Some(receipt), None,)
-                .unwrap_err(),
-            ActivationCandidateProofEvidenceError::CandidatePinsMismatch
-        );
     }
 
     fn control_relation() -> ActivationControlRelationPin {

@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use arrow_array::builder::FixedSizeBinaryBuilder;
 use arrow_array::{
@@ -35,14 +36,13 @@ use datafusion::physical_plan::metrics::{MetricValue, MetricsSet};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{
     ChildStats, DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties,
-    PlanProperties, SendableRecordBatchStream, StatisticsArgs, execute_stream,
+    PlanProperties, SendableRecordBatchStream, StatisticsArgs,
 };
 use futures::StreamExt as _;
 use thiserror::Error;
 
 use super::command::EpochId;
 use super::id16_array;
-use super::{ResultChecksumError, result_checksum_v2};
 use crate::schema_contract::{
     FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY,
     RELATION_SEMANTIC_ROLE_METADATA_KEY, SEMANTIC_ROLE_METADATA_KEY, SchemaContract,
@@ -920,6 +920,7 @@ pub(super) struct IdentityPreservingViewTable {
     inner: Arc<dyn TableProvider>,
     logical_plan: LogicalPlan,
     schema: SchemaRef,
+    resource_contract: Option<Arc<ProgrammaticTransformationContract>>,
 }
 
 /// Opaque, value-preserving physical boundary for exact Arrow schema identity.
@@ -936,6 +937,8 @@ struct SchemaIdentityExec {
     input: Arc<dyn ExecutionPlan>,
     schema: SchemaRef,
     properties: Arc<PlanProperties>,
+    resource_contract: Option<Arc<ProgrammaticTransformationContract>>,
+    output_rows: Arc<AtomicU64>,
 }
 
 impl SchemaIdentityExec {
@@ -951,7 +954,17 @@ impl SchemaIdentityExec {
             input,
             schema,
             properties,
+            resource_contract: None,
+            output_rows: Arc::new(AtomicU64::new(0)),
         })
+    }
+
+    fn with_resource_contract(
+        mut self,
+        contract: Option<Arc<ProgrammaticTransformationContract>>,
+    ) -> Self {
+        self.resource_contract = contract;
+        self
     }
 }
 
@@ -1006,10 +1019,17 @@ impl ExecutionPlan for SchemaIdentityExec {
                 children.len()
             )));
         }
-        Ok(Arc::new(Self::try_new(
-            children.swap_remove(0),
-            Arc::clone(&self.schema),
-        )?))
+        Ok(Arc::new(
+            Self::try_new(children.swap_remove(0), Arc::clone(&self.schema))?
+                .with_resource_contract(self.resource_contract.clone()),
+        ))
+    }
+
+    fn reset_state(self: Arc<Self>) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+        Ok(Arc::new(
+            Self::try_new(Arc::clone(&self.input), Arc::clone(&self.schema))?
+                .with_resource_contract(self.resource_contract.clone()),
+        ))
     }
 
     fn repartitioned(
@@ -1020,8 +1040,10 @@ impl ExecutionPlan for SchemaIdentityExec {
         self.input
             .repartitioned(target_partitions, config)?
             .map(|input| {
-                Self::try_new(input, Arc::clone(&self.schema))
-                    .map(|plan| Arc::new(plan) as Arc<dyn ExecutionPlan>)
+                Self::try_new(input, Arc::clone(&self.schema)).map(|plan| {
+                    Arc::new(plan.with_resource_contract(self.resource_contract.clone()))
+                        as Arc<dyn ExecutionPlan>
+                })
             })
             .transpose()
     }
@@ -1032,23 +1054,51 @@ impl ExecutionPlan for SchemaIdentityExec {
         context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
         let schema = Arc::clone(&self.schema);
-        let stream = self.input.execute(partition, context)?.map({
-            let schema = Arc::clone(&schema);
-            move |batch| {
-                let batch = batch?;
-                validate_schema_identity_shape(
-                    batch.schema_ref().as_ref(),
-                    schema.as_ref(),
-                    "execution",
-                )?;
-                RecordBatch::try_new_with_options(
-                    Arc::clone(&schema),
-                    batch.columns().to_vec(),
-                    &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
-                )
-                .map_err(DataFusionError::from)
-            }
-        });
+        let batch_schema = Arc::clone(&schema);
+        let resource_contract = self.resource_contract.clone();
+        let output_rows = Arc::clone(&self.output_rows);
+        let physical = Arc::clone(&self.input);
+        let stream = futures::stream::try_unfold(
+            self.input.execute(partition, context)?,
+            move |mut input| {
+                let schema = Arc::clone(&batch_schema);
+                let resource_contract = resource_contract.clone();
+                let output_rows = Arc::clone(&output_rows);
+                let physical = Arc::clone(&physical);
+                async move {
+                    let Some(batch) = input.next().await.transpose()? else {
+                        if let Some(contract) = &resource_contract {
+                            enforce_transformation_memory_bound(contract, 0, &physical)
+                                .and_then(|()| {
+                                    enforce_transformation_spill_bound(contract, &physical)
+                                })
+                                .map_err(|error| DataFusionError::External(Box::new(error)))?;
+                        }
+                        return Ok(None);
+                    };
+                    if let Some(contract) = &resource_contract {
+                        validate_streamed_transformation_batch(
+                            contract,
+                            &output_rows,
+                            &physical,
+                            &batch,
+                        )
+                        .map_err(|error| DataFusionError::External(Box::new(error)))?;
+                    }
+                    validate_schema_identity_shape(
+                        batch.schema_ref().as_ref(),
+                        schema.as_ref(),
+                        "execution",
+                    )?;
+                    let batch = RecordBatch::try_new_with_options(
+                        schema,
+                        batch.columns().to_vec(),
+                        &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
+                    )?;
+                    Ok::<_, DataFusionError>(Some((batch, input)))
+                }
+            },
+        );
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
     }
 
@@ -1125,6 +1175,19 @@ impl IdentityPreservingViewTable {
         Self::with_definition(plan, None)
     }
 
+    fn with_resource_contract(mut self, contract: ProgrammaticTransformationContract) -> Self {
+        self.resource_contract = Some(Arc::new(contract));
+        self
+    }
+
+    /// Preserve execution limits when authorization rebuilds a view against child providers.
+    pub(super) fn inherit_resource_contract(mut self, parent: &dyn TableProvider) -> Self {
+        self.resource_contract = parent
+            .downcast_ref::<Self>()
+            .and_then(|view| view.resource_contract.clone());
+        self
+    }
+
     /// Rebind an executable plan to an exact Arrow batch schema with identical value shape.
     /// This is used at persistence boundaries where Delta's native schema intentionally omits
     /// application metadata retained by the logical contract.
@@ -1138,6 +1201,7 @@ impl IdentityPreservingViewTable {
             inner: Arc::new(ViewTable::new(plan, None)),
             logical_plan,
             schema,
+            resource_contract: None,
         })
     }
 
@@ -1148,6 +1212,7 @@ impl IdentityPreservingViewTable {
             inner: Arc::new(ViewTable::new(plan, definition)),
             logical_plan,
             schema,
+            resource_contract: None,
         }
     }
 
@@ -1166,6 +1231,7 @@ impl IdentityPreservingViewTable {
             inner,
             logical_plan,
             schema,
+            resource_contract: None,
         })
     }
 
@@ -1206,8 +1272,10 @@ impl IdentityPreservingViewTable {
             .with_physical_optimizer_rules(Vec::new())
             .build();
         let result = self.inner.scan_with_args(&nested_state, args).await?;
-        let plan: Arc<dyn ExecutionPlan> =
-            Arc::new(SchemaIdentityExec::try_new(result.into_inner(), target)?);
+        let plan: Arc<dyn ExecutionPlan> = Arc::new(
+            SchemaIdentityExec::try_new(result.into_inner(), target)?
+                .with_resource_contract(self.resource_contract.clone()),
+        );
         Ok(plan.into())
     }
 }
@@ -1423,7 +1491,10 @@ impl ProgrammaticSchemaAssembly {
     /// Start from the exact candidate `SessionState` later transferred to the epoch.
     #[must_use]
     pub(crate) fn new(candidate_state: SessionState) -> Self {
-        Self::with_observation_policy(candidate_state, ObservationMaterializationPolicy::production())
+        Self::with_observation_policy(
+            candidate_state,
+            ObservationMaterializationPolicy::production(),
+        )
     }
 
     /// Start a candidate with explicit validated observation materialization limits.
@@ -2042,7 +2113,7 @@ impl ProgrammaticSchemaAssembly {
                 actual: actual_schema,
             });
         }
-        prove_transformation_execution_contract(
+        validate_transformation_physical_contract(
             &self.session,
             transformation.contract(),
             transformation.output(),
@@ -2060,7 +2131,10 @@ impl ProgrammaticSchemaAssembly {
             Arc::clone(&actual_schema),
             mappings,
         )?);
-        let view = Arc::new(IdentityPreservingViewTable::new(installed_plan.clone()));
+        let view = Arc::new(
+            IdentityPreservingViewTable::new(installed_plan.clone())
+                .with_resource_contract(transformation.contract().clone()),
+        );
         self.session.register_table(
             transformation.output().table_reference().clone(),
             view as Arc<dyn TableProvider>,
@@ -2650,52 +2724,22 @@ fn validate_transformation_plan_policy(
     }
 }
 
-async fn prove_transformation_execution_contract(
+async fn validate_transformation_physical_contract(
     session: &SessionContext,
     contract: &ProgrammaticTransformationContract,
     output: &TransformationOutput,
     plan: &LogicalPlan,
 ) -> Result<(), ProgrammaticSchemaError> {
-    let first = execute_transformation_proof_once(session, contract, output, plan).await?;
-    if contract.determinism_policy() == TransformationDeterminismPolicy::Volatile {
-        return Ok(());
-    }
-    let first_identity = transformation_execution_identity(contract, plan, &first)?;
-    drop(first);
-
-    // A new physical plan is deliberate: deterministic authority is proved
-    // across two executions, while physical operators and their metrics remain
-    // per-execution state rather than a cached result or physical plan.
-    let second = execute_transformation_proof_once(session, contract, output, plan).await?;
-    let second_identity = transformation_execution_identity(contract, plan, &second)?;
-    if first_identity != second_identity {
-        return Err(ProgrammaticSchemaError::TransformationNotDeterministic {
-            transformation_id: contract.semantic_id().clone(),
-        });
-    }
-    Ok(())
-}
-
-async fn execute_transformation_proof_once(
-    session: &SessionContext,
-    contract: &ProgrammaticTransformationContract,
-    output: &TransformationOutput,
-    plan: &LogicalPlan,
-) -> Result<Vec<RecordBatch>, ProgrammaticSchemaError> {
-    // Prove the same native ViewTable scan path installed in the candidate
-    // catalog, rather than executing the view definition as a detached plan.
-    // This forces DataFusion to reconcile the provider's advertised schema and
-    // its physical output exactly as a later consumer will observe them.
-    let proof_view = Arc::new(IdentityPreservingViewTable::new(plan.clone()));
-    let proof_plan = LogicalPlanBuilder::scan(
+    let view = Arc::new(IdentityPreservingViewTable::new(plan.clone()));
+    let scan = LogicalPlanBuilder::scan(
         output.table_reference().clone(),
-        provider_as_source(proof_view as Arc<dyn TableProvider>),
+        provider_as_source(view as Arc<dyn TableProvider>),
         None,
     )?
     .build()?;
     let physical = session
         .state()
-        .create_physical_plan(&proof_plan)
+        .create_physical_plan(&scan)
         .await
         .map_err(
             |source| ProgrammaticSchemaError::TransformationPhysicalPlanning {
@@ -2703,62 +2747,45 @@ async fn execute_transformation_proof_once(
                 source,
             },
         )?;
-    validate_transformation_output_ordering(contract, output, &physical)?;
+    validate_transformation_output_ordering(contract, output, &physical)
+}
 
-    let mut stream =
-        execute_stream(Arc::clone(&physical), session.task_ctx()).map_err(|source| {
-            ProgrammaticSchemaError::TransformationExecution {
+/// Enforce output and observed execution bounds when a consumer actually reads the relation.
+/// The physical node shares its row counter across partitions; a fresh physical plan owns a
+/// fresh counter. No rows are collected or checksummed to admit a logical transformation.
+fn validate_streamed_transformation_batch(
+    contract: &ProgrammaticTransformationContract,
+    output_rows: &AtomicU64,
+    physical: &Arc<dyn ExecutionPlan>,
+    batch: &RecordBatch,
+) -> Result<(), ProgrammaticSchemaError> {
+    let added = u64::try_from(batch.num_rows()).unwrap_or(u64::MAX);
+    let previous = output_rows
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |rows| {
+            rows.checked_add(added)
+        })
+        .map_err(
+            |_| ProgrammaticSchemaError::TransformationResourceCounterOverflow {
                 transformation_id: contract.semantic_id().clone(),
-                source,
-            }
-        })?;
-    let expected_schema = proof_plan.schema().inner();
-    let resource_class = contract.resource_class();
-    let mut rows = 0_u64;
-    let mut output_bytes = 0_u64;
-    let mut batches = Vec::new();
-    while let Some(batch) = stream.next().await {
-        let batch = batch.map_err(|source| ProgrammaticSchemaError::TransformationExecution {
+            },
+        )?;
+    let observed = previous + added;
+    let limit = contract.resource_class().max_rows();
+    if observed > limit {
+        return Err(ProgrammaticSchemaError::TransformationOutputRowsExceeded {
             transformation_id: contract.semantic_id().clone(),
-            source,
-        })?;
-        if batch.schema_ref().as_ref() != expected_schema.as_ref() {
-            return Err(
-                ProgrammaticSchemaError::TransformationExecutionSchemaMismatch {
-                    transformation_id: contract.semantic_id().clone(),
-                    expected: Arc::clone(expected_schema),
-                    actual: batch.schema(),
-                },
-            );
-        }
-        rows = rows
-            .checked_add(u64::try_from(batch.num_rows()).unwrap_or(u64::MAX))
-            .ok_or_else(
-                || ProgrammaticSchemaError::TransformationResourceCounterOverflow {
-                    transformation_id: contract.semantic_id().clone(),
-                },
-            )?;
-        if rows > resource_class.max_rows() {
-            return Err(ProgrammaticSchemaError::TransformationOutputRowsExceeded {
-                transformation_id: contract.semantic_id().clone(),
-                limit: resource_class.max_rows(),
-                observed: rows,
-            });
-        }
-        output_bytes = output_bytes
-            .checked_add(u64::try_from(batch.get_array_memory_size()).unwrap_or(u64::MAX))
-            .ok_or_else(
-                || ProgrammaticSchemaError::TransformationResourceCounterOverflow {
-                    transformation_id: contract.semantic_id().clone(),
-                },
-            )?;
-        enforce_transformation_memory_bound(contract, output_bytes, &physical)?;
-        enforce_transformation_spill_bound(contract, &physical)?;
-        batches.push(batch);
+            limit,
+            observed,
+        });
     }
-    enforce_transformation_memory_bound(contract, output_bytes, &physical)?;
-    enforce_transformation_spill_bound(contract, &physical)?;
-    Ok(batches)
+    // Streaming does not retain previous output batches. Check the current batch and native
+    // operator memory, while the shared workspace pool and spill owner enforce overall limits.
+    enforce_transformation_memory_bound(
+        contract,
+        u64::try_from(batch.get_array_memory_size()).unwrap_or(u64::MAX),
+        physical,
+    )?;
+    enforce_transformation_spill_bound(contract, physical)
 }
 
 fn validate_transformation_output_ordering(
@@ -2899,88 +2926,6 @@ fn observed_physical_spill(plan: &dyn ExecutionPlan) -> (u64, u64) {
         spilled_bytes = spilled_bytes.saturating_add(child_bytes);
     }
     (spill_count, spilled_bytes)
-}
-
-#[derive(Eq, PartialEq)]
-enum TransformationExecutionIdentity {
-    Set(String),
-    Sequence([u8; 32]),
-}
-
-fn transformation_execution_identity(
-    contract: &ProgrammaticTransformationContract,
-    plan: &LogicalPlan,
-    batches: &[RecordBatch],
-) -> Result<TransformationExecutionIdentity, ProgrammaticSchemaError> {
-    let maximum_encoding_bytes = usize::try_from(contract.resource_class().max_memory_bytes())
-        .map_err(
-            |_| ProgrammaticSchemaError::TransformationResourceCounterOverflow {
-                transformation_id: contract.semantic_id().clone(),
-            },
-        )?;
-    match contract.determinism_policy() {
-        TransformationDeterminismPolicy::DeterministicSet => result_checksum_v2(
-            plan.schema().inner().as_ref(),
-            batches,
-            maximum_encoding_bytes,
-        )
-        .map(|result| TransformationExecutionIdentity::Set(result.checksum))
-        .map_err(
-            |source| ProgrammaticSchemaError::TransformationDeterminismProof {
-                transformation_id: contract.semantic_id().clone(),
-                source,
-            },
-        ),
-        TransformationDeterminismPolicy::DeterministicSequence => {
-            ordered_execution_identity(plan.schema().inner().as_ref(), batches)
-                .map(TransformationExecutionIdentity::Sequence)
-                .map_err(
-                    |source| ProgrammaticSchemaError::TransformationDeterminismProof {
-                        transformation_id: contract.semantic_id().clone(),
-                        source,
-                    },
-                )
-        }
-        TransformationDeterminismPolicy::Volatile => {
-            unreachable!("volatile transformations are executed once without comparison")
-        }
-    }
-}
-
-fn ordered_execution_identity(
-    schema: &Schema,
-    batches: &[RecordBatch],
-) -> Result<[u8; 32], ResultChecksumError> {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"codefabric.programmatic-transformation-sequence-proof.v1");
-    let converter = arrow_row::RowConverter::new(
-        schema
-            .fields()
-            .iter()
-            .map(|field| arrow_row::SortField::new(field.data_type().clone()))
-            .collect(),
-    )?;
-    let mut row_count = 0_u64;
-    for batch in batches {
-        let batch_rows =
-            u64::try_from(batch.num_rows()).map_err(|_| ResultChecksumError::ResourceLimit)?;
-        row_count = row_count
-            .checked_add(batch_rows)
-            .ok_or(ResultChecksumError::ResourceLimit)?;
-        if schema.fields().is_empty() {
-            for _ in 0..batch.num_rows() {
-                hasher.update(&0_u64.to_be_bytes());
-            }
-            continue;
-        }
-        let rows = converter.convert_columns(batch.columns())?;
-        for row in &rows {
-            hasher.update(&(row.data().len() as u64).to_be_bytes());
-            hasher.update(row.data());
-        }
-    }
-    hasher.update(&row_count.to_be_bytes());
-    Ok(*hasher.finalize().as_bytes())
 }
 
 /// Add identity metadata to a schema otherwise derived wholly from the analyzed plan.
@@ -4176,18 +4121,6 @@ pub enum ProgrammaticSchemaError {
     TransformationOrderingNotSatisfied {
         transformation_id: ProgrammaticTransformationId,
     },
-    #[error("transformation {transformation_id:?} failed its bounded proof execution")]
-    TransformationExecution {
-        transformation_id: ProgrammaticTransformationId,
-        #[source]
-        source: DataFusionError,
-    },
-    #[error("transformation {transformation_id:?} execution schema differs from its plan")]
-    TransformationExecutionSchemaMismatch {
-        transformation_id: ProgrammaticTransformationId,
-        expected: SchemaRef,
-        actual: SchemaRef,
-    },
     #[error("transformation {transformation_id:?} resource counter overflowed")]
     TransformationResourceCounterOverflow {
         transformation_id: ProgrammaticTransformationId,
@@ -4223,16 +4156,6 @@ pub enum ProgrammaticSchemaError {
         transformation_id: ProgrammaticTransformationId,
         limit: u64,
         observed: u64,
-    },
-    #[error("transformation {transformation_id:?} determinism proof failed")]
-    TransformationDeterminismProof {
-        transformation_id: ProgrammaticTransformationId,
-        #[source]
-        source: ResultChecksumError,
-    },
-    #[error("transformation {transformation_id:?} produced different results on re-execution")]
-    TransformationNotDeterministic {
-        transformation_id: ProgrammaticTransformationId,
     },
     #[error("transformation {transformation_id:?} output schema assertion differs from its plan")]
     OutputSchemaAssertionMismatch {
@@ -5128,7 +5051,11 @@ mod tests {
     async fn published_catalog_rejects_relations_added_after_observation() {
         let mut assembly = ProgrammaticSchemaAssembly::new(candidate_state());
         assembly
-            .register_provider(provider_input("provider.events", table("provider_events"), false))
+            .register_provider(provider_input(
+                "provider.events",
+                table("provider_events"),
+                false,
+            ))
             .unwrap();
         let prepared = assembly
             .prepare_observation_relations(observation_epoch())
@@ -5439,7 +5366,7 @@ mod tests {
         volatile.determinism_policy = TransformationDeterminismPolicy::Volatile;
         policy_fixture(volatile.clone(), PolicyPlanKind::Volatile)
             .await
-            .expect("an explicitly volatile plan is proof-executed once");
+            .expect("an explicitly volatile plan can be installed without execution");
         assert!(matches!(
             policy_fixture(volatile, PolicyPlanKind::Project)
                 .await
@@ -5449,40 +5376,134 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn proof_execution_enforces_row_and_memory_resource_bounds() {
-        let mut row_bounded = test_transformation_contract(
-            "row-bounded-policy",
+    async fn actual_transformation_reads_enforce_row_and_memory_bounds_without_preexecution() {
+        for (max_rows, max_memory_bytes, expected) in [
+            (2, 1 << 20, "beyond its 2 row bound"),
+            (10, 1, "beyond its 1 memory bound"),
+        ] {
+            let mut contract = test_transformation_contract(
+                "bounded-policy",
+                TransformationSemanticVersion::new(1, 0, 0),
+            );
+            contract.resource_class = TransformationResourceClass::BoundedInMemory {
+                max_rows,
+                max_memory_bytes,
+            };
+            let sealed = policy_fixture(contract, PolicyPlanKind::Project)
+                .await
+                .expect("catalog installation plans but does not execute transformations");
+            let error = sealed
+                .session()
+                .table(table("policy_output"))
+                .await
+                .unwrap()
+                .collect()
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+            let parent = sealed
+                .session()
+                .table_provider(table("policy_output"))
+                .await
+                .unwrap();
+            let rebuilt = IdentityPreservingViewTable::with_definition(
+                registered_view_logical_plan(parent.as_ref()).unwrap(),
+                None,
+            )
+            .inherit_resource_contract(parent.as_ref());
+            let error = sealed
+                .session()
+                .read_table(Arc::new(rebuilt))
+                .unwrap()
+                .collect()
+                .await
+                .unwrap_err();
+            assert!(
+                error.to_string().contains(expected),
+                "rebuilt view: {error}"
+            );
+        }
+        // Separate reads must get independent execution counters.
+        let mut contract = test_transformation_contract(
+            "repeat-bounded-policy",
             TransformationSemanticVersion::new(1, 0, 0),
         );
-        row_bounded.resource_class = TransformationResourceClass::BoundedInMemory {
-            max_rows: 2,
+        contract.resource_class = TransformationResourceClass::BoundedInMemory {
+            max_rows: 3,
             max_memory_bytes: 1 << 20,
         };
-        assert!(matches!(
-            policy_fixture(row_bounded, PolicyPlanKind::Project)
+        let sealed = policy_fixture(contract, PolicyPlanKind::Project)
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            let batches = sealed
+                .session()
+                .table(table("policy_output"))
                 .await
-                .unwrap_err(),
-            ProgrammaticSchemaError::TransformationOutputRowsExceeded {
-                limit: 2,
-                observed: 3,
-                ..
-            }
-        ));
+                .unwrap()
+                .collect()
+                .await
+                .unwrap();
+            assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
+        }
+    }
 
-        let mut memory_bounded = test_transformation_contract(
-            "memory-bounded-policy",
+    #[tokio::test]
+    async fn streamed_transformation_bounds_span_partitions_and_reset_with_execution_state() {
+        let context = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![Arc::new(Int64Array::from(vec![1, 2])) as ArrayRef],
+        )
+        .unwrap();
+        let provider =
+            MemTable::try_new(Arc::clone(&schema), vec![vec![batch.clone()], vec![batch]]).unwrap();
+        let input = provider
+            .scan(&context.state(), None, &[], None)
+            .await
+            .unwrap();
+        let mut contract = test_transformation_contract(
+            "partitioned-policy",
             TransformationSemanticVersion::new(1, 0, 0),
         );
-        memory_bounded.resource_class = TransformationResourceClass::BoundedInMemory {
-            max_rows: 10,
-            max_memory_bytes: 1,
+        contract.resource_class = TransformationResourceClass::BoundedInMemory {
+            max_rows: 3,
+            max_memory_bytes: 1 << 20,
         };
-        assert!(matches!(
-            policy_fixture(memory_bounded, PolicyPlanKind::Project)
-                .await
-                .unwrap_err(),
-            ProgrammaticSchemaError::TransformationMemoryBytesExceeded { limit: 1, .. }
-        ));
+        let execution = Arc::new(
+            SchemaIdentityExec::try_new(input, schema)
+                .unwrap()
+                .with_resource_contract(Some(Arc::new(contract))),
+        );
+        let first = execution
+            .execute(0, context.task_ctx())
+            .unwrap()
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.num_rows(), 2);
+        let error = execution
+            .execute(1, context.task_ctx())
+            .unwrap()
+            .next()
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("beyond its 3 row bound"),
+            "{error}"
+        );
+        let reset = execution.reset_state().unwrap();
+        let first = reset
+            .execute(0, context.task_ctx())
+            .unwrap()
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.num_rows(), 2);
     }
 
     #[tokio::test]

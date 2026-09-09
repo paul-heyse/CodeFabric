@@ -65,8 +65,6 @@ pub mod programmatic_derived_analysis;
 pub mod provider_admission;
 #[cfg(feature = "data-fabric")]
 pub mod provider_boundary;
-#[cfg(feature = "daemon")]
-pub mod provider_capability;
 #[cfg(feature = "provider-contracts")]
 pub mod provider_contracts;
 #[cfg(feature = "fact-generation")]

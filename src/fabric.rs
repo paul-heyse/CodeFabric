@@ -96,7 +96,6 @@ pub mod programmatic_relation_delta;
 pub mod programmatic_schema;
 #[cfg(feature = "daemon")]
 pub mod programmatic_workspace;
-pub mod proof;
 pub mod provider;
 #[cfg(feature = "daemon")]
 pub mod published_arrow_result;

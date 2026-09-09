@@ -891,9 +891,10 @@ fn rebuild_child_provider(
 
         if table_type == TableType::View {
             let plan = rebind_child_view_plan(relation_id, logical_plan, &child_dependencies)?;
-            Arc::new(IdentityPreservingViewTable::with_definition(
-                plan, definition,
-            )) as Arc<dyn datafusion::catalog::TableProvider>
+            Arc::new(
+                IdentityPreservingViewTable::with_definition(plan, definition)
+                    .inherit_resource_contract(parent_provider.as_ref()),
+            ) as Arc<dyn datafusion::catalog::TableProvider>
         } else {
             parent_provider
         }

@@ -25,17 +25,12 @@ use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
 use crate::fabric::programmatic_schema::{
     ProgrammaticRelationId, ProgrammaticSchemaAssembly, ProgrammaticSchemaError, ProviderInput,
 };
-use crate::fabric::proof::ProofRelations;
 use crate::provider_boundary::{
     ContractDisposition, InstalledProviderSurface, ProviderApiFamily, ProviderAuthorityRole,
     ProviderBoundaryContract, ProviderBoundaryError, ProviderBoundaryEvidence,
     ProviderBoundaryReport, ProviderFamilyCoverage, ProviderFamilyRequest,
     ProviderFamilyRunOutcome, ProviderHandlerId, ProviderInstallerIdentity,
     evaluate_provider_boundary, validate_provider_boundary_contract,
-};
-use crate::provider_capability::{
-    ProviderCapabilityError, ProviderCapabilityRelation, ProviderOracleProofBinding,
-    derive_provider_capability_relation, provider_oracle_proofs_from_executable_relations,
 };
 use crate::provider_native_syntax::{
     NativeSyntaxRelation, ProviderNativeSyntaxRun, RUFF_COMPONENT_RELEASE,
@@ -51,7 +46,7 @@ use crate::rustc_service::{
     AcceptedRustcCompilation, AcceptedRustcOwner, AcceptedRustcRelation,
     TrustQualifiedRustcCompilation, arrow_ipc_digest,
 };
-use crate::schema_contract::{FieldIndexMapping, SchemaContract, SchemaContractError, SchemaRole};
+use crate::schema_contract::{FieldIndexMapping, SchemaContract, SchemaContractError};
 
 const MAX_ADMISSION_BINDINGS: usize = 4_096;
 const MAX_PROVIDER_WORKSPACE_PARTITIONS: usize = 4_096;
@@ -807,49 +802,6 @@ impl ProgrammaticProviderAdmissionOutcome {
     }
 }
 
-/// Application-owned catalog binding for the capability relation derived from exact provider runs.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProviderCapabilityCatalogBinding {
-    pub table_name: String,
-    pub source_schema_identity: Arc<str>,
-}
-
-/// Successful provider admission plus its registered, proof-qualified capability relation.
-pub struct ProviderCapabilityAdmissionOutcome {
-    builder: ProgrammaticFabricEpochBuilder,
-    provider_reports: ExactProgrammaticProviderReports,
-    capabilities: Vec<ProviderCapabilityRelation>,
-}
-
-impl ProviderCapabilityAdmissionOutcome {
-    #[must_use]
-    pub const fn provider_reports(&self) -> &ExactProgrammaticProviderReports {
-        &self.provider_reports
-    }
-
-    #[must_use]
-    pub fn capabilities(&self) -> &[ProviderCapabilityRelation] {
-        &self.capabilities
-    }
-
-    /// Exact candidate epoch that owns both raw providers and capability evidence.
-    #[must_use]
-    pub const fn candidate_epoch_id(&self) -> &FabricEpochId {
-        self.builder.identity()
-    }
-
-    #[must_use]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        ProgrammaticFabricEpochBuilder,
-        ExactProgrammaticProviderReports,
-        Vec<ProviderCapabilityRelation>,
-    ) {
-        (self.builder, self.provider_reports, self.capabilities)
-    }
-}
-
 /// Closed admission failures. Any error drops the consumed candidate builder.
 #[derive(Debug, Error)]
 pub enum ProviderAdmissionError {
@@ -908,8 +860,6 @@ pub enum ProviderAdmissionError {
     },
     #[error("provider source/context pin differs from the accepted admission plan")]
     AdmissionPinMismatch,
-    #[error("provider capability proof epoch differs from the candidate epoch")]
-    CapabilityProofEpochMismatch,
     #[error("{provider} output does not expose required {pin} pin")]
     MissingObservedPin {
         pin: &'static str,
@@ -930,8 +880,6 @@ pub enum ProviderAdmissionError {
     RustcTrustEvidence(String),
     #[error(transparent)]
     Boundary(#[from] ProviderBoundaryError),
-    #[error(transparent)]
-    Capability(#[from] ProviderCapabilityError),
     #[error(transparent)]
     SchemaContract(#[from] SchemaContractError),
     #[error(transparent)]
@@ -2103,172 +2051,6 @@ fn validate_programmatic_transaction_plans(
     Ok(())
 }
 
-fn validate_provider_capability_catalog_binding(
-    binding: &ProviderCapabilityCatalogBinding,
-) -> Result<(), ProviderAdmissionError> {
-    if binding.table_name.is_empty()
-        || binding.table_name.trim() != binding.table_name
-        || binding.table_name.len() > MAX_RELATION_NAME_BYTES
-        || binding.table_name.chars().any(char::is_control)
-        || binding.source_schema_identity.trim().is_empty()
-    {
-        return Err(ProviderAdmissionError::InvalidPlan(
-            "provider capability catalog binding is invalid".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn programmatic_provider_capabilities(
-    reports: &ExactProgrammaticProviderReports,
-    proof_relations: &ProofRelations,
-    oracle_bindings: &[ProviderOracleProofBinding],
-) -> Result<Vec<ProviderCapabilityRelation>, ProviderAdmissionError> {
-    let reports = [
-        reports.tree_sitter(),
-        reports.ruff(),
-        reports.pyrefly(),
-        reports.rustc(),
-    ];
-    let mut owners = BTreeMap::new();
-    for (report_index, report) in reports.iter().enumerate() {
-        for family in &report.boundary.families {
-            if owners
-                .insert((family.oracle_id, family.relation_id), report_index)
-                .is_some()
-            {
-                return Err(ProviderCapabilityError::DuplicateBoundaryFamily.into());
-            }
-        }
-    }
-
-    let mut seen_bindings = BTreeSet::new();
-    let mut bindings_by_report: [Vec<ProviderOracleProofBinding>; 4] =
-        std::array::from_fn(|_| Vec::new());
-    for binding in oracle_bindings {
-        let key = (binding.provider_oracle_id, binding.relation_id);
-        if !seen_bindings.insert(key) {
-            return Err(ProviderCapabilityError::DuplicateProofBinding.into());
-        }
-        let report_index = owners
-            .get(&key)
-            .copied()
-            .ok_or(ProviderCapabilityError::UnboundProofBinding)?;
-        bindings_by_report[report_index].push(*binding);
-    }
-
-    reports
-        .into_iter()
-        .zip(bindings_by_report)
-        .map(|(report, bindings)| {
-            let proofs = provider_oracle_proofs_from_executable_relations(
-                &report.boundary,
-                proof_relations,
-                &bindings,
-            )?;
-            if proofs.iter().any(|proof| {
-                proof.proof_epoch_id != *proof_relations.candidate_pins().epoch.as_bytes()
-            }) {
-                return Err(ProviderAdmissionError::CapabilityProofEpochMismatch);
-            }
-            Ok(derive_provider_capability_relation(
-                &report.boundary,
-                &proofs,
-            )?)
-        })
-        .collect()
-}
-
-fn register_programmatic_provider_capabilities(
-    outcome: ProgrammaticProviderAdmissionOutcome,
-    binding: &ProviderCapabilityCatalogBinding,
-    capabilities: Vec<ProviderCapabilityRelation>,
-) -> Result<ProviderCapabilityAdmissionOutcome, ProviderAdmissionError> {
-    validate_provider_capability_catalog_binding(binding)?;
-    let schema = capabilities
-        .first()
-        .map(ProviderCapabilityRelation::schema)
-        .cloned()
-        .ok_or_else(|| {
-            ProviderAdmissionError::InvalidPlan(
-                "programmatic provider capability set is empty".into(),
-            )
-        })?;
-    if capabilities
-        .iter()
-        .any(|capability| capability.schema().as_ref() != schema.as_ref())
-    {
-        return Err(ProviderAdmissionError::SchemaMismatch {
-            relation: "system.provider_capability.v1".to_owned(),
-        });
-    }
-    let provider = Arc::new(MemTable::try_new(
-        Arc::clone(&schema),
-        capabilities
-            .iter()
-            .map(|capability| vec![capability.batch().clone()])
-            .collect(),
-    )?);
-    let table_reference = TableReference::full(
-        FABRIC_CATALOG,
-        FabricSchemaRole::System.as_str(),
-        binding.table_name.as_str(),
-    );
-    let contract = Arc::new(SchemaContract::try_new(
-        Arc::clone(&binding.source_schema_identity),
-        table_reference.clone(),
-        Arc::clone(&schema),
-        Arc::clone(&schema),
-        (0..schema.fields().len())
-            .map(|index| FieldIndexMapping::direct(index, index))
-            .collect(),
-    )?);
-    let relation_id =
-        ProgrammaticRelationId::new(contract.relation_id(SchemaRole::Logical)?.to_owned());
-    let ProgrammaticProviderAdmissionOutcome { builder, reports } = outcome;
-    let (identity, runtime_config, runtime_env, mut assembly) = builder.into_assembly_parts();
-    assembly.register_provider(ProviderInput::new(
-        relation_id,
-        table_reference,
-        contract,
-        provider,
-    ))?;
-    Ok(ProviderCapabilityAdmissionOutcome {
-        builder: ProgrammaticFabricEpochBuilder::from_assembly_parts(
-            identity,
-            runtime_config,
-            runtime_env,
-            assembly,
-        ),
-        provider_reports: reports,
-        capabilities,
-    })
-}
-
-/// Register provider capability derived only from the executable proof engine's sealed output.
-///
-/// This is the production path: application-owned bindings join all four exact provider reports
-/// to proof oracles, exact proof/candidate pins are carried into the receipt relation, and missing
-/// oracle execution remains missing proof rather than an optimistic capability.
-///
-/// # Errors
-///
-/// Returns binding, proof-pin, schema, or catalog-registration failures without returning a
-/// partially mutated epoch candidate.
-pub fn admit_provider_capability_from_proof_relations(
-    outcome: ProgrammaticProviderAdmissionOutcome,
-    catalog_binding: &ProviderCapabilityCatalogBinding,
-    proof_relations: &ProofRelations,
-    oracle_bindings: &[ProviderOracleProofBinding],
-) -> Result<ProviderCapabilityAdmissionOutcome, ProviderAdmissionError> {
-    if proof_relations.candidate_pins().epoch != *outcome.candidate_epoch_id() {
-        return Err(ProviderAdmissionError::CapabilityProofEpochMismatch);
-    }
-    let capabilities =
-        programmatic_provider_capabilities(outcome.reports(), proof_relations, oracle_bindings)?;
-    register_programmatic_provider_capabilities(outcome, catalog_binding, capabilities)
-}
-
 fn prepare_provider_admission(
     plan: &ProviderAdmissionPlan,
     observed: &AcceptedProviderRelationSet,
@@ -2950,10 +2732,6 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig, FabricSchemaRole};
-    use crate::fabric::proof::{
-        OracleId, OracleImplementationRef, ProofRunId, ProofTerminalStatus,
-        test_relations_with_oracle,
-    };
     use crate::provider_boundary::{
         BoundaryContractId, BoundaryOwnerId, CanonicalIdentityRole, ContractDisposition,
         CoordinateRole, FieldMeaning, IndependentContractAcceptance, ProviderArrowRelationContract,
@@ -4339,170 +4117,6 @@ pub(crate) mod tests {
         assert_eq!(observed.batches[0].num_rows(), 0);
         assert_eq!(relations.source_pin(), SourcePin([42; 32]));
         assert_eq!(relations.context_pin(), ContextPin([41; 32]));
-    }
-
-    #[tokio::test]
-    async fn proof_qualified_capabilities_register_in_the_exact_programmatic_candidate() {
-        let fixture = exact_workspace_fixture();
-        let admitted =
-            admit_provider_relations_programmatic(programmatic_epoch_builder(), fixture.runs())
-                .unwrap();
-        let candidate_epoch_id = FabricEpochId::from_bytes([90; 16]);
-        assert_eq!(admitted.candidate_epoch_id(), &candidate_epoch_id);
-
-        let proof_oracle = OracleId::new([71; 16]).unwrap();
-        let proof_relations = test_relations_with_oracle(
-            candidate_epoch_id,
-            proof_oracle,
-            OracleImplementationRef::new([72; 32]).unwrap(),
-            Some(ProofRunId::new([73; 16]).unwrap()),
-            ProofTerminalStatus::Pass,
-        );
-        let reports = admitted.reports();
-        let provider_reports = [
-            reports.tree_sitter(),
-            reports.ruff(),
-            reports.pyrefly(),
-            reports.rustc(),
-        ];
-        let expected_rows = provider_reports
-            .iter()
-            .map(|report| report.boundary.families.len())
-            .sum::<usize>();
-        let oracle_bindings = provider_reports
-            .into_iter()
-            .flat_map(|report| &report.boundary.families)
-            .map(|family| ProviderOracleProofBinding {
-                provider_oracle_id: family.oracle_id,
-                relation_id: family.relation_id,
-                proof_oracle_id: proof_oracle,
-            })
-            .collect::<Vec<_>>();
-        let admitted = admit_provider_capability_from_proof_relations(
-            admitted,
-            &ProviderCapabilityCatalogBinding {
-                table_name: "provider_capability".into(),
-                source_schema_identity: Arc::from("programmatic:provider-capability:test"),
-            },
-            &proof_relations,
-            &oracle_bindings,
-        )
-        .unwrap();
-        assert_eq!(admitted.candidate_epoch_id(), &candidate_epoch_id);
-        assert_eq!(admitted.capabilities().len(), 4);
-        assert_eq!(
-            admitted
-                .capabilities()
-                .iter()
-                .map(|capability| capability.batch().num_rows())
-                .sum::<usize>(),
-            expected_rows
-        );
-        for capability in admitted.capabilities() {
-            let states = capability
-                .batch()
-                .column(24)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            assert!(
-                states.iter().all(|state| state == Some("proved-complete")),
-                "a complete accepted family with passing proof was not advertised"
-            );
-        }
-
-        let (builder, reports, capabilities) = admitted.into_parts();
-        assert_eq!(reports.rustc().boundary.status, TerminalStatus::Complete);
-        assert_eq!(capabilities.len(), 4);
-        let (_, _, _, assembly) = builder.into_assembly_parts();
-        let sealed = assembly.seal(candidate_epoch_id).await.unwrap();
-        let capability = sealed
-            .relation(&ProgrammaticRelationId::new(
-                "system.provider_capability.v1",
-            ))
-            .expect("provider capability relation was not registered");
-        assert_eq!(
-            capability.table_reference,
-            TableReference::full(
-                FABRIC_CATALOG,
-                FabricSchemaRole::System.as_str(),
-                "provider_capability",
-            )
-        );
-        let row_count = sealed
-            .session()
-            .table(capability.table_reference.clone())
-            .await
-            .unwrap()
-            .count()
-            .await
-            .unwrap();
-        assert_eq!(row_count, expected_rows);
-    }
-
-    #[test]
-    fn provider_capability_rejects_a_different_proof_candidate_epoch() {
-        let fixture = exact_workspace_fixture();
-        let admitted =
-            admit_provider_relations_programmatic(programmatic_epoch_builder(), fixture.runs())
-                .unwrap();
-        let proof_relations = test_relations_with_oracle(
-            FabricEpochId::from_bytes([91; 16]),
-            OracleId::new([71; 16]).unwrap(),
-            OracleImplementationRef::new([72; 32]).unwrap(),
-            Some(ProofRunId::new([73; 16]).unwrap()),
-            ProofTerminalStatus::Pass,
-        );
-        let error = admit_provider_capability_from_proof_relations(
-            admitted,
-            &ProviderCapabilityCatalogBinding {
-                table_name: "provider_capability".into(),
-                source_schema_identity: Arc::from("programmatic:provider-capability:test"),
-            },
-            &proof_relations,
-            &[],
-        )
-        .err()
-        .expect("a proof from another candidate epoch must fail");
-        assert!(matches!(
-            error,
-            ProviderAdmissionError::CapabilityProofEpochMismatch
-        ));
-    }
-
-    #[test]
-    fn provider_capability_rejects_a_binding_outside_the_exact_reports() {
-        let fixture = exact_workspace_fixture();
-        let admitted =
-            admit_provider_relations_programmatic(programmatic_epoch_builder(), fixture.runs())
-                .unwrap();
-        let proof_oracle = OracleId::new([71; 16]).unwrap();
-        let proof_relations = test_relations_with_oracle(
-            FabricEpochId::from_bytes([90; 16]),
-            proof_oracle,
-            OracleImplementationRef::new([72; 32]).unwrap(),
-            Some(ProofRunId::new([73; 16]).unwrap()),
-            ProofTerminalStatus::Pass,
-        );
-        let error = admit_provider_capability_from_proof_relations(
-            admitted,
-            &ProviderCapabilityCatalogBinding {
-                table_name: "provider_capability".into(),
-                source_schema_identity: Arc::from("programmatic:provider-capability:test"),
-            },
-            &proof_relations,
-            &[ProviderOracleProofBinding {
-                provider_oracle_id: ProviderOracleId([250; 32]),
-                relation_id: RelationId([251; 16]),
-                proof_oracle_id: proof_oracle,
-            }],
-        )
-        .err()
-        .expect("a binding outside the exact reports must fail");
-        assert!(matches!(
-            error,
-            ProviderAdmissionError::Capability(ProviderCapabilityError::UnboundProofBinding)
-        ));
     }
 
     #[test]
