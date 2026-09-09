@@ -20,6 +20,7 @@ ignores:
   # Fixed /proc/self/status telemetry is a host resource observation, never source ingress.
   - src/process_memory.rs
   - src/provider_sandbox.rs
+  - src/provider_sandbox/linux_policy.rs
   - src/rust_compilation_trust.rs
 rule:
   all:

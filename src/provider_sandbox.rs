@@ -14,6 +14,27 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 
+#[cfg(target_os = "linux")]
+mod linux_policy;
+#[cfg(target_os = "linux")]
+pub use linux_policy::CompiledProviderSeccomp;
+#[cfg(not(target_os = "linux"))]
+#[derive(Debug)]
+pub struct CompiledProviderSeccomp(std::convert::Infallible);
+#[cfg(not(target_os = "linux"))]
+impl CompiledProviderSeccomp {
+    /// This Linux-only value cannot be constructed on this platform.
+    ///
+    /// # Errors
+    /// Unreachable: no policy value exists on this platform.
+    pub fn try_clone(&self) -> std::io::Result<Self> {
+        match self.0 {}
+    }
+    fn descriptor(&self) -> &fs::File {
+        match self.0 {}
+    }
+}
+
 /// Stable reason returned when the requested containment profile cannot be proved.
 pub const SANDBOX_UNAVAILABLE_REASON: &str = "SANDBOX_UNAVAILABLE";
 /// Exact Linux containment executable required by the accepted host contract.
@@ -562,9 +583,6 @@ fn probe_linux_bubblewrap() -> SandboxProbeObservation {
             "linux-cgroup-parent-control-writable".into(),
             cgroup_parent_control_writable,
         ),
-        // A caller-supplied descriptor is not proof of an application-owned compiled policy. The
-        // policy and the full escape matrix remain unavailable even when the independently tested
-        // cgroup backend can place and account a child before its first untrusted exec.
         ("compiled-seccomp-policy-authorized".into(), false),
         (
             "pre-exec-cgroup-placement".into(),
@@ -576,6 +594,7 @@ fn probe_linux_bubblewrap() -> SandboxProbeObservation {
         ),
         ("seccomp-active".into(), false),
     ]);
+    behavior.extend(linux_policy::probe_behavior(&executable));
     SandboxProbeObservation {
         mechanism: SandboxMechanism::LinuxBubblewrap,
         executable_path: executable,
@@ -1113,7 +1132,7 @@ pub struct ProviderLaunchRequest {
 #[derive(Clone, Copy)]
 pub enum ProviderSandboxLaunchMaterial<'a> {
     DarwinProfile(&'a Path),
-    LinuxSeccomp(&'a fs::File),
+    LinuxSeccomp(&'a CompiledProviderSeccomp),
     None,
 }
 
@@ -1415,53 +1434,17 @@ impl ProviderSandboxLauncher {
                 // `dup` deliberately clears close-on-exec so bubblewrap can consume the
                 // already-compiled seccomp program by descriptor number. The owned duplicate
                 // remains alive through `spawn` and is closed in the daemon immediately after.
-                let inherited =
-                    rustix::io::dup(descriptor).map_err(|_| SandboxError::InvalidLaunch)?;
+                let policy = descriptor
+                    .try_clone()
+                    .map_err(|_| SandboxError::InvalidLaunch)?;
+                let inherited = rustix::io::dup(policy.descriptor())
+                    .map_err(|_| SandboxError::InvalidLaunch)?;
                 let inherited_fd = inherited.as_raw_fd().to_string();
                 inherited_seccomp = Some(inherited);
-                confined.extend([
-                    "/usr/bin/bwrap".into(),
-                    "--unshare-all".into(),
-                    "--unshare-net".into(),
-                    "--die-with-parent".into(),
-                    "--new-session".into(),
-                    "--cap-drop".into(),
-                    "ALL".into(),
-                    "--seccomp".into(),
-                    inherited_fd,
-                    "--ro-bind".into(),
-                    "/usr".into(),
-                    "/usr".into(),
-                    "--symlink".into(),
-                    "usr/bin".into(),
-                    "/bin".into(),
-                    "--symlink".into(),
-                    "usr/lib".into(),
-                    "/lib".into(),
-                    "--symlink".into(),
-                    "usr/lib64".into(),
-                    "/lib64".into(),
-                    "--symlink".into(),
-                    "usr/sbin".into(),
-                    "/sbin".into(),
-                    "--proc".into(),
-                    "/proc".into(),
-                    "--dev".into(),
-                    "/dev".into(),
-                    "--tmpfs".into(),
-                    "/tmp".into(),
-                    "--ro-bind".into(),
-                    profile.workspace_view.to_string_lossy().into_owned(),
-                    "/workspace".into(),
-                    "--ro-bind".into(),
-                    profile.dependency_root.to_string_lossy().into_owned(),
-                    "/dependencies".into(),
-                    "--bind".into(),
-                    profile.output_root.to_string_lossy().into_owned(),
-                    "/output".into(),
-                    "--chdir".into(),
-                    "/output".into(),
-                ]);
+                #[cfg(target_os = "linux")]
+                confined.extend(linux_sandbox_arguments(profile, &inherited_fd));
+                #[cfg(not(target_os = "linux"))]
+                return Err(SandboxError::SandboxUnavailable);
             }
             SandboxMechanism::None => {
                 if request.contained_executable != request.host_executable {
@@ -1668,6 +1651,53 @@ fn darwin_profile(view: &Path, dependencies: &Path, output: &Path) -> String {
         quote_seatbelt(view),
         quote_seatbelt(output),
     )
+}
+
+#[cfg(target_os = "linux")]
+fn linux_sandbox_arguments(profile: &GeneratedSandboxProfile, inherited_fd: &str) -> Vec<String> {
+    vec![
+        "/usr/bin/bwrap".into(),
+        "--unshare-all".into(),
+        "--unshare-net".into(),
+        "--die-with-parent".into(),
+        "--new-session".into(),
+        "--cap-drop".into(),
+        "ALL".into(),
+        "--seccomp".into(),
+        inherited_fd.to_owned(),
+        "--ro-bind".into(),
+        "/usr".into(),
+        "/usr".into(),
+        "--symlink".into(),
+        "usr/bin".into(),
+        "/bin".into(),
+        "--symlink".into(),
+        "usr/lib".into(),
+        "/lib".into(),
+        "--symlink".into(),
+        "usr/lib64".into(),
+        "/lib64".into(),
+        "--symlink".into(),
+        "usr/sbin".into(),
+        "/sbin".into(),
+        "--proc".into(),
+        "/proc".into(),
+        "--dev".into(),
+        "/dev".into(),
+        "--tmpfs".into(),
+        "/tmp".into(),
+        "--ro-bind".into(),
+        profile.workspace_view.to_string_lossy().into_owned(),
+        "/workspace".into(),
+        "--ro-bind".into(),
+        profile.dependency_root.to_string_lossy().into_owned(),
+        "/dependencies".into(),
+        "--bind".into(),
+        profile.output_root.to_string_lossy().into_owned(),
+        "/output".into(),
+        "--chdir".into(),
+        "/output".into(),
+    ]
 }
 
 fn linux_profile(view: &Path, dependencies: &Path, output: &Path) -> String {
@@ -2142,13 +2172,6 @@ mod tests {
     #[test]
     fn linux_host_probe_records_remaining_authority_without_fallback() {
         let observation = probe_host_sandbox();
-        for requirement in ["compiled-seccomp-policy-authorized", "seccomp-active"] {
-            assert_eq!(
-                observation.behavior.get(requirement),
-                Some(&false),
-                "Linux probe must not synthesize {requirement}: {observation:?}"
-            );
-        }
         for observed_prerequisite in [
             "linux-namespace-launch",
             "linux-user-namespace-enabled",
@@ -2164,21 +2187,19 @@ mod tests {
                 "Linux probe omitted {observed_prerequisite}: {observation:?}"
             );
         }
-        let matrix = SandboxCapabilityMatrix::probe_current_host();
+        let matrix = SandboxCapabilityMatrix::evaluate(&observation);
         let row = matrix
             .row(ProviderTrustProfile::UntrustedSandboxed)
             .unwrap();
-        assert!(!row.available);
-        assert!(
-            row.unmet_requirements
-                .iter()
-                .any(|requirement| requirement == "compiled-seccomp-policy-authorized")
-        );
-        assert!(
-            row.unmet_requirements
-                .iter()
-                .any(|requirement| requirement == "seccomp-active")
-        );
+        for requirement in required_untrusted_probes(SandboxMechanism::LinuxBubblewrap) {
+            assert_eq!(
+                row.unmet_requirements
+                    .iter()
+                    .any(|missing| missing == requirement),
+                observation.behavior.get(requirement) != Some(&true)
+            );
+        }
+        assert_eq!(row.available, row.unmet_requirements.is_empty());
         let cgroup_backend_available = observation
             .behavior
             .get("pre-exec-cgroup-placement")
@@ -2223,27 +2244,13 @@ mod tests {
         let untrusted = matrix
             .row(ProviderTrustProfile::UntrustedSandboxed)
             .expect("the closed matrix always contains the untrusted row");
-        if observation.mechanism == SandboxMechanism::DarwinSeatbelt {
-            let required = [
-                "launch-confined",
-                "leased-workspace-read-allowed",
-                "workspace-write-denied",
-                "out-of-root-write-denied",
-                "live-workspace-read-denied",
-                "credential-read-denied",
-                "git-read-denied",
-                "network-denied",
-                "inherited-fd-read-denied",
-                "child-process-contained",
-                "resource-limit-enforceable",
-                "cleanup-escape-denied",
-                "output-write-allowed",
-            ];
+        if untrusted.available {
+            let required = required_untrusted_probes(observation.mechanism);
             for probe in required {
                 assert_eq!(
                     observation.behavior.get(probe),
                     Some(&true),
-                    "advertised Darwin containment lacks {probe}: {observation:?}"
+                    "advertised containment lacks {probe}: {observation:?}"
                 );
             }
             assert!(untrusted.available, "{observation:?}");

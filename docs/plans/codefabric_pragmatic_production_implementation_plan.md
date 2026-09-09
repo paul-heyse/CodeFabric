@@ -85,7 +85,9 @@ checker answers, using a small local fix to the pinned Query handle construction
 production context preparation and bounded immutable source reads pass all 29 sidecar tests,
 strict sidecar Clippy, and 10 root service tests. The real sidecar UDS test validates a Python
 3.14-dependent call target and joined shutdown. Daemon publication, external context roots,
-Rust contributions and mixed-language public answers remain open; this does not close outcome 4.
+Rust contributions and mixed-language public answers remain open; this does not close outcome 4. The Linux
+launcher now has an application-compiled sealed seccomp policy and real containment probes;
+39 affected sandbox/provider tests pass, including owned descendant cleanup.
 
 ## 6. Outcome 5 — Query-relevant progress and unfinished scope
 

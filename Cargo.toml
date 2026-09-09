@@ -118,6 +118,7 @@ daemon = [
     "dep:notify-debouncer-full",
     "dep:hyper-util",
     "dep:command-fds",
+    "dep:seccompiler",
     "dep:sha2",
     "dep:tokio-stream",
     "dep:tokio-util",
@@ -194,6 +195,9 @@ tree-sitter = { version = "=0.26.12", optional = true }
 tree-sitter-python = { version = "=0.25.0", optional = true }
 tree-sitter-rust = { version = "=0.24.2", optional = true }
 url = { version = "2", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+seccompiler = { version = "=0.5.0", features = ["json"], optional = true }
 
 [dev-dependencies]
 hyper-util = { version = "=0.1.20", features = ["tokio"] }

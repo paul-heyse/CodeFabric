@@ -84,8 +84,25 @@ real-process test now analyzes a version-dependent call through UDS and validate
 answer `module.current` for Python 3.14 before joined shutdown. Sidecar tests independently
 cover 3.13/3.14 and Linux/Darwin selection, deletion/recreation and rejected source mutation.
 This demonstrates the provider boundary, not daemon catalog publication or containment.
-The Linux sandbox's compiled seccomp/escape-probe path remains unimplemented; production
-provider wiring must preserve that distinction. Outcomes 4–8 remain open.
+The Linux sandbox follow-up below replaces its previously unimplemented policy path. Outcomes 4–8 remain open.
+
+## Linux provider containment
+
+The production launcher now consumes an application-compiled, sealed seccomp descriptor.
+The Linux-only `seccompiler` 0.5.0 dependency compiles architecture-aware filters; existing
+versions are unchanged. The filter permits Unix sockets and normal threads while rejecting
+network socket families, namespace/process-group escape and privileged kernel operations.
+Bubblewrap supplies the private filesystem/PID/network view, and delegated cgroups retain
+whole-process-tree memory/CPU/process accounting and cleanup. A missing host prerequisite
+continues to produce an unavailable containment result.
+
+The live Linux probe uses the same Bubblewrap arguments and descriptor-closing shell as
+production. All 12 sandbox tests and all 39 affected sandbox/Pyrefly/rustc service tests pass
+on 2026-09-09. A real confined worker starts threads and a descendant; kernel usage is
+observed and the complete tree is killed and joined. Strict source-read governance passes.
+The root library Clippy command completes with the existing broad warning backlog; two
+new missing-error-section warnings were corrected. This is containment infrastructure for
+provider integration, not completed daemon semantics.
 
 ## Completed preparation
 

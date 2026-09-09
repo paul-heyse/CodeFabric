@@ -1767,7 +1767,7 @@ pub struct UntrustedRustcProviderLifecycle<'a> {
 
 enum OwnedRustcLaunchMaterial {
     DarwinProfile(PathBuf),
-    LinuxSeccomp(fs::File),
+    LinuxSeccomp(crate::provider_sandbox::CompiledProviderSeccomp),
 }
 
 impl OwnedRustcLaunchMaterial {
