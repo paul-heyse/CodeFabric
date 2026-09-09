@@ -24,10 +24,10 @@ use crate::protocol::generated::codefabric::pyrefly::v1::pyrefly_sidecar_server:
     PyreflySidecar, PyreflySidecarServer,
 };
 use crate::protocol::generated::codefabric::pyrefly::v1::{
-    AnalyzeCommand, AnalyzeEvent, AnalyzeEventHeader, CancelRunRequest, CloseContextRequest,
-    CloseContextResponse, Hello, HelloAck, ModuleBegin, ModuleEnd, OpenContextRequest,
-    OpenContextResponse, RelationIpcFrameEvent, RunAccepted, RunProgress, RunTerminal,
-    ShutdownRequest, ShutdownResponse,
+    AnalyzeCommand, AnalyzeEvent, AnalyzeEventHeader, AnalyzeModulesRequest, CancelRunRequest,
+    CloseContextRequest, CloseContextResponse, Hello, HelloAck, ModuleBegin, ModuleEnd,
+    ModuleRequest, OpenContextRequest, OpenContextResponse, RelationIpcFrameEvent, RunAccepted,
+    RunProgress, RunTerminal, ShutdownRequest, ShutdownResponse,
 };
 use crate::pyrefly_link::preparation::{
     PreparationError, SelectedPyreflyPreparation, UNAVAILABLE_DETAILS,
@@ -43,11 +43,13 @@ const MAX_OUTSTANDING_FRAMES: u32 = 4;
 const MAX_UNACKNOWLEDGED_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CONTEXTS: usize = 4;
 const MAX_MEMORY_MIB: u64 = 16_384;
-const MAX_MODULES_PER_RUN: usize = 64;
-const MAX_SOURCE_BYTES_PER_MODULE: u64 = 8 * 1024 * 1024;
-const MAX_SOURCE_BYTES_PER_RUN: u64 = 64 * 1024 * 1024;
+#[path = "../../src/pyrefly_inventory_stream.rs"]
+pub(crate) mod inventory_stream;
+use inventory_stream::{
+    MAX_MODULES_PER_RUN, MAX_SOURCE_BYTES_PER_MODULE, MAX_SOURCE_BYTES_PER_RUN,
+};
 const MAX_TOTAL_RELATION_BYTES: usize = 256 * 1024 * 1024;
-const REQUIRED_FEATURE_BITS: u64 = (1_u64 << 17) | (1_u64 << 32);
+const REQUIRED_FEATURE_BITS: u64 = (1_u64 << 17) | (1_u64 << 32) | (1_u64 << 34);
 const OPTIONAL_FEATURE_BITS: u64 = 1_u64 << 33;
 const RESOURCE_PROFILE_ID: &str = "sidecar-semantic-standard";
 const TRUST_PROFILE: &str = "UNTRUSTED_SANDBOXED";
@@ -339,7 +341,8 @@ async fn receive_run_control(
                 run.request_cancel(false);
                 return;
             }
-            Some(Command::Start(_)) | None => {
+            Some(Command::Start(_) | Command::InventoryChunk(_) | Command::InventoryEnd(_))
+            | None => {
                 credits.rejected = Some("analysis stream contains an invalid command".into());
                 drop(credits);
                 run.request_cancel(false);
@@ -676,11 +679,12 @@ impl PyreflySidecar for Service {
             .message()
             .await?
             .ok_or_else(|| Status::invalid_argument("Pyrefly analysis stream is empty"))?;
-        let Some(Command::Start(start)) = first.command else {
+        let Some(Command::Start(mut start)) = first.command else {
             return Err(Status::failed_precondition(
                 "Pyrefly analysis stream must begin with start",
             ));
         };
+        inventory_stream::receive_inventory(&mut start, &mut commands).await?;
         validate_complete_inventory(&start)?;
         let context = self
             .contexts

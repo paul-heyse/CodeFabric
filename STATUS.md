@@ -15,6 +15,23 @@ function queries, independent Rust syntax publication and observed result-row tr
 External/generated compiler inputs, the other query forms and full coverage/freshness delivery
 remain active work.
 
+Python analysis now uploads ordered descriptor chunks under one complete checker inventory.
+The previous 64-module startup ceiling is removed; the current configured bounds are 16,384
+modules, 32 MiB per source file and 512 MiB per context run. Individual RPC frames remain
+bounded. Sequence/end counts, duplicate/missing members, deadlines, cancellation and exact
+source bindings are checked before run acceptance or checker mutation. Larger context metadata
+still has a 4 MiB RPC frame limit; external roots and further scaling remain work. Limit
+rejection retains explicit resource-limited processing instead of declaring a truncated
+inventory complete. Source capture now allows 1 GiB across the mixed-language input set.
+
+Validation on 2026-09-09: all 16 selected root Pyrefly/daemon tests pass, including contained
+cross-chunk imports and fresh Delta publication from 70 Python modules in about eight seconds.
+The latter checks all 69 distinct function declarations and the actual `extra_69.chosen`
+semantic target. All 29 sidecar tests, strict sidecar Clippy/check, protocol regeneration checks
+and 95 adapter tests plus lint/types pass. These bounds are configured ceilings, not measured
+optimal capacities; the scenario does not close effective external contexts or full Python
+normalization. The root library Clippy command completes with the existing warning backlog.
+
 Declaration-fact retrieval now accepts exact public entity IDs and the meanings `declarations`
 or `declaration locations and provenance`. A native DataFusion semi join consumes the typed
 request relation, preserves each declaration occurrence and prevents repeated subjects from

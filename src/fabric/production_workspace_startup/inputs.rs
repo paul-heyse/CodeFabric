@@ -157,7 +157,7 @@ pub(super) fn capture_inputs(
             &mut store,
             &inventory,
             SourceInventoryCapturePolicy {
-                maximum_total_bytes: 64 * 1024 * 1024,
+                maximum_total_bytes: 1024 * 1024 * 1024,
                 holder_kind: SourceBlobHolderKind::ProviderRun,
             },
             &cancellation,

@@ -99,6 +99,21 @@ message AnalyzeModulesRequest {
   bool complete_inventory = 17;
   // Scheduling hints only; each unique ID must belong to modules. Never a replacement list.
   repeated string changed_module_ids = 18;
+  // Present selects ordered descriptor upload. Inline modules/changed IDs must then be empty.
+  // No checker mutation or RunAccepted event occurs until inventory_end validates the full set.
+  optional uint32 expected_module_count = 19;
+}
+
+message AnalyzeInventoryChunk {
+  uint32 sequence = 1;
+  repeated ModuleRequest modules = 2;
+  repeated string changed_module_ids = 3;
+}
+
+message AnalyzeInventoryEnd {
+  uint32 chunk_count = 1;
+  uint32 module_count = 2;
+  uint32 changed_module_count = 3;
 }
 
 message AnalyzeCommand {
@@ -109,6 +124,8 @@ message AnalyzeCommand {
     CancelRunRequest cancel = 4;
     // Only the flow_control_ack variant is valid in the daemon-to-sidecar direction.
     codefabric.provider.v1.RelationIpcFrame relation_ipc_ack = 5;
+    AnalyzeInventoryChunk inventory_chunk = 6;
+    AnalyzeInventoryEnd inventory_end = 7;
   }
 }
 

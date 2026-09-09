@@ -2077,6 +2077,64 @@ fn pragmatic_python_semantics_publish_real_call_targets() {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn pragmatic_python_chunked_inventory_publishes_cross_module_semantics() {
+    use arrow::array::{BinaryArray, StringArray};
+
+    let fixture =
+        ProductionFixture::with_source(b"from extra_69 import chosen\nanswer = chosen()\n");
+    let workspace = Path::new(&fixture.workspace.root_path_display);
+    for index in 1..70 {
+        fs::write(
+            workspace.join(format!("extra_{index}.py")),
+            "def chosen() -> int:\n    return 42\n",
+        )
+        .unwrap();
+    }
+    let supervisor = fixture.start_supervisor();
+    let mut targets = BTreeSet::new();
+    for batch in fresh_activation_relation_batches(&fixture, "provider.pyrefly.call_target.v1") {
+        let values = batch
+            .column_by_name("qualified_target")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        targets.extend(values.iter().flatten().map(ToOwned::to_owned));
+    }
+    assert_eq!(targets, BTreeSet::from(["extra_69.chosen".to_owned()]));
+    let mut declarations = BTreeSet::new();
+    for batch in fresh_activation_relation_batches(&fixture, "fact.code_declaration") {
+        let names = batch
+            .column_by_name("name")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let kinds = batch
+            .column_by_name("entity_kind")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let entities = batch
+            .column_by_name("entity_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            if names.value(row) == "chosen" && kinds.value(row) == "function" {
+                declarations.insert(entities.value(row).to_vec());
+            }
+        }
+    }
+    // Each file defines a different function even though every spelling is the same.
+    assert_eq!(declarations.len(), 69);
+    supervisor.stop();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn pragmatic_rust_semantics_publish_real_call_targets() {
     rust_semantics_publication(false, false);
 }

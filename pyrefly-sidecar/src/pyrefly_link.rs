@@ -259,7 +259,7 @@ fn read_module_source(module: &ModuleInput) -> Result<Vec<u8>, String> {
     let invalid = || "Pyrefly source is not a bounded immutable regular file".to_owned();
     if module.file_id.is_empty()
         || !module.source_path.is_absolute()
-        || module.source_byte_length > 8 * 1024 * 1024
+        || module.source_byte_length > crate::server::inventory_stream::MAX_SOURCE_BYTES_PER_MODULE
     {
         return Err(invalid());
     }
@@ -421,13 +421,15 @@ impl SemanticContext {
         if run.provider_run_id.is_empty() || run.analysis_context_id.is_empty() {
             return Err("Pyrefly run identity is incomplete".to_owned());
         }
-        if modules.len() > 64
+        if modules.len() > crate::server::inventory_stream::MAX_MODULES_PER_RUN
             || modules
                 .iter()
                 .try_fold(0_u64, |sum, module| {
                     sum.checked_add(module.source_byte_length)
                 })
-                .is_none_or(|bytes| bytes > 64 * 1024 * 1024)
+                .is_none_or(|bytes| {
+                    bytes > crate::server::inventory_stream::MAX_SOURCE_BYTES_PER_RUN
+                })
         {
             return Err("Pyrefly complete source inventory exceeds its byte/module bound".into());
         }
@@ -1445,7 +1447,8 @@ mod tests {
         changed = module.clone();
         changed.source_byte_length += 1;
         assert!(read_module_source(&changed).is_err());
-        changed.source_byte_length = 8 * 1024 * 1024 + 1;
+        changed.source_byte_length =
+            crate::server::inventory_stream::MAX_SOURCE_BYTES_PER_MODULE + 1;
         assert!(read_module_source(&changed).is_err());
         changed = module.clone();
         changed.source_path = root.join("linked.py");

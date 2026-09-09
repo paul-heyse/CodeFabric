@@ -91,10 +91,17 @@ pub(super) fn run(
         return Ok(outcome);
     }
     // A complete checker inventory is required. Never call a truncated batch complete.
-    if images.len() > 64
+    if images.len() > crate::pyrefly_service::inventory_stream::MAX_MODULES_PER_RUN
         || images
             .iter()
-            .any(|image| image.byte_length > 8 * 1024 * 1024)
+            .try_fold(0_u64, |total, image| total.checked_add(image.byte_length))
+            .is_none_or(|total| {
+                total > crate::pyrefly_service::inventory_stream::MAX_SOURCE_BYTES_PER_RUN
+            })
+        || images.iter().any(|image| {
+            image.byte_length
+                > crate::pyrefly_service::inventory_stream::MAX_SOURCE_BYTES_PER_MODULE
+        })
     {
         outcome.gap = ProviderLaneGap::ResourceLimit;
         return Ok(outcome);
@@ -202,7 +209,8 @@ pub(super) fn run(
                     ProviderResourceCeilingSpec {
                         max_relations: 64,
                         max_batches_per_relation: 65_536,
-                        max_input_bytes: 64 * 1024 * 1024,
+                        max_input_bytes:
+                            crate::pyrefly_service::inventory_stream::MAX_SOURCE_BYTES_PER_RUN,
                         max_rows: 4_000_000,
                         max_bytes: 512 * 1024 * 1024,
                         max_diagnostics: 20_000,
@@ -257,6 +265,7 @@ pub(super) fn run(
         Err(StartupPyreflyError::Provider(error)) => {
             use crate::pyrefly_service::PyreflyRunGap;
             outcome.gap = match error.run_gap() {
+                Some(PyreflyRunGap::ResourceLimit) => ProviderLaneGap::ResourceLimit,
                 Some(PyreflyRunGap::Cancelled) => ProviderLaneGap::Cancelled,
                 Some(PyreflyRunGap::TimedOut) => ProviderLaneGap::TimedOut,
                 Some(PyreflyRunGap::TrustUnavailable) => ProviderLaneGap::TrustUnavailable,

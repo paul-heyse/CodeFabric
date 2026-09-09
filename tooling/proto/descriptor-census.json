@@ -7500,6 +7500,32 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.provider.v1.RelationIpcFrame"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "inventoryChunk",
+              "label": "LABEL_OPTIONAL",
+              "name": "inventory_chunk",
+              "number": 6,
+              "oneof": "command",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.pyrefly.v1.AnalyzeInventoryChunk"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "inventoryEnd",
+              "label": "LABEL_OPTIONAL",
+              "name": "inventory_end",
+              "number": 7,
+              "oneof": "command",
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.pyrefly.v1.AnalyzeInventoryEnd"
             }
           ],
           "full_name": "codefabric.pyrefly.v1.AnalyzeCommand",
@@ -7745,6 +7771,104 @@
             {
               "default_value": null,
               "has_presence": false,
+              "json_name": "sequence",
+              "label": "LABEL_OPTIONAL",
+              "name": "sequence",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "modules",
+              "label": "LABEL_REPEATED",
+              "name": "modules",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.pyrefly.v1.ModuleRequest"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "changedModuleIds",
+              "label": "LABEL_REPEATED",
+              "name": "changed_module_ids",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.pyrefly.v1.AnalyzeInventoryChunk",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "chunkCount",
+              "label": "LABEL_OPTIONAL",
+              "name": "chunk_count",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "moduleCount",
+              "label": "LABEL_OPTIONAL",
+              "name": "module_count",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "changedModuleCount",
+              "label": "LABEL_OPTIONAL",
+              "name": "changed_module_count",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT32",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.pyrefly.v1.AnalyzeInventoryEnd",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
               "json_name": "providerRunId",
               "label": "LABEL_OPTIONAL",
               "name": "provider_run_id",
@@ -7975,10 +8099,28 @@
               "proto3_optional": false,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "expectedModuleCount",
+              "label": "LABEL_OPTIONAL",
+              "name": "expected_module_count",
+              "number": 19,
+              "oneof": "_expected_module_count",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_UINT32",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.pyrefly.v1.AnalyzeModulesRequest",
-          "oneofs": [],
+          "oneofs": [
+            {
+              "name": "_expected_module_count",
+              "options": {}
+            }
+          ],
           "options": {},
           "reserved_names": [],
           "reserved_ranges": []

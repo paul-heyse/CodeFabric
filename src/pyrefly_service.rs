@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use arrow_array::{Array as _, FixedSizeBinaryArray, RecordBatch, StringArray, UInt64Array};
 use hyper_util::rt::TokioIo;
+use prost::Message as _;
 use serde::{Deserialize, Serialize};
 use tokio::net::UnixStream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -40,12 +41,18 @@ use crate::rpc::generated::codefabric::pyrefly::v1::analyze_command::Command;
 use crate::rpc::generated::codefabric::pyrefly::v1::analyze_event::Event;
 use crate::rpc::generated::codefabric::pyrefly::v1::pyrefly_sidecar_client::PyreflySidecarClient as WireClient;
 use crate::rpc::generated::codefabric::pyrefly::v1::{
-    AnalyzeCommand, AnalyzeEventHeader, AnalyzeModulesRequest, CancelRunRequest, Hello,
-    ModuleRequest, OpenContextRequest,
+    AnalyzeCommand, AnalyzeEventHeader, AnalyzeInventoryChunk, AnalyzeInventoryEnd,
+    AnalyzeModulesRequest, CancelRunRequest, Hello, ModuleRequest, OpenContextRequest,
 };
 
 #[path = "pyrefly_relation_schema.rs"]
 mod relation_schema;
+
+#[path = "pyrefly_inventory_stream.rs"]
+pub(crate) mod inventory_stream;
+use inventory_stream::{
+    MAX_MODULES_PER_RUN, MAX_SOURCE_BYTES_PER_MODULE, MAX_SOURCE_BYTES_PER_RUN, MODULES_PER_CHUNK,
+};
 
 pub use relation_schema::PyreflyRelation;
 pub(crate) use relation_schema::schema_bundle_digest;
@@ -53,12 +60,9 @@ use relation_schema::schema_digests;
 
 const PYREFLY_SOURCE_DIGEST: &str =
     "b3:1b9e72144644d1b3df0bdca564496566238543dfb7f576980a8408714327fc3e";
-const REQUIRED_FEATURE_BITS: u64 = (1_u64 << 17) | (1_u64 << 32);
+const REQUIRED_FEATURE_BITS: u64 = (1_u64 << 17) | (1_u64 << 32) | (1_u64 << 34);
 const OPTIONAL_FEATURE_BITS: u64 = 1_u64 << 33;
 const MAX_UNACKNOWLEDGED_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_MODULES_PER_RUN: usize = 64;
-const MAX_SOURCE_BYTES_PER_MODULE: u64 = 8 * 1024 * 1024;
-const MAX_SOURCE_BYTES_PER_RUN: u64 = 64 * 1024 * 1024;
 const MAX_RELATION_ROWS: u64 = 1_000_000;
 const MAX_TOTAL_RELATION_BYTES: usize = 256 * 1024 * 1024;
 const RESOURCE_PROFILE_ID: &str = "sidecar-semantic-standard";
@@ -173,6 +177,8 @@ pub struct AcceptedPyreflyRun {
 pub enum PyreflyServiceError {
     #[error("Pyrefly request is invalid: {0}")]
     Invalid(String),
+    #[error("Pyrefly input exceeds its configured {0} bound")]
+    InputLimit(&'static str),
     #[error("Pyrefly sidecar transport failed: {0}")]
     Transport(String),
     #[error("Pyrefly sidecar protocol failed: {0}")]
@@ -201,6 +207,7 @@ pub enum PyreflyServiceError {
 /// Exact incomplete provider outcome returned instead of an accepted Pyrefly batch.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PyreflyRunGap {
+    ResourceLimit,
     Cancelled,
     TimedOut,
     ProcessFailure,
@@ -213,6 +220,7 @@ impl PyreflyServiceError {
     #[must_use]
     pub const fn run_gap(&self) -> Option<PyreflyRunGap> {
         match self {
+            Self::InputLimit(_) => Some(PyreflyRunGap::ResourceLimit),
             Self::Cancelled => Some(PyreflyRunGap::Cancelled),
             Self::TimedOut => Some(PyreflyRunGap::TimedOut),
             Self::ProcessTermination(_) | Self::Transport(_) => Some(PyreflyRunGap::ProcessFailure),
@@ -938,8 +946,8 @@ fn request_from_job(
         || input.changed_module_ids.len() > MAX_MODULES_PER_RUN
         || input.context_manifest.len() as u64 > job.ceilings().max_input_bytes()
     {
-        return Err(PyreflyServiceError::Invalid(
-            "Pyrefly immutable inputs exceed the admitted preflight bounds".to_owned(),
+        return Err(PyreflyServiceError::InputLimit(
+            "module count or immutable input bytes",
         ));
     }
     let context_manifest_digest = b3(&input.context_manifest);
@@ -1100,6 +1108,46 @@ fn expected_context_handle(request: &PyreflyRunRequest) -> String {
         ]
         .concat())[3..35]
     )
+}
+
+async fn send_inventory(
+    sender: &tokio::sync::mpsc::Sender<AnalyzeCommand>,
+    modules: &[ModuleRequest],
+    changed: &[String],
+    chunked: bool,
+) -> Result<(), PyreflyServiceError> {
+    if !chunked {
+        return Ok(());
+    }
+    let count = modules.len().max(changed.len()).div_ceil(MODULES_PER_CHUNK);
+    for sequence in 0..count {
+        let start = sequence * MODULES_PER_CHUNK;
+        let end = start + MODULES_PER_CHUNK;
+        sender
+            .send(AnalyzeCommand {
+                command: Some(Command::InventoryChunk(AnalyzeInventoryChunk {
+                    sequence: u32::try_from(sequence).expect("bounded chunks"),
+                    modules: modules[start.min(modules.len())..end.min(modules.len())].to_vec(),
+                    changed_module_ids: changed[start.min(changed.len())..end.min(changed.len())]
+                        .to_vec(),
+                })),
+            })
+            .await
+            .map_err(|_| {
+                PyreflyServiceError::Protocol("inventory command stream closed".to_owned())
+            })?;
+    }
+    sender
+        .send(AnalyzeCommand {
+            command: Some(Command::InventoryEnd(AnalyzeInventoryEnd {
+                chunk_count: u32::try_from(count).expect("bounded chunks"),
+                module_count: u32::try_from(modules.len()).expect("bounded modules"),
+                changed_module_count: u32::try_from(changed.len())
+                    .expect("bounded changed modules"),
+            })),
+        })
+        .await
+        .map_err(|_| PyreflyServiceError::Protocol("inventory command stream closed".to_owned()))
 }
 
 async fn validate_handshake(
@@ -1498,6 +1546,11 @@ pub(crate) async fn analyze_pyrefly_uds(
             process.completed_generations = process.completed_generations.saturating_add(1);
             Ok(result)
         }
+        Err(PyreflyServiceError::InputLimit(_)) => PyreflyProviderRunResult::gap(
+            job,
+            ProviderUnknownCause::Oversized,
+            "Pyrefly inventory exceeds the admitted input limit",
+        ),
         Err(PyreflyServiceError::Cancelled) => {
             process.invalidate_and_join().await?;
             PyreflyProviderRunResult::gap(
@@ -1597,9 +1650,7 @@ async fn analyze_pyrefly_uds_inner(
         total.checked_add(blob.reference.byte_length)
     });
     if admitted_source_total.is_none_or(|total| total > MAX_SOURCE_BYTES_PER_RUN) {
-        return Err(PyreflyServiceError::Invalid(
-            "Pyrefly admitted source bytes exceed the per-run bound".to_owned(),
-        ));
+        return Err(PyreflyServiceError::InputLimit("source bytes per run"));
     }
     let blobs = admitted_blobs
         .iter()
@@ -1620,18 +1671,22 @@ async fn analyze_pyrefly_uds_inner(
         expires_at_unix_ms: request.deadline_unix_ms,
         blobs: blobs.clone(),
     };
+    let open = OpenContextRequest {
+        workspace_id: request.workspace_id.clone(),
+        analysis_context_id: request.analysis_context_id.clone(),
+        immutable_context_manifest: request.context_manifest.clone(),
+        context_manifest_digest: context_digest.clone(),
+        source_snapshot_lease: Some(lease),
+        resource_profile_id: RESOURCE_PROFILE_ID.to_owned(),
+        maximum_contexts: 4,
+        maximum_memory_mib: 16_384,
+        sandbox_profile_digest: request.sandbox_profile_digest.clone(),
+    };
+    if open.encoded_len() > 4 * 1024 * 1024 {
+        return Err(PyreflyServiceError::InputLimit("context metadata frame"));
+    }
     let opened = client
-        .open_context(OpenContextRequest {
-            workspace_id: request.workspace_id.clone(),
-            analysis_context_id: request.analysis_context_id.clone(),
-            immutable_context_manifest: request.context_manifest.clone(),
-            context_manifest_digest: context_digest.clone(),
-            source_snapshot_lease: Some(lease),
-            resource_profile_id: RESOURCE_PROFILE_ID.to_owned(),
-            maximum_contexts: 4,
-            maximum_memory_mib: 16_384,
-            sandbox_profile_digest: request.sandbox_profile_digest.clone(),
-        })
+        .open_context(open)
         .await
         .map_err(context_open_error)?
         .into_inner();
@@ -1643,7 +1698,7 @@ async fn analyze_pyrefly_uds_inner(
             "opened context identity differs".to_owned(),
         ));
     }
-    let modules = request
+    let mut modules = request
         .modules
         .iter()
         .zip(blobs)
@@ -1656,11 +1711,20 @@ async fn analyze_pyrefly_uds_inner(
             dependency_generation: request.source_generation,
             module_resolution_generation: request.source_generation,
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let chunked =
+        modules.len() > MODULES_PER_CHUNK || request.changed_module_ids.len() > MODULES_PER_CHUNK;
+    let mut changed_module_ids = request.changed_module_ids.clone();
     let start = AnalyzeCommand {
         command: Some(Command::Start(AnalyzeModulesRequest {
             complete_inventory: true,
-            changed_module_ids: request.changed_module_ids.clone(),
+            expected_module_count: chunked
+                .then(|| u32::try_from(modules.len()).expect("bounded module count")),
+            changed_module_ids: if chunked {
+                Vec::new()
+            } else {
+                std::mem::take(&mut changed_module_ids)
+            },
             provider_run_id: request.provider_run_id.clone(),
             workspace_id: request.workspace_id.clone(),
             analysis_context_id: request.analysis_context_id.clone(),
@@ -1668,7 +1732,11 @@ async fn analyze_pyrefly_uds_inner(
             context_manifest_digest: context_digest.clone(),
             source_generation: request.source_generation,
             source_snapshot_lease_id: request.source_snapshot_lease_id.clone(),
-            modules,
+            modules: if chunked {
+                Vec::new()
+            } else {
+                std::mem::take(&mut modules)
+            },
             requested_capability_codes: request.requested_capability_codes.clone(),
             deadline_unix_ms: request.deadline_unix_ms,
             output_schema_bundle_digest: request.output_schema_bundle_digest.clone(),
@@ -1684,11 +1752,18 @@ async fn analyze_pyrefly_uds_inner(
         .send(start)
         .await
         .map_err(|_| PyreflyServiceError::Protocol("analysis command stream closed".to_owned()))?;
-    let mut stream = client
-        .analyze_modules(ReceiverStream::new(command_receiver))
-        .await
-        .map_err(|error| PyreflyServiceError::Protocol(error.to_string()))?
-        .into_inner();
+    // Upload and RPC establishment must advance together: the bounded sender may fill before
+    // the server returns response headers. No independent task survives a failed RPC.
+    let ((), response) = tokio::try_join!(
+        send_inventory(&command_sender, &modules, &changed_module_ids, chunked),
+        async {
+            client
+                .analyze_modules(ReceiverStream::new(command_receiver))
+                .await
+                .map_err(|error| PyreflyServiceError::Protocol(error.to_string()))
+        },
+    )?;
+    let mut stream = response.into_inner();
     let mut sequence = 0_u64;
     let mut analysis_progress_seen = false;
     let mut accepted = Vec::new();
@@ -2481,8 +2556,8 @@ mod tests {
             .collect();
         let ceilings = ProviderResourceCeilings::try_new(ProviderResourceCeilingSpec {
             max_relations: PyreflyRelation::ALL.len(),
-            max_batches_per_relation: 64,
-            max_input_bytes: MAX_SOURCE_BYTES_PER_RUN,
+            max_batches_per_relation: MAX_MODULES_PER_RUN,
+            max_input_bytes: 64 * 1024 * 1024,
             max_rows: MAX_RELATION_ROWS,
             max_bytes: u64::try_from(MAX_TOTAL_RELATION_BYTES).unwrap(),
             max_diagnostics: 1_000,
@@ -2940,17 +3015,127 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn chunked_inventory_upload_advances_with_a_single_queued_frame() {
+        let modules = (0..193)
+            .map(|index| ModuleRequest {
+                module_id: format!("module-{index}"),
+                module_name: format!("m{index}"),
+                ..ModuleRequest::default()
+            })
+            .collect::<Vec<_>>();
+        let changed = modules
+            .iter()
+            .map(|module| module.module_id.clone())
+            .collect::<Vec<_>>();
+        let mut start = AnalyzeModulesRequest {
+            expected_module_count: Some(modules.len() as u32),
+            deadline_unix_ms: now_unix_millis() + 2_000,
+            ..AnalyzeModulesRequest::default()
+        };
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let mut commands = tokio_stream::StreamExt::map(ReceiverStream::new(receiver), Ok);
+        let (sent, received) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(
+                send_inventory(&sender, &modules, &changed, true),
+                inventory_stream::receive_inventory(&mut start, &mut commands)
+            )
+        })
+        .await
+        .expect("upload cannot wait for RPC response headers");
+        sent.unwrap();
+        received.unwrap();
+        assert_eq!(start.modules, modules);
+        assert_eq!(start.changed_module_ids, changed);
+    }
+
+    #[tokio::test]
+    async fn incomplete_inventory_upload_never_replaces_the_start_inventory() {
+        let chunk = AnalyzeCommand {
+            command: Some(Command::InventoryChunk(AnalyzeInventoryChunk {
+                sequence: 0,
+                modules: vec![ModuleRequest {
+                    module_id: "one".to_owned(),
+                    ..ModuleRequest::default()
+                }],
+                changed_module_ids: vec![],
+            })),
+        };
+        let end = AnalyzeCommand {
+            command: Some(Command::InventoryEnd(AnalyzeInventoryEnd {
+                chunk_count: 1,
+                module_count: 2,
+                changed_module_count: 0,
+            })),
+        };
+        for commands in [
+            vec![chunk.clone()],
+            vec![chunk.clone(), chunk.clone(), end.clone()],
+            vec![chunk, end],
+        ] {
+            let mut start = AnalyzeModulesRequest {
+                provider_run_id: "run".to_owned(),
+                expected_module_count: Some(2),
+                deadline_unix_ms: now_unix_millis() + 2_000,
+                ..AnalyzeModulesRequest::default()
+            };
+            let mut commands = tokio_stream::iter(commands.into_iter().map(Ok));
+            assert!(
+                inventory_stream::receive_inventory(&mut start, &mut commands)
+                    .await
+                    .is_err()
+            );
+            assert!(start.modules.is_empty());
+            assert!(start.changed_module_ids.is_empty());
+        }
+        let mut start = AnalyzeModulesRequest {
+            provider_run_id: "run".to_owned(),
+            expected_module_count: Some(2),
+            deadline_unix_ms: now_unix_millis() + 25,
+            ..AnalyzeModulesRequest::default()
+        };
+        let mut commands = futures::stream::pending();
+        assert_eq!(
+            inventory_stream::receive_inventory(&mut start, &mut commands)
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::DeadlineExceeded
+        );
+        start.deadline_unix_ms = now_unix_millis() + 2_000;
+        let mut commands = tokio_stream::iter([Ok(AnalyzeCommand {
+            command: Some(Command::Cancel(CancelRunRequest {
+                provider_run_id: "run".to_owned(),
+                reason: "cancel".to_owned(),
+            })),
+        })]);
+        assert_eq!(
+            inventory_stream::receive_inventory(&mut start, &mut commands)
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::Cancelled
+        );
+        assert!(start.modules.is_empty());
+    }
+
+    #[tokio::test]
     async fn wp34_ops_real_pyrefly_shutdown_joins_serving_process() {
-        real_pyrefly_session(false).await;
+        real_pyrefly_session(false, 1).await;
     }
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn contained_pyrefly_reads_mapped_blobs_and_returns_real_semantics() {
-        real_pyrefly_session(true).await;
+        real_pyrefly_session(true, 1).await;
     }
 
-    async fn real_pyrefly_session(contained: bool) {
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn contained_pyrefly_chunked_inventory_resolves_across_chunk_boundaries() {
+        real_pyrefly_session(true, 70).await;
+    }
+
+    async fn real_pyrefly_session(contained: bool, module_count: usize) {
         let executable = std::env::var_os("CODEFABRIC_PYREFLY_SIDECAR_BIN")
             .expect("relation-IPC operations gate must supply the built sidecar binary");
         let executable = std::fs::canonicalize(executable).unwrap();
@@ -3036,8 +3221,48 @@ mod tests {
         if contained {
             input.modules[0].provider_source_blob_path = "/workspace/module.py".into();
         }
-        std::fs::write(&input.modules[0].source_blob_path, source).unwrap();
-        input.modules[0].content_digest = b3(source);
+        let mut source = source.to_vec();
+        if module_count > 1 {
+            source.extend_from_slice(
+                format!(
+                    "from extra_{} import chosen\nother = chosen()\n",
+                    module_count - 1
+                )
+                .as_bytes(),
+            );
+        }
+        std::fs::write(&input.modules[0].source_blob_path, &source).unwrap();
+        input.modules[0].content_digest = b3(&source);
+        for index in 1..module_count {
+            let name = format!("extra_{index}");
+            let file = format!("{name}.py");
+            let path = input_root.join(&file);
+            let bytes = b"def chosen() -> int:\n    return 42\n";
+            std::fs::write(&path, bytes).unwrap();
+            let id = crate::identity::encode_public_id(
+                crate::identity::IdentityDomain::SourceFile,
+                None,
+                (index as u128).to_be_bytes(),
+            )
+            .unwrap();
+            input.modules.push(PyreflyModuleInput {
+                module_id: id.clone(),
+                file_id: id,
+                module_name: name,
+                source_blob_path: path.clone(),
+                provider_source_blob_path: if contained {
+                    Path::new("/workspace").join(file)
+                } else {
+                    path
+                },
+                content_digest: b3(bytes),
+            });
+        }
+        let module_map = input.modules.iter().map(|module| serde_json::json!({
+            "module_name": module.module_name, "file_id": module.file_id,
+            "relative_path": module.source_blob_path.file_name().unwrap().as_encoded_bytes(),
+            "root_id": "workspace", "is_stub": false, "is_package": false,
+        })).collect::<Vec<_>>();
         let manifest = serde_json::to_vec(&serde_json::json!({
             "context_kind": "python", "python_language_version": "3.14",
             "implementation_profile": "cpython-semantics", "platform_tag": "linux",
@@ -3047,27 +3272,57 @@ mod tests {
             "pyrefly_bundle_digest": null, "ruff_bundle_digest": b3(b"fixture-ruff"),
             "provider_bundle_version": "configured-context-v1", "platforms": ["linux"],
             "root_bindings": [{"root_id": "workspace", "relative_path": [46]}],
-            "module_map": [{"module_name": "module", "file_id": input.modules[0].file_id,
-                "relative_path": b"module.py".as_slice(), "root_id": "workspace", "is_stub": false, "is_package": false}],
+            "module_map": module_map,
             "configuration_namespace": [46], "configuration_roots": [{"root_id": "workspace", "relative_path": [46]}],
             "configuration_policy_identity": vec![1; 32]
         })).unwrap();
         input.context_manifest = manifest.clone();
+        // Exercise a changed-file hint within a larger complete inventory.
+        let changed_paths = vec![b"module.py".to_vec()];
         let inventory = crate::provider_contracts::ProviderSourceInventory::try_new(
             [1; 16],
             1,
             [2; 32],
-            &[b"module.py".to_vec()],
-            vec![crate::provider_contracts::ProviderInventoryMember {
-                relative_path: b"module.py".to_vec(),
-                disposition: crate::provider_contracts::ProviderInputDisposition::Captured {
-                    file_id: [4; 16],
-                    digest: *blake3::hash(source).as_bytes(),
-                    byte_length: source.len() as u64,
-                },
-                selected_for_provider: true,
-            }],
-            vec![b"module.py".to_vec()],
+            &input
+                .modules
+                .iter()
+                .map(|module| {
+                    module
+                        .source_blob_path
+                        .file_name()
+                        .unwrap()
+                        .as_encoded_bytes()
+                        .to_vec()
+                })
+                .collect::<Vec<_>>(),
+            input
+                .modules
+                .iter()
+                .map(|module| {
+                    let bytes = std::fs::read(&module.source_blob_path).unwrap();
+                    crate::provider_contracts::ProviderInventoryMember {
+                        relative_path: module
+                            .source_blob_path
+                            .file_name()
+                            .unwrap()
+                            .as_encoded_bytes()
+                            .to_vec(),
+                        disposition:
+                            crate::provider_contracts::ProviderInputDisposition::Captured {
+                                file_id: crate::identity::decode_public_id(
+                                    crate::identity::IdentityDomain::SourceFile,
+                                    None,
+                                    &module.file_id,
+                                )
+                                .unwrap(),
+                                digest: *blake3::hash(&bytes).as_bytes(),
+                                byte_length: bytes.len() as u64,
+                            },
+                        selected_for_provider: true,
+                    }
+                })
+                .collect(),
+            changed_paths,
             None,
         )
         .unwrap();
@@ -3090,8 +3345,12 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(accepted.modules.len(), 1);
-        let targets = accepted.modules[0]
+        assert_eq!(accepted.modules.len(), module_count);
+        let targets = accepted
+            .modules
+            .iter()
+            .find(|module| module.module_id == input.modules[0].module_id)
+            .unwrap()
             .relations
             .iter()
             .find(|r| r.relation == PyreflyRelation::CallTarget)
@@ -3103,7 +3362,18 @@ mod tests {
             .as_any()
             .downcast_ref::<StringArray>()
             .unwrap();
-        assert_eq!(targets.iter().collect::<Vec<_>>(), [Some("module.current")]);
+        let mut expected = std::collections::BTreeSet::from(["module.current".to_owned()]);
+        if module_count > 1 {
+            expected.insert(format!("extra_{}.chosen", module_count - 1));
+        }
+        assert_eq!(
+            targets
+                .iter()
+                .flatten()
+                .map(ToOwned::to_owned)
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected
+        );
         PyreflyProviderRunResult::try_new(&job, accepted).unwrap();
         assert!(
             client
