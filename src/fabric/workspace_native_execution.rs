@@ -200,6 +200,7 @@ impl WorkspaceNativeExecution {
         O: FnOnce(Cancellation, Arc<OwnedLocalStore>) -> F + Send + 'static,
         C: FnOnce(E) -> NativeLaneError + Send + 'static,
     {
+        crate::process_memory::admit(request.class)?;
         let (parent, lane) = match request.class {
             ResourceClass::Data => (&self.owner.data_scope, &self.owner.data_lane),
             ResourceClass::Control => (&self.owner.control_scope, &self.owner.control_lane),

@@ -499,6 +499,8 @@ fn build_fresh_native_source(
     workspace_resources: &ProductionWorkspaceResources,
     cancellation: crate::cancellation::Cancellation,
 ) -> Result<FreshNativeSource, ProductionWorkspaceStartupError> {
+    crate::process_memory::admit(crate::resource_budget::ResourceClass::Data)
+        .map_err(|error| step("source-memory-headroom", error))?;
     let workspace_root = state_root
         .join("fabric")
         .join(lower_hex(&record.workspace_id));

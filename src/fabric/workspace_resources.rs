@@ -300,6 +300,8 @@ fn resource_policy_identity(
     hash.update(b"codefabric.aggregate-resource-envelope.v1\0");
     hash.update(b"owned-local-store.workspace-bootstrap.v1\0");
     hash.update(b"workspace-native-execution.bounded-owned.v2\0");
+    hash.update(&crate::process_memory::RSS_PAUSE_BYTES.to_be_bytes());
+    hash.update(&crate::process_memory::RSS_RESUME_BYTES.to_be_bytes());
     for class in [ResourceClass::Data, ResourceClass::Control] {
         let profile = local_native_profile(class);
         let lane = profile.lane;

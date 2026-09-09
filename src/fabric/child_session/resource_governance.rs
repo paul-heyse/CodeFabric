@@ -295,6 +295,8 @@ pub struct EpochWorkRequest {
 /// Read-only resource state suitable for system relations and tests.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EpochResourceObservation {
+    pub process_memory: Option<crate::process_memory::ProcessMemoryObservation>,
+    pub process_memory_error: Option<String>,
     pub epoch_id: EpochId,
     pub resource_policy: [u8; 32],
     pub memory_limit_bytes: usize,
@@ -548,6 +550,7 @@ impl EpochResourceCoordinator {
         request: EpochWorkRequest,
     ) -> Result<EpochWorkPermit, EpochResourceError> {
         self.validate_request(&request)?;
+        crate::process_memory::admit(resource_class(request.class))?;
         if request.cancellation.is_cancelled() {
             return Err(EpochResourceError::Cancelled);
         }
@@ -736,7 +739,13 @@ impl EpochResourceCoordinator {
                 )
             })
             .collect();
+        let (process_memory, process_memory_error) = match crate::process_memory::sample() {
+            Ok(sample) => (Some(sample), None),
+            Err(error) => (None, Some(error.to_string())),
+        };
         Ok(EpochResourceObservation {
+            process_memory,
+            process_memory_error,
             epoch_id: self.epoch_id,
             resource_policy: self.inner.resource_policy,
             memory_limit_bytes: self.inner.policy.datafusion_resources.memory_limit_bytes,
@@ -1063,6 +1072,7 @@ impl EpochWorkPermit {
     /// Fail at explicit synchronous phase boundaries after cancellation or
     /// deadline. This complements the bounded native terminal drain in `run`.
     pub fn checkpoint(&self) -> Result<(), EpochResourceError> {
+        crate::process_memory::admit(resource_class(self.class))?;
         if self.cancellation.is_cancelled() {
             return Err(EpochResourceError::Cancelled);
         }
@@ -1218,6 +1228,8 @@ const fn all_zero<const N: usize>(value: &[u8; N]) -> bool {
 /// Fail-closed resource admission and retention outcomes.
 #[derive(Debug, thiserror::Error)]
 pub enum EpochResourceError {
+    #[error(transparent)]
+    MemoryPressure(#[from] crate::process_memory::ProcessMemoryError),
     #[error(transparent)]
     Resource(#[from] ResourceBudgetError),
     #[error("NATIVE_OPERATION:{0}")]

@@ -53,6 +53,8 @@ pub mod inventory;
 pub mod operational_store;
 #[cfg(feature = "daemon")]
 pub mod owned_unix_socket;
+#[cfg(feature = "data-fabric")]
+pub mod process_memory;
 #[cfg(feature = "daemon")]
 pub mod process_runtime;
 #[cfg(feature = "daemon")]

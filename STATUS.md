@@ -32,7 +32,7 @@ Next: outcome 3's reduced resource ownership and native-patch cleanup, including
 
 The [consolidated review](docs/reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md) and [selected domain documents](docs/spec_index/README.md) define the revised target. All Python/Rust fact families and eight query forms remain scope. First-release delivery, complete-product delivery and preparation readiness are different claims.
 
-## Outcome 3 in progress — upstream native libraries and owned execution
+## Outcome 3 — reduced resources implemented for the current Linux runtime
 
 On 2026-09-09, production execution stopped constructing generalized native allocation
 owners/policies. Native worker/thread/job envelopes, cancellation, joined runtime cleanup,
@@ -51,8 +51,18 @@ focused resource/provider/maintenance run passed 64 cases; its real Pyrefly shut
 then passed with the freshly verified sidecar binary supplied (65 affected cases total).
 All 28 selected feature-architecture/change-routing tooling tests pass. Native checkpoint,
 vacuum protection, exact reopen, cancellation, writer reconciliation and control headroom
-are among the passing cases. Whole-process RSS sampling/backpressure remains outcome 3
-work; this is not an allocator or OOM guarantee. Outcomes 4–8 remain open.
+are among the passing cases. The cleanup is committed as `200b306`; all four affected
+compatibility integration tests also pass.
+
+Whole-process RSS sampling now gates source capture, native data operations and scheduled
+query admission/checkpoints. Initial workstation thresholds pause new data work at 3 GiB
+and resume at 2.5 GiB; control/cancellation/cleanup remain available. Current and peak-sampled
+RSS are separate from DataFusion reservations and spill, and observation failure is explicit.
+Nineteen RSS/scheduler/executor tests, the isolated data-fabric feature check and all four real
+golden cases pass with this behavior. RSS is sampled on Linux; other platforms report it
+unavailable, not zero. Sampling cannot guarantee immunity from OOM. Provider containment,
+shared pools, work/result bounds and physical disk headroom remain in place. Full mixed-language
+provider wiring and sustained retention/performance are outcomes 4–8, still open.
 
 ## Completed preparation
 

@@ -199,6 +199,8 @@ pub(crate) enum NativeDiagnosticCategory {
 #[derive(Debug, Error)]
 pub(crate) enum NativeLaneError {
     #[error(transparent)]
+    MemoryPressure(#[from] crate::process_memory::ProcessMemoryError),
+    #[error(transparent)]
     AdmissionDenied(#[from] NativeAdmissionFailure),
     #[error("invalid native execution envelope: {0}")]
     InvalidEnvelope(&'static str),
@@ -307,7 +309,8 @@ impl NativeLaneError {
                 | StructuredTaskError::ControlCapacityUnavailable
                 | StructuredTaskError::ObservationClosed) => Self::Registry(error),
             },
-            error @ (Self::AdmissionDenied(_)
+            error @ (Self::MemoryPressure(_)
+            | Self::AdmissionDenied(_)
             | Self::InvalidEnvelope(_)
             | Self::Budget(_)
             | Self::Cancelled

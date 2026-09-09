@@ -57,12 +57,16 @@ After callers stop depending on generalized native receipt APIs, classify the lo
 
 **Done:** pressure/cancellation tests exercise real owners, budgets and cleanup; native-source changes compile and preserve affected behavior; `just stable-graph-check` and relevant feature/native tests pass. Resource measurements distinguish managed budgets from whole-process RSS.
 
-**Progress 2026-09-09:** generalized native allocation owners/policies and all receipt-only
+**Implemented for the current Linux runtime, 2026-09-09:** generalized native allocation owners/policies and all receipt-only
 fork selections are removed. The same upstream versions compile, the exact graph and
 source-read governance checks pass, and all four golden daemon cases pass. Actual owned
 lane/store/pool/maintenance tests remain; the obsolete allocator harnesses are retired.
-Bounded pinned-blob reads fix both source-read findings. Finish whole-process RSS sampling
-and backpressure, then continue semantic provider and live-update integration.
+Bounded pinned-blob reads fix both source-read findings. RSS backpressure now pauses data
+admission/checkpoints at 3 GiB and resumes below 2.5 GiB while retaining control capacity.
+Observations distinguish RSS from managed reservations; unavailable platform probes remain
+explicit. Nineteen affected RSS/scheduler/owner tests, the isolated data-fabric check, four
+compatibility tests and all four golden cases pass. Sustained retention/measurement and
+new semantic provider integration continue under outcomes 4–8.
 
 ## 5. Outcome 4 — Real mixed-language semantics through the first four forms
 
@@ -175,8 +179,9 @@ Old identifiers are navigation only. Preserve semantic and operational obligatio
 
 ## 12. Next action
 
-Outcomes 1–2 are complete. Outcome 3 has retired native receipt consumers and forks,
-with upstream compilation, real ownership/maintenance tests and all four golden cases
-passing. Finish daemon RSS sampling/backpressure; then wire real semantic providers and
-continue outcomes 4–8. Source-read structural findings are fixed. Resolve engineering choices
-directly in this editable plan when new evidence matters; no additional review cycle is required.
+Outcomes 1–3 are implemented for the current Linux workflow. Continue outcome 4 with
+actual Pyrefly/rustc contributions, then query-relevant remainder, live updates, remaining
+analyses/forms and sustained operation in outcomes 5–8. Pyrefly currently rejects production
+context preparation, and its upstream Query ignores configured runtime settings; fix those
+actual boundaries while preserving exact input/context identity. No additional review cycle
+is required. Other-platform RSS sampling remains an explicit deployment limitation.
