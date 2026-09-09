@@ -31,7 +31,7 @@ pub struct SourceContextParameters {
     pub(crate) maximum_source_bytes: usize,
 }
 
-pub(crate) const INPUT_FIELDS: [&str; 10] = [
+pub(crate) const INPUT_FIELDS: [&str; 11] = [
     "public_entity_id",
     "context_id",
     "file_id",
@@ -42,6 +42,7 @@ pub(crate) const INPUT_FIELDS: [&str; 10] = [
     "end_byte",
     "source_bytes",
     "context_kind",
+    "language",
 ];
 
 pub(crate) fn output_type() -> DataType {
@@ -58,6 +59,10 @@ pub(crate) fn output_type() -> DataType {
         Field::new("start_byte_column", DataType::UInt64, false),
         Field::new("end_line", DataType::UInt64, false),
         Field::new("end_byte_column", DataType::UInt64, false),
+        Field::new("start_utf8_column", DataType::UInt64, true),
+        Field::new("start_utf16_column", DataType::UInt64, true),
+        Field::new("end_utf8_column", DataType::UInt64, true),
+        Field::new("end_utf16_column", DataType::UInt64, true),
     ]))
 }
 
@@ -78,6 +83,7 @@ pub(crate) fn function(parameters: SourceContextParameters) -> Arc<ScalarUDF> {
             DataType::UInt64,
             DataType::UInt64,
             DataType::Binary,
+            DataType::Utf8,
             DataType::Utf8,
         ],
         output_type(),
@@ -126,6 +132,41 @@ fn position(bytes: &[u8], offset: usize) -> (u64, u64) {
     (line, (offset - line_start) as u64)
 }
 
+/// Zero-based columns in decoded UTF-8 bytes and UTF-16 code units. A BOM has no
+/// text column; offsets inside a character are deliberately unmappable. Walk both
+/// endpoints together without allocating another source or per-character index.
+fn text_columns(bytes: &[u8], python: bool, start: usize, end: usize) -> [Option<(u64, u64)>; 2] {
+    let Ok(decoded) = crate::source_encoding::DecodedSource::select(bytes, python) else {
+        return [None; 2];
+    };
+    let mut columns = (0, 0);
+    let mut result = [None; 2];
+    let positions = [start, end];
+    for (original, character) in decoded
+        .characters()
+        .map(|(offset, ch)| (offset, Some(ch)))
+        .chain(std::iter::once((decoded.original_len(), None)))
+    {
+        if original > end {
+            break;
+        }
+        for (index, position) in positions.iter().enumerate() {
+            if *position == original {
+                result[index] = Some(columns);
+            }
+        }
+        if let Some(character) = character {
+            if character == '\n' {
+                columns = (0, 0);
+            } else {
+                columns.0 += character.len_utf8() as u64;
+                columns.1 += character.len_utf16() as u64;
+            }
+        }
+    }
+    result
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "one bounded Arrow batch has one source-policy check and columnar output construction"
@@ -156,6 +197,10 @@ fn materialize(
     let mut start_columns = Vec::with_capacity(count);
     let mut end_lines = Vec::with_capacity(count);
     let mut end_columns = Vec::with_capacity(count);
+    let mut start_utf8_columns = Vec::with_capacity(count);
+    let mut start_utf16_columns = Vec::with_capacity(count);
+    let mut end_utf8_columns = Vec::with_capacity(count);
+    let mut end_utf16_columns = Vec::with_capacity(count);
     for row in 0..count {
         let source = typed::<BinaryArray>(&arrays, 8)?.value(row);
         let start = usize::try_from(typed::<UInt64Array>(&arrays, 6)?.value(row)).map_err(error)?;
@@ -211,6 +256,16 @@ fn materialize(
         let delivered_end = start + materialized.returned_bytes;
         let (start_line, start_column) = position(source, start);
         let (end_line, end_column) = position(source, delivered_end);
+        let [start_text, end_text] = text_columns(
+            source,
+            typed::<StringArray>(&arrays, 10)?.value(row) == "python",
+            start,
+            delivered_end,
+        );
+        start_utf8_columns.push(start_text.map(|columns| columns.0));
+        start_utf16_columns.push(start_text.map(|columns| columns.1));
+        end_utf8_columns.push(end_text.map(|columns| columns.0));
+        end_utf16_columns.push(end_text.map(|columns| columns.1));
         identities.push(materialized.source_context_id.to_string());
         match materialized.content {
             SourceContextContent::Text(text) => {
@@ -245,6 +300,10 @@ fn materialize(
         Arc::new(UInt64Array::from(start_columns)),
         Arc::new(UInt64Array::from(end_lines)),
         Arc::new(UInt64Array::from(end_columns)),
+        Arc::new(UInt64Array::from(start_utf8_columns)),
+        Arc::new(UInt64Array::from(start_utf16_columns)),
+        Arc::new(UInt64Array::from(end_utf8_columns)),
+        Arc::new(UInt64Array::from(end_utf16_columns)),
     ];
     let DataType::Struct(fields) = output_type() else {
         unreachable!("closed source schema");
@@ -252,4 +311,37 @@ fn materialize(
     Ok(ColumnarValue::Array(Arc::new(StructArray::try_new(
         fields, output, None,
     )?)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::text_columns;
+
+    #[test]
+    fn source_text_columns_cover_bom_surrogates_crlf_and_partial_characters() {
+        let source = "\u{feff}a😀é\r\nz".as_bytes();
+        assert_eq!(
+            text_columns(source, true, 3, 10),
+            [Some((0, 0)), Some((7, 4))]
+        );
+        assert_eq!(
+            text_columns(source, false, 4, 8),
+            [Some((1, 1)), Some((5, 3))]
+        );
+        assert_eq!(text_columns(source, true, 5, 9), [None, None]);
+        assert_eq!(text_columns(source, true, 0, 2), [None, None]);
+        assert_eq!(
+            text_columns(source, true, 12, 13),
+            [Some((0, 0)), Some((1, 1))]
+        );
+        assert_eq!(text_columns(b"", true, 0, 0), [Some((0, 0)); 2]);
+        assert_eq!(
+            text_columns(b"# coding: latin-1\n\xe9x", true, 18, 20),
+            [Some((0, 0)), Some((3, 2))]
+        );
+        assert_eq!(
+            text_columns(b"# coding: latin-1\n\xe9x", false, 18, 20),
+            [None; 2]
+        );
+    }
 }

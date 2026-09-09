@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `10e577d5` (`Expose exact function definition and body source contexts`);
-decoded source mappings are the current implementation slice.
+Last production commit: `55e50782` (`Map decoded Python and normalized Rust spans to captured bytes`);
+UTF-8/UTF-16 source-context columns are the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -181,6 +181,21 @@ changed lines. The packaging guard now excludes vendored package manifests while
 Rust dependency graphs; an application-file negative probe still fails as expected (`e9743daf`).
 Further codecs, full coordinate semantics, syntax outlines, broader context selection and retained
 parser/checker state remain open.
+
+## Source-context text columns
+
+Source context now adds zero-based `start_utf8_column`, `end_utf8_column`, `start_utf16_column` and
+`end_utf16_column` beside original byte columns and one-based lines. UTF-8 columns count bytes in
+decoded text; UTF-16 columns count code units. Both endpoints share one allocation-free scan of the
+selected decoding. BOM bytes and partial characters have no text position; byte coordinates remain
+available for lossless truncated output. The checks cover astral characters, Latin-1, BOM, CRLF,
+empty input and missing final newlines. The mixed installed source/call scenario passes with
+independent UTF-8/UTF-16 column expectations (202.48 s), including an astral character, Latin-1,
+BOM/CRLF Rust, encoding changes/restoration and clean daemons. The function definition/body
+scenario also passes (204.34 s), including public null text columns for a split-character byte limit.
+Default/featureless root checks, full governance, docs navigation and changed-file formatting pass.
+Library/integration Clippy adds no diagnostics over the previous slice; the library retains its
+955-warning baseline.
 
 ## Live source reconciliation and current query selection
 

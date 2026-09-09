@@ -1151,6 +1151,8 @@ fn function_source_observation(
         assert!(source["text"].is_null());
         assert_eq!(source["bytes"], "72657475726e2022c3");
         assert_eq!(source["returned_bytes"], 9);
+        assert!(source["end_utf8_column"].is_null());
+        assert!(source["end_utf16_column"].is_null());
         assert_eq!(source["omitted_bytes"], 2);
         assert_eq!(source["complete"], false);
     }
@@ -1213,7 +1215,7 @@ fn encoded_sources(utf8: bool) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     } else {
         b"# coding: latin-1\r\n# \xe9\r\nfrom helper import caf\xe9\r\ndef caller():\r\n    return caf\xe9()\r\n"
     };
-    let helper = "# coding: utf-8\r\n# é\r\ndef café() -> str:\r\n    return 'é'\r\n";
+    let helper = "# coding: utf-8\r\n# é\r\ndef café() -> str:\r\n    return '😀é'\r\n";
     let rust = "// é\r\n\r\npub fn rust_leaf() -> u32 {\r\n    7\r\n}\r\n".as_bytes();
     let prefix = if utf8 {
         b"".as_slice()
@@ -1225,6 +1227,22 @@ fn encoded_sources(utf8: bool) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
         [prefix, helper.as_bytes()].concat(),
         [prefix, rust].concat(),
     )
+}
+
+fn assert_encoded_text_columns(context: &serde_json::Value, name: &str, utf8: bool) {
+    let (start_line, end_line, byte_column, utf8_column, utf16_column) = match name {
+        "caller" => (4, 5, if utf8 { 18 } else { 17 }, 18, 17),
+        "café" => (3, 4, 19, 19, 16),
+        _ => (3, 5, 1, 1, 1),
+    };
+    assert_eq!(context["start_line"], start_line);
+    assert_eq!(context["end_line"], end_line);
+    assert_eq!(context["start_byte_column"], 0);
+    assert_eq!(context["start_utf8_column"], 0);
+    assert_eq!(context["start_utf16_column"], 0);
+    assert_eq!(context["end_byte_column"], byte_column);
+    assert_eq!(context["end_utf8_column"], utf8_column);
+    assert_eq!(context["end_utf16_column"], utf16_column);
 }
 
 fn encoded_source_observation(
@@ -1301,7 +1319,7 @@ fn encoded_source_observation(
         (
             "café",
             helper.as_slice(),
-            "def café() -> str:\r\n    return 'é'".as_bytes(),
+            "def café() -> str:\r\n    return '😀é'".as_bytes(),
         ),
         (
             "fixture::rust_leaf",
@@ -1319,6 +1337,7 @@ fn encoded_source_observation(
         assert_eq!(context["end_byte"], start + expected.len());
         assert_eq!(context["returned_bytes"], expected.len());
         assert_eq!(context["complete"], true);
+        assert_encoded_text_columns(context, name, utf8);
         if let Ok(text) = std::str::from_utf8(expected) {
             assert_eq!(context["text"], text);
         } else {

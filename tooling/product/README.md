@@ -67,7 +67,9 @@ clean builds. It has a 600-second default harness deadline.
 `just golden --case decoded-source-live` checks original source bytes and checker-selected call
 anchors for Latin-1 and UTF-8/BOM Python plus BOM/CRLF Rust. Encoding changes and restoration are
 compared against independent clean daemons. The installed case passes (203.40 seconds on 2026-09-09)
-and has a 600-second default harness deadline.
+and has a 600-second default harness deadline. Explicit zero-based UTF-8 and UTF-16 column
+expectations, including an astral character, pass in 202.48 seconds; byte coordinates remain the
+original captured positions. Text columns are null for an endpoint inside a character.
 
 `just golden --case function-source-live` compares Python/Rust function definitions and bodies
 against independently written source expectations and separate clean builds after edits/restoration.
