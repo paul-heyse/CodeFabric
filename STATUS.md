@@ -4,7 +4,15 @@ Updated 2026-09-08. Current work is in `/home/paul/CodeFabric` on `master`.
 
 ## Current handoff
 
-**Non-production preparation is complete.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md), starting with outcome 1: restore real daemon startup/query/status/reopen at the activation-control native-runtime boundary. No further process migration or plan activation is required.
+**Production implementation is active; preparation is complete.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). Outcome 1 is in progress: activation-control and candidate publication now complete under the bounded owned executor, but daemon readiness remains blocked at activation-command reconciliation. No further process migration or plan activation is required.
+
+Current production work, 2026-09-08:
+
+- Initial control-table creation runs with the workspace write lease and joined cleanup; exact-version readback reconstructs the serving reader after the native runtime joins.
+- The production executor retains bounded work, deadlines, store ownership and cleanup without enabling the generalized native allocation receipt policy. The first attempt with that policy panicked on a roughly 2 GiB schema-decode estimate for the small activation schema.
+- Executor commit `3a41bd0` passes its focused real-store test: an error after writing preserves durable data, joined cleanup releases the lease, unowned writes remain rejected, and a subsequent owned write succeeds. Candidate publication now uses the same executor; only identifiers/version records cross the joined runtime boundary, and serving readers reopen those exact versions.
+- `just root-check-fast` passes. The real startup case completes control-table creation, candidate publication and exact-version reconstruction, then fails at `fresh-activation-reconciliation`: durable command storage contains a contradictory record. The test took 4.76 seconds after compilation. Startup/query/reopen are not yet working; remaining outcomes are open.
+- uv was correctly upgraded on the host. Commit `fe5615f` aligns the environment manifest and all three CI setup sites with 0.12.11. Both tool-version checks pass; refreshed session context reports 13 ok, no warnings or failures.
 
 The [consolidated review](docs/reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md) and [selected domain documents](docs/spec_index/README.md) define the revised target. All Python/Rust fact families and eight query forms remain scope. First-release delivery, complete-product delivery and preparation readiness are different claims.
 

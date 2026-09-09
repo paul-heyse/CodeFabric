@@ -304,6 +304,7 @@ async fn open_activation_authority(
     generations: Arc<SqliteWriterGenerationStore>,
     assurance_fault: Option<ProductionWorkspaceStartupAssuranceFault>,
     resources: &ProductionWorkspaceResources,
+    task_scope: &StructuredCancellationScope,
 ) -> Result<Arc<DeltaActivationRuntimeAuthority>, ProductionWorkspaceStartupError> {
     let control_path = workspace_root.join("activation-control");
     let root = Url::from_directory_path(&control_path).map_err(|()| {
@@ -350,9 +351,36 @@ async fn open_activation_authority(
             .map_err(|error| step("activation-control-open", error))?;
         (pin, table)
     } else {
-        provision_activation_control_history(root, &session)
+        let executor = resources
+            .native_execution(task_scope)
+            .map_err(|error| step("activation-control-executor", error))?;
+        let provision_root = root.clone();
+        let provision_session = Arc::clone(&session);
+        let version = executor
+            .run_bounded_mutation(
+                "activation-control-provision",
+                crate::resource_budget::ResourceClass::Control,
+                Instant::now() + Duration::from_secs(120),
+                move |_, _| async move {
+                    let (pin, _table) =
+                        provision_activation_control_history(provision_root, &provision_session)
+                            .await?;
+                    Ok::<_, super::activation_control_delta::ActivationControlError>(pin.version())
+                },
+            )
             .await
-            .map_err(|error| step("activation-control-provision", error))?
+            .map_err(|error| step("activation-control-provision", error))?;
+        // The native runtime and its writes have joined. Only the exact version crosses
+        // that boundary; reconstruct the long-lived reader on the serving runtime.
+        let pin = ExactDeltaPin::new(&root, version)
+            .map_err(|error| step("activation-control-pin", error))?;
+        let table = super::delta_exact::session_delta_table_builder(root, &session)
+            .map_err(|error| step("activation-control-open", error))?
+            .with_version(version)
+            .load()
+            .await
+            .map_err(|error| step("activation-control-open", error))?;
+        (pin, table)
     };
     let mut provider = ActivationControlDeltaProvider::try_from_loaded_table(session, pin, table)
         .await
@@ -428,6 +456,25 @@ struct FreshCandidate {
     proof_receipt: ProofReceiptRef,
     pins: FabricEpochPins,
     source_images: SourceImageSetRef,
+}
+
+// Only owned identifiers and exact version vectors leave the publishing runtime.
+// Delta tables, sessions, executors and streams are reconstructed after it joins.
+struct FreshCandidatePublication {
+    table_versions: Arc<super::activation::TableVersionSet>,
+    proof: super::proof::ProofDeltaHistoryPublication,
+    pins: FabricEpochPins,
+    source_images: SourceImageSetRef,
+}
+
+impl super::native_execution_lane::output_seal::Sealed for FreshCandidatePublication {}
+impl super::native_execution_lane::NativeLaneOutput for FreshCandidatePublication {
+    fn validate_retained_owner(
+        &self,
+        _: &crate::resource_budget::ResourceBudget,
+    ) -> Result<(), crate::resource_budget::ResourceBudgetError> {
+        Ok(())
+    }
 }
 
 fn inprocess_operational_ceilings() -> Result<ProviderResourceCeilings, ProviderContractError> {
@@ -825,7 +872,6 @@ async fn build_fresh_candidate(
     workspace_resources: &ProductionWorkspaceResources,
     task_scope: &StructuredCancellationScope,
 ) -> Result<FreshCandidate, ProductionWorkspaceStartupError> {
-    let workspace_id = WorkspaceId::from_bytes(record.workspace_id);
     let guard = workspace_resources
         .budget()
         .try_reserve(
@@ -862,6 +908,73 @@ async fn build_fresh_candidate(
         })
         .await
         .map_err(|error| step("source-operation-start", error))?;
+    let source = operation
+        .wait()
+        .await
+        .map_err(|error| step("source-operation-join", error))??;
+    let publish_release = Arc::clone(release);
+    let publish_record = record.clone();
+    let publish_resources = workspace_resources.clone();
+    let publication = workspace_resources
+        .native_execution(task_scope)
+        .map_err(|error| step("candidate-publish-executor", error))?
+        .run_bounded_mutation(
+            "candidate-publish",
+            crate::resource_budget::ResourceClass::Data,
+            Instant::now() + Duration::from_secs(120),
+            move |_, _| async move {
+                publish_fresh_candidate(
+                    source,
+                    &publish_record,
+                    &publish_release,
+                    fence,
+                    &publish_resources,
+                )
+                .await
+            },
+        )
+        .await
+        .map_err(|error| step("candidate-publish", error))?;
+    let candidate = Arc::new(
+        ProgrammaticFabricEpochBuilder::try_new_governed(
+            publication.pins.epoch,
+            workspace_resources.config().epoch_runtime().clone(),
+            workspace_resources.native().clone(),
+        )
+        .map_err(|error| step("candidate-reader", error))?
+        .reopen(publication.table_versions)
+        .await
+        .map_err(|error| step("candidate-readback", error))?,
+    );
+    let proof_receipt = publication.pins.proof_receipt;
+    let integrity_diagnostic = DiagnosticRef::from_bytes(digest32(
+        b"codefabric.proof-integrity-diagnostic.v1\0",
+        &[publication.pins.epoch.as_bytes()],
+    ));
+    let proof = Arc::new(DeltaActivationCandidateProofRelations::new(
+        publication.proof,
+        Arc::new(candidate.context().state()),
+        Some(proof_receipt),
+        None,
+        integrity_diagnostic,
+    ));
+    Ok(FreshCandidate {
+        candidate,
+        proof,
+        proof_receipt,
+        pins: publication.pins,
+        source_images: publication.source_images,
+    })
+}
+
+async fn publish_fresh_candidate(
+    source: FreshNativeSource,
+    record: &WorkspaceRecord,
+    release: &Arc<CompiledSemanticRelease>,
+    fence: super::command::WriterFence,
+    workspace_resources: &ProductionWorkspaceResources,
+) -> Result<FreshCandidatePublication, ProductionWorkspaceStartupError> {
+    let workspace_id = WorkspaceId::from_bytes(record.workspace_id);
     let FreshNativeSource {
         builder,
         workspace_root,
@@ -872,10 +985,7 @@ async fn build_fresh_candidate(
         analysis_context,
         semantic_environment,
         native_pin,
-    } = operation
-        .wait()
-        .await
-        .map_err(|error| step("source-operation-join", error))??;
+    } = source;
     let observation_root = workspace_root
         .join("epochs")
         .join(lower_hex(epoch_id.as_bytes()))
@@ -1009,22 +1119,9 @@ async fn build_fresh_candidate(
     )
     .await
     .map_err(|error| step("proof-history-persist", error))?;
-    let integrity_diagnostic = DiagnosticRef::from_bytes(digest32(
-        b"codefabric.proof-integrity-diagnostic.v1\0",
-        &[epoch_id.as_bytes()],
-    ));
-    let proof: Arc<dyn ActivationCandidateProofRelationsPort> =
-        Arc::new(DeltaActivationCandidateProofRelations::new(
-            publication,
-            session,
-            Some(proof_receipt),
-            None,
-            integrity_diagnostic,
-        ));
-    Ok(FreshCandidate {
-        candidate,
-        proof,
-        proof_receipt,
+    Ok(FreshCandidatePublication {
+        table_versions: Arc::clone(candidate.table_version_set()),
+        proof: publication,
         pins: FabricEpochPins {
             epoch: epoch_id,
             input_release,
@@ -1146,6 +1243,7 @@ async fn compose_production_workspace(
         Arc::clone(&generations),
         assurance_fault,
         &workspace_resources,
+        &task_scope,
     )
     .await?;
     let selection = activation
