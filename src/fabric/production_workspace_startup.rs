@@ -846,6 +846,11 @@ fn build_fresh_native_source(
         rustc_available,
         pyrefly_available,
     )?;
+    canonical::install_processing(
+        &mut builder,
+        &prepared_inputs.inventory,
+        pyrefly_available && !native_runs.is_empty(),
+    )?;
     // Registered batches own their buffers; source leases are no longer needed after providers join.
     prepared_inputs.release()?;
     Ok(FreshNativeSource {

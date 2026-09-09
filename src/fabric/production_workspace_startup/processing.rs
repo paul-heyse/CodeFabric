@@ -15,7 +15,9 @@ use crate::provider_native_syntax::NativeSyntaxRelation;
 use crate::rustc_relation_schema::RustcRelation;
 use arrow_array::{ArrayRef, BinaryArray, StringArray, UInt64Array};
 
+#[derive(Clone, Copy)]
 struct Partition<'a> {
+    family: &'static str,
     language: &'static str,
     scope_kind: &'static str,
     path: &'a [u8],
@@ -46,10 +48,16 @@ pub(super) fn install(
             Some((*file_id, run))
         })
         .collect::<BTreeMap<_, _>>();
-    let rust = runs
+    let pyrefly = runs
         .iter()
-        .filter(|run| run.job().lane() == ProviderLane::Rustc)
-        .map(|run| (run.job().context().analysis_context_id(), run))
+        .filter(|run| run.job().lane() == ProviderLane::Pyrefly)
+        .flat_map(|run| match run.job().source().selection() {
+            ProviderSourceSelection::Inventory(inventory) => inventory
+                .selected_files()
+                .map(|(file, _)| (file, run))
+                .collect::<Vec<_>>(),
+            ProviderSourceSelection::File { .. } => Vec::new(),
+        })
         .collect::<BTreeMap<_, _>>();
     let mut rows = Vec::new();
     let mut rust_requested = false;
@@ -82,7 +90,8 @@ pub(super) fn install(
         } else {
             family_state(run, NativeSyntaxRelation::RuffBinding.as_str())
         };
-        rows.push(Partition {
+        let partition = Partition {
+            family: "function-declarations",
             language: "python",
             scope_kind: "source_file",
             path,
@@ -92,31 +101,28 @@ pub(super) fn install(
             file,
             state,
             reason,
-        });
-    }
-    for target in targets {
-        let run = target
-            .context_id
-            .and_then(|context| rust.get(&context).copied());
-        let (state, reason) = if target.state == "processed" {
-            family_state(run, RustcRelation::PublicItem.relation_id())
-        } else {
-            ("unavailable", "compiler_target_unavailable")
         };
-        rows.push(Partition {
-            language: "rust",
-            scope_kind: "cargo_target",
-            path: &target.manifest,
-            target: Some(&target.target),
-            target_kind: Some(&target.target_kind),
-            context: target.context_id,
-            file: None,
-            state,
-            reason,
-        });
+        rows.push(partition);
+        let mut calls = Partition {
+            family: "call-targets",
+            ..partition
+        };
+        if calls.state == "complete" {
+            (calls.state, calls.reason) =
+                family_state(run, NativeSyntaxRelation::RuffCallSite.as_str());
+            if calls.state == "complete" {
+                (calls.state, calls.reason) = family_state(
+                    file.and_then(|id| pyrefly.get(&id).copied()),
+                    crate::pyrefly_service::PyreflyRelation::CallTarget.relation_id(),
+                );
+            }
+        }
+        rows.push(calls);
     }
+    append_rust_partitions(&mut rows, runs, targets);
     if rust_requested && targets.is_empty() {
-        rows.push(Partition {
+        let partition = Partition {
+            family: "function-declarations",
             language: "rust",
             scope_kind: "workspace_context",
             path: b".",
@@ -126,9 +132,57 @@ pub(super) fn install(
             file: None,
             state: "unavailable",
             reason: "cargo_context_preparation_incomplete",
+        };
+        rows.push(partition);
+        rows.push(Partition {
+            family: "call-targets",
+            ..partition
         });
     }
     register(builder, inventory, &rows)
+}
+
+fn append_rust_partitions<'a>(
+    rows: &mut Vec<Partition<'a>>,
+    runs: &[AdmittedProviderResult],
+    targets: &'a [RustTargetProgress],
+) {
+    let rust = runs
+        .iter()
+        .filter(|run| run.job().lane() == ProviderLane::Rustc)
+        .map(|run| (run.job().context().analysis_context_id(), run))
+        .collect::<BTreeMap<_, _>>();
+    for target in targets {
+        let run = target
+            .context_id
+            .and_then(|context| rust.get(&context).copied());
+        let (state, reason) = if target.state == "processed" {
+            family_state(run, RustcRelation::PublicItem.relation_id())
+        } else {
+            ("unavailable", "compiler_target_unavailable")
+        };
+        let partition = Partition {
+            family: "function-declarations",
+            language: "rust",
+            scope_kind: "cargo_target",
+            path: &target.manifest,
+            target: Some(&target.target),
+            target_kind: Some(&target.target_kind),
+            context: target.context_id,
+            file: None,
+            state,
+            reason,
+        };
+        rows.push(partition);
+        let mut calls = Partition {
+            family: "call-targets",
+            ..partition
+        };
+        if target.state == "processed" {
+            (calls.state, calls.reason) = family_state(run, RustcRelation::Call.relation_id());
+        }
+        rows.push(calls);
+    }
 }
 
 fn family_state(
@@ -209,7 +263,7 @@ fn register(
     input_observations::register(
         builder,
         FabricSchemaRole::System,
-        "entity_processing_scope",
+        "requested_processing_scope",
         vec![
             (
                 "workspace_id",
@@ -260,11 +314,7 @@ fn register(
                 true,
                 id16_array(rows.iter().map(|row| row.file.as_ref())),
             ),
-            (
-                "family",
-                false,
-                Arc::new(StringArray::from(vec!["function-declarations"; rows.len()])),
-            ),
+            ("family", false, strings(|row| row.family)),
             ("processing_state", false, strings(|row| row.state)),
             ("reason", false, strings(|row| row.reason)),
         ],

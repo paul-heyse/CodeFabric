@@ -1166,7 +1166,9 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
                 let declarations =
                     output.relation_id().as_str() == "query.result.declaration-facts";
+                let calls = output.relation_id().as_str() == "query.result.call-facts";
                 if !declarations
+                    && !calls
                     && !output.program().output_fields.iter().any(|field| {
                         field.as_str() == "query.result.semantic-entities.entity-language"
                     })
@@ -1177,7 +1179,9 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     selection.query_id == *query_id
                         && selection.selection_id.as_ref() == "selection.looking-for"
                 });
-                let selector = if declarations {
+                let selector = if calls {
+                    "calls"
+                } else if declarations {
                     "declarations"
                 } else {
                     match selector.map(|selection| &selection.value) {
@@ -1196,8 +1200,8 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                         Ok(scope) => scope,
                         Err(error) => return failed(&artifacts, "processing_scope", error),
                     };
-                let predicate = match if declarations {
-                    scope.predicate_for("query.result.declaration-facts", "language", "context_id")
+                let predicate = match if declarations || calls {
+                    scope.predicate_for(output.relation_id().as_str(), "language", "context_id")
                 } else {
                     scope.predicate()
                 } {

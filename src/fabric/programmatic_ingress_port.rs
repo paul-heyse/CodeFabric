@@ -818,12 +818,12 @@ impl ApplicationOwnedSemanticIngressPort {
                     vec![text(relationship)?],
                     projection,
                 )?;
-                project_optional_text_selection(
+                project_selection(
                     fields,
                     &mut consumed,
                     ProgrammaticFormIngressField::Direction,
                     query_id,
-                    direction.as_ref(),
+                    vec![text(direction.as_deref().unwrap_or("outgoing"))?],
                     projection,
                 )?;
                 project_optional_text_selection(

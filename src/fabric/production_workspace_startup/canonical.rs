@@ -32,8 +32,23 @@ use crate::provider_contracts::ProviderSourceInventory;
 use crate::provider_native_syntax::NativeSyntaxRelation;
 use crate::rustc_relation_schema::RustcRelation;
 
+mod call_selector;
 mod calls;
+mod processing;
 mod python_calls;
+
+pub(super) fn install_processing(
+    builder: &mut ProgrammaticFabricEpochBuilder,
+    inventory: &ProviderSourceInventory,
+    pyrefly: bool,
+) -> Result<(), ProductionWorkspaceStartupError> {
+    builder
+        .add_transformation(Arc::new(Canonical::new(
+            Kind::Processing { pyrefly },
+            inventory,
+        )))
+        .map_err(|error| step("canonical-processing-install", error))
+}
 
 const SOURCE: &str = "source.code_file";
 const DECLARATION: &str = "fact.code_declaration";
@@ -61,6 +76,7 @@ pub(super) fn install(
         },
         Kind::Entity,
         Kind::EntitySelector,
+        Kind::CallSelector,
     ] {
         builder
             .add_transformation(Arc::new(Canonical::new(kind, inventory)))
@@ -71,6 +87,9 @@ pub(super) fn install(
 
 #[derive(Clone, Copy)]
 enum Kind {
+    Processing {
+        pyrefly: bool,
+    },
     Source,
     Declaration {
         python: bool,
@@ -86,6 +105,7 @@ enum Kind {
     },
     Entity,
     EntitySelector,
+    CallSelector,
 }
 
 struct Canonical {
@@ -98,9 +118,17 @@ struct Canonical {
 }
 
 impl Canonical {
-    #[allow(clippy::too_many_lines, reason = "canonical schemas and dependencies stay in one constructor")]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "canonical schemas and dependencies stay in one constructor"
+    )]
     fn new(kind: Kind, inventory: &ProviderSourceInventory) -> Self {
         let (id, names, mut dependencies) = match kind {
+            Kind::Processing { pyrefly } => (
+                processing::OUTPUT,
+                processing::fields(),
+                processing::dependencies(pyrefly),
+            ),
             Kind::Source => (SOURCE, source_fields(), vec![INPUT]),
             Kind::Declaration { python, rust } => (
                 DECLARATION,
@@ -114,6 +142,11 @@ impl Canonical {
                 },
             ),
             Kind::Entity => (ENTITY, entity_fields(), vec![DECLARATION]),
+            Kind::CallSelector => (
+                call_selector::RELATION,
+                call_selector::fields(),
+                vec![calls::RELATION, ENTITY],
+            ),
             Kind::CallSite {
                 python,
                 rust,
@@ -445,6 +478,8 @@ impl ProgrammaticTransformation for Canonical {
     }
     fn build(&self, inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
         match self.kind {
+            Kind::Processing { pyrefly } => processing::build(inputs, pyrefly),
+            Kind::CallSelector => call_selector::build(inputs),
             Kind::Source => self.source(inputs),
             Kind::Reference { python: true } => self.references(inputs),
             Kind::Reference { python: false } => empty(reference_fields()),

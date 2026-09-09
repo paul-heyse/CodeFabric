@@ -281,7 +281,7 @@ pub(super) fn build(
         .build()?)
 }
 
-fn targets(
+pub(super) fn targets(
     inputs: &TransformationInputs,
     enabled: bool,
 ) -> Result<LogicalPlan, TransformationPlanError> {

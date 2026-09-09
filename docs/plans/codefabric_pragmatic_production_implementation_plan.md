@@ -7,7 +7,7 @@ expands the remaining scope with dependency-ordered slices, the complete fact-fa
 concrete library API choices and behavioral acceptance criteria. It is the detailed execution
 portion of this backlog; writing it does not mark additional production outcomes complete.
 
-Production implementation is the next phase, not work completed by preparation. Keep the canonical tree, integrate coherent changes frequently, preserve existing useful implementation and choose tests by behavior and risk. Do not conduct another process migration before starting outcome 1.
+Production implementation is underway: Linux outcomes 1–3 are implemented; outcomes 4–5 are partial and 6–8 remain open. The 2026-09-09 call-query continuation now exercises Python/Rust one-step incoming/outgoing calls through installed clients, including scoped partial results and exact Python reopen. This does not complete any outcome from 4 through 8. Keep the canonical tree, integrate coherent changes frequently, preserve existing useful implementation and choose tests by behavior and risk.
 
 ## 1. Product completion boundaries
 

@@ -1,6 +1,6 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `734821db` (`Publish canonical Python call occurrences and checker-resolved edges`) and the uncommitted continuation described in §1.4.
+Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `734821db` (`Publish canonical Python call occurrences and checker-resolved edges`) and the validated call-query continuation described in §1.4.
 
 This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Implementation is underway. The status notes distinguish demonstrated committed behavior, uncommitted work and remaining acceptance; writing or updating this plan is not implementation evidence.
 
@@ -33,8 +33,8 @@ This is the current implementation baseline, reconciled from code, commits and r
 | Python contexts | Selected version/platform; contained captured inventory; chunked descriptors into one checker; real cross-module call resolution and checker-selected definition anchors | External roots/distributions/stubs, project configuration, complete semantic families and retained incremental checker state |
 | Source/syntax | Production Python Tree-sitter/Ruff plus six Rust Tree-sitter relations; recoverable errors; Ruff callable/call-site/callable-syntax observations | Full source/lexical census, non-identity decoded byte mappings, reversible compiler paths, retained parsers and incremental behavior |
 | Canonical facts | `source.code_file`, entities/declarations/function selectors, Python lexical references and Python/Rust call sites; native DataFusion normalization and exact storage type restoration | Full modules/classes/lambdas, imports/exports/semantic references/types/members/signatures/dispatch/instances, external/generated correspondence and edit-time identity/replacement |
-| Public forms | Installed-client FindEntities for canonical functions and RetrieveFacts for exact-ID declaration facts; scoped partial/empty results and limits | Uncommitted one-step call traversal needs behavioral validation; SourceContext, broader first-four meanings and full composition remain open |
-| Processing/wire | Requested files/targets, provider run/family scopes, language/context summaries, typed Protobuf/Pydantic result processing, first 64 remainder rows and observed N+1 truncation | All-family/owner/dependency scope, public remainder paging, live state and real freshness barriers; call-specific scope is uncommitted |
+| Public forms | Installed-client FindEntities for canonical functions and RetrieveFacts for exact-ID declaration facts; scoped partial/empty results and limits | One-step call traversal is demonstrated; SourceContext, broader first-four meanings and full composition remain open |
+| Processing/wire | Requested files/targets, provider run/family scopes, language/context summaries, typed Protobuf/Pydantic result processing, first 64 remainder rows and observed N+1 truncation | All-family/owner/dependency scope, public remainder paging, live state and real freshness barriers; call-specific scope is demonstrated |
 | Analyses | Substantial typed Python/MIR/common code and selected real raw provider inputs | Actual production wiring, corrected algorithms, canonical/public consumers and full family precision/replacement |
 | Updates/corpus | Source-wave/identity/activation seams and prepared independent expectations/edit helpers | Running notify/gix coordinator, invalidation, two-speed publication, retained providers, stale-result rejection and real clean/incremental convergence |
 | Persistence/maintenance | Exact reopen, immutable input deduplication, native checkpoints and retention-aware dry runs | Selective persistence/version reuse, native compaction/destructive vacuum, coordinated retention and real reclamation |
@@ -52,11 +52,21 @@ Runtime actions retain compact input/output references, selected context/snapsho
 
 **Committed through `734821db`:** real mixed-language startup, captured Cargo dependency/multiple-target support, canonical declarations/references/calls, public function/declaration queries, typed processing and truncation, chunked Python inventories and exact checker-selected call definition anchors. Key commits and checks are recorded in STATUS and §9.1 below.
 
-**Uncommitted; focused tests passed:** call-specific processing. `system.requested_processing_scope` retains requested provider/input partitions; a native transformation derives `system.entity_processing_scope`. `function-declarations` and `call-targets` are counted separately. Call coverage includes unresolved targets, missing source/caller identities and unmatched Pyrefly implicit-call observations. Three scope tests and the real Python publication test pass before the subsequent public-query changes. A dedicated implicit-property/decorator case remains untested.
+**Call-query continuation delivered as a limited slice:** `system.requested_processing_scope` and
+`system.entity_processing_scope` keep declaration and call coverage separate. Installed modern clients
+execute incoming/outgoing Python and Rust calls, omitted-direction default, both one-step distance
+phrases, repeated subjects/sites, unknown targets, empty results, limits and language/context filtering.
+A failed Rust target retains its remainder. Python call queries pass after exact reopen. The real
+property/decorator fixture confirms implicit calls remain explicitly partial. Broader traversal and
+all-family scope are still open.
 
-**Uncommitted, compile-only:** `canonical/call_selector.rs` constructs public incoming/outgoing call subjects and endpoint IDs; the shared subject-fact recipe adds `query.result.call-facts`, exact entity-reference joins, direction/distance selections, ordering, scope and call processing. Omitted direction defaults to outgoing; supported distance is explicitly one step. `just root-check-fast` passes, but the new DataFusion plan has not been executed through the installed service, and the final dirty query code has no affected test/Clippy result yet. Do not mark FollowRelationships delivered or discard these files at resumption.
-
-Both new modules (`canonical/processing.rs`, `canonical/call_selector.rs`) and the related startup, processing, query recipe/backend/ingress and daemon-test changes are in the single canonical tree. No new agent worktree or parallel editing stream was created. The documentation refresh does not change or commit the pending production slice.
+Validation on 2026-09-09: Python public calls/reopen 16.02 s; mixed Rust/declarations/calls 60.89 s;
+16 focused scope/recipe/ingress/implicit-call cases and five final scope/implicit-call/reopen cases pass.
+`just root-check` default/featureless and `just governance-scan` pass. Strict root Clippy remains red
+on the existing backlog; two new processing findings were fixed and affected library Clippy completes
+with 959 warnings. Global formatting retains pre-existing failures in untouched files; changed Rust
+files, docs navigation and whitespace checks pass. Runtime checks use a temporary delegated user-systemd scope because the login shell
+itself lacks provider cgroup delegation. No containment bypass is used.
 
 | Slice | Current status | Next unmet boundary |
 |---|---|---|
@@ -64,8 +74,8 @@ Both new modules (`canonical/processing.rs`, `canonical/call_selector.rs`) and t
 | 4B | Partial, committed | Complete effective external Python contexts and semantic output; retain chunking and definition anchors |
 | 4C | Partial, committed | Full source/syntax/coordinate/path behavior and parser reuse/live edits |
 | 4D | Partial, committed | Remaining canonical families, authority/unknowns and external/generated/edit-time identity |
-| 4E | Two limited forms demonstrated; call form compile-only | Execute/fix calls, implement SourceContext, broaden first-four meanings and composition |
-| 5A | Partial; call extension uncommitted | Query dependency/owner scope, all families, public paging, efficient authorized live status |
+| 4E | Three limited forms demonstrated | Extend calls, implement SourceContext, broaden first-four meanings and composition |
+| 5A | Partial; call extension demonstrated | Query dependency/owner scope, all families, public paging, efficient authorized live status |
 | 5B | Typed processing/truncation delivered in part | Real freshness policies and observable generation/context/family convergence |
 | 6A | Open; infrastructure only | Daemon-owned notify/gix watch, reconciliation and overflow/rescan recovery |
 | 6B | Open; identity/admission foundations | Immediate invalidation, deletions/replacements, negative dependencies and obsolete completions |
@@ -207,7 +217,7 @@ Shared runtime interfaces should stay small:
 
 ### 4D. Canonical two-language normalization and authority
 
-**Current status — partial, committed.** Native DataFusion constructs captured source, Python/Rust entities/declarations, function selectors, Python lexical references and both languages' call occurrences. Exact Python checker anchors and Rust stable keys resolve selected targets; unknown and unmapped calls remain explicit. Schema nullability refinement and exact ID/storage restoration work. Imports/exports, semantic references, structural types/propositions, members/signatures, complete dispatch/instances, module/lambda entities, external/generated endpoints and edit-time identity/authority remain. The uncommitted call selector is a query projection, not completion of these families.
+**Current status — partial, committed.** Native DataFusion constructs captured source, Python/Rust entities/declarations, function selectors, Python lexical references and both languages' call occurrences. Exact Python checker anchors and Rust stable keys resolve selected targets; unknown and unmapped calls remain explicit. Schema nullability refinement and exact ID/storage restoration work. Imports/exports, semantic references, structural types/propositions, members/signatures, complete dispatch/instances, module/lambda entities, external/generated endpoints and edit-time identity/authority remain. The validated call selector is a query projection, not completion of these families.
 
 **Surfaces:** `src/production_provider_recipe.rs`, `src/provider_admission.rs`, `src/programmatic_derived_analysis.rs`, `src/schema_contract.rs`, programmatic relation builders and startup publication.
 
@@ -224,7 +234,7 @@ Shared runtime interfaces should stay small:
 
 ### 4E. First four production query forms and mixed-language demonstration
 
-**Current status — partial.** Installed clients exercise canonical function FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. The uncommitted FollowRelationships recipe compiles for one-step calls but has no public behavioral result; validate it first. SourceContext has no canonical production form yet. All broader meanings, source/representation scopes, semantic reference resolution, stop/filter/distance behavior and composition remain required. The first-four acceptance below is open.
+**Current status — partial.** Installed clients exercise canonical function FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. Installed FollowRelationships queries execute one-step Python/Rust calls and exact Python reopen; full traversal is still open. SourceContext has no canonical production form yet. All broader meanings, source/representation scopes, semantic reference resolution, stop/filter/distance behavior and composition remain required. The first-four acceptance below is open.
 
 **Prerequisites:** 4D and 5A–5B. **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, `src/semantic_query_contract.rs`, existing child catalog and adapter.
 
@@ -245,7 +255,7 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 
 ### 5A. One processing authority with a query dependency scope
 
-**Current status — partial.** Committed requested file/target and run/family relations drive canonical function/declaration query summaries independently of fact rows. Language/context filtering, reason categories and a retained first 64-row remainder page work. Uncommitted call-family scope adds semantic gaps and conservative context-wide potential callers; four focused tests pass before final query wiring. Remaining: all-family/owner/dependency/frontier scope, public remainder paging, authorization-scoped efficient scans, live transitions, precision/next actions and a terminal-versus-runnable distinction. Do not turn semantic unknowns into endlessly pending jobs.
+**Current status — partial.** Committed requested file/target and run/family relations drive canonical function/declaration query summaries independently of fact rows. Language/context filtering, reason categories and a retained first 64-row remainder page work. Validated call-family scope adds semantic gaps and conservative context-wide potential callers; real implicit-property/decorator and public call cases pass. Remaining: all-family/owner/dependency/frontier scope, public remainder paging, authorization-scoped efficient scans, live transitions, precision/next actions and a terminal-versus-runnable distinction. Do not turn semantic unknowns into endlessly pending jobs.
 
 **Surfaces:** provider admission/input observations, processing relations, `src/fabric/production_workspace_startup/input_observations.rs`, query planning/status and lifecycle coordinator.
 
@@ -467,7 +477,7 @@ Complete resource acquisition/transfer/drop/escape, unwind paths, closure captur
 
 ### 7G. Remaining forms, complete composition and query semantics
 
-**Current status — open.** Eight-form parsing/typed ingress exists; two limited canonical forms are publicly demonstrated, and the third has compile-only wiring. FindPaths, MatchPattern, Compare, Summarize and full first-four behavior remain. Real prior-result resolution and repeated-form/multi-block DAG execution also remain; fixed per-form output relations must not collide or silently reuse another block's output.
+**Current status — open.** Eight-form parsing/typed ingress exists; three limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, Compare, Summarize and full first-four behavior remain. Real prior-result resolution and repeated-form/multi-block DAG execution also remain; fixed per-form output relations must not collide or silently reuse another block's output.
 
 **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, query contracts and graph integration. Complete the first four forms from 4E and extend them to every relevant family in the coverage map as those families land.
 
@@ -643,10 +653,10 @@ The following observations come from implementation runs on 2026-09-09; this doc
 | Checker anchors `92bb153d` | 30 sidecar cases and strict sidecar check; 26 selected root cases | Actual imported alias/bound-method definition anchors and substituted file/digest/range rejection |
 | Canonical Python calls `734821db` | Affected native/canonical/recipe cases; final regression rerun; real mixed/Python daemon and installed restart | Stale relation-count assertions fixed; repeated/dynamic/module/cross-module calls and exact range pass; reopen 15.6 s |
 | Committed governance/schema/result fixes | Governance rule cases/scan; root library Clippy; scoped schema/IPC tests | Governance passes; root library Clippy completes with existing backlog, not a strict clean result |
-| Uncommitted call processing, before call-query wiring | `just root-test-incremental -E 'test(processing_scope) \| test(pragmatic_python_semantics_publish_real_call_targets)'` with both provider binaries | Four tests pass; real Python run 6.59 s; implicit-property/decorator scenario still needed |
-| Final uncommitted call-query library | `just root-check-fast` | Pass, 66 warnings, 7.13 s; new DataFusion query execution, regression tests and Clippy pending |
+| Historical call processing, before call-query wiring | `just root-test-incremental -E 'test(processing_scope) \| test(pragmatic_python_semantics_publish_real_call_targets)'` with both provider binaries | Four tests pass; real Python run 6.59 s; implicit-property/decorator scenario subsequently passes |
+| Validated call-query continuation | Installed Python/reopen and mixed Rust/declaration/call cases; 16 focused tests and five final regression cases | Pass; type checks/governance pass; strict root Clippy retains its existing backlog |
 
-Earlier four-case golden runs passed startup, installed Python serving, exact reopen and cancellation. They do not exercise the full plan and were not rerun on the final dirty call-query code. Recent recorded root library Clippy has a large existing backlog (958 warnings after new issues were addressed). The historical `0cc7242` full-root result (1,038 passed, 13 failed, two skipped) is not a current verdict; no current aggregate green claim replaces it. No real live-convergence, full-family/eight-form, destructive-maintenance, sustained-retention or representative benchmark acceptance is complete.
+Earlier four-case golden runs passed startup, installed Python serving, exact reopen and cancellation. They do not exercise the full plan and were supplemented by exact-reopen and call-query runs on the current slice. Recent recorded root library Clippy has a large existing backlog (958 warnings after new issues were addressed). The historical `0cc7242` full-root result (1,038 passed, 13 failed, two skipped) is not a current verdict; no current aggregate green claim replaces it. No real live-convergence, full-family/eight-form, destructive-maintenance, sustained-retention or representative benchmark acceptance is complete.
 
 Select focused cases during implementation; run integrated checks when the assembled product claim warrants them. The existing command surface remains:
 
@@ -692,7 +702,10 @@ Ordinary corpus assertions and short algorithm arguments should explain why the 
 
 ## 10. Immediate implementation handoff
 
-Resume the **uncommitted 4E/5A call-query continuation** in §1.4. Preserve the two new canonical modules and their startup/query/test changes. The last successful runtime run covered call processing before query wiring; the final library only has a compile pass. Execute the actual native plans through the installed modern client, fix failures, check declaration-query and exact-reopen regressions, run affected Clippy/governance and commit the coherent slice. Include incoming/outgoing calls, omitted-direction default, explicit distance, repeated subjects/call sites, dynamic targets, partial/empty cases, limits and language/context selection. Do not declare this done because the plan compiles.
+The **limited 4E/5A one-step call-query continuation** is now exercised through the installed modern
+client, including implicit-call coverage, exact reopen and declaration regressions. Preserve this
+working path while extending canonical families, reference/import traversal and full distance/stop/filter
+semantics. FollowRelationships as a whole remains open.
 
 Then finish remaining **4A–4D** effective/external/generated inputs and canonical families for **4E**, plus **5A–5B** full query scope, public remainder pagination and actual freshness barriers. Do not redo contained Cargo startup, path-dependency/target discovery, Rust syntax, chunked Python inventories or canonical declarations/calls: extend those working implementations. Complete RetrieveSourceContext and the first four forms' actual meanings/composition. Recheck the static mixed-language acceptance against real providers/public answers.
 
@@ -700,4 +713,4 @@ Proceed to **6A–6D** using shared startup/update operations, watch-first recon
 
 Continue through **7A–7H** and **8A–8F** without reducing the family/form target: corrected analyses and actual inputs, full DAG/query/presentation behavior, native maintenance, coordinated finite retention, recovery and representative measurement. Optional overlays/CDF/Rayon/orjson remain conditional on a concrete consumer or bottleneck. The full completion criteria in §9.2 are unchanged and are not yet satisfied.
 
-Update this detailed portion of the parent backlog and STATUS in place as behavior lands. The current user request is this documentation reconciliation; production work remains at the explicit checkpoint for the next implementation turn. No plan activation, proving commit, source-artifact bundle, new worktree or repeated approval is a prerequisite to resuming already authorized work.
+Update this detailed portion of the parent backlog and STATUS in place as behavior lands. The current user request is implementation of the entire remaining scope; the call-query slice does not satisfy the full completion criteria. No plan activation, proving commit, source-artifact bundle, new worktree or repeated approval is a prerequisite to resuming already authorized work.

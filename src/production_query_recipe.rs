@@ -499,6 +499,9 @@ fn compiled_released_form_programs(
         if let Some(program) = facts::declarations(epoch)? {
             programs.push(program);
         }
+        if let Some(program) = facts::calls(epoch)? {
+            programs.push(program);
+        }
         return validate_form_coverage(programs);
     }
     let binding_family = NativeSyntaxRelation::RuffBinding.as_str();

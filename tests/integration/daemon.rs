@@ -2019,7 +2019,9 @@ fn pragmatic_python_semantics_publish_real_call_targets() {
     // Python 3.14 is the effective context. Both functions exist syntactically;
     // only the checker-selected branch supplies the call's semantic target.
     let fixture = ProductionFixture::with_source(b"import sys\ndef legacy() -> str:\n    return 'old'\ndef current() -> int:\n    return 1\nif sys.version_info >= (3, 14):\n    selected = current\nelse:\n    selected = legacy\nanswer = selected()\ndef caller() -> int:\n    return selected() + selected()\ndef indirect(f):\n    return f()\n");
-    let supervisor = fixture.start_supervisor();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     let rows = decoded_activation_control_rows(&fixture);
     let (_, pin) = rows[0]
         .table_versions()
@@ -2073,12 +2075,49 @@ fn pragmatic_python_semantics_publish_real_call_targets() {
         "{entities:?}"
     );
     assert_canonical_python_calls(&fixture);
+    let mut processing = std::collections::BTreeMap::new();
+    for batch in fresh_activation_relation_batches(&fixture, "system.entity_processing_scope") {
+        let text = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap()
+        };
+        for row in 0..batch.num_rows() {
+            processing.insert(
+                text("family").value(row).to_owned(),
+                (
+                    text("processing_state").value(row).to_owned(),
+                    text("reason").value(row).to_owned(),
+                ),
+            );
+        }
+    }
+    assert_eq!(
+        processing["function-declarations"],
+        ("complete".to_owned(), String::new())
+    );
+    assert_eq!(processing["call-targets"].0, "partial");
+    assert!(
+        processing["call-targets"].1.contains("unresolved_targets"),
+        "{processing:?}"
+    );
+    assert!(
+        processing["call-targets"].1.contains("caller_entities"),
+        "{processing:?}"
+    );
+    assert_public_call_queries(&fixture, &stack, "python", "caller", "current", "fresh");
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    assert_public_call_queries(&fixture, &stack, "python", "caller", "current", "reopen");
     supervisor.stop();
 }
 
 fn assert_canonical_python_calls(fixture: &ProductionFixture) {
-    use std::collections::BTreeMap;
     use arrow::array::{Array as _, BinaryArray, StringArray};
+    use std::collections::BTreeMap;
     let mut entities = BTreeMap::new();
     for batch in fresh_activation_relation_batches(fixture, "fact.code_entity") {
         let names = batch
@@ -2149,6 +2188,44 @@ fn assert_canonical_python_calls(fixture: &ProductionFixture) {
         (seen.len(), calls_from_caller, unknown, module),
         (4, 2, 1, 1)
     );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn pragmatic_python_implicit_calls_qualify_call_coverage() {
+    let fixture = ProductionFixture::with_source(
+        b"class Box:\n    @property\n    def value(self) -> int:\n        return 1\ndef read(box: Box) -> int:\n    return box.value\n",
+    );
+    let supervisor = fixture.start_supervisor();
+    let scopes = fresh_activation_relation_batches(&fixture, "system.entity_processing_scope");
+    let mut observed = false;
+    for batch in scopes {
+        let text = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap()
+        };
+        for row in 0..batch.num_rows() {
+            if text("family").value(row) == "call-targets" {
+                observed = true;
+                assert_eq!(text("processing_state").value(row), "partial");
+                assert!(
+                    text("reason")
+                        .value(row)
+                        .contains("implicit_calls_not_normalized"),
+                    "{:?}",
+                    text("reason")
+                );
+            } else if text("family").value(row) == "function-declarations" {
+                assert_eq!(text("processing_state").value(row), "complete");
+            }
+        }
+    }
+    assert!(observed);
+    supervisor.stop();
 }
 
 #[test]
@@ -2467,6 +2544,14 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         assert_eq!(states.get("fixture").map(String::as_str), Some("processed"));
         assert_rust_syntax_survives_compilation_failure(&fixture);
         assert_mixed_public_entity_queries(&fixture, stack.as_ref().unwrap());
+        assert_public_call_queries(
+            &fixture,
+            stack.as_ref().unwrap(),
+            "rust",
+            "two_calls",
+            "target",
+            "fresh",
+        );
     }
     supervisor.stop();
 }
@@ -2906,6 +2991,217 @@ fn assert_mixed_public_declaration_facts(
     assert_eq!(
         unresolved["issues"][0]["presentation_key"],
         "query.validation.semantic_reference_unavailable"
+    );
+}
+
+/// Actual provider calls through the installed modern client, including exact restart.
+fn assert_public_call_queries(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    language: &str,
+    caller_name: &str,
+    target_name: &str,
+    phase: &str,
+) {
+    use arrow::array::{Array, BinaryArray, StringArray, UInt64Array};
+    let mut subjects = std::collections::BTreeMap::new();
+    for batch in fresh_activation_relation_batches(fixture, "fact.code_declaration") {
+        let text = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+        };
+        for row in 0..batch.num_rows() {
+            if text("language").value(row) == language && !text("public_entity_id").is_null(row) {
+                let name = text("name").value(row).rsplit("::").next().unwrap();
+                let contexts = batch
+                    .column_by_name("context_id")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<BinaryArray>()
+                    .unwrap();
+                subjects.insert(
+                    (contexts.value(row).to_vec(), name.to_owned()),
+                    text("public_entity_id").value(row).to_owned(),
+                );
+            }
+        }
+    }
+    // Multiple Cargo targets intentionally have distinct semantic identities. Resolve
+    // all three subjects in the same context, independently of batch/target order.
+    let context_bytes = subjects
+        .keys()
+        .find(|(_, name)| name == caller_name)
+        .unwrap()
+        .0
+        .clone();
+    let caller = &subjects[&(context_bytes.clone(), caller_name.to_owned())];
+    let target = &subjects[&(context_bytes.clone(), target_name.to_owned())];
+    let indirect = &subjects[&(context_bytes.clone(), "indirect".to_owned())];
+    let mut request = semantic_request(&fixture.workspace.public_id(), "request:calls", "unused");
+    request["scope"]["languages"] = json!([language]);
+    request["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "calls",
+        "starting_from": [{"entity_id": caller}, {"entity_id": caller}],
+        "relationship": "calls", "direction": "outgoing", "distance": "one relationship step",
+        "return": {"limit": {"maximum_results": 64}}
+    }]);
+    let mut requests = vec![("outgoing", request.clone())];
+    let mut default = request.clone();
+    default["queries"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("direction");
+    default["queries"][0]["distance"] = json!("one step");
+    requests.push(("default", default));
+    let mut incoming = request.clone();
+    incoming["queries"][0]["starting_from"] = json!([{"entity_id": target}]);
+    incoming["queries"][0]["direction"] = json!("incoming");
+    requests.push(("incoming", incoming));
+    let mut dynamic = request.clone();
+    dynamic["queries"][0]["starting_from"] = json!([{"entity_id": indirect}]);
+    requests.push(("dynamic", dynamic));
+    let mut empty = request.clone();
+    empty["queries"][0]["starting_from"] =
+        json!([{"entity_id": "entity:function:01010101010101010101010101010101"}]);
+    requests.push(("empty", empty));
+    let mut limited = request.clone();
+    limited["queries"][0]["return"]["limit"]["maximum_results"] = json!(1);
+    requests.push(("limited", limited));
+    let mut other_language = request.clone();
+    other_language["scope"]["languages"] = json!([if language == "python" {
+        "rust"
+    } else {
+        "python"
+    }]);
+    requests.push(("other_language", other_language));
+    let mut context = request.clone();
+    let context_id = codefabric::identity::encode_public_id(
+        codefabric::identity::IdentityDomain::AnalysisContext,
+        None,
+        context_bytes.try_into().unwrap(),
+    )
+    .unwrap();
+    context["scope"]["analysis_contexts"] =
+        json!({"mode": "explicit", "context_ids": [context_id]});
+    requests.push(("context", context));
+    let mut steps = Vec::new();
+    for (id, mut selected) in requests {
+        selected["semantic_request_id"] = json!(format!("request:calls-{phase}-{id}"));
+        steps.push(json!({"id": id, "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": selected, "delivery": "resource"}}));
+        steps.push(json!({"id": format!("{id}_page"), "operation": "read_resource", "uri": {"$ref": format!("{id}.structured_content.pages.0.uri")}}));
+    }
+    let mut unsupported = request;
+    unsupported["semantic_request_id"] =
+        json!(format!("request:calls-{phase}-unsupported-distance"));
+    unsupported["queries"][0]["distance"] = json!("two steps");
+    steps.push(json!({"id": "unsupported", "operation": "call_tool", "name": "validate_code_graph_query", "arguments": {"request": unsupported}}));
+    let scenario = modern_client_scenario(fixture, stack, "policy-one", json!([]), json!(steps));
+    let path = write_modern_client_scenario(fixture, "canonical-calls", &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let rows = |id: &str| {
+        let result = modern_structured(modern_step(&report, id));
+        assert_eq!(result["execution_state"], "SUCCEEDED", "{id}: {report}");
+        assert_eq!(
+            result["processing"][0]["family"], "call-targets",
+            "{id}: {report}"
+        );
+        let bytes = STANDARD
+            .decode(
+                modern_step(&report, &format!("{id}_page"))[0]["blob"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+        let reader =
+            arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None).unwrap();
+        let mut rows = Vec::new();
+        for batch in reader {
+            let batch = batch.unwrap();
+            let text = |name| {
+                batch
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+            };
+            for row in 0..batch.num_rows() {
+                assert_eq!(text("language").value(row), language);
+                let value =
+                    |name| (!text(name).is_null(row)).then(|| text(name).value(row).to_owned());
+                let number = |name| {
+                    let values = batch
+                        .column_by_name(name)
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<UInt64Array>()
+                        .unwrap();
+                    (!values.is_null(row)).then(|| values.value(row))
+                };
+                rows.push((
+                    value("public_caller_entity_id"),
+                    value("public_target_entity_id"),
+                    value("public_call_site_id"),
+                    number("start_byte"),
+                    number("end_byte"),
+                    value("unknown_reason"),
+                ));
+            }
+        }
+        rows
+    };
+    let outgoing = rows("outgoing");
+    assert_eq!(
+        outgoing.len(),
+        2,
+        "repeated subjects must not duplicate call occurrences: {outgoing:?}"
+    );
+    assert_eq!(outgoing, rows("default"));
+    assert_eq!(outgoing, rows("context"));
+    assert_ne!(outgoing[0].2, outgoing[1].2);
+    for row in &outgoing {
+        assert_eq!(row.0.as_ref(), Some(caller));
+        assert_eq!(row.1.as_ref(), Some(target));
+        assert!(row.2.as_ref().unwrap().starts_with("entity:call-site:"));
+        assert!(row.3.unwrap() < row.4.unwrap());
+        assert!(row.5.is_none());
+    }
+    let incoming = rows("incoming");
+    assert_eq!(
+        incoming
+            .iter()
+            .filter(|row| row.0.as_ref() == Some(caller))
+            .count(),
+        2
+    );
+    assert!(incoming.iter().all(|row| row.1.as_ref() == Some(target)));
+    let dynamic = rows("dynamic");
+    assert_eq!(dynamic.len(), 1);
+    assert_eq!(dynamic[0].0.as_ref(), Some(indirect));
+    assert!(dynamic[0].1.is_none());
+    assert!(dynamic[0].5.is_some());
+    assert!(rows("empty").is_empty());
+    assert!(rows("other_language").is_empty());
+    assert_eq!(rows("limited"), outgoing[..1]);
+    assert_eq!(
+        modern_structured(modern_step(&report, "limited"))["processing"][0]["additional_rows"],
+        true
+    );
+    let coverage = modern_structured(modern_step(&report, "outgoing"));
+    assert!(
+        coverage["processing"][0]["remaining_partitions"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(coverage["processing"][0]["additional_rows"], false);
+    assert_ne!(
+        modern_structured(modern_step(&report, "unsupported"))["execution_state"],
+        "SUCCEEDED"
     );
 }
 

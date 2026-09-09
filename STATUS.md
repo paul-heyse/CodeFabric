@@ -2,7 +2,7 @@
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
 Last production commit: `734821db` (`Publish canonical Python call occurrences and checker-resolved edges`).
-The uncommitted continuation is identified below; documentation updates do not certify that code.
+The current call-query slice and its validation are recorded below.
 
 ## Current handoff
 
@@ -20,45 +20,42 @@ implemented portions, unfinished acceptance and the next work for every slice.
 Fresh daemon startup captures real Python/Rust inputs, runs contained semantic providers and
 publishes exact Delta versions. Canonical declarations, Python lexical references and Python/Rust
 call occurrences exist. Installed FastMCP clients have exercised function search and declaration
-fact retrieval with scoped processing and observed result truncation. Full public call traversal
-has **not** been demonstrated. A running daemon does **not yet** continuously update the graph;
+fact retrieval and one-step incoming/outgoing call traversal with scoped processing and observed
+result truncation. Python call queries also pass after exact reopen. A running daemon does **not yet** continuously update the graph;
 startup still waits for semantic work before publication. The first useful release remains open.
 
-All work in this implementation has used the canonical tree and small commits. No new independent
-worktrees or subagents were created. At this checkpoint no implementation build/test process remains
-running. Existing production edits are preserved while the user-requested documentation update is made.
+Work remains in the canonical tree. The call-query continuation present at session start was
+preserved, exercised, and completed as a coherent slice. No outcome from 4 through 8 is closed.
 
-## Uncommitted continuation: call scope and public call queries
+## Call scope and public call queries: implemented limited production slice
 
-There are two successive validation levels in the current source changes:
+`system.requested_processing_scope` retains requested provider/input partitions, and native
+DataFusion derives `system.entity_processing_scope`. Declaration and call families stay separate.
+Terminal provider coverage combines with unresolved targets, missing source/caller identities and
+unmatched implicit Pyrefly calls. A real property/decorator fixture verifies that unnormalized implicit
+calls leave call coverage partial while declarations remain complete.
 
-1. **Call-specific processing: implemented and focused tests passed, not committed.**
-   Requested provider/input partitions are retained in `system.requested_processing_scope`.
-   A native DataFusion transformation produces `system.entity_processing_scope`, keeping
-   `function-declarations` separate from `call-targets`. Call partitions combine terminal Ruff,
-   Pyrefly or rustc family coverage with unresolved targets, absent source/caller identities and
-   Pyrefly calls without explicit Ruff callee syntax. Semantic gaps can mark a completed provider
-   partition partial without changing declaration completeness. The implicit-call detection path
-   exists, but a dedicated property/decorator scenario has not exercised it.
-2. **Public call-query wiring: implemented to compile, behavioral validation pending, not committed.**
-   `fact.code_call_selector` uses native joins to canonical entities and incoming/outgoing projections.
-   `query.result.call-facts` reuses the declaration query's typed subject semi join. The recipe accepts
-   exact canonical entity subjects, `calls`/`call relationships`, incoming/outgoing direction and
-   explicit `one relationship step`/`one step` distance. Omitted direction projects as outgoing.
-   Public endpoint/call-site IDs, deterministic ordering, language/context scope and call-family
-   processing are wired. These are intended behaviors awaiting execution through the real service.
+`fact.code_call_selector` joins canonical entities and projects incoming/outgoing subjects without
+multiplying call occurrences. `query.result.call-facts` uses an exact subject semi join. Installed
+modern clients exercise Python and Rust incoming/outgoing calls, omitted-direction default, the two
+one-step distance phrases, repeated subjects/sites, dynamic targets, empty results, observed limits,
+language/context selection and a failed Rust target. Python calls pass after exact persisted reopen.
+Unsupported distances enter the existing clarification path; broader traversal remains unimplemented.
 
-Changed surfaces: startup `processing.rs`, `canonical.rs`, `canonical/processing.rs` (new),
-`canonical/call_selector.rs` (new), `canonical/python_calls.rs`, startup assembly,
-`src/fabric/processing_status.rs`, `programmatic_ingress_port.rs`, `programmatic_query_backend.rs`,
-`src/production_query_recipe.rs`, `production_query_recipe/facts.rs` and the daemon integration test.
+Validation on 2026-09-09: the installed Python/call/reopen scenario passes (16.02 s); the mixed Rust
+failed-target/declaration/call scenario passes (60.89 s). Sixteen focused processing/recipe/ingress
+and implicit-call tests pass. Default and featureless `just root-check` and `just governance-scan`
+pass. Strict `just root-clippy` fails on the existing broad lint backlog (960 library and 1,084
+library-test errors in that run, before fixing two new processing findings). A subsequent library
+Clippy run completes with 959 warnings; this is not strict lint cleanliness. `just root-fmt` also
+fails on pre-existing formatting in seven untouched files; all twelve changed Rust files pass focused
+format checks. Docs navigation and `git diff --check` pass. Five final processing/implicit-call/exact
+reopen regression cases pass after the processing refactor (reopen 16.65 s).
 
-Four focused tests passed before the call-selector/query changes: three processing-scope tests and
-`pragmatic_python_semantics_publish_real_call_targets` (6.59 seconds). They verify family isolation,
-remainder paging/context handling and real Python declaration-complete/call-partial publication.
-The subsequent whole dirty library passes `just root-check-fast` (66 warnings; 7.13 seconds).
-**That check does not execute DataFusion plans or validate the new public form.** No test or Clippy
-result is claimed for the final call-selector/query changes. Resume here, preserving both new files.
+This login shell lacks delegated provider cgroups. Runtime checks pass inside
+`systemd-run --user --scope --quiet --property=Delegate=yes env` with the two provider binary
+variables below. The initial direct contained-provider run fails `SandboxUnavailable`; no production
+containment bypass or host configuration change was introduced.
 
 ## Outcome 4: real inputs, canonical facts and the first four forms
 
@@ -159,7 +156,7 @@ Raw provider coverage is not complete canonical-family coverage.
 |---|---|---|
 | FindEntities | Installed client returns canonical Python/Rust functions; language/context filters precede limits; stable name/entity ordering | Other kinds/representations, source boundaries, semantic name/ambiguity resolution and full directives |
 | RetrieveFacts | Explicit canonical entity IDs; `declarations` or `declaration locations and provenance`; native semi join prevents repeated subjects duplicating occurrences; partial and empty cases tested | Types, members, call/derived families, point filters, broad family expansion and phrase/fact/prior-result resolution |
-| FollowRelationships | Canonical call data is committed; one-step public call recipe is uncommitted and compile-checked only | Execute/fix new call path; references/imports, candidates, full direction/distance/stop/filter behavior and composition |
+| FollowRelationships | Installed Python/Rust one-step incoming/outgoing calls, repeated sites, unknown targets, limits and exact Python reopen | references/imports, candidates, full direction/distance/stop/filter behavior and composition |
 | RetrieveSourceContext | Existing source storage/lease infrastructure only | Canonical production form, exact selected bytes after disk changes, separate disclosure authorization, coordinate and truncation delivery |
 
 Unsupported subject meanings are explicitly rejected; they do not fall back to names. The generalized
@@ -179,7 +176,7 @@ reason categories; coverage and row truncation are distinct.
 
 The first remainder page is bounded to 64 rows with `next_offset`; raw path bytes, optional display path,
 target/kind and known context survive projection. The summary is retained with the exact result package.
-The uncommitted call-specific extension is described above and conservatively includes the selected
+The validated call-specific extension is described above and conservatively includes the selected
 context's potential callers. It does not yet derive exact owner/reverse-dependency scope.
 
 Remaining: all family/owner dimensions; public remainder pagination; authorization-scoped efficient status
@@ -260,8 +257,8 @@ refresh. Counts below overlap; they must not be added into a full-suite total.
 | Checker definition anchors (`92bb153d`) | `just sidecar-test`, `just sidecar-check`; selected root provider/recipe/daemon cases | 30 sidecar and 26 root cases pass; imported alias/bound method, wrong file/digest/range and real 70-module target anchors |
 | Canonical Python calls (`734821db`) | Affected native/canonical/recipe tests plus real Python/mixed Rust and installed restart | Initial stale relation-count assertions were corrected; final selected rerun passes; repeated, module and dynamic calls and cross-module exact call range tested; reopen 15.6 s |
 | Compiler-input governance (`fe51b1bd`) and committed call work | `just governance-scan`, root library Clippy, docs/whitespace checks | 30 rule cases and scan pass. Configured compiler/extractor readers have narrow exceptions; workspace source capture rules remain. Clippy completes with the existing warning backlog, not strict cleanliness |
-| Uncommitted processing extension, before public call wiring | `just root-test-incremental -E 'test(processing_scope) \| test(pragmatic_python_semantics_publish_real_call_targets)'` with both real provider binaries selected | Four pass: three scope tests and real Python publication, 6.59 s runtime |
-| Final uncommitted call-query library | `just root-check-fast` | Pass, 66 existing warnings; public call execution, affected tests and Clippy still pending |
+| Historical processing extension, before public call wiring | `just root-test-incremental -E 'test(processing_scope) \| test(pragmatic_python_semantics_publish_real_call_targets)'` with both real provider binaries selected | Four pass: three scope tests and real Python publication, 6.59 s runtime |
+| Call-query continuation | Installed Python/call/reopen and mixed Rust/declaration/call tests; 16 focused scope/recipe/ingress/implicit-call tests; five final scope/implicit-call/reopen tests | Pass; full traversal, composition and live updates remain open |
 
 Local observations for resumption include `/tmp/codefabric-call-processing-tests.log`,
 `/tmp/codefabric-public-calls-check.log`, `/tmp/codefabric-python-canonical-calls-final-regression.log`
@@ -269,9 +266,9 @@ and `/tmp/codefabric-python-call-anchors-*`. They are optional local logs, not r
 artifacts or a new certification mechanism. Git and named behavioral tests retain the useful history.
 
 The existing four golden scenarios have passed during earlier slices (startup, installed Python
-serving, exact reopen and cancellation). They were not rerun on the final dirty call-query code and do
-not exercise full outcomes 4–8. Root Clippy retains a large warning backlog (958 in the recent recorded
-library run after new warnings were addressed). The last older aggregate root result at `0cc7242`
+serving, exact reopen and cancellation). Exact reopen was rerun on the call-query slice (16.65 s);
+these scenarios do not exercise full outcomes 4–8. Root Clippy retains a large warning backlog (958 in the recent recorded
+library run before this slice; the current affected library run has 959 warnings). The last older aggregate root result at `0cc7242`
 reported 1,038 passed, 13 failed and two skipped; it is historical, not a current verdict. No new
 four-domain aggregate, full-root green result or universal product completion is claimed here.
 
@@ -313,11 +310,8 @@ golden setup; `just sidecar-check` checks/lints rather than installing a fresh e
 
 ## Next action
 
-1. Finish the preserved call-query continuation: exercise real installed-client incoming/outgoing,
-   repeated-subject, unknown-target, empty/partial, direction-default, distance/limit and language/context
-   cases; verify query compilation, exact reopen and declaration-query regressions; fix issues, run
-   affected Clippy/governance, then commit the coherent slice. Do not treat the current compile pass as
-   completion of FollowRelationships.
+1. Retain the validated one-step call-query slice and extend it with the remaining canonical families
+   and traversal semantics. Full FollowRelationships is still open.
 2. Finish 4A–4D effective/external/generated inputs and canonical families needed by the first four forms;
    complete 4E and 5A–5B, especially public remainder paging and real freshness barriers. Retain the broad
    workstation allowances and honest partial semantics.
@@ -327,5 +321,5 @@ golden setup; `just sidecar-check` checks/lints rather than installing a fresh e
    retention, actual native maintenance, recovery and representative performance. Add phase metrics and
    persistence improvements while integrating updates; optional performance mechanisms remain conditional.
 
-The user's current request is to reconcile these documents. Production implementation remains authorized
-but is left at the explicit checkpoint above for the next implementation turn.
+The active user request is implementation of the entire remaining detailed plan. The limited call
+slice above is progress; all other stated acceptance remains required.

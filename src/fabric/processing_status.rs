@@ -93,6 +93,7 @@ impl QueryProcessing {
 }
 
 pub(crate) struct EntityQueryScope {
+    family: &'static str,
     languages: BTreeSet<String>,
     contexts: BTreeSet<[u8; 16]>,
 }
@@ -132,7 +133,7 @@ impl EntityQueryScope {
         match selector {
             "python:function" => languages.retain(|language| language == "python"),
             "rust:function" => languages.retain(|language| language == "rust"),
-            "function" | "declarations" => {}
+            "function" | "declarations" | "calls" => {}
             _ => {
                 return Err(
                     "entity selector is not a compiled function declaration meaning".to_owned(),
@@ -152,6 +153,11 @@ impl EntityQueryScope {
             })
             .collect::<Result<_, _>>()?;
         Ok(Self {
+            family: if selector == "calls" {
+                "call-targets"
+            } else {
+                "function-declarations"
+            },
             languages,
             contexts,
         })
@@ -294,12 +300,13 @@ impl EntityProcessingSnapshot {
             completed_partitions: 0,
             remaining_partitions: 0,
             scope: "requested_python_sources_and_selected_cargo_targets".to_owned(),
-            family: "function-declarations".to_owned(),
+            family: scope.family.to_owned(),
             remainder: Vec::new(),
             next_offset: None,
             languages: scope.languages.iter().cloned().collect(),
         };
         for batch in &self.batches {
+            let families = strings(batch, "family").expect("validated processing schema");
             let languages = strings(batch, "language").expect("validated processing schema");
             let states = strings(batch, "processing_state").expect("validated processing schema");
             let reasons = strings(batch, "reason").expect("validated processing schema");
@@ -314,7 +321,9 @@ impl EntityProcessingSnapshot {
                 .and_then(|a| a.as_any().downcast_ref::<FixedSizeBinaryArray>())
                 .expect("validated context ID");
             for row in 0..batch.num_rows() {
-                if !scope.languages.contains(languages.value(row)) {
+                if families.value(row) != scope.family
+                    || !scope.languages.contains(languages.value(row))
+                {
                     continue;
                 }
                 if !scope.contexts.is_empty()
@@ -444,7 +453,7 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
             || workspace_ids.value(row) != workspace
             || generations.is_null(row)
             || generations.value(row) != generation
-            || family.value(row) != "function-declarations"
+            || !matches!(family.value(row), "function-declarations" | "call-targets")
             || !matches!(language.value(row), "python" | "rust")
             || !matches!(
                 state.value(row),
@@ -555,6 +564,7 @@ mod tests {
     fn processing_scope_keeps_python_complete_and_paginates_rust_remainder() {
         let processing = fixture();
         let python = EntityQueryScope {
+            family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned()]),
             contexts: BTreeSet::new(),
         };
@@ -572,6 +582,7 @@ mod tests {
             ResultCompleteness::Complete
         );
         let rust = EntityQueryScope {
+            family: "function-declarations",
             languages: BTreeSet::from(["rust".to_owned()]),
             contexts: BTreeSet::new(),
         };
@@ -599,12 +610,53 @@ mod tests {
     }
 
     #[test]
+    fn processing_scope_counts_only_the_requested_family() {
+        let mut processing = fixture();
+        let original = processing.batches[0].slice(0, 1);
+        let mut columns = original.columns().to_vec();
+        let family = original.schema().index_of("family").unwrap();
+        let state = original.schema().index_of("processing_state").unwrap();
+        let reason = original.schema().index_of("reason").unwrap();
+        columns[family] = Arc::new(StringArray::from(vec!["call-targets"]));
+        columns[state] = Arc::new(StringArray::from(vec!["partial"]));
+        columns[reason] = Arc::new(StringArray::from(vec!["unresolved_targets"]));
+        let calls = RecordBatch::try_new(original.schema(), columns).unwrap();
+        validate(&calls, [1; 16], 3).unwrap();
+        processing.batches.push(ChargedValue::for_test(calls));
+        let mut scope = EntityQueryScope {
+            family: "function-declarations",
+            languages: BTreeSet::from(["python".to_owned()]),
+            contexts: BTreeSet::new(),
+        };
+        let declarations = processing.summarize(&scope, 0);
+        assert_eq!(
+            (
+                declarations.requested_partitions,
+                declarations.completed_partitions
+            ),
+            (1, 1)
+        );
+        scope.family = "call-targets";
+        let calls = processing.summarize(&scope, 0);
+        assert_eq!(
+            (
+                calls.requested_partitions,
+                calls.completed_partitions,
+                calls.remaining_partitions
+            ),
+            (1, 0, 1)
+        );
+        assert_eq!(calls.remainder[0].reason, "unresolved_targets");
+    }
+
+    #[test]
     fn processing_scope_rejects_another_epoch_and_preserves_unknown_contexts() {
         let processing = fixture();
         assert!(!processing.matches([2; 16], processing.epoch, 3));
         assert!(!processing.matches([1; 16], processing.epoch, 4));
         assert!(validate(&processing.batches[0], [1; 16], 4).is_err());
         let scope = EntityQueryScope {
+            family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned(), "rust".to_owned()]),
             contexts: BTreeSet::from([[8; 16]]),
         };
@@ -614,6 +666,7 @@ mod tests {
             (0, 130)
         );
         let empty = EntityQueryScope {
+            family: "function-declarations",
             languages: BTreeSet::new(),
             contexts: BTreeSet::new(),
         };

@@ -1,4 +1,4 @@
-//! Native declaration retrieval with an exact request-owned entity-reference semi join.
+//! Subject-bound facts and calls share one native request-owned entity-reference semi join.
 
 use std::sync::Arc;
 
@@ -17,15 +17,42 @@ use crate::semantic_query_contract::{
     SemanticQueryClause, SemanticQueryRequest, SemanticReference,
 };
 
-const SOURCE: &str = "fact.code_declaration";
-const OUTPUT: &str = "query.result.declaration-facts";
-
-// One compact plan keeps request identity matching, family selection and projection together.
-#[allow(clippy::too_many_lines)]
 pub(super) fn declarations(
     epoch: &ProgrammaticFabricEpoch,
 ) -> Result<Option<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
-    let Some(source) = epoch.relation(&ProgrammaticRelationId::new(SOURCE)) else {
+    subject_facts(epoch, false)
+}
+
+pub(super) fn calls(
+    epoch: &ProgrammaticFabricEpoch,
+) -> Result<Option<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
+    subject_facts(epoch, true)
+}
+
+// One compact plan keeps request identity matching, family selection and projection together.
+#[allow(clippy::too_many_lines)]
+fn subject_facts(
+    epoch: &ProgrammaticFabricEpoch,
+    calls: bool,
+) -> Result<Option<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
+    let (source_id, output_id, input_id, input_prefix, form) = if calls {
+        (
+            "fact.code_call_selector",
+            "query.result.call-facts",
+            "query.input.call-subjects",
+            "starting-from",
+            ReleasedSemanticForm::FollowCodeRelationships,
+        )
+    } else {
+        (
+            "fact.code_declaration",
+            "query.result.declaration-facts",
+            "query.input.declaration-about",
+            "about",
+            ReleasedSemanticForm::RetrieveFactsAboutCode,
+        )
+    };
+    let Some(source) = epoch.relation(&ProgrammaticRelationId::new(source_id)) else {
         return Ok(None);
     };
     let schema = source.contract.logical_schema();
@@ -51,7 +78,7 @@ pub(super) fn declarations(
         })?;
         Ok(fields[index].clone())
     };
-    let output_field = |name: &str| release_field_id(&format!("{OUTPUT}.{name}"));
+    let output_field = |name: &str| release_field_id(&format!("{output_id}.{name}"));
     let projections = schema
         .fields()
         .iter()
@@ -68,14 +95,13 @@ pub(super) fn declarations(
         .iter()
         .map(|field| field.output_field_id.clone())
         .collect::<Vec<_>>();
-    let request_fields = ["about.kind", "about.value", "about.producer-role"]
+    let request_fields = ["kind", "value", "producer-role"]
         .into_iter()
-        .map(release_field_id)
+        .map(|suffix| release_field_id(&format!("{input_prefix}.{suffix}")))
         .collect::<Result<Vec<_>, _>>()?;
-    let request_relation = release_relation_id("query.input.declaration-about")?;
-    let source_relation = release_relation_id(SOURCE)?;
-    let output_relation = release_relation_id(OUTPUT)?;
-    let form = ReleasedSemanticForm::RetrieveFactsAboutCode;
+    let request_relation = release_relation_id(input_id)?;
+    let source_relation = release_relation_id(source_id)?;
+    let output_relation = release_relation_id(output_id)?;
     let binding = released_program_binding_id(form);
     let node = |name: &str| Arc::<str>::from(format!("{binding}.{name}"));
     let operator = |name: &str, ordinal, input_names: &[&str], operator, output_fields| {
@@ -86,6 +112,86 @@ pub(super) fn declarations(
             operator,
             output_fields,
         }
+    };
+    let meanings: &[(&str, &str, &[&str], &str)] = if calls {
+        &[
+            (
+                "selection.relationship",
+                "fact_family",
+                &["calls", "call relationships"],
+                "calls",
+            ),
+            (
+                "selection.direction",
+                "direction",
+                &["outgoing", "incoming"],
+                "",
+            ),
+            (
+                "selection.distance",
+                "distance",
+                &["one relationship step", "one step"],
+                "one relationship step",
+            ),
+        ]
+    } else {
+        &[(
+            "selection.facts",
+            "fact_family",
+            &["declarations", "declaration locations and provenance"],
+            "declarations",
+        )]
+    };
+    let selections = meanings
+        .iter()
+        .map(|(id, field, values, canonical)| {
+            Ok(ProductionSelectionDefinition {
+                selection_id: Arc::from(*id),
+                value_kind: SemanticValueKind::Text,
+                minimum_values: 1,
+                maximum_values: if calls {
+                    1
+                } else {
+                    RELEASE_SELECTION_MAXIMUM_VALUES
+                },
+                operator_node_id: node("families"),
+                input_field_id: source_field(field)?,
+                scalar_operator: ScalarOperator::Equal,
+                fold: EpochBoundSelectionFold::Any,
+                resolutions: values
+                    .iter()
+                    .map(|value| EpochBoundSelectionValueResolution {
+                        request_value: SemanticClauseValue::Text(Arc::from(*value)),
+                        execution_value: SemanticClauseValue::Text(Arc::from(
+                            if canonical.is_empty() {
+                                *value
+                            } else {
+                                *canonical
+                            },
+                        )),
+                    })
+                    .collect(),
+            })
+        })
+        .collect::<Result<_, ProductionQueryRecipeError>>()?;
+    let ordering: &[&str] = if calls {
+        &[
+            "public_entity_id",
+            "context_id",
+            "file_id",
+            "start_byte",
+            "call_site_id",
+            "provider_owner",
+            "provider_block_index",
+            "provider_instance_key",
+        ]
+    } else {
+        &[
+            "public_entity_id",
+            "file_id",
+            "start_byte",
+            "declaration_id",
+        ]
     };
     Ok(Some(ProductionSemanticFormProgram {
         form,
@@ -172,21 +278,16 @@ pub(super) fn declarations(
                 5,
                 &["project"],
                 ProgramRelationalOperator::Sort {
-                    fields: [
-                        "public_entity_id",
-                        "file_id",
-                        "start_byte",
-                        "declaration_id",
-                    ]
-                    .into_iter()
-                    .map(|name| {
-                        Ok(ProgramSortField {
-                            input_field_id: output_field(name)?,
-                            ascending: true,
-                            nulls_first: false,
+                    fields: ordering
+                        .iter()
+                        .map(|name| {
+                            Ok(ProgramSortField {
+                                input_field_id: output_field(name)?,
+                                ascending: true,
+                                nulls_first: false,
+                            })
                         })
-                    })
-                    .collect::<Result<_, ProductionQueryRecipeError>>()?,
+                        .collect::<Result<_, ProductionQueryRecipeError>>()?,
                 },
                 output_fields.clone(),
             ),
@@ -198,25 +299,9 @@ pub(super) fn declarations(
                 output_fields,
             ),
         ],
-        selections: vec![ProductionSelectionDefinition {
-            selection_id: Arc::from("selection.facts"),
-            value_kind: SemanticValueKind::Text,
-            minimum_values: 1,
-            maximum_values: RELEASE_SELECTION_MAXIMUM_VALUES,
-            operator_node_id: node("families"),
-            input_field_id: source_field("fact_family")?,
-            scalar_operator: ScalarOperator::Equal,
-            fold: EpochBoundSelectionFold::Any,
-            resolutions: ["declarations", "declaration locations and provenance"]
-                .into_iter()
-                .map(|value| EpochBoundSelectionValueResolution {
-                    request_value: SemanticClauseValue::Text(Arc::from(value)),
-                    execution_value: SemanticClauseValue::Text(Arc::from("declarations")),
-                })
-                .collect(),
-        }],
+        selections,
         request_inputs: vec![ProductionRequestInputDefinition {
-            input_id: Arc::from("input.about"),
+            input_id: Arc::from(format!("input.{input_prefix}")),
             relation_id: request_relation,
             fields: request_fields
                 .into_iter()
@@ -242,12 +327,14 @@ pub(crate) fn validate_canonical_fact_references(
     request: &SemanticQueryRequest,
 ) -> Result<(), String> {
     for clause in &request.queries {
-        let SemanticQueryClause::RetrieveFacts { about, .. } = clause else {
-            continue;
+        let references = match clause {
+            SemanticQueryClause::RetrieveFacts { about, .. } => about,
+            SemanticQueryClause::FollowRelationships { starting_from, .. } => starting_from,
+            _ => continue,
         };
-        for reference in about {
+        for reference in references {
             let SemanticReference::Entity { entity_id } = reference else {
-                return Err("declaration retrieval currently requires explicit canonical entity IDs; phrase, fact and prior-result resolution is unavailable".to_owned());
+                return Err("subject-bound facts currently require explicit canonical entity IDs; phrase, fact and prior-result resolution is unavailable".to_owned());
             };
             let slug = entity_id
                 .split(':')
