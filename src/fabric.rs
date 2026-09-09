@@ -113,7 +113,9 @@ pub mod retention_command_effect;
 pub mod rollback_command_effect;
 #[cfg(feature = "daemon")]
 pub mod source_context;
+#[cfg(feature = "daemon")]
 pub mod source_context_query;
+#[cfg(feature = "daemon")]
 pub(crate) mod source_disclosure;
 #[cfg(feature = "daemon")]
 pub mod source_wave_command_effect;
@@ -125,6 +127,8 @@ pub mod streamed_result_registry;
 pub(crate) mod workspace_native_execution;
 #[cfg(feature = "daemon")]
 pub(crate) mod workspace_resources;
+#[cfg(feature = "daemon")]
+pub(crate) mod workspace_updates;
 #[cfg(feature = "daemon")]
 #[cfg(feature = "daemon")]
 pub mod writer_generation_sqlite;

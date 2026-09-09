@@ -945,6 +945,8 @@ def create_server(
                 execution_state=cast(Any, result.execution_state),
                 epoch_id=result.epoch_id,
                 source_generation=result.source_generation,
+                freshness=result.freshness,
+                analysis_context_set_id=result.analysis_context_set_id,
                 processing=result.processing,
                 package_id=result.package_id,
                 manifest=manifest,
@@ -1038,6 +1040,7 @@ def create_server(
                 queued_queries=result.queued_queries,
                 failure=_safe_error(result.failure),
                 public_status=PublicStatusProjection(**result.public_status.model_dump()),
+                source_observations=result.source_observations,
             )
         except DaemonRpcError as error:
             raise ToolError(f"{error.status.name}:{error.error.code}") from None

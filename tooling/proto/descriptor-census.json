@@ -633,6 +633,16 @@
               "name": "SAFE_ERROR_CODE_INTERNAL",
               "number": 17,
               "options": {}
+            },
+            {
+              "name": "SAFE_ERROR_CODE_FRESHNESS_DEADLINE",
+              "number": 18,
+              "options": {}
+            },
+            {
+              "name": "SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE",
+              "number": 19,
+              "options": {}
             }
           ]
         },
@@ -675,6 +685,34 @@
             {
               "name": "SAFE_ERROR_LAYER_LIFECYCLE",
               "number": 6,
+              "options": {}
+            }
+          ]
+        },
+        {
+          "full_name": "codefabric.cpgd.v2.SnapshotFreshness",
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": [],
+          "values": [
+            {
+              "name": "SNAPSHOT_FRESHNESS_UNSPECIFIED",
+              "number": 0,
+              "options": {}
+            },
+            {
+              "name": "SNAPSHOT_FRESHNESS_CURRENT",
+              "number": 10,
+              "options": {}
+            },
+            {
+              "name": "SNAPSHOT_FRESHNESS_POTENTIALLY_STALE",
+              "number": 20,
+              "options": {}
+            },
+            {
+              "name": "SNAPSHOT_FRESHNESS_UNAVAILABLE",
+              "number": 30,
               "options": {}
             }
           ]
@@ -1809,6 +1847,19 @@
               "proto3_optional": false,
               "type": "TYPE_BYTES",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "sourceObservations",
+              "label": "LABEL_REPEATED",
+              "name": "source_observations",
+              "number": 9,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v2.WorkspaceSourceObservation"
             }
           ],
           "full_name": "codefabric.cpgd.v2.GetStatusResponse",
@@ -4491,10 +4542,45 @@
               "proto3_optional": false,
               "type": "TYPE_UINT64",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "freshness",
+              "label": "LABEL_OPTIONAL",
+              "name": "freshness",
+              "number": 6,
+              "oneof": "_freshness",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.cpgd.v2.SnapshotFreshness"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "analysisContextSetId",
+              "label": "LABEL_OPTIONAL",
+              "name": "analysis_context_set_id",
+              "number": 7,
+              "oneof": "_analysis_context_set_id",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v2.SnapshotPinnedEvent",
-          "oneofs": [],
+          "oneofs": [
+            {
+              "name": "_freshness",
+              "options": {}
+            },
+            {
+              "name": "_analysis_context_set_id",
+              "options": {}
+            }
+          ],
           "options": {},
           "reserved_names": [],
           "reserved_ranges": []
@@ -4989,6 +5075,120 @@
               "options": {}
             }
           ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "workspaceId",
+              "label": "LABEL_OPTIONAL",
+              "name": "workspace_id",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "selectedSourceGeneration",
+              "label": "LABEL_OPTIONAL",
+              "name": "selected_source_generation",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "requestedWatermark",
+              "label": "LABEL_OPTIONAL",
+              "name": "requested_watermark",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "reconciledWatermark",
+              "label": "LABEL_OPTIONAL",
+              "name": "reconciled_watermark",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "freshness",
+              "label": "LABEL_OPTIONAL",
+              "name": "freshness",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.cpgd.v2.SnapshotFreshness"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "watchHealthy",
+              "label": "LABEL_OPTIONAL",
+              "name": "watch_healthy",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BOOL",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "rescanRequired",
+              "label": "LABEL_OPTIONAL",
+              "name": "rescan_required",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BOOL",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "runnablePending",
+              "label": "LABEL_OPTIONAL",
+              "name": "runnable_pending",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BOOL",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.cpgd.v2.WorkspaceSourceObservation",
+          "oneofs": [],
           "options": {},
           "reserved_names": [],
           "reserved_ranges": []

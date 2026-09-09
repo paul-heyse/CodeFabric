@@ -44,6 +44,8 @@ pub struct WorkspaceEpochQueryAuthority {
     result_lease_millis: NonZeroU64,
     entity_processing: Option<Arc<super::processing_status::EntityProcessingSnapshot>>,
     source_disclosure: Option<Arc<super::source_disclosure::SourceDisclosureAuthority>>,
+    source_observation: Option<Arc<super::workspace_updates::WorkspaceObservation>>,
+    source_inventory_digest: Option<[u8; 32]>,
 }
 
 impl fmt::Debug for WorkspaceEpochQueryAuthority {
@@ -129,7 +131,29 @@ impl WorkspaceEpochQueryAuthority {
             result_lease_millis,
             entity_processing: None,
             source_disclosure: None,
+            source_observation: None,
+            source_inventory_digest: None,
         })
+    }
+
+    pub(crate) fn with_source_observation(
+        mut self,
+        observation: Arc<super::workspace_updates::WorkspaceObservation>,
+        digest: Option<[u8; 32]>,
+    ) -> Self {
+        self.source_observation = Some(observation);
+        self.source_inventory_digest = digest;
+        self
+    }
+
+    pub(crate) fn source_observation(
+        &self,
+    ) -> Option<&Arc<super::workspace_updates::WorkspaceObservation>> {
+        self.source_observation.as_ref()
+    }
+
+    pub(crate) fn source_inventory_digest(&self) -> Option<[u8; 32]> {
+        self.source_inventory_digest
     }
 
     pub(crate) fn with_source_disclosure(
@@ -390,13 +414,8 @@ impl ProgrammaticWorkspaceRuntime {
     }
 }
 
-impl Drop for ProgrammaticWorkspaceRuntime {
-    fn drop(&mut self) {
-        // This is a synchronous safety net for partial construction and owner teardown. The
-        // daemon's ordered async shutdown still closes admission before joining command workers.
-        let _ = self.admission.close_for_shutdown();
-    }
-}
+// Epoch retirement only releases this epoch. Admission belongs to the workspace owner
+// and must remain open when a predecessor runtime loses its final snapshot lease.
 
 /// Derive the only semantic epoch pin accepted by the workspace query authority.
 ///

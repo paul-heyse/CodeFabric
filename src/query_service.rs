@@ -42,6 +42,7 @@ use crate::query_backend::{
     SemanticInputAnswer, SemanticInputConstraints, SemanticInputKind, SemanticInputRequirement,
     SemanticInputValue, SemanticQueryBackend, SemanticStringFormat, now_millis,
 };
+#[cfg(test)]
 use crate::registries::FreshnessState;
 use crate::relational_semantic_query::{ProducerFamilyDisposition, SemanticValueKind};
 use crate::rpc::generated::codefabric::cpgd::v2::authorized_choice::Value as WireChoiceValue;
@@ -720,14 +721,18 @@ impl<B: SemanticQueryBackend> QueryApplicationService<B> {
         {
             return Err(public_status(Code::InvalidArgument, "SEMANTIC_REQUEST_ID"));
         }
-        self.prepare_semantic_submission(parsed, Vec::new())
+        self.prepare_semantic_submission(parsed, Vec::new()).await
     }
 
-    fn prepare_semantic_submission(
+    async fn prepare_semantic_submission(
         &self,
         parsed: crate::semantic_query_contract::ParsedSemanticRequest,
         answers: Vec<SemanticInputAnswer>,
     ) -> Result<PreparedSubmission, Status> {
+        self.backend
+            .await_freshness(&parsed)
+            .await
+            .map_err(semantic_status)?;
         let preparation = self
             .backend
             .prepare_execution_request(&parsed, &answers)
@@ -1003,9 +1008,43 @@ impl<B: SemanticQueryBackend> QueryApplicationService<B> {
         };
         let mut accumulated_answers = record.prepared.answers.clone();
         accumulated_answers.extend(answers);
-        let prepared = match self
+        drop(starts);
+        let preparation_started = Instant::now();
+        let prepared_result = self
             .prepare_semantic_submission(record.prepared.parsed.clone(), accumulated_answers)
+            .await;
+        let admitted_result = if let Ok(prepared) = &prepared_result {
+            if let Some(resolved) = prepared.resolved.clone() {
+                Some(self.backend.admit_fresh_execution_request(resolved).await)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let observed_at_unix_ms = observed_at_unix_ms.saturating_add(
+            i64::try_from(preparation_started.elapsed().as_millis()).unwrap_or(i64::MAX),
+        );
+        let mut starts = self.starts.lock().await;
+        if starts
+            .challenges
+            .get(&token)
+            .is_none_or(|record| record.used)
         {
+            return Err(public_status(Code::InvalidArgument, "CHALLENGE_REPLAY"));
+        }
+        if observed_at_unix_ms >= record.expires_at_unix_ms {
+            let status = public_status(Code::InvalidArgument, "CHALLENGE_EXPIRED");
+            return Ok(close_challenge_rejection(
+                &mut starts,
+                &record,
+                token,
+                session,
+                &status,
+                correlation_id,
+            ));
+        }
+        let prepared = match prepared_result {
             Ok(prepared) => prepared,
             Err(status) if status.code() == Code::InvalidArgument => {
                 return Ok(close_challenge_rejection(
@@ -1019,8 +1058,8 @@ impl<B: SemanticQueryBackend> QueryApplicationService<B> {
             }
             Err(status) => return Err(status),
         };
-        if let Some(resolved) = prepared.resolved.clone() {
-            let admitted = match self.backend.admit_execution_request(resolved) {
+        if let Some(admitted_result) = admitted_result {
+            let admitted = match admitted_result {
                 Ok(admitted) => admitted,
                 Err(error) => {
                     let status = semantic_status(error);
@@ -1670,6 +1709,25 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                             )
                         })
                 });
+                let source_observations = session.workspace_ids().iter().filter_map(|workspace| {
+                    let lease = self.workspace_slots.slot(*workspace)?.lease().ok()?;
+                    let runtime = lease.workspace().runtime();
+                    let authority = runtime.query_authority();
+                    let observed = authority.source_observation()?;
+                    let generation = authority.activation_pins().source_generation.get();
+                    let reconciled_watermark = observed.freshness.reconciled();
+                    let requested_watermark = observed.freshness.requested();
+                    Some(crate::rpc::generated::codefabric::cpgd::v2::WorkspaceSourceObservation {
+                        workspace_id: runtime.public_workspace_id().ok()?,
+                        selected_source_generation: generation,
+                        requested_watermark,
+                        reconciled_watermark,
+                        freshness: i32::from(observed.state_for(generation) as u16),
+                        watch_healthy: observed.watch_healthy(),
+                        rescan_required: observed.rescan_required(),
+                        runnable_pending: reconciled_watermark < requested_watermark,
+                    })
+                }).collect();
                 let status_value = serde_json::json!({
                     "semantic_release": self.release.suite().as_str(),
                     "lifecycle": projection.phase().code(),
@@ -1700,6 +1758,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                     running_queries: u32::try_from(coordinator.running).unwrap_or(u32::MAX),
                     queued_queries: u32::try_from(coordinator.queued).unwrap_or(u32::MAX),
                     canonical_public_status_json,
+                    source_observations,
                 }))
             })
             .await
@@ -1969,28 +2028,29 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                                 outcome: Some(outcome),
                             }));
                         }
-                        let prepared = match self.prepare_semantic_submission(parsed, Vec::new()) {
-                            Ok(prepared) => prepared,
-                            Err(status) if status.code() == Code::InvalidArgument => {
-                                return Ok(Response::new(StartQueryResponse {
-                                    outcome: Some(StartOutcome::ValidationRejection(
-                                        ValidationRejection {
-                                            authority: Some(authority(&session)),
-                                            semantic_request_id: query.semantic_request_id,
-                                            issues: vec![validation_issue(&status)],
-                                            error: Some(safe_error(
-                                                SafeErrorCode::ValidationRejected,
-                                                SafeErrorLayer::Validation,
-                                                false,
-                                                "",
-                                                &context.correlation_id,
-                                            )),
-                                        },
-                                    )),
-                                }));
-                            }
-                            Err(status) => return Err(status),
-                        };
+                        let prepared =
+                            match self.prepare_semantic_submission(parsed, Vec::new()).await {
+                                Ok(prepared) => prepared,
+                                Err(status) if status.code() == Code::InvalidArgument => {
+                                    return Ok(Response::new(StartQueryResponse {
+                                        outcome: Some(StartOutcome::ValidationRejection(
+                                            ValidationRejection {
+                                                authority: Some(authority(&session)),
+                                                semantic_request_id: query.semantic_request_id,
+                                                issues: vec![validation_issue(&status)],
+                                                error: Some(safe_error(
+                                                    SafeErrorCode::ValidationRejected,
+                                                    SafeErrorLayer::Validation,
+                                                    false,
+                                                    "",
+                                                    &context.correlation_id,
+                                                )),
+                                            },
+                                        )),
+                                    }));
+                                }
+                                Err(status) => return Err(status),
+                            };
                         if !prepared.requirements.is_empty() {
                             let outcome = self
                                 .issue_challenge(
@@ -2011,9 +2071,10 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                         }
                         let admitted = self
                             .backend
-                            .admit_execution_request(prepared.resolved.clone().ok_or_else(
+                            .admit_fresh_execution_request(prepared.resolved.clone().ok_or_else(
                                 || public_status(Code::Internal, "RESOLVED_OPERATION"),
                             )?)
+                            .await
                             .map_err(semantic_status)?;
                         self.reserve_start_acceptance(&scope, fingerprint, observed_at)
                             .await?;
@@ -2539,6 +2600,8 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>)
                 source_generation: snapshot.source_generation,
                 activation_head: snapshot.overlay_generation,
                 lifecycle_watermark: snapshot.source_generation,
+                freshness: Some(snapshot.freshness_state),
+                analysis_context_set_id: Some(snapshot.analysis_context_set_id.clone()),
             },
             observed_at,
         )
@@ -2616,7 +2679,7 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>)
     );
     let execution = backend.execute(
         prepared,
-        FreshnessState::Current,
+        snapshot.freshness_state,
         cancellation,
         context,
         artifacts,
@@ -2964,12 +3027,16 @@ async fn event_to_wire(
             source_generation,
             activation_head,
             lifecycle_watermark,
+            freshness,
+            analysis_context_set_id,
         } => Event::SnapshotPinned(SnapshotPinnedEvent {
             header: Some(header()),
             epoch_id,
             source_generation,
             activation_head,
             lifecycle_watermark,
+            freshness: freshness.map(|state| i32::from(state as u16)),
+            analysis_context_set_id,
         }),
         QueryControlEventPayload::Progress {
             stage,
@@ -4060,6 +4127,14 @@ fn terminal_state(state: QueryTerminalState) -> QueryExecutionState {
 fn semantic_status(error: SemanticQueryError) -> Status {
     let (code, public_code) = match error {
         SemanticQueryError::Phase {
+            code: "FRESHNESS_DEADLINE",
+            ..
+        } => (Code::DeadlineExceeded, "FRESHNESS_DEADLINE"),
+        SemanticQueryError::Phase {
+            code: "FRESHNESS_UNAVAILABLE" | "FRESHNESS_SELECTION_CHANGED",
+            ..
+        } => (Code::Unavailable, "FRESHNESS_UNAVAILABLE"),
+        SemanticQueryError::Phase {
             code: "SOURCE_ACCESS_DENIED",
             ..
         } => (Code::PermissionDenied, "SOURCE_ACCESS_DENIED"),
@@ -4205,6 +4280,8 @@ fn public_error_detail(code: Code, public_code: &str) -> SafeErrorMetadata {
         | "RESOURCE_CAPACITY" => SafeErrorCode::CapacityUnavailable,
         "QUERY_CANCELLED" => SafeErrorCode::Cancelled,
         "QUERY_DEADLINE" => SafeErrorCode::ResumeWindowExpired,
+        "FRESHNESS_DEADLINE" => SafeErrorCode::FreshnessDeadline,
+        "FRESHNESS_UNAVAILABLE" => SafeErrorCode::FreshnessUnavailable,
         "LIFECYCLE_NOT_READY" | "RESULT_RECOVERY_UNAVAILABLE" => SafeErrorCode::DaemonUnavailable,
         _ => match code {
             Code::InvalidArgument => SafeErrorCode::InvalidRequest,
@@ -4236,6 +4313,7 @@ fn public_error_detail(code: Code, public_code: &str) -> SafeErrorMetadata {
         }
         value
             if value.starts_with("QUERY_")
+                || value.starts_with("FRESHNESS_")
                 || value.starts_with("START_")
                 || value.starts_with("CHALLENGE_")
                 || value.starts_with("IDEMPOTENCY_") =>
@@ -4260,6 +4338,8 @@ fn public_error_detail(code: Code, public_code: &str) -> SafeErrorMetadata {
             SafeErrorCode::CapacityUnavailable
                 | SafeErrorCode::DaemonUnavailable
                 | SafeErrorCode::ResumeWindowExpired
+                | SafeErrorCode::FreshnessDeadline
+                | SafeErrorCode::FreshnessUnavailable
         ),
         retry_after_ms: None,
         diagnostic_reference: None,
@@ -4621,6 +4701,7 @@ mod tests {
         let parsed = parse_request(TEST_REQUEST).unwrap();
         let prepared = service
             .prepare_semantic_submission(parsed, Vec::new())
+            .await
             .unwrap();
         (service, session, prepared)
     }

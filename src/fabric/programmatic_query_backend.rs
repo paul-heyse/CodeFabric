@@ -869,6 +869,53 @@ impl ProgrammaticSemanticQueryBackend {
 impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
     type ExecutionAuthority = ProgrammaticExecutionAuthority;
 
+    async fn await_freshness(
+        &self,
+        request: &ParsedSemanticRequest,
+    ) -> Result<(), SemanticQueryError> {
+        use crate::semantic_query_contract::FreshnessPolicy;
+        if request.request.freshness_policy == FreshnessPolicy::BestAvailableSnapshot {
+            return Ok(());
+        }
+        self.require_semantic_admission()?;
+        let lease = self.workspace_lease(&request.request.workspace_id)?;
+        let Some(observation) = lease
+            .workspace()
+            .runtime()
+            .query_authority()
+            .source_observation()
+            .cloned()
+        else {
+            return Ok(());
+        };
+        // Current-required requests force a census even if an OS notification was lost or
+        // is still inside the native debounce window. The workspace coalesces all requests.
+        observation.request(true);
+        observation
+            .freshness
+            .admit_query(
+                crate::freshness::FreshnessAdmission::AwaitLatest,
+                std::time::Duration::from_millis(
+                    request
+                        .request
+                        .freshness_deadline_ms
+                        .unwrap_or(30_000)
+                        .min(300_000),
+                ),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| SemanticQueryError::Phase {
+                code: match error {
+                    crate::freshness::FreshnessError::Stale => "FRESHNESS_DEADLINE",
+                    crate::freshness::FreshnessError::Unavailable => "FRESHNESS_UNAVAILABLE",
+                },
+                phase: "freshness",
+                pointer: "freshness.policy".to_owned(),
+                message: error.to_string(),
+            })
+    }
+
     fn application_release_pin(&self) -> Option<[u8; 32]> {
         Some(compiled_query_release_pin(self.release.as_ref()))
     }
@@ -971,19 +1018,44 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         let epoch_lease = workspace
             .admission()
             .admit_selected(Arc::clone(authority.epoch()))
-            .map_err(|error| query_error("admission", error.to_string()))?;
+            .map_err(|error| match error {
+                super::admission::AdmissionError::AdmissionClosed => SemanticQueryError::Phase {
+                    code: "FRESHNESS_SELECTION_CHANGED",
+                    phase: "freshness",
+                    pointer: "freshness.policy".to_owned(),
+                    message: "an epoch activation is still completing".to_owned(),
+                },
+                other => query_error("admission", other.to_string()),
+            })?;
         if !Arc::ptr_eq(authority.epoch(), epoch_lease.epoch()) {
             return Err(query_error(
                 "epoch_authority",
                 "atomic-start admission retained a different epoch capability",
             ));
         }
+        let freshness =
+            authority
+                .source_observation()
+                .map_or(FreshnessState::Current, |observation| {
+                    observation.state_for(authority.activation_pins().source_generation.get())
+                });
+        if request.request.freshness_policy
+            != crate::semantic_query_contract::FreshnessPolicy::BestAvailableSnapshot
+            && freshness != FreshnessState::Current
+        {
+            return Err(SemanticQueryError::Phase {
+                code: "FRESHNESS_SELECTION_CHANGED",
+                phase: "freshness",
+                pointer: "freshness.policy".to_owned(),
+                message: "source changed before the selected epoch could be pinned".to_owned(),
+            });
+        }
         let snapshot = self.project_snapshot(
             &request.request.workspace_id,
             workspace.as_ref(),
             authority,
             workspace_lease.workspace().query_ports(),
-            FreshnessState::Current,
+            freshness,
         )?;
         Ok(PreparedSemanticExecution::new(
             resolved,
@@ -993,6 +1065,48 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             },
             snapshot,
         ))
+    }
+
+    async fn admit_fresh_execution_request(
+        &self,
+        resolved: ResolvedSemanticExecutionRequest,
+    ) -> Result<PreparedSemanticExecution<Self::ExecutionAuthority>, SemanticQueryError> {
+        if resolved.parsed().request.freshness_policy
+            == crate::semantic_query_contract::FreshnessPolicy::BestAvailableSnapshot
+        {
+            return self.admit_execution_request(resolved);
+        }
+        let deadline = std::time::Duration::from_millis(
+            resolved
+                .parsed()
+                .request
+                .freshness_deadline_ms
+                .unwrap_or(30_000)
+                .min(300_000),
+        );
+        tokio::time::timeout(deadline, async {
+            loop {
+                self.await_freshness(resolved.parsed()).await?;
+                match self.admit_execution_request(resolved.clone()) {
+                    Err(SemanticQueryError::Phase {
+                        code: "FRESHNESS_SELECTION_CHANGED",
+                        ..
+                    }) => {
+                        // Admission and an event can race after the census. Retry the same
+                        // resolved request against the successor within the original budget.
+                        tokio::task::yield_now().await;
+                    }
+                    result => return result,
+                }
+            }
+        })
+        .await
+        .map_err(|_| SemanticQueryError::Phase {
+            code: "FRESHNESS_DEADLINE",
+            phase: "freshness",
+            pointer: "freshness.policy".to_owned(),
+            message: "source did not settle before snapshot admission".to_owned(),
+        })?
     }
 
     async fn execute(

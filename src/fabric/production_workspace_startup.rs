@@ -115,10 +115,12 @@ mod pyrefly;
 mod rust_syntax;
 mod rustc;
 mod source_context;
+mod updates;
 
 /// Joined owner retained by the daemon after one workspace reaches queryable authority.
 pub(crate) struct ProductionWorkspaceStartup {
-    command_runtime: FabricCommandRuntime,
+    command_runtime: Arc<FabricCommandRuntime>,
+    admission: Arc<super::admission::FabricAdmissionRuntime>,
     selected_epoch: EpochId,
     fresh_activation: bool,
     resources: ProductionWorkspaceResources,
@@ -153,7 +155,16 @@ impl ProductionWorkspaceStartup {
             .cancel_and_join(Duration::from_secs(2))
             .await
             .map_err(|error| step("workspace-operation-join", error))?;
-        self.command_runtime
+        self.admission
+            .close_for_shutdown()
+            .map_err(|error| step("workspace-admission-shutdown", error))?;
+        Arc::try_unwrap(self.command_runtime)
+            .map_err(|_| {
+                step(
+                    "command-runtime-shutdown",
+                    "joined source operations retained the writer runtime",
+                )
+            })?
             .shutdown()
             .await
             .map_err(|error| step("command-runtime-shutdown", error))
@@ -175,9 +186,15 @@ fn step(step: &'static str, error: impl std::fmt::Display) -> ProductionWorkspac
 }
 
 async fn shutdown_after_startup_error(
-    runtime: FabricCommandRuntime,
+    runtime: Arc<FabricCommandRuntime>,
     primary: ProductionWorkspaceStartupError,
 ) -> ProductionWorkspaceStartupError {
+    let Ok(runtime) = Arc::try_unwrap(runtime) else {
+        return step(
+            "post-startup-command-runtime-cleanup",
+            "writer runtime is still retained",
+        );
+    };
     match runtime.shutdown().await {
         Ok(()) => primary,
         Err(shutdown) => step(
@@ -1235,6 +1252,13 @@ async fn compose_production_workspace(
             "slot or writer lease was substituted",
         ));
     }
+    let (observation, updates) = super::workspace_updates::WorkspaceObservation::new();
+    let observation = Arc::new(observation);
+    let source_root = PathBuf::from(OsString::from_vec(record.root_path_bytes.clone()));
+    let watch = observation
+        .start_watch(source_root, workspace_resources.budget(), &task_scope)
+        .await
+        .map_err(|error| step("source-watch-install", error))?;
     // Physical directory ownership is established before any Delta engine or
     // mutation lease exists. This join retains the original store through a
     // dropped observer and preserves partial-failure charges for retry.
@@ -1295,6 +1319,7 @@ async fn compose_production_workspace(
                 .map_err(|error| step("source-disclosure-reader", error))?,
                 record.workspace_id,
             )),
+            Arc::clone(&observation),
         ));
 
     let fresh = match &selection {
@@ -1410,7 +1435,7 @@ async fn compose_production_workspace(
     let effects = ExactProgrammaticCommandEffectClosure::new(
         ProgrammaticActivationCommandEffects::new(
             Arc::clone(&state_store) as Arc<_>,
-            validation,
+            Arc::clone(&validation),
             Arc::clone(&active_builder),
         ),
         non_activation,
@@ -1460,14 +1485,16 @@ async fn compose_production_workspace(
         actor_id,
         FabricCommandActorConfig::default(),
     );
-    let command_runtime = FabricCommandRuntime::start_with_held_authority(
-        runtime_config,
-        Arc::clone(&generations),
-        writer_lease,
-        semantics,
-        effects,
-    )
-    .map_err(|error| step("command-runtime-start", error))?;
+    let command_runtime = Arc::new(
+        FabricCommandRuntime::start_with_held_authority(
+            runtime_config,
+            Arc::clone(&generations),
+            writer_lease,
+            semantics,
+            effects,
+        )
+        .map_err(|error| step("command-runtime-start", error))?,
+    );
     let post_startup = async {
         let diagnostics = RelationalInterruptedCommitDiagnostics::new(
             workspace_id,
@@ -1492,143 +1519,19 @@ async fn compose_production_workspace(
         }
 
         let selected = if let Some(fresh) = fresh {
-            let operation_id = OperationId::from_bytes(digest16(
-                b"codefabric.fresh-activation.operation.v1\0",
-                &[
-                    fresh.candidate.identity().as_bytes(),
-                    fresh.source_images.as_bytes(),
-                ],
-            ));
-            let command = FabricCommand {
-                identity: CommandIdentity {
-                    operation_id,
-                    idempotency_key: IdempotencyKey::from_bytes(digest32(
-                        b"codefabric.fresh-activation.idempotency.v1\0",
-                        &[operation_id.as_bytes()],
-                    )),
-                },
-                ownership: CommandOwnership {
-                    workspace_id,
-                    principal_id,
-                    authorization,
-                },
-                expected_head: ExpectedHead::Empty,
-                writer_fence: command_runtime.fence(),
-                pins: CommandPins {
-                    input_release: fresh.pins.input_release,
-                    program_release: fresh.pins.program_release,
-                    application_release: fresh.pins.application_release,
-                    source_authority: fresh.pins.source_authority,
-                    source_generation: fresh.pins.source_generation,
-                    provider_release: fresh.pins.provider_release,
-                    provider_set: fresh.pins.provider_set,
-                },
-                resources: fresh.pins.resource_envelope,
-                payload: FabricCommandPayload::ActivateEpoch {
-                    candidate_epoch: fresh.pins.epoch,
-                    proof_receipt: fresh.proof_receipt,
-                },
-            };
-            let activation_control = activation
-                .current_control()
-                .map_err(|error| step("activation-control-state", error))?;
-            let material = ActivationCommandRequestMaterial::new(
-                ActivationCommandRequestKey::new(command),
-                Arc::clone(&fresh.candidate),
-                fresh.pins,
-                ActivationEventId::from_bytes(digest32(
-                    b"codefabric.fresh-activation.event.v1\0",
-                    &[
-                        operation_id.as_bytes(),
-                        fresh.candidate.table_version_set_ref().as_bytes(),
-                    ],
-                )),
-                CompatibilityClassRef::from_bytes(digest32(
-                    b"codefabric.compatibility-class.v1\0",
-                    &[release.suite().as_str().as_bytes()],
-                )),
-                RetentionPolicyRef::from_bytes(digest32(
-                    b"codefabric.retention-policy.v1\0",
-                    &[workspace_id.as_bytes()],
-                )),
-                OperationSelectionRef::from_bytes(digest32(
-                    b"codefabric.activation-operation-selection.v1\0",
-                    &[operation_id.as_bytes()],
-                )),
-                TransactionRef::from_bytes(digest32(
-                    b"codefabric.activation-transaction.v1\0",
-                    &[
-                        operation_id.as_bytes(),
-                        command_runtime.fence().lease_id.as_bytes(),
-                    ],
-                )),
-                ActivationControlRelationPin::new(
-                    activation_control.control_relation().table().clone(),
-                    activation_control.control_relation().binding().clone(),
-                ),
-            );
-            state_store
-                .persist_request(&material)
-                .await
-                .map_err(|error| step("activation-request-persist", error))?;
-            let completed = command_runtime
-                .handle()
-                .submit(command)
-                .await
-                .map_err(|error| step("fresh-activation-command", error))?;
-            let completed = if matches!(
-                completed.state(),
-                DurableCommandState::AwaitingReconciliation { .. }
-            ) {
-                let reconciliation = command_runtime
-                    .recover_and_open_bounded(
-                        CommandRecoveryPageSize::new(128).expect("128 is a valid recovery page"),
-                        NonZeroUsize::new(8).expect("eight recovery sweeps is nonzero"),
-                        &diagnostics as &dyn InterruptedCommitDiagnosticPort,
-                    )
-                    .await
-                    .map_err(|error| {
-                        step(
-                            "fresh-activation-reconciliation",
-                            format!("{error}; preceding command state: {:?}", completed.state(),),
-                        )
-                    })?;
-                match reconciliation.state() {
-                    super::command_runtime::FabricCommandStartupRecoveryState::Ready => {
-                        command_runtime
-                            .handle()
-                            .submit(command)
-                            .await
-                            .map_err(|error| step("fresh-activation-terminal-readback", error))?
-                    }
-                    super::command_runtime::FabricCommandStartupRecoveryState::Pending {
-                        operation_id,
-                        obligation,
-                    } => {
-                        return Err(step(
-                            "fresh-activation-reconciliation",
-                            format!(
-                                "exact durable evidence remained ambiguous for operation \
-                                 {operation_id:?}: {obligation:?}"
-                            ),
-                        ));
-                    }
-                }
-            } else {
-                completed
-            };
-            match completed.state() {
-                DurableCommandState::Succeeded {
-                    result: CommandResult::EpochActivated { epoch, .. },
-                    ..
-                } if epoch == fresh.pins.epoch => (epoch, true),
-                state => {
-                    return Err(step(
-                        "fresh-activation-command",
-                        format!("unexpected terminal state {state:?}"),
-                    ));
-                }
-            }
+            let epoch = activate_source_candidate(
+                &fresh,
+                ExpectedHead::Empty,
+                workspace_id,
+                principal_id,
+                authorization,
+                &command_runtime,
+                &activation,
+                &state_store,
+                &release,
+            )
+            .await?;
+            (epoch, true)
         } else {
             let active = slot
                 .lease()
@@ -1645,11 +1548,181 @@ async fn compose_production_workspace(
         Ok(selected) => selected,
         Err(primary) => return Err(shutdown_after_startup_error(command_runtime, primary).await),
     };
+    let update_owner = updates::SourceUpdateOwner {
+        state_root: state_root.to_owned(),
+        database: operational_database.to_owned(),
+        record: record.clone(),
+        release,
+        slot,
+        resources: workspace_resources.clone(),
+        runtime: Arc::clone(&command_runtime),
+        activation,
+        state_store,
+        validation,
+        principal: principal_id,
+        authorization,
+    };
+    if let Err(error) = Box::pin(update_owner.start(observation, updates, watch, &task_scope)).await
+    {
+        return Err(shutdown_after_startup_error(command_runtime, error).await);
+    }
     Ok(ProductionWorkspaceStartup {
         command_runtime,
+        admission,
         selected_epoch,
         fresh_activation,
         resources: workspace_resources,
         task_scope,
     })
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+async fn activate_source_candidate(
+    fresh: &FreshCandidate,
+    expected_head: ExpectedHead,
+    workspace_id: WorkspaceId,
+    principal_id: PrincipalId,
+    authorization: AuthorizationRef,
+    command_runtime: &FabricCommandRuntime,
+    activation: &DeltaActivationRuntimeAuthority,
+    state_store: &SqliteProgrammaticActivationCommandStateStore,
+    release: &CompiledSemanticRelease,
+) -> Result<EpochId, ProductionWorkspaceStartupError> {
+    let diagnostics = RelationalInterruptedCommitDiagnostics::new(
+        workspace_id,
+        Arc::new(FailClosedInterruptionDiagnostics),
+    );
+    let operation_id = OperationId::from_bytes(digest16(
+        b"codefabric.fresh-activation.operation.v1\0",
+        &[
+            fresh.candidate.identity().as_bytes(),
+            fresh.source_images.as_bytes(),
+        ],
+    ));
+    let command = FabricCommand {
+        identity: CommandIdentity {
+            operation_id,
+            idempotency_key: IdempotencyKey::from_bytes(digest32(
+                b"codefabric.fresh-activation.idempotency.v1\0",
+                &[operation_id.as_bytes()],
+            )),
+        },
+        ownership: CommandOwnership {
+            workspace_id,
+            principal_id,
+            authorization,
+        },
+        expected_head,
+        writer_fence: command_runtime.fence(),
+        pins: CommandPins {
+            input_release: fresh.pins.input_release,
+            program_release: fresh.pins.program_release,
+            application_release: fresh.pins.application_release,
+            source_authority: fresh.pins.source_authority,
+            source_generation: fresh.pins.source_generation,
+            provider_release: fresh.pins.provider_release,
+            provider_set: fresh.pins.provider_set,
+        },
+        resources: fresh.pins.resource_envelope,
+        payload: FabricCommandPayload::ActivateEpoch {
+            candidate_epoch: fresh.pins.epoch,
+            proof_receipt: fresh.proof_receipt,
+        },
+    };
+    let activation_control = activation
+        .current_control()
+        .map_err(|error| step("activation-control-state", error))?;
+    let material = ActivationCommandRequestMaterial::new(
+        ActivationCommandRequestKey::new(command),
+        Arc::clone(&fresh.candidate),
+        fresh.pins,
+        ActivationEventId::from_bytes(digest32(
+            b"codefabric.fresh-activation.event.v1\0",
+            &[
+                operation_id.as_bytes(),
+                fresh.candidate.table_version_set_ref().as_bytes(),
+            ],
+        )),
+        CompatibilityClassRef::from_bytes(digest32(
+            b"codefabric.compatibility-class.v1\0",
+            &[release.suite().as_str().as_bytes()],
+        )),
+        RetentionPolicyRef::from_bytes(digest32(
+            b"codefabric.retention-policy.v1\0",
+            &[workspace_id.as_bytes()],
+        )),
+        OperationSelectionRef::from_bytes(digest32(
+            b"codefabric.activation-operation-selection.v1\0",
+            &[operation_id.as_bytes()],
+        )),
+        TransactionRef::from_bytes(digest32(
+            b"codefabric.activation-transaction.v1\0",
+            &[
+                operation_id.as_bytes(),
+                command_runtime.fence().lease_id.as_bytes(),
+            ],
+        )),
+        ActivationControlRelationPin::new(
+            activation_control.control_relation().table().clone(),
+            activation_control.control_relation().binding().clone(),
+        ),
+    );
+    state_store
+        .persist_request(&material)
+        .await
+        .map_err(|error| step("activation-request-persist", error))?;
+    let completed = command_runtime
+        .handle()
+        .submit(command)
+        .await
+        .map_err(|error| step("fresh-activation-command", error))?;
+    let completed = if matches!(
+        completed.state(),
+        DurableCommandState::AwaitingReconciliation { .. }
+    ) {
+        let reconciliation = command_runtime
+            .recover_and_open_bounded(
+                CommandRecoveryPageSize::new(128).expect("128 is a valid recovery page"),
+                NonZeroUsize::new(8).expect("eight recovery sweeps is nonzero"),
+                &diagnostics as &dyn InterruptedCommitDiagnosticPort,
+            )
+            .await
+            .map_err(|error| {
+                step(
+                    "fresh-activation-reconciliation",
+                    format!("{error}; preceding command state: {:?}", completed.state()),
+                )
+            })?;
+        match reconciliation.state() {
+            super::command_runtime::FabricCommandStartupRecoveryState::Ready => command_runtime
+                .handle()
+                .submit(command)
+                .await
+                .map_err(|error| step("fresh-activation-terminal-readback", error))?,
+            super::command_runtime::FabricCommandStartupRecoveryState::Pending {
+                operation_id,
+                obligation,
+            } => {
+                return Err(step(
+                    "fresh-activation-reconciliation",
+                    format!(
+                        "exact durable evidence remained ambiguous for operation \
+                         {operation_id:?}: {obligation:?}"
+                    ),
+                ));
+            }
+        }
+    } else {
+        completed
+    };
+    match completed.state() {
+        DurableCommandState::Succeeded {
+            result: CommandResult::EpochActivated { epoch, .. },
+            ..
+        } if epoch == fresh.pins.epoch => Ok(epoch),
+        state => Err(step(
+            "fresh-activation-command",
+            format!("unexpected terminal state {state:?}"),
+        )),
+    }
 }

@@ -2202,6 +2202,133 @@ fn assert_canonical_python_calls(fixture: &ProductionFixture) {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn pragmatic_live_python_edits_converge_without_restart() {
+    use arrow::array::StringArray;
+    let fixture = ProductionFixture::new();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let query = |phase: &str, policy: &str, expected: &[&str]| -> u64 {
+        eprintln!("live update phase: {phase}");
+        let mut request = semantic_request(
+            &fixture.workspace.public_id(),
+            &format!("request:live-{phase}"),
+            "Python function declarations",
+        );
+        request["freshness"] = json!({"policy": policy, "deadline_ms": 60_000});
+        let scenario = modern_client_scenario(
+            &fixture,
+            &stack,
+            "policy-one",
+            json!([]),
+            json!([
+                {"id": "query", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": request, "delivery": "resource"}},
+                {"id": "page", "operation": "read_resource", "uri": {"$ref": "query.structured_content.pages.0.uri"}},
+                {"id": "status", "operation": "call_tool", "name": "get_code_graph_status"}
+            ]),
+        );
+        let path = write_modern_client_scenario(&fixture, phase, &scenario);
+        let report = modern_client_report(&run_modern_client(&stack, &path));
+        let result = modern_structured(modern_step(&report, "query"));
+        assert_eq!(result["execution_state"], "SUCCEEDED", "{phase}: {result}");
+        assert_eq!(result["freshness"], "CURRENT", "{phase}: {result}");
+        assert!(result["analysis_context_set_id"].as_str().is_some());
+        assert_eq!(
+            result["processing"][0]["remaining_partitions"], 0,
+            "{phase}: {result}"
+        );
+        let bytes = STANDARD
+            .decode(modern_step(&report, "page")[0]["blob"].as_str().unwrap())
+            .unwrap();
+        let mut names = BTreeSet::new();
+        for batch in
+            arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None).unwrap()
+        {
+            let batch = batch.unwrap();
+            let column = batch
+                .column_by_name("name")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            names.extend(column.iter().flatten().map(ToOwned::to_owned));
+        }
+        assert_eq!(
+            names,
+            expected.iter().map(|name| (*name).to_owned()).collect(),
+            "{phase}"
+        );
+        let status = modern_structured(modern_step(&report, "status"));
+        let observation = &status["source_observations"][0];
+        assert_eq!(observation["workspace_id"], fixture.workspace.public_id());
+        assert_eq!(
+            observation["selected_source_generation"],
+            result["source_generation"]
+        );
+        assert_eq!(observation["watch_healthy"], true);
+        result["source_generation"].as_u64().unwrap()
+    };
+    let initial = query("initial", "require_current_for_targets", &["answer"]);
+    let workspace = Path::new(&fixture.workspace.root_path_display);
+    fs::write(
+        workspace.join("sample.py"),
+        b"def replacement():\n    return 2\n",
+    )
+    .unwrap();
+    let replaced = query("replaced", "await_latest", &["replacement"]);
+    assert!(replaced > initial);
+    fs::write(
+        workspace.join("extra.py"),
+        b"def additional():\n    return 3\n",
+    )
+    .unwrap();
+    let added = query(
+        "added",
+        "require_source_current",
+        &["additional", "replacement"],
+    );
+    assert!(added > replaced);
+    fs::remove_file(workspace.join("sample.py")).unwrap();
+    let removed = query("removed", "require_semantic_current", &["additional"]);
+    assert!(removed > added);
+    fs::write(
+        workspace.join("replacement.tmp"),
+        b"def atomic_save():\n    return 4\n",
+    )
+    .unwrap();
+    fs::rename(
+        workspace.join("replacement.tmp"),
+        workspace.join("extra.py"),
+    )
+    .unwrap();
+    let atomic = query("atomic", "require_current_for_targets", &["atomic_save"]);
+    assert!(atomic > removed);
+    fs::remove_file(workspace.join("extra.py")).unwrap();
+    let empty = query("empty", "require_current_for_targets", &[]);
+    assert!(empty > atomic);
+    fs::write(
+        workspace.join("renamed.py"),
+        b"def atomic_save():\n    return 4\n",
+    )
+    .unwrap();
+    let recreated = query("recreated", "require_semantic_current", &["atomic_save"]);
+    assert!(recreated > empty);
+    assert_eq!(
+        query("unchanged", "await_latest", &["atomic_save"]),
+        recreated,
+        "unchanged census must not republish"
+    );
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        query("reopen", "require_source_current", &["atomic_save"]),
+        recreated
+    );
+    supervisor.stop();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn pragmatic_public_source_context_is_exact_and_separately_authorized() {
     use arrow::array::{Array, BinaryArray, BooleanArray, StringArray, StructArray, UInt64Array};
     let fixture = ProductionFixture::with_source(
@@ -2412,15 +2539,101 @@ fn pragmatic_public_source_context_is_exact_and_separately_authorized() {
         "PERMISSION_DENIED:NOT_AUTHORIZED"
     );
     policy(true);
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    run("source-reopen", true);
+
+    // An unread page remains bound to the old exact source after a successor converges.
+    let mut pinned_request = request.clone();
+    pinned_request["semantic_request_id"] = json!("request:source-pinned-edit");
+    let scenario = modern_client_scenario(
+        &fixture,
+        &stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "source", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": pinned_request, "delivery": "resource"}},
+            {"id": "edit", "operation": "barrier", "name": "source-edit"},
+            {"id": "page", "operation": "read_resource", "uri": {"$ref": "source.structured_content.pages.0.uri"}}
+        ]),
+    );
+    let path = write_modern_client_scenario(&fixture, "source-pinned-edit", &scenario);
+    let mut client = spawn_modern_client(&stack, &path);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !path.parent().unwrap().join("source-edit.ready").exists() {
+        assert!(
+            client.try_wait().unwrap().is_none(),
+            "source client exited before edit barrier"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "source client did not reach edit barrier"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
     fs::write(
         fixture._root.path().join("workspace/sample.py"),
         b"def changed():\n    pass\n",
     )
     .unwrap();
-    run("source-disk-changed", true);
-    supervisor.stop();
-    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
-    run("source-reopen", true);
+    let mut current = semantic_request(
+        &fixture.workspace.public_id(),
+        "request:source-after-edit",
+        "Python function declarations",
+    );
+    current["freshness"] = json!({"policy": "await_latest", "deadline_ms": 60_000});
+    let current_scenario = modern_client_scenario(
+        &fixture,
+        &stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "query", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": current, "delivery": "resource"}}
+        ]),
+    );
+    let current_path =
+        write_modern_client_scenario(&fixture, "source-after-edit", &current_scenario);
+    let current_report = modern_client_report(&run_modern_client(&stack, &current_path));
+    let current_result = modern_structured(modern_step(&current_report, "query"));
+    assert_eq!(
+        current_result["execution_state"], "SUCCEEDED",
+        "{current_result}"
+    );
+    fs::write(
+        path.parent().unwrap().join("source-edit.resume"),
+        b"resume\n",
+    )
+    .unwrap();
+    let report = modern_client_report(&client.wait_with_output().unwrap());
+    let selected = modern_structured(modern_step(&report, "source"));
+    assert!(
+        selected["source_generation"].as_u64().unwrap()
+            < current_result["source_generation"].as_u64().unwrap()
+    );
+    let bytes = STANDARD
+        .decode(modern_step(&report, "page")[0]["blob"].as_str().unwrap())
+        .unwrap();
+    let batches = arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None)
+        .unwrap()
+        .map(Result::unwrap)
+        .collect::<Vec<_>>();
+    let batch = batches.iter().find(|batch| batch.num_rows() > 0).unwrap();
+    let context = batch
+        .column_by_name("source_context")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    assert_eq!(
+        context
+            .column_by_name("text")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .value(0),
+        "café"
+    );
     policy(false);
     run("source-revoked", false);
     supervisor.stop();

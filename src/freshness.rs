@@ -65,7 +65,27 @@ impl FreshnessBarrier {
 
     /// Advance the reconciliation watermark monotonically.
     pub fn reconcile(&self, watermark: u64) {
-        self.reconciled.fetch_max(watermark, Ordering::AcqRel);
+        self.reconciled
+            .fetch_max(watermark.min(self.requested()), Ordering::AcqRel);
+        self.notify.notify_waiters();
+    }
+
+    /// Latest observation requiring an authoritative source census.
+    #[must_use]
+    pub fn requested(&self) -> u64 {
+        self.admitted.load(Ordering::Acquire)
+    }
+
+    /// Last completed authoritative observation, bounded by admitted observations.
+    #[must_use]
+    pub fn reconciled(&self) -> u64 {
+        self.reconciled.load(Ordering::Acquire)
+    }
+
+    /// A successful retry restores availability only after its observation is reconciled.
+    pub fn restore(&self, watermark: u64) {
+        self.reconcile(watermark);
+        self.unavailable.store(false, Ordering::Release);
         self.notify.notify_waiters();
     }
 
@@ -100,21 +120,29 @@ impl FreshnessBarrier {
         let target = self.admitted.load(Ordering::Acquire);
         match policy {
             FreshnessAdmission::BestAvailable => return Ok(self.state()),
-            FreshnessAdmission::RequireCurrent if self.state() != FreshnessState::Current => {
-                return Err(FreshnessError::Stale);
+            FreshnessAdmission::RequireCurrent => {
+                return match self.state() {
+                    FreshnessState::Current => Ok(FreshnessState::Current),
+                    FreshnessState::Unavailable => Err(FreshnessError::Unavailable),
+                    FreshnessState::PotentiallyStale => Err(FreshnessError::Stale),
+                };
             }
-            FreshnessAdmission::RequireCurrent => return Ok(FreshnessState::Current),
             FreshnessAdmission::AwaitLatest => {}
         }
         tokio::time::timeout(timeout, async {
             loop {
+                // Register before reading the watermarks: completion between the state read
+                // and awaiting a newly created notification must not lose its wakeup.
+                let changed = self.notify.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
                 if self.unavailable.load(Ordering::Acquire) {
                     return Err(FreshnessError::Unavailable);
                 }
                 if self.reconciled.load(Ordering::Acquire) >= target {
                     return Ok(FreshnessState::Current);
                 }
-                self.notify.notified().await;
+                changed.await;
             }
         })
         .await

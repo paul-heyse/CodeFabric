@@ -61,5 +61,28 @@ pub(super) fn install(
                 )),
             ),
         ],
+    )?;
+    let inventory = capture.inventory().inventory();
+    input_observations::register(
+        builder,
+        FabricSchemaRole::Source,
+        "input_inventory_state",
+        vec![
+            (
+                "workspace_id",
+                false,
+                id16_array([Some(&inventory.workspace_id)]),
+            ),
+            (
+                "source_generation",
+                false,
+                Arc::new(UInt64Array::from(vec![inventory.source_generation])),
+            ),
+            (
+                "inventory_digest",
+                false,
+                hash32_array([Some(&inventory.digest)]),
+            ),
+        ],
     )
 }

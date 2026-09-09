@@ -78,6 +78,8 @@ class SafeErrorProjection(StrictWireModel):
         "CAPACITY_UNAVAILABLE",
         "CANCELLED",
         "RESUME_WINDOW_EXPIRED",
+        "FRESHNESS_DEADLINE",
+        "FRESHNESS_UNAVAILABLE",
         "DAEMON_UNAVAILABLE",
         "INTERNAL",
     ]
@@ -226,6 +228,12 @@ class QueryProcessingSummary(StrictWireModel):
         return self
 
 
+class SnapshotFreshness(StrEnum):
+    CURRENT = "CURRENT"
+    POTENTIALLY_STALE = "POTENTIALLY_STALE"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
 class QueryToolOutput(StrictWireModel):
     """One strict object with branch invariants for both terminal start outcomes."""
 
@@ -235,6 +243,8 @@ class QueryToolOutput(StrictWireModel):
     execution_state: Literal["SUCCEEDED", "FAILED", "CANCELLED", "LOST"] | None = None
     epoch_id: str | None = None
     source_generation: PositiveInt | None = None
+    freshness: SnapshotFreshness | None = None
+    analysis_context_set_id: str | None = None
     processing: tuple[QueryProcessingSummary, ...] = ()
     package_id: str | None = None
     manifest: ResourceReference | None = None
@@ -297,6 +307,25 @@ class ValidateQueryOutput(StrictWireModel):
     estimated_result_pages: NonNegativeInt
 
 
+class WorkspaceSourceObservation(StrictWireModel):
+    workspace_id: NonEmptyString
+    selected_source_generation: PositiveInt
+    requested_watermark: NonNegativeInt
+    reconciled_watermark: NonNegativeInt
+    freshness: SnapshotFreshness
+    watch_healthy: bool
+    rescan_required: bool
+    runnable_pending: bool
+
+    @model_validator(mode="after")
+    def coherent_watermarks(self) -> WorkspaceSourceObservation:
+        if self.reconciled_watermark > self.requested_watermark:
+            raise ValueError("source reconciliation exceeds requested observation")
+        if self.runnable_pending != (self.reconciled_watermark < self.requested_watermark):
+            raise ValueError("source pending work disagrees with observation watermarks")
+        return self
+
+
 class StatusToolOutput(StrictWireModel):
     authority: AuthorityProjection
     lifecycle: Literal["BOOTSTRAPPING", "READY", "DRAINING", "FAILED_CLOSED"]
@@ -306,6 +335,7 @@ class StatusToolOutput(StrictWireModel):
     queued_queries: NonNegativeInt
     failure: SafeErrorProjection | None = None
     public_status: PublicStatusProjection
+    source_observations: tuple[WorkspaceSourceObservation, ...] = ()
 
 
 class ReferenceToolOutput(StrictWireModel):

@@ -278,6 +278,14 @@ pub trait SemanticQueryBackend: Send + Sync + 'static {
         None
     }
 
+    /// Await workspace-owned source reconciliation before resolving semantic meanings.
+    async fn await_freshness(
+        &self,
+        _request: &ParsedSemanticRequest,
+    ) -> Result<(), SemanticQueryError> {
+        Ok(())
+    }
+
     /// Validate semantic executability against the installed epoch without starting work.
     fn validate_execution_request(
         &self,
@@ -299,6 +307,14 @@ pub trait SemanticQueryBackend: Send + Sync + 'static {
         &self,
         resolved: ResolvedSemanticExecutionRequest,
     ) -> Result<PreparedSemanticExecution<Self::ExecutionAuthority>, SemanticQueryError>;
+
+    /// Select an execution snapshot with any required current-source barrier.
+    async fn admit_fresh_execution_request(
+        &self,
+        resolved: ResolvedSemanticExecutionRequest,
+    ) -> Result<PreparedSemanticExecution<Self::ExecutionAuthority>, SemanticQueryError> {
+        self.admit_execution_request(resolved)
+    }
 
     /// Execute one accepted operation against the exact leased active workspace.
     async fn execute(

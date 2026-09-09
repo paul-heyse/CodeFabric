@@ -207,6 +207,7 @@ pub(crate) struct ProductionActiveWorkspaceBuilder {
     activation_authority: Arc<DeltaActivationRuntimeAuthority>,
     resources: ProductionWorkspaceResources,
     source_disclosure: Arc<super::source_disclosure::SourceDisclosureAuthority>,
+    source_observation: Arc<super::workspace_updates::WorkspaceObservation>,
 }
 
 impl ProductionActiveWorkspaceBuilder {
@@ -224,6 +225,7 @@ impl ProductionActiveWorkspaceBuilder {
         activation_authority: Arc<DeltaActivationRuntimeAuthority>,
         resources: ProductionWorkspaceResources,
         source_disclosure: Arc<super::source_disclosure::SourceDisclosureAuthority>,
+        source_observation: Arc<super::workspace_updates::WorkspaceObservation>,
     ) -> Self {
         Self {
             release,
@@ -234,6 +236,7 @@ impl ProductionActiveWorkspaceBuilder {
             activation_authority,
             resources,
             source_disclosure,
+            source_observation,
         }
     }
 
@@ -348,6 +351,13 @@ impl ProductionActiveWorkspaceBuilder {
             tracing::warn!(%error, "cannot reconstruct selected processing scope");
             Self::invalid("processing-scope")
         })?;
+        let inventory_digest = super::workspace_updates::selected_inventory_digest(
+            &epoch,
+            *selection.workspace_id().as_bytes(),
+            pins.source_generation.get(),
+        )
+        .await
+        .map_err(|_| Self::invalid("source-inventory-state"))?;
         let query_authority = Arc::new(
             WorkspaceEpochQueryAuthority::try_new(
                 selection.workspace_id(),
@@ -364,6 +374,7 @@ impl ProductionActiveWorkspaceBuilder {
             )
             .map_err(|_| Self::invalid("query-authority"))?
             .with_source_disclosure(Arc::clone(&self.source_disclosure))
+            .with_source_observation(Arc::clone(&self.source_observation), inventory_digest)
             .with_entity_processing(entity_processing)
             .map_err(|_| Self::invalid("processing-scope-binding"))?,
         );

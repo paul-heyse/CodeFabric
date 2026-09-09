@@ -142,6 +142,7 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
         self.handshake_calls = 0
         self.watch_calls = 0
         self.watch_cursors: list[bytes | None] = []
+        self.snapshot_freshness: int | None = query_pb.SNAPSHOT_FRESHNESS_CURRENT
         self.disconnect_after: Literal["snapshot_pinned", "result_ready"] | None = None
         self.change_replayed_result = False
         self.replacement_daemon_generation = 7
@@ -422,6 +423,8 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
                     source_generation=2,
                     activation_head=3,
                     lifecycle_watermark=4,
+                    freshness=cast(query_pb.SnapshotFreshness, self.snapshot_freshness),
+                    analysis_context_set_id="context-set:one",
                 )
             )
         ]
@@ -967,3 +970,36 @@ def test_daemon_port_source_has_no_displaced_authority_or_duplicate_fields() -> 
     ):
         assert forbidden not in source
     assert set(QueryToolInput.model_fields) == {"request", "delivery"}
+
+
+@pytest.mark.parametrize(
+    ("freshness", "expected"),
+    [(None, None), (10, "CURRENT"), (20, "POTENTIALLY_STALE"), (30, "UNAVAILABLE")],
+)
+def test_snapshot_freshness_presence_and_state_survive_public_watch(
+    tmp_path: Path, freshness: int | None, expected: str | None
+) -> None:
+    daemon = V2DaemonPortStub()
+    daemon.snapshot_freshness = freshness
+
+    async def exercise() -> None:
+        async with _client(tmp_path, daemon) as client:
+            accepted = await _accepted_query(client)
+            result = await client.watch_query(accepted, correlation_id="mcp-request:one")
+            assert result.freshness == expected
+            assert result.analysis_context_set_id == "context-set:one"
+
+    asyncio.run(exercise())
+
+
+def test_explicit_unspecified_snapshot_freshness_is_rejected(tmp_path: Path) -> None:
+    daemon = V2DaemonPortStub()
+    daemon.snapshot_freshness = query_pb.SNAPSHOT_FRESHNESS_UNSPECIFIED
+
+    async def exercise() -> None:
+        async with _client(tmp_path, daemon) as client:
+            accepted = await _accepted_query(client)
+            with pytest.raises(DaemonProtocolError, match="freshness"):
+                await client.watch_query(accepted, correlation_id="mcp-request:one")
+
+    asyncio.run(exercise())

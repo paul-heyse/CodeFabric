@@ -290,7 +290,14 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 
 ### 5B. Snapshot freshness and wire projection
 
-**Current status — partial wire delivery, freshness still open.** Typed Protobuf/Pydantic processing, retained manifest/reopen and presence-safe observed row truncation are implemented (`b865c6b2`, `11a61909`); diagnostic projection and empty IPC handling are corrected. The inspected backend still supplies `FreshnessState::Current`; the actual five selection/barrier policies, current-versus-historical/newer observations, public remainder paging and convergence adapter are not implemented. A pinned epoch alone does not satisfy current-required semantics against new disk changes.
+**Current status — partial, with a live whole-workspace barrier.** Typed Protobuf/Pydantic processing,
+retained manifest/reopen and presence-safe truncation are implemented. Strict policies now request a
+secure source census and await an exact successor; racing selection retries within a deadline.
+Best-available snapshots retain actual freshness. Snapshot freshness/context and separate live workspace
+watermarks/watch health/rescan/runnable state cross the typed wire. Retained old source pages pass
+across live publication. Target/family-specific barriers, historical selectors, public remainder paging
+and all-family terminal convergence remain open; full provider-pass completion is the current
+conservative implementation for every strict policy.
 
 **Surfaces:** `src/query_service.rs`, snapshot selection, `src/semantic_query_contract.rs`, released Protobuf files under `contracts/`, generated Rust/Python clients, adapter DTOs/status tools.
 
@@ -307,7 +314,11 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 
 ### 6A. Watcher, repository observations and authoritative reconciliation
 
-**Current status — open.** Secure capture and source/repository observation components exist, but there is no demonstrated daemon-owned continuous watch/reconciliation path. Every watcher, queue-loss/rescan, gix inclusion and polling/lifecycle requirement below remains delivery work.
+**Current status — partial.** The daemon installs a native notify watcher before census, owns its
+blocking lifetime, coalesces callbacks through a bounded queue, retains a rescan watermark and runs
+periodic secure reconciliation. Public status exposes watch health and source observations. Installed
+Python replacement/addition/deletion/atomic save and exact reopen pass. Selected external roots,
+Git inclusion, excluded native watch topology, explicit polling and root/config recovery remain open.
 
 **Surfaces:** `src/source_image/`, source/context preparation, supervisor/daemon ownership, `src/fabric/source_wave_command_effect.rs`; add a focused watcher/coordinator module within the existing stable package as needed.
 
@@ -323,7 +334,11 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 
 ### 6B. Conservative invalidation and owner replacement
 
-**Current status — open.** Startup source/context identity and provider substitution rejection are useful foundations. They do not implement live invalidation, negative dependencies, deleted-owner replacement, coalescing or obsolete-generation rejection across successive publications. All update acceptance below remains.
+**Current status — partial.** Monotonic source generations, whole-context replacement and immediate
+stale observation are wired into live updates. Providers and activation reuse exact source/context
+pins; new events cancel or invalidate older candidate work. Python edit/delete/atomic-save scenarios
+pass. Full mixed-language/configuration/negative-dependency and delayed-completion acceptance, and
+independent clean comparison, remain open.
 
 **Surfaces:** source/context relations, provider/analysis scheduling, owner-replacement normalization and activation inputs.
 
@@ -338,7 +353,11 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 
 ### 6C. Two-speed publication and retained provider state
 
-**Current status — open.** Reuse the now-working mixed-language startup composition, exact publication/reopen and immutable dependency blobs. Syntax/semantic split publication, persistent checker/parser state, retained Cargo build output, update scheduling and unchanged relation reuse are not delivered. Startup currently runs through semantic completion before activation.
+**Current status — partial orchestration reuse.** Startup capture/providers/normalization/publication
+now serve serialized updates, and old source pages remain readable during successor publication.
+Epoch retirement is separate from workspace admission shutdown. Publication still waits for semantic
+completion and rebuilds all selected relations. Syntax-first publication, retained checker/parser/Cargo
+state, unchanged-version reuse and update scheduling remain open.
 
 **Surfaces:** source-wave commands, candidate/activation builders, `src/fabric/production_workspace_startup.rs` reused as shared preparation/composition helpers, provider services and runtime scheduler.
 
@@ -354,7 +373,10 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 
 ### 6D. Real incremental-versus-clean corpus
 
-**Current status — open.** Prepared expectations/edit/comparison helpers and static daemon cases exist. Runtime adapters for a persistent incremental daemon, an independent clean state root and observable quiet convergence remain unimplemented. Static fresh/restart checks do not close this slice or the first useful release.
+**Current status — partial live acceptance.** An installed-client persistent Python daemon case uses
+actual strict freshness waits for edits, additions, deletion, atomic save and reopen; the retained source
+page case spans a live successor. Independent clean-state runtime comparison, mixed-language edits,
+full identity/coverage comparisons and deterministic delayed-completion scenarios remain open.
 
 **Surfaces:** `tooling/product/corpus.py`, `edits.json`, daemon integration fixture, modern driver and golden case selection.
 
@@ -497,7 +519,7 @@ Complete resource acquisition/transfer/drop/escape, unwind paths, closure captur
 
 ### 7G. Remaining forms, complete composition and query semantics
 
-**Current status — open.** Eight-form parsing/typed ingress exists; three limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, Compare, Summarize and full first-four behavior remain. Real prior-result resolution and repeated-form/multi-block DAG execution also remain; fixed per-form output relations must not collide or silently reuse another block's output.
+**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, Compare, Summarize and full first-four behavior remain. Real prior-result resolution and repeated-form/multi-block DAG execution also remain; fixed per-form output relations must not collide or silently reuse another block's output.
 
 **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, query contracts and graph integration. Complete the first four forms from 4E and extend them to every relevant family in the coverage map as those families land.
 
@@ -602,7 +624,7 @@ The current implementation still has two different blockers. Treat them differen
 
 ### 8D. Failure, cancellation and deployment recovery
 
-**Current status — partial Linux baseline.** Actual containment, joined provider/native cleanup, exact restart and scoped cancellation/lost-ack tests pass in earlier slices. Extend that behavior to the unimplemented update loop, retained providers, new queries, expiry/pressure and real maintenance. No equivalent unvalidated non-Linux profile is implied.
+**Current status — partial Linux baseline.** Actual containment, joined provider/native cleanup, exact restart and scoped cancellation/lost-ack tests pass in earlier slices. Extend that behavior across the live update loop, retained providers, new queries, expiry/pressure and real maintenance. No equivalent unvalidated non-Linux profile is implied.
 
 **Surfaces:** daemon/supervisor, provider services, runtime ownership, command reconciliation, gRPC/adapter lifespan and storage maintenance.
 
@@ -722,14 +744,22 @@ Ordinary corpus assertions and short algorithm arguments should explain why the 
 
 ## 10. Immediate implementation handoff
 
-The **limited 4E/5A one-step call-query continuation** is now exercised through the installed modern
-client, including implicit-call coverage, exact reopen and declaration regressions. Preserve this
-working path while extending canonical families, reference/import traversal and full distance/stop/filter
-semantics. FollowRelationships as a whole remains open.
+The limited declaration/call/reference/source forms and Python live update path now have installed-client
+coverage. Current policies use whole-workspace census/publication barriers; typed snapshot freshness
+and separate live source observations are exposed. Preserve these working paths while extending the
+remaining semantic meanings and composition.
 
-Then finish remaining **4A–4D** effective/external/generated inputs and canonical families for **4E**, plus **5A–5B** full query scope, public remainder pagination and actual freshness barriers. Do not redo contained Cargo startup, path-dependency/target discovery, Rust syntax, chunked Python inventories or canonical declarations/calls: extend those working implementations. Extend RetrieveSourceContext beyond exact declaration spans and complete the first four forms' actual meanings/composition. Recheck the static mixed-language acceptance against real providers/public answers.
+Continue **6A–6D** with mixed Python/Rust edits and independent clean-state comparison, configuration
+and negative-dependency/delayed-completion cases, selected external input roots, Git inclusion, polling,
+root recovery, syntax-first publication and retained provider state. Extend **5A–5B** with public
+remainder pagination and target/family-specific barriers. Add phase metrics and selective persistence
+as these consumers become real.
 
-Proceed to **6A–6D** using shared startup/update operations, watch-first reconciliation, immediate invalidation, two-speed publication, retained providers and the independent clean/incremental corpus. This is the outstanding boundary for a continuously useful first release. Add phase metrics and selective persistence as these consumers become real.
+Finish remaining **4A–4D** effective/external/generated inputs and canonical families for **4E**.
+Do not redo contained Cargo startup, path-dependency/target discovery, Rust syntax, chunked Python
+inventories or canonical declarations/calls: extend those implementations. Complete source-context
+syntax/body selection and all first-four meanings/composition, then recheck the static mixed-language
+and first-useful-release acceptance.
 
 Continue through **7A–7H** and **8A–8F** without reducing the family/form target: corrected analyses and actual inputs, full DAG/query/presentation behavior, native maintenance, coordinated finite retention, recovery and representative measurement. Optional overlays/CDF/Rayon/orjson remain conditional on a concrete consumer or bottleneck. The full completion criteria in §9.2 are unchanged and are not yet satisfied.
 

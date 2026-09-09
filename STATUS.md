@@ -1,7 +1,7 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `5964e5ff` (`Expose Python lexical reference witnesses with independent family coverage`).
+Last production commit: `46e260a9` (`Serve exact source spans with live disclosure authorization`).
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -22,8 +22,9 @@ publishes exact Delta versions. Canonical declarations, Python lexical reference
 call occurrences exist. Installed FastMCP clients have exercised function search and declaration
 fact retrieval, one-step incoming/outgoing call traversal and Python lexical-reference traversal with scoped processing and observed
 result truncation. Exact declaration source spans now pass through the same client with independent
-disclosure authorization. Python call/source queries also pass after exact reopen. A running daemon does **not yet** continuously update the graph;
-startup still waits for semantic work before publication. The first useful release remains open.
+disclosure authorization. Python call/source queries also pass after exact reopen. A running daemon now reconciles Python edits,
+additions, deletions and atomic saves, with current-source query barriers and exact successor epochs.
+Startup and updates still wait for semantic work before publication. The first useful release remains open.
 
 The call-query continuation present at session start was preserved, exercised and committed in
 `80bc6d18`; declaration kinds/public subjects followed in `1a60e748`, and lexical references in
@@ -123,6 +124,42 @@ request-authority and source-materialization tests pass. Default/featureless roo
 tests, 186 tooling tests, docs navigation and governance pass. Strict lint remains open on the
 existing backlog; final library Clippy completes with 958 warnings and no new findings. This does not close source
 syntax coverage, complete public-form semantics, composition, freshness or outcomes 4–8.
+
+## Live source reconciliation and current query selection
+
+The daemon now owns a bounded, coalesced notify queue, a native watcher with an owned blocking
+lifetime, and a serialized update operation. Watches precede the first census. Events are hints;
+secure descriptor-relative inventories and captured bytes remain authoritative. Queue overflow retains
+a reconciliation watermark, and periodic censuses recover missed events. A durable single-row
+`source.input_inventory_state` relation permits unchanged exact reopen and avoids needless publication.
+Updates reuse startup capture, contained providers, normalization and exact activation. Whole-context
+replacement removes deleted owners; event/capture fences abandon obsolete candidates.
+
+Current-required policies request an authoritative census and wait for publication. Admission retries
+an event racing snapshot selection within a deadline. Best-available queries retain the selected epoch
+and its actual freshness. Typed snapshot events expose freshness/context selection; a separate typed
+workspace status reports observation/reconciliation watermarks, watch health, rescan and runnable work.
+Unavailability and freshness deadlines have distinct safe errors. Old source pages keep their exact
+captured bytes across newer publications. Epoch retirement no longer closes the shared workspace
+admission gate; shutdown owns that transition.
+
+Validation on 2026-09-09: 49 selected query-service/coordinator, watcher/barrier and installed runtime
+checks pass. The extended live Python scenario includes complete source removal/recreation, public
+status and unchanged exact reopen (68.53 s); the old-source-page/live-edit/reopen scenario passes
+(31.45 s). The async challenge-expiry regression found by the first integrated run is corrected and
+its regression passes. Adapter lint/types and 100 tests, generated protocol compatibility, governance,
+docs navigation and diff checks pass. Default/featureless root checks and isolated `data-fabric`
+checking pass. Library Clippy completes with 957 existing warnings and no findings on changed lines;
+strict lint remains open. Changed Rust files pass formatting except pre-existing layout elsewhere in
+`activation_transaction.rs`. The final installed live regression passes after the future-ownership
+refactor (67.12 s). This is a limited live slice, not closure of outcomes 5 or 6.
+
+Remaining live work includes mixed-language and independent clean-build comparison, syntax-first
+publication, retained provider/parser/compiler state, external roots, Git inclusion, an explicit polling
+profile, root replacement recovery, configuration/negative-dependency and delayed-completion cases.
+Current policies conservatively await the complete workspace provider pass; target/family-specific
+barriers and all-family scope remain open. Reconciliation currently rebuilds all selected relations;
+selective persistence and finite historical/candidate reclamation remain outcome 8 work.
 
 ## Outcome 4: real inputs, canonical facts and the first four forms
 
@@ -260,25 +297,22 @@ support. Presence distinguishes unobserved result exhaustion from observed false
 authorized lookahead row, seals only N requested rows and reports actual truncation; at a grant ceiling,
 exactly N rows leave exhaustion unknown. `e65bdbeb` fixes released diagnostic enum projection in the adapter.
 
-Remaining: actual selection/barriers for `best_available_snapshot`, `await_latest`,
-`require_current_for_targets`, `require_source_current` and `require_semantic_current`; historical/newer
-workspace observations; public pagination; generation/context/family convergence waits and compile-failure
-quiescence. The backend still supplies `FreshnessState::Current` on the inspected path; this does not
-implement those policies or prove currentness against live disk edits. Strict freshness is a priority
-before claiming continuous or fully current service behavior.
+Current-source barriers and typed snapshot/workspace observations now run against the live update
+owner, as described above. Remaining: target/family-specific current selection, historical selectors,
+public remainder pagination and full generation/context/family convergence with terminal coverage.
+Whole-workspace provider completion is currently the conservative barrier for all strict policies.
 
-## Outcome 6: continuous updates — open
+## Outcome 6: continuous updates — partial
 
-| Slice | Existing foundation | Remaining delivery |
+| Slice | Implemented foundation | Remaining delivery |
 |---|---|---|
-| 6A | Secure capture and repository/source-wave components | Daemon-owned notify/gix input loop; watch-before-census; bounded dirty queue/coalescing; overflow/rescan, polling, rename/delete/root/config recovery |
-| 6B | Source/context identities, exact admitted provider pins and owner/command seams | Immediate semantic invalidation; conservative context dependencies including negative imports; deletion/replacement; generation fences and stale-completion rejection during updates |
-| 6C | Working startup composition, exact version vectors and immutable dependency blobs | Reuse startup for updates; source/syntax publication before semantics; retained Tree-sitter/Pyrefly/Cargo state; changed-version reuse and fair scheduling |
-| 6D | Prepared independent expectations, edits and comparison helpers | Real persistent-daemon versus independent-clean adapters, observable quiet convergence and semantic/identity/coverage comparisons over actual edit sequences |
+| 6A | Watch-before-census, owned native watcher, bounded coalesced queue, retained rescan obligation, periodic secure census and public observation/health | Git inclusion, selected external roots, polling profile, root recreation and ignore/config acceptance |
+| 6B | Whole-context replacement, monotonic generations, immediate stale observation, changed-input fences and successor activation | Mixed-language/negative-dependency/config coverage, deterministic delayed completion and independent clean comparison |
+| 6C | Startup/update reuse with exact complete version-vector activation; old source-page retention | Syntax-first publication, retained Tree-sitter/Pyrefly/Cargo state, changed-version reuse and fair scheduling |
+| 6D | Real persistent Python edit/add/delete/atomic-save/reopen case | Independent-clean runtime adapter and full semantic/identity/coverage edit corpus for both languages |
 
-No startup-versus-restart test is being counted as live incremental convergence. Python canonical identity
-continuity across unrelated edits also needs the actual incremental/clean corpus; current identities are
-not evidence that all continuity requirements hold.
+The installed live test is distinct from startup-versus-restart validation. Python canonical identity
+continuity across unrelated edits still needs the independent incremental/clean corpus.
 
 ## Outcome 7: full analyses and all eight forms — open
 
@@ -290,7 +324,7 @@ not evidence that all continuity requirements hold.
 | 7D Rust source/types/MIR | Real typed compiler publication, stable declaration keys and selected canonical calls | Full types/generics/traits/instances/MIR payloads, macro/hygiene/generated spans, coroutine/CTFE/FFI facts, structured diagnostics and canonical/public coverage |
 | 7E Rust derived/private borrow | Existing MIR analysis modules and contained compiler seam | Real typed inputs, finite dataflow/state/ownership analyses, exact private loans/regions, drop/unwind/coroutine and changed-body replacement |
 | 7F Common graphs/summaries | Existing petgraph/analysis integration and canonical calls | Demand-rooted projections, correct dominance/SCC/reachability, structural facts and bounded interprocedural fixpoints with precision/frontier scope |
-| 7G Complete forms/composition | Eight-form request/ingress infrastructure; three limited public forms | FindPaths, MatchPattern, Compare and Summarize; finish first four; real typed multi-block DAGs, fan-out/fan-in, repeated forms, references, authorization, negatives, ordering/limits and cancellation |
+| 7G Complete forms/composition | Eight-form request/ingress infrastructure; four limited public forms | FindPaths, MatchPattern, Compare and Summarize; finish first four; real typed multi-block DAGs, fan-out/fan-in, repeated forms, references, authorization, negatives, ordering/limits and cancellation |
 | 7H Modern presentation | Installed FastMCP transport/resources, guarded-input scenarios, typed processing and diagnostic correction | All-form presentation, full paging/cursors and source permissions; replay/expiry/reconnect/slow-reader/TTL integration for new workflows; one consistent daemon-authored response |
 
 Substantial existing algorithms and fixtures are reusable, but fixture-fed or schema-only families are

@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:603c2c2570760b9cf11944104ccca634904f8b2af5fc7973fbcb49320926cac0
+// canonical_digest: b3:a5f9544f78fe2e3132e0f631c31369a8f4ff607731c7e647fca4184f8bde7e3a
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
@@ -111,6 +111,8 @@ enum SafeErrorCode {
   SAFE_ERROR_CODE_RESUME_WINDOW_EXPIRED = 15;
   SAFE_ERROR_CODE_DAEMON_UNAVAILABLE = 16;
   SAFE_ERROR_CODE_INTERNAL = 17;
+  SAFE_ERROR_CODE_FRESHNESS_DEADLINE = 18;
+  SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE = 19;
 }
 
 enum SafeDiagnosticReference {
@@ -258,6 +260,19 @@ message GetStatusResponse {
   uint32 running_queries = 6;
   uint32 queued_queries = 7;
   bytes canonical_public_status_json = 8;
+  repeated WorkspaceSourceObservation source_observations = 9;
+}
+
+// Current workspace work is separate from any query's immutable selected snapshot.
+message WorkspaceSourceObservation {
+  string workspace_id = 1;
+  uint64 selected_source_generation = 2;
+  uint64 requested_watermark = 3;
+  uint64 reconciled_watermark = 4;
+  SnapshotFreshness freshness = 5;
+  bool watch_healthy = 6;
+  bool rescan_required = 7;
+  bool runnable_pending = 8;
 }
 
 message ReferenceReadRequest {
@@ -504,12 +519,21 @@ message QueryEventHeader {
   bytes cursor = 5;
 }
 
+enum SnapshotFreshness {
+  SNAPSHOT_FRESHNESS_UNSPECIFIED = 0;
+  SNAPSHOT_FRESHNESS_CURRENT = 10;
+  SNAPSHOT_FRESHNESS_POTENTIALLY_STALE = 20;
+  SNAPSHOT_FRESHNESS_UNAVAILABLE = 30;
+}
+
 message SnapshotPinnedEvent {
   QueryEventHeader header = 1;
   string epoch_id = 2;
   uint64 source_generation = 3;
   uint64 activation_head = 4;
   uint64 lifecycle_watermark = 5;
+  optional SnapshotFreshness freshness = 6;
+  optional string analysis_context_set_id = 7;
 }
 
 message ProgressEvent {

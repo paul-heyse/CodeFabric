@@ -27,7 +27,9 @@ from ..contracts.wire_models import (
     ProcessingState,
     QueryProcessingSummary,
     QueryToolInput,
+    SnapshotFreshness,
     ValidateToolInput,
+    WorkspaceSourceObservation,
 )
 from ..settings import Settings, next_settings
 from .channel import create_local_channel
@@ -82,6 +84,8 @@ type SafeErrorCode = Literal[
     "CAPACITY_UNAVAILABLE",
     "CANCELLED",
     "RESUME_WINDOW_EXPIRED",
+    "FRESHNESS_DEADLINE",
+    "FRESHNESS_UNAVAILABLE",
     "DAEMON_UNAVAILABLE",
     "INTERNAL",
 ]
@@ -527,6 +531,7 @@ class DaemonStatus(_PortModel):
     running_queries: NonNegativeInt
     queued_queries: NonNegativeInt
     public_status: PublicDaemonStatus
+    source_observations: tuple[WorkspaceSourceObservation, ...] = ()
 
 
 class DaemonQueryResult(_PortModel):
@@ -536,6 +541,8 @@ class DaemonQueryResult(_PortModel):
     execution_state: QueryState
     epoch_id: str | None
     source_generation: PositiveInt | None = None
+    freshness: SnapshotFreshness | None = None
+    analysis_context_set_id: str | None = None
     processing: tuple[QueryProcessingSummary, ...] = ()
     package_id: str | None
     manifest: ResourceHandle | None
@@ -1030,6 +1037,38 @@ def _processing_summary(value: query_pb.QueryProcessingSummary) -> QueryProcessi
         raise DaemonProtocolError("invalid typed processing scope") from error
 
 
+def _snapshot_freshness(value: query_pb.SnapshotPinnedEvent) -> SnapshotFreshness | None:
+    return _freshness_state(value.freshness) if value.HasField("freshness") else None
+
+
+def _freshness_state(value: int) -> SnapshotFreshness:
+    match value:
+        case query_pb.SNAPSHOT_FRESHNESS_CURRENT:
+            return SnapshotFreshness.CURRENT
+        case query_pb.SNAPSHOT_FRESHNESS_POTENTIALLY_STALE:
+            return SnapshotFreshness.POTENTIALLY_STALE
+        case query_pb.SNAPSHOT_FRESHNESS_UNAVAILABLE:
+            return SnapshotFreshness.UNAVAILABLE
+        case _:
+            raise DaemonProtocolError("snapshot has an invalid explicit freshness state")
+
+
+def _source_observation(value: query_pb.WorkspaceSourceObservation) -> WorkspaceSourceObservation:
+    try:
+        return WorkspaceSourceObservation(
+            workspace_id=value.workspace_id,
+            selected_source_generation=value.selected_source_generation,
+            requested_watermark=value.requested_watermark,
+            reconciled_watermark=value.reconciled_watermark,
+            freshness=_freshness_state(value.freshness),
+            watch_healthy=value.watch_healthy,
+            rescan_required=value.rescan_required,
+            runnable_pending=value.runnable_pending,
+        )
+    except ValueError as error:
+        raise DaemonProtocolError("incoherent workspace source observation") from error
+
+
 def _query_event_identity(event: query_pb.QueryEvent) -> tuple[object, ...]:
     """Project one event to content identity independent of session/cursor/handle reissue."""
 
@@ -1042,6 +1081,8 @@ def _query_event_identity(event: query_pb.QueryEvent) -> tuple[object, ...]:
             value.source_generation,
             value.activation_head,
             value.lifecycle_watermark,
+            _snapshot_freshness(value),
+            value.analysis_context_set_id if value.HasField("analysis_context_set_id") else None,
         )
     if kind == "progress":
         value = event.progress
@@ -1321,6 +1362,9 @@ class CpgDaemonClient:
             running_queries=response.running_queries,
             queued_queries=response.queued_queries,
             public_status=value,
+            source_observations=tuple(
+                _source_observation(row) for row in response.source_observations
+            ),
         )
 
     async def reference(
@@ -1664,6 +1708,8 @@ class CpgDaemonClient:
         cursor: bytes | None = None
         epoch_id: str | None = None
         source_generation: int | None = None
+        freshness: SnapshotFreshness | None = None
+        analysis_context_set_id: str | None = None
         result_ready: query_pb.ResultReadyEvent | None = None
         terminal: query_pb.TerminalEvent | None = None
         last_sequence = 0
@@ -1718,6 +1764,12 @@ class CpgDaemonClient:
                     if kind == "snapshot_pinned":
                         epoch_id = payload.epoch_id
                         source_generation = payload.source_generation
+                        freshness = _snapshot_freshness(payload)
+                        analysis_context_set_id = (
+                            payload.analysis_context_set_id
+                            if payload.HasField("analysis_context_set_id")
+                            else None
+                        )
                     elif kind == "progress":
                         if progress is not None and not replayed:
                             total = payload.total if payload.HasField("total") else None
@@ -1752,6 +1804,9 @@ class CpgDaemonClient:
                     cursor = None
                     last_sequence = 0
                     epoch_id = None
+                    source_generation = None
+                    freshness = None
+                    analysis_context_set_id = None
                     result_ready = None
                     result_predecessor = None
                 elif result_ready is not None:
@@ -1806,6 +1861,8 @@ class CpgDaemonClient:
             execution_state=state,
             epoch_id=epoch_id,
             source_generation=source_generation,
+            freshness=freshness,
+            analysis_context_set_id=analysis_context_set_id,
             processing=processing,
             package_id=package_id,
             manifest=manifest,

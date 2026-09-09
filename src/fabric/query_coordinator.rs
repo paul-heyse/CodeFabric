@@ -308,6 +308,10 @@ pub enum QueryControlEventPayload {
         source_generation: u64,
         activation_head: u64,
         lifecycle_watermark: u64,
+        #[serde(default)]
+        freshness: Option<crate::freshness::FreshnessState>,
+        #[serde(default)]
+        analysis_context_set_id: Option<String>,
     },
     Progress {
         stage: String,
@@ -2794,6 +2798,8 @@ mod tests {
                     source_generation: 1,
                     activation_head: 2,
                     lifecycle_watermark: 3,
+                    freshness: None,
+                    analysis_context_set_id: None,
                 },
                 1_001,
             )
@@ -2953,6 +2959,8 @@ mod tests {
                     source_generation: 11,
                     activation_head: 12,
                     lifecycle_watermark: 13,
+                    freshness: None,
+                    analysis_context_set_id: None,
                 },
                 1_003,
             )
@@ -3011,6 +3019,8 @@ mod tests {
                     source_generation: 1,
                     activation_head: 2,
                     lifecycle_watermark: 3,
+                    freshness: None,
+                    analysis_context_set_id: None,
                 },
                 1_001,
             )
@@ -3155,6 +3165,8 @@ mod tests {
                         source_generation: 1,
                         activation_head: 2,
                         lifecycle_watermark: 3,
+                        freshness: None,
+                        analysis_context_set_id: None,
                     },
                     1_001,
                 )

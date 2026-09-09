@@ -1,4 +1,4 @@
-# @generated from released Protobuf semantic identities b3:603c2c2570760b9cf11944104ccca634904f8b2af5fc7973fbcb49320926cac0,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
+# @generated from released Protobuf semantic identities b3:a5f9544f78fe2e3132e0f631c31369a8f4ff607731c7e647fca4184f8bde7e3a,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
 import datetime
 
 from google.protobuf import duration_pb2 as _duration_pb2
@@ -94,6 +94,8 @@ class SafeErrorCode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     SAFE_ERROR_CODE_RESUME_WINDOW_EXPIRED: _ClassVar[SafeErrorCode]
     SAFE_ERROR_CODE_DAEMON_UNAVAILABLE: _ClassVar[SafeErrorCode]
     SAFE_ERROR_CODE_INTERNAL: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_FRESHNESS_DEADLINE: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE: _ClassVar[SafeErrorCode]
 
 class SafeDiagnosticReference(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -152,6 +154,13 @@ class ReservedControlOperation(int, metaclass=_enum_type_wrapper.EnumTypeWrapper
     RESERVED_CONTROL_OPERATION_GET_STATUS: _ClassVar[ReservedControlOperation]
     RESERVED_CONTROL_OPERATION_CANCEL_QUERY: _ClassVar[ReservedControlOperation]
     RESERVED_CONTROL_OPERATION_RELEASE_RESOURCE: _ClassVar[ReservedControlOperation]
+
+class SnapshotFreshness(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    SNAPSHOT_FRESHNESS_UNSPECIFIED: _ClassVar[SnapshotFreshness]
+    SNAPSHOT_FRESHNESS_CURRENT: _ClassVar[SnapshotFreshness]
+    SNAPSHOT_FRESHNESS_POTENTIALLY_STALE: _ClassVar[SnapshotFreshness]
+    SNAPSHOT_FRESHNESS_UNAVAILABLE: _ClassVar[SnapshotFreshness]
 
 class ProcessingState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -227,6 +236,8 @@ SAFE_ERROR_CODE_CANCELLED: SafeErrorCode
 SAFE_ERROR_CODE_RESUME_WINDOW_EXPIRED: SafeErrorCode
 SAFE_ERROR_CODE_DAEMON_UNAVAILABLE: SafeErrorCode
 SAFE_ERROR_CODE_INTERNAL: SafeErrorCode
+SAFE_ERROR_CODE_FRESHNESS_DEADLINE: SafeErrorCode
+SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE: SafeErrorCode
 SAFE_DIAGNOSTIC_REFERENCE_UNSPECIFIED: SafeDiagnosticReference
 SAFE_DIAGNOSTIC_REFERENCE_LIFECYCLE_FAILED_CLOSED: SafeDiagnosticReference
 SAFE_DIAGNOSTIC_REFERENCE_QUERY_CHALLENGE_REJECTED: SafeDiagnosticReference
@@ -261,6 +272,10 @@ RESERVED_CONTROL_OPERATION_HANDSHAKE: ReservedControlOperation
 RESERVED_CONTROL_OPERATION_GET_STATUS: ReservedControlOperation
 RESERVED_CONTROL_OPERATION_CANCEL_QUERY: ReservedControlOperation
 RESERVED_CONTROL_OPERATION_RELEASE_RESOURCE: ReservedControlOperation
+SNAPSHOT_FRESHNESS_UNSPECIFIED: SnapshotFreshness
+SNAPSHOT_FRESHNESS_CURRENT: SnapshotFreshness
+SNAPSHOT_FRESHNESS_POTENTIALLY_STALE: SnapshotFreshness
+SNAPSHOT_FRESHNESS_UNAVAILABLE: SnapshotFreshness
 PROCESSING_STATE_UNSPECIFIED: ProcessingState
 PROCESSING_STATE_PENDING: ProcessingState
 PROCESSING_STATE_RUNNING: ProcessingState
@@ -405,7 +420,7 @@ class GetStatusRequest(_message.Message):
     def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., include_diagnostics: _Optional[bool] = ...) -> None: ...
 
 class GetStatusResponse(_message.Message):
-    __slots__ = ("authority", "lifecycle", "lifecycle_sequence", "failure", "active_epoch_id", "running_queries", "queued_queries", "canonical_public_status_json")
+    __slots__ = ("authority", "lifecycle", "lifecycle_sequence", "failure", "active_epoch_id", "running_queries", "queued_queries", "canonical_public_status_json", "source_observations")
     AUTHORITY_FIELD_NUMBER: _ClassVar[int]
     LIFECYCLE_FIELD_NUMBER: _ClassVar[int]
     LIFECYCLE_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
@@ -414,6 +429,7 @@ class GetStatusResponse(_message.Message):
     RUNNING_QUERIES_FIELD_NUMBER: _ClassVar[int]
     QUEUED_QUERIES_FIELD_NUMBER: _ClassVar[int]
     CANONICAL_PUBLIC_STATUS_JSON_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_OBSERVATIONS_FIELD_NUMBER: _ClassVar[int]
     authority: AuthorityGeneration
     lifecycle: LifecycleState
     lifecycle_sequence: int
@@ -422,7 +438,28 @@ class GetStatusResponse(_message.Message):
     running_queries: int
     queued_queries: int
     canonical_public_status_json: bytes
-    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., lifecycle: _Optional[_Union[LifecycleState, str]] = ..., lifecycle_sequence: _Optional[int] = ..., failure: _Optional[_Union[SafeErrorMetadata, _Mapping]] = ..., active_epoch_id: _Optional[str] = ..., running_queries: _Optional[int] = ..., queued_queries: _Optional[int] = ..., canonical_public_status_json: _Optional[bytes] = ...) -> None: ...
+    source_observations: _containers.RepeatedCompositeFieldContainer[WorkspaceSourceObservation]
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., lifecycle: _Optional[_Union[LifecycleState, str]] = ..., lifecycle_sequence: _Optional[int] = ..., failure: _Optional[_Union[SafeErrorMetadata, _Mapping]] = ..., active_epoch_id: _Optional[str] = ..., running_queries: _Optional[int] = ..., queued_queries: _Optional[int] = ..., canonical_public_status_json: _Optional[bytes] = ..., source_observations: _Optional[_Iterable[_Union[WorkspaceSourceObservation, _Mapping]]] = ...) -> None: ...
+
+class WorkspaceSourceObservation(_message.Message):
+    __slots__ = ("workspace_id", "selected_source_generation", "requested_watermark", "reconciled_watermark", "freshness", "watch_healthy", "rescan_required", "runnable_pending")
+    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
+    SELECTED_SOURCE_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_WATERMARK_FIELD_NUMBER: _ClassVar[int]
+    RECONCILED_WATERMARK_FIELD_NUMBER: _ClassVar[int]
+    FRESHNESS_FIELD_NUMBER: _ClassVar[int]
+    WATCH_HEALTHY_FIELD_NUMBER: _ClassVar[int]
+    RESCAN_REQUIRED_FIELD_NUMBER: _ClassVar[int]
+    RUNNABLE_PENDING_FIELD_NUMBER: _ClassVar[int]
+    workspace_id: str
+    selected_source_generation: int
+    requested_watermark: int
+    reconciled_watermark: int
+    freshness: SnapshotFreshness
+    watch_healthy: bool
+    rescan_required: bool
+    runnable_pending: bool
+    def __init__(self, workspace_id: _Optional[str] = ..., selected_source_generation: _Optional[int] = ..., requested_watermark: _Optional[int] = ..., reconciled_watermark: _Optional[int] = ..., freshness: _Optional[_Union[SnapshotFreshness, str]] = ..., watch_healthy: _Optional[bool] = ..., rescan_required: _Optional[bool] = ..., runnable_pending: _Optional[bool] = ...) -> None: ...
 
 class ReferenceReadRequest(_message.Message):
     __slots__ = ("kind", "version")
@@ -811,18 +848,22 @@ class QueryEventHeader(_message.Message):
     def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., daemon_query_id: _Optional[str] = ..., sequence: _Optional[int] = ..., emitted_at_unix_ms: _Optional[int] = ..., cursor: _Optional[bytes] = ...) -> None: ...
 
 class SnapshotPinnedEvent(_message.Message):
-    __slots__ = ("header", "epoch_id", "source_generation", "activation_head", "lifecycle_watermark")
+    __slots__ = ("header", "epoch_id", "source_generation", "activation_head", "lifecycle_watermark", "freshness", "analysis_context_set_id")
     HEADER_FIELD_NUMBER: _ClassVar[int]
     EPOCH_ID_FIELD_NUMBER: _ClassVar[int]
     SOURCE_GENERATION_FIELD_NUMBER: _ClassVar[int]
     ACTIVATION_HEAD_FIELD_NUMBER: _ClassVar[int]
     LIFECYCLE_WATERMARK_FIELD_NUMBER: _ClassVar[int]
+    FRESHNESS_FIELD_NUMBER: _ClassVar[int]
+    ANALYSIS_CONTEXT_SET_ID_FIELD_NUMBER: _ClassVar[int]
     header: QueryEventHeader
     epoch_id: str
     source_generation: int
     activation_head: int
     lifecycle_watermark: int
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., epoch_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., activation_head: _Optional[int] = ..., lifecycle_watermark: _Optional[int] = ...) -> None: ...
+    freshness: SnapshotFreshness
+    analysis_context_set_id: str
+    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., epoch_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., activation_head: _Optional[int] = ..., lifecycle_watermark: _Optional[int] = ..., freshness: _Optional[_Union[SnapshotFreshness, str]] = ..., analysis_context_set_id: _Optional[str] = ...) -> None: ...
 
 class ProgressEvent(_message.Message):
     __slots__ = ("header", "stage", "completed", "total")

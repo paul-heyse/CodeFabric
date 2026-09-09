@@ -297,6 +297,7 @@ pub enum ScalarExpression {
     /// A typed Arrow scalar value.
     Literal(ScalarValue),
     /// Exact source-span materialization with daemon-bound snapshot and disclosure authority.
+    #[cfg(feature = "daemon")]
     SourceContext {
         parameters: crate::fabric::source_context_query::SourceContextParameters,
         arguments: Vec<ScalarExpression>,
@@ -1331,6 +1332,7 @@ impl CompileState {
                 Ok(Expr::Column(field.column.clone()))
             }
             ScalarExpression::Literal(value) => Ok(Expr::Literal(value.clone(), None)),
+            #[cfg(feature = "daemon")]
             ScalarExpression::SourceContext {
                 parameters,
                 arguments,

@@ -59,7 +59,7 @@ pub trait ActivationCandidateProofPort: Send + Sync {
 /// The persisted `proof_receipt` field remains a compatible opaque record identity;
 /// it no longer implies a generalized proof program or separate proof histories.
 pub(crate) struct PublishedCandidateValidation {
-    candidate: Option<(WorkspaceId, FabricEpochPins)>,
+    candidate: RwLock<Option<(WorkspaceId, FabricEpochPins)>>,
     diagnostic: DiagnosticRef,
 }
 
@@ -76,21 +76,49 @@ impl PublishedCandidateValidation {
         {
             return Err("published candidate and activation record disagree");
         }
-        Ok(Self { candidate: Some((workspace_id, pins)), diagnostic })
+        Ok(Self {
+            candidate: RwLock::new(Some((workspace_id, pins))),
+            diagnostic,
+        })
     }
 
     pub(crate) const fn unavailable(diagnostic: DiagnosticRef) -> Self {
-        Self { candidate: None, diagnostic }
+        Self {
+            candidate: RwLock::new(None),
+            diagnostic,
+        }
+    }
+
+    /// The serialized publisher installs only a candidate already validated against its
+    /// actual exact-version epoch. Previous candidate pins immediately cease to authorize.
+    pub(crate) fn replace_with(&self, published: &Self) {
+        let candidate = *published
+            .candidate
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *self
+            .candidate
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = candidate;
     }
 }
 
 #[async_trait]
 impl ActivationCandidateProofPort for PublishedCandidateValidation {
     async fn prove_candidate(&self, request: CandidateProofRequest) -> CandidateProofOutcome {
-        if self.candidate == Some((request.workspace_id, request.pins)) {
-            CandidateProofOutcome::Proved { proof_receipt: request.pins.proof_receipt }
+        if *self
+            .candidate
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            == Some((request.workspace_id, request.pins))
+        {
+            CandidateProofOutcome::Proved {
+                proof_receipt: request.pins.proof_receipt,
+            }
         } else {
-            CandidateProofOutcome::Unknown { diagnostic: self.diagnostic }
+            CandidateProofOutcome::Unknown {
+                diagnostic: self.diagnostic,
+            }
         }
     }
 }

@@ -34,6 +34,20 @@ impl Serialize for FreshnessState {
     }
 }
 
+impl<'de> Deserialize<'de> for FreshnessState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let name = String::deserialize(deserializer)?;
+        FRESHNESS_STATE_VALUES
+            .iter()
+            .find(|entry| entry.name == name)
+            .and_then(|entry| Self::try_from(entry.code).ok())
+            .ok_or_else(|| serde::de::Error::custom("unknown snapshot freshness"))
+    }
+}
+
 /// Strict normalized DTO for the released v2.0 semantic-query envelope.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SemanticQueryRequest {
