@@ -1,501 +1,331 @@
 # CodeFabric status
 
-Updated 2026-09-09. Current work is in `/home/paul/CodeFabric` on `master`.
+Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
+Last production commit: `734821db` (`Publish canonical Python call occurrences and checker-resolved edges`).
+The uncommitted continuation is identified below; documentation updates do not certify that code.
 
 ## Current handoff
 
-**Production implementation is active. Outcomes 1–3 are implemented for the current Linux workflow; outcomes 4–5 are in progress and outcomes 6–8 remain open.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). Startup publishes real Python/Rust facts, including captured Cargo path dependencies and multiple targets. Canonical function queries work through the installed FastMCP client and explain incomplete target processing. These checks do not establish full-product completion.
-
-The [detailed outcomes 4–8 plan](docs/plans/codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md)
-now expands that same backlog with the full fact-family/query scope, library API choices,
-dependency order and acceptance criteria. Implementation of that detailed plan is active.
-Implemented slices include contained Rust compilation, captured path dependencies, multiple
-targets/contexts, reusable immutable input blobs, canonical declarations/entities and public
-function queries, independent Rust syntax publication and observed result-row truncation.
-External/generated compiler inputs, the other query forms and full coverage/freshness delivery
-remain active work.
-
-Python analysis now uploads ordered descriptor chunks under one complete checker inventory.
-The previous 64-module startup ceiling is removed; the current configured bounds are 16,384
-modules, 32 MiB per source file and 512 MiB per context run. Individual RPC frames remain
-bounded. Sequence/end counts, duplicate/missing members, deadlines, cancellation and exact
-source bindings are checked before run acceptance or checker mutation. Larger context metadata
-still has a 4 MiB RPC frame limit; external roots and further scaling remain work. Limit
-rejection retains explicit resource-limited processing instead of declaring a truncated
-inventory complete. Source capture now allows 1 GiB across the mixed-language input set.
-
-Validation on 2026-09-09: all 16 selected root Pyrefly/daemon tests pass, including contained
-cross-chunk imports and fresh Delta publication from 70 Python modules in about eight seconds.
-The latter checks all 69 distinct function declarations and the actual `extra_69.chosen`
-semantic target. All 29 sidecar tests, strict sidecar Clippy/check, protocol regeneration checks
-and 95 adapter tests plus lint/types pass. These bounds are configured ceilings, not measured
-optimal capacities; the scenario does not close effective external contexts or full Python
-normalization. The root library Clippy command completes with the existing warning backlog.
-
-Pyrefly call targets now carry optional checker-selected definition coordinates. The narrow
-pinned `Query` seam follows function metadata through its definition index to the actual
-source declaration, including imported aliases and bound methods. The sidecar maps that
-location to captured file/digest/range; the daemon independently validates those target pins.
-Synthesized targets and definitions outside the inventory retain explicit mapping gaps.
-This supplies canonical call normalization with exact inputs; it does not yet expose Python
-call edges through the public query forms. No library versions changed.
-
-All 30 sidecar tests and strict sidecar check/Clippy pass on 2026-09-09. All 26 selected root
-provider/recipe/daemon tests pass, including a real cross-module alias and method definition,
-wrong-source/digest/range rejection, contained imports and exact target-file/range readback
-from the 70-module Delta fixture. Root library Clippy completes with its existing backlog;
-new duplicate match-arm warnings were corrected. Historical semantic expectations remain;
-their old schema digest no longer incorrectly requires the current relation to omit new fields.
-
-Production Ruff publication now includes callable, call-site and callable-syntax observations
-from its existing owned traversal. `fact.code_call_site` combines Python and Rust calls.
-Python normalization joins exact syntax occurrences to checker-selected target declarations
-and declared caller bindings through native DataFusion plans. Repeated calls stay distinct;
-dynamic targets remain unknown. Module/lambda calls retain canonical source occurrences with
-an application-owned file/context owner while their unavailable public caller entity is explicit.
-Rust-only provenance columns are nullable for Python. Public relationship querying and complete
-module/lambda entity normalization remain active work.
-
-Validation on 2026-09-09: the affected canonical/native-provider/recipe tests pass after updating
-stale relation counts. Real daemon tests cover cross-module canonical target identity and the
-exact full call range, repeated Python calls to one target, canonical caller IDs, unresolved
-parameter calls and mixed Rust publication. Installed exact-epoch reopen passes in 15.6 seconds.
-Root library Clippy completes with the existing backlog; two new long table-construction
-warnings have explicit local rationale. Governance passes after a narrow correction for the
-already implemented configured compiler/extractor input readers; workspace source remains
-subject to the secure-read rule.
-
-Declaration-fact retrieval now accepts exact public entity IDs and the meanings `declarations`
-or `declaration locations and provenance`. A native DataFusion semi join consumes the typed
-request relation, preserves each declaration occurrence and prevents repeated subjects from
-duplicating facts. Results carry canonical entity/occurrence IDs, exact source digest/range,
-language/context, raw kind and provider provenance. Language/context filters precede limits;
-processing uses the admitted Ruff Binding/rustc PublicItem partitions, independently of rows.
-Phrase/fact/prior-result subject resolution remains unavailable and is rejected explicitly.
-This is a second public form's first supported family, not completed RetrieveFacts or 4E scope.
-
-Validation on 2026-09-09: 42 affected canonical/processing/result/query-service tests pass,
-including the installed-client mixed-language declaration query, repeated subjects, a failed
-Rust target, a completed Python scope with no match, and unsupported-reference rejection.
-The empty case exposed and fixed schema validation using encoded page length as a memory
-bound; empty metadata-rich pages now seal and reopen within the configured bound. That fix
-is committed as `068e8fd4`. Valid daemon diagnostic references also now survive adapter enum
-projection (`e65bdbeb`); all 95 adapter tests and adapter lint/types pass. Root library Clippy
-completes with 958 existing warnings; strict root lint cleanliness is not claimed.
-The installed exact-activation restart check also passes (15.2 seconds); documentation
-navigation and whitespace checks pass. New validation rejections use released optional
-diagnostic fields rather than an unregistered diagnostic label.
-
-The latest 4E/5A slice serves Python, Rust or combined function declarations from native
-DataFusion canonical transformations. Language/context filters apply before the row limit;
-name and entity ID define stable default ordering. Exact-epoch processing partitions come
-from requested Python inputs and selected Cargo targets, independently of emitted fact rows.
-A failed target retains other target facts and identifies the unfinished target. Python-only
-queries remain complete when only Rust compilation failed. Missing capture, unsupported work,
-provider timeout, cancellation and resource limits retain distinct reason codes. Processing
-coverage and result-row bounds are separate. Result streaming now observes truncation with one
-authorized lookahead row; public remainder pagination and broader scope/freshness semantics
-remain pending.
-
-Validation on 2026-09-09: 14 focused query/scope tests pass; the installed-client mixed-language
-query and guarded-input/resource scenario both pass after the final ordering/filter changes.
-The mixed case checks actual function names/languages and one failed target, not just counts.
-Root library Clippy completes with the existing warning backlog; strict root lint cleanliness
-is not claimed. All four golden cases pass, including exact reopen and cancellation. Changes
-remain in the canonical working tree and are integrated in small commits.
-
-Processing now has typed Protobuf fields on the result event and strict Pydantic projections
-on the FastMCP tool output. The same summary is retained with the exact result package for
-replay/reopen. It includes source generation, requested/completed/remaining partitions, bounded
-remainder details, raw path bytes with optional UTF-8 display text, target/kind and known context,
-and an optional result-exhaustion observation. Absent exhaustion is preserved as unknown rather
-than converted to false. Public target kinds use the context manifest vocabulary, not Rust debug
-formatting. The initial explanation is bounded to 64 partitions; fetching subsequent detail
-pages remains work. Protobuf additions preserve existing field numbers and the compatibility
-baseline; no dependency versions changed.
-
-Typed delivery validation on 2026-09-09: 92 adapter tests, adapter lint/types and `just proto-check`
-pass. All 28 selected scope/package/registry/mixed-service tests pass; the new typed package
-reopen/corruption test and final mixed-client target-kind check also pass. Root Clippy completes
-with 958 existing warnings, so this is not a strict root lint pass. This extends 5A/5B; it does
-not close public remainder pagination, full freshness policy behavior or live processing status.
-
-Rust Tree-sitter now publishes six native source-context relations through the production
-admission and Delta path, independently of successful compilation. Loose Rust files and
-malformed Unicode/CRLF source retain CST recovery observations and exact byte locations;
-Rust schemas carry no invented Python target version. Recovered Python parsing preserves
-syntax/diagnostics while Ruff semantic families report unknown coverage and provider failure.
-Startup still waits for the semantic phase: live two-speed publication remains outcome 6.
-
-Result streaming uses a native final limit of N+1 where the existing execution grant permits
-it, seals only the first N rows, and records observed exhaustion in the typed response and
-retained manifest. Processing completeness stays separate from row truncation. At the grant
-ceiling an exact-N result retains unknown exhaustion; fewer rows establish no truncation.
-The stream is consumed once, with cancellation/error handling and existing page/resource bounds.
-Validation on 2026-09-09: all four golden scenarios pass; 40 affected syntax/release/result
-and real mixed-client tests pass, including exact-byte Rust recovery and row-limit lookahead.
-The nine provider recipe tests and isolated release-compiler architecture/check pass. Root
-library Clippy completes with its existing backlog; the new local length/doc warnings are
-addressed. Documentation navigation and `git diff --check` pass.
-
-Current production work, 2026-09-08–09:
-
-- Initial control-table creation runs with the workspace write lease and joined cleanup; exact-version readback reconstructs the serving reader after the native runtime joins.
-- The production executor retains bounded work, deadlines, store ownership and cleanup without enabling the generalized native allocation receipt policy. The first attempt with that policy panicked on a roughly 2 GiB schema-decode estimate for the small activation schema.
-- Executor commit `3a41bd0` passes its focused real-store test: an error after writing preserves durable data, joined cleanup releases the lease, unowned writes remain rejected, and a subsequent owned write succeeds. Candidate publication now uses the same executor; only identifiers/version records cross the joined runtime boundary, and serving readers reopen those exact versions.
-- Commit `41c30dc` owns candidate publication and reconstructs exact readers after join. The final activation append/readback now uses the same bounded control lane.
-- Completed head/error/range/list reads release their pending-operation entries. Previously these entries survived until host-runtime shutdown and prevented a joined writer lease from releasing. Cancelled unfinished native IO still retains its entry through runtime join.
-- `just root-check-fast` passes for the startup/resource changes. `just golden --timeout 360` passes all four real cases on 2026-09-09. Focused store/executor regressions and lost-acknowledgement recovery pass: 33 tests, 1,021 unrelated tests filtered out. Generalized runtime proof machinery, provider completeness and live-update gaps remain production work.
-- uv was correctly upgraded on the host. Commit `fe5615f` aligns the environment manifest and all three CI setup sites with 0.12.11. Both tool-version checks pass; refreshed session context reports 13 ok, no warnings or failures.
-
-Outcome 1 is committed as `a940930`. Outcome 2's first slice (`b4f03f1`) removes the activation proof evaluator and its nine newly written histories. The existing activation record retains exact input/provider/source/table references and an opaque candidate identity in the compatible `proof_receipt` field. Validation rejects substituted workspace, source generation and table versions. All four golden cases still pass, including the assertion that no proof directory is created; five focused candidate/factory tests pass. Historical proof data is preserved but no longer required by new activations.
-
-The frozen unimplemented-analysis gate is removed (`e674454`). Actual typed census/composition checks still require producer or explicit-remainder coverage; a family no longer has to retain a fixed unavailable status to be admitted. The Rust check and three real producer/census/remainder tests pass.
-
-Proof-program construction is removed from the release model in both production and tests. Its definitions, fault/expectation compiler and legacy fixture validator are deleted. Useful source examples and target fact assertions are preserved in `tests/fixtures/pragmatic_cpg/analysis_cases.json`; actual source-to-syntax/remainder tests consume the examples, while their unfinished semantic assertions remain explicitly pending. All four golden cases, 17 affected release/provider tests and `just feature-architecture-check release-compiler` pass. Producer-result validation now returns the existing execution directly instead of copying its rows into a proof wrapper. Its binding, coverage, cancellation and resource checks remain; the Rust check and 14 affected tests pass. This slice is committed as `1cf9c72`.
-
-Catalog sealing now uses a single schema/identity/dependency validation pass against the published observations. The iterative self-comparison and iteration policy are removed; row/byte limits remain. This also rejects a catalog changed after publication rather than accepting two matching later scans. The Rust check, 30 affected catalog/publication/reopen tests and all four golden scenarios pass on 2026-09-09. Existing observation histories remain for exact reopen and explanation; their retirement requires replacing those consumers. This slice is committed as `55fdd7b`.
-
-Outcome 2 is complete. The unused activation proof adapters, nine-history reader/writer, generalized expectation/fault/proof engine and proof-qualified provider-capability API are removed. Ordinary provider coverage/remainder reports and exact activation/reconciliation remain. Transformation installation now checks plans, schemas, dependencies, volatility and ordering without executing result sets. Actual relation reads enforce rows across partitions and observed memory/spill limits, including stream completion; authorized child views retain those limits and physical-plan reset clears counters. No intermediate result collection/checksum or repeated execution establishes admission.
-
-Validation on 2026-09-09: 69 affected provider/admission/reconciliation/catalog/child-view/producer tests and all four golden daemon scenarios pass. The isolated `data-fabric` compile and `just feature-architecture-check data-fabric` pass. Its existing native dependency expectations were aligned with `arrow-json` and `buoyant_kernel`; no dependency was changed or downgraded. All 20 feature-architecture tooling tests pass. Structural rule fixtures pass (30), but `just governance-scan` still reports two unchanged direct source reads at `source_image.rs:1805` and `pyrefly_service.rs:1241`. These remain open for source/provider boundary work; the full suite is not claimed green.
-
-The resource and source-read work described below supersedes those earlier findings. Next is actual Python/Rust semantic-provider integration, scoped progress and live updates. Retained catalog histories are recovery/explanation inputs; reducing redundant history writes belongs to outcome 8. All full-product fact families and query forms remain required.
-
-The [consolidated review](docs/reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md) and [selected domain documents](docs/spec_index/README.md) define the revised target. All Python/Rust fact families and eight query forms remain scope. First-release delivery, complete-product delivery and preparation readiness are different claims.
-
-## Outcome 3 — reduced resources implemented for the current Linux runtime
-
-On 2026-09-09, production execution stopped constructing generalized native allocation
-owners/policies. Native worker/thread/job envelopes, cancellation, joined runtime cleanup,
-owned-store mutation leases and shared DataFusion memory/spill pools remain. The receipt
-forks and their dedicated allocator harnesses are removed from the tree; Cargo selects the
-same upstream Arrow/Parquet 59.2.0, Tokio 1.53.1, Buoyant kernel/engine/derive versions and
-exact delta-rs revision. No dependency was downgraded. Git retains the previous sources.
-
-Pinned provider blobs now use one bounded, no-follow regular-file read and the caller's
-expected content digest. Symlinks in any component, oversized files and FIFOs are rejected.
-Both previously reported direct source-read findings are fixed.
-
-Validation: stable library compile, `just stable-graph-check`, `just governance-scan`
-and all four `just golden --timeout 360` cases pass against upstream dependencies. The
-focused resource/provider/maintenance run passed 64 cases; its real Pyrefly shutdown case
-then passed with the freshly verified sidecar binary supplied (65 affected cases total).
-All 28 selected feature-architecture/change-routing tooling tests pass. Native checkpoint,
-vacuum protection, exact reopen, cancellation, writer reconciliation and control headroom
-are among the passing cases. The cleanup is committed as `200b306`; all four affected
-compatibility integration tests also pass.
-
-Whole-process RSS sampling now gates source capture, native data operations and scheduled
-query admission/checkpoints. Initial workstation thresholds pause new data work at 3 GiB
-and resume at 2.5 GiB; control/cancellation/cleanup remain available. Current and peak-sampled
-RSS are separate from DataFusion reservations and spill, and observation failure is explicit.
-Nineteen RSS/scheduler/executor tests, the isolated data-fabric feature check and all four real
-golden cases pass with this behavior. RSS is sampled on Linux; other platforms report it
-unavailable, not zero. Sampling cannot guarantee immunity from OOM. Provider containment,
-shared pools, work/result bounds and physical disk headroom remain in place. Full mixed-language
-provider wiring and sustained retention/performance are outcomes 4–8, still open.
-
-## Outcome 4A — contained Rust startup publication
-
-On 2026-09-09, fresh daemon startup prepares a selected captured Cargo package, runs locked/offline
-metadata inside the same Linux containment used for compilation, binds the returned metadata to
-the selected context/sysroot/source manifest, and publishes accepted compiler Arrow relations.
-Metadata output has bounded, digest-checked readback and cannot authorize compiler observations.
-The input census now supports separate Python/Rust selections without changing captured inputs.
-Compiler coverage uses accepted item-owner counts instead of a fixed single-owner placeholder.
-
-Validation: 27 affected trust/compiler tests pass, including a real contained metadata/compilation
-run. The real mixed Python/Rust daemon case persists the expected `other::target` call into the
-activated Delta snapshot; the provider-selection substitution regression passes. Root library
-Clippy completes with the existing warning backlog; strict repository-wide Clippy is not claimed
-clean. No dependency versions changed. Use `just rust-provider-test` for the real compiler and
-publication scenarios; the extractor may be installed beside the daemon or selected with
-`CODEFABRIC_RUSTC_EXTRACTOR_BIN`.
-
-This first slice supports a dependency-free root package and its selected library or binary.
-It does not close 4A: resolved dependencies, workspace members/multiple targets, generated/proc-macro
-inputs and reusable sysroot/build caches remain. Raw compiler publication is not canonical semantic
-query completion. Outcomes 4–8 remain active in the detailed plan.
-
-The subsequent 4A slice resolves captured path dependencies through contained Cargo metadata
-and admits several distinct compilation units from one Cargo job. A real daemon test queries
-the persisted call relation for both the local call and `helper::increment` from a separate
-captured package. It passes alongside the changed-source/trust-binding rejection test.
-
-Provider views now share application-owned immutable dependency blobs across source generations,
-including sysroot files. Live source/toolchain files are copied into that cache; views never link
-to mutable installed files. Each published view retains bounded input verification. Two cache/view
-tests confirm inode sharing, read-only mode and rejection of changed backing bytes. The combined
-four-case dependency/publication run passes on 2026-09-09. Source edits no longer cause another full
-sysroot disk copy, though trusted toolchain bytes are still recaptured and verified. Cache retention
-and startup/incremental performance measurements remain outcome 8 work. External registry/git
-materialization, generated source maps and multiple selected targets remain open.
-
-The 4A/5A admission follow-up preserves returned facts when declared coverage reports fewer units
-than the selected request. Unreported units become a counted unknown remainder; over-reporting
-is still rejected. Compiler relation aggregation now binds an ordered-independent set of context
-identities while retaining each run's source/context qualification. The affected provider-admission
-tests pass, including missing work, conflicting context identity and changed-source rejection.
-This is admission support for multiple target scheduling, not completed query-scoped status or
-production multi-target scheduling; both remain active work.
-
-Production now discovers captured Cargo libraries, binaries, examples, tests and benchmarks across
-package manifests, including directory binaries and virtual workspaces. Each selected target runs
-in a distinct context with the same captured source generation. Workspace-inherited version/edition
-settings are resolved from captured manifests. Failed target processing remains visible in
-`system.rust_target_progress` while other targets' returned facts are published.
-
-The input catalog retains every provider-specific inventory selection. `system.provider_run_scope`
-joins each run to its file/inventory, context and source generation; `system.provider_family_progress`
-records requested/completed/remaining scope and the actual family state. These are input/status
-relations for query scoping and updates, not an additional proof gate. Six input-observation tests
-pass, including a cross-selection inventory/progress join. Five captured-target/context tests pass.
-Three real daemon scenarios also pass: Python semantic publication, a virtual Rust workspace with
-inherited package settings, and a failed Rust binary alongside working library/binary targets.
-The last scenario confirms both the retained calls and the persisted unavailable target state.
-
-Multiple-target work is currently sequential. External registry/git dependencies, generated-source
-mapping, retained compiler build caches, configurable feature/target profiles and public use of the
-scoped status still remain. The target rows' `processed` state means that compiler output returned;
-per-family rows retain incomplete or unknown semantics, including missing structured diagnostics.
-
-## Outcome 4D — canonical source, declarations and lexical references
-
-Fresh startup now installs native DataFusion transformations for `source.code_file`,
-`fact.code_entity` and `fact.code_declaration`. The source relation selects the captured base
-inventory once, preserving raw path bytes and capture dispositions. Normalization joins exact
-file, content digest and generation; Rust observations also join their admitted run/context.
-Python scope/name bindings and Rust stable compiler keys feed application CBEF identity recipes.
-Declaration occurrences retain their source ranges, raw kind, provider run and separate identity.
-Missing stable compiler keys retain a declaration with an explicit identity gap; they do not
-produce an invented entity. Builtin references are not treated as source declarations.
-
-Real Python and mixed Python/Rust daemon publication/readback pass on 2026-09-09, including the
-expected function names, exact Rust declaration-header span and content digest, and distinct
-entity/declaration IDs. Focused native-plan checks cover repeated assignments, identical names
-in separate files, stale digests, missing providers and contextual compiler identities. The
-stable library check and Clippy command complete; the existing broad warning backlog remains.
-All four `just golden --timeout 360` scenarios pass, including exact reopen and cancellation.
-Public function search now uses canonical entities with query-scoped coverage as described above.
-
-`fact.code_reference` now joins actual Ruff reference observations to canonical binding and
-declaration IDs by file, context, source digest/generation, run and target observation. Read/write
-occurrences have separate application IDs and exact ranges; unresolved targets and context
-mismatches remain rows with explicit unknown reasons. Resolution is labeled lexical: imports,
-external/builtin targets and cross-module semantic resolution are still normalization work.
-The native schema wrapper now accepts a physical non-null refinement of a declared nullable
-field, preserves its declared schema/metadata without copying buffers, and still rejects the
-unsafe opposite direction. This fixes mixed-language branch-filter/left-join planning.
-Types, imports, Rust references, call sites/dispatch and remaining canonical families stay open.
-Validation on 2026-09-09: four canonical tests and three affected native-view/resource tests
-pass; exact installed restart passes. The final mixed-language daemon test reads the expected
-parameter write at bytes 11–16 and read at 42–47 from persisted canonical references. Library
-Clippy completes with the existing 958-warning backlog. No dependency versions changed.
-
-Canonical Rust call publication now emits `fact.code_call_site` from typed compiler calls,
-terminators, stable item keys, admitted context/run scope and exact Tree-sitter call-expression
-ranges. Direct calls bind existing canonical caller and target IDs, including captured Cargo
-path dependencies. Two occurrences sharing a callee retain different call-site IDs. Indirect
-function-pointer targets stay unknown. Unmapped macro/lowered calls retain available target
-facts and an explicit source-mapping reason; their syntax occurrence is not guessed. Compiler
-block/instance keys stay explicitly provider-local provenance, separate from canonical IDs.
-This starts call normalization; Python calls, complete generated/lowered correspondence,
-external endpoints and public relationship/fact query forms remain work.
-
-Validation on 2026-09-09: the extended real mixed-language fixture passes direct, indirect,
-repeated-callee, macro and failed-target cases. The final seven selected canonical/provider/
-restart tests pass, including a real call to a captured path-dependency function and exact
-reopen. The root library check and Clippy complete with the existing warning backlog.
-
-## Outcome 4 — selected Pyrefly context preparation
-
-Pyrefly 1.2.0's Query ignored configured runtime selection by retaining default system
-information. A narrow local dependency fix now creates handles with the selected file
-configuration's system information. The sidecar keeps the same pinned sibling dependencies;
-its handshake identifies the configured-context implementation so an old binary is rejected.
-A null bundle selection uses the pinned embedded bundles; an explicit mismatching bundle is
-rejected. External dependency/stub roots and project configuration preparation remain open.
-
-The deployed context path now accepts supported contexts. Source blobs are read once with
-bounded size, no-follow components, regular-file and exact digest checks before checker-state
-mutation. The same bytes drive checker input and result positions. Source substitution,
-symlinks and FIFOs cannot silently change a selected input.
-
-Validation on 2026-09-09: all 29 sidecar tests and `just sidecar-check` (compile and strict
-Clippy) pass. All 10 root Pyrefly service tests pass with the rebuilt sidecar binary. The
-real-process test now analyzes a version-dependent call through UDS and validates the Arrow
-answer `module.current` for Python 3.14 before joined shutdown. Sidecar tests independently
-cover 3.13/3.14 and Linux/Darwin selection, deletion/recreation and rejected source mutation.
-This demonstrates the provider boundary, not daemon catalog publication or containment.
-The Linux sandbox follow-up below replaces its previously unimplemented policy path. Outcomes 4–8 remain open.
-
-## Linux provider containment
-
-The production launcher now consumes an application-compiled, sealed seccomp descriptor.
-The Linux-only `seccompiler` 0.5.0 dependency compiles architecture-aware filters; existing
-versions are unchanged. The filter permits Unix sockets and normal threads while rejecting
-network socket families, namespace/process-group escape and privileged kernel operations.
-Bubblewrap supplies the private filesystem/PID/network view, and delegated cgroups retain
-whole-process-tree memory/CPU/process accounting and cleanup. A missing host prerequisite
-continues to produce an unavailable containment result.
-
-The live Linux probe uses the same Bubblewrap arguments and descriptor-closing shell as
-production. All 12 sandbox tests and all 39 affected sandbox/Pyrefly/rustc service tests pass
-on 2026-09-09. A real confined worker starts threads and a descendant; kernel usage is
-observed and the complete tree is killed and joined. Strict source-read governance passes.
-The root library Clippy command completes with the existing broad warning backlog; two
-new missing-error-section warnings were corrected. This is containment infrastructure for
-provider integration, not completed daemon semantics.
-
-## Workstation capacity and contained Pyrefly follow-up
-
-User direction on 2026-09-09: exploit the 16-core/32-thread, 192 GB workstation. Legitimate
-large CPG workloads are not defects merely because they need substantial resources. The
-new production settings allow 64 GiB of managed workspace memory, a shared 32 GiB DataFusion
-pool, 16 execution partitions/workers, and RSS pause/resume at 112/96 GiB. The shared disk
-ceiling is 128 GiB, including a 64 GiB spill allowance and room for source/durable/control
-storage; actual free-space checks still apply. A system-memory
-check reserves up to 16 GiB available for other processes and resumes after recovery; its
-floor scales down on smaller hosts. Managed caps are ceilings, not eager allocations.
-
-Provider cgroups no longer impose a one-core CPU quota. Their memory limit measures physical
-pages across the process tree; the virtual-address-space limit is removed. Pyrefly uses 16
-checker threads, two transport workers and up to 16 blocking workers, with a 16 GiB negotiated
-memory profile. This avoids both an unnecessarily serial checker and host-sized implicit
-thread-pool creation. Source/frame limits still require deliberate batching/scaling work;
-these settings do not close the remaining full-product scope.
-
-The contained Pyrefly path now maps each verified host blob to its provider-visible path.
-The same real Python 3.14 call target passes both direct and sandboxed UDS/Arrow sessions.
-An initial confined run reached its 32-process allowance because Tokio selected a host-sized
-pool; the explicit pool fix passed all 11 root Pyrefly tests before the broader workstation
-settings were applied. Handshake/context-close work now observes cancellation and deadlines.
-All 29 sidecar tests plus formatting/strict Clippy pass with the updated checker parallelism
-and memory negotiation. All 67 affected root tests pass with the broader resource profile,
-including system-headroom hysteresis, shared owners, containment, real Pyrefly semantics and
-Rust compiler process ownership. The initial golden startup check exposed a shared disk
-budget mismatch: the spill reservation consumed the entire disk allowance before control
-headroom. After correcting the aggregate disk ceiling, all four `just golden --timeout 240`
-cases pass: startup, Python serving, exact persisted reopen and cancellation. These settings
-are broad starting allowances, not measured optimal tuning or completed mixed-language scope.
-The root library Clippy command completes with 1,013 warnings in the existing backlog;
-this is not a strict root lint pass. Governance and whitespace checks pass.
-
-During validation the generated `target/` directory disappeared outside this task's commands.
-Source edits and commits remain intact; the build directory and sidecar executable have been
-restored and root tests have completed. Free disk initially rose from about 81 GiB to 243 GiB.
-This was a build-environment interruption, not loss of source implementation. The governance recipe is
-also corrected to apply application boundary rules to first-party code, excluding all vendored
-`third_party/` dependencies consistently.
-
-## Pyrefly facts in production publication
-
-Fresh Linux startup now invokes the contained Pyrefly process against a complete captured
-Python inventory and publishes its accepted Arrow relations into the same exact Delta epoch
-as syntax. Captured input identities independently constrain returned source/context pins.
-The existing daemon runtime drives UDS traffic while the source operation retains its leases;
-provider cleanup joins before normal publication. Socket readiness obeys the job deadline
-and cancellation, and descriptor-relative dialing supports long private state paths.
-
-A real daemon test independently asserts that a Python 3.14 conditional call resolves only
-to `sample.current`, although both possible functions exist in syntax. All 35 affected
-provider/admission tests and all four golden daemon/installed-adapter cases pass on 2026-09-09.
-Installed fixtures now include the actual sidecar, and the serving test requires its type/context
-relations in the activated snapshot. The dated-nightly extractor builds and its identity check
-passes; Rust compilation has not yet been wired into daemon publication.
-After separating provider failure from failed process cleanup, all five affected real daemon
-tests pass together. Governance passes; root library Clippy completes with 966 warnings,
-including the new long startup-assembly function, so no strict root lint pass is claimed.
-All 14 extractor tests pass, including its actual compiler callback and IPC round trip.
-
-This is the first production Python semantic contribution. External Python configuration and
-dependency/stub inputs, larger complete inventories, retained checker reuse across updates,
-Rust semantics, and the other first-release query forms remain work. Provider input views are
-currently retained beneath workspace state; their reclamation belongs to outcome 8. The new
-raw call-target assertion is not a claim that public call/relationship querying is complete.
-
-## Real contained Rust compiler boundary
-
-Selected Rust preparation now accepts actual Cargo metadata matching the selected package,
-target and source path, and maps the installed sysroot into the read-only dependency view.
-Other missing dependency/build/configuration inputs remain explicit. The real Linux fixture
-runs offline locked Cargo with the dated-nightly compiler and actual extractor through
-Bubblewrap, seccomp, cgroup accounting and UDS/Arrow admission. It asserts the expected direct
-call to `target` and an explicit missing structured-diagnostics relation while preserving the
-successfully extracted facts.
-
-That run found and fixed two production blockers: the sandbox rejected application-generated
-encoded compiler flags, and the extractor held stderr locked while the compiler thread tried
-to emit Cargo artifact notifications. Compiler identity no longer hardcodes a Darwin host.
-`just rust-provider-test` builds the current extractor and runs this real boundary; the regular
-root Rust test recipe also builds its required extractor.
-
-Validation on 2026-09-09: all 53 affected launcher/preparation/protocol tests pass, including
-the real contained call in about 4.6 seconds. All 14 extractor tests and its strict Clippy/check
-pass. Root library Clippy completes with the existing warning backlog; it is not a strict pass.
-This is provider execution, not Rust daemon publication. Production dependency/context preparation
-and compiler scheduling remain next; the source identity follow-up below is now implemented. The real fixture
-uses its own no-dependency sources and a private copy of the installed nightly sysroot; it does
-not demonstrate arbitrary Cargo workspaces or complete Rust fact families.
-
-## Captured Rust source identities
-
-The compiler subprocess now consumes a bounded source manifest supplied by source capture,
-bound to the selected workspace/generation and launch environment. Preparation requires the
-selected crate root in that manifest. The extractor checks each used file's path and content
-digest, then assigns item owners their actual compiler source span and captured application
-file ID. It no longer labels every owner with a crate-root content hash. Each file is checked
-once per invocation; out-of-inventory locations fail instead of borrowing a crate-root identity.
-The extractor identity includes `captured-files-v1` so its handshake distinguishes older binaries.
-
-The real contained fixture now spans `src/lib.rs` and `src/other.rs`. It asserts the nested
-module's direct call and its distinct supplied file identity. That run passes in about 4.6
-seconds. All 25 preparation tests and 14 extractor tests pass, including changed/unlisted
-source and changed-manifest rejection. Extractor strict Clippy and governance pass. Root
-library Clippy completes with 969 warnings; no strict root lint pass is claimed.
-Rust daemon publication and production context/dependency preparation remain work. This
-fix supplies a necessary identity boundary; it does not complete normalization, arbitrary
-generated/macro source support or the remaining product outcomes.
-
-## Completed preparation
-
-[Preparation plan](docs/plans/codefabric_pragmatic_delivery_nonproduction_preparation_plan_2026-09-08.md), steps 1–8:
-
-- Consolidated workflow skills and short canonical instructions; library references remain optional API navigation.
-- Revised the eight selected domain documents, resource/artifact principles, alignment guidance, roadmap and indexes. Historical predecessors remain unchanged.
-- Retired plan activation/state/artifact/oracle/packet/source-bundle machinery and its live callers; kept actual behavioral and build-boundary checks.
-- Added proportionate Just commands, CI change routing, truthful hook/config reporting and licensing-free routine dependency policy.
-- Prepared independent Python/Rust fixtures, edit sequences, bounded real-product runners, reusable semantic/differential helpers, scale-source generation and measurement tools.
-- Created the complete production backlog, including the WP77–WP106 disposition table and detailed first fix.
-
-Execution began at `7479af1`. Preservation commit `84833ca` saved the pre-existing assessment and its two validator additions before retiring that validator. Preparation implementation is commit `79c5d52`. All preparation edits used the canonical tree; existing historical worktrees were left untouched. No subagents or extra worktrees were created for preparation.
-
-## Validation and limits
-
-Checks on the preparation tree, 2026-09-08:
-
-| Check | Result |
+**Outcomes 1–3 are implemented for the current Linux workflow. Outcomes 4 and 5 are partially
+implemented. Outcomes 6–8 remain open, with reusable infrastructure and some prerequisite work
+already present. No outcome from 4 through 8 is complete.**
+
+Follow the [production backlog](docs/plans/codefabric_pragmatic_production_implementation_plan.md)
+and its [detailed outcomes 4–8 execution plan](docs/plans/codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md).
+The [consolidated review](docs/reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md)
+and [selected design](docs/spec_index/README.md) retain the full Python/Rust CPG, all eight forms,
+composition, truthful incomplete scope and sustained operation. The detailed plan now separates
+implemented portions, unfinished acceptance and the next work for every slice.
+
+Fresh daemon startup captures real Python/Rust inputs, runs contained semantic providers and
+publishes exact Delta versions. Canonical declarations, Python lexical references and Python/Rust
+call occurrences exist. Installed FastMCP clients have exercised function search and declaration
+fact retrieval with scoped processing and observed result truncation. Full public call traversal
+has **not** been demonstrated. A running daemon does **not yet** continuously update the graph;
+startup still waits for semantic work before publication. The first useful release remains open.
+
+All work in this implementation has used the canonical tree and small commits. No new independent
+worktrees or subagents were created. At this checkpoint no implementation build/test process remains
+running. Existing production edits are preserved while the user-requested documentation update is made.
+
+## Uncommitted continuation: call scope and public call queries
+
+There are two successive validation levels in the current source changes:
+
+1. **Call-specific processing: implemented and focused tests passed, not committed.**
+   Requested provider/input partitions are retained in `system.requested_processing_scope`.
+   A native DataFusion transformation produces `system.entity_processing_scope`, keeping
+   `function-declarations` separate from `call-targets`. Call partitions combine terminal Ruff,
+   Pyrefly or rustc family coverage with unresolved targets, absent source/caller identities and
+   Pyrefly calls without explicit Ruff callee syntax. Semantic gaps can mark a completed provider
+   partition partial without changing declaration completeness. The implicit-call detection path
+   exists, but a dedicated property/decorator scenario has not exercised it.
+2. **Public call-query wiring: implemented to compile, behavioral validation pending, not committed.**
+   `fact.code_call_selector` uses native joins to canonical entities and incoming/outgoing projections.
+   `query.result.call-facts` reuses the declaration query's typed subject semi join. The recipe accepts
+   exact canonical entity subjects, `calls`/`call relationships`, incoming/outgoing direction and
+   explicit `one relationship step`/`one step` distance. Omitted direction projects as outgoing.
+   Public endpoint/call-site IDs, deterministic ordering, language/context scope and call-family
+   processing are wired. These are intended behaviors awaiting execution through the real service.
+
+Changed surfaces: startup `processing.rs`, `canonical.rs`, `canonical/processing.rs` (new),
+`canonical/call_selector.rs` (new), `canonical/python_calls.rs`, startup assembly,
+`src/fabric/processing_status.rs`, `programmatic_ingress_port.rs`, `programmatic_query_backend.rs`,
+`src/production_query_recipe.rs`, `production_query_recipe/facts.rs` and the daemon integration test.
+
+Four focused tests passed before the call-selector/query changes: three processing-scope tests and
+`pragmatic_python_semantics_publish_real_call_targets` (6.59 seconds). They verify family isolation,
+remainder paging/context handling and real Python declaration-complete/call-partial publication.
+The subsequent whole dirty library passes `just root-check-fast` (66 warnings; 7.13 seconds).
+**That check does not execute DataFusion plans or validate the new public form.** No test or Clippy
+result is claimed for the final call-selector/query changes. Resume here, preserving both new files.
+
+## Outcome 4: real inputs, canonical facts and the first four forms
+
+### 4A — Rust contexts and production compilation: partial
+
+Implemented in `eba6f19a`, `baf533f4`, `52477365` and `b6a7d777`:
+
+- Contained locked/offline Cargo metadata and compilation during fresh startup, bound to captured
+  manifests, source generation, context, compiler/sysroot and the extractor source manifest.
+- Captured path dependencies, multiple compilation units, package and virtual workspaces with
+  inherited package settings; libraries, binaries, examples, tests and benchmark targets.
+- Distinct target contexts and sequential execution. A failed target retains other targets' facts
+  and records its unavailable state in `system.rust_target_progress`.
+- Reusable immutable dependency/sysroot blobs shared between provider views. Mutable installed
+  files are copied and verified before reuse; per-edit full sysroot disk copies are avoided.
+- Raw compiler Arrow publication and per-family partial admission. Missing units remain unknown;
+  excess units or substituted source/context pins are rejected. Target `processed` means output
+  returned, not that every compiler family or semantic proposition is complete.
+
+Remaining: registry/git dependency materialization; build-script/proc-macro and generated `OUT_DIR`
+input closure/source mapping; effective Cargo configuration/environment and selectable feature,
+profile/target combinations; host-versus-target build separation; retained compatible compiler
+build caches; bounded parallel context scheduling; byte-safe compiler path handling; structured
+compiler diagnostics; update-time invalidation, cancellation and obsolete-completion scenarios.
+
+### 4B — Python contexts and semantic extraction: partial
+
+Contained Pyrefly startup honors selected Python version/platform and uses the pinned embedded
+bundles. Its private input view verifies captured bytes, no-follow regular files and exact source
+bindings before checker mutation. Both direct and contained real-process tests pass.
+
+`1301df5a` removes the old 64-module ceiling with ordered descriptor chunks under one complete
+checker inventory. Sequence/end counts, duplicate/missing members, deadline/cancellation and input
+bounds are checked before run acceptance. The producer and uploader advance together over a bounded
+channel; chunks do not create independent checkers. A real 70-module daemon fixture resolves
+`extra_69.chosen` among 69 distinct same-name function declarations.
+
+`92bb153d` extends the selected Pyrefly Query seam with checker-selected definition coordinates.
+Function metadata resolves through the definition index into the target module's declaration;
+imported aliases and bound methods are tested. The sidecar maps coordinates to captured file/digest
+pins, and the daemon independently validates file, digest and range. Synthesized/unavailable or
+out-of-inventory definitions remain explicit gaps; qualified display names are not identity.
+
+Remaining: project configuration and ordered external import roots; namespaces/re-exports and
+`.pyi` precedence across dependencies; external distribution/stub materialization and identity;
+canonical structural type/member/import/reference output and all declared/computed/expected/narrowed
+propositions; full overload/descriptor/decorator semantics; retained checker updates and context
+invalidation. Current bulk raw output and selected call resolution do not close those families.
+
+### 4C — source and syntax: partial
+
+`11a61909` publishes six Rust Tree-sitter source-context relations independently of successful
+compilation, including exact-byte CST recovery for malformed Unicode/CRLF source. Rust schemas do
+not invent Python version fields. Python retains syntax/parse diagnostics while failed Ruff semantic
+families report unknown coverage. `734821db` adds owned Ruff callable, call-site and callable-syntax
+observations: native syntax has 28 relations total, including 22 Ruff relations. Provider-local
+syntax/binding IDs remain observations within their admitted source/context/run.
+
+Remaining: full source/lexical/CST feature census; retained parsers/query packs and incremental trees;
+complete trivia/index/coordinate handling; non-identity decoded source mappings (for example BOM or
+non-UTF-8 Python encodings); reversible compiler paths and source presentation; rename/case-collision
+semantics; incomplete-edit behavior during actual live updates. No source-context public form is
+implemented for the canonical production release yet.
+
+### 4D — canonical normalization: partial
+
+The committed canonical catalog includes:
+
+| Relation | Implemented behavior and limits |
 |---|---|
-| `just tooling-test` | 184 passed; these test tooling and harnesses, not full CPG behavior |
-| `just tooling-lint` | Format and lint pass for 30 tooling files |
-| `just docs-check`, all changed Markdown local links and scoped spelling | Pass; core navigation checks 17 documents |
-| Spec outline fixture tests and current-suite outline | Pass; selects the eight working masters without plan history |
-| Shell syntax, environment-contract and tool-version checks | Pass; recipes isolate synthetic inherited contamination |
-| `just doctor` | 13 ok, 0 warn, 0 fail; healthy cache/tooling preserved |
-| Hook from a subdirectory, installed Codex configuration/rule checks | Pass; valid JSON, STATUS handoff, actual local source selections |
-| CI configuration/routing and recipe references | Local checks pass; hosted CI has not been executed here |
-| `just policy` | Advisories, bans and sources pass; licensing is outside the routine check |
-| Scale-source generator | 10 generated modules per language, 23 source files; workload preparation, not a performance measurement |
-| `just golden --case startup --timeout 240` | **Failed:** one real selected test reproduces the retained activation-control provisioning error |
-| Production boundary and whitespace | No runtime/native/dependency/wire/runtime-contract changes; `git diff --check` passes |
+| `source.code_file` | Captured input identity, raw path bytes, content/generation and capture disposition |
+| `fact.code_entity`, `fact.code_declaration` | Python bindings and Rust stable compiler keys mapped through application identity recipes; declarations retain separate occurrence identity, exact source range, context and provenance |
+| `fact.code_entity_selector` | Canonical function selectors for Python, Rust or both |
+| `fact.code_reference` | Python lexical read/write occurrences joined to bindings/declarations through exact source/context/run pins; unresolved targets retained; project-aware semantic and Rust references remain open |
+| `fact.code_call_site` | Python and Rust call occurrences, caller/target identity when established, resolution/dispatch, exact or explicitly unavailable source mapping, raw provider provenance |
 
-The real startup test reports `activation-control-provision`: `local store mutation requires its admitted native runtime`. It fails before readiness; this is not skipped or converted to an expected pass. Local ignored observations are in `target/preparation-*.log`, `target/preparation-session-hook.json` and `target/product/golden.json`. They are development observations, not committed proof artifacts. The golden observation was taken at `84833ca` plus the recorded preparation diff; production inputs did not change.
+Native DataFusion joins/projections construct these relations. Rust uses actual stable crate/definition
+keys and kind; missing stable keys yield identity gaps. Direct calls, repeated same-callee occurrences,
+function-pointer unknowns, captured dependency targets and macro/lowered source-mapping gaps are tested.
+Python uses exact Ruff caller/call syntax and checker-selected target definitions. Repeated calls remain
+distinct; dynamic targets remain unknown. Module/lambda calls retain application-owned source occurrences,
+with unavailable public caller entities explicit. Implicit property/decorator calls are not fully normalized.
 
-The earlier closeout at `0cc7242` recorded a passing root check and 1,038 root tests passed, 13 failed, two skipped. Those are historical results; preparation did not rerun or claim the full product suite. The August cached baseline is stale.
+`d7487f39` permits a native non-null refinement of a declared nullable field while rejecting the unsafe
+reverse; buffers and schema metadata remain intact. Exact Delta reopen restores logical fixed-width IDs
+and numeric types from storage representations. `068e8fd4` fixes empty metadata-rich IPC schema validation
+to use the admitted allocation bound instead of encoded page length.
 
-## Remaining production work
+Remaining: full module/class/lambda/callable entities; semantic imports/exports and references for both
+languages; canonical structural types and propositions; members/signatures/argument binding; complete
+candidate/dispatch and executable-instance relations; external endpoints and generated/lowered correspondence;
+full per-proposition authority/conflict retention; identity continuity and owner replacement under edits.
+Raw provider coverage is not complete canonical-family coverage.
 
-Complete actual semantic contributions from Python and Rust, implement query-relevant processing remainder, live invalidation/publication and quiet convergence, then finish all analyses/forms and sustained bounded operation with safe retention and measured performance.
+### 4E — public query forms: partial
 
-The mixed-language public-answer adapter, real convergence/rebuild callbacks, obsolete-completion controls and phase-specific runtime telemetry are tied to these production changes and explicitly scheduled in the production plan. Prepared fixtures and harness unit tests do not imply those behaviors work. Native receipt forks have been removed; the new Pyrefly context fix remains a selected local dependency.
+| Form | Demonstrated current behavior | Remaining |
+|---|---|---|
+| FindEntities | Installed client returns canonical Python/Rust functions; language/context filters precede limits; stable name/entity ordering | Other kinds/representations, source boundaries, semantic name/ambiguity resolution and full directives |
+| RetrieveFacts | Explicit canonical entity IDs; `declarations` or `declaration locations and provenance`; native semi join prevents repeated subjects duplicating occurrences; partial and empty cases tested | Types, members, call/derived families, point filters, broad family expansion and phrase/fact/prior-result resolution |
+| FollowRelationships | Canonical call data is committed; one-step public call recipe is uncommitted and compile-checked only | Execute/fix new call path; references/imports, candidates, full direction/distance/stop/filter behavior and composition |
+| RetrieveSourceContext | Existing source storage/lease infrastructure only | Canonical production form, exact selected bytes after disk changes, separate disclosure authorization, coordinate and truncation delivery |
+
+Unsupported subject meanings are explicitly rejected; they do not fall back to names. The generalized
+pragmatic expectation corpus is not fully connected to all public forms. The static four-form mixed-language
+acceptance and the live first-useful-release acceptance are both still open.
+
+## Outcome 5: processing, incomplete scope and freshness
+
+### 5A — requested/query scope: partial
+
+`system.provider_run_scope` and `system.provider_family_progress` retain requested inputs, provider/context
+pins and terminal family state. Committed entity processing uses requested Python files and selected Cargo
+targets, independently of emitted fact rows. Public function/declaration queries select language/context
+before limits and summarize corresponding partitions. Failed Rust targets do not make a Python-only query
+incomplete. Missing capture, unsupported work, failure, deadline, cancellation and resource bounds retain
+reason categories; coverage and row truncation are distinct.
+
+The first remainder page is bounded to 64 rows with `next_offset`; raw path bytes, optional display path,
+target/kind and known context survive projection. The summary is retained with the exact result package.
+The uncommitted call-specific extension is described above and conservatively includes the selected
+context's potential callers. It does not yet derive exact owner/reverse-dependency scope.
+
+Remaining: all family/owner dimensions; public remainder pagination; authorization-scoped efficient status
+scans; incoming reference/import and negative dependency/frontier propagation; shared live pending/running
+state; provider precision and actionable retry details; a clean distinction between terminal semantic
+unknowns and runnable pending work for convergence. Empty results alone never establish complete absence.
+
+### 5B — wire delivered in part; freshness barriers open
+
+`b865c6b2` adds typed Protobuf processing fields, strict Pydantic projections and retained manifest/reopen
+support. Presence distinguishes unobserved result exhaustion from observed false. Streaming observes one
+authorized lookahead row, seals only N requested rows and reports actual truncation; at a grant ceiling,
+exactly N rows leave exhaustion unknown. `e65bdbeb` fixes released diagnostic enum projection in the adapter.
+
+Remaining: actual selection/barriers for `best_available_snapshot`, `await_latest`,
+`require_current_for_targets`, `require_source_current` and `require_semantic_current`; historical/newer
+workspace observations; public pagination; generation/context/family convergence waits and compile-failure
+quiescence. The backend still supplies `FreshnessState::Current` on the inspected path; this does not
+implement those policies or prove currentness against live disk edits. Strict freshness is a priority
+before claiming continuous or fully current service behavior.
+
+## Outcome 6: continuous updates — open
+
+| Slice | Existing foundation | Remaining delivery |
+|---|---|---|
+| 6A | Secure capture and repository/source-wave components | Daemon-owned notify/gix input loop; watch-before-census; bounded dirty queue/coalescing; overflow/rescan, polling, rename/delete/root/config recovery |
+| 6B | Source/context identities, exact admitted provider pins and owner/command seams | Immediate semantic invalidation; conservative context dependencies including negative imports; deletion/replacement; generation fences and stale-completion rejection during updates |
+| 6C | Working startup composition, exact version vectors and immutable dependency blobs | Reuse startup for updates; source/syntax publication before semantics; retained Tree-sitter/Pyrefly/Cargo state; changed-version reuse and fair scheduling |
+| 6D | Prepared independent expectations, edits and comparison helpers | Real persistent-daemon versus independent-clean adapters, observable quiet convergence and semantic/identity/coverage comparisons over actual edit sequences |
+
+No startup-versus-restart test is being counted as live incremental convergence. Python canonical identity
+continuity across unrelated edits also needs the actual incremental/clean corpus; current identities are
+not evidence that all continuity requirements hold.
+
+## Outcome 7: full analyses and all eight forms — open
+
+| Slice | Implemented prerequisite | Remaining delivery |
+|---|---|---|
+| 7A Python language semantics | Owned Ruff bindings/references/call syntax and selected Pyrefly call definition anchors | Complete scope/binding/import/type/member/call/decorator/pattern/comprehension and dynamic-semantics rows, canonical consumers and invalidation |
+| 7B Python CFG/dataflow | Typed analysis code and prepared source expectations | Correct owner-scoped control/evaluation semantics, normal/exception/cleanup/suspend edges, reaching definitions/liveness and real production input wiring; replace ordinal/sequential approximations |
+| 7C Python advanced state | Existing analysis structures | Finite memory/points-to, effects/resources/exceptions, capture/generator/async/concurrency and unknown propagation, built on 7B |
+| 7D Rust source/types/MIR | Real typed compiler publication, stable declaration keys and selected canonical calls | Full types/generics/traits/instances/MIR payloads, macro/hygiene/generated spans, coroutine/CTFE/FFI facts, structured diagnostics and canonical/public coverage |
+| 7E Rust derived/private borrow | Existing MIR analysis modules and contained compiler seam | Real typed inputs, finite dataflow/state/ownership analyses, exact private loans/regions, drop/unwind/coroutine and changed-body replacement |
+| 7F Common graphs/summaries | Existing petgraph/analysis integration and canonical calls | Demand-rooted projections, correct dominance/SCC/reachability, structural facts and bounded interprocedural fixpoints with precision/frontier scope |
+| 7G Complete forms/composition | Eight-form request/ingress infrastructure; two limited public forms, third in progress | FindPaths, MatchPattern, Compare and Summarize; finish first four; real typed multi-block DAGs, fan-out/fan-in, repeated forms, references, authorization, negatives, ordering/limits and cancellation |
+| 7H Modern presentation | Installed FastMCP transport/resources, guarded-input scenarios, typed processing and diagnostic correction | All-form presentation, full paging/cursors and source permissions; replay/expiry/reconnect/slow-reader/TTL integration for new workflows; one consistent daemon-authored response |
+
+Substantial existing algorithms and fixtures are reusable, but fixture-fed or schema-only families are
+not delivered production analyses. Every row in the detailed plan's full ontology coverage map remains
+required through canonical facts, public retrieval, precision/unknowns and update replacement. Dynamic
+unknowns are legitimate terminal facts; unfinished implementation is a separate remaining task.
+
+## Outcome 8: sustained operation — open
+
+| Slice | Existing foundation/progress | Remaining delivery |
+|---|---|---|
+| 8A Persistence | Exact Delta publication/reopen, removed proof-only histories, immutable provider-input blob reuse | Consumer-based durable/cache split, unchanged version/owner reuse, fewer redundant history/intermediate writes and measured growth over edits |
+| 8B Maintenance | Native checkpoints and retention-aware vacuum dry runs | Native compaction and destructive vacuum remain unavailable; fix actual commit-properties/transaction/retry seams, replace `AtomicVacuumApprovalBinding` with writer/reader ownership, protect files plus reconstruction logs and test real reclaim/recovery |
+| 8C Retention | Store budgets, headroom and existing leases/handles | Coordinated history/result/source/context/build/cache/diagnostic TTL and eviction; maintenance scheduling; finite retained state through real cycles while protecting readers and uncertain writers |
+| 8D Recovery | Linux containment, joined subprocess/native cleanup, exact restart and focused cancellation/lost-ack tests | Failures/races introduced by updates, retained providers, new forms and native maintenance; pressure/expiry recovery; explicit unsupported behavior for unimplemented deployment profiles |
+| 8E Measurement | RSS/cgroup/headroom signals, benchmark harness and small real scenario timings | Correlated phase metrics, representative small/medium/large and real-repository CPG workloads, distributions, convergence/first-batch/retention/recovery measurements |
+| 8F Performance | Native canonical joins, valid schema refinement, streaming lookahead and shared immutable input storage | Safe scan pushdown/statistics/physical properties, pruning/file-size tuning, workload-based parallelism/caches and measured before/after improvements; overlays/CDF/Rayon/orjson only with a concrete need |
+
+`delta_guarded_maintenance.rs` still returns `OptimizeCommitIdentityAndRetryControl` and
+`AtomicVacuumApprovalBinding`. No optimize commit or destructive vacuum/reclamation is claimed.
+No representative benchmark or sustained bounded-storage acceptance has been completed.
+
+## Validation and limits at this checkpoint
+
+These are attributable implementation runs from 2026-09-09, not tests rerun for this documentation
+refresh. Counts below overlap; they must not be added into a full-suite total.
+
+| Code scope | Command/observation | Result and boundary |
+|---|---|---|
+| Through canonical Rust calls (`45421cff`) | Focused canonical/provider tests and real mixed/path-dependency daemon scenarios | Direct, indirect, repeated and macro/unmapped calls; exact installed restart pass; seven final selected cases pass |
+| Public declaration facts (`64ce1acf`) plus IPC/diagnostic corrections | Focused query/scope/resource tests, installed mixed-client query, exact restart | 42 selected tests pass; repeated subjects, failed Rust target, completed empty Python scope and unsupported references exercised; exact reopen about 15.2 s |
+| Chunked Python inventory (`1301df5a`) | 16 selected root Pyrefly/daemon tests; sidecar check/tests; protocol and adapter checks | Pass, including contained cross-chunk imports and 70-module fresh Delta publication; 29 sidecar and 95 adapter tests, adapter lint/types and `just proto-check` pass |
+| Checker definition anchors (`92bb153d`) | `just sidecar-test`, `just sidecar-check`; selected root provider/recipe/daemon cases | 30 sidecar and 26 root cases pass; imported alias/bound method, wrong file/digest/range and real 70-module target anchors |
+| Canonical Python calls (`734821db`) | Affected native/canonical/recipe tests plus real Python/mixed Rust and installed restart | Initial stale relation-count assertions were corrected; final selected rerun passes; repeated, module and dynamic calls and cross-module exact call range tested; reopen 15.6 s |
+| Compiler-input governance (`fe51b1bd`) and committed call work | `just governance-scan`, root library Clippy, docs/whitespace checks | 30 rule cases and scan pass. Configured compiler/extractor readers have narrow exceptions; workspace source capture rules remain. Clippy completes with the existing warning backlog, not strict cleanliness |
+| Uncommitted processing extension, before public call wiring | `just root-test-incremental -E 'test(processing_scope) \| test(pragmatic_python_semantics_publish_real_call_targets)'` with both real provider binaries selected | Four pass: three scope tests and real Python publication, 6.59 s runtime |
+| Final uncommitted call-query library | `just root-check-fast` | Pass, 66 existing warnings; public call execution, affected tests and Clippy still pending |
+
+Local observations for resumption include `/tmp/codefabric-call-processing-tests.log`,
+`/tmp/codefabric-public-calls-check.log`, `/tmp/codefabric-python-canonical-calls-final-regression.log`
+and `/tmp/codefabric-python-call-anchors-*`. They are optional local logs, not required runtime
+artifacts or a new certification mechanism. Git and named behavioral tests retain the useful history.
+
+The existing four golden scenarios have passed during earlier slices (startup, installed Python
+serving, exact reopen and cancellation). They were not rerun on the final dirty call-query code and do
+not exercise full outcomes 4–8. Root Clippy retains a large warning backlog (958 in the recent recorded
+library run after new warnings were addressed). The last older aggregate root result at `0cc7242`
+reported 1,038 passed, 13 failed and two skipped; it is historical, not a current verdict. No new
+four-domain aggregate, full-root green result or universal product completion is claimed here.
+
+## Runtime profile and completed foundations
+
+The [nonproduction preparation plan](docs/plans/codefabric_pragmatic_delivery_nonproduction_preparation_plan_2026-09-08.md)
+was completed in `79c5d52`: pragmatic skills/instructions, selected design alignment, retired process
+machinery, focused command/CI/environment checks, and independent product fixture/tooling preparation.
+That readiness did not establish production completion; the startup failure recorded during preparation
+was subsequently repaired in outcome 1.
+
+Preparation and outcomes 1–3 remain implemented for the Linux workflow: owned control/candidate
+publication, exact activation/readback/reconciliation, removal of the generalized proof-program and
+allocation-receipt paths, one-pass catalog/schema validation, real execution bounds and joined cleanup.
+Useful exact histories, provider coverage, source identity and operation outcomes remain. Historical
+`proof_receipt` compatibility fields do not reinstate a proof evaluator. Previous source-read/governance
+findings are resolved; uv is aligned to the actual host update, 0.12.11 (`fe5615f`).
+
+The workstation profile is 16 physical cores/32 threads and 192 GB RAM: 64 GiB managed workspace budget,
+32 GiB shared DataFusion pool, 16 data workers/partitions, RSS pause/resume at 112/96 GiB, system-memory
+headroom up to 16 GiB, and a 128 GiB shared disk allowance including 64 GiB spill. These replace the old
+3/2.5 GiB RSS thresholds. Actual free disk and physical process memory matter; reservations are not RSS.
+Linux containment combines Bubblewrap, seccomp and cgroups. Provider cgroups do not impose a one-core
+quota or virtual-address-space limit. Pyrefly uses 16 checker threads, two transport workers, up to
+16 blocking workers and a negotiated 16 GiB memory profile. Other platforms must report unavailable
+observations/containment honestly; sampling does not guarantee immunity from OOM.
+
+Current source/transport ceilings: 1 GiB mixed captured source set; Pyrefly 16,384 modules, 64 descriptors
+per chunk, 32 MiB per file, 512 MiB source bytes and 32 MiB aggregate descriptors per run; individual RPC
+frames remain 4 MiB. Context opening remains unary/bounded and external roots remain unfinished. These
+are configured ceilings, not measured optimal workload sizes. Dependency blobs avoid repeated sysroot
+disk copies, but toolchain verification cost, retained build state and cache reclamation still need work.
+
+Use self-contained `just` recipes; keep stable/sidecar shared `target/` and the extractor's separate
+dated-nightly target. Real root provider tests require current `CODEFABRIC_RUSTC_EXTRACTOR_BIN` and
+`CODEFABRIC_PYREFLY_SIDECAR_BIN`. Rebuild a changed sidecar through the repository shell or the existing
+golden setup; `just sidecar-check` checks/lints rather than installing a fresh executable. No routine
+`cargo clean`, independent worktrees, source-edit artifacts or new approval cycle is required.
+
+## Next action
+
+1. Finish the preserved call-query continuation: exercise real installed-client incoming/outgoing,
+   repeated-subject, unknown-target, empty/partial, direction-default, distance/limit and language/context
+   cases; verify query compilation, exact reopen and declaration-query regressions; fix issues, run
+   affected Clippy/governance, then commit the coherent slice. Do not treat the current compile pass as
+   completion of FollowRelationships.
+2. Finish 4A–4D effective/external/generated inputs and canonical families needed by the first four forms;
+   complete 4E and 5A–5B, especially public remainder paging and real freshness barriers. Retain the broad
+   workstation allowances and honest partial semantics.
+3. Connect 6A–6D continuous observation, invalidation, two-speed publication, retained providers and the
+   independent clean/incremental corpus. Only then claim the first useful release.
+4. Continue 7A–7H and 8A–8F to the full plan acceptance: every family and all forms/composition, finite
+   retention, actual native maintenance, recovery and representative performance. Add phase metrics and
+   persistence improvements while integrating updates; optional performance mechanisms remain conditional.
+
+The user's current request is to reconcile these documents. Production implementation remains authorized
+but is left at the explicit checkpoint above for the next implementation turn.

@@ -1,8 +1,8 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `master` at `126cf71f` (`Bind compiler owners to captured Rust source file identities`).
+Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `734821db` (`Publish canonical Python call occurrences and checker-resolved edges`) and the uncommitted continuation described in §1.4.
 
-This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Implementation has not been performed by writing this document.
+This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Implementation is underway. The status notes distinguish demonstrated committed behavior, uncommitted work and remaining acceptance; writing or updating this plan is not implementation evidence.
 
 The objective is a useful, continuously updated Python/Rust code property graph, queried through the Rust daemon and thin FastMCP adapter, with Arrow, DataFusion and Delta doing the data work. Every selected fact family, all eight query forms, composition, truthful unfinished scope and sustained operation remain required. The first useful release is an intermediate delivery boundary, not a reduction of the full target.
 
@@ -23,29 +23,70 @@ Use the revised selected domain specifications, with the [consolidated pragmatic
 
 ### 1.2 What already works and what must change
 
-These are code/handoff observations at the baseline, not a new test run. Existing tests establish only their recorded scope.
+This is the current implementation baseline, reconciled from code, commits and recorded checks on 2026-09-09. The original plan started at `126cf71f`; that creation baseline no longer describes the running implementation. No outcome from 4 through 8 is complete. Existing checks establish only their recorded scope; see §9.1 and STATUS for validation limits.
 
-| Surface | Baseline | Remaining implementation |
+| Surface | Implemented now | Remaining implementation |
 |---|---|---|
-| Startup, exact publication and reopen | Outcomes 1–3 are implemented for the current Linux workflow; four existing golden scenarios are recorded passing | Preserve these paths as real providers, updates and maintenance are integrated |
-| Resource ownership | Shared runtime/store/pool ownership, cancellation, containment and broad workstation budgets exist; generalized allocation receipts were removed | Exercise all new work through those owners; finish finite retention and sustained measurements |
-| Python semantics | Fresh daemon startup runs contained Pyrefly and publishes raw types/calls; selected Python version/platform affect the checker | External environment/import/stub inputs, full semantic normalization, larger projects and persistent update scheduling |
-| Rust compiler boundary | Real contained, locked/offline Cargo/extractor run; exact captured source-file manifest; independent two-file direct-call assertion | Production metadata/dependency preparation, target/context scheduling, diagnostics, publication and public semantic answers |
-| Native syntax | Production recipe currently pairs Python Tree-sitter/Ruff relations | Full Python coverage and actual Rust Tree-sitter lane, including recoverable errors and source coordinates |
-| Query construction | `compiled_released_form_programs` in `production_query_recipe.rs` currently constructs only FindEntities from available Ruff bindings | Semantic two-language backing plus the other three first-release forms; remaining four forms and full composition later |
-| Analyses | Python, MIR and common analysis modules contain substantial typed code and algorithms | Feed real accepted inputs; replace approximations; fill families; establish source-to-public-answer behavior |
-| Updates | Typed source-wave command and publication/reconciliation seams exist | A running watcher/coordinator, effective invalidation, two-speed publication, obsolete-result rejection and convergence |
-| Corpus tooling | Independent expectations and edit helpers exist; `clean_incremental` takes caller-supplied adapters | Real runtime capture, independent rebuild and coverage-driven convergence adapters |
-| Maintenance | Exact checkpoints and native vacuum dry runs exist | Compaction and destructive vacuum are explicitly unavailable in `delta_guarded_maintenance.rs`; implement safe native execution and retention |
-| Measurement | Product benchmark wraps real scenarios and reports missing metrics | Phase instrumentation, representative workloads and sustained performance/recovery observations |
+| Startup/publication/reopen | Linux outcomes 1–3; contained Python and Rust providers; exact selected Delta publication and reopen | Preserve these paths while adding live updates, full queries and maintenance |
+| Resources | Shared owners/pool/store, joined cancellation, Linux containment, broad workstation budgets; generalized allocation receipts removed | Retention, sustained pressure/recovery and measurements across all new consumers |
+| Rust contexts | Contained locked/offline metadata/compiler startup; captured path dependencies; multiple target contexts, virtual workspaces/inherited settings; reusable immutable sysroot/dependency blobs; target/family remainder | Registry/git and generated/proc-macro/build-script inputs, complete effective configuration, retained build caches, parallel scheduling and structured diagnostics |
+| Python contexts | Selected version/platform; contained captured inventory; chunked descriptors into one checker; real cross-module call resolution and checker-selected definition anchors | External roots/distributions/stubs, project configuration, complete semantic families and retained incremental checker state |
+| Source/syntax | Production Python Tree-sitter/Ruff plus six Rust Tree-sitter relations; recoverable errors; Ruff callable/call-site/callable-syntax observations | Full source/lexical census, non-identity decoded byte mappings, reversible compiler paths, retained parsers and incremental behavior |
+| Canonical facts | `source.code_file`, entities/declarations/function selectors, Python lexical references and Python/Rust call sites; native DataFusion normalization and exact storage type restoration | Full modules/classes/lambdas, imports/exports/semantic references/types/members/signatures/dispatch/instances, external/generated correspondence and edit-time identity/replacement |
+| Public forms | Installed-client FindEntities for canonical functions and RetrieveFacts for exact-ID declaration facts; scoped partial/empty results and limits | Uncommitted one-step call traversal needs behavioral validation; SourceContext, broader first-four meanings and full composition remain open |
+| Processing/wire | Requested files/targets, provider run/family scopes, language/context summaries, typed Protobuf/Pydantic result processing, first 64 remainder rows and observed N+1 truncation | All-family/owner/dependency scope, public remainder paging, live state and real freshness barriers; call-specific scope is uncommitted |
+| Analyses | Substantial typed Python/MIR/common code and selected real raw provider inputs | Actual production wiring, corrected algorithms, canonical/public consumers and full family precision/replacement |
+| Updates/corpus | Source-wave/identity/activation seams and prepared independent expectations/edit helpers | Running notify/gix coordinator, invalidation, two-speed publication, retained providers, stale-result rejection and real clean/incremental convergence |
+| Persistence/maintenance | Exact reopen, immutable input deduplication, native checkpoints and retention-aware dry runs | Selective persistence/version reuse, native compaction/destructive vacuum, coordinated retention and real reclamation |
+| Measurement | RSS/cgroup/headroom signals, real small scenario timings and benchmark tooling | Phase instrumentation, representative workload distributions, edit latency and sustained retention/recovery measurements |
 
-Important limits to address as scaling work: startup Pyrefly preparation currently has 64-module and 8 MiB-per-file limits; source inventory preparation has bounded aggregate reads; the new Rust source manifest is bounded at 64 MiB/one million entries. Preserve bounded protocol inputs, but remove accidental project-size ceilings through chunked inventory/batches and scheduling. A project exceeding a transport chunk is not intrinsically unsupported.
+Current bounds supersede the original 64-module/8 MiB startup limitation: Pyrefly accepts up to 16,384 modules, 32 MiB per source file, 512 MiB source bytes and 32 MiB descriptors per context run, sent in chunks of up to 64 modules. Mixed source capture allows 1 GiB. Frames remain bounded at 4 MiB; context opening remains unary/bounded. These are configured ceilings, not measured optimal capacities or proof that arbitrary external contexts work. The compiler source manifest retains its separate bounded contract. Scaling and retention remain required; increasing an input bound does not implement scheduling.
 
 ### 1.3 Execution policy
 
 Implement and integrate in the canonical working tree. Each slice ends with a working consumer, relevant checks and a concise STATUS update; commit coherent changes promptly. Do not accumulate independently designed interfaces in temporary worktrees. The sequence below does not mandate subagents or a fixed commit count.
 
 Runtime actions retain compact input/output references, selected context/snapshot, outcome, coverage and useful diagnostics. Git records code changes. Do not recreate proof-language execution, per-allocation artifacts, source-artifact certification, repeated audit/status cycles or licensing investigations. Types, short algorithm arguments, independent examples and targeted failure tests provide proportionate assurance.
+
+### 1.4 Progress checkpoint and how to execute the remaining scope
+
+**Committed through `734821db`:** real mixed-language startup, captured Cargo dependency/multiple-target support, canonical declarations/references/calls, public function/declaration queries, typed processing and truncation, chunked Python inventories and exact checker-selected call definition anchors. Key commits and checks are recorded in STATUS and §9.1 below.
+
+**Uncommitted; focused tests passed:** call-specific processing. `system.requested_processing_scope` retains requested provider/input partitions; a native transformation derives `system.entity_processing_scope`. `function-declarations` and `call-targets` are counted separately. Call coverage includes unresolved targets, missing source/caller identities and unmatched Pyrefly implicit-call observations. Three scope tests and the real Python publication test pass before the subsequent public-query changes. A dedicated implicit-property/decorator case remains untested.
+
+**Uncommitted, compile-only:** `canonical/call_selector.rs` constructs public incoming/outgoing call subjects and endpoint IDs; the shared subject-fact recipe adds `query.result.call-facts`, exact entity-reference joins, direction/distance selections, ordering, scope and call processing. Omitted direction defaults to outgoing; supported distance is explicitly one step. `just root-check-fast` passes, but the new DataFusion plan has not been executed through the installed service, and the final dirty query code has no affected test/Clippy result yet. Do not mark FollowRelationships delivered or discard these files at resumption.
+
+Both new modules (`canonical/processing.rs`, `canonical/call_selector.rs`) and the related startup, processing, query recipe/backend/ingress and daemon-test changes are in the single canonical tree. No new agent worktree or parallel editing stream was created. The documentation refresh does not change or commit the pending production slice.
+
+| Slice | Current status | Next unmet boundary |
+|---|---|---|
+| 4A | Partial, committed | External/generated/effective build inputs, cache/scheduler/configuration coverage and diagnostics |
+| 4B | Partial, committed | Complete effective external Python contexts and semantic output; retain chunking and definition anchors |
+| 4C | Partial, committed | Full source/syntax/coordinate/path behavior and parser reuse/live edits |
+| 4D | Partial, committed | Remaining canonical families, authority/unknowns and external/generated/edit-time identity |
+| 4E | Two limited forms demonstrated; call form compile-only | Execute/fix calls, implement SourceContext, broaden first-four meanings and composition |
+| 5A | Partial; call extension uncommitted | Query dependency/owner scope, all families, public paging, efficient authorized live status |
+| 5B | Typed processing/truncation delivered in part | Real freshness policies and observable generation/context/family convergence |
+| 6A | Open; infrastructure only | Daemon-owned notify/gix watch, reconciliation and overflow/rescan recovery |
+| 6B | Open; identity/admission foundations | Immediate invalidation, deletions/replacements, negative dependencies and obsolete completions |
+| 6C | Open; startup and blob reuse exist | Shared update orchestration, two-speed snapshots and retained Tree-sitter/Pyrefly/Cargo state |
+| 6D | Open; helpers/expectations only | Persistent incremental daemon versus independent clean rebuild with real semantic comparisons |
+| 7A | Open; selected lexical/call prerequisites | Complete production Python semantics, canonical/query consumers and invalidation |
+| 7B | Open; existing algorithms not full production behavior | Correct Python CFG/evaluation/dataflow and actual accepted input wiring |
+| 7C | Open | Python memory/effects/resources/exceptions/capture/async/concurrency on 7B |
+| 7D | Partial raw foundation; full slice open | Typed Rust family census, canonical types/instances/lowering, private mappings and diagnostics |
+| 7E | Open | MIR analyses, exact private borrow facts and advanced state on real bodies |
+| 7F | Open | Demand-rooted graph algorithms, structural facts and interprocedural summaries |
+| 7G | Open; typed request infrastructure exists | Last four forms, complete first four, multi-block/repeated-form DAGs and full directives |
+| 7H | Partial foundation; full slice open | All-form modern delivery, cursors/permissions, replay/reconnect/expiry and Rust-owned retention |
+| 8A | Partial foundation | Selective persistence, unchanged version reuse and bounded edit-time growth |
+| 8B | Open; checkpoint/dry-run only | Fix native commit-properties seams and enable owned compaction/destructive vacuum |
+| 8C | Open | Coordinated finite retention/eviction/reclamation across all real owners |
+| 8D | Partial Linux baseline | New update/provider/query/maintenance failure and recovery behavior |
+| 8E | Open; signals/tooling only | Correlated runtime metrics and representative performance/retention measurements |
+| 8F | Open; a few enabling fixes | Correct native pushdown/properties and measured workload-driven optimization |
+
+The numbered requirements and acceptance paragraphs below remain the complete target. They are not a request to redo already implemented portions. Each slice's current-status note identifies what can be reused and what still needs implementation or behavioral validation. A partial family is not complete merely because its raw schema, fixture or capability label exists. No progress percentage is assigned because the remaining work is not uniform in size.
 
 ## 2. Library selection and implementation rules
 
@@ -57,7 +98,7 @@ Use manifests, locks and selected source origins when implementing. These are th
 |---|---|
 | Stable fabric | Arrow/Parquet 59.2.0; DataFusion 55.0.0; object_store 0.13.2; delta-rs `43a0cf10a313e5077c48637ad786a05359136bbb` |
 | Stable syntax | Tree-sitter 0.26.12; Python grammar 0.25.0; Rust grammar 0.24.2; Ruff analysis crates 0.0.7 |
-| Python semantics | Pinned Pyrefly 1.2.0 source graph, including the existing local configured-context correction |
+| Python semantics | Pinned Pyrefly 1.2.0 source graph, including the local configured-context correction and checker-selected call-definition seam |
 | Rust semantics | `rustc_public` and narrow private adapters on nightly-2026-08-18; stable daemon remains Rust 1.98.0 |
 | Source observation/graph | gix 0.86.0; notify-debouncer-full 0.7.0; petgraph 0.8.3, currently `std` without its optional Rayon feature |
 | Rust transport/runtime | tonic/tonic-prost 0.14.6; prost 0.14.4; Tokio 1.53.1 in root/sidecar, 1.49.0 in the separately built extractor; tokio-stream 0.1.18 and tokio-util 0.7.19 in the stable domain |
@@ -118,10 +159,12 @@ Shared runtime interfaces should stay small:
 
 ### 4A. Production Rust contexts, dependencies and scheduling
 
+**Current status — partial, committed.** Startup now performs contained metadata/compiler work for captured packages/path dependencies and multiple target contexts, with reusable immutable sysroot/dependency blobs and retained target/family failure scope (`eba6f19a`–`b6a7d777`). This implements the startup portions of items 1–2 and 5–7, plus captured dependencies and multi-target selection in items 3–4. Remaining: registry/git, generated/build-script/proc-macro input closure, full configuration/features/targets, retained build caches, parallel scheduling, structured diagnostics, byte-safe paths and update-time cases. The full acceptance below has not passed.
+
 **Surfaces:** `src/analysis_context/rust_context.rs`, `src/rust_compilation_trust.rs`, `src/rustc_source_files.rs`, `src/rustc_service.rs`, `src/fabric/production_workspace_startup.rs`, startup `inputs.rs`, `rustc-extractor/src/`, existing provider contracts and containment owners.
 
 1. Move selected compilation preparation from the real fixture into the production startup/update path. Discover each selected package/target/context from captured Cargo manifests, lockfile, target/features/profile, compiler identity, relevant `.cargo` configuration and explicit environment inputs. Separate host build dependencies/proc macros from target compilation.
-2. Run Cargo metadata through the contained dependency-preparation boundary. The current fixture's host metadata invocation is valid only for its test-authored trusted project. Production must not inspect an untrusted workspace by inheriting host Cargo configuration, credential helpers, network or arbitrary tool overrides.
+2. Run Cargo metadata through the contained dependency-preparation boundary. The production contained metadata path is now implemented; any fixture-only host invocation remains limited to its test-authored trusted project. Production must not inspect an untrusted workspace by inheriting host Cargo configuration, credential helpers, network or arbitrary tool overrides.
 3. Assemble the exact resolved dependency/source/sysroot view before compilation. Reuse immutable content-addressed dependency bundles across compatible jobs; do not copy the full nightly sysroot on every edit. Account source dependencies, build scripts, proc macros, generated `OUT_DIR` inputs and declared configuration in context identity. Default compilation remains locked/offline/contained. Missing materialization becomes an actionable dependency scope, not a silently different resolution.
 4. Support workspace members, multiple crate types, target triples and feature selections as distinct contexts. Key Cargo incremental/build caches by compiler, target, effective build configuration and dependency/source selection; keep build output private and outside watched source inventory. Revalidate authoritative inputs even on a cache hit.
 5. Supply the existing captured source-file manifest and source digests to the extractor. Extend the current UTF-8 workspace-file seam for authorized dependency/generated source maps and raw/reversible path handling. Preserve application file identity and content revision separately. Do not convert a rustc index or crate-root hash into a source owner.
@@ -134,11 +177,13 @@ Shared runtime interfaces should stay small:
 
 ### 4B. Complete effective Python contexts and bulk semantic extraction
 
+**Current status — partial, committed.** Configured version/platform, captured contained inputs, raw semantic output and one-checker chunked inventories work. Item 3 is implemented within the current bounds (`1301df5a`); do not recreate the old 64-module ceiling. Item 7 now includes the narrow definition-index seam (`92bb153d`) used to normalize actual cross-module and bound-method targets. External configuration/roots/stubs, complete type/member/import/reference propositions and retained update state remain. The 70-module scenario demonstrates selected semantics, not complete context acceptance.
+
 **Surfaces:** `src/python_context.rs`, `src/analysis_context.rs`, startup `inputs.rs`/`pyrefly.rs`, `src/pyrefly_service.rs`, `pyrefly-sidecar/src/`, `third_party/pyrefly/lib/query.rs` and the pinned configuration/module-resolution seams.
 
 1. Resolve project configuration, Python version/platform, ordered import search paths, packages/namespace packages, `.pyi` precedence, dependency distributions and selected stub/typeshed bundles. Capture/digest the semantic inputs actually consumed. Context inventory is internal analysis input, not a public environment-inventory graph domain.
 2. Materialize authorized external roots into the sidecar's immutable input view. Preserve ecosystem package/version/source identity and explicit missing-body policy. Do not execute project imports to discover semantics.
-3. Replace the startup module-count ceiling with chunked input descriptors and batched checks under one effective checker context. Increase legitimate per-file capacity with measured bounded reads; report a concrete file/context remainder when a configured bound is reached. Do not start independent checkers per chunk and lose cross-module resolution.
+3. Preserve the implemented chunked input descriptors and one complete inventory/check under an effective checker context; extend scheduling and bounds when actual workloads require it. Increase legitimate per-file capacity with measured bounded reads; report a concrete file/context remainder when a configured bound is reached. Do not start independent checkers per chunk and lose cross-module resolution.
 4. Use `Query::get_type_table_in_file` once per needed file/checker revision, intern its deduplicated structural type table into application-owned type identities, and validate every local type-table index. Use `get_callees_with_location`, `get_attributes` and solver-backed subtype requests for their supported meanings. Preserve raw type representation and unknown/error variants.
 5. Use the pinned module resolver/TSP handler seam for import targets and declared/computed/expected propositions absent from the bulk Query API. Export declarations/references through the existing pinned semantic/index seam where needed; do not infer project-aware references from token spelling. Keep these adapters inside the sidecar and return the same owned Arrow contract, rather than introducing multiple independent semantic daemons.
 6. A `TypeQueryStmtWalker` may filter extraction for an explicitly narrow request; its callback does not recursively traverse children. Full-profile indexing must retain every required occurrence. Use the timing-capable type-table methods to distinguish checker work from transformation cost.
@@ -148,9 +193,11 @@ Shared runtime interfaces should stay small:
 
 ### 4C. Complete owned source and syntax inputs for both languages
 
+**Current status — partial, committed.** The real Rust Tree-sitter lane and malformed-source retention in item 1 exist (`11a61909`); Python parse failures retain syntax/diagnostics and qualify semantic coverage. Ruff callable/call-site/callable-syntax output is now published (`734821db`). Remaining work covers the full lexical/CST census, parser/query reuse, coordinate/encoding completeness, reversible compiler paths and live incomplete-edit behavior. Startup still waits for semantics before activation.
+
 **Surfaces:** `src/source_image/`, `src/provider_native_syntax.rs`, `src/production_provider_recipe.rs`, provider relation schemas and normalization consumers.
 
-1. Add a real Rust Tree-sitter grammar lane and complete Python/Rust source, lexical and CST coverage. Emit raw kind, normalized kind, parent/field/child order, named/anonymous distinctions, errors/missing nodes, comments/tokens and enclosing owner as required.
+1. Retain the implemented Rust Tree-sitter grammar lane and complete the remaining Python/Rust source, lexical and CST coverage. Emit raw kind, normalized kind, parent/field/child order, named/anonymous distinctions, errors/missing nodes, comments/tokens and enclosing owner as required.
 2. Reuse parser instances and compile query packs once per grammar/release. Keep trees/nodes within the adapter. Use `TreeCursor` for structural traversal and query captures for bounded feature extraction; configure query limits/cancellation and turn match exhaustion into coverage remainder.
 3. Parse Python with recoverable Ruff `parse_unchecked`, retaining the complete parsed result, errors and unsupported-syntax diagnostics. Build `LineIndex`, token/trivia/index structures once per source revision. Construct semantic scopes/bindings through actual traversal; constructing `SemanticModel` alone does not analyze a file.
 4. Establish byte offsets as the join coordinate. Convert through the pinned source bytes to UTF-8/UTF-16/line-column presentation; cover Unicode, CRLF, empty/end-of-file spans and missing final newline. Keep undecodable/binary/oversized/excluded inputs explicit. Source context uses lossless text or an authorized byte/base64 variant.
@@ -159,6 +206,8 @@ Shared runtime interfaces should stay small:
 **Acceptance:** real `.py`, `.pyi` and `.rs` inputs produce correctly located facts, including incomplete edits. Provider disagreements/unmappable ranges remain diagnostics/ambiguity. Rust syntax continues to update when compilation fails.
 
 ### 4D. Canonical two-language normalization and authority
+
+**Current status — partial, committed.** Native DataFusion constructs captured source, Python/Rust entities/declarations, function selectors, Python lexical references and both languages' call occurrences. Exact Python checker anchors and Rust stable keys resolve selected targets; unknown and unmapped calls remain explicit. Schema nullability refinement and exact ID/storage restoration work. Imports/exports, semantic references, structural types/propositions, members/signatures, complete dispatch/instances, module/lambda entities, external/generated endpoints and edit-time identity/authority remain. The uncommitted call selector is a query projection, not completion of these families.
 
 **Surfaces:** `src/production_provider_recipe.rs`, `src/provider_admission.rs`, `src/programmatic_derived_analysis.rs`, `src/schema_contract.rs`, programmatic relation builders and startup publication.
 
@@ -175,6 +224,8 @@ Shared runtime interfaces should stay small:
 
 ### 4E. First four production query forms and mixed-language demonstration
 
+**Current status — partial.** Installed clients exercise canonical function FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. The uncommitted FollowRelationships recipe compiles for one-step calls but has no public behavioral result; validate it first. SourceContext has no canonical production form yet. All broader meanings, source/representation scopes, semantic reference resolution, stop/filter/distance behavior and composition remain required. The first-four acceptance below is open.
+
 **Prerequisites:** 4D and 5A–5B. **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, `src/semantic_query_contract.rs`, existing child catalog and adapter.
 
 Implement compositional typed plans for:
@@ -186,13 +237,15 @@ Implement compositional typed plans for:
 | RetrieveFacts | Family-selected joins, properties, provenance and point/context filters; expanded family scope for broad requests | Parameter/return types, members, call resolution and unknown reasons from actual semantic providers |
 | RetrieveSourceContext | Exact snapshot source descriptors and independent disclosure authorization; byte/line bounds and syntax joins | Correct source span after current disk changes, Unicode positions and exact omitted bytes on truncation |
 
-Replace FindEntities' Ruff-binding-only production source with canonical semantics. Reuse the existing form/request infrastructure but remove assumptions that a form can exist only when every producer is globally complete. Unsupported semantic meanings must yield a typed gap, never a syntax/name fallback.
+FindEntities now uses canonical function semantics; retain that path and extend its remaining kinds/scopes. Reuse the existing form/request infrastructure but remove assumptions that a form can exist only when every producer is globally complete. Unsupported semantic meanings must yield a typed gap, never a syntax/name fallback.
 
 Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/daemon.rs` and the modern client driver. Use the existing registered-supervisor fixture and installed provider binaries. Check at least one real Pyrefly and one real rustc semantic result through the public adapter, plus partial and empty cases. This closes the static mixed-language vertical, while the first useful release still awaits outcome 6.
 
 ## 5. Outcome 5: query-relevant coverage, freshness and unfinished scope
 
 ### 5A. One processing authority with a query dependency scope
+
+**Current status — partial.** Committed requested file/target and run/family relations drive canonical function/declaration query summaries independently of fact rows. Language/context filtering, reason categories and a retained first 64-row remainder page work. Uncommitted call-family scope adds semantic gaps and conservative context-wide potential callers; four focused tests pass before final query wiring. Remaining: all-family/owner/dependency/frontier scope, public remainder paging, authorization-scoped efficient scans, live transitions, precision/next actions and a terminal-versus-runnable distinction. Do not turn semantic unknowns into endlessly pending jobs.
 
 **Surfaces:** provider admission/input observations, processing relations, `src/fabric/production_workspace_startup/input_observations.rs`, query planning/status and lifecycle coordinator.
 
@@ -206,6 +259,8 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 **Acceptance:** known-empty, missing output, parse/type/compile failure, timeout, cancellation, denied scope, unsupported context, dynamic ambiguity and limited execution all yield distinct truthful responses. A references query warns about a pending potential importer even if the target file is complete.
 
 ### 5B. Snapshot freshness and wire projection
+
+**Current status — partial wire delivery, freshness still open.** Typed Protobuf/Pydantic processing, retained manifest/reopen and presence-safe observed row truncation are implemented (`b865c6b2`, `11a61909`); diagnostic projection and empty IPC handling are corrected. The inspected backend still supplies `FreshnessState::Current`; the actual five selection/barrier policies, current-versus-historical/newer observations, public remainder paging and convergence adapter are not implemented. A pinned epoch alone does not satisfy current-required semantics against new disk changes.
 
 **Surfaces:** `src/query_service.rs`, snapshot selection, `src/semantic_query_contract.rs`, released Protobuf files under `contracts/`, generated Rust/Python clients, adapter DTOs/status tools.
 
@@ -222,6 +277,8 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 
 ### 6A. Watcher, repository observations and authoritative reconciliation
 
+**Current status — open.** Secure capture and source/repository observation components exist, but there is no demonstrated daemon-owned continuous watch/reconciliation path. Every watcher, queue-loss/rescan, gix inclusion and polling/lifecycle requirement below remains delivery work.
+
 **Surfaces:** `src/source_image/`, source/context preparation, supervisor/daemon ownership, `src/fabric/source_wave_command_effect.rs`; add a focused watcher/coordinator module within the existing stable package as needed.
 
 1. Own one `notify-debouncer-full` watcher per workspace input topology. Install watches before initial census, buffer changes during capture, then reconcile changes observed across the capture fence. Include source/config roots and selected external input roots; exclude generated caches, Delta tables and build outputs by explicit policy.
@@ -236,6 +293,8 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 
 ### 6B. Conservative invalidation and owner replacement
 
+**Current status — open.** Startup source/context identity and provider substitution rejection are useful foundations. They do not implement live invalidation, negative dependencies, deleted-owner replacement, coalescing or obsolete-generation rejection across successive publications. All update acceptance below remains.
+
 **Surfaces:** source/context relations, provider/analysis scheduling, owner-replacement normalization and activation inputs.
 
 1. Assign monotonic source generations and immutable context revisions. Capture the complete changed input set, including deleted owners and configuration/dependency changes. Publish processing invalidation immediately enough that current-required queries cannot serve known-obsolete semantics.
@@ -248,6 +307,8 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 **Acceptance:** deletion removes old declarations and edges; rename respects identity rules; changed imports/features/stubs invalidate affected answers; a delayed older provider result cannot overwrite a repaired newer generation.
 
 ### 6C. Two-speed publication and retained provider state
+
+**Current status — open.** Reuse the now-working mixed-language startup composition, exact publication/reopen and immutable dependency blobs. Syntax/semantic split publication, persistent checker/parser state, retained Cargo build output, update scheduling and unchanged relation reuse are not delivered. Startup currently runs through semantic completion before activation.
 
 **Surfaces:** source-wave commands, candidate/activation builders, `src/fabric/production_workspace_startup.rs` reused as shared preparation/composition helpers, provider services and runtime scheduler.
 
@@ -262,6 +323,8 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 **Acceptance:** syntax can become current while compiler facts remain explicitly pending; semantic convergence produces the expected successor; an old query continues to read its exact source/facts during multiple updates.
 
 ### 6D. Real incremental-versus-clean corpus
+
+**Current status — open.** Prepared expectations/edit/comparison helpers and static daemon cases exist. Runtime adapters for a persistent incremental daemon, an independent clean state root and observable quiet convergence remain unimplemented. Static fresh/restart checks do not close this slice or the first useful release.
 
 **Surfaces:** `tooling/product/corpus.py`, `edits.json`, daemon integration fixture, modern driver and golden case selection.
 
@@ -279,41 +342,43 @@ Extend edits to Python/Rust declaration and call changes, negative imports, dele
 
 Each row includes its raw observations, canonical properties/relationships, derived facts where applicable, explicit unknowns, public retrieval and owner/context invalidation. The map covers ONT's semantic sections and GEN's generation/relationship sections; it does not replace those specifications with a smaller vocabulary.
 
-| ONT section and title | Required implementation, including language specialization | Owning slices |
-|---|---|---|
-| §5 Source and lexical ontology; §6 Syntax ontology | Files, bytes/ranges/lines, tokens/comments/trivia, syntax structure, raw/normalized kinds, malformed/generated input and coordinate mappings | 4C, 7A, 7D |
-| §7 Semantic identity ontology; §8 Scope, binding, and name-resolution ontology | Declarations, symbols, definitions/references, lexical owners, qualified identity, overload/candidate sets, local/global/nonlocal scopes and Rust namespaces | 4D, 7A, 7D |
-| §9 Module, import, export, and dependency ontology | Packages/modules/crates, aliases/re-exports/globs, dependencies, external endpoints, positive and negative resolution inputs | 4A–4B, 7A, 7D |
-| §10 Type ontology; §35 Python type ontology extensions; §47 Rust type ontology extensions | Canonical structural type algebra; declared/computed/expected/narrowed propositions; generics, unions, callable types, traits/projections and unknown/error forms | 4B/4D, 7A, 7D |
-| §11 Member and object-model ontology; §36 Python object-model ontology | Fields/properties/descriptors, inheritance/MRO/protocols, visibility, overrides, Rust impl/trait items and associated members | 7A, 7D |
-| §12 Callable contract ontology; §13 Call-site ontology; §14 Dispatch ontology | Signatures, defaults/argument binding, receiver, call occurrence, resolved/possible/unknown target, callable value and executable instance distinctions | 4D, 7A, 7D |
-| §15 Control-flow ontology; §16 Derived control-flow facts | Normal/exception/cleanup/unwind/suspend edges, entry/exits, reachability, dominance/post-dominance, control dependence and loops | 7B, 7E, 7F |
-| §17 Value and computation ontology; §18 Definition/use and dataflow ontology | Evaluation order, temporaries/constants/operators, definitions/uses, reaching definitions, liveness and value/data dependence | 7B, 7E |
-| §19 Abstract memory and state-location ontology; §20 Alias and points-to ontology | Variables/fields/elements/allocations/unknown locations, addresses, reads/writes/moves/copies/borrows, may/must alias and points-to under declared precision | 7C, 7E |
-| §21 Program-point state ontology | Entry/exit/before/after states tied to exact owner/body and source revision, joins and unknown states | 7B–7C, 7E |
-| §22 Effect ontology | Direct effects separated from propagated summaries; unknown calls imply unknown effects | 7C, 7E, 7F |
-| §23 Exceptional-flow ontology | Python raise/handlers/exception groups/finally; Rust unwind/cleanup; normal and exceptional successors kept distinct | 7B–7C, 7E |
-| §24 Resource-lifetime ontology | Acquire/release/transfer/escape, exceptional cleanup, Python context managers and Rust Drop; no leak/safety verdicts | 7C, 7E, 7F |
-| §25 Async and concurrency ontology | Suspension/resumption, spawn/join, lock/channel and semantics-backed possible happens-before, with no runtime ordering claims | 7C, 7E, 7F |
-| §26 Closure and capture ontology | Free/cell variables, capture mode/environment, escapes and source/lowering correspondence | 7A/7C, 7D/7E |
-| §27 Generated and lowered-code ontology; §28 Generic and specialization ontology | Expansion/desugaring/synthesized nodes, provenance, monomorphized instances, shims/glue and explicit unmappable/generated spans | 7A, 7D–7E |
-| §29 Objective graph-analysis facts; §30 Objective structural metrics | Typed graph projections, SCC, connectivity/reachability, justified closure/reduction, degree/count/nesting distributions; no quality scores | 7F–7G |
-| §31 Interprocedural summary ontology; §32 Explicit unknown ontology | Bounded SCC fixpoints, effects/resources/value summaries, convergence/precision/unknown propagation and dependency invalidation | 5A, 7F |
-| §33 Python scope ontology; §34 Python binding ontology | Module/class/function/comprehension/type-parameter scopes, rebinding/shadowing, assignment/destructuring, global/nonlocal, deletion and definition ownership | 7A–7B |
-| §37 Python call ontology; §38 Python dynamic-semantics facts | Constructor/bound-method/overload/descriptor calls, dynamic attribute/import/exec/eval uncertainty, runtime mutation boundaries | 7A–7C |
-| §39 Python decorator ontology; §40 Python pattern-matching ontology; §41 Python comprehension ontology | Decorator evaluation/application order, source/transformed correspondence, pattern bindings/guards and comprehension/generator scope/evaluation | 7A–7C |
-| §42 Python context-manager ontology; §43 Python async and generator ontology | Enter/exit/suppression, async enter/exit, yield/yield-from/await, exceptional resumption and cleanup/capture | 7B–7C |
-| §44 Rust source-semantic entities; §45 Rust declaration properties; §46 Rust generic ontology | Items/visibility/attributes/cfg, modules, impl/trait members, parameters/bounds/associated items and substitutions | 7D |
-| §48 Rust MIR ontology; §49 Rust place and projection ontology; §50 Rust MIR state-transition ontology | Typed bodies/blocks/statements/terminators, locals/place projections, storage transitions, calls/assert/switch/drop/return/unwind, moves/copies and aggregate/rvalue semantics | 7D–7E |
-| §51 Rust ownership and borrow ontology | Public typed accesses plus separate exact private loan/region evidence and conservative derived ownership/initialization/liveness states | 7E |
-| §52 Rust call and executable-instance ontology; §53 Rust trait and dynamic-dispatch ontology | Direct/virtual/indirect calls, specialization, function-item values versus calls, trait selection, vtable candidates and unknown targets | 7D–7F |
-| §54 Rust macro ontology; §55 Rust drop and destruction ontology; §56 Rust async and coroutine-lowering ontology | Invocation/expansion/hygiene mappings, drop glue/flags/cleanup, coroutine states/suspension/resumption and source correspondence | 7D–7E |
-| §57 Rust unsafe and FFI ontology; §58 Rust constants, statics, and CTFE ontology | Unsafe/ABI/raw-pointer/static facts, evidence-qualified cross-language links, const evaluation outcomes/errors and inline assembly boundaries | 7D–7F |
-| §§61–67 metadata, evidence, ownership, identity, separation, unknowns and non-evaluative rules; AC-G-12–18/70–77 | Apply across every family, including external/body policy, path encoding, precision, schema mapping, negative facts, summaries and static concurrency | All slices |
+| ONT section and title | Required implementation, including language specialization | Owning slices | Current implementation boundary |
+|---|---|---|---|
+| §5 Source and lexical ontology; §6 Syntax ontology | Files, bytes/ranges/lines, tokens/comments/trivia, syntax structure, raw/normalized kinds, malformed/generated input and coordinate mappings | 4C, 7A, 7D | Partial: real Python/Rust syntax; full lexical/coordinates and live replacement open |
+| §7 Semantic identity ontology; §8 Scope, binding, and name-resolution ontology | Declarations, symbols, definitions/references, lexical owners, qualified identity, overload/candidate sets, local/global/nonlocal scopes and Rust namespaces | 4D, 7A, 7D | Partial: canonical declarations and Python lexical references; semantic scopes/references open |
+| §9 Module, import, export, and dependency ontology | Packages/modules/crates, aliases/re-exports/globs, dependencies, external endpoints, positive and negative resolution inputs | 4A–4B, 7A, 7D | Partial captured Cargo inputs; canonical modules/imports/exports and external roots open |
+| §10 Type ontology; §35 Python type ontology extensions; §47 Rust type ontology extensions | Canonical structural type algebra; declared/computed/expected/narrowed propositions; generics, unions, callable types, traits/projections and unknown/error forms | 4B/4D, 7A, 7D | Raw semantic inputs only; complete canonical type algebra/propositions open |
+| §11 Member and object-model ontology; §36 Python object-model ontology | Fields/properties/descriptors, inheritance/MRO/protocols, visibility, overrides, Rust impl/trait items and associated members | 7A, 7D | Selected provider observations only; complete canonical/public object model open |
+| §12 Callable contract ontology; §13 Call-site ontology; §14 Dispatch ontology | Signatures, defaults/argument binding, receiver, call occurrence, resolved/possible/unknown target, callable value and executable instance distinctions | 4D, 7A, 7D | Partial: actual canonical calls; full contracts/dispatch and public traversal open |
+| §15 Control-flow ontology; §16 Derived control-flow facts | Normal/exception/cleanup/unwind/suspend edges, entry/exits, reachability, dominance/post-dominance, control dependence and loops | 7B, 7E, 7F | Existing algorithms/raw inputs; real complete CFG/derived delivery open |
+| §17 Value and computation ontology; §18 Definition/use and dataflow ontology | Evaluation order, temporaries/constants/operators, definitions/uses, reaching definitions, liveness and value/data dependence | 7B, 7E | Existing algorithms/raw inputs; real complete value/dataflow delivery open |
+| §19 Abstract memory and state-location ontology; §20 Alias and points-to ontology | Variables/fields/elements/allocations/unknown locations, addresses, reads/writes/moves/copies/borrows, may/must alias and points-to under declared precision | 7C, 7E | Open production abstraction/analysis/query path |
+| §21 Program-point state ontology | Entry/exit/before/after states tied to exact owner/body and source revision, joins and unknown states | 7B–7C, 7E | Open production state/precision/query path |
+| §22 Effect ontology | Direct effects separated from propagated summaries; unknown calls imply unknown effects | 7C, 7E, 7F | Open direct/propagated effect delivery |
+| §23 Exceptional-flow ontology | Python raise/handlers/exception groups/finally; Rust unwind/cleanup; normal and exceptional successors kept distinct | 7B–7C, 7E | Open complete exceptional-flow delivery |
+| §24 Resource-lifetime ontology | Acquire/release/transfer/escape, exceptional cleanup, Python context managers and Rust Drop; no leak/safety verdicts | 7C, 7E, 7F | Open semantic resource-lifetime delivery |
+| §25 Async and concurrency ontology | Suspension/resumption, spawn/join, lock/channel and semantics-backed possible happens-before, with no runtime ordering claims | 7C, 7E, 7F | Open static async/concurrency delivery |
+| §26 Closure and capture ontology | Free/cell variables, capture mode/environment, escapes and source/lowering correspondence | 7A/7C, 7D/7E | Open complete capture/environment/escape delivery |
+| §27 Generated and lowered-code ontology; §28 Generic and specialization ontology | Expansion/desugaring/synthesized nodes, provenance, monomorphized instances, shims/glue and explicit unmappable/generated spans | 7A, 7D–7E | Partial unmapped-call reasons; generated/lowered/generic normalization open |
+| §29 Objective graph-analysis facts; §30 Objective structural metrics | Typed graph projections, SCC, connectivity/reachability, justified closure/reduction, degree/count/nesting distributions; no quality scores | 7F–7G | Existing graph helpers; production projections/analyses/query delivery open |
+| §31 Interprocedural summary ontology; §32 Explicit unknown ontology | Bounded SCC fixpoints, effects/resources/value summaries, convergence/precision/unknown propagation and dependency invalidation | 5A, 7F | Partial scope/unknown handling; interprocedural summaries and full precision open |
+| §33 Python scope ontology; §34 Python binding ontology | Module/class/function/comprehension/type-parameter scopes, rebinding/shadowing, assignment/destructuring, global/nonlocal, deletion and definition ownership | 7A–7B | Partial Ruff binding/reference normalization; full scope/evaluation semantics open |
+| §37 Python call ontology; §38 Python dynamic-semantics facts | Constructor/bound-method/overload/descriptor calls, dynamic attribute/import/exec/eval uncertainty, runtime mutation boundaries | 7A–7C | Partial checker-selected call targets; full dynamic/call semantics open |
+| §39 Python decorator ontology; §40 Python pattern-matching ontology; §41 Python comprehension ontology | Decorator evaluation/application order, source/transformed correspondence, pattern bindings/guards and comprehension/generator scope/evaluation | 7A–7C | Raw syntax prerequisites; canonical/evaluation/derived delivery open |
+| §42 Python context-manager ontology; §43 Python async and generator ontology | Enter/exit/suppression, async enter/exit, yield/yield-from/await, exceptional resumption and cleanup/capture | 7B–7C | Open complete context-manager/async/generator semantics |
+| §44 Rust source-semantic entities; §45 Rust declaration properties; §46 Rust generic ontology | Items/visibility/attributes/cfg, modules, impl/trait members, parameters/bounds/associated items and substitutions | 7D | Partial stable item/declaration normalization; full Rust semantic properties open |
+| §48 Rust MIR ontology; §49 Rust place and projection ontology; §50 Rust MIR state-transition ontology | Typed bodies/blocks/statements/terminators, locals/place projections, storage transitions, calls/assert/switch/drop/return/unwind, moves/copies and aggregate/rvalue semantics | 7D–7E | Raw typed compiler foundation; complete canonical/MIR-derived delivery open |
+| §51 Rust ownership and borrow ontology | Public typed accesses plus separate exact private loan/region evidence and conservative derived ownership/initialization/liveness states | 7E | Open exact private borrow and complete derived ownership delivery |
+| §52 Rust call and executable-instance ontology; §53 Rust trait and dynamic-dispatch ontology | Direct/virtual/indirect calls, specialization, function-item values versus calls, trait selection, vtable candidates and unknown targets | 7D–7F | Partial direct/indirect canonical calls; instances/traits/virtual dispatch open |
+| §54 Rust macro ontology; §55 Rust drop and destruction ontology; §56 Rust async and coroutine-lowering ontology | Invocation/expansion/hygiene mappings, drop glue/flags/cleanup, coroutine states/suspension/resumption and source correspondence | 7D–7E | Partial explicit unmapped macro calls; full macro/drop/coroutine delivery open |
+| §57 Rust unsafe and FFI ontology; §58 Rust constants, statics, and CTFE ontology | Unsafe/ABI/raw-pointer/static facts, evidence-qualified cross-language links, const evaluation outcomes/errors and inline assembly boundaries | 7D–7F | Raw compiler foundation; complete canonical CTFE/unsafe/FFI delivery open |
+| §§61–67 metadata, evidence, ownership, identity, separation, unknowns and non-evaluative rules; AC-G-12–18/70–77 | Apply across every family, including external/body policy, path encoding, precision, schema mapping, negative facts, summaries and static concurrency | All slices | Identity/pinning/unknown foundations in use; all-family/external/update closure open |
 
 GEN §§67–79 relationship generation is included in the corresponding rows, including the lettered source/object/exception/resource/async/capture/program-state additions. A family is not delivered if its raw producer exists but its canonical relationship or public projection is missing.
 
 ### 7A. Complete Python language semantics
+
+**Current status — open beyond selected prerequisites.** Real lexical bindings/references, callable syntax and checker-selected call targets now feed canonical relations. The complete scope/import/type/member/decorator/pattern/comprehension/dynamic census and its public/update consumers remain; implicit properties/decorators and module/lambda caller entities are known normalization gaps.
 
 **Surfaces:** native Ruff adapter, Pyrefly sidecar, canonical normalization and `src/programmatic_derived_analysis.rs`.
 
@@ -327,6 +392,8 @@ Emit dynamic `getattr`, monkey-patching, dynamic imports, `exec`/`eval`, star ex
 
 ### 7B. Correct Python CFG, evaluation order and core dataflow
 
+**Current status — open.** Existing typed analysis code and `analysis_cases.json` are reusable. The real owner-scoped CFG/evaluation builder and production input wiring remain; ordinal/sequential approximations are not complete Python control semantics. No full source-to-public CFG/dataflow acceptance is claimed.
+
 **Surfaces:** `src/python_derived_analysis.rs`, native syntax-to-analysis seeds, `src/programmatic_derived_analysis.rs`.
 
 1. Replace ordinal/sequential flow as the default semantic construction with an explicit owner-scoped CFG builder. Reuse typed Ruff traversal but implement application-owned Python control semantics: conditionals, short-circuit booleans, conditional expressions, loops/else, break/continue, return/raise, try/except/except*/else/finally, with/async-with, match guards and suspension.
@@ -338,6 +405,8 @@ Emit dynamic `getattr`, monkey-patching, dynamic imports, `exec`/`eval`, star ex
 **Acceptance:** activate the existing branch/loop/return/nested-callable expectations in `analysis_cases.json`. Add short-circuit, finally-overrides-return, exception group, loop-else, context-manager suppression and comprehension cases. Compare small graphs against an independent simple reference solver where it exposes errors the implementation could otherwise mirror.
 
 ### 7C. Python memory, effects, resources, exceptions and concurrency
+
+**Current status — open.** Existing structures do not establish production memory/effect/resource/exception/capture/async/concurrency analysis. Implement the finite abstraction and real input/query/update path after 7B, with declared precision and unknown propagation.
 
 **Prerequisite:** 7B's actual CFG/dataflow. **Surfaces:** Python analysis modules, canonical derived relations and common summary inputs.
 
@@ -351,6 +420,8 @@ Add closure/cell/environment capture, generator/async state, await/yield/yield-f
 
 ### 7D. Complete typed Rust source, type, instance and lowering facts
 
+**Current status — partial raw foundation; complete slice open.** Contained compiler publication, exact multi-file owners, stable declaration keys and selected direct/indirect/macro/dependency call normalization work. Full typed source/type/generic/trait/instance/MIR payload coverage, generated/hygiene/coroutine/CTFE/FFI mapping, structured diagnostics and canonical/public consumers remain to be completed against actual compiled fixtures.
+
 **Surfaces:** `rustc-extractor/src/`, `src/rustc_relation_schema.rs`, `src/rustc_service.rs`, source mapping and Rust normalization.
 
 1. Enumerate supported selected-crate items and bodies through typed `rustc_public`; emit declarations/properties, types, generics/substitutions/bounds, traits/impls, associated items and executable instances. Keep compiler-local handles inside the extraction run and map stable compiler keys through application recipes.
@@ -363,6 +434,8 @@ Add closure/cell/environment capture, generator/async state, await/yield/yield-f
 **Acceptance:** actual compiled fixtures cover generics, trait/default/associated methods, function pointers, closures, macros, async, constants/statics and FFI declarations. Validate source/owner identity across files and generated spans, not merely raw MIR row counts.
 
 ### 7E. Rust MIR dataflow, ownership and advanced state
+
+**Current status — open.** Real compiler relations and existing MIR analysis modules are inputs to this work, not evidence of complete derived behavior. Exact private loans/regions, finite transfer/join analyses, partial moves, drop/unwind/coroutine state and changed-body replacement all require production integration and the acceptance below.
 
 **Surfaces:** `src/rust_mir_derived_analysis.rs`, private extractor enrichment and canonical derived integration.
 
@@ -378,6 +451,8 @@ Complete resource acquisition/transfer/drop/escape, unwind paths, closure captur
 
 ### 7F. Common graphs, structural facts and interprocedural summaries
 
+**Current status — open.** Existing petgraph/common-analysis code and newly canonical calls can be reused. No full demand-rooted graph, dominance, structural or interprocedural summary delivery has been demonstrated from real inputs through public queries and updates. Preserve call-site witnesses and explicit unknown frontiers.
+
 **Surfaces:** `src/common_derived_analysis.rs`, existing graph execution interfaces, `src/programmatic_derived_analysis.rs`, query projections.
 
 1. Reuse existing `tarjan_scc`, `condensation`, `toposort` and `dominators::simple_fast` integration after binding it to real accepted canonical inputs. A graph projection names node/edge identities, parallel-edge policy, direction, filters, context, unknown frontier and bounds. Build only the requested owner/component/reachable region when possible.
@@ -392,7 +467,9 @@ Complete resource acquisition/transfer/drop/escape, unwind paths, closure captur
 
 ### 7G. Remaining forms, complete composition and query semantics
 
-**Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, query contracts and graph integration. Extend the four implemented forms to every relevant family in the coverage map as those families land.
+**Current status — open.** Eight-form parsing/typed ingress exists; two limited canonical forms are publicly demonstrated, and the third has compile-only wiring. FindPaths, MatchPattern, Compare, Summarize and full first-four behavior remain. Real prior-result resolution and repeated-form/multi-block DAG execution also remain; fixed per-form output relations must not collide or silently reuse another block's output.
+
+**Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, query contracts and graph integration. Complete the first four forms from 4E and extend them to every relevant family in the coverage map as those families land.
 
 | Form | Native-first plan and bounded algorithm | Correctness and partial-result requirements |
 |---|---|---|
@@ -411,6 +488,8 @@ Implement row/byte/path/depth/iteration/work limits and cancellation through eve
 
 ### 7H. Complete daemon-authored modern presentation
 
+**Current status — partial foundation; full slice open.** Installed FastMCP resource/guarded-input paths, typed processing, explicit presence and diagnostic handling have passing scoped checks. Complete new forms, source permissions, public paging/cursors, replay/reconnect/expiry and slow-reader/retention behavior remain. The 95 adapter tests do not establish all-form or live-update presentation.
+
 **Surfaces:** Rust v2 service/query handles, `codefabric-cpg-mcp/src/codefabric_cpg_mcp/server.py`, client/DTO modules, released Protobuf and modern driver.
 
 1. Reuse one lifespan-owned `grpc.aio` channel/stub per daemon attachment on the same event loop. Set explicit per-call timeouts from the remaining tool budget. Stream bounded data using one read style per RPC and preserve response backpressure; do not concatenate an arbitrarily large daemon result before returning it.
@@ -427,6 +506,8 @@ Implement row/byte/path/depth/iteration/work limits and cancellation through eve
 ## 8. Outcome 8: sustained operation, native maintenance and measured performance
 
 ### 8A. Durable/recomputable split and selective persistence
+
+**Current status — partial foundation.** Exact selected-version reopen, proof-only history removal and immutable input-blob reuse exist. Selective persistence by consumer, reuse of unchanged relation versions/owner partitions, reduced redundant observation writes and measured edit-time file/version growth remain. The current call selector does not justify a new durable-history policy by itself.
 
 **Surfaces:** programmatic publication/observation Delta histories, `src/fabric/programmatic_delta_runtime.rs`, exact reopen, source image storage, result/cursor leases.
 
@@ -450,9 +531,11 @@ Reopen the selected exact version vector; do not reconstruct an epoch by asking 
 
 ### 8B. Enable native compaction, checkpoints and vacuum
 
+**Current status — open for compaction/reclamation.** The inspected executor still returns `OptimizeCommitIdentityAndRetryControl` for optimization and `AtomicVacuumApprovalBinding` for destructive vacuum. Native checkpoints and retention-aware dry runs work. The native commit-properties corrections, ownership replacement and actual reclamation/reader-race/recovery acceptance below have not been implemented.
+
 **Surfaces:** `src/fabric/delta_guarded_maintenance.rs`, `programmatic_delta_maintenance_command.rs`, `programmatic_delta_maintenance_relation.rs`, `delta_commit_reconciliation.rs`, exact reader/store/writer owners and selected delta-rs source.
 
-The baseline has two different blockers. Treat them differently:
+The current implementation still has two different blockers. Treat them differently:
 
 **Compaction has a confirmed native commit-properties gap.** At the selected pin, `operations/optimize.rs` creates fresh `CommitProperties` for internal commits, copies `app_metadata`, and supplies its own retry count. It does not preserve the caller's entire transaction/retry policy. A builder method existing in rustdoc does not resolve that behavior.
 
@@ -474,6 +557,8 @@ The baseline has two different blockers. Treat them differently:
 
 ### 8C. Finite retention and reclamation across all owners
 
+**Current status — open.** Broad disk budgets, physical headroom and existing leases/handles are foundations. Provider views/build/cache state and all snapshot/source/result/diagnostic owners still need coordinated finite retention and real maintenance/TTL cycles. No sustained finite-state or reclamation result is claimed.
+
 **Surfaces:** `src/fabric/retention_command_effect.rs`, `src/fabric/delta_exact.rs`, snapshot/source/result leases, provider context caches, runtime disk accounting and maintenance scheduler.
 
 1. Define configurable history age/count, result/cursor TTL, source/dependency cache policy, diagnostics age/size and table retention periods. Publish what historical requests remain supported. Finite retention can expire unleased history; it must not break an active authorized lease.
@@ -486,6 +571,8 @@ The baseline has two different blockers. Treat them differently:
 **Acceptance:** repeated edits and reads across at least one actual retention/TTL cycle reach finite retained state; ending leases permits measurable reclamation; old protected queries survive compaction/vacuum; expired requests receive clear errors; interrupted publication and CDF intervals, if enabled, remain protected.
 
 ### 8D. Failure, cancellation and deployment recovery
+
+**Current status — partial Linux baseline.** Actual containment, joined provider/native cleanup, exact restart and scoped cancellation/lost-ack tests pass in earlier slices. Extend that behavior to the unimplemented update loop, retained providers, new queries, expiry/pressure and real maintenance. No equivalent unvalidated non-Linux profile is implied.
 
 **Surfaces:** daemon/supervisor, provider services, runtime ownership, command reconciliation, gRPC/adapter lifespan and storage maintenance.
 
@@ -500,6 +587,8 @@ Preserve platform-specific truth: the implemented RSS/containment profile is Lin
 **Acceptance:** affected boundary cases plus a real mixed-language restart/cancel/recovery scenario demonstrate no stale-current facts, orphaned active providers, permanently held writer leases or unbounded abandoned results. Use focused fault injection, not a Cartesian product of every failure at every function.
 
 ### 8E. Runtime phase metrics and representative measurements
+
+**Current status — open.** RSS/cgroup/headroom observations and benchmark/corpus tooling exist; small fixture timings are recorded. Correlated phase coverage, representative mixed/real-repository workloads, distributions and sustained update/retention/recovery measurements have not been completed. Existing timings are not latency objectives or a performance pass.
 
 **Surfaces:** existing tracing/metrics, source watcher/coordinator, providers, DataFusion execution/publication, `tooling/product/benchmark.py`, golden driver and reusable scale fixtures.
 
@@ -524,6 +613,8 @@ Set service objectives after measurement. The earlier 100 ms/500 ms ideas are hy
 
 ### 8F. Optimize measured bottlenecks using native capabilities
 
+**Current status — open.** Native canonical joins, immutable input reuse, schema nullability refinement and one-pass result lookahead are useful enabling changes. Complete safe scan pushdown/statistics/properties and workload-driven tuning with before/after evidence. No representative performance improvement or optional overlay/CDF/Rayon/orjson adoption is claimed.
+
 **Surfaces:** schema/provider adapters, child catalogs, query planning, relation publication, graph/provider caches and scheduling.
 
 1. Restore safe native `TableProvider::scan` projection/filter/limit pushdown. Map physical/logical fields and statistics through `SchemaContract`. Return `Exact`, `Inexact` or `Unsupported` truthfully per filter; retain residual filtering for inexact predicates. A fully pushed filter may need a column absent from the output projection.
@@ -541,7 +632,23 @@ Set service objectives after measurement. The earlier 100 ms/500 ms ideas are hy
 
 ### 9.1 Reuse the existing command surface
 
-No commands in this table were run to establish new production behavior while writing the plan. Select focused cases during implementation; run integrated checks when the assembled product claim warrants them.
+The following observations come from implementation runs on 2026-09-09; this documentation reconciliation does not rerun production tests. Counts overlap and are not a combined full-suite result.
+
+| Implemented slice | Recorded check | What it establishes / limit |
+|---|---|---|
+| Contained Cargo/path dependencies/multiple targets | Focused provider/context tests and real mixed/virtual-workspace daemon cases | Actual captured dependency calls, inherited settings and failed-target retention; no generated/registry/proc-macro closure |
+| Canonical Rust calls through `45421cff` | Seven final selected canonical/provider/restart cases plus real call fixtures | Direct, indirect, repeated, dependency and unmapped macro cases; exact reopen |
+| Public declaration facts through `64ce1acf` | 42 affected scope/query/resource/service cases; installed client; exact restart | Real Python/Rust declaration IDs/ranges, duplicate subjects, failed target, completed empty scope and explicit unsupported references; not all RetrieveFacts |
+| Chunked inventory `1301df5a` | 16 selected root Pyrefly/daemon cases; sidecar/protocol/adapter checks | Real contained cross-chunk imports and 70-module publication; 29 sidecar and 95 adapter tests, lint/types and proto checks pass |
+| Checker anchors `92bb153d` | 30 sidecar cases and strict sidecar check; 26 selected root cases | Actual imported alias/bound-method definition anchors and substituted file/digest/range rejection |
+| Canonical Python calls `734821db` | Affected native/canonical/recipe cases; final regression rerun; real mixed/Python daemon and installed restart | Stale relation-count assertions fixed; repeated/dynamic/module/cross-module calls and exact range pass; reopen 15.6 s |
+| Committed governance/schema/result fixes | Governance rule cases/scan; root library Clippy; scoped schema/IPC tests | Governance passes; root library Clippy completes with existing backlog, not a strict clean result |
+| Uncommitted call processing, before call-query wiring | `just root-test-incremental -E 'test(processing_scope) \| test(pragmatic_python_semantics_publish_real_call_targets)'` with both provider binaries | Four tests pass; real Python run 6.59 s; implicit-property/decorator scenario still needed |
+| Final uncommitted call-query library | `just root-check-fast` | Pass, 66 warnings, 7.13 s; new DataFusion query execution, regression tests and Clippy pending |
+
+Earlier four-case golden runs passed startup, installed Python serving, exact reopen and cancellation. They do not exercise the full plan and were not rerun on the final dirty call-query code. Recent recorded root library Clippy has a large existing backlog (958 warnings after new issues were addressed). The historical `0cc7242` full-root result (1,038 passed, 13 failed, two skipped) is not a current verdict; no current aggregate green claim replaces it. No real live-convergence, full-family/eight-form, destructive-maintenance, sustained-retention or representative benchmark acceptance is complete.
+
+Select focused cases during implementation; run integrated checks when the assembled product claim warrants them. The existing command surface remains:
 
 | Changed boundary | Existing command/fixture route |
 |---|---|
@@ -585,6 +692,12 @@ Ordinary corpus assertions and short algorithm arguments should explain why the 
 
 ## 10. Immediate implementation handoff
 
-Begin with **4A** and the Rust syntax portion of **4C**: production contained Rust context/dependency preparation and scheduling, reusing the now-working source manifest and real extractor boundary. In the same vertical, add **4D** canonical Rust call/type/source output and **5A–5B** scoped coverage/freshness, then expose it through the first public forms in **4E**. Complete **4B/4C** inputs and syntax so the mixed-language fixture exercises the supported profile rather than a special-case demo.
+Resume the **uncommitted 4E/5A call-query continuation** in §1.4. Preserve the two new canonical modules and their startup/query/test changes. The last successful runtime run covered call processing before query wiring; the final library only has a compile pass. Execute the actual native plans through the installed modern client, fix failures, check declaration-query and exact-reopen regressions, run affected Clippy/governance and commit the coherent slice. Include incoming/outgoing calls, omitted-direction default, explicit distance, repeated subjects/call sites, dynamic targets, partial/empty cases, limits and language/context selection. Do not declare this done because the plan compiles.
 
-Continue directly through the dependency order in §3. Use this document as the detailed portion of the parent backlog, update both only where scope/status changes require it, and keep STATUS concise. A new review, plan activation, proving commit or source-artifact bundle is not a prerequisite to the authorized production work.
+Then finish remaining **4A–4D** effective/external/generated inputs and canonical families for **4E**, plus **5A–5B** full query scope, public remainder pagination and actual freshness barriers. Do not redo contained Cargo startup, path-dependency/target discovery, Rust syntax, chunked Python inventories or canonical declarations/calls: extend those working implementations. Complete RetrieveSourceContext and the first four forms' actual meanings/composition. Recheck the static mixed-language acceptance against real providers/public answers.
+
+Proceed to **6A–6D** using shared startup/update operations, watch-first reconciliation, immediate invalidation, two-speed publication, retained providers and the independent clean/incremental corpus. This is the outstanding boundary for a continuously useful first release. Add phase metrics and selective persistence as these consumers become real.
+
+Continue through **7A–7H** and **8A–8F** without reducing the family/form target: corrected analyses and actual inputs, full DAG/query/presentation behavior, native maintenance, coordinated finite retention, recovery and representative measurement. Optional overlays/CDF/Rayon/orjson remain conditional on a concrete consumer or bottleneck. The full completion criteria in §9.2 are unchanged and are not yet satisfied.
+
+Update this detailed portion of the parent backlog and STATUS in place as behavior lands. The current user request is this documentation reconciliation; production work remains at the explicit checkpoint for the next implementation turn. No plan activation, proving commit, source-artifact bundle, new worktree or repeated approval is a prerequisite to resuming already authorized work.
