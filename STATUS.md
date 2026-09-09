@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `9cc99f76` (`Scope outgoing Rust call coverage to admitted caller bodies`);
-captured Cargo platform selection is the current implementation slice.
+Last production commit: `c1e95674` (`Apply captured Cargo platform selections and retain platform failure scope`);
+shared captured Rust toolchain preparation is the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -302,6 +302,25 @@ lint/types. Default/featureless root checks and full governance pass. Six final 
 and progress helpers (0.12 s). Affected Clippy retains the 955/36-warning baseline with no new
 code/file diagnostics. Changed-file formatting, docs navigation and whitespace checks pass. Full feature/profile selection, custom target-spec
 closure, registry/git/generated inputs, host/target separation and build caching remain open.
+
+## Shared captured Rust toolchain preparation
+
+Every semantic publication pass now lazily captures one immutable compiler/sysroot/extractor/host-C
+bundle shared across selected Cargo targets. A failed capture is shared too, while requested targets
+retain separate failure explanations. The workspace budget owns the retained bytes through the pass;
+the initial capture reservation shrinks to measured retained capacity. The extractor read now shares
+the complete toolchain byte bound. Compact capture diagnostics report bytes, files, elapsed time
+and the input digest.
+
+Actual captured toolchain contents now enter effective context identity. Changing runtime bytes
+changes the context; relocating identical bytes or advancing only source generation does not.
+A previously captured view remains immutable after an installed file changes. Four focused capture/
+context/selection tests pass. The installed multi-platform live/clean/exact-reopen case passes in
+205.79 s on 2026-09-09. The preceding single sample was 198.82 s, so this scenario establishes
+correctness with shared capture, not an end-to-end speedup. Default/featureless root checks,
+governance scan, docs navigation and changed-file formatting pass. Library/integration Clippy
+retains its 955/36-warning baseline with no new code/file diagnostics. Broader performance measurements,
+retained build caches, parallel scheduling and observation of external toolchain changes remain open.
 
 ## Live source reconciliation and current query selection
 
