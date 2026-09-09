@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `1a60e748` (`Expose canonical declaration kinds and reusable public query subjects`).
-The current lexical-reference continuation and its validation are recorded below.
+Last production commit: `5964e5ff` (`Expose Python lexical reference witnesses with independent family coverage`).
+The three completed query slices and their validation are recorded below.
 
 ## Current handoff
 
@@ -20,12 +20,13 @@ implemented portions, unfinished acceptance and the next work for every slice.
 Fresh daemon startup captures real Python/Rust inputs, runs contained semantic providers and
 publishes exact Delta versions. Canonical declarations, Python lexical references and Python/Rust
 call occurrences exist. Installed FastMCP clients have exercised function search and declaration
-fact retrieval and one-step incoming/outgoing call traversal with scoped processing and observed
+fact retrieval, one-step incoming/outgoing call traversal and Python lexical-reference traversal with scoped processing and observed
 result truncation. Python call queries also pass after exact reopen. A running daemon does **not yet** continuously update the graph;
 startup still waits for semantic work before publication. The first useful release remains open.
 
-Work remains in the canonical tree. The call-query continuation present at session start was
-preserved, exercised, and completed as a coherent slice. No outcome from 4 through 8 is closed.
+The call-query continuation present at session start was preserved, exercised and committed in
+`80bc6d18`; declaration kinds/public subjects followed in `1a60e748`, and lexical references in
+`5964e5ff`. The full requested implementation remains unfinished. No outcome from 4 through 8 is closed.
 
 ## Call scope and public call queries: implemented limited production slice
 
@@ -300,16 +301,19 @@ refresh. Counts below overlap; they must not be added into a full-suite total.
 | Compiler-input governance (`fe51b1bd`) and committed call work | `just governance-scan`, root library Clippy, docs/whitespace checks | 30 rule cases and scan pass. Configured compiler/extractor readers have narrow exceptions; workspace source capture rules remain. Clippy completes with the existing warning backlog, not strict cleanliness |
 | Historical processing extension, before public call wiring | `just root-test-incremental -E 'test(processing_scope) \| test(pragmatic_python_semantics_publish_real_call_targets)'` with both real provider binaries selected | Four pass: three scope tests and real Python publication, 6.59 s runtime |
 | Call-query continuation | Installed Python/call/reopen and mixed Rust/declaration/call tests; 16 focused scope/recipe/ingress/implicit-call tests; five final scope/implicit-call/reopen tests | Pass; full traversal, composition and live updates remain open |
+| Declaration kinds/public subjects (`1a60e748`) | Installed Python kinds/fact subjects, guard choices, mixed Rust constants/statics/facts, exact reopen; adapter fast and focused root checks | Pass: 12.95 s Python, 11.04 s guard, 63.91 s Rust, 17.94 s reopen; 95 adapter and 15 focused root cases; default root check and affected Clippy complete |
+| Lexical references (`5964e5ff`) | Installed Python complete/partial/reference/reopen and mixed Rust calls/declarations/unsupported-reference checks; root default/featureless check; affected Clippy/governance/docs/format | Pass: 30.39 s Python, 64.48 s Rust and three processing cases; Python call/reopen regression 17.49 s; Clippy retains 958 warnings |
 
 Local observations for resumption include `/tmp/codefabric-call-processing-tests.log`,
 `/tmp/codefabric-public-calls-check.log`, `/tmp/codefabric-python-canonical-calls-final-regression.log`
-and `/tmp/codefabric-python-call-anchors-*`. They are optional local logs, not required runtime
+and `/tmp/codefabric-python-call-anchors-*`. The current slices also retain
+`/tmp/codefabric-outcomes-declarations-final.log`, `/tmp/codefabric-outcomes-references-final.log`
+and `/tmp/codefabric-outcomes-references-check-final.log`. They are optional local logs, not required runtime
 artifacts or a new certification mechanism. Git and named behavioral tests retain the useful history.
 
 The existing four golden scenarios have passed during earlier slices (startup, installed Python
 serving, exact reopen and cancellation). Exact reopen was rerun on the call-query slice (16.65 s);
-these scenarios do not exercise full outcomes 4–8. Root Clippy retains a large warning backlog (958 in the recent recorded
-library run before this slice; the current affected library run has 959 warnings). The last older aggregate root result at `0cc7242`
+these scenarios do not exercise full outcomes 4–8. Root Clippy retains a large warning backlog (958 warnings in the latest affected library run). The last older aggregate root result at `0cc7242`
 reported 1,038 passed, 13 failed and two skipped; it is historical, not a current verdict. No new
 four-domain aggregate, full-root green result or universal product completion is claimed here.
 

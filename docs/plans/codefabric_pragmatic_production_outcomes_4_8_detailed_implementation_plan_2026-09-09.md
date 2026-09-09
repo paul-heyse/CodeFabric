@@ -50,7 +50,7 @@ Runtime actions retain compact input/output references, selected context/snapsho
 
 ### 1.4 Progress checkpoint and how to execute the remaining scope
 
-**Committed through `1a60e748`:** real mixed-language startup, captured Cargo dependency/multiple-target support, canonical declarations/references/calls, public function/declaration queries, typed processing and truncation, chunked Python inventories and exact checker-selected call definition anchors. Key commits and checks are recorded in STATUS and §9.1 below.
+**Committed through `5964e5ff`:** real mixed-language startup, captured Cargo dependency/multiple-target support, canonical declarations/references/calls, public function/declaration queries, typed processing and truncation, chunked Python inventories and exact checker-selected call definition anchors. Key commits and checks are recorded in STATUS and §9.1 below.
 
 **Call-query continuation delivered as a limited slice:** `system.requested_processing_scope` and
 `system.entity_processing_scope` keep declaration and call coverage separate. Installed modern clients
@@ -68,6 +68,15 @@ with 959 warnings. Global formatting retains pre-existing failures in untouched 
 files, docs navigation and whitespace checks pass. Runtime checks use a temporary delegated user-systemd scope because the login shell
 itself lacks provider cgroup delegation. No containment bypass is used.
 
+**Further query slices:** `1a60e748` exposes canonical declaration kinds, reusable public entity IDs
+and readable guard choices. `5964e5ff` exposes one-step Python lexical references with occurrence
+IDs, provider reference kinds, exact byte positions and independent requested family coverage.
+Complete/unknown-target Python source, exact reopen and explicit unsupported Rust reference scope
+pass through the installed client. Final selected scenarios take 30.39 s (Python) and 64.48 s (mixed
+Rust); three processing cases, default/featureless root checks and governance/docs/format checks pass.
+Affected library Clippy retains 958 warnings. SourceContext, live freshness/updates, the remaining
+semantic families/forms, maintenance, retention and sustained workload acceptance remain unfinished.
+
 | Slice | Current status | Next unmet boundary |
 |---|---|---|
 | 4A | Partial, committed | External/generated/effective build inputs, cache/scheduler/configuration coverage and diagnostics |
@@ -75,7 +84,7 @@ itself lacks provider cgroup delegation. No containment bypass is used.
 | 4C | Partial, committed | Full source/syntax/coordinate/path behavior and parser reuse/live edits |
 | 4D | Partial, committed | Remaining canonical families, authority/unknowns and external/generated/edit-time identity |
 | 4E | Three limited forms demonstrated | Extend calls, implement SourceContext, broaden first-four meanings and composition |
-| 5A | Partial; call extension demonstrated | Query dependency/owner scope, all families, public paging, efficient authorized live status |
+| 5A | Partial; call and lexical-reference scopes demonstrated | Query dependency/owner scope, all families, public paging, efficient authorized live status |
 | 5B | Typed processing/truncation delivered in part | Real freshness policies and observable generation/context/family convergence |
 | 6A | Open; infrastructure only | Daemon-owned notify/gix watch, reconciliation and overflow/rescan recovery |
 | 6B | Open; identity/admission foundations | Immediate invalidation, deletions/replacements, negative dependencies and obsolete completions |
