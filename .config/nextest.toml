@@ -8,11 +8,11 @@ fail-fast = true
 slow-timeout = { period = "60s", terminate-after = 2 }
 
 [[profile.default.overrides]]
-filter = 'test(live_mixed_function_definitions_and_bodies_equal_exact_clean_source)'
+filter = 'test(live_mixed_function_definitions_and_bodies_equal_exact_clean_source) | test(live_mixed_decoded_sources_equal_original_bytes_and_independent_clean_queries)'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
 [[profile.ci.overrides]]
-filter = 'test(live_mixed_function_definitions_and_bodies_equal_exact_clean_source)'
+filter = 'test(live_mixed_function_definitions_and_bodies_equal_exact_clean_source) | test(live_mixed_decoded_sources_equal_original_bytes_and_independent_clean_queries)'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
 [[profile.default.overrides]]

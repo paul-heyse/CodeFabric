@@ -64,6 +64,11 @@ display conversion, filenames with URI metacharacters and a root initializer. It
 file/entity identities, local calls and source spans through deletion/recreation and independent
 clean builds. It has a 600-second default harness deadline.
 
+`just golden --case decoded-source-live` checks original source bytes and checker-selected call
+anchors for Latin-1 and UTF-8/BOM Python plus BOM/CRLF Rust. Encoding changes and restoration are
+compared against independent clean daemons. The installed case passes (203.40 seconds on 2026-09-09)
+and has a 600-second default harness deadline.
+
 `just golden --case function-source-live` compares Python/Rust function definitions and bodies
 against independently written source expectations and separate clean builds after edits/restoration.
 It includes nested Python functions, CRLF/Unicode, a byte limit splitting a character and Rust braces

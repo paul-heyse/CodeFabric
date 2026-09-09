@@ -644,7 +644,7 @@ impl RuffAdapter {
                 parse_diagnostic_count,
             ));
         }
-        let batch = semantic::project_python_semantics(
+        let mut batch = semantic::project_python_semantics(
             &retained.text.text,
             retained.parsed.syntax().body.as_slice(),
             module_name,
@@ -652,6 +652,7 @@ impl RuffAdapter {
             &retained.snapshot.source.provider_image_fingerprint,
             inject_cleanup_failure,
         )?;
+        batch.map_source_ranges(&retained.text)?;
         if job.cancellation().is_cancelled() {
             return Err(PythonSemanticError::Cancelled);
         }

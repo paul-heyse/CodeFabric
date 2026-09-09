@@ -334,12 +334,13 @@ fn owned_span(tcx: TyCtxt<'_>, span: rustc_public::ty::Span) -> OwnedSpan {
     let internal = rustc_public::rustc_internal::internal(tcx, span);
     let source_map = tcx.sess.source_map();
     let start = source_map.lookup_byte_offset(internal.lo());
-    let start_pos = start.sf.start_pos.0;
     let lines = span.get_lines();
     OwnedSpan {
         file: start.sf.name.prefer_remapped_unconditionally().to_string(),
-        start_byte: u64::from(internal.lo().0.saturating_sub(start_pos)),
-        end_byte: u64::from(internal.hi().0.saturating_sub(start_pos)),
+        // rustc strips BOMs and normalizes CRLF internally. Use its recorded
+        // normalization map for every public item, MIR and local source span.
+        start_byte: u64::from(start.sf.original_relative_byte_pos(internal.lo()).0),
+        end_byte: u64::from(start.sf.original_relative_byte_pos(internal.hi()).0),
         start_line: lines.start_line as u64,
         start_column: lines.start_col as u64,
         end_line: lines.end_line as u64,

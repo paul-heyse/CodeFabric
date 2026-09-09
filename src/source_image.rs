@@ -1597,61 +1597,59 @@ fn classify_encoding_governed(
     bytes: &[u8],
     budget: &ResourceBudget,
 ) -> Result<(SourceEncoding, Option<ProviderText>), ResourceBudgetError> {
-    let bom = bytes.starts_with(&[0xef, 0xbb, 0xbf]);
-    let payload = if bom { &bytes[3..] } else { bytes };
-    if let Ok(text) = std::str::from_utf8(payload) {
-        return Ok((
-            if bom {
-                SourceEncoding::Utf8Bom
-            } else {
+    use crate::source_encoding::DecodedSource;
+    let decoded = match DecodedSource::select(bytes, language == SourceLanguage::Python) {
+        Ok(decoded) => decoded,
+        Err(declared) => {
+            let declared = declared
+                .map(|label| {
+                    reserve_memory(budget, (label.len() + std::mem::size_of::<String>()) as u64)
+                        .map(|charge| charge.into_charged_value(label.to_owned()))
+                })
+                .transpose()?;
+            return Ok((SourceEncoding::Unsupported { declared }, None));
+        }
+    };
+    match decoded {
+        DecodedSource::Utf8 {
+            text,
+            original_start,
+        } => Ok((
+            if original_start == 0 {
                 SourceEncoding::Utf8
+            } else {
+                SourceEncoding::Utf8Bom
             },
             Some(ProviderText::from_validated_utf8_with_offset(
                 text,
-                u64::from(bom) * 3,
+                original_start as u64,
                 budget,
             )?),
-        ));
-    }
-    if language == SourceLanguage::Python {
-        let cookie_charge = reserve_memory(
-            budget,
-            (bytes.len() as u64)
+        )),
+        DecodedSource::Latin1(bytes) => {
+            let text_capacity = bytes
+                .len()
                 .checked_mul(2)
-                .and_then(|n| n.checked_add(std::mem::size_of::<String>() as u64))
-                .ok_or(ResourceBudgetError::Overflow)?,
-        )?;
-        let declared = python_encoding_cookie(bytes);
-        if declared
-            .as_deref()
-            .is_some_and(|name| matches!(name, "latin-1" | "latin1" | "iso-8859-1" | "iso-latin-1"))
-        {
+                .ok_or(ResourceBudgetError::Overflow)?;
             let text_charge = reserve_memory(
                 budget,
-                bytes.len() as u64 * 2 + std::mem::size_of::<String>() as u64,
+                (text_capacity + std::mem::size_of::<String>()) as u64,
             )?;
             let offsets_charge = reserve_memory(budget, (bytes.len() as u64 + 1) * 8)?;
-            let mut text = String::with_capacity(bytes.len() * 2);
-            text.extend(bytes.iter().map(|byte| char::from(*byte)));
+            let mut text = String::with_capacity(text_capacity);
+            text.extend(decoded.characters().map(|(_, ch)| ch));
             let offsets = (0..=bytes.len())
                 .map(|offset| offset as u64)
                 .collect::<Vec<_>>();
-            return Ok((
+            Ok((
                 SourceEncoding::PythonLatin1,
                 Some(ProviderText {
                     text: text_charge.into_charged_value(text),
                     original_byte_offsets: offsets_charge.into_charged_vec(offsets)?,
                 }),
-            ));
+            ))
         }
-        return Ok((
-            SourceEncoding::Unsupported {
-                declared: declared.map(|value| cookie_charge.into_charged_value(value)),
-            },
-            None,
-        ));
     }
-    Ok((SourceEncoding::Unsupported { declared: None }, None))
 }
 
 #[cfg(test)]
@@ -1665,40 +1663,6 @@ fn classify_encoding(
         &crate::provider_types::source_fixture_budget([2; 16]),
     )
     .unwrap()
-}
-
-fn python_encoding_cookie(bytes: &[u8]) -> Option<String> {
-    for line in bytes.split(|byte| *byte == b'\n').take(2) {
-        let Ok(ascii) = std::str::from_utf8(line) else {
-            continue;
-        };
-        let Some(coding) = ascii.find("coding") else {
-            continue;
-        };
-        let Some(suffix) = ascii.get(coding + "coding".len()..) else {
-            continue;
-        };
-        let suffix = suffix.trim_start();
-        let Some(suffix) = suffix
-            .strip_prefix(':')
-            .or_else(|| suffix.strip_prefix('='))
-        else {
-            continue;
-        };
-        let label = suffix
-            .trim_start()
-            .chars()
-            .take_while(|character| {
-                character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
-            })
-            .collect::<String>()
-            .to_ascii_lowercase()
-            .replace('_', "-");
-        if !label.is_empty() {
-            return Some(label);
-        }
-    }
-    None
 }
 
 fn digest_name(digest: &[u8; 32]) -> String {

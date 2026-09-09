@@ -102,6 +102,24 @@ impl ProviderNativeSourceImage {
         content_digest: [u8; 32],
         provider_text: ProviderText,
     ) -> Result<Self, ProviderNativeSyntaxError> {
+        Self::new_for_language(
+            file_id,
+            source_generation,
+            bytes,
+            content_digest,
+            provider_text,
+            false,
+        )
+    }
+
+    fn new_for_language(
+        file_id: [u8; 16],
+        source_generation: u64,
+        bytes: crate::resource_budget::ChargedSlice<u8>,
+        content_digest: [u8; 32],
+        provider_text: ProviderText,
+        python: bool,
+    ) -> Result<Self, ProviderNativeSyntaxError> {
         let source = Self {
             file_id,
             source_generation,
@@ -109,7 +127,7 @@ impl ProviderNativeSourceImage {
             content_digest,
             provider_text,
         };
-        validated_provider_text(&source)?;
+        validated_provider_text(&source, python)?;
         Ok(source)
     }
 }
@@ -127,7 +145,7 @@ impl TryFrom<&SourceImage> for ProviderNativeSourceImage {
                 "language has no supported syntax provider",
             ));
         }
-        Self::new(
+        Self::new_for_language(
             source.file_id,
             source.source_generation,
             source.bytes.clone(),
@@ -138,6 +156,7 @@ impl TryFrom<&SourceImage> for ProviderNativeSourceImage {
                 .ok_or(ProviderNativeSyntaxError::InvalidSource(
                     "provider UTF-8 text is unavailable",
                 ))?,
+            source.language == SourceLanguage::Python,
         )
     }
 }
@@ -403,7 +422,7 @@ impl ExactPythonSyntaxRunner {
     ) -> Result<ProviderNativeSyntaxRun, ProviderNativeSyntaxError> {
         validate_job_source(jobs, source)?;
         validate_job_module(jobs, source.file_id, module)?;
-        let text = validated_provider_text(source)?;
+        let text = validated_provider_text(source, true)?;
         let pins = jobs.pins()?;
         validate_run_pins(pins)?;
         let tree = self
@@ -430,7 +449,7 @@ impl ExactPythonSyntaxRunner {
     ) -> Result<ProviderNativeSyntaxRun, ProviderNativeSyntaxError> {
         validate_job_source(jobs, source)?;
         validate_job_module(jobs, source.file_id, module)?;
-        let text = validated_provider_text(source)?;
+        let text = validated_provider_text(source, true)?;
         let pins = jobs.pins()?;
         validate_run_pins(pins)?;
         let tree =
@@ -554,6 +573,7 @@ fn validate_run_pins(pins: PythonSyntaxRunPins) -> Result<(), ProviderNativeSynt
 
 pub(crate) fn validated_provider_text(
     source: &ProviderNativeSourceImage,
+    python: bool,
 ) -> Result<ProviderText, ProviderNativeSyntaxError> {
     if crate::integrity::digest_bytes(&source.bytes) != source.content_digest {
         return Err(ProviderNativeSyntaxError::InvalidSource(
@@ -561,9 +581,17 @@ pub(crate) fn validated_provider_text(
         ));
     }
     let text = source.provider_text.clone();
-    if text.text.as_bytes() != source.bytes.as_ref() {
+    let decoded = crate::source_encoding::DecodedSource::select(&source.bytes, python)
+        .map_err(|_| ProviderNativeSyntaxError::InvalidSource("unsupported source encoding"))?;
+    if !decoded.characters().map(|(_, ch)| ch).eq(text.text.chars())
+        || !decoded
+            .characters()
+            .map(|(offset, _)| offset as u64)
+            .chain(std::iter::once(decoded.original_len() as u64))
+            .eq(text.original_byte_offsets.iter().copied())
+    {
         return Err(ProviderNativeSyntaxError::InvalidSource(
-            "provider text differs from immutable source bytes",
+            "provider text or boundary map differs from immutable source decoding",
         ));
     }
     Ok(text)
@@ -2895,6 +2923,90 @@ pub(crate) mod job_tests {
             .unwrap()
             .run_full(jobs.borrowed(), 1, &source, module())
             .unwrap()
+    }
+
+    #[test]
+    fn decoded_sources_preserve_native_ranges_and_reject_forged_maps() {
+        for bytes in [
+            b"# coding: latin-1\r\n# \xe9\r\ndef caf\xe9():\r\n    return caf\xe9()\r\n".as_slice(),
+            b"\xef\xbb\xbf# \xc3\xa9\r\ndef caf\xc3\xa9():\r\n    return caf\xc3\xa9()\r\n",
+        ] {
+            let budget = crate::provider_contracts::fixture_provider_budget([6; 16], [254; 16]);
+            let decoded = crate::source_encoding::DecodedSource::select(bytes, true).unwrap();
+            let text: String = decoded.characters().map(|(_, ch)| ch).collect();
+            let mut mapped = ProviderText::from_validated_utf8(&text, &budget).unwrap();
+            mapped.original_byte_offsets = crate::resource_budget::ChargedSlice::try_from_fn(
+                &budget,
+                crate::resource_budget::ResourceClass::Data,
+                text.chars().count() + 1,
+                || {
+                    let mut offsets = Vec::with_capacity(text.chars().count() + 1);
+                    offsets.extend(decoded.characters().map(|(offset, _)| offset as u64));
+                    offsets.push(bytes.len() as u64);
+                    offsets
+                },
+            )
+            .unwrap();
+            let source = ProviderNativeSourceImage::new_for_language(
+                [1; 16],
+                1,
+                crate::resource_budget::ChargedSlice::try_from_fn(
+                    &budget,
+                    crate::resource_budget::ResourceClass::Data,
+                    bytes.len(),
+                    || bytes.to_vec(),
+                )
+                .unwrap(),
+                crate::integrity::digest_bytes(bytes),
+                mapped,
+                true,
+            )
+            .unwrap();
+            let jobs = jobs(&source);
+            let mut runner = ExactPythonSyntaxRunner::new(jobs.borrowed()).unwrap();
+            let run = runner
+                .run_full(jobs.borrowed(), 1, &source, module())
+                .unwrap();
+            let bindings = run.relation(NativeSyntaxRelation::RuffBinding);
+            let names = bindings
+                .column_by_name("name")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let starts = bindings
+                .column_by_name("start_byte")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap();
+            let ends = bindings
+                .column_by_name("end_byte")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap();
+            let row = (0..bindings.num_rows())
+                .find(|row| names.value(*row) == "café")
+                .unwrap();
+            let start = bytes
+                .windows(4)
+                .position(|window| window == b"def ")
+                .unwrap()
+                + 4;
+            let end = bytes[start..]
+                .iter()
+                .position(|byte| *byte == b'(')
+                .unwrap()
+                + start;
+            assert_eq!(
+                (starts.value(row), ends.value(row)),
+                (start as u64, end as u64)
+            );
+            let mut forged = source.clone();
+            forged.provider_text = ProviderText::from_validated_utf8(&text, &budget).unwrap();
+            assert!(validated_provider_text(&forged, true).is_err());
+        }
     }
 
     #[test]

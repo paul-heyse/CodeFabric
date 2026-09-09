@@ -309,6 +309,86 @@ pub struct PythonFrontendBatch {
 }
 
 impl PythonFrontendBatch {
+    /// Convert every source-bearing observation after all decoded-text analyses finish.
+    /// IDs and graph references remain provider-local; no downstream join mixes coordinate spaces.
+    pub(super) fn map_source_ranges(
+        &mut self,
+        text: &crate::provider_types::ProviderText,
+    ) -> Result<(), PythonSemanticError> {
+        let map = crate::provider_types::ProviderBoundaryMap::new(text)
+            .map_err(|error| PythonSemanticError::Invariant(error.to_string()))?;
+        let original = |offset: u64| {
+            let offset = usize::try_from(offset).map_err(|_| {
+                PythonSemanticError::Invariant("source offset exceeds usize".into())
+            })?;
+            map.original(offset)
+                .map_err(|error| PythonSemanticError::Invariant(error.to_string()))
+        };
+        for row in &mut self.scopes {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        for row in &mut self.bindings {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        for row in &mut self.references {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        for row in &mut self.imports {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        for row in &mut self.exports {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        for row in &mut self.callables {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        for row in &mut self.parameters {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        for row in &mut self.callable_syntax {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        for row in &mut self.call_sites {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        for row in &mut self.members {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        for row in &mut self.dataflow_events {
+            row.start_byte = original(row.start_byte)?;
+            row.end_byte = original(row.end_byte)?;
+        }
+        let optional = self
+            .call_arguments
+            .iter_mut()
+            .map(|row| (&mut row.start_byte, &mut row.end_byte))
+            .chain(
+                self.cfg_nodes
+                    .iter_mut()
+                    .map(|row| (&mut row.start_byte, &mut row.end_byte)),
+            )
+            .chain(
+                self.values
+                    .iter_mut()
+                    .map(|row| (&mut row.start_byte, &mut row.end_byte)),
+            );
+        for (start, end) in optional {
+            *start = start.map(&original).transpose()?;
+            *end = end.map(&original).transpose()?;
+        }
+        Ok(())
+    }
+
     /// Owned vector capacities and nested string storage, excluding opaque native arenas.
     pub(super) fn memory_bytes(
         &self,

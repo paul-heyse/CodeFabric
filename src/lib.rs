@@ -105,6 +105,8 @@ pub mod relation_ipc;
 pub(crate) mod relation_ipc_contract;
 #[cfg(feature = "provider-contracts")]
 pub mod resource_budget;
+#[cfg(feature = "fact-generation")]
+pub(crate) mod source_encoding;
 
 #[cfg(feature = "daemon")]
 pub(crate) mod disk_headroom;
@@ -132,13 +134,13 @@ pub mod ruff_adapter;
 #[cfg(feature = "daemon")]
 pub mod rust_compilation_trust;
 #[cfg(feature = "daemon")]
-pub mod rustc_source_files;
-#[cfg(feature = "daemon")]
 pub mod rust_mir_derived_analysis;
 #[cfg(feature = "daemon")]
 pub(crate) mod rustc_relation_schema;
 #[cfg(feature = "daemon")]
 pub mod rustc_service;
+#[cfg(feature = "daemon")]
+pub mod rustc_source_files;
 #[cfg(feature = "data-fabric")]
 pub mod schema_contract;
 #[cfg(any(feature = "data-fabric", feature = "operational-state"))]

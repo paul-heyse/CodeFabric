@@ -1283,7 +1283,7 @@ fn expected_module_digest(
 
 fn validate_call_definition_pins(
     batch: &RecordBatch,
-    sources: &BTreeMap<&str, ([u8; 32], &[u8])>,
+    sources: &BTreeMap<&str, ([u8; 32], crate::source_encoding::DecodedSource<'_>)>,
 ) -> Result<(), PyreflyServiceError> {
     let invalid =
         || PyreflyServiceError::Arrow("call definition differs from captured input".to_owned());
@@ -1321,18 +1321,24 @@ fn validate_call_definition_pins(
             }
             continue;
         }
-        let (digest, bytes) = sources.get(files.value(row)).ok_or_else(invalid)?;
+        let (digest, decoded) = sources.get(files.value(row)).ok_or_else(invalid)?;
         let start = usize::try_from(starts.value(row)).map_err(|_| invalid())?;
         let end = usize::try_from(ends.value(row)).map_err(|_| invalid())?;
-        let boundary = |position: usize| {
-            position == bytes.len() || bytes.get(position).is_some_and(|byte| byte & 0xc0 != 0x80)
+        let boundary = |position: usize| match decoded {
+            crate::source_encoding::DecodedSource::Utf8 {
+                text,
+                original_start,
+            } => position
+                .checked_sub(*original_start)
+                .is_some_and(|offset| text.is_char_boundary(offset)),
+            crate::source_encoding::DecodedSource::Latin1(bytes) => position <= bytes.len(),
         };
         if digests.is_null(row)
             || starts.is_null(row)
             || ends.is_null(row)
             || digests.value(row) != digest
             || start >= end
-            || end > bytes.len()
+            || end > decoded.original_len()
             || !boundary(start)
             || !boundary(end)
             || mappings.value(row) != "exact_checker_definition"
@@ -1733,7 +1739,16 @@ async fn analyze_pyrefly_uds_inner(
         .map(|(module, blob)| {
             Ok((
                 module.file_id.as_str(),
-                (parse_digest(&module.content_digest)?, blob.bytes.as_ref()),
+                (
+                    parse_digest(&module.content_digest)?,
+                    crate::source_encoding::DecodedSource::select(&blob.bytes, true).map_err(
+                        |_| {
+                            PyreflyServiceError::Protocol(
+                                "unsupported captured source encoding".to_owned(),
+                            )
+                        },
+                    )?,
+                ),
             ))
         })
         .collect::<Result<BTreeMap<_, _>, PyreflyServiceError>>()?;
@@ -2533,7 +2548,13 @@ mod tests {
         use arrow_schema::{Field, Schema};
         let bytes = b"def chosen(): pass\n";
         let digest = *blake3::hash(bytes).as_bytes();
-        let sources = BTreeMap::from([("file:one", (digest, bytes.as_slice()))]);
+        let sources = BTreeMap::from([(
+            "file:one",
+            (
+                digest,
+                crate::source_encoding::DecodedSource::select(bytes, true).unwrap(),
+            ),
+        )]);
         let schema = Arc::new(Schema::new(vec![
             Field::new("target_file_id", arrow_schema::DataType::Utf8, true),
             Field::new(

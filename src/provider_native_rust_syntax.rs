@@ -141,7 +141,7 @@ impl ExactRustSyntaxRunner {
     ) -> Result<ProviderRunResult, ProviderNativeSyntaxError> {
         validate_job(job)?;
         crate::provider_native_syntax::validate_single_job_source(job, source)?;
-        let text = crate::provider_native_syntax::validated_provider_text(source)?;
+        let text = crate::provider_native_syntax::validated_provider_text(source, false)?;
         let tree = if let Some(edit) = edit {
             self.parser.parse_incremental(job, revision, text, edit)?
         } else {

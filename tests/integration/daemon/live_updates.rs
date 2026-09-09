@@ -1207,6 +1207,181 @@ fn live_mixed_function_definitions_and_bodies_equal_exact_clean_source() {
     supervisor.stop();
 }
 
+fn encoded_sources(utf8: bool) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let python = if utf8 {
+        "# coding: utf-8\r\n# é\r\nfrom helper import café\r\ndef caller():\r\n    return café()\r\n".as_bytes()
+    } else {
+        b"# coding: latin-1\r\n# \xe9\r\nfrom helper import caf\xe9\r\ndef caller():\r\n    return caf\xe9()\r\n"
+    };
+    let helper = "# coding: utf-8\r\n# é\r\ndef café() -> str:\r\n    return 'é'\r\n";
+    let rust = "// é\r\n\r\npub fn rust_leaf() -> u32 {\r\n    7\r\n}\r\n".as_bytes();
+    let prefix = if utf8 {
+        b"".as_slice()
+    } else {
+        b"\xef\xbb\xbf"
+    };
+    (
+        python.to_vec(),
+        [prefix, helper.as_bytes()].concat(),
+        [prefix, rust].concat(),
+    )
+}
+
+fn encoded_source_observation(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    utf8: bool,
+) -> Vec<SemanticObservation> {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "function declarations",
+    );
+    let entities = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-entities"),
+        request.clone(),
+    );
+    let by_name = entities
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row["name"].as_str().unwrap(),
+                row["public_entity_id"].clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        by_name.keys().copied().collect::<Vec<_>>(),
+        ["café", "caller", "fixture::rust_leaf"]
+    );
+    assert_eq!(
+        entities.processing[0]["remaining_partitions"], 0,
+        "{phase}: encoded declarations"
+    );
+    request["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "calls", "starting_from": [{"entity_id": by_name["caller"]}],
+        "relationship": "calls", "direction": "outgoing", "distance": "one relationship step", "return": {"limit": {"maximum_results": 32}}
+    }]);
+    let calls = public_query(fixture, stack, &format!("{phase}-calls"), request.clone());
+    assert_eq!(calls.rows.len(), 1);
+    assert_eq!(calls.rows[0]["public_target_entity_id"], by_name["café"]);
+    assert_eq!(
+        calls.processing[0]["remaining_partitions"], 0,
+        "{phase}: encoded target definition"
+    );
+    let subjects = by_name
+        .values()
+        .map(|id| json!({"entity_id": id}))
+        .collect::<Vec<_>>();
+    request["queries"] = json!([{
+        "request": "retrieve source and syntax context", "query_id": "source", "about": subjects,
+        "context": "function definition", "return": {"maximum_source_bytes": 4096, "limit": {"maximum_results": 32}}
+    }]);
+    let source = public_query(fixture, stack, &format!("{phase}-source"), request);
+    assert_eq!(source.rows.len(), 3, "{phase}: encoded function owners");
+    assert_eq!(
+        source.processing[0]["remaining_partitions"], 0,
+        "{phase}: decoded syntax mapping"
+    );
+    let (python, helper, rust) = encoded_sources(utf8);
+    for (name, bytes, expected) in [
+        (
+            "caller",
+            python.as_slice(),
+            if utf8 {
+                "def caller():\r\n    return café()".as_bytes()
+            } else {
+                b"def caller():\r\n    return caf\xe9()"
+            },
+        ),
+        (
+            "café",
+            helper.as_slice(),
+            "def café() -> str:\r\n    return 'é'".as_bytes(),
+        ),
+        (
+            "fixture::rust_leaf",
+            rust.as_slice(),
+            b"pub fn rust_leaf() -> u32 {\r\n    7\r\n}".as_slice(),
+        ),
+    ] {
+        let row = source.rows.iter().find(|row| row["name"] == name).unwrap();
+        let start = bytes
+            .windows(expected.len())
+            .position(|window| window == expected)
+            .unwrap();
+        let context = &row["source_context"];
+        assert_eq!(context["start_byte"], start);
+        assert_eq!(context["end_byte"], start + expected.len());
+        assert_eq!(context["returned_bytes"], expected.len());
+        assert_eq!(context["complete"], true);
+        if let Ok(text) = std::str::from_utf8(expected) {
+            assert_eq!(context["text"], text);
+        } else {
+            assert!(context["text"].is_null());
+            assert_eq!(
+                context["bytes"],
+                "6465662063616c6c657228293a0d0a2020202072657475726e20636166e92829"
+            );
+        }
+    }
+    vec![entities, calls, source]
+}
+
+#[test]
+fn live_mixed_decoded_sources_equal_original_bytes_and_independent_clean_queries() {
+    let (python, helper, rust) = encoded_sources(false);
+    let fixture = ProductionFixture::with_source(&python);
+    let root = Path::new(&fixture.workspace.root_path_display);
+    fs::write(root.join("helper.py"), helper).unwrap();
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(root.join("src/lib.rs"), rust).unwrap();
+    fs::write(root.join("Cargo.toml"), "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[lib]\ntest = false\ndoctest = false\n").unwrap();
+    fs::write(
+        root.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+        store.backup_to(&registration).unwrap();
+    }
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let initial = encoded_source_observation(&fixture, &stack, "encoding-initial", false);
+    for (phase, utf8) in [("encoding-utf8", true), ("encoding-restored", false)] {
+        let (python, helper, rust) = encoded_sources(utf8);
+        fs::write(root.join("sample.py"), python).unwrap();
+        fs::write(root.join("helper.py"), helper).unwrap();
+        fs::write(root.join("src/lib.rs"), rust).unwrap();
+        let live = encoded_source_observation(&fixture, &stack, phase, utf8);
+        let clean = clean_fixture(&fixture, &registration, &stack);
+        let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+        let expected = encoded_source_observation(&clean, &stack, &format!("clean-{phase}"), utf8);
+        assert_eq!(
+            live, expected,
+            "{phase}: decoded inputs match independent clean state"
+        );
+        if !utf8 {
+            assert_eq!(
+                live, initial,
+                "restored encoding restores source and identity"
+            );
+        }
+        clean_supervisor.stop();
+    }
+    supervisor.stop();
+}
+
 fn pending_semantic_candidate(fixture: &ProductionFixture) -> PathBuf {
     eprintln!(
         "waiting for semantic publication in {}",

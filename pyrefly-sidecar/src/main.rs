@@ -8,6 +8,8 @@ pub(crate) use protocol::generated::codefabric::provider::v1 as relation_ipc_pro
 #[path = "../../src/relation_ipc_proto.rs"]
 mod relation_ipc_proto;
 mod server;
+#[path = "../../src/source_encoding.rs"]
+mod source_encoding;
 
 use std::ffi::OsString;
 use std::io::{self, Write};

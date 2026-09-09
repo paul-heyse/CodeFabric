@@ -206,11 +206,11 @@ struct LoadedModuleAnalysisInput<'a> {
     run: &'a AnalysisRunIdentity,
     diagnostics: &'a [(ModulePath, String)],
     module: &'a ModuleInput,
-    source: &'a [u8],
+    source: &'a CheckerSource,
     provider_path: &'a Path,
     name: ModuleName,
     path: ModulePath,
-    definition_sources: &'a BTreeMap<PathBuf, (&'a ModuleInput, &'a [u8])>,
+    definition_sources: &'a BTreeMap<PathBuf, (&'a ModuleInput, &'a CheckerSource)>,
 }
 
 struct CallTargetRow {
@@ -455,10 +455,11 @@ impl SemanticContext {
             return Err("Pyrefly complete source inventory exceeds its byte/module bound".into());
         }
         // Capture each immutable input once, before mutating retained checker state.
-        // The same verified bytes feed the private source view and result positions.
+        // Decode only digest-verified bytes; the private UTF-8 view and original-byte
+        // positions share one mapping for this exact inventory.
         let source_bytes = modules
             .iter()
-            .map(read_module_source)
+            .map(|module| read_module_source(module).and_then(|bytes| CheckerSource::new(&bytes)))
             .collect::<Result<Vec<_>, _>>()?;
 
         // Resolve the complete selected module map before any retained-state mutation.
@@ -516,11 +517,11 @@ impl SemanticContext {
             match self.loaded.get(&module.module_id) {
                 Some(loaded) if loaded.source_digest == module.source_digest => {}
                 Some(_) => {
-                    write_provider_source(target, bytes)?;
+                    write_provider_source(target, bytes.text.as_bytes())?;
                     modified.push(target.clone());
                 }
                 None => {
-                    write_provider_source(target, bytes)?;
+                    write_provider_source(target, bytes.text.as_bytes())?;
                     created.push(target.clone());
                 }
             }
@@ -552,7 +553,7 @@ impl SemanticContext {
         let definition_sources = provider_paths
             .iter()
             .cloned()
-            .zip(modules.iter().zip(source_bytes.iter().map(Vec::as_slice)))
+            .zip(modules.iter().zip(&source_bytes))
             .collect::<BTreeMap<_, _>>();
         let analyses = modules
             .iter()
@@ -648,7 +649,7 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
     let mut relations = vec![
         encode_relation(
             PyreflyRelation::ModuleContext,
-            &module_context_batch(&common, source.len())?,
+            &module_context_batch(&common, source.original_len)?,
         )?,
         encode_relation(
             PyreflyRelation::TypeShape,
@@ -698,7 +699,7 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
 
 fn project_type_table(
     response: Option<&TypeTableResponseData>,
-    source: &[u8],
+    source: &CheckerSource,
 ) -> Result<ProjectedTypeRows, String> {
     let Some(response) = response else {
         return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
@@ -772,7 +773,7 @@ fn project_type_table(
                 "Pyrefly located type references an absent response-local index".to_owned(),
             );
         }
-        let (start_byte, end_byte) = byte_range(source, &occurrence.location)?;
+        let (start_byte, end_byte) = source.byte_range(&occurrence.location)?;
         located.push(LocatedTypeRow {
             ordinal: u64::try_from(ordinal).map_err(|_| "located type ordinal exceeds u64")?,
             start_byte,
@@ -807,8 +808,8 @@ fn push_components(
 
 fn project_callees(
     callees: Option<&[(PythonASTRange, pyrefly::query::Callee)]>,
-    source: &[u8],
-    definition_sources: &BTreeMap<PathBuf, (&ModuleInput, &[u8])>,
+    source: &CheckerSource,
+    definition_sources: &BTreeMap<PathBuf, (&ModuleInput, &CheckerSource)>,
 ) -> Result<Vec<CallTargetRow>, String> {
     let Some(callees) = callees else {
         return Ok(Vec::new());
@@ -817,7 +818,7 @@ fn project_callees(
     let mut target_ordinals = BTreeMap::<(u64, u64), u64>::new();
     let mut rows = Vec::with_capacity(callees.len());
     for (range, callee) in callees {
-        let key = byte_range(source, range)?;
+        let key = source.byte_range(range)?;
         let next_occurrence = u64::try_from(occurrence_ordinals.len())
             .map_err(|_| "callee occurrence count exceeds u64")?;
         let occurrence = *occurrence_ordinals.entry(key).or_insert(next_occurrence);
@@ -829,10 +830,7 @@ fn project_callees(
                 Some((module, bytes)) => {
                     let start = definition.start_byte as usize;
                     let end = definition.end_byte as usize;
-                    let text =
-                        std::str::from_utf8(bytes).map_err(|_| "definition source is not UTF-8")?;
-                    if start >= end || !text.is_char_boundary(start) || !text.is_char_boundary(end)
-                    {
+                    if start >= end {
                         return Err(
                             "checker definition range differs from captured source".to_owned()
                         );
@@ -841,8 +839,8 @@ fn project_callees(
                         Some(CallDefinitionRow {
                             file_id: module.file_id.clone(),
                             content_digest: parse_digest(&module.source_digest)?,
-                            start_byte: u64::from(definition.start_byte),
-                            end_byte: u64::from(definition.end_byte),
+                            start_byte: bytes.original(start)?,
+                            end_byte: bytes.original(end)?,
                         }),
                         "exact_checker_definition",
                     )
@@ -909,47 +907,76 @@ fn project_members(
     rows
 }
 
-fn byte_range(source: &[u8], range: &PythonASTRange) -> Result<(u64, u64), String> {
-    let text = std::str::from_utf8(source)
-        .map_err(|_| "Pyrefly semantic source is not valid UTF-8".to_owned())?;
-    let mut line_starts = vec![0_usize];
-    line_starts.extend(
-        source
-            .iter()
-            .enumerate()
-            .filter_map(|(index, byte)| (*byte == b'\n').then_some(index + 1)),
-    );
-    let position = |line: u32, column: u32| -> Result<usize, String> {
-        let line_index = usize::try_from(line)
-            .map_err(|_| "Pyrefly line exceeds usize".to_owned())?
-            .checked_sub(1)
-            .ok_or_else(|| "Pyrefly line numbers must be one-indexed".to_owned())?;
-        let line_start = *line_starts
-            .get(line_index)
-            .ok_or_else(|| "Pyrefly range line exceeds source".to_owned())?;
-        let absolute = line_start
-            .checked_add(
-                usize::try_from(column).map_err(|_| "Pyrefly column exceeds usize".to_owned())?,
-            )
-            .ok_or_else(|| "Pyrefly range overflows source coordinates".to_owned())?;
-        let line_end = line_starts
-            .get(line_index + 1)
-            .copied()
-            .unwrap_or(source.len());
-        if absolute > line_end || absolute > source.len() || !text.is_char_boundary(absolute) {
-            return Err("Pyrefly range is out of bounds or splits UTF-8".to_owned());
+/// One admitted source, transcoded for the checker with indexed exact original boundaries.
+struct CheckerSource {
+    text: String,
+    boundaries: Vec<(usize, u64)>,
+    line_starts: Vec<usize>,
+    original_len: usize,
+}
+
+impl CheckerSource {
+    fn new(bytes: &[u8]) -> Result<Self, String> {
+        let decoded = crate::source_encoding::DecodedSource::select(bytes, true)
+            .map_err(|_| "unsupported captured Python source encoding".to_owned())?;
+        let mut text = String::with_capacity(bytes.len());
+        let mut boundaries = Vec::with_capacity(decoded.characters().count() + 1);
+        for (original, ch) in decoded.characters() {
+            boundaries.push((text.len(), original as u64));
+            text.push(ch);
         }
-        Ok(absolute)
-    };
-    let start = position(range.start_line.get(), range.start_col)?;
-    let end = position(range.end_line.get(), range.end_col)?;
-    if start > end {
-        return Err("Pyrefly range is reversed".to_owned());
+        boundaries.push((text.len(), decoded.original_len() as u64));
+        let mut line_starts = vec![0];
+        line_starts.extend(
+            text.bytes()
+                .enumerate()
+                .filter_map(|(index, byte)| (byte == b'\n').then_some(index + 1)),
+        );
+        Ok(Self {
+            text,
+            boundaries,
+            line_starts,
+            original_len: bytes.len(),
+        })
     }
-    Ok((
-        u64::try_from(start).map_err(|_| "start byte exceeds u64")?,
-        u64::try_from(end).map_err(|_| "end byte exceeds u64")?,
-    ))
+
+    fn original(&self, offset: usize) -> Result<u64, String> {
+        self.boundaries
+            .binary_search_by_key(&offset, |(provider, _)| *provider)
+            .map(|index| self.boundaries[index].1)
+            .map_err(|_| "checker range differs from captured source boundaries".to_owned())
+    }
+
+    fn byte_range(&self, range: &PythonASTRange) -> Result<(u64, u64), String> {
+        let position = |line: u32, column: u32| -> Result<u64, String> {
+            let line_index = usize::try_from(line)
+                .ok()
+                .and_then(|line| line.checked_sub(1))
+                .ok_or_else(|| "Pyrefly line numbers must be one-indexed".to_owned())?;
+            let line_start = *self
+                .line_starts
+                .get(line_index)
+                .ok_or_else(|| "Pyrefly range line exceeds source".to_owned())?;
+            let absolute = line_start
+                .checked_add(column as usize)
+                .ok_or_else(|| "Pyrefly range overflows source coordinates".to_owned())?;
+            let line_end = self
+                .line_starts
+                .get(line_index + 1)
+                .copied()
+                .unwrap_or(self.text.len());
+            if absolute > line_end {
+                return Err("Pyrefly range exceeds source line".to_owned());
+            }
+            self.original(absolute)
+        };
+        let start = position(range.start_line.get(), range.start_col)?;
+        let end = position(range.end_line.get(), range.end_col)?;
+        if start > end {
+            return Err("Pyrefly range is reversed".to_owned());
+        }
+        Ok((start, end))
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1513,6 +1540,71 @@ mod tests {
             source_digest: b3(source),
             source_byte_length: source.len() as u64,
         }
+    }
+
+    #[test]
+    fn decoded_checker_sources_keep_original_call_and_definition_bytes() {
+        let root = claim_001_temp_root("decoded-source");
+        std::fs::create_dir_all(&root).unwrap();
+        let caller = b"# coding: latin-1\r\n# \xe9\r\nfrom helper import caf\xe9\r\ndef caller():\r\n    return caf\xe9()\r\n";
+        let helper = b"\xef\xbb\xbf# coding: utf-8\r\n# \xc3\xa9\r\ndef caf\xc3\xa9() -> str:\r\n    return 'ok'\r\n";
+        let modules = [
+            inventory_module(&root, "caller", caller),
+            inventory_module(&root, "helper", helper),
+        ];
+        let run = AnalysisRunIdentity {
+            provider_run_id: "run:encoding".into(),
+            analysis_context_id: "context:encoding".into(),
+            semantic_environment_digest: b3(b"encoding-environment"),
+            source_generation: 1,
+        };
+        let mut context = SemanticContext::test_only_fixture(&root, "encoding-context").unwrap();
+        let analysis = context.analyze_modules(&run, &complete(modules)).unwrap();
+        let caller_result = analysis
+            .modules
+            .iter()
+            .find(|module| module.module_id == "module:caller")
+            .unwrap();
+        let relation = caller_result
+            .relations
+            .iter()
+            .find(|relation| relation.relation == PyreflyRelation::CallTarget)
+            .unwrap();
+        let batch = StreamReader::try_new(Cursor::new(&relation.arrow_ipc), None)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        let number = |name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap()
+                .value(0)
+        };
+        assert_eq!(
+            &caller[usize::try_from(number("start_byte")).unwrap()
+                ..usize::try_from(number("end_byte")).unwrap()],
+            b"caf\xe9"
+        );
+        assert_eq!(claim_001_text(&batch, "target_file_id"), "file:helper");
+        assert_eq!(
+            &helper[usize::try_from(number("target_start_byte")).unwrap()
+                ..usize::try_from(number("target_end_byte")).unwrap()],
+            b"caf\xc3\xa9"
+        );
+        assert_eq!(
+            claim_001_text(&batch, "target_source_mapping"),
+            "exact_checker_definition"
+        );
+        let view = CheckerSource::new(caller).unwrap();
+        assert!(view.text.contains("café()"));
+        assert!(view.original(view.text.find('é').unwrap() + 1).is_err());
+        drop(context);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

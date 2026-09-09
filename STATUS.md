@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `4516a5a7` (`Preserve raw Python paths and exact diagnostic ownership`);
-function definition/body source context is the current implementation slice.
+Last production commit: `10e577d5` (`Expose exact function definition and body source contexts`);
+decoded source mappings are the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -153,6 +153,34 @@ combined library/integration Clippy reports no findings on changed lines.
 Syntax nodes determine definition/body boundaries; separate decorator or attribute nodes need broader
 context selection. Full syntax outlines, surrounding-line selection, other source subjects and
 composition remain open.
+
+## Decoded source mappings
+
+Capture, Python syntax and the Pyrefly executable share an allocation-free selection rule for UTF-8,
+UTF-8 BOM, ASCII and Latin-1 inputs. Python coding cookies apply before UTF-8 detection, only in legal
+first/second-line comments; conflicting BOMs, unknown codecs and invalid bytes are unavailable.
+Syntax admission verifies both decoded text and every original-byte boundary against captured bytes.
+Ruff converts all source-bearing semantic observations after decoded-text analysis. Pyrefly reads a
+private UTF-8 view and projects located types, calls and cross-file definition anchors through indexed
+original-byte mappings. Daemon admission uses the selected encoding when checking target boundaries.
+Captured bytes and their digests remain authoritative for source disclosure.
+
+The rustc extractor now uses the pinned compiler's `SourceFile::original_relative_byte_pos` map for
+item, MIR and local spans, including BOM stripping and CRLF normalization. Provider line/column
+observations retain compiler coordinates; public source context derives coordinates from raw bytes.
+Strict sidecar and extractor checks pass, with 36 sidecar tests and 14 extractor tests. The new
+checker case resolves a Latin-1 caller to a BOM/UTF-8 definition with independently checked original
+byte slices. The root decoding/admission cases pass, including forged-map rejection. Installed
+mixed live/clean acceptance passes (203.40 s on 2026-09-09), with exact declarations, cross-encoding
+call targets, authorized lossless source, encoding changes/restoration and BOM/CRLF Rust spans.
+`just golden --case decoded-source-live` selects the case with a 600-second bound. All 204 tooling
+tests, tooling lint, full governance and documentation navigation pass. All 45 affected root source
+tests pass, including the 10,000-file governed capture case (63.30 s). Default/featureless root
+checks pass; library Clippy retains 955 baseline warnings, with no library/integration findings on
+changed lines. The packaging guard now excludes vendored package manifests while checking activated
+Rust dependency graphs; an application-file negative probe still fails as expected (`e9743daf`).
+Further codecs, full coordinate semantics, syntax outlines, broader context selection and retained
+parser/checker state remain open.
 
 ## Live source reconciliation and current query selection
 
@@ -375,14 +403,15 @@ functions also remain queryable. Thirteen context tests, all 34 sidecar tests (i
 error under colliding display paths), strict sidecar checking/lint and all 200 tooling tests pass.
 Default/featureless root checks, tooling lint, governance, docs navigation and changed-file formatting
 pass. Root library Clippy retains the same 955 warning baseline. The installed scenario is selected by
-`just golden --case python-paths-live`. Byte-safe Rust compiler inputs and full decoded
-source mappings remain open.
+`just golden --case python-paths-live`. Decoded UTF-8/BOM/Latin-1 mappings now pass the separately
+recorded mixed source scenario above. Byte-safe Rust compiler input paths remain open.
 
 Remaining: full source/lexical/CST feature census; retained parsers/query packs and incremental trees;
-complete trivia/index/coordinate handling; non-identity decoded source mappings (for example BOM or
-non-UTF-8 Python encodings); reversible compiler paths and source presentation; rename/case-collision
+complete trivia/index/coordinate handling and further source codecs; reversible compiler paths
+and source presentation; rename/case-collision
 semantics; incomplete-edit behavior during actual live updates. Exact declaration-span source
-retrieval is implemented; richer syntax/body/source-context selection remains open.
+retrieval and exact function definitions/bodies are implemented; broader syntax/line/source-context
+selection remains open.
 
 ### 4D — canonical normalization: partial
 
@@ -423,7 +452,7 @@ Raw provider coverage is not complete canonical-family coverage.
 | FindEntities | Installed client returns canonical functions and selected additional Python/Rust declaration kinds with reusable public IDs; language/context filters precede limits; stable name/entity ordering | Remaining kinds/representations, source boundaries, semantic name/ambiguity resolution and full directives |
 | RetrieveFacts | Explicit canonical entity IDs; `declarations` or `declaration locations and provenance`; native semi join prevents repeated subjects duplicating occurrences; partial and empty cases tested | Types, members, call/derived families, point filters, broad family expansion and phrase/fact/prior-result resolution |
 | FollowRelationships | Installed Python/Rust one-step calls and Python lexical references, repeated occurrences, scoped unknowns and limits | project-aware semantic references/imports, Rust references, candidates, full direction/distance/stop/filter behavior and composition |
-| RetrieveSourceContext | Exact canonical declaration spans, independently authorized captured bytes, Unicode/CRLF coordinates and explicit byte truncation; disk-change/reopen/revocation/empty/mixed-language cases | Broader syntax/body and line-bound selection, non-identity decoded mappings, remaining subjects and composition |
+| RetrieveSourceContext | Exact canonical declaration spans, independently authorized captured bytes, Unicode/CRLF coordinates and explicit byte truncation; disk-change/reopen/revocation/empty/mixed-language cases | Broader syntax/line-bound selection, remaining subjects and composition |
 
 Unsupported subject meanings are explicitly rejected; they do not fall back to names. The generalized
 pragmatic expectation corpus is not fully connected to all public forms. The static four-form mixed-language
