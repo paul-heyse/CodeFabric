@@ -6,6 +6,12 @@ Updated 2026-09-09. Current work is in `/home/paul/CodeFabric` on `master`.
 
 **Production implementation is active. Outcomes 1–3 are implemented for the current Linux workflow; outcome 4 is in progress and outcomes 5–8 remain open.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). The four existing golden cases pass. Pyrefly honors selected Python version/platform settings and publishes semantic facts during fresh daemon startup. Real contained Rust compilation now passes its provider-boundary test; Rust daemon publication remains next. These checks do not establish mixed-language or full-product completion.
 
+The [detailed outcomes 4–8 plan](docs/plans/codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md)
+now expands that same backlog with the full fact-family/query scope, library API choices,
+dependency order and acceptance criteria. This 2026-09-09 update is planning only; no additional
+production behavior is claimed. Next implementation slice is 4A: production contained Rust
+context/dependency preparation and scheduling, followed by canonical normalization and public queries.
+
 Current production work, 2026-09-08–09:
 
 - Initial control-table creation runs with the workspace write lease and joined cleanup; exact-version readback reconstructs the serving reader after the native runtime joins.

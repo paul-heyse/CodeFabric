@@ -2,6 +2,11 @@
 
 Updated 2026-09-09. This is the editable production backlog following [non-production preparation](codefabric_pragmatic_delivery_nonproduction_preparation_plan_2026-09-08.md), derived from the [consolidated review](../reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md) and [selected suite](../spec_index/README.md). [STATUS](../../STATUS.md) records demonstrated behavior and next work. No activation pointer, packet state, proving chain or second audit workflow selects this plan.
 
+The [detailed outcomes 4–8 implementation plan](codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md)
+expands the remaining scope with dependency-ordered slices, the complete fact-family map,
+concrete library API choices and behavioral acceptance criteria. It is the detailed execution
+portion of this backlog; writing it does not mark additional production outcomes complete.
+
 Production implementation is the next phase, not work completed by preparation. Keep the canonical tree, integrate coherent changes frequently, preserve existing useful implementation and choose tests by behavior and risk. Do not conduct another process migration before starting outcome 1.
 
 ## 1. Product completion boundaries
@@ -218,9 +223,11 @@ Old identifiers are navigation only. Preserve semantic and operational obligatio
 
 ## 12. Next action
 
-Outcomes 1–3 are implemented for the current Linux workflow. Continue outcome 4 with
-actual Pyrefly/rustc contributions, then query-relevant remainder, live updates, remaining
-analyses/forms and sustained operation in outcomes 5–8. Pyrefly now accepts supported production
-contexts and honors configured runtime settings. Continue with actual provider scheduling,
-external context inputs and production containment while preserving exact input/context identity. No additional review cycle
-is required. Other-platform RSS sampling remains an explicit deployment limitation.
+Outcomes 1–3 are implemented for the current Linux workflow. Follow the detailed plan's 4A
+slice: production contained Rust context/dependency preparation and scheduling, reusing the
+working source-file manifest and real extractor boundary. Pyrefly already publishes supported
+semantic facts at startup. Complete canonical two-language normalization, query-relevant
+coverage and the first four public forms, then live updates, remaining analyses/forms and
+sustained operation. The detailed plan covers external contexts, native maintenance and all
+eight requested library-reference areas. No additional review cycle is required. Other-platform
+RSS sampling remains an explicit deployment limitation.
