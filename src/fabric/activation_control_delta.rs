@@ -1342,6 +1342,7 @@ pub struct DeltaActivationRuntimeAuthority {
     workspace_id: WorkspaceId,
     control: RwLock<Arc<ActivationControlDeltaProvider>>,
     generations: Arc<dyn DurableWriterGenerationPort>,
+    execution: Option<super::workspace_native_execution::WorkspaceNativeExecution>,
 }
 
 impl fmt::Debug for DeltaActivationRuntimeAuthority {
@@ -1369,7 +1370,16 @@ impl DeltaActivationRuntimeAuthority {
             workspace_id,
             control: RwLock::new(control),
             generations,
+            execution: None,
         }
+    }
+
+    pub(crate) fn with_execution(
+        mut self,
+        execution: super::workspace_native_execution::WorkspaceNativeExecution,
+    ) -> Self {
+        self.execution = Some(execution);
+        self
     }
 
     #[must_use]
@@ -1651,7 +1661,45 @@ impl ActivationEventPort for DeltaActivationRuntimeAuthority {
                 );
             }
         };
-        let outcome = control.append_and_readback(contract.clone()).await;
+        let outcome = if let Some(execution) = &self.execution {
+            let session = Arc::clone(&control.session);
+            let pin = control.control_relation.table().clone();
+            let fault = control.assurance_fault;
+            let request = contract.clone();
+            let result = execution
+                .run_bounded_mutation(
+                    "activation-append",
+                    crate::resource_budget::ResourceClass::Control,
+                    std::time::Instant::now() + std::time::Duration::from_secs(120),
+                    move |_, _| async move {
+                        let table = super::delta_exact::session_delta_table_builder(
+                            pin.canonical_root().clone(), &session,
+                        )
+                        .map_err(|error| ActivationControlError::Delta(error.to_string()))?
+                        .with_version(pin.version())
+                        .load()
+                        .await
+                        .map_err(|error| ActivationControlError::Delta(error.to_string()))?;
+                        let mut writer = ActivationControlDeltaProvider::try_from_loaded_table(
+                            session, pin, table,
+                        ).await?;
+                        writer.assurance_fault = fault;
+                        Ok::<_, ActivationControlError>(writer.append_and_readback(request).await)
+                    },
+                )
+                .await;
+            match result {
+                Ok(outcome) => outcome,
+                Err(error) => append_unknown(
+                    &contract,
+                    ActivationAppendUnknownReason::CommitOutcomeUnknown,
+                    ActivationDiagnosticStage::DeltaAppend,
+                    error.to_string(),
+                ),
+            }
+        } else {
+            control.append_and_readback(contract.clone()).await
+        };
         if let ActivationAppendOutcome::Committed { selection, .. } = &outcome
             && let Err(error) = self.advance_from_selected_readback(selection).await
         {
@@ -1803,6 +1851,12 @@ fn append_unknown(
     detail: impl Into<Arc<str>>,
 ) -> ActivationAppendOutcome {
     let detail = detail.into();
+    // The public diagnostic is an opaque identifier. Keep a bounded local reason
+    // as well so operators can diagnose uncertain writes without replay machinery.
+    eprintln!(
+        "activation append {stage:?} ({reason:?}): {}",
+        detail.chars().take(4096).collect::<String>(),
+    );
     ActivationAppendOutcome::Unknown {
         reason,
         diagnostic: activation_diagnostic_ref(

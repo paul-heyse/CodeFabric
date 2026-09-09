@@ -27,6 +27,8 @@ Reuse `tests/integration/daemon.rs` and the current `tooling/fastmcp4_modern_cli
 
 **Done:** the actual daemon starts and serves its supported query/status behavior and reopens exact persisted state. This does not imply both-language semantic completeness or full lifecycle correctness.
 
+**Completed 2026-09-09.** Control provisioning, candidate publication and activation append/readback use bounded owned write lanes with joined cleanup and exact reader reconstruction. Completed metadata/error reads release their bookkeeping instead of holding a writer until the serving runtime shuts down. All four existing golden cases and 33 affected store/executor/lost-acknowledgement tests pass; see STATUS. Native allocation receipt estimates are no longer enabled for these production mutations. Remaining proof/resource simplification continues below.
+
 ## 3. Outcome 2 — Replace generalized proof execution with compact runtime records
 
 Depends on a working startup boundary; work alongside resource simplification where callers overlap. Inspect `src/semantic_release.rs`, `src/fabric/proof.rs` and `proof/`, `programmatic_schema.rs`, `programmatic_epoch.rs`, `programmatic_observation_delta.rs`, query/publication admission and their consumers.
@@ -164,4 +166,4 @@ Old identifiers are navigation only. Preserve semantic and operational obligatio
 
 ## 12. Next action
 
-Start outcome 1 at the activation-control native-runtime write failure, using the current STATUS observation. Resolve engineering choices directly in this editable plan when new evidence matters. Another design, plan review or status-artifact cycle is not a prerequisite.
+Outcome 1 is complete. Continue outcome 2 by replacing generalized activation proof histories with compact candidate validation records, then remove remaining generalized proof execution and resource consumers. Resolve engineering choices directly in this editable plan when new evidence matters. Another design, plan review or status-artifact cycle is not a prerequisite.

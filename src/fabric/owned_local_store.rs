@@ -874,7 +874,19 @@ impl OwnedLocalStore {
     }
 
     fn complete_read(&self, ticket: &ReadTicket) -> Result<(), OwnedLocalStoreError> {
-        self.state()?.pending_reads.remove(&ticket.id);
+        let mut state = self.state()?;
+        state.pending_reads.remove(&ticket.id);
+        if state.pending_reads.is_empty()
+            && let Some(active) = state.active.as_ref()
+            && let Some(joined) = active.joined
+        {
+            let mutation = OwnedLocalMutation {
+                store: self.clone(),
+                generation: active.generation,
+                runtime: active.runtime,
+            };
+            mutation.reconcile_locked_after_join(&mut state, joined)?;
+        }
         Ok(())
     }
 
@@ -999,14 +1011,14 @@ impl OwnedLocalStore {
         ticket: &ReadTicket,
         retained_bytes: u64,
     ) -> Result<(), OwnedLocalStoreError> {
-        let mut state = self.state()?;
+        let state = self.state()?;
         let pending = state
             .pending_reads
-            .get_mut(&ticket.id)
+            .get(&ticket.id)
             .ok_or(OwnedLocalStoreError::CensusUnavailable)?;
-        // The fully consumed native stream/call no longer owns its batch or walk iterator.
-        // Emitted metadata may be held by Delta, so it stays charged until the lane joins.
-        let mut reservation = pending
+        // A completed listing owns no live filesystem operation. Bound its metadata,
+        // but do not retain a reader ticket until the serving runtime shuts down.
+        let reservation = pending
             ._charge
             .reservation
             .lock()
@@ -1015,12 +1027,15 @@ impl OwnedLocalStore {
             .checked_add(512)
             .ok_or(OwnedLocalStoreError::Bound("list metadata"))?;
         let current = reservation.amounts().memory_bytes;
-        if retained > current {
-            return Err(OwnedLocalStoreError::Bound("list metadata admission"));
+        let over_limit = retained > current;
+        drop(reservation);
+        drop(state);
+        self.complete_read(ticket)?;
+        if over_limit {
+            Err(OwnedLocalStoreError::Bound("list metadata admission"))
+        } else {
+            Ok(())
         }
-        reservation.shrink(memory(current - retained))?;
-        pending.list = None;
-        Ok(())
     }
 
     fn validate_meta(&self, meta: &ObjectMeta) -> Result<(), OwnedLocalStoreError> {
@@ -1350,57 +1365,63 @@ impl ObjectStore for OwnedLocalStore {
         options: GetOptions,
     ) -> object_store::Result<GetResult> {
         let ticket = self.read_ticket(location, 0).map_err(object_error)?;
-        let head = options.head;
-        let result = self.inner.backend.get_opts(location, options).await?;
-        self.validate_meta(&result.meta).map_err(object_error)?;
-        if head {
-            return Ok(GetResult {
-                payload: GetResultPayload::Stream(futures::stream::empty().boxed()),
-                ..result
+        let outcome = async {
+            let head = options.head;
+            let result = self.inner.backend.get_opts(location, options).await?;
+            self.validate_meta(&result.meta).map_err(object_error)?;
+            if head {
+                return Ok(GetResult {
+                    payload: GetResultPayload::Stream(futures::stream::empty().boxed()),
+                    ..result
+                });
+            }
+            let length = result
+                .range
+                .end
+                .checked_sub(result.range.start)
+                .ok_or_else(|| object_error(OwnedLocalStoreError::Bound("read range")))?;
+            if length > self.inner.limits.max_read_bytes {
+                return Err(object_error(OwnedLocalStoreError::Bound("read bytes")));
+            }
+            ticket
+                .charge
+                .reservation
+                .lock()
+                .map_err(|_| object_error(OwnedLocalStoreError::CensusUnavailable))?
+                .try_grow(memory(length))
+                .map_err(object_error)?;
+            let GetResult {
+                meta,
+                range,
+                attributes,
+                payload,
+            } = result;
+            let bytes = GetResult {
+                meta: meta.clone(),
+                range: range.clone(),
+                attributes: attributes.clone(),
+                payload,
+            }
+            .bytes()
+            .await?;
+            let bytes = Bytes::from_owner(ReadBytes {
+                bytes,
+                _charge: Arc::clone(&ticket.charge),
             });
+            Ok(GetResult {
+                meta,
+                range,
+                attributes,
+                payload: GetResultPayload::Stream(
+                    futures::stream::once(async move { Ok(bytes) }).boxed(),
+                ),
+            })
         }
-        let length = result
-            .range
-            .end
-            .checked_sub(result.range.start)
-            .ok_or_else(|| object_error(OwnedLocalStoreError::Bound("read range")))?;
-        if length > self.inner.limits.max_read_bytes {
-            return Err(object_error(OwnedLocalStoreError::Bound("read bytes")));
-        }
-        ticket
-            .charge
-            .reservation
-            .lock()
-            .map_err(|_| object_error(OwnedLocalStoreError::CensusUnavailable))?
-            .try_grow(memory(length))
-            .map_err(object_error)?;
-        let GetResult {
-            meta,
-            range,
-            attributes,
-            payload,
-        } = result;
-        let bytes = GetResult {
-            meta: meta.clone(),
-            range: range.clone(),
-            attributes: attributes.clone(),
-            payload,
-        }
-        .bytes()
-        .await?;
-        let bytes = Bytes::from_owner(ReadBytes {
-            bytes,
-            _charge: Arc::clone(&ticket.charge),
-        });
+        .await;
+        // Even NotFound/head/error completion is terminal. If this future is
+        // cancelled during native IO, the ticket remains until its runtime joins.
         self.complete_read(&ticket).map_err(object_error)?;
-        Ok(GetResult {
-            meta,
-            range,
-            attributes,
-            payload: GetResultPayload::Stream(
-                futures::stream::once(async move { Ok(bytes) }).boxed(),
-            ),
-        })
+        outcome
     }
 
     async fn get_ranges(
@@ -1421,37 +1442,41 @@ impl ObjectStore for OwnedLocalStore {
             })
             .ok_or_else(|| object_error(OwnedLocalStoreError::Bound("read ranges")))?;
         let ticket = self.read_ticket(location, total).map_err(object_error)?;
-        // The native backend clones all range descriptors and builds a Bytes vector even
-        // for zero-length ranges. Each returned Bytes::from_owner adds its own allocation;
-        // keep that bookkeeping charged through the shared owners, not just payload bytes.
-        let per_range = std::mem::size_of::<Range<u64>>()
-            + 2 * std::mem::size_of::<Bytes>()
-            + std::mem::size_of::<ReadBytes>()
-            + std::mem::size_of::<std::sync::atomic::AtomicUsize>()
-            + 64;
-        let bookkeeping = ranges
-            .len()
-            .checked_mul(per_range)
-            .ok_or_else(|| object_error(OwnedLocalStoreError::Bound("range bookkeeping")))?;
-        ticket
-            .charge
-            .reservation
-            .lock()
-            .map_err(|_| object_error(OwnedLocalStoreError::CensusUnavailable))?
-            .try_grow(memory(usize_u64(bookkeeping).map_err(object_error)?))
-            .map_err(object_error)?;
-        let bytes = self.inner.backend.get_ranges(location, ranges).await?;
-        let bytes = bytes
-            .into_iter()
-            .map(|bytes| {
-                Bytes::from_owner(ReadBytes {
-                    bytes,
-                    _charge: Arc::clone(&ticket.charge),
+        let outcome = async {
+            // The native backend clones all range descriptors and builds a Bytes vector even
+            // for zero-length ranges. Each returned Bytes::from_owner adds its own allocation;
+            // keep that bookkeeping charged through the shared owners, not just payload bytes.
+            let per_range = std::mem::size_of::<Range<u64>>()
+                + 2 * std::mem::size_of::<Bytes>()
+                + std::mem::size_of::<ReadBytes>()
+                + std::mem::size_of::<std::sync::atomic::AtomicUsize>()
+                + 64;
+            let bookkeeping = ranges
+                .len()
+                .checked_mul(per_range)
+                .ok_or_else(|| object_error(OwnedLocalStoreError::Bound("range bookkeeping")))?;
+            ticket
+                .charge
+                .reservation
+                .lock()
+                .map_err(|_| object_error(OwnedLocalStoreError::CensusUnavailable))?
+                .try_grow(memory(usize_u64(bookkeeping).map_err(object_error)?))
+                .map_err(object_error)?;
+            let bytes = self.inner.backend.get_ranges(location, ranges).await?;
+            let bytes = bytes
+                .into_iter()
+                .map(|bytes| {
+                    Bytes::from_owner(ReadBytes {
+                        bytes,
+                        _charge: Arc::clone(&ticket.charge),
+                    })
                 })
-            })
-            .collect();
+                .collect();
+            Ok(bytes)
+        }
+        .await;
         self.complete_read(&ticket).map_err(object_error)?;
-        Ok(bytes)
+        outcome
     }
 
     fn delete_stream(
@@ -1478,16 +1503,26 @@ impl ObjectStore for OwnedLocalStore {
         futures::stream::once(async move {
             let prefix = prefix.ok_or_else(|| object_error(OwnedLocalStoreError::DeniedPath))?;
             let ticket = store.read_ticket(&prefix, 0).map_err(object_error)?;
-            store
-                .prepare_list(&ticket, &prefix, true)
-                .map_err(object_error)?;
+            if let Err(error) = store.prepare_list(&ticket, &prefix, true) {
+                store.complete_read(&ticket).map_err(object_error)?;
+                return Err(object_error(error));
+            }
             let input = store.inner.backend.list(Some(&prefix));
             let maximum = store.inner.limits.max_list_entries;
             let result = futures::stream::try_unfold(
                 (store, input, ticket, 0_usize, 0_u64),
                 move |(store, mut input, ticket, count, retained)| async move {
-                    match input.try_next().await? {
+                    let next = match input.try_next().await {
+                        Ok(next) => next,
+                        Err(error) => {
+                            drop(input);
+                            store.complete_read(&ticket).map_err(object_error)?;
+                            return Err(error);
+                        }
+                    };
+                    match next {
                         None => {
+                            drop(input);
                             store.finish_list(&ticket, retained).map_err(object_error)?;
                             Ok(None)
                         }
@@ -1521,35 +1556,42 @@ impl ObjectStore for OwnedLocalStore {
     async fn list_with_delimiter(&self, prefix: Option<&Path>) -> object_store::Result<ListResult> {
         let prefix = prefix.ok_or_else(|| object_error(OwnedLocalStoreError::DeniedPath))?;
         let ticket = self.read_ticket(prefix, 0).map_err(object_error)?;
-        self.prepare_list(&ticket, prefix, false)
-            .map_err(object_error)?;
-        let result = self.inner.backend.list_with_delimiter(Some(prefix)).await?;
-        if result
-            .objects
-            .len()
-            .checked_add(result.common_prefixes.len())
-            .is_none_or(|count| count > self.inner.limits.max_list_entries)
-        {
-            return Err(object_error(OwnedLocalStoreError::Bound("list entries")));
-        }
-        let mut retained = 0_u64;
-        for meta in &result.objects {
-            self.validate_meta(meta).map_err(object_error)?;
-            retained = retained
-                .checked_add(
-                    metadata_capacity(1, meta.location.as_ref().len()).map_err(object_error)?,
-                )
-                .ok_or_else(|| object_error(OwnedLocalStoreError::Bound("list metadata")))?;
-        }
-        for prefix in &result.common_prefixes {
-            self.validate_path(&*self.state().map_err(object_error)?, prefix)
+        let outcome = async {
+            self.prepare_list(&ticket, prefix, false)
                 .map_err(object_error)?;
-            retained = retained
-                .checked_add(metadata_capacity(1, prefix.as_ref().len()).map_err(object_error)?)
-                .ok_or_else(|| object_error(OwnedLocalStoreError::Bound("list metadata")))?;
+            let result = self.inner.backend.list_with_delimiter(Some(prefix)).await?;
+            if result
+                .objects
+                .len()
+                .checked_add(result.common_prefixes.len())
+                .is_none_or(|count| count > self.inner.limits.max_list_entries)
+            {
+                return Err(object_error(OwnedLocalStoreError::Bound("list entries")));
+            }
+            let mut retained = 0_u64;
+            for meta in &result.objects {
+                self.validate_meta(meta).map_err(object_error)?;
+                retained = retained
+                    .checked_add(
+                        metadata_capacity(1, meta.location.as_ref().len()).map_err(object_error)?,
+                    )
+                    .ok_or_else(|| object_error(OwnedLocalStoreError::Bound("list metadata")))?;
+            }
+            for prefix in &result.common_prefixes {
+                self.validate_path(&*self.state().map_err(object_error)?, prefix)
+                    .map_err(object_error)?;
+                retained = retained
+                    .checked_add(metadata_capacity(1, prefix.as_ref().len()).map_err(object_error)?)
+                    .ok_or_else(|| object_error(OwnedLocalStoreError::Bound("list metadata")))?;
+            }
+            self.finish_list(&ticket, retained).map_err(object_error)?;
+            Ok(result)
         }
-        self.finish_list(&ticket, retained).map_err(object_error)?;
-        Ok(result)
+        .await;
+        if outcome.is_err() {
+            self.complete_read(&ticket).map_err(object_error)?;
+        }
+        outcome
     }
 
     async fn copy_opts(

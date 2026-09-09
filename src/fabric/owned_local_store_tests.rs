@@ -645,7 +645,7 @@ async fn owned_local_tiny_control_listing_does_not_reserve_global_history_ceilin
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn owned_local_read_bound_rejects_before_materialization_and_releases_after_join() {
+async fn owned_local_read_bound_rejects_before_materialization_and_releases_on_completion() {
     let directory = TempDir::new().unwrap();
     std::fs::write(directory.path().join("large"), vec![7; 8192]).unwrap();
     let resources = budget(8 * 1024 * 1024);
@@ -667,9 +667,9 @@ async fn owned_local_read_bound_rejects_before_materialization_and_releases_afte
     let target = location(&directory, "large");
     run(&owner, &resources, false, move |store| async move {
         assert!(store.get(&target).await.is_err());
-        assert_eq!(store.observe().unwrap().pending_read_operations, 1);
+        assert_eq!(store.observe().unwrap().pending_read_operations, 0);
         assert!(store.get_ranges(&target, &[0..2048]).await.is_err());
-        assert_eq!(store.observe().unwrap().pending_read_operations, 1);
+        assert_eq!(store.observe().unwrap().pending_read_operations, 0);
         Ok(())
     })
     .await
@@ -1288,7 +1288,7 @@ fn owned_local_bootstrap_restart_census_separates_data_control_and_source_blobs(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn owned_local_registration_cannot_reconcile_before_reader_runtime_join() {
+async fn owned_local_completed_head_does_not_block_reconciliation() {
     let directory = TempDir::new().unwrap();
     std::fs::write(directory.path().join("value"), b"retained").unwrap();
     let resources = budget(8 * 1024 * 1024);
@@ -1298,10 +1298,8 @@ async fn owned_local_registration_cannot_reconcile_before_reader_runtime_join() 
     let during = root.clone();
     run(&owner, &resources, false, move |store| async move {
         store.head(&target).await?;
-        assert!(matches!(
-            store.register_root(&during, ResourceClass::Data),
-            Err(OwnedLocalStoreError::MutationBusy)
-        ));
+        assert_eq!(store.observe().unwrap().pending_read_operations, 0);
+        store.register_root(&during, ResourceClass::Data).unwrap();
         Ok(())
     })
     .await

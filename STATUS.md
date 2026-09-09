@@ -1,17 +1,19 @@
 # CodeFabric status
 
-Updated 2026-09-08. Current work is in `/home/paul/CodeFabric` on `master`.
+Updated 2026-09-09. Current work is in `/home/paul/CodeFabric` on `master`.
 
 ## Current handoff
 
-**Production implementation is active; preparation is complete.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). Outcome 1 is in progress: activation-control and candidate publication now complete under the bounded owned executor, but daemon readiness remains blocked at activation-command reconciliation. No further process migration or plan activation is required.
+**Production implementation is active; outcome 1 is complete.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). All four existing golden cases pass: startup, Python serving, persisted reopen and cancellation. All 33 affected store/executor and lost-acknowledgement recovery tests pass. Next is outcome 2, removing generalized runtime proof execution at its consumers. Outcomes 2–8 remain open; these tests do not establish mixed-language semantic completeness.
 
-Current production work, 2026-09-08:
+Current production work, 2026-09-08–09:
 
 - Initial control-table creation runs with the workspace write lease and joined cleanup; exact-version readback reconstructs the serving reader after the native runtime joins.
 - The production executor retains bounded work, deadlines, store ownership and cleanup without enabling the generalized native allocation receipt policy. The first attempt with that policy panicked on a roughly 2 GiB schema-decode estimate for the small activation schema.
 - Executor commit `3a41bd0` passes its focused real-store test: an error after writing preserves durable data, joined cleanup releases the lease, unowned writes remain rejected, and a subsequent owned write succeeds. Candidate publication now uses the same executor; only identifiers/version records cross the joined runtime boundary, and serving readers reopen those exact versions.
-- `just root-check-fast` passes. The real startup case completes control-table creation, candidate publication and exact-version reconstruction, then fails at `fresh-activation-reconciliation`: durable command storage contains a contradictory record. The test took 4.76 seconds after compilation. Startup/query/reopen are not yet working; remaining outcomes are open.
+- Commit `41c30dc` owns candidate publication and reconstructs exact readers after join. The final activation append/readback now uses the same bounded control lane.
+- Completed head/error/range/list reads release their pending-operation entries. Previously these entries survived until host-runtime shutdown and prevented a joined writer lease from releasing. Cancelled unfinished native IO still retains its entry through runtime join.
+- `just root-check-fast` passes for the startup/resource changes. `just golden --timeout 360` passes all four real cases on 2026-09-09. Focused store/executor regressions and lost-acknowledgement recovery pass: 33 tests, 1,021 unrelated tests filtered out. Generalized runtime proof machinery, provider completeness and live-update gaps remain production work.
 - uv was correctly upgraded on the host. Commit `fe5615f` aligns the environment manifest and all three CI setup sites with 0.12.11. Both tool-version checks pass; refreshed session context reports 13 ok, no warnings or failures.
 
 The [consolidated review](docs/reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md) and [selected domain documents](docs/spec_index/README.md) define the revised target. All Python/Rust fact families and eight query forms remain scope. First-release delivery, complete-product delivery and preparation readiness are different claims.
@@ -54,6 +56,6 @@ The earlier closeout at `0cc7242` recorded a passing root check and 1,038 root t
 
 ## Remaining production work
 
-Restore the startup owner, replace generalized runtime proof/resource machinery at its consumers, complete actual semantic contributions from Python and Rust, implement query-relevant processing remainder, live invalidation/publication and quiet convergence, then finish all analyses/forms and sustained bounded operation with safe retention and measured performance.
+Replace generalized runtime proof/resource machinery at its consumers, complete actual semantic contributions from Python and Rust, implement query-relevant processing remainder, live invalidation/publication and quiet convergence, then finish all analyses/forms and sustained bounded operation with safe retention and measured performance.
 
 The mixed-language public-answer adapter, real convergence/rebuild callbacks, obsolete-completion controls and phase-specific runtime telemetry are tied to these production changes and explicitly scheduled in the production plan. Prepared fixtures and harness unit tests do not imply those behaviors work. Existing native patches remain selected until production consumers are replaced and useful fixes preserved.

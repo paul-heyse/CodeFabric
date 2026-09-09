@@ -300,6 +300,17 @@ pub enum ActivationAppendOutcome {
     },
 }
 
+// This result contains owned selection/chain records, never a table or executor.
+impl super::native_execution_lane::output_seal::Sealed for ActivationAppendOutcome {}
+impl super::native_execution_lane::NativeLaneOutput for ActivationAppendOutcome {
+    fn validate_retained_owner(
+        &self,
+        _: &crate::resource_budget::ResourceBudget,
+    ) -> Result<(), crate::resource_budget::ResourceBudgetError> {
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActivationNotCommittedReason {
     Rejected,

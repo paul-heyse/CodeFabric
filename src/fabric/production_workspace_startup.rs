@@ -399,6 +399,9 @@ async fn open_activation_authority(
         workspace_id,
         provider,
         generations,
+    ).with_execution(
+        resources.native_execution(task_scope)
+            .map_err(|error| step("activation-executor", error))?,
     )))
 }
 
@@ -1576,7 +1579,11 @@ async fn compose_production_workspace(
                         &diagnostics as &dyn InterruptedCommitDiagnosticPort,
                     )
                     .await
-                    .map_err(|error| step("fresh-activation-reconciliation", error))?;
+                    .map_err(|error| {
+                        step("fresh-activation-reconciliation", format!(
+                            "{error}; preceding command state: {:?}", completed.state(),
+                        ))
+                    })?;
                 match reconciliation.state() {
                     super::command_runtime::FabricCommandStartupRecoveryState::Ready => {
                         command_runtime

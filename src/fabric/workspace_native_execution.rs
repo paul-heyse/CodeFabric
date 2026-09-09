@@ -636,6 +636,27 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn bounded_mutation_reconciles_failed_write_and_releases_lease() {
         let fixture = Fixture::new(4);
+        // Serving reads run on this long-lived host runtime before the short
+        // writer runtime. Completed metadata/error reads must not hold its lease.
+        fixture
+            .store
+            .head(&fixture.location("initial"))
+            .await
+            .unwrap();
+        assert!(
+            fixture
+                .store
+                .get(&fixture.location("missing"))
+                .await
+                .is_err()
+        );
+        let prefix = Path::from_absolute_path(&fixture.data).unwrap();
+        fixture
+            .store
+            .list_with_delimiter(Some(&prefix))
+            .await
+            .unwrap();
+        assert_eq!(fixture.store.observe().unwrap().pending_read_operations, 0);
         let target = fixture.location("bounded");
         let failed = fixture
             .executor
