@@ -1878,7 +1878,6 @@ fn aggregate_rustc_runs(
     }
 
     let first = &runs[0].accepted().admission;
-    let mut provider_runs = BTreeSet::new();
     let mut compilation_units = BTreeSet::new();
     let mut relation_sets = Vec::with_capacity(runs.len());
     let mut source_pin = None;
@@ -1904,12 +1903,7 @@ fn aggregate_rustc_runs(
                 },
             );
         }
-        if !provider_runs.insert(run.admission.provider_run_id.as_str()) {
-            return Err(ProviderAdmissionError::DuplicateProviderPartition {
-                lane: ProviderNativeLane::Rustc,
-                partition: run.admission.provider_run_id.clone(),
-            });
-        }
+        // One Cargo job legitimately emits several distinct crate/target compilation units.
         if !compilation_units.insert(run.control.header.compilation_unit.as_str()) {
             return Err(ProviderAdmissionError::DuplicateProviderPartition {
                 lane: ProviderNativeLane::Rustc,

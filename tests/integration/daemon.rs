@@ -2069,6 +2069,17 @@ fn pragmatic_python_semantics_publish_real_call_targets() {
 #[test]
 #[cfg(target_os = "linux")]
 fn pragmatic_rust_semantics_publish_real_call_targets() {
+    rust_semantics_publication(false);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn pragmatic_rust_semantics_publish_captured_path_dependency() {
+    rust_semantics_publication(true);
+}
+
+#[cfg(target_os = "linux")]
+fn rust_semantics_publication(with_dependency: bool) {
     let fixture = ProductionFixture::new();
     let workspace = Path::new(&fixture.workspace.root_path_display);
     fs::create_dir(workspace.join("src")).unwrap();
@@ -2092,6 +2103,31 @@ fn pragmatic_rust_semantics_publish_real_call_targets() {
         "pub fn target(v: u32) -> u32 { v + 1 }\n",
     )
     .unwrap();
+    if with_dependency {
+        fs::create_dir_all(workspace.join("helper/src")).unwrap();
+        fs::write(
+            workspace.join("helper/Cargo.toml"),
+            "[package]\nname = \"helper\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join("helper/src/lib.rs"),
+            "pub fn increment(value: u32) -> u32 { value + 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join("src/other.rs"),
+            "pub fn target(v: u32) -> u32 { helper::increment(v) }\n",
+        )
+        .unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(workspace.join("Cargo.toml"))
+            .unwrap()
+            .write_all(b"[dependencies]\nhelper = { path = \"helper\" }\n")
+            .unwrap();
+        fs::write(workspace.join("Cargo.lock"), "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\ndependencies = [\"helper\"]\n[[package]]\nname = \"helper\"\nversion = \"0.1.0\"\n").unwrap();
+    }
     let supervisor = fixture.start_supervisor();
     let rows = decoded_activation_control_rows(&fixture);
     let (_, pin) = rows[0]
@@ -2133,6 +2169,14 @@ fn pragmatic_rust_semantics_publish_real_call_targets() {
             .any(|target| target.ends_with("other::target")),
         "{targets:?}"
     );
+    if with_dependency {
+        assert!(
+            targets
+                .iter()
+                .any(|target| target.ends_with("helper::increment")),
+            "{targets:?}"
+        );
+    }
     supervisor.stop();
 }
 

@@ -93,6 +93,20 @@ It does not close 4A: resolved dependencies, workspace members/multiple targets,
 inputs and reusable sysroot/build caches remain. Raw compiler publication is not canonical semantic
 query completion. Outcomes 4–8 remain active in the detailed plan.
 
+The subsequent 4A slice resolves captured path dependencies through contained Cargo metadata
+and admits several distinct compilation units from one Cargo job. A real daemon test queries
+the persisted call relation for both the local call and `helper::increment` from a separate
+captured package. It passes alongside the changed-source/trust-binding rejection test.
+
+Provider views now share application-owned immutable dependency blobs across source generations,
+including sysroot files. Live source/toolchain files are copied into that cache; views never link
+to mutable installed files. Each published view retains bounded input verification. Two cache/view
+tests confirm inode sharing, read-only mode and rejection of changed backing bytes. The combined
+four-case dependency/publication run passes on 2026-09-09. Source edits no longer cause another full
+sysroot disk copy, though trusted toolchain bytes are still recaptured and verified. Cache retention
+and startup/incremental performance measurements remain outcome 8 work. External registry/git
+materialization, generated source maps and multiple selected targets remain open.
+
 ## Outcome 4 — selected Pyrefly context preparation
 
 Pyrefly 1.2.0's Query ignored configured runtime selection by retaining default system

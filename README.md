@@ -15,8 +15,8 @@ capability gap rather than an empty result implying “none.”
 The pragmatic production plan is active. The daemon starts, serves Python function queries,
 reopens persisted snapshots and supports modern FastMCP cancellation. On Linux, fresh
 publication also runs contained Pyrefly analysis and persists real type and call-target facts.
-Contained Rust compilation now also publishes raw compiler facts for a captured, dependency-free
-Cargo package. Multiple targets and dependencies, canonical semantic queries, live updates and
+Contained Rust compilation now also publishes raw compiler facts for a captured Cargo package
+and captured path dependencies. Multiple targets, external dependencies, canonical semantic queries, live updates and
 sustained operation are still in progress; this is not yet the complete Python/Rust CPG product.
 
 Place the built `codefabric-pyrefly-sidecar` alongside `codefabricd`, or select its absolute

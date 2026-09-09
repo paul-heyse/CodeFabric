@@ -771,19 +771,34 @@ fn initial_selection(
     };
     let identity: serde_json::Value = serde_json::from_slice(TOOLCHAIN_IDENTITY)
         .map_err(|error| step("rust-toolchain-identity", error))?;
-    let dependencies_present = [
-        "dependencies",
-        "dev-dependencies",
-        "build-dependencies",
-        "target",
-    ]
-    .iter()
-    .any(|key| {
-        document
-            .get(key)
-            .is_some_and(|value| value.as_table().is_none_or(|table| !table.is_empty()))
-    });
-    let build = files.iter().find(|file| file.relative_path == b"build.rs");
+    // Captured inputs are the only material available to Cargo. Contained metadata must
+    // still resolve the complete locked graph before these inputs authorize compilation.
+    let dependency_roots = files
+        .iter()
+        .filter_map(|file| file.relative_path.strip_suffix(b"/Cargo.toml"))
+        .collect::<Vec<_>>();
+    let dependency_inputs = files
+        .iter()
+        .filter(|file| {
+            dependency_roots.iter().any(|root| {
+                file.relative_path
+                    .strip_prefix(*root)
+                    .is_some_and(|suffix| suffix.starts_with(b"/"))
+            })
+        })
+        .map(|file| ContextArtifactInput {
+            file_id: file.file_id.clone(),
+            digest: file.digest,
+        })
+        .collect();
+    let build_inputs = files
+        .iter()
+        .filter(|file| file.relative_path.ends_with(b"build.rs"))
+        .map(|file| ContextArtifactInput {
+            file_id: file.file_id.clone(),
+            digest: file.digest,
+        })
+        .collect();
     Ok(RustContextSelection {
         manifest_path: Some(b"Cargo.toml".to_vec()),
         package_name: Some(name.to_owned()),
@@ -803,16 +818,8 @@ fn initial_selection(
             file_id: "sysroot:selected".into(),
             digest: digest_bytes(TOOLCHAIN_IDENTITY),
         }),
-        dependency_inputs: (!dependencies_present).then(Vec::new),
-        build_inputs: Some(
-            build
-                .map(|file| ContextArtifactInput {
-                    file_id: file.file_id.clone(),
-                    digest: file.digest,
-                })
-                .into_iter()
-                .collect(),
-        ),
+        dependency_inputs: Some(dependency_inputs),
+        build_inputs: Some(build_inputs),
         ..RustContextSelection::default()
     })
 }

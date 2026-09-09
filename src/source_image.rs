@@ -143,7 +143,7 @@ pub struct ProviderWorkspaceManifestEntry {
     pub mode: u32,
 }
 
-/// One pinned dependency file. Bytes are copied into the provider view and never linked.
+/// One pinned dependency file. Live inputs are copied; immutable application cache files may be shared.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DependencyInput {
     pub raw_relative_path_bytes: Vec<u8>,
@@ -348,7 +348,12 @@ pub fn publish_provider_workspace_view(
                         .map_err(|_| SourceImageError::ProviderWorkspaceView)?,
                     mode: entry.mode,
                 };
-                write_verified_provider_input(&staged_dependencies, &manifest_entry, &entry.bytes)?;
+                link_cached_dependency(
+                    state_root,
+                    &staged_dependencies,
+                    &manifest_entry,
+                    &entry.bytes,
+                )?;
             }
             let staged_manifest = stage.join("manifest.json");
             write_immutable_file(&staged_manifest, &manifest_bytes, 0o400)?;
@@ -1757,6 +1762,66 @@ fn write_verified_provider_input(
     write_immutable_file(&path, bytes, entry.mode)
 }
 
+/// Share only application-owned immutable bytes, never a link to an installed or source file.
+fn link_cached_dependency(
+    state_root: &Path,
+    view_root: &Path,
+    entry: &ProviderWorkspaceManifestEntry,
+    bytes: &[u8],
+) -> Result<(), SourceImageError> {
+    let digest = crate::integrity::digest_bytes(bytes);
+    if entry.blob_digest != format!("b3:{}", digest_name(&digest))
+        || entry.byte_length != bytes.len() as u64
+        || !matches!(entry.mode, 0o400 | 0o500)
+    {
+        return Err(SourceImageError::ProviderWorkspaceView);
+    }
+    let cache = state_root.join("provider-dependency-blobs");
+    fs::create_dir_all(&cache).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    crate::secure_path::open_absolute_directory_nofollow(&cache)
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    fs::set_permissions(&cache, fs::Permissions::from_mode(0o700))
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    let cached = cache.join(format!("{}-{:o}", digest_name(&digest), entry.mode));
+    if !cached
+        .try_exists()
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)?
+    {
+        let staging = cache.join(format!(
+            ".stage-{}",
+            digest_name_16(&random_registration_nonce()?)
+        ));
+        let result = (|| {
+            write_immutable_file(&staging, bytes, entry.mode)?;
+            match fs::hard_link(&staging, &cached) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                Err(_) => Err(SourceImageError::ProviderWorkspaceView),
+            }
+        })();
+        let removed = fs::remove_file(&staging);
+        result?;
+        removed.map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    }
+    let metadata =
+        fs::symlink_metadata(&cached).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.permissions().mode() & 0o777 != entry.mode
+    {
+        return Err(SourceImageError::ProviderWorkspaceView);
+    }
+    // The ordinary published-view check below reads and verifies the linked bytes once.
+    let target = provider_input_path(view_root, &entry.raw_relative_path_bytes)?;
+    fs::create_dir_all(
+        target
+            .parent()
+            .ok_or(SourceImageError::ProviderWorkspaceView)?,
+    )
+    .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+    fs::hard_link(&cached, &target).map_err(|_| SourceImageError::ProviderWorkspaceView)
+}
+
 fn make_tree_read_only(root: &Path) -> Result<(), SourceImageError> {
     let metadata =
         fs::symlink_metadata(root).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
@@ -2248,6 +2313,40 @@ mod tests {
         assert_eq!(metrics.reclaimed_blobs, 2);
         assert_eq!((metrics.live_holders, metrics.orphan_holders), (0, 0));
         assert!(metrics.capture_duration_micros > 0);
+    }
+
+    #[test]
+    fn provider_dependency_cache_shares_immutable_bytes_and_rejects_substitution() {
+        use std::os::unix::fs::MetadataExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("provider-state");
+        let dependencies = DependencyInputBundle::pin(vec![DependencyInput {
+            raw_relative_path_bytes: b"sysroot/libcompiler.so".to_vec(),
+            digest: crate::integrity::digest_bytes(b"installed compiler library"),
+            bytes: Arc::from(b"installed compiler library".as_slice()),
+            mode: 0o400,
+        }])
+        .unwrap();
+        let first = publish_provider_workspace_view(&root, "first", [1; 16], 1, &[], &dependencies)
+            .unwrap();
+        let second =
+            publish_provider_workspace_view(&root, "second", [1; 16], 2, &[], &dependencies)
+                .unwrap();
+        assert_ne!(first.workspace_root, second.workspace_root);
+        let first_file = first.dependency_root.join("sysroot/libcompiler.so");
+        let second_file = second.dependency_root.join("sysroot/libcompiler.so");
+        let left = fs::metadata(&first_file).unwrap();
+        let right = fs::metadata(&second_file).unwrap();
+        assert_eq!((left.dev(), left.ino()), (right.dev(), right.ino()));
+        assert_eq!(left.nlink(), 3, "one cache object and two immutable views");
+        assert_eq!(left.permissions().mode() & 0o777, 0o400);
+        fs::set_permissions(&first_file, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&first_file, b"substituted compiler library").unwrap();
+        fs::set_permissions(&first_file, fs::Permissions::from_mode(0o400)).unwrap();
+        assert!(
+            publish_provider_workspace_view(&root, "third", [1; 16], 3, &[], &dependencies)
+                .is_err()
+        );
     }
 
     #[test]
