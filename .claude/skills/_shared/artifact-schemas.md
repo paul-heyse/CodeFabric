@@ -288,6 +288,7 @@ Common required keys: `artifact`, `date`, `version` (`vN`), and
 | `skill-eval` | — |
 | `design-principles-conformance` | `principles_path`, `principles_digest`, `baseline_commit`; `verdict: conformant\|conformant-with-findings\|divergent\|framework-unowned` |
 | `design-principles-remediation-proposal` | `principles_path`, `principles_digest`, `conformance_review_path`, `conformance_review_digest`, `baseline_commit` |
+| `process-assessment` | `scope`, `baseline_commit` |
 
 ## 8. Validation and derivation
 

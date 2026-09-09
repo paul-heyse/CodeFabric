@@ -122,6 +122,7 @@ REVIEW_REQUIREMENTS = {
     "interface-design-review": {"interface_path", "verdict"},
     "lib-leverage": {"library"},
     "skill-eval": set(),
+    "process-assessment": {"scope", "baseline_commit"},
     "design-principles-conformance": {
         "principles_path",
         "principles_digest",
