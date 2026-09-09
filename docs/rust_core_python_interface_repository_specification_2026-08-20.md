@@ -1,5 +1,8 @@
 # Rust-Core / Python-Interface Repository — Comprehensive Development & Tooling Specification
 
+> Workflow revised 2026-09-08: AGENTS.md and STATUS.md select current practice and work. Sections 59, 60, 65, 70 and 92 contain the revised proportional workflow. Historical native-extension/wheel examples elsewhere are infrastructure background, not an instruction to add a PyO3/Maturin build domain. The actual four-domain commands are listed by `just --list`.
+
+
 **Reference date:** 2026-08-20  
 **Primary audience:** LLM programming agents and engineers maintaining a small-to-medium Rust-first project with a Python interface  
 **Architecture stance:** one Rust package/crate by default; Python is the interface layer over a private PyO3 native module; additional Rust crates are introduced only for demonstrable package/build reasons; **the semantic organization of production source files and folders is intentionally outside this specification**  

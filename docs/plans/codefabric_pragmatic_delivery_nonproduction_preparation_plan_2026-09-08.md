@@ -6,6 +6,12 @@ Source: [finalized pragmatic product-delivery review](../reviews/codefabric_prag
 
 This plan is derived directly from that review and the current repository. It does not use the `impl-plan` skill, its packet template, activation process, digest tables, or proving-commit requirements. It is an ordinary editable Markdown plan. Creating it does not execute it.
 
+## Execution closeout — 2026-09-08
+
+Steps 1–8 are complete under commit `79c5d52` and the accompanying status closeout. [STATUS](../../STATUS.md) records actual validation, the preserved baseline and remaining product failures. The [production plan](codefabric_pragmatic_production_implementation_plan.md) is ready for execution. Production code, dependencies, native patches, wire assets and runtime contracts were deliberately preserved. The real startup test still fails at activation-control native-runtime provisioning; preparation does not claim product readiness.
+
+The sections below retain the preparation scope and rationale. Their proposed actions are now implemented, subject to the explicit runtime-dependent adapters and instrumentation assigned to production work.
+
 ## 1. Outcome and scope boundary
 
 Execution ends with one coherent development environment: short current instructions and skills; an updated target design; proportionate commands and CI; usable test and benchmark infrastructure; retired process machinery; a truthful `STATUS.md`; and a concrete follow-on production implementation plan. A new session can start the first production change without another process migration or design-reconciliation cycle.

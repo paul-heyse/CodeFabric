@@ -1819,8 +1819,8 @@ parquet = "=59.2.0"
 object_store = "=0.13.2"
 ```
 
-Use the narrowest direct dependency set your public interfaces require, but reject duplicate Arrow/DataFusion majors crossing public boundaries. Record the resolved dependency graph and feature set in `OBS-07`, and enforce it through `TST-14`.
+Use the narrowest direct dependency set your public interfaces require, but reject duplicate Arrow/DataFusion majors crossing public boundaries. Use the existing resolved-graph check when changing this boundary; no additional mapping artifact is required.
 
 # Closing maxim
 
-> **Model the truth once; compile it through Arrow and DataFusion; keep the optimizer able to see it; execute it through truthful contracts; and preserve enough identity, state, evidence, and lineage to explain it forever.**
+> **Model the truth once; compile it through Arrow and DataFusion; keep the optimizer able to see it; execute it through truthful contracts; and preserve enough identity, state, evidence, and lineage to explain it within the configured retention policy.**
