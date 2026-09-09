@@ -45,9 +45,9 @@ pub(super) fn fields() -> Vec<FieldSpec> {
         ("raw_resolution_confidence", DataType::Utf8, false),
         ("provider_instance_key", DataType::FixedSizeBinary(32), true),
         ("provider_run_id", DataType::FixedSizeBinary(16), false),
-        ("provider_compilation_unit", DataType::Utf8, false),
-        ("provider_owner", DataType::Utf8, false),
-        ("provider_block_index", DataType::UInt64, false),
+        ("provider_compilation_unit", DataType::Utf8, true),
+        ("provider_owner", DataType::Utf8, true),
+        ("provider_block_index", DataType::UInt64, true),
         ("provider", DataType::Utf8, false),
     ]
 }

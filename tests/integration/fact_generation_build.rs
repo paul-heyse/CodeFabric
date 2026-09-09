@@ -222,9 +222,9 @@ fn isolated_fact_generation_executes_provider_jobs_to_arrow() {
     let tree = admit_provider_result(tree_job, result.tree_sitter_result().clone()).unwrap();
     let ruff = admit_provider_result(ruff_job, result.ruff_result().clone()).unwrap();
     assert_eq!(tree.observation().emitted_relations, 6);
-    assert_eq!(ruff.observation().emitted_relations, 19);
+    assert_eq!(ruff.observation().emitted_relations, 22);
     assert_eq!(tree.result().coverage().len(), 6);
-    assert_eq!(ruff.result().coverage().len(), 19);
+    assert_eq!(ruff.result().coverage().len(), 22);
     assert!(tree.result().gaps().is_empty());
     assert!(ruff.result().gaps().is_empty());
     assert!(workspace.observation().used.memory_bytes > baseline_memory);

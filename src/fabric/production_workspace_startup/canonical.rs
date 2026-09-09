@@ -33,6 +33,7 @@ use crate::provider_native_syntax::NativeSyntaxRelation;
 use crate::rustc_relation_schema::RustcRelation;
 
 mod calls;
+mod python_calls;
 
 const SOURCE: &str = "source.code_file";
 const DECLARATION: &str = "fact.code_declaration";
@@ -47,12 +48,17 @@ pub(super) fn install(
     inventory: &ProviderSourceInventory,
     python: bool,
     rust: bool,
+    pyrefly: bool,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     for kind in [
         Kind::Source,
         Kind::Declaration { python, rust },
         Kind::Reference { python },
-        Kind::CallSite { rust },
+        Kind::CallSite {
+            python,
+            rust,
+            pyrefly,
+        },
         Kind::Entity,
         Kind::EntitySelector,
     ] {
@@ -66,9 +72,18 @@ pub(super) fn install(
 #[derive(Clone, Copy)]
 enum Kind {
     Source,
-    Declaration { python: bool, rust: bool },
-    Reference { python: bool },
-    CallSite { rust: bool },
+    Declaration {
+        python: bool,
+        rust: bool,
+    },
+    Reference {
+        python: bool,
+    },
+    CallSite {
+        python: bool,
+        rust: bool,
+        pyrefly: bool,
+    },
     Entity,
     EntitySelector,
 }
@@ -83,6 +98,7 @@ struct Canonical {
 }
 
 impl Canonical {
+    #[allow(clippy::too_many_lines, reason = "canonical schemas and dependencies stay in one constructor")]
     fn new(kind: Kind, inventory: &ProviderSourceInventory) -> Self {
         let (id, names, mut dependencies) = match kind {
             Kind::Source => (SOURCE, source_fields(), vec![INPUT]),
@@ -98,11 +114,19 @@ impl Canonical {
                 },
             ),
             Kind::Entity => (ENTITY, entity_fields(), vec![DECLARATION]),
-            Kind::CallSite { rust } => (
-                calls::RELATION,
-                calls::fields(),
-                if rust { calls::dependencies() } else { vec![] },
-            ),
+            Kind::CallSite {
+                python,
+                rust,
+                pyrefly,
+            } => (calls::RELATION, calls::fields(), {
+                let mut dependencies = if rust { calls::dependencies() } else { vec![] };
+                if python {
+                    dependencies.extend(python_calls::dependencies(pyrefly));
+                }
+                dependencies.sort_unstable();
+                dependencies.dedup();
+                dependencies
+            }),
             Kind::Reference { python } => (
                 REFERENCE,
                 reference_fields(),
@@ -424,8 +448,20 @@ impl ProgrammaticTransformation for Canonical {
             Kind::Source => self.source(inputs),
             Kind::Reference { python: true } => self.references(inputs),
             Kind::Reference { python: false } => empty(reference_fields()),
-            Kind::CallSite { rust: true } => calls::build(self.workspace, inputs),
-            Kind::CallSite { rust: false } => empty(calls::fields()),
+            Kind::CallSite {
+                python,
+                rust,
+                pyrefly,
+            } => match (python, rust) {
+                (true, true) => Ok(
+                    LogicalPlanBuilder::from(calls::build(self.workspace, inputs)?)
+                        .union(python_calls::build(self.workspace, inputs, pyrefly)?)?
+                        .build()?,
+                ),
+                (true, false) => python_calls::build(self.workspace, inputs, pyrefly),
+                (false, true) => calls::build(self.workspace, inputs),
+                (false, false) => empty(calls::fields()),
+            },
             Kind::EntitySelector => {
                 let input = plan(inputs, ENTITY)?;
                 let project = |selector: Expr| -> Result<LogicalPlan, TransformationPlanError> {
@@ -1024,7 +1060,30 @@ mod tests {
                 ],
             );
         }
-        install(&mut builder, &inventory, python, false).unwrap();
+        if python {
+            for relation in [
+                NativeSyntaxRelation::RuffCallable,
+                NativeSyntaxRelation::RuffCallSite,
+                NativeSyntaxRelation::RuffCallableSyntax,
+            ] {
+                let schema = relation.schema();
+                provider(
+                    &mut builder,
+                    relation.as_str(),
+                    schema
+                        .fields()
+                        .iter()
+                        .map(|field| {
+                            (
+                                field.name().as_str(),
+                                arrow_array::new_empty_array(field.data_type()),
+                            )
+                        })
+                        .collect(),
+                );
+            }
+        }
+        install(&mut builder, &inventory, python, false, false).unwrap();
         let mut assembly = builder.into_assembly_parts().3;
         assembly.install_transformations().await.unwrap();
         assembly.candidate_context()

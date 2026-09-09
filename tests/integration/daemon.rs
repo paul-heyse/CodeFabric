@@ -2018,7 +2018,7 @@ fn wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation() {
 fn pragmatic_python_semantics_publish_real_call_targets() {
     // Python 3.14 is the effective context. Both functions exist syntactically;
     // only the checker-selected branch supplies the call's semantic target.
-    let fixture = ProductionFixture::with_source(b"import sys\ndef legacy() -> str:\n    return 'old'\ndef current() -> int:\n    return 1\nif sys.version_info >= (3, 14):\n    selected = current\nelse:\n    selected = legacy\nanswer = selected()\n");
+    let fixture = ProductionFixture::with_source(b"import sys\ndef legacy() -> str:\n    return 'old'\ndef current() -> int:\n    return 1\nif sys.version_info >= (3, 14):\n    selected = current\nelse:\n    selected = legacy\nanswer = selected()\ndef caller() -> int:\n    return selected() + selected()\ndef indirect(f):\n    return f()\n");
     let supervisor = fixture.start_supervisor();
     let rows = decoded_activation_control_rows(&fixture);
     let (_, pin) = rows[0]
@@ -2072,13 +2072,89 @@ fn pragmatic_python_semantics_publish_real_call_targets() {
         entities.contains(&("python".to_owned(), "legacy".to_owned())),
         "{entities:?}"
     );
+    assert_canonical_python_calls(&fixture);
     supervisor.stop();
+}
+
+fn assert_canonical_python_calls(fixture: &ProductionFixture) {
+    use std::collections::BTreeMap;
+    use arrow::array::{Array as _, BinaryArray, StringArray};
+    let mut entities = BTreeMap::new();
+    for batch in fresh_activation_relation_batches(fixture, "fact.code_entity") {
+        let names = batch
+            .column_by_name("name")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let ids = batch
+            .column_by_name("entity_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            entities.insert(names.value(row).to_owned(), ids.value(row).to_vec());
+        }
+    }
+    let mut seen = BTreeSet::new();
+    let mut calls_from_caller = 0;
+    let mut unknown = 0;
+    let mut module = 0;
+    for batch in fresh_activation_relation_batches(fixture, "fact.code_call_site") {
+        let ids = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .unwrap()
+        };
+        let text = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+        };
+        for row in 0..batch.num_rows() {
+            assert!(!ids("call_site_id").is_null(row));
+            assert!(seen.insert(ids("call_site_id").value(row).to_vec()));
+            let caller = text("caller_name").value(row);
+            if caller.ends_with("indirect") {
+                assert_eq!(ids("caller_entity_id").value(row), entities["indirect"]);
+                assert!(ids("target_entity_id").is_null(row));
+                assert_eq!(text("resolution").value(row), "unknown");
+                assert!(!text("unknown_reason").is_null(row));
+                unknown += 1;
+            } else {
+                assert_eq!(ids("target_entity_id").value(row), entities["current"]);
+                assert_eq!(text("resolution").value(row), "resolved_declaration");
+                if caller.ends_with("caller") {
+                    assert_eq!(ids("caller_entity_id").value(row), entities["caller"]);
+                    calls_from_caller += 1;
+                } else {
+                    assert!(ids("caller_entity_id").is_null(row));
+                    assert_eq!(
+                        text("unknown_reason").value(row),
+                        "caller_entity_unavailable"
+                    );
+                    module += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(
+        (seen.len(), calls_from_caller, unknown, module),
+        (4, 2, 1, 1)
+    );
 }
 
 #[test]
 #[cfg(target_os = "linux")]
 fn pragmatic_python_chunked_inventory_publishes_cross_module_semantics() {
-    use arrow::array::{BinaryArray, Decimal128Array, StringArray};
+    use arrow::array::{Array as _, BinaryArray, Decimal128Array, StringArray};
 
     let fixture =
         ProductionFixture::with_source(b"from extra_69 import chosen\nanswer = chosen()\n");
@@ -2151,6 +2227,7 @@ fn pragmatic_python_chunked_inventory_publishes_cross_module_semantics() {
     }
     assert_eq!(targets, BTreeSet::from(["extra_69.chosen".to_owned()]));
     let mut declarations = BTreeSet::new();
+    let mut expected_target = None;
     for batch in fresh_activation_relation_batches(&fixture, "fact.code_declaration") {
         let names = batch
             .column_by_name("name")
@@ -2170,14 +2247,64 @@ fn pragmatic_python_chunked_inventory_publishes_cross_module_semantics() {
             .as_any()
             .downcast_ref::<BinaryArray>()
             .unwrap();
+        let files = batch
+            .column_by_name("file_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
         for row in 0..batch.num_rows() {
             if names.value(row) == "chosen" && kinds.value(row) == "function" {
                 declarations.insert(entities.value(row).to_vec());
+                let file = codefabric::identity::encode_public_id(
+                    codefabric::identity::IdentityDomain::SourceFile,
+                    None,
+                    files.value(row).try_into().unwrap(),
+                )
+                .unwrap();
+                if file == target_file {
+                    expected_target = Some(entities.value(row).to_vec());
+                }
             }
         }
     }
     // Each file defines a different function even though every spelling is the same.
     assert_eq!(declarations.len(), 69);
+    let expected_target = expected_target.unwrap();
+    let mut calls = 0;
+    for batch in fresh_activation_relation_batches(&fixture, "fact.code_call_site") {
+        let targets = batch
+            .column_by_name("target_entity_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        let sites = batch
+            .column_by_name("call_site_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        let starts = batch
+            .column_by_name("start_byte")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        let ends = batch
+            .column_by_name("end_byte")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            assert_eq!(targets.value(row), expected_target);
+            assert!(!sites.is_null(row));
+            assert_eq!((starts.value(row), ends.value(row)), (37, 45));
+            calls += 1;
+        }
+    }
+    assert_eq!(calls, 1);
     supervisor.stop();
 }
 

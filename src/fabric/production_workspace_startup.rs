@@ -815,6 +815,7 @@ fn build_fresh_native_source(
     let (derived, _) = outcome.into_parts();
     let (mut builder, _, _) = derived.into_parts();
     let rustc_available = matches!(rustc.lane(), ExactProviderLaneRuns::Accepted(_));
+    let pyrefly_available = matches!(pyrefly.lane(), ExactProviderLaneRuns::Accepted(_));
     if let Some(admitted) = pyrefly.admitted {
         admitted_runs.push(admitted);
     }
@@ -843,6 +844,7 @@ fn build_fresh_native_source(
         &prepared_inputs.inventory,
         !native_runs.is_empty(),
         rustc_available,
+        pyrefly_available,
     )?;
     // Registered batches own their buffers; source leases are no longer needed after providers join.
     prepared_inputs.release()?;

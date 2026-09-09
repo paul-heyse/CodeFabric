@@ -914,7 +914,10 @@ const fn syntax_lane(relation: NativeSyntaxRelation) -> ProviderNativeLane {
         | NativeSyntaxRelation::RuffUnknownSymbol
         | NativeSyntaxRelation::RuffSemanticEdge
         | NativeSyntaxRelation::RuffImport
-        | NativeSyntaxRelation::RuffExport => ProviderNativeLane::Ruff,
+        | NativeSyntaxRelation::RuffExport
+        | NativeSyntaxRelation::RuffCallable
+        | NativeSyntaxRelation::RuffCallSite
+        | NativeSyntaxRelation::RuffCallableSyntax => ProviderNativeLane::Ruff,
     }
 }
 

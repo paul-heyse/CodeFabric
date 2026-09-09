@@ -847,6 +847,7 @@ fn build_plan(
     })
 }
 
+#[allow(clippy::too_many_lines, reason = "closed native family-to-coverage map")]
 fn native_coverage(
     relation: NativeSyntaxRelation,
 ) -> Result<(ProviderRelationPurpose, ProviderCoverageSource), ProductionProviderRecipeError> {
@@ -928,6 +929,17 @@ fn native_coverage(
         NativeSyntaxRelation::RuffExport => {
             (NativeSyntaxRelation::RuffCoverage.as_str(), "ruff.export")
         }
+        NativeSyntaxRelation::RuffCallable => {
+            (NativeSyntaxRelation::RuffCoverage.as_str(), "ruff.callable")
+        }
+        NativeSyntaxRelation::RuffCallSite => (
+            NativeSyntaxRelation::RuffCoverage.as_str(),
+            "ruff.call_site",
+        ),
+        NativeSyntaxRelation::RuffCallableSyntax => (
+            NativeSyntaxRelation::RuffCoverage.as_str(),
+            "ruff.callable_syntax",
+        ),
     };
     Ok((
         ProviderRelationPurpose::SemanticFact,
@@ -1096,7 +1108,10 @@ const fn native_lane(relation: NativeSyntaxRelation) -> ProviderNativeLane {
         | NativeSyntaxRelation::RuffUnknownSymbol
         | NativeSyntaxRelation::RuffSemanticEdge
         | NativeSyntaxRelation::RuffImport
-        | NativeSyntaxRelation::RuffExport => ProviderNativeLane::Ruff,
+        | NativeSyntaxRelation::RuffExport
+        | NativeSyntaxRelation::RuffCallable
+        | NativeSyntaxRelation::RuffCallSite
+        | NativeSyntaxRelation::RuffCallableSyntax => ProviderNativeLane::Ruff,
     }
 }
 
@@ -1137,7 +1152,10 @@ const fn native_authority(relation: NativeSyntaxRelation) -> ProviderAuthorityRo
         | NativeSyntaxRelation::RuffUnknownSymbol
         | NativeSyntaxRelation::RuffSemanticEdge
         | NativeSyntaxRelation::RuffImport
-        | NativeSyntaxRelation::RuffExport => ProviderAuthorityRole::Primary,
+        | NativeSyntaxRelation::RuffExport
+        | NativeSyntaxRelation::RuffCallable
+        | NativeSyntaxRelation::RuffCallSite
+        | NativeSyntaxRelation::RuffCallableSyntax => ProviderAuthorityRole::Primary,
     }
 }
 
@@ -1188,6 +1206,9 @@ const fn native_upstream_symbol(relation: NativeSyntaxRelation) -> &'static str 
         NativeSyntaxRelation::RuffSemanticEdge => "ruff_python_semantic::SemanticModel",
         NativeSyntaxRelation::RuffImport => "ruff_python_semantic::SemanticModel",
         NativeSyntaxRelation::RuffExport => "ruff_python_semantic::SemanticModel",
+        NativeSyntaxRelation::RuffCallable
+        | NativeSyntaxRelation::RuffCallSite
+        | NativeSyntaxRelation::RuffCallableSyntax => "ruff_python_ast::visitor::Visitor",
     }
 }
 
@@ -1870,6 +1891,45 @@ fn compiled_provider_field_role(
             "end_byte" => Some(BYTE_END_ROLE),
             _ => None,
         },
+        ProviderRelation::NativeSyntax(
+            NativeSyntaxRelation::RuffCallable
+            | NativeSyntaxRelation::RuffCallSite
+            | NativeSyntaxRelation::RuffCallableSyntax,
+        ) => match name {
+            "provider_run_id"
+            | "provider_id"
+            | "provider_release"
+            | "analysis_context_id"
+            | "context_fingerprint"
+            | "python_target_major"
+            | "python_target_minor"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "callable_id"
+            | "owner_scope_id"
+            | "declared_binding_id"
+            | "class_id"
+            | "call_site_id"
+            | "caller_id"
+            | "syntax_id"
+            | "callee_syntax_id"
+            | "receiver_syntax_id"
+            | "declared_target_id"
+            | "owner_id" => Some(OCCURRENCE_REFERENCE_ROLE),
+            "start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" => Some(BYTE_END_ROLE),
+            "dispatch_kind" | "role" => Some(PROVIDER_KIND_ROLE),
+            "name"
+            | "qualified_name"
+            | "parameter_count"
+            | "generic_parameter_count"
+            | "flags"
+            | "ordinal"
+            | "text" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
         ProviderRelation::Pyrefly(PyreflyRelation::ModuleContext) => match name {
             "provider_run_id"
             | "analysis_context_id"
@@ -2371,8 +2431,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(release.observation().provider_lanes, 5);
-        assert_eq!(release.observation().provider_relations, 59);
-        assert_eq!(release.observation().transformations, 59);
+        assert_eq!(release.observation().provider_relations, 62);
+        assert_eq!(release.observation().transformations, 62);
         assert_eq!(release.observation().query_forms, 8);
     }
 

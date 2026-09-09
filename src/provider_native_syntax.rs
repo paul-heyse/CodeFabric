@@ -10,6 +10,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 
+mod callables;
+
 use arrow_array::builder::{BooleanBuilder, FixedSizeBinaryBuilder, StringBuilder};
 use arrow_array::{ArrayRef, RecordBatch, StringArray, UInt16Array, UInt32Array, UInt64Array};
 use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
@@ -168,10 +170,13 @@ pub enum NativeSyntaxRelation {
     RuffSemanticEdge,
     RuffImport,
     RuffExport,
+    RuffCallable,
+    RuffCallSite,
+    RuffCallableSyntax,
 }
 
 impl NativeSyntaxRelation {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 28] = [
         Self::TreeSitterRun,
         Self::TreeSitterCoverage,
         Self::TreeSitterRemainder,
@@ -197,6 +202,9 @@ impl NativeSyntaxRelation {
         Self::RuffSemanticEdge,
         Self::RuffImport,
         Self::RuffExport,
+        Self::RuffCallable,
+        Self::RuffCallSite,
+        Self::RuffCallableSyntax,
     ];
 
     #[must_use]
@@ -227,6 +235,9 @@ impl NativeSyntaxRelation {
             Self::RuffSemanticEdge => "provider.ruff.semantic_edge",
             Self::RuffImport => "provider.ruff.import",
             Self::RuffExport => "provider.ruff.export",
+            Self::RuffCallable => "provider.ruff.callable",
+            Self::RuffCallSite => "provider.ruff.call_site",
+            Self::RuffCallableSyntax => "provider.ruff.callable_syntax",
         }
     }
 
@@ -304,7 +315,7 @@ pub struct ProviderNativeSyntaxRun {
 }
 
 impl ProviderNativeSyntaxRun {
-    /// Fetch one typed relation. All 25 relation families are present, including empty ones.
+    /// Fetch one typed relation. Every declared family is present, including empty ones.
     #[must_use]
     pub fn relation(&self, relation: NativeSyntaxRelation) -> &RecordBatch {
         &self.relations[&relation]
@@ -653,7 +664,7 @@ pub(crate) fn project_tree_relations(
     Ok(relations)
 }
 
-#[allow(clippy::too_many_lines)] // One closed projection makes the exact 25-relation surface auditable.
+#[allow(clippy::too_many_lines)] // One projection keeps the declared native relation surface together.
 fn project_relations(
     source: &ProviderNativeSourceImage,
     pins: PythonSyntaxRunPins,
@@ -707,6 +718,9 @@ fn project_relations(
         "ruff.semantic_edge",
         "ruff.import",
         "ruff.export",
+        "ruff.callable",
+        "ruff.call_site",
+        "ruff.callable_syntax",
     ];
     let mut ruff_remainders = Vec::new();
     if semantics.is_some() {
@@ -877,6 +891,9 @@ fn provider_result(
                     | NativeSyntaxRelation::RuffSemanticEdge
                     | NativeSyntaxRelation::RuffImport
                     | NativeSyntaxRelation::RuffExport
+                    | NativeSyntaxRelation::RuffCallable
+                    | NativeSyntaxRelation::RuffCallSite
+                    | NativeSyntaxRelation::RuffCallableSyntax
             ) {
             let cause = crate::provider_contracts::ProviderUnknownCause::ProviderFailure;
             gaps.push(crate::provider_contracts::ProviderGap::try_new(
@@ -1391,6 +1408,17 @@ fn insert_semantic_relations(
     pin: RelationPin<'_>,
     semantics: Option<&PythonFrontendBatch>,
 ) -> Result<(), ArrowError> {
+    for relation in [
+        NativeSyntaxRelation::RuffCallable,
+        NativeSyntaxRelation::RuffCallSite,
+        NativeSyntaxRelation::RuffCallableSyntax,
+    ] {
+        insert(
+            relations,
+            relation,
+            callables::project(pin, relation, semantics)?,
+        );
+    }
     insert(
         relations,
         NativeSyntaxRelation::RuffScope,
@@ -1612,6 +1640,9 @@ fn ruff_export_batch(
 
 fn native_relation_specific_fields(relation: NativeSyntaxRelation) -> Vec<Field> {
     match relation {
+        NativeSyntaxRelation::RuffCallable
+        | NativeSyntaxRelation::RuffCallSite
+        | NativeSyntaxRelation::RuffCallableSyntax => callables::fields(relation),
         NativeSyntaxRelation::TreeSitterRun | NativeSyntaxRelation::RuffRun => vec![
             typed_field(
                 "provider_revision",
@@ -2869,7 +2900,7 @@ pub(crate) mod job_tests {
     #[test]
     fn inprocess_provider_boundary_integrity() {
         assert_eq!(requests(ProviderLane::TreeSitter).len(), 6);
-        assert_eq!(requests(ProviderLane::Ruff).len(), 19);
+        assert_eq!(requests(ProviderLane::Ruff).len(), 22);
         assert!(
             crate::provider_raw_kinds::RUFF_PYTHON_FRONTEND
                 .catalog_id
@@ -3177,9 +3208,9 @@ pub(crate) mod job_tests {
             .unwrap()
             .run_full(jobs.borrowed(), 1, &source, module())
             .unwrap();
-        assert_eq!(run.relations.len(), 25);
+        assert_eq!(run.relations.len(), NativeSyntaxRelation::ALL.len());
         assert_eq!(run.tree_sitter_result().relations().len(), 6);
-        assert_eq!(run.ruff_result().relations().len(), 19);
+        assert_eq!(run.ruff_result().relations().len(), 22);
         assert!(
             run.relation(NativeSyntaxRelation::TreeSitterCstNode)
                 .num_rows()
@@ -3210,7 +3241,7 @@ pub(crate) mod job_tests {
             admit_provider_result(jobs.tree.clone(), run.tree_sitter_result().clone()).unwrap();
         let ruff = admit_provider_result(jobs.ruff.clone(), run.ruff_result().clone()).unwrap();
         assert_eq!(tree.observation().emitted_relations, 6);
-        assert_eq!(ruff.observation().emitted_relations, 19);
+        assert_eq!(ruff.observation().emitted_relations, 22);
     }
 
     #[test]

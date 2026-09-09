@@ -47,6 +47,24 @@ from the 70-module Delta fixture. Root library Clippy completes with its existin
 new duplicate match-arm warnings were corrected. Historical semantic expectations remain;
 their old schema digest no longer incorrectly requires the current relation to omit new fields.
 
+Production Ruff publication now includes callable, call-site and callable-syntax observations
+from its existing owned traversal. `fact.code_call_site` combines Python and Rust calls.
+Python normalization joins exact syntax occurrences to checker-selected target declarations
+and declared caller bindings through native DataFusion plans. Repeated calls stay distinct;
+dynamic targets remain unknown. Module/lambda calls retain canonical source occurrences with
+an application-owned file/context owner while their unavailable public caller entity is explicit.
+Rust-only provenance columns are nullable for Python. Public relationship querying and complete
+module/lambda entity normalization remain active work.
+
+Validation on 2026-09-09: the affected canonical/native-provider/recipe tests pass after updating
+stale relation counts. Real daemon tests cover cross-module canonical target identity and the
+exact full call range, repeated Python calls to one target, canonical caller IDs, unresolved
+parameter calls and mixed Rust publication. Installed exact-epoch reopen passes in 15.6 seconds.
+Root library Clippy completes with the existing backlog; two new long table-construction
+warnings have explicit local rationale. Governance passes after a narrow correction for the
+already implemented configured compiler/extractor input readers; workspace source remains
+subject to the secure-read rule.
+
 Declaration-fact retrieval now accepts exact public entity IDs and the meanings `declarations`
 or `declaration locations and provenance`. A native DataFusion semi join consumes the typed
 request relation, preserves each declaration occurrence and prevents repeated subjects from
