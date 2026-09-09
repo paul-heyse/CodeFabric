@@ -328,6 +328,46 @@ fn required_lookup_keys(scope: &ContextSearchScope) -> BTreeSet<(ContextLookupKi
     keys
 }
 
+fn effective_package_string(
+    package: &toml::Value,
+    field: &str,
+    default: &str,
+    files: &BTreeMap<Vec<u8>, &ContextFileInput>,
+    manifest: &ContextFileInput,
+) -> Result<Option<String>, RustContextDiscoveryError> {
+    let Some(value) = package.get(field) else {
+        return Ok(Some(default.to_owned()));
+    };
+    if let Some(value) = value.as_str() {
+        return Ok(Some(value.to_owned()));
+    }
+    if value.get("workspace").and_then(toml::Value::as_bool) != Some(true) {
+        return Ok(None);
+    }
+    let mut selected = None;
+    for file in files.values() {
+        let Some(parent) = file.relative_path.strip_suffix(b"Cargo.toml") else {
+            continue;
+        };
+        if !manifest.relative_path.starts_with(parent) {
+            continue;
+        }
+        let document = parse_toml(file)?;
+        if let Some(value) = document
+            .get("workspace")
+            .and_then(|workspace| workspace.get("package"))
+            .and_then(|package| package.get(field))
+            .and_then(toml::Value::as_str)
+            && selected
+                .as_ref()
+                .is_none_or(|(length, _)| parent.len() > *length)
+        {
+            selected = Some((parent.len(), value.to_owned()));
+        }
+    }
+    Ok(selected.map(|(_, value)| value))
+}
+
 fn prepare_settings(
     request: &RustContextDiscoveryRequest,
     files: &BTreeMap<Vec<u8>, &ContextFileInput>,
@@ -338,10 +378,8 @@ fn prepare_settings(
     let selection = &request.selection;
     let package = document.get("package").expect("selected package document");
     let name = package.get("name").and_then(toml::Value::as_str);
-    let version = package.get("version").and_then(toml::Value::as_str);
-    let edition = package
-        .get("edition")
-        .map_or(Some("2015"), toml::Value::as_str);
+    let version = effective_package_string(package, "version", "0.0.0", files, manifest)?;
+    let edition = effective_package_string(package, "edition", "2015", files, manifest)?;
     if name.is_none() || version.is_none() || edition.is_none() {
         remainders.push(RustContextRemainder::PackageMetadataInherited);
     }
@@ -407,9 +445,9 @@ fn prepare_settings(
     requested_features.dedup();
     Ok(Some(RustCompilationSettings {
         package_name: name.expect("validated package name").to_owned(),
-        package_version: version.expect("validated package version").to_owned(),
+        package_version: version.expect("validated package version"),
         manifest_path: manifest.relative_path.clone(),
-        edition: edition.expect("validated edition").to_owned(),
+        edition: edition.expect("validated edition"),
         target,
         requested_features,
         default_features: selection.default_features,

@@ -115,6 +115,26 @@ tests pass, including missing work, conflicting context identity and changed-sou
 This is admission support for multiple target scheduling, not completed query-scoped status or
 production multi-target scheduling; both remain active work.
 
+Production now discovers captured Cargo libraries, binaries, examples, tests and benchmarks across
+package manifests, including directory binaries and virtual workspaces. Each selected target runs
+in a distinct context with the same captured source generation. Workspace-inherited version/edition
+settings are resolved from captured manifests. Failed target processing remains visible in
+`system.rust_target_progress` while other targets' returned facts are published.
+
+The input catalog retains every provider-specific inventory selection. `system.provider_run_scope`
+joins each run to its file/inventory, context and source generation; `system.provider_family_progress`
+records requested/completed/remaining scope and the actual family state. These are input/status
+relations for query scoping and updates, not an additional proof gate. Six input-observation tests
+pass, including a cross-selection inventory/progress join. Five captured-target/context tests pass.
+Three real daemon scenarios also pass: Python semantic publication, a virtual Rust workspace with
+inherited package settings, and a failed Rust binary alongside working library/binary targets.
+The last scenario confirms both the retained calls and the persisted unavailable target state.
+
+Multiple-target work is currently sequential. External registry/git dependencies, generated-source
+mapping, retained compiler build caches, configurable feature/target profiles and public use of the
+scoped status still remain. The target rows' `processed` state means that compiler output returned;
+per-family rows retain incomplete or unknown semantics, including missing structured diagnostics.
+
 ## Outcome 4 — selected Pyrefly context preparation
 
 Pyrefly 1.2.0's Query ignored configured runtime selection by retaining default system

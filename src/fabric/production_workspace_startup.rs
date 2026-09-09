@@ -773,7 +773,7 @@ fn build_fresh_native_source(
         &prepared_inputs,
         record,
         provider_scope,
-        cancellation.clone(),
+        &cancellation,
     )?;
     let authority = ProductionProviderAuthority::try_new(
         ExactProviderLaneAuthority::try_new(
@@ -814,9 +814,8 @@ fn build_fresh_native_source(
     if let Some(admitted) = pyrefly.admitted {
         admitted_runs.push(admitted);
     }
-    if let Some(admitted) = rustc.admitted {
-        admitted_runs.push(admitted);
-    }
+    input_observations::install_rust_target_progress(&mut builder, generation, &rustc.progress)?;
+    admitted_runs.extend(rustc.admitted);
     input_observations::install_input_observations(
         &mut builder,
         &prepared_inputs.inventory,

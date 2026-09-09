@@ -13,7 +13,7 @@ use crate::analysis_context::rust_context::{
 };
 use crate::analysis_context::{
     ContextArtifactInput, ContextFileInput, ContextSearchRoot, ContextSearchScope,
-    ContextSearchUniverse, RustTargetKind, RustTargetSettings, RustToolchainSettings,
+    ContextSearchUniverse, RustToolchainSettings,
 };
 use crate::cancellation::{Cancellation, StructuredCancellationScope};
 use crate::identity::{IdentityDomain, decode_public_id, encode_public_id};
@@ -50,6 +50,8 @@ use crate::workspace_registry::WorkspaceRecord;
 use super::inputs::PreparedSourceInputs;
 use super::{CompiledSemanticRelease, ProductionWorkspaceStartupError, digest16, lower_hex, step};
 
+mod targets;
+
 const TOOLCHAIN_IDENTITY: &[u8] =
     include_bytes!("../../../rustc-extractor/toolchain-identity.json");
 const MAX_TOOLCHAIN_BYTES: u64 = 8 * 1024 * 1024 * 1024;
@@ -64,9 +66,19 @@ fn toolchain_release() -> String {
 pub(super) struct RustcOutcome {
     pub source_pin: SourcePin,
     pub context_pin: ContextPin,
-    pub admitted: Option<AdmittedProviderResult>,
+    pub admitted: Vec<AdmittedProviderResult>,
+    pub progress: Vec<RustTargetProgress>,
     runs: Vec<TrustQualifiedRustcCompilation>,
     gap: ProviderLaneGap,
+}
+
+pub(super) struct RustTargetProgress {
+    pub manifest: Vec<u8>,
+    pub target: String,
+    pub target_kind: String,
+    pub context_id: Option<[u8; 16]>,
+    pub state: &'static str,
+    pub detail: String,
 }
 
 impl RustcOutcome {
@@ -102,13 +114,14 @@ pub(super) fn run(
     inputs: &PreparedSourceInputs,
     record: &WorkspaceRecord,
     scope: &StructuredCancellationScope,
-    cancellation: Cancellation,
+    cancellation: &Cancellation,
 ) -> Result<RustcOutcome, ProductionWorkspaceStartupError> {
     let inventory = inputs.inventory_for_language(SourceLanguage::Rust)?;
     let mut outcome = RustcOutcome {
         source_pin: SourcePin(inventory.identity()),
         context_pin: ContextPin(record.context_fingerprint),
-        admitted: None,
+        admitted: Vec::new(),
+        progress: Vec::new(),
         runs: Vec::new(),
         gap: ProviderLaneGap::RequiredInputAbsent,
     };
@@ -119,27 +132,71 @@ pub(super) fn run(
         outcome.gap = ProviderLaneGap::TrustUnavailable;
         return Ok(outcome);
     }
-    let available = prepare_and_run(
-        root,
-        release,
-        inputs,
-        record,
-        inventory,
-        scope,
-        cancellation,
-    );
-    match available {
-        Ok((context_pin, admitted, runs)) => {
-            outcome.context_pin = context_pin;
-            outcome.admitted = Some(admitted);
-            outcome.runs = runs;
-            outcome.gap = ProviderLaneGap::ProviderFailure;
-        }
-        Err(error) if error.step == "rust-process-join" => return Err(error),
+    let targets = match targets::discover(&captured_files(inputs)?) {
+        Ok(targets) => targets,
         Err(error) => {
-            tracing::warn!(%error, "Rust semantic scope did not complete");
+            tracing::warn!(%error, "Rust target discovery did not complete");
             outcome.gap = ProviderLaneGap::ProviderFailure;
+            return Ok(outcome);
         }
+    };
+    let mut contexts = Vec::new();
+    for target in targets {
+        let mut progress = RustTargetProgress {
+            manifest: target.manifest.clone(),
+            target: target.target.name.clone(),
+            target_kind: format!("{:?}", target.target.kind),
+            context_id: None,
+            state: "unavailable",
+            detail: String::new(),
+        };
+        let available = prepare_and_run(
+            root,
+            release,
+            inputs,
+            record,
+            inventory.clone(),
+            &target,
+            scope,
+            cancellation.clone(),
+        );
+        match available {
+            Ok((context_pin, admitted, runs)) => {
+                progress.context_id = Some(admitted.job().context().analysis_context_id());
+                progress.state = if runs.is_empty() {
+                    "unavailable"
+                } else {
+                    "processed"
+                };
+                progress.detail = admitted.result().gaps().first().map_or_else(
+                    || format!("{:?}", admitted.result().terminal()),
+                    |gap| {
+                        format!(
+                            "{}: {:?}: {}",
+                            gap.family().as_str(),
+                            gap.cause(),
+                            gap.detail()
+                        )
+                    },
+                );
+                if !runs.is_empty() {
+                    contexts.push((admitted.job().context().analysis_context_id(), context_pin));
+                }
+                outcome.admitted.push(admitted);
+                outcome.runs.extend(runs);
+            }
+            Err(error) if error.step == "rust-process-join" => return Err(error),
+            Err(error) => {
+                progress.detail = error.to_string();
+                tracing::warn!(%error, target = %target.target.name, "Rust semantic scope did not complete");
+            }
+        }
+        outcome.progress.push(progress);
+    }
+    outcome.gap = ProviderLaneGap::ProviderFailure;
+    if !contexts.is_empty() {
+        outcome.context_pin = crate::provider_admission::rustc_context_set_pin(contexts)
+            .map_err(|error| step("rust-context-set", error))?;
     }
     Ok(outcome)
 }
@@ -153,6 +210,7 @@ fn prepare_and_run(
     inventory: crate::resource_budget::ChargedValue<
         crate::provider_contracts::ProviderSourceInventory,
     >,
+    target: &targets::CargoTarget,
     scope: &StructuredCancellationScope,
     cancellation: Cancellation,
 ) -> Result<
@@ -175,19 +233,7 @@ fn prepare_and_run(
         .map_err(|error| step("rust-toolchain-memory", error))?;
     let (mut dependencies, host) = toolchain_inputs(&cancellation)?;
     let workspace_id = public_id(IdentityDomain::Workspace, record.workspace_id)?;
-    let files = inputs
-        .capture()?
-        .images()
-        .iter()
-        .map(|image| {
-            Ok(ContextFileInput {
-                file_id: public_id(IdentityDomain::SourceFile, image.file_id)?,
-                relative_path: image.path.raw_relative_path_bytes.clone(),
-                digest: image.digest,
-                contents: image.bytes.to_vec(),
-            })
-        })
-        .collect::<Result<Vec<_>, ProductionWorkspaceStartupError>>()?;
+    let files = captured_files(inputs)?;
     let source_manifest = RustSourceFileManifest {
         workspace_id: workspace_id.clone(),
         source_generation: inventory.source_generation(),
@@ -213,7 +259,7 @@ fn prepare_and_run(
     ));
     let dependencies = DependencyInputBundle::pin(dependencies)
         .map_err(|error| step("rust-dependency-bundle", error))?;
-    let selection = initial_selection(&files, &host)?;
+    let selection = initial_selection(&files, &host, target)?;
     let product = discover_rust_context(&RustContextDiscoveryRequest {
         workspace_id: workspace_id.clone(),
         source_generation: inventory.source_generation(),
@@ -722,59 +768,15 @@ fn collect_toolchain(
 fn initial_selection(
     files: &[ContextFileInput],
     host: &str,
+    selected: &targets::CargoTarget,
 ) -> Result<RustContextSelection, ProductionWorkspaceStartupError> {
-    let manifest = files
-        .iter()
-        .find(|file| file.relative_path == b"Cargo.toml")
-        .ok_or_else(|| step("rust-manifest", "root Cargo.toml unavailable"))?;
-    let document: toml::Value = toml::from_str(
-        std::str::from_utf8(&manifest.contents).map_err(|error| step("rust-manifest", error))?,
-    )
-    .map_err(|error| step("rust-manifest", error))?;
-    let package = document.get("package").ok_or_else(|| {
-        step(
-            "rust-package",
-            "virtual workspace requires package selection",
-        )
-    })?;
-    let name = package
-        .get("name")
-        .and_then(toml::Value::as_str)
-        .ok_or_else(|| step("rust-package", "package name unavailable"))?;
-    let lib = document.get("lib");
-    let lib_path = lib
-        .and_then(|lib| lib.get("path"))
-        .and_then(toml::Value::as_str)
-        .unwrap_or("src/lib.rs");
-    let has_lib = files
-        .iter()
-        .any(|file| file.relative_path == lib_path.as_bytes());
-    let kind = if has_lib {
-        RustTargetKind::Library
-    } else {
-        RustTargetKind::Binary
-    };
-    let target = RustTargetSettings {
-        name: if has_lib {
-            lib.and_then(|lib| lib.get("name"))
-                .and_then(toml::Value::as_str)
-                .map_or_else(|| name.replace('-', "_"), str::to_owned)
-        } else {
-            name.to_owned()
-        },
-        kind,
-        crate_root: if has_lib {
-            lib_path.as_bytes().to_vec()
-        } else {
-            b"src/main.rs".to_vec()
-        },
-    };
     let identity: serde_json::Value = serde_json::from_slice(TOOLCHAIN_IDENTITY)
         .map_err(|error| step("rust-toolchain-identity", error))?;
     // Captured inputs are the only material available to Cargo. Contained metadata must
     // still resolve the complete locked graph before these inputs authorize compilation.
     let dependency_roots = files
         .iter()
+        .filter(|file| file.relative_path != selected.manifest)
         .filter_map(|file| file.relative_path.strip_suffix(b"/Cargo.toml"))
         .collect::<Vec<_>>();
     let dependency_inputs = files
@@ -800,9 +802,9 @@ fn initial_selection(
         })
         .collect();
     Ok(RustContextSelection {
-        manifest_path: Some(b"Cargo.toml".to_vec()),
-        package_name: Some(name.to_owned()),
-        target: Some(target),
+        manifest_path: Some(selected.manifest.clone()),
+        package_name: Some(selected.package.clone()),
+        target: Some(selected.target.clone()),
         default_features: true,
         target_triple: Some(host.to_owned()),
         profile: Some("dev".into()),
@@ -822,4 +824,22 @@ fn initial_selection(
         build_inputs: Some(build_inputs),
         ..RustContextSelection::default()
     })
+}
+
+fn captured_files(
+    inputs: &PreparedSourceInputs,
+) -> Result<Vec<ContextFileInput>, ProductionWorkspaceStartupError> {
+    inputs
+        .capture()?
+        .images()
+        .iter()
+        .map(|image| {
+            Ok(ContextFileInput {
+                file_id: public_id(IdentityDomain::SourceFile, image.file_id)?,
+                relative_path: image.path.raw_relative_path_bytes.clone(),
+                digest: image.digest,
+                contents: image.bytes.to_vec(),
+            })
+        })
+        .collect::<Result<Vec<_>, ProductionWorkspaceStartupError>>()
 }

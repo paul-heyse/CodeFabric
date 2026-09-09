@@ -1045,7 +1045,8 @@ pub enum ProviderCoverageState {
 }
 
 impl ProviderCoverageState {
-    const fn completed_units(&self) -> u64 {
+    #[must_use]
+    pub const fn completed_units(&self) -> u64 {
         match self {
             Self::Complete { completed_units }
             | Self::IntentionalRemainder {
@@ -1091,6 +1092,19 @@ pub struct ProviderGap {
 }
 
 impl ProviderGap {
+    #[must_use]
+    pub fn family(&self) -> &ProviderFamilyIdentity {
+        &self.family
+    }
+    #[must_use]
+    pub const fn cause(&self) -> ProviderUnknownCause {
+        self.cause
+    }
+    #[must_use]
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
+
     /// Construct one bounded explicit gap.
     ///
     /// # Errors

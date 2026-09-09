@@ -32,12 +32,25 @@ pub(super) fn install_input_observations(
     inventory: &ProviderSourceInventory,
     runs: &[AdmittedProviderResult],
 ) -> Result<(), ProductionWorkspaceStartupError> {
-    let selected_files = inventory.selected_files().collect::<BTreeMap<_, _>>();
+    let selected_files = inventory
+        .members()
+        .iter()
+        .filter_map(|member| match member.disposition {
+            ProviderInputDisposition::Captured {
+                file_id, digest, ..
+            } => Some((file_id, digest)),
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut inventories = BTreeMap::from([(inventory.identity(), inventory)]);
     let mut run_ids = BTreeSet::new();
     for run in runs {
         let source = run.job().source();
         let selected = match source.selection() {
-            ProviderSourceSelection::Inventory(bound) => bound.has_same_capture(inventory),
+            ProviderSourceSelection::Inventory(bound) => {
+                inventories.insert(bound.identity(), &**bound);
+                bound.has_same_capture(inventory)
+            }
             ProviderSourceSelection::File {
                 file_id,
                 content_digest,
@@ -59,8 +72,231 @@ pub(super) fn install_input_observations(
             ));
         }
     }
-    install_inventory(builder, inventory)?;
+    install_inventory(builder, &inventories.into_values().collect::<Vec<_>>())?;
+    install_provider_progress(builder, runs)?;
     install_support(builder, runs)
+}
+
+#[allow(clippy::too_many_lines)] // Two small typed Arrow tables share the admitted run census.
+fn install_provider_progress(
+    builder: &mut ProgrammaticFabricEpochBuilder,
+    runs: &[AdmittedProviderResult],
+) -> Result<(), ProductionWorkspaceStartupError> {
+    use crate::provider_contracts::{ProviderCoverageState, ProviderLane};
+    struct Family<'a> {
+        run: [u8; 16],
+        name: &'a str,
+        scope: &'a str,
+        requested: u64,
+        completed: u64,
+        state: &'static str,
+        reason: String,
+    }
+    let ids = runs
+        .iter()
+        .map(|run| run.job().run().provider_run_id())
+        .collect::<Vec<_>>();
+    let contexts = runs
+        .iter()
+        .map(|run| run.job().context().analysis_context_id())
+        .collect::<Vec<_>>();
+    let fingerprints = runs
+        .iter()
+        .map(|run| run.job().context().context_fingerprint())
+        .collect::<Vec<_>>();
+    let inventories = runs
+        .iter()
+        .map(|run| match run.job().source().selection() {
+            ProviderSourceSelection::Inventory(inventory) => Some(inventory.identity()),
+            ProviderSourceSelection::File { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    let terminal = runs
+        .iter()
+        .map(|run| format!("{:?}", run.result().terminal()))
+        .collect::<Vec<_>>();
+    register(
+        builder,
+        FabricSchemaRole::System,
+        "provider_run_scope",
+        vec![
+            ("provider_run_id", false, id16_array(ids.iter().map(Some))),
+            ("context_id", false, id16_array(contexts.iter().map(Some))),
+            (
+                "context_fingerprint",
+                false,
+                hash32_array(fingerprints.iter().map(Some)),
+            ),
+            (
+                "source_generation",
+                false,
+                numbers(runs.iter().map(|run| run.job().source().generation())),
+            ),
+            (
+                "input_set_id",
+                true,
+                hash32_array(inventories.iter().map(Option::as_ref)),
+            ),
+            (
+                "file_id",
+                true,
+                id16_array(runs.iter().map(|run| match run.job().source().selection() {
+                    ProviderSourceSelection::File { file_id, .. } => Some(file_id),
+                    ProviderSourceSelection::Inventory(_) => None,
+                })),
+            ),
+            (
+                "provider",
+                false,
+                strings(runs.iter().map(|run| {
+                    Some(match run.job().lane() {
+                        ProviderLane::TreeSitter => "tree-sitter",
+                        ProviderLane::Ruff => "ruff",
+                        ProviderLane::Pyrefly => "pyrefly",
+                        ProviderLane::Rustc => "rustc",
+                    })
+                })),
+            ),
+            (
+                "terminal_state",
+                false,
+                strings(terminal.iter().map(|value| Some(value.as_str()))),
+            ),
+        ],
+    )?;
+    let mut families = Vec::new();
+    for run in runs {
+        for coverage in run.result().coverage() {
+            let request = run
+                .job()
+                .requests()
+                .iter()
+                .find(|request| request.family() == coverage.family())
+                .ok_or_else(|| step("provider-progress", "unrequested coverage family"))?;
+            let (state, reason) = match coverage.state() {
+                ProviderCoverageState::Complete { .. } => ("complete", String::new()),
+                ProviderCoverageState::IntentionalRemainder { reason, .. } => {
+                    ("partial", format!("{reason:?}"))
+                }
+                ProviderCoverageState::Unknown { cause, .. } => ("unknown", format!("{cause:?}")),
+            };
+            families.push(Family {
+                run: run.job().run().provider_run_id(),
+                name: coverage.family().as_str(),
+                scope: request.scope().as_str(),
+                requested: request.requested_units(),
+                completed: coverage.state().completed_units(),
+                state,
+                reason,
+            });
+        }
+    }
+    register(
+        builder,
+        FabricSchemaRole::System,
+        "provider_family_progress",
+        vec![
+            (
+                "provider_run_id",
+                false,
+                id16_array(families.iter().map(|row| Some(&row.run))),
+            ),
+            (
+                "family",
+                false,
+                strings(families.iter().map(|row| Some(row.name))),
+            ),
+            (
+                "scope",
+                false,
+                strings(families.iter().map(|row| Some(row.scope))),
+            ),
+            (
+                "requested_units",
+                false,
+                numbers(families.iter().map(|row| row.requested)),
+            ),
+            (
+                "completed_units",
+                false,
+                numbers(families.iter().map(|row| row.completed)),
+            ),
+            (
+                "remaining_units",
+                false,
+                numbers(families.iter().map(|row| row.requested - row.completed)),
+            ),
+            (
+                "processing_state",
+                false,
+                strings(families.iter().map(|row| Some(row.state))),
+            ),
+            (
+                "reason",
+                false,
+                strings(families.iter().map(|row| Some(row.reason.as_str()))),
+            ),
+        ],
+    )
+}
+
+pub(super) fn install_rust_target_progress(
+    builder: &mut ProgrammaticFabricEpochBuilder,
+    generation: u64,
+    progress: &[super::rustc::RustTargetProgress],
+) -> Result<(), ProductionWorkspaceStartupError> {
+    register(
+        builder,
+        FabricSchemaRole::System,
+        "rust_target_progress",
+        vec![
+            (
+                "source_generation",
+                false,
+                Arc::new(UInt64Array::from(vec![generation; progress.len()])),
+            ),
+            (
+                "manifest_path",
+                false,
+                Arc::new(BinaryArray::from_iter_values(
+                    progress.iter().map(|row| row.manifest.as_slice()),
+                )),
+            ),
+            (
+                "target_name",
+                false,
+                Arc::new(StringArray::from_iter_values(
+                    progress.iter().map(|row| row.target.as_str()),
+                )),
+            ),
+            (
+                "target_kind",
+                false,
+                Arc::new(StringArray::from_iter_values(
+                    progress.iter().map(|row| row.target_kind.as_str()),
+                )),
+            ),
+            (
+                "context_id",
+                true,
+                id16_array(progress.iter().map(|row| row.context_id.as_ref())),
+            ),
+            (
+                "processing_state",
+                false,
+                Arc::new(StringArray::from_iter_values(
+                    progress.iter().map(|row| row.state),
+                )),
+            ),
+            (
+                "detail",
+                false,
+                Arc::new(StringArray::from_iter_values(
+                    progress.iter().map(|row| row.detail.as_str()),
+                )),
+            ),
+        ],
+    )
 }
 
 type Column = (&'static str, bool, ArrayRef);
@@ -72,6 +308,18 @@ fn register(
     table: &'static str,
     columns: Vec<Column>,
 ) -> Result<(), ProductionWorkspaceStartupError> {
+    register_batches(builder, role, table, vec![columns])
+}
+
+fn register_batches(
+    builder: &mut ProgrammaticFabricEpochBuilder,
+    role: FabricSchemaRole,
+    table: &'static str,
+    batches: Vec<Vec<Column>>,
+) -> Result<(), ProductionWorkspaceStartupError> {
+    let columns = batches
+        .first()
+        .ok_or_else(|| step("input-observation-batches", "missing schema batch"))?;
     let relation_id = format!("{}.{}", role.as_str(), table);
     let fields = columns
         .iter()
@@ -91,12 +339,17 @@ fn register(
     let mappings = (0..columns.len())
         .map(|index| FieldIndexMapping::direct(index, index))
         .collect();
-    let batch = RecordBatch::try_new(
-        Arc::clone(&schema),
-        columns.into_iter().map(|(_, _, array)| array).collect(),
-    )
-    .map_err(|error| step("input-observation-arrow-batch", error))?;
-    let provider = MemTable::try_new(Arc::clone(&schema), vec![vec![batch]])
+    let batches = batches
+        .into_iter()
+        .map(|columns| {
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                columns.into_iter().map(|(_, _, array)| array).collect(),
+            )
+            .map_err(|error| step("input-observation-arrow-batch", error))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let provider = MemTable::try_new(Arc::clone(&schema), vec![batches])
         .map_err(|error| step("input-observation-memtable", error))?;
     let reference = TableReference::full(FABRIC_CATALOG, role.as_str(), table);
     let contract = SchemaContract::try_new(
@@ -139,15 +392,30 @@ fn cardinality(value: usize) -> Result<u64, ProductionWorkspaceStartupError> {
 
 fn install_inventory(
     builder: &mut ProgrammaticFabricEpochBuilder,
+    inventories: &[&ProviderSourceInventory],
+) -> Result<(), ProductionWorkspaceStartupError> {
+    let mut tables = BTreeMap::<&'static str, Vec<Vec<Column>>>::new();
+    for inventory in inventories {
+        collect_inventory_columns(inventory, &mut |table, columns| {
+            tables.entry(table).or_default().push(columns);
+            Ok(())
+        })?;
+    }
+    for (table, batches) in tables {
+        register_batches(builder, FabricSchemaRole::Source, table, batches)?;
+    }
+    Ok(())
+}
+
+fn collect_inventory_columns(
     inventory: &ProviderSourceInventory,
+    collect: &mut impl FnMut(&'static str, Vec<Column>) -> Result<(), ProductionWorkspaceStartupError>,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     let workspace = inventory.workspace_id();
     let generation = inventory.source_generation();
     let input_set = inventory.identity();
     let members = inventory.members();
-    register(
-        builder,
-        FabricSchemaRole::Source,
+    collect(
         "input_inventory_set",
         vec![
             ("workspace_id", false, id16_array([Some(&workspace)])),
@@ -175,11 +443,9 @@ fn install_inventory(
             ),
         ],
     )?;
-    register_inventory_members(builder, inventory)?;
+    collect_inventory_members(inventory, collect)?;
     let withdrawn = inventory.withdrawn();
-    register(
-        builder,
-        FabricSchemaRole::Source,
+    collect(
         "input_inventory_withdrawal",
         vec![
             (
@@ -211,9 +477,9 @@ fn install_inventory(
     )
 }
 
-fn register_inventory_members(
-    builder: &mut ProgrammaticFabricEpochBuilder,
+fn collect_inventory_members(
     inventory: &ProviderSourceInventory,
+    collect: &mut impl FnMut(&'static str, Vec<Column>) -> Result<(), ProductionWorkspaceStartupError>,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     let workspace = inventory.workspace_id();
     let generation = inventory.source_generation();
@@ -224,9 +490,7 @@ fn register_inventory_members(
         .iter()
         .map(Vec::as_slice)
         .collect::<BTreeSet<_>>();
-    register(
-        builder,
-        FabricSchemaRole::Source,
+    collect(
         "input_inventory",
         vec![
             (
@@ -1259,6 +1523,35 @@ mod tests {
                 0
             );
         }
+    }
+
+    #[tokio::test]
+    async fn provider_selections_have_joinable_inventory_and_family_progress() {
+        let mut rust = captured(b"b.rs", 8);
+        rust.selected_for_provider = false;
+        let base = ProviderSourceInventory::try_new(
+            [6; 16],
+            7,
+            [26; 32],
+            &[b"a.py".to_vec(), b"b.rs".to_vec()],
+            vec![captured(b"a.py", 7), rust],
+            vec![],
+            None,
+        )
+        .unwrap();
+        let selection = base.select_files(&BTreeSet::from([[8; 16]])).unwrap();
+        let run = admitted(source(&selection), 19, vec![], &[]);
+        let context = context(&base, &[run]);
+        assert_eq!(
+            count(&context, "SELECT count(*) FROM source.input_inventory_set").await,
+            2
+        );
+        assert_eq!(
+            count(&context, "SELECT count(*) FROM source.input_inventory").await,
+            4
+        );
+        assert_eq!(count(&context, "SELECT count(*) FROM system.provider_run_scope r JOIN source.input_inventory i ON r.input_set_id = i.input_set_id WHERE i.selected_for_provider AND i.relative_path = arrow_cast('b.rs', 'Binary')").await, 1);
+        assert_eq!(count(&context, "SELECT count(*) FROM system.provider_family_progress p JOIN system.provider_run_scope r USING (provider_run_id) WHERE p.completed_units = 1 AND p.remaining_units = 0 AND p.processing_state = 'complete'").await, 1);
     }
 
     #[tokio::test]

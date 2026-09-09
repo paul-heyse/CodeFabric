@@ -2069,17 +2069,23 @@ fn pragmatic_python_semantics_publish_real_call_targets() {
 #[test]
 #[cfg(target_os = "linux")]
 fn pragmatic_rust_semantics_publish_real_call_targets() {
-    rust_semantics_publication(false);
+    rust_semantics_publication(false, false);
 }
 
 #[test]
 #[cfg(target_os = "linux")]
 fn pragmatic_rust_semantics_publish_captured_path_dependency() {
-    rust_semantics_publication(true);
+    rust_semantics_publication(true, false);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn pragmatic_rust_target_failure_retains_other_targets() {
+    rust_semantics_publication(false, true);
 }
 
 #[cfg(target_os = "linux")]
-fn rust_semantics_publication(with_dependency: bool) {
+fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
     let fixture = ProductionFixture::new();
     let workspace = Path::new(&fixture.workspace.root_path_display);
     fs::create_dir(workspace.join("src")).unwrap();
@@ -2128,40 +2134,29 @@ fn rust_semantics_publication(with_dependency: bool) {
             .unwrap();
         fs::write(workspace.join("Cargo.lock"), "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\ndependencies = [\"helper\"]\n[[package]]\nname = \"helper\"\nversion = \"0.1.0\"\n").unwrap();
     }
+    if with_failure {
+        fs::create_dir_all(workspace.join("src/bin")).unwrap();
+        fs::write(
+            workspace.join("src/bin/broken.rs"),
+            "fn main() { missing_function(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join("src/bin/working.rs"),
+            "fn main() { let _ = fixture::caller(); }\n",
+        )
+        .unwrap();
+    }
     let supervisor = fixture.start_supervisor();
-    let rows = decoded_activation_control_rows(&fixture);
-    let (_, pin) = rows[0]
-        .table_versions()
-        .components()
-        .find(|(id, _)| *id == "provider.rustc.call.v1")
-        .expect("real daemon published the rustc call relation");
-    let root = pin.canonical_root().to_file_path().unwrap();
-    let log = fs::File::open(root.join(format!("_delta_log/{:020}.json", pin.version()))).unwrap();
     let mut targets = BTreeSet::new();
-    for action in BufReader::new(log).lines() {
-        let action: Value = serde_json::from_str(&action.unwrap()).unwrap();
-        let Some(path) = action
-            .get("add")
-            .and_then(|add| add.get("path"))
-            .and_then(Value::as_str)
-        else {
-            continue;
-        };
-        let reader =
-            ParquetRecordBatchReaderBuilder::try_new(fs::File::open(root.join(path)).unwrap())
-                .unwrap()
-                .build()
-                .unwrap();
-        for batch in reader {
-            let batch = batch.unwrap();
-            let values = batch
-                .column_by_name("declared_target")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<arrow::array::StringArray>()
-                .unwrap();
-            targets.extend(values.iter().flatten().map(ToOwned::to_owned));
-        }
+    for batch in fresh_activation_relation_batches(&fixture, "provider.rustc.call.v1") {
+        let values = batch
+            .column_by_name("declared_target")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        targets.extend(values.iter().flatten().map(ToOwned::to_owned));
     }
     assert!(
         targets
@@ -2177,7 +2172,132 @@ fn rust_semantics_publication(with_dependency: bool) {
             "{targets:?}"
         );
     }
+    if with_failure {
+        let mut states = std::collections::BTreeMap::new();
+        for batch in fresh_activation_relation_batches(&fixture, "system.rust_target_progress") {
+            let names = batch
+                .column_by_name("target_name")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap();
+            let values = batch
+                .column_by_name("processing_state")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap();
+            for row in 0..batch.num_rows() {
+                states.insert(names.value(row).to_owned(), values.value(row).to_owned());
+            }
+        }
+        assert_eq!(
+            states.get("broken").map(String::as_str),
+            Some("unavailable")
+        );
+        assert_eq!(states.get("working").map(String::as_str), Some("processed"));
+        assert_eq!(states.get("fixture").map(String::as_str), Some("processed"));
+    }
     supervisor.stop();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn pragmatic_rust_virtual_workspace_inherits_package_settings() {
+    let fixture = ProductionFixture::new();
+    let workspace = Path::new(&fixture.workspace.root_path_display);
+    fs::create_dir_all(workspace.join("app/src")).unwrap();
+    fs::create_dir_all(workspace.join("helper/src")).unwrap();
+    for (path, bytes) in [
+        (
+            "Cargo.toml",
+            "[workspace]\nmembers = ['app', 'helper']\nresolver = '3'\n[workspace.package]\nversion = '0.1.0'\nedition = '2024'\n",
+        ),
+        (
+            "Cargo.lock",
+            "version = 4\n[[package]]\nname = 'fixture'\nversion = '0.1.0'\ndependencies = ['helper']\n[[package]]\nname = 'helper'\nversion = '0.1.0'\n",
+        ),
+        (
+            "app/Cargo.toml",
+            "[package]\nname = 'fixture'\nversion.workspace = true\nedition.workspace = true\n[dependencies]\nhelper = { path = '../helper' }\n",
+        ),
+        (
+            "app/src/lib.rs",
+            "pub fn caller() -> u32 { helper::increment(1) }\n",
+        ),
+        (
+            "helper/Cargo.toml",
+            "[package]\nname = 'helper'\nversion.workspace = true\nedition.workspace = true\n",
+        ),
+        (
+            "helper/src/lib.rs",
+            "pub fn increment(value: u32) -> u32 { value + 1 }\n",
+        ),
+    ] {
+        fs::write(workspace.join(path), bytes).unwrap();
+    }
+    let supervisor = fixture.start_supervisor();
+    let calls = fresh_activation_relation_batches(&fixture, "provider.rustc.call.v1");
+    assert!(calls.iter().any(|batch| {
+        batch
+            .column_by_name("declared_target")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap()
+            .iter()
+            .flatten()
+            .any(|target| target.ends_with("helper::increment"))
+    }));
+    let progress = fresh_activation_relation_batches(&fixture, "system.rust_target_progress");
+    assert_eq!(progress.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
+    assert!(progress.iter().all(|batch| {
+        batch
+            .column_by_name("processing_state")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap()
+            .iter()
+            .all(|value| value == Some("processed"))
+    }));
+    supervisor.stop();
+}
+
+fn fresh_activation_relation_batches(
+    fixture: &ProductionFixture,
+    relation: &str,
+) -> Vec<RecordBatch> {
+    let rows = decoded_activation_control_rows(fixture);
+    let (_, pin) = rows[0]
+        .table_versions()
+        .components()
+        .find(|(id, _)| *id == relation)
+        .unwrap_or_else(|| panic!("missing activated relation {relation}"));
+    assert_eq!(
+        pin.version(),
+        1,
+        "fresh fixture relation has one data commit"
+    );
+    let root = pin.canonical_root().to_file_path().unwrap();
+    let log = fs::File::open(root.join("_delta_log/00000000000000000001.json")).unwrap();
+    let mut batches = Vec::new();
+    for action in BufReader::new(log).lines() {
+        let action: Value = serde_json::from_str(&action.unwrap()).unwrap();
+        if let Some(path) = action
+            .get("add")
+            .and_then(|add| add.get("path"))
+            .and_then(Value::as_str)
+        {
+            let reader =
+                ParquetRecordBatchReaderBuilder::try_new(fs::File::open(root.join(path)).unwrap())
+                    .unwrap()
+                    .build()
+                    .unwrap();
+            batches.extend(reader.map(Result::unwrap));
+        }
+    }
+    batches
 }
 
 #[test]
