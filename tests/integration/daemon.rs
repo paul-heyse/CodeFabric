@@ -2181,6 +2181,7 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         "{entities:?}"
     );
     assert_canonical_rust_declaration(&fixture);
+    assert_canonical_python_reference(&fixture);
     let mut targets = BTreeSet::new();
     for batch in fresh_activation_relation_batches(&fixture, "provider.rustc.call.v1") {
         let values = batch
@@ -2517,6 +2518,94 @@ fn assert_mixed_public_entity_queries(
         names("rust_page", "rust")
             .iter()
             .any(|name| name.ends_with("caller"))
+    );
+}
+
+fn assert_canonical_python_reference(fixture: &ProductionFixture) {
+    use arrow::array::{BinaryArray, Decimal128Array, StringArray};
+    let declarations = fresh_activation_relation_batches(fixture, "fact.code_declaration");
+    let target = declarations
+        .iter()
+        .find_map(|batch| {
+            let names = batch
+                .column_by_name("name")?
+                .as_any()
+                .downcast_ref::<StringArray>()?;
+            let kinds = batch
+                .column_by_name("entity_kind")?
+                .as_any()
+                .downcast_ref::<StringArray>()?;
+            let entities = batch
+                .column_by_name("entity_id")?
+                .as_any()
+                .downcast_ref::<BinaryArray>()?;
+            (0..batch.num_rows())
+                .find(|&row| names.value(row) == "value" && kinds.value(row) == "parameter")
+                .map(|row| entities.value(row).to_vec())
+        })
+        .expect("actual source parameter declaration");
+    let mut found = 0;
+    for batch in fresh_activation_relation_batches(fixture, "fact.code_reference") {
+        let names = batch
+            .column_by_name("name")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let targets = batch
+            .column_by_name("target_entity_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        let ids = batch
+            .column_by_name("reference_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        let resolution = batch
+            .column_by_name("resolution")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let kinds = batch
+            .column_by_name("reference_kind")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let starts = batch
+            .column_by_name("start_byte")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        let ends = batch
+            .column_by_name("end_byte")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            if names.value(row) == "value" {
+                assert_eq!(targets.value(row), target);
+                assert_ne!(ids.value(row), target);
+                assert_eq!(resolution.value(row), "resolved");
+                let expected = match kinds.value(row) {
+                    "read" => (42, 47),
+                    "write" => (11, 16),
+                    kind => panic!("unexpected parameter reference kind {kind}"),
+                };
+                assert_eq!((starts.value(row), ends.value(row)), expected);
+                found += 1;
+            }
+        }
+    }
+    assert_eq!(
+        found, 2,
+        "the parameter definition writes its binding and return value + 1 reads it"
     );
 }
 

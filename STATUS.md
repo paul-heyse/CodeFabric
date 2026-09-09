@@ -189,7 +189,7 @@ mapping, retained compiler build caches, configurable feature/target profiles an
 scoped status still remain. The target rows' `processed` state means that compiler output returned;
 per-family rows retain incomplete or unknown semantics, including missing structured diagnostics.
 
-## Outcome 4D — canonical source, entity and declaration relations
+## Outcome 4D — canonical source, declarations and lexical references
 
 Fresh startup now installs native DataFusion transformations for `source.code_file`,
 `fact.code_entity` and `fact.code_declaration`. The source relation selects the captured base
@@ -206,9 +206,21 @@ entity/declaration IDs. Focused native-plan checks cover repeated assignments, i
 in separate files, stale digests, missing providers and contextual compiler identities. The
 stable library check and Clippy command complete; the existing broad warning backlog remains.
 All four `just golden --timeout 360` scenarios pass, including exact reopen and cancellation.
-No dependency versions changed. Public search still uses its preceding Ruff source while
-query-scoped coverage and canonical query binding are connected together. Types, references,
-imports, call sites/dispatch and the rest of the canonical families remain active 4D work.
+Public function search now uses canonical entities with query-scoped coverage as described above.
+
+`fact.code_reference` now joins actual Ruff reference observations to canonical binding and
+declaration IDs by file, context, source digest/generation, run and target observation. Read/write
+occurrences have separate application IDs and exact ranges; unresolved targets and context
+mismatches remain rows with explicit unknown reasons. Resolution is labeled lexical: imports,
+external/builtin targets and cross-module semantic resolution are still normalization work.
+The native schema wrapper now accepts a physical non-null refinement of a declared nullable
+field, preserves its declared schema/metadata without copying buffers, and still rejects the
+unsafe opposite direction. This fixes mixed-language branch-filter/left-join planning.
+Types, imports, Rust references, call sites/dispatch and remaining canonical families stay open.
+Validation on 2026-09-09: four canonical tests and three affected native-view/resource tests
+pass; exact installed restart passes. The final mixed-language daemon test reads the expected
+parameter write at bytes 11–16 and read at 42–47 from persisted canonical references. Library
+Clippy completes with the existing 958-warning backlog. No dependency versions changed.
 
 ## Outcome 4 — selected Pyrefly context preparation
 

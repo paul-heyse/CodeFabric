@@ -36,6 +36,7 @@ const SOURCE: &str = "source.code_file";
 const DECLARATION: &str = "fact.code_declaration";
 const ENTITY: &str = "fact.code_entity";
 const SELECTOR: &str = "fact.code_entity_selector";
+const REFERENCE: &str = "fact.code_reference";
 const INPUT: &str = "source.input_inventory";
 const RUN: &str = "system.provider_run_scope";
 
@@ -48,6 +49,7 @@ pub(super) fn install(
     for kind in [
         Kind::Source,
         Kind::Declaration { python, rust },
+        Kind::Reference { python },
         Kind::Entity,
         Kind::EntitySelector,
     ] {
@@ -62,6 +64,7 @@ pub(super) fn install(
 enum Kind {
     Source,
     Declaration { python: bool, rust: bool },
+    Reference { python: bool },
     Entity,
     EntitySelector,
 }
@@ -91,6 +94,19 @@ impl Canonical {
                 },
             ),
             Kind::Entity => (ENTITY, entity_fields(), vec![DECLARATION]),
+            Kind::Reference { python } => (
+                REFERENCE,
+                reference_fields(),
+                if python {
+                    vec![
+                        SOURCE,
+                        DECLARATION,
+                        NativeSyntaxRelation::RuffReference.as_str(),
+                    ]
+                } else {
+                    vec![]
+                },
+            ),
             Kind::EntitySelector => {
                 let mut fields = entity_fields();
                 fields.push(("selector", DataType::Utf8, false));
@@ -108,28 +124,7 @@ impl Canonical {
         let (schema, table) = id.split_once('.').expect("closed canonical relation");
         let fields = names
             .iter()
-            .map(|(name, _, _)| {
-                let field = TransformationFieldIdentity::new(ProgrammaticFieldId::new(format!(
-                    "{id}.{name}"
-                )));
-                match *name {
-                    "entity_id" => field.with_semantic_role("semantic.entity.identity"),
-                    "entity_kind" => field.with_semantic_role("semantic.entity.kind"),
-                    "name" => field.with_semantic_role("semantic.entity.name"),
-                    "language" => field.with_semantic_role("semantic.entity.language"),
-                    "selector" => field.with_semantic_role("semantic.entity.selector"),
-                    "file_id" => field.with_semantic_role("semantic.provenance.source-file"),
-                    "context_id" => {
-                        field.with_semantic_role("semantic.provenance.analysis-context")
-                    }
-                    "source_generation" => {
-                        field.with_semantic_role("semantic.provenance.source-generation")
-                    }
-                    "start_byte" => field.with_semantic_role("semantic.source.start-byte"),
-                    "end_byte" => field.with_semantic_role("semantic.source.end-byte"),
-                    _ => field,
-                }
-            })
+            .map(|(name, _, _)| canonical_field_identity(id, name))
             .collect::<Vec<_>>();
         let mut output = TransformationOutput::new(
             ProgrammaticRelationId::new(id),
@@ -143,6 +138,9 @@ impl Canonical {
         }
         if matches!(kind, Kind::EntitySelector) {
             output = output.with_semantic_role("canonical.entity-selector");
+        }
+        if matches!(kind, Kind::Reference { .. }) {
+            output = output.with_semantic_role("canonical.reference");
         }
         let identity =
             *blake3::hash(format!("codefabric.canonical-code.v1:{id}").as_bytes()).as_bytes();
@@ -299,6 +297,104 @@ impl Canonical {
             ])?
             .build()?)
     }
+
+    fn references(
+        &self,
+        inputs: &TransformationInputs,
+    ) -> Result<LogicalPlan, TransformationPlanError> {
+        let raw =
+            LogicalPlanBuilder::from(plan(inputs, NativeSyntaxRelation::RuffReference.as_str())?)
+                .alias("p")?
+                .build()?;
+        let declarations = LogicalPlanBuilder::from(plan(inputs, DECLARATION)?)
+            .filter(col("language").eq(lit("python")))?
+            .alias("d")?
+            .build()?;
+        let occurrence = source_occurrence_id(
+            self.workspace,
+            "codefabric_reference_occurrence_id_v1",
+            101,
+            2,
+        )
+        .call(vec![
+            col("p.file_id"),
+            col("p.file_id"),
+            col("p.content_digest"),
+            col("p.start_byte"),
+            col("p.end_byte"),
+        ]);
+        // A provider's local lookup links observations from the same admitted run. A name or
+        // coincident range is never a substitute for the target binding and its exact inputs.
+        Ok(LogicalPlanBuilder::from(raw)
+            .join(
+                source_alias(inputs)?,
+                JoinType::Inner,
+                (
+                    vec!["p.file_id", "p.content_digest", "p.source_generation"],
+                    vec!["s.file_id", "s.content_digest", "s.source_generation"],
+                ),
+                None,
+            )?
+            .join(
+                declarations,
+                JoinType::Left,
+                (
+                    vec![
+                        "p.target_id",
+                        "p.file_id",
+                        "p.analysis_context_id",
+                        "p.content_digest",
+                        "p.source_generation",
+                        "p.provider_run_id",
+                    ],
+                    vec![
+                        "d.provider_observation_id",
+                        "d.file_id",
+                        "d.context_id",
+                        "d.content_digest",
+                        "d.source_generation",
+                        "d.provider_run_id",
+                    ],
+                ),
+                None,
+            )?
+            .project(vec![
+                occurrence.alias("reference_id"),
+                col("d.entity_id").alias("target_entity_id"),
+                col("d.declaration_id").alias("target_declaration_id"),
+                col("p.name").alias("name"),
+                lit("python").alias("language"),
+                col("p.reference_class").alias("reference_kind"),
+                col("p.resolution").alias("raw_resolution"),
+                datafusion::logical_expr::when(col("d.entity_id").is_null(), lit("unknown"))
+                    .when(col("p.resolution").eq(lit("resolved")), lit("resolved"))
+                    .otherwise(lit("candidate"))?
+                    .alias("resolution"),
+                datafusion::logical_expr::when(
+                    col("p.unknown_reason").is_not_null(),
+                    col("p.unknown_reason"),
+                )
+                .when(
+                    col("d.entity_id").is_null(),
+                    lit("canonical_target_unavailable"),
+                )
+                .otherwise(lit(ScalarValue::Utf8(None)))?
+                .alias("unknown_reason"),
+                lit("lexical").alias("resolution_scope"),
+                col("p.analysis_context_id").alias("context_id"),
+                col("p.file_id").alias("file_id"),
+                col("p.content_digest").alias("content_digest"),
+                col("p.source_generation").alias("source_generation"),
+                col("p.start_byte").alias("start_byte"),
+                col("p.end_byte").alias("end_byte"),
+                col("p.provider_run_id").alias("provider_run_id"),
+                col("p.reference_id").alias("provider_observation_id"),
+                col("p.target_id").alias("provider_target_observation_id"),
+                lit("ruff").alias("provider"),
+                col("s.workspace_id").alias("workspace_id"),
+            ])?
+            .build()?)
+    }
 }
 
 impl ProgrammaticTransformation for Canonical {
@@ -314,6 +410,8 @@ impl ProgrammaticTransformation for Canonical {
     fn build(&self, inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
         match self.kind {
             Kind::Source => self.source(inputs),
+            Kind::Reference { python: true } => self.references(inputs),
+            Kind::Reference { python: false } => empty(reference_fields()),
             Kind::EntitySelector => {
                 let input = plan(inputs, ENTITY)?;
                 let project = |selector: Expr| -> Result<LogicalPlan, TransformationPlanError> {
@@ -384,6 +482,23 @@ impl ProgrammaticTransformation for Canonical {
     }
 }
 
+fn canonical_field_identity(id: &str, name: &str) -> TransformationFieldIdentity {
+    let field = TransformationFieldIdentity::new(ProgrammaticFieldId::new(format!("{id}.{name}")));
+    match name {
+        "entity_id" => field.with_semantic_role("semantic.entity.identity"),
+        "entity_kind" => field.with_semantic_role("semantic.entity.kind"),
+        "name" => field.with_semantic_role("semantic.entity.name"),
+        "language" => field.with_semantic_role("semantic.entity.language"),
+        "selector" => field.with_semantic_role("semantic.entity.selector"),
+        "file_id" => field.with_semantic_role("semantic.provenance.source-file"),
+        "context_id" => field.with_semantic_role("semantic.provenance.analysis-context"),
+        "source_generation" => field.with_semantic_role("semantic.provenance.source-generation"),
+        "start_byte" => field.with_semantic_role("semantic.source.start-byte"),
+        "end_byte" => field.with_semantic_role("semantic.source.end-byte"),
+        _ => field,
+    }
+}
+
 fn plan(inputs: &TransformationInputs, id: &str) -> Result<LogicalPlan, TransformationPlanError> {
     inputs.plan(&ProgrammaticRelationId::new(id))
 }
@@ -423,6 +538,39 @@ fn entity_fields() -> Vec<FieldSpec> {
         ("language", DataType::Utf8, false),
         ("context_id", DataType::FixedSizeBinary(16), false),
         ("file_id", DataType::FixedSizeBinary(16), true),
+        ("workspace_id", DataType::FixedSizeBinary(16), false),
+    ]
+}
+fn reference_fields() -> Vec<FieldSpec> {
+    vec![
+        ("reference_id", DataType::FixedSizeBinary(16), false),
+        ("target_entity_id", DataType::FixedSizeBinary(16), true),
+        ("target_declaration_id", DataType::FixedSizeBinary(16), true),
+        ("name", DataType::Utf8, false),
+        ("language", DataType::Utf8, false),
+        ("reference_kind", DataType::Utf8, false),
+        ("raw_resolution", DataType::Utf8, false),
+        ("resolution", DataType::Utf8, false),
+        ("unknown_reason", DataType::Utf8, true),
+        ("resolution_scope", DataType::Utf8, false),
+        ("context_id", DataType::FixedSizeBinary(16), false),
+        ("file_id", DataType::FixedSizeBinary(16), false),
+        ("content_digest", DataType::FixedSizeBinary(32), false),
+        ("source_generation", DataType::UInt64, false),
+        ("start_byte", DataType::UInt64, false),
+        ("end_byte", DataType::UInt64, false),
+        ("provider_run_id", DataType::FixedSizeBinary(16), false),
+        (
+            "provider_observation_id",
+            DataType::FixedSizeBinary(16),
+            false,
+        ),
+        (
+            "provider_target_observation_id",
+            DataType::FixedSizeBinary(16),
+            false,
+        ),
+        ("provider", DataType::Utf8, false),
         ("workspace_id", DataType::FixedSizeBinary(16), false),
     ]
 }
@@ -622,8 +770,12 @@ fn file_id_udf() -> Arc<ScalarUDF> {
 }
 
 fn declaration_id(workspace: [u8; 16]) -> Arc<ScalarUDF> {
+    source_occurrence_id(workspace, "codefabric_declaration_id_v1", 100, 1)
+}
+
+fn source_occurrence_id(workspace: [u8; 16], name: &str, kind: u16, family: u16) -> Arc<ScalarUDF> {
     Arc::new(create_udf(
-        "codefabric_declaration_id_v1",
+        name,
         vec![
             DataType::FixedSizeBinary(16),
             DataType::FixedSizeBinary(16),
@@ -649,8 +801,8 @@ fn declaration_id(workspace: [u8; 16]) -> Arc<ScalarUDF> {
                     start_byte: number(&a[3], r)?,
                     end_byte: number(&a[4], r)?,
                     owner_id: fixed(&a[0], r)?,
-                    entity_kind_code: 100,
-                    occurrence_family_code: 1,
+                    entity_kind_code: kind,
+                    occurrence_family_code: family,
                     normalized_kind_code: 1,
                     parent_id: None,
                     role_code: None,
@@ -699,9 +851,9 @@ mod tests {
         let fields = columns
             .iter()
             .map(|(name, array)| {
-                Field::new(*name, array.data_type().clone(), false).with_metadata(HashMap::from([
-                    (FIELD_ID_METADATA_KEY.to_owned(), format!("{id}.{name}")),
-                ]))
+                Field::new(*name, array.data_type().clone(), array.null_count() > 0).with_metadata(
+                    HashMap::from([(FIELD_ID_METADATA_KEY.to_owned(), format!("{id}.{name}"))]),
+                )
             })
             .collect::<Vec<_>>();
         let schema = Arc::new(Schema::new(fields).with_metadata(HashMap::from([(
@@ -713,7 +865,7 @@ mod tests {
             columns.into_iter().map(|(_, a)| a).collect(),
         )
         .unwrap();
-        let reference = TableReference::full(FABRIC_CATALOG, "raw_ruff", "binding");
+        let reference = TableReference::full(FABRIC_CATALOG, "raw_ruff", id.replace('.', "_"));
         let contract = SchemaContract::try_new(
             "test-canonical-binding",
             reference.clone(),
@@ -783,6 +935,43 @@ mod tests {
                     ("end_byte", numbers(&[1, 11, 1, 25, 0])),
                     ("provider_run_id", ids16(&[4; 5])),
                     ("binding_id", ids16(&[9, 10, 9, 11, 12])),
+                ],
+            );
+            provider(
+                &mut builder,
+                NativeSyntaxRelation::RuffReference.as_str(),
+                vec![
+                    ("analysis_context_id", ids16(&[2, 2, 2, 2, 3])),
+                    ("file_id", ids16(&[7, 8, 7, 7, 7])),
+                    ("name", strings(&["x", "x", "missing", "stale", "x"])),
+                    ("reference_class", strings(&["read"; 5])),
+                    (
+                        "resolution",
+                        strings(&[
+                            "resolved",
+                            "resolved",
+                            "unknown-symbol",
+                            "resolved",
+                            "resolved",
+                        ]),
+                    ),
+                    ("target_id", ids16(&[9, 9, 99, 9, 9])),
+                    (
+                        "unknown_reason",
+                        Arc::new(StringArray::from(vec![
+                            None,
+                            None,
+                            Some("unbound_name"),
+                            None,
+                            None,
+                        ])),
+                    ),
+                    ("content_digest", digests(&[17, 17, 17, 18, 17])),
+                    ("source_generation", numbers(&[3; 5])),
+                    ("start_byte", numbers(&[40, 40, 50, 70, 80])),
+                    ("end_byte", numbers(&[41, 41, 57, 75, 81])),
+                    ("provider_run_id", ids16(&[4; 5])),
+                    ("reference_id", ids16(&[40, 41, 42, 43, 44])),
                 ],
             );
         }
@@ -870,9 +1059,94 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn canonical_references_preserve_unknowns_and_resolve_only_exact_binding_inputs() {
+        let context = fixture(true).await;
+        let batches = context
+            .sql("SELECT * FROM fact.code_reference ORDER BY file_id, start_byte")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let rows = arrow::compute::concat_batches(&batches[0].schema(), &batches).unwrap();
+        assert_eq!(
+            rows.num_rows(),
+            4,
+            "the stale source observation is excluded"
+        );
+        let target = rows
+            .column_by_name("target_entity_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .unwrap();
+        let occurrence = rows
+            .column_by_name("reference_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .unwrap();
+        assert_ne!(
+            target.value(0),
+            target.value(3),
+            "the same raw binding key in two files is not one target"
+        );
+        assert_ne!(
+            occurrence.value(0),
+            target.value(0),
+            "a reference occurrence is not its target entity"
+        );
+        assert!(
+            target.is_null(1),
+            "unresolved symbols must retain unknown targets"
+        );
+        assert!(
+            target.is_null(2),
+            "a different analysis context must not bind to a known name"
+        );
+        let reasons = rows
+            .column_by_name("unknown_reason")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(reasons.value(1), "unbound_name");
+        assert_eq!(reasons.value(2), "canonical_target_unavailable");
+        let bindings = context.sql("SELECT r.name, d.name AS target_name, d.start_byte AS declaration_start FROM fact.code_reference r JOIN fact.code_declaration d ON r.target_declaration_id = d.declaration_id ORDER BY r.file_id")
+            .await.unwrap().collect().await.unwrap();
+        let bindings = arrow::compute::concat_batches(&bindings[0].schema(), &bindings).unwrap();
+        assert_eq!(bindings.num_rows(), 2);
+        assert_eq!(
+            bindings
+                .column_by_name("target_name")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+                .value(0),
+            "x"
+        );
+        assert_eq!(
+            bindings
+                .column_by_name("declaration_start")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap()
+                .value(0),
+            0,
+            "the provider selected the first declaration, not the last textual assignment"
+        );
+    }
+
+    #[tokio::test]
     async fn canonical_missing_providers_install_empty_relations_without_invented_facts() {
         let context = fixture(false).await;
-        for table in ["fact.code_entity", "fact.code_declaration"] {
+        for table in [
+            "fact.code_entity",
+            "fact.code_declaration",
+            "fact.code_reference",
+        ] {
             let batches = context.table(table).await.unwrap().collect().await.unwrap();
             assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 0);
         }

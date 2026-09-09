@@ -1169,7 +1169,10 @@ fn validate_schema_identity_shape(
     {
         if actual.name() != expected.name()
             || actual.data_type() != expected.data_type()
-            || actual.is_nullable() != expected.is_nullable()
+            // Filtering a union branch or joining on a nullable key can establish that a
+            // physical result is non-null. Rebinding it to the declared nullable schema is
+            // safe; the opposite direction would conceal a contract violation.
+            || (actual.is_nullable() && !expected.is_nullable())
         {
             return Err(DataFusionError::Execution(format!(
                 "programmatic view {phase} field {index} shape differs: actual={actual:?}, expected={expected:?}"
@@ -1197,7 +1200,7 @@ impl IdentityPreservingViewTable {
         self
     }
 
-    /// Rebind an executable plan to an exact Arrow batch schema with identical value shape.
+    /// Rebind an executable plan to an exact Arrow batch schema with compatible value shape.
     /// This is used at persistence boundaries where Delta's native schema intentionally omits
     /// application metadata retained by the logical contract.
     pub(super) fn with_schema(
@@ -4121,7 +4124,7 @@ pub enum ProgrammaticSchemaError {
     VolatileTransformationDeclarationInert {
         transformation_id: ProgrammaticTransformationId,
     },
-    #[error("transformation {transformation_id:?} failed physical planning")]
+    #[error("transformation {transformation_id:?} failed physical planning: {source}")]
     TransformationPhysicalPlanning {
         transformation_id: ProgrammaticTransformationId,
         #[source]
@@ -5461,6 +5464,51 @@ mod tests {
                 .unwrap();
             assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
         }
+    }
+
+    #[tokio::test]
+    async fn view_preserves_declared_schema_when_native_planning_strengthens_nullability() {
+        let context = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let values = Arc::new(Int64Array::from(vec![7, 11])) as ArrayRef;
+        let batch = RecordBatch::try_new(Arc::clone(&schema), vec![Arc::clone(&values)]).unwrap();
+        let input = MemTable::try_new(schema, vec![vec![batch]])
+            .unwrap()
+            .scan(&context.state(), None, &[], None)
+            .await
+            .unwrap();
+        let target = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, true).with_metadata(HashMap::from([(
+                FIELD_ID_METADATA_KEY.to_owned(),
+                "fact.test.id".to_owned(),
+            )])),
+        ]));
+        let wrapped = Arc::new(SchemaIdentityExec::try_new(input, Arc::clone(&target)).unwrap());
+        let rows = datafusion::physical_plan::collect(wrapped, context.task_ctx())
+            .await
+            .unwrap();
+        assert_eq!(rows[0].schema(), target);
+        assert!(
+            Arc::ptr_eq(rows[0].column(0), &values),
+            "schema restoration does not copy fact buffers"
+        );
+
+        let nullable = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+        let batch = RecordBatch::try_new(
+            Arc::clone(&nullable),
+            vec![Arc::new(Int64Array::from(vec![None, Some(7)]))],
+        )
+        .unwrap();
+        let input = MemTable::try_new(nullable, vec![vec![batch]])
+            .unwrap()
+            .scan(&context.state(), None, &[], None)
+            .await
+            .unwrap();
+        let required = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        assert!(
+            SchemaIdentityExec::try_new(input, required).is_err(),
+            "nullable data cannot satisfy a required field"
+        );
     }
 
     #[tokio::test]
