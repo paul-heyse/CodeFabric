@@ -1456,13 +1456,16 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 Ok(grant) => grant,
                 Err(error) => return failed(&artifacts, "source_authorization", error),
             };
-            let maximum_source_bytes = request.parsed().request.queries.iter().find_map(|clause| {
+            let source_return = request.parsed().request.queries.iter().find_map(|clause| {
                 if clause.query_id() != query_id.as_ref() { return None; }
                 match clause {
-                    crate::semantic_query_contract::SemanticQueryClause::RetrieveSourceContext { return_spec, .. } => return_spec.as_ref().and_then(|spec| spec.maximum_source_bytes),
+                    crate::semantic_query_contract::SemanticQueryClause::RetrieveSourceContext { return_spec, .. } => return_spec.as_ref(),
                     _ => None,
                 }
-            }).unwrap_or(1024 * 1024);
+            });
+            let maximum_source_bytes = source_return.and_then(|spec| spec.maximum_source_bytes);
+            let line_window = source_return
+                .and_then(crate::semantic_query_contract::ReturnSpec::source_line_window);
             let access_scope = match encode_public_id(
                 IdentityDomain::AccessScope,
                 None,
@@ -1484,6 +1487,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 snapshot_id: snapshot.snapshot_id.clone(),
                 authorization_scope: access_scope,
                 maximum_source_bytes,
+                line_window,
             };
             *output = match output.clone().with_source_context(parameters) {
                 Ok(output) => output,
@@ -1607,6 +1611,13 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             .await
         {
             Ok(publication) => publication,
+            Err(error) if is_source_hard_limit_error(&error) => {
+                return failed_error(&artifacts, "physical_execution", SemanticQueryError::Phase {
+                    code: "QUERY_HARD_LIMIT_EXCEEDED", phase: "physical_execution",
+                    pointer: "/runtime/source_context".to_owned(),
+                    message: "source context exceeds the service byte bound; request an explicit maximum_source_bytes".to_owned(),
+                });
+            }
             Err(error) if is_resource_capacity_error(&error) => {
                 return failed_error(
                     &artifacts,
@@ -1725,6 +1736,23 @@ fn record_complete_stage<const N: usize>(
     });
 }
 
+fn is_source_hard_limit_error(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = Some(error);
+    for _ in 0..32 {
+        let Some(error) = current else {
+            return false;
+        };
+        if matches!(
+            error.downcast_ref::<super::source_context::SourceContextMaterializationError>(),
+            Some(super::source_context::SourceContextMaterializationError::HardOutputLimitExceeded)
+        ) {
+            return true;
+        }
+        current = error.source();
+    }
+    false
+}
+
 fn is_resource_capacity_error(error: &(dyn std::error::Error + 'static)) -> bool {
     let mut current = Some(error);
     // Error wrappers are not trusted to form an acyclic chain; classification is bounded.
@@ -1829,6 +1857,20 @@ pub enum ProgrammaticSemanticQueryBackendError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn source_hard_limit_preserves_its_category_through_datafusion_errors() {
+        use super::super::source_context::SourceContextMaterializationError;
+        let hard = datafusion::common::DataFusionError::External(Box::new(
+            SourceContextMaterializationError::HardOutputLimitExceeded,
+        ));
+        assert!(super::is_source_hard_limit_error(&hard));
+        assert!(!super::is_resource_capacity_error(&hard));
+        let invalid = datafusion::common::DataFusionError::External(Box::new(
+            SourceContextMaterializationError::InvalidRange,
+        ));
+        assert!(!super::is_source_hard_limit_error(&invalid));
+    }
+
     #[test]
     fn native_capacity_preserves_its_category_through_runtime_error_wrappers() {
         use crate::fabric::child_session::resource_governance::EpochResourceError;

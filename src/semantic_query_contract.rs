@@ -899,6 +899,9 @@ pub struct ReturnLimit {
 pub struct ReturnSpec {
     /// Explicit byte limit per returned source span; independent of result-row limits.
     pub maximum_source_bytes: Option<usize>,
+    /// Explicit surrounding-line window; an omitted side is zero when the other is present.
+    pub source_lines_before: Option<usize>,
+    pub source_lines_after: Option<usize>,
     #[serde(default)]
     pub include: Vec<String>,
     #[serde(default)]
@@ -912,6 +915,15 @@ pub struct ReturnSpec {
     pub supporting_facts: Option<String>,
     pub include_query_result: Option<bool>,
     pub limit: Option<ReturnLimit>,
+}
+
+impl ReturnSpec {
+    pub(crate) fn source_line_window(&self) -> Option<(usize, usize)> {
+        (self.source_lines_before.is_some() || self.source_lines_after.is_some()).then_some((
+            self.source_lines_before.unwrap_or(0),
+            self.source_lines_after.unwrap_or(0),
+        ))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -154,7 +154,21 @@ fn subject_facts(
             (
                 "selection.context",
                 "context_kind",
-                if schema.field_with_name("source_mapping").is_ok() {
+                if source
+                    .contract
+                    .relation_semantic_role(SchemaRole::Logical)
+                    .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                        detail: error.to_string(),
+                    })?
+                    == Some("canonical.source-context.line-window")
+                {
+                    &[
+                        "exact source span",
+                        "function definition",
+                        "function body",
+                        "surrounding lines",
+                    ]
+                } else if schema.field_with_name("source_mapping").is_ok() {
                     &["exact source span", "function definition", "function body"]
                 } else {
                     &["exact source span"]

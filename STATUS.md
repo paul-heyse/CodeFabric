@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `55e50782` (`Map decoded Python and normalized Rust spans to captured bytes`);
-UTF-8/UTF-16 source-context columns are the current implementation slice.
+Last production commit: `d07d81e4` (`Expose checked UTF-8 and UTF-16 source-context columns`);
+surrounding-line context and typed source hard limits are validated in the current slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -196,6 +196,26 @@ scenario also passes (204.34 s), including public null text columns for a split-
 Default/featureless root checks, full governance, docs navigation and changed-file formatting pass.
 Library/integration Clippy adds no diagnostics over the previous slice; the library retains its
 955-warning baseline.
+
+## Surrounding-line source context and hard-limit failures
+
+Source context now offers `surrounding lines` for declaration subjects with explicit
+`return.source_lines_before` / `return.source_lines_after` counts (0–4096 per side; an omitted side
+is zero). Catalog semantic-role metadata distinguishes epochs that contain line anchors. Queries
+expand complete physical lines from captured bytes, retain CRLF and file edges, and expose anchor,
+requested-window and delivered-byte ranges separately. No requested byte limit now means no semantic
+truncation limit; exceeding the service byte envelope returns non-retryable
+`QUERY_HARD_LIMIT_EXCEEDED` through the appended Protobuf enum and strict adapter projections.
+The generated descriptor identity is `b3:9012381600dcae6ba4e347a9b376ff36c16c00dc17d78ac2350c884cd24dd7be`.
+
+On 2026-09-09 the installed `source-lines-live` scenario passes in 33.70 s: CRLF/astral Unicode,
+zero/large windows, missing final newline, split-character binary output, exact reopen and an
+oversized body with and without an explicit 128-byte limit. Seven affected line/source/ingress/error
+checks pass. Default/featureless root checks, full governance, all 109 adapter tests with lint/types,
+206 tooling tests with lint, docs navigation and changed-file formatting pass. Library Clippy keeps
+its 955-warning baseline; an added test-only ownership warning was corrected. Full root strict lint
+and global formatting retain the previously recorded unrelated failures. Broader source subjects and
+syntax outlines remain open.
 
 ## Live source reconciliation and current query selection
 

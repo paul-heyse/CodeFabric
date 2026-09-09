@@ -1,4 +1,4 @@
-# @generated from released Protobuf semantic identities b3:c8373c633afcc5859e801edf747248166c2167af2a91d1d55fbe0f8e62595493,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
+# @generated from released Protobuf semantic identities b3:9012381600dcae6ba4e347a9b376ff36c16c00dc17d78ac2350c884cd24dd7be,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
 import datetime
 
 from google.protobuf import duration_pb2 as _duration_pb2
@@ -98,6 +98,7 @@ class SafeErrorCode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE: _ClassVar[SafeErrorCode]
     SAFE_ERROR_CODE_RESOURCE_RELEASED: _ClassVar[SafeErrorCode]
     SAFE_ERROR_CODE_RESULT_NOT_RETAINED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_QUERY_HARD_LIMIT_EXCEEDED: _ClassVar[SafeErrorCode]
 
 class SafeDiagnosticReference(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -242,6 +243,7 @@ SAFE_ERROR_CODE_FRESHNESS_DEADLINE: SafeErrorCode
 SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE: SafeErrorCode
 SAFE_ERROR_CODE_RESOURCE_RELEASED: SafeErrorCode
 SAFE_ERROR_CODE_RESULT_NOT_RETAINED: SafeErrorCode
+SAFE_ERROR_CODE_QUERY_HARD_LIMIT_EXCEEDED: SafeErrorCode
 SAFE_DIAGNOSTIC_REFERENCE_UNSPECIFIED: SafeDiagnosticReference
 SAFE_DIAGNOSTIC_REFERENCE_LIFECYCLE_FAILED_CLOSED: SafeDiagnosticReference
 SAFE_DIAGNOSTIC_REFERENCE_QUERY_CHALLENGE_REJECTED: SafeDiagnosticReference

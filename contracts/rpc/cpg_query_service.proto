@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:c8373c633afcc5859e801edf747248166c2167af2a91d1d55fbe0f8e62595493
+// canonical_digest: b3:9012381600dcae6ba4e347a9b376ff36c16c00dc17d78ac2350c884cd24dd7be
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
@@ -116,6 +116,7 @@ enum SafeErrorCode {
   SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE = 19;
   SAFE_ERROR_CODE_RESOURCE_RELEASED = 20;
   SAFE_ERROR_CODE_RESULT_NOT_RETAINED = 21;
+  SAFE_ERROR_CODE_QUERY_HARD_LIMIT_EXCEEDED = 22;
 }
 
 enum SafeDiagnosticReference {

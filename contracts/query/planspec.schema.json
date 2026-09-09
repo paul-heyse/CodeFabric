@@ -191,6 +191,18 @@
         "include_query_result": {
           "type": "boolean"
         },
+        "source_lines_before": {
+          "description": "Complete physical lines before the anchor; only for surrounding lines. An omitted side is zero.",
+          "minimum": 0,
+          "maximum": 4096,
+          "type": "integer"
+        },
+        "source_lines_after": {
+          "description": "Complete physical lines after the anchor; only for surrounding lines. An omitted side is zero.",
+          "minimum": 0,
+          "maximum": 4096,
+          "type": "integer"
+        },
         "maximum_source_bytes": {
           "description": "Maximum returned bytes per source span; only for source-context requests.",
           "minimum": 1,

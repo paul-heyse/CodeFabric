@@ -75,3 +75,8 @@ original captured positions. Text columns are null for an endpoint inside a char
 against independently written source expectations and separate clean builds after edits/restoration.
 It includes nested Python functions, CRLF/Unicode, a byte limit splitting a character and Rust braces
 inside strings/comments. Its default harness deadline is 600 seconds.
+
+`just golden --case source-lines-live` exercises explicit surrounding-line windows, CRLF,
+Unicode and a missing final newline through installed clients and exact reopen. It distinguishes
+an explicit byte prefix from non-retryable service hard-limit failure (33.70 seconds on 2026-09-09).
+Its default harness deadline is 600 seconds.

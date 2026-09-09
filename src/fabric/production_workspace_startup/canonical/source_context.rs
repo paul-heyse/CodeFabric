@@ -36,7 +36,14 @@ pub(super) fn build(
     python: bool,
     rust: bool,
 ) -> Result<LogicalPlan, TransformationPlanError> {
-    let mut result = exact(inputs)?;
+    let mut result =
+        LogicalPlanBuilder::from(exact(inputs, "exact source span", "declaration-span")?)
+            .union(exact(
+                inputs,
+                "surrounding lines",
+                "declaration-line-anchor",
+            )?)?
+            .build()?;
     if python {
         result = LogicalPlanBuilder::from(result)
             .union(functions(
@@ -60,7 +67,11 @@ pub(super) fn build(
     Ok(result)
 }
 
-fn exact(inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
+fn exact(
+    inputs: &TransformationInputs,
+    kind: &str,
+    mapping: &str,
+) -> Result<LogicalPlan, TransformationPlanError> {
     let declarations = LogicalPlanBuilder::from(plan(inputs, super::DECLARATION)?)
         .filter(col("public_entity_id").is_not_null())?
         .alias("d")?
@@ -94,9 +105,9 @@ fn exact(inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPla
                 .map(|(name, _, _)| col(format!("d.{name}")))
                 .chain([
                     col("s.relative_path"),
-                    lit("exact source span").alias("context_kind"),
+                    lit(kind).alias("context_kind"),
                     lit("lossless UTF-8 else bytes").alias("text_handling"),
-                    lit("declaration-span").alias("source_mapping"),
+                    lit(mapping).alias("source_mapping"),
                 ]),
         )?
         .build()?)

@@ -1209,6 +1209,197 @@ fn live_mixed_function_definitions_and_bodies_equal_exact_clean_source() {
     supervisor.stop();
 }
 
+fn source_line_request(fixture: &ProductionFixture, subject: &Value, options: Value) -> Value {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "function declarations",
+    );
+    request["queries"] = json!([{
+        "request": "retrieve source and syntax context", "query_id": "source",
+        "about": [{"entity_id": subject}], "context": "surrounding lines"
+    }]);
+    request["queries"][0]["return"] = options;
+    request
+}
+
+fn source_line_observation(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    original: &str,
+) -> Vec<SemanticObservation> {
+    let entities = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-find"),
+        semantic_request(
+            &fixture.workspace.public_id(),
+            "unused",
+            "Python function declarations",
+        ),
+    );
+    let subject = |name: &str| {
+        entities
+            .rows
+            .iter()
+            .find(|row| row["name"] == name)
+            .unwrap()["public_entity_id"]
+            .clone()
+    };
+    let target = subject("target");
+    let expected = "# 😀é\r\ndef target(value):\r\n    return value\r\n";
+    let mut observations = Vec::new();
+    for (name, id, options, text, start) in [
+        (
+            "window",
+            target.clone(),
+            json!({"source_lines_before": 1, "source_lines_after": 1}),
+            expected,
+            7,
+        ),
+        (
+            "anchor",
+            target.clone(),
+            json!({"source_lines_before": 0}),
+            "def target(value):\r\n",
+            17,
+        ),
+        (
+            "edges",
+            subject("last"),
+            json!({"source_lines_before": 4096, "source_lines_after": 4096}),
+            original,
+            0,
+        ),
+    ] {
+        let result = public_query(
+            fixture,
+            stack,
+            &format!("{phase}-{name}"),
+            source_line_request(fixture, &id, options),
+        );
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.processing[0]["remaining_partitions"], 0);
+        let context = &result.rows[0]["source_context"];
+        assert_eq!(context["text"], text);
+        assert_eq!(context["start_byte"], start);
+        assert_eq!(context["end_byte"], start + text.len());
+        assert_eq!(context["requested_start_byte"], start);
+        assert_eq!(context["requested_end_byte"], start + text.len());
+        assert_eq!(context["returned_bytes"], text.len());
+        assert_eq!(context["omitted_bytes"], 0);
+        assert_eq!(context["complete"], true);
+        if name != "edges" {
+            assert_eq!(context["anchor_start_byte"], 21);
+            assert_eq!(context["anchor_end_byte"], 27);
+        }
+        observations.push(result);
+    }
+    let split = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-split"),
+        source_line_request(
+            fixture,
+            &target,
+            json!({"source_lines_before": 1, "source_lines_after": 1, "maximum_source_bytes": 7}),
+        ),
+    );
+    let context = &split.rows[0]["source_context"];
+    assert!(context["text"].is_null());
+    assert_eq!(context["bytes"], "2320f09f9880c3");
+    assert_eq!(context["requested_start_byte"], 7);
+    assert_eq!(context["requested_end_byte"], 7 + expected.len());
+    assert_eq!(context["end_byte"], 14);
+    assert!(context["end_utf8_column"].is_null());
+    assert!(context["end_utf16_column"].is_null());
+    assert_eq!(context["returned_bytes"], 7);
+    assert_eq!(context["omitted_bytes"], expected.len() - 7);
+    assert_eq!(context["complete"], false);
+    observations.push(split);
+    observations
+}
+
+fn assert_source_hard_limit(fixture: &ProductionFixture, stack: &InstalledProductionStack) {
+    let entities = public_query(
+        fixture,
+        stack,
+        "hard-limit-find",
+        semantic_request(
+            &fixture.workspace.public_id(),
+            "unused",
+            "Python function declarations",
+        ),
+    );
+    let huge = entities
+        .rows
+        .iter()
+        .find(|row| row["name"] == "huge")
+        .unwrap();
+    let mut request = source_line_request(fixture, &huge["public_entity_id"], json!({}));
+    request["semantic_request_id"] = json!("request:source-hard-limit");
+    request["queries"][0]["context"] = json!("function body");
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "query", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": request, "delivery": "resource"}}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, "source-hard-limit", &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let result = modern_structured(modern_step(&report, "query"));
+    assert_eq!(result["execution_state"], "FAILED", "{result}");
+    assert_eq!(
+        result["error"]["code"], "QUERY_HARD_LIMIT_EXCEEDED",
+        "{result}"
+    );
+    assert_eq!(result["error"]["retryable"], false);
+    assert!(result["pages"].as_array().unwrap().is_empty());
+    request["queries"][0]["return"]["maximum_source_bytes"] = json!(128);
+    let truncated = public_query(fixture, stack, "source-explicit-truncation", request);
+    let context = &truncated.rows[0]["source_context"];
+    assert_eq!(
+        context["text"],
+        format!("return '{}'", "x".repeat(1_100_000))[..128]
+    );
+    assert_eq!(context["returned_bytes"], 128);
+    assert_eq!(context["omitted_bytes"], 1_100_009 - 128);
+    assert_eq!(context["complete"], false);
+}
+
+#[test]
+fn source_line_windows_and_hard_limits_survive_public_delivery_and_reopen() {
+    let original = "# top\r\n# 😀é\r\ndef target(value):\r\n    return value\r\n# after\r\ndef last(): return 2";
+    let fixture = ProductionFixture::with_source(original.as_bytes());
+    fs::write(
+        Path::new(&fixture.workspace.root_path_display).join("huge.py"),
+        format!("def huge():\n    return '{}'\n", "x".repeat(1_100_000)),
+    )
+    .unwrap();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+    }
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let initial = source_line_observation(&fixture, &stack, "lines-initial", original);
+    assert_source_hard_limit(&fixture, &stack);
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        initial,
+        source_line_observation(&fixture, &stack, "lines-reopen", original)
+    );
+    supervisor.stop();
+}
+
 fn encoded_sources(utf8: bool) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let python = if utf8 {
         "# coding: utf-8\r\n# é\r\nfrom helper import café\r\ndef caller():\r\n    return café()\r\n".as_bytes()

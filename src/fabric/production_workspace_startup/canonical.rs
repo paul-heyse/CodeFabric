@@ -217,6 +217,9 @@ impl Canonical {
             TableReference::full(FABRIC_CATALOG, schema, table),
             fields,
         );
+        if matches!(kind, Kind::SourceContext { .. }) {
+            output = output.with_semantic_role("canonical.source-context.line-window");
+        }
         if matches!(kind, Kind::Entity) {
             // Kept distinct from the predecessor Ruff-only role until scoped public queries
             // consume this relation and its processing coverage together.

@@ -2875,16 +2875,12 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>)
         }
         SemanticBackendOutcome::Failed { error, .. } => {
             tracing::warn!(query_id, error = %error, "semantic query execution failed");
-            let public_code = if matches!(
-                error,
+            let public_code = match &error {
                 SemanticQueryError::Phase {
-                    code: "RESOURCE_CAPACITY",
+                    code: code @ ("RESOURCE_CAPACITY" | "QUERY_HARD_LIMIT_EXCEEDED"),
                     ..
-                }
-            ) {
-                "RESOURCE_CAPACITY"
-            } else {
-                "QUERY_EXECUTION_FAILED"
+                } => *code,
+                _ => "QUERY_EXECUTION_FAILED",
             };
             let _ = coordinator
                 .terminal(
@@ -3287,6 +3283,8 @@ async fn event_to_wire(
                     safe_error(
                         if capacity {
                             SafeErrorCode::CapacityUnavailable
+                        } else if public_code == "QUERY_HARD_LIMIT_EXCEEDED" {
+                            SafeErrorCode::QueryHardLimitExceeded
                         } else {
                             terminal_safe_code(state)
                         },
@@ -4276,6 +4274,10 @@ fn semantic_status(error: SemanticQueryError) -> Status {
             ..
         } => (Code::ResourceExhausted, "RESOURCE_CAPACITY"),
         SemanticQueryError::Phase {
+            code: "QUERY_HARD_LIMIT_EXCEEDED",
+            ..
+        } => (Code::ResourceExhausted, "QUERY_HARD_LIMIT_EXCEEDED"),
+        SemanticQueryError::Phase {
             code: "SEMANTIC_REFERENCE_UNAVAILABLE",
             ..
         } => (Code::InvalidArgument, "SEMANTIC_REFERENCE_UNAVAILABLE"),
@@ -4398,6 +4400,7 @@ fn public_status(code: Code, public_code: &'static str) -> Status {
 
 fn public_error_detail(code: Code, public_code: &str) -> SafeErrorMetadata {
     let safe_code = match public_code {
+        "QUERY_HARD_LIMIT_EXCEEDED" => SafeErrorCode::QueryHardLimitExceeded,
         "SEMANTIC_REFERENCE_UNAVAILABLE" => SafeErrorCode::ValidationRejected,
         "IDEMPOTENCY_CONFLICT" => SafeErrorCode::IdempotencyConflict,
         "CHALLENGE_EXPIRED" => SafeErrorCode::ContinuationExpired,
@@ -6003,6 +6006,30 @@ mod tests {
         let _reused = admission
             .data()
             .expect("a replacement resource stream is admitted after timeout");
+    }
+
+    #[test]
+    fn source_hard_limit_is_typed_and_not_retryable() {
+        let status = semantic_status(SemanticQueryError::Phase {
+            code: "QUERY_HARD_LIMIT_EXCEEDED",
+            phase: "physical_execution",
+            pointer: "/runtime/source_context".to_owned(),
+            message: "private cause".to_owned(),
+        });
+        assert_eq!(status.code(), Code::ResourceExhausted);
+        let detail = SafeErrorMetadata::decode(
+            status
+                .metadata()
+                .get_bin("codefabric-safe-error-bin")
+                .unwrap()
+                .to_bytes()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(detail.code, SafeErrorCode::QueryHardLimitExceeded as i32);
+        assert_eq!(detail.layer, SafeErrorLayer::Query as i32);
+        assert!(!detail.retryable);
+        assert!(!status.message().contains("private cause"));
     }
 
     #[test]

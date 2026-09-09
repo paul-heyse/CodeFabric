@@ -78,6 +78,7 @@ class SafeErrorProjection(StrictWireModel):
         "RESULT_NOT_RETAINED",
         "RANGE_NOT_SATISFIABLE",
         "CAPACITY_UNAVAILABLE",
+        "QUERY_HARD_LIMIT_EXCEEDED",
         "CANCELLED",
         "RESUME_WINDOW_EXPIRED",
         "FRESHNESS_DEADLINE",

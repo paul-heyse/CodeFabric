@@ -15,7 +15,12 @@ import pytest
 from pydantic import SecretStr
 
 from codefabric_cpg_mcp.contracts.json import canonicalize_value, checksum
-from codefabric_cpg_mcp.contracts.wire_models import JsonObject, QueryToolInput, ValidateToolInput
+from codefabric_cpg_mcp.contracts.wire_models import (
+    JsonObject,
+    QueryToolInput,
+    SafeErrorProjection,
+    ValidateToolInput,
+)
 from codefabric_cpg_mcp.daemon import (
     AcceptedQuery,
     CpgDaemonClient,
@@ -50,6 +55,21 @@ def test_released_safe_diagnostics_preserve_their_closed_public_name(
         diagnostic_reference=reference,
     )
     assert _safe_error(value).diagnostic_reference == expected
+
+
+def test_source_hard_limit_survives_the_generated_and_public_error_contracts() -> None:
+    error = _safe_error(
+        query_pb.SafeErrorMetadata(
+            code=query_pb.SAFE_ERROR_CODE_QUERY_HARD_LIMIT_EXCEEDED,
+            layer=query_pb.SAFE_ERROR_LAYER_QUERY,
+            retryable=False,
+        )
+    )
+    assert error.code == "QUERY_HARD_LIMIT_EXCEEDED"
+    assert not error.retryable
+    projection = SafeErrorProjection.model_validate(error.model_dump(exclude={"correlation_id"}))
+    assert projection.code == error.code
+    assert not projection.retryable
 
 
 def test_typed_processing_rejects_inconsistent_scope_and_preserves_unknown_exhaustion() -> None:

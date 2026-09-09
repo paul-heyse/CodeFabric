@@ -601,6 +601,16 @@ impl ApplicationOwnedSemanticIngressPort {
                     "source byte limit requires a source-context block and must be in 1..=1048576",
                 ));
             }
+            let window = return_spec(clause)
+                .and_then(crate::semantic_query_contract::ReturnSpec::source_line_window);
+            let surrounding = matches!(clause, SemanticQueryClause::RetrieveSourceContext { context, .. } if context.as_slice() == ["surrounding lines"]);
+            if surrounding != window.is_some()
+                || window.is_some_and(|(before, after)| before > 4096 || after > 4096)
+            {
+                return Err(rejected(
+                    "surrounding lines requires source_lines_before or source_lines_after in 0..=4096; these fields apply only to that context",
+                ));
+            }
             let maximum_results = clause.maximum_results();
             if maximum_results == 0
                 || maximum_results > self.limits.compiler().max_explicit_result_rows()
@@ -3418,6 +3428,32 @@ mod tests {
         });
         parse_request(&serde_json::to_vec(&value).expect("request JSON"))
             .expect("released request parses")
+    }
+
+    #[test]
+    fn surrounding_source_line_windows_require_explicit_bounded_context_parameters() {
+        let port = port();
+        let baseline: serde_json::Value =
+            serde_json::from_slice(&eight_form_request().canonical_bytes).unwrap();
+        for (context, before, after, valid) in [
+            ("exact source span", None, None, true),
+            ("surrounding lines", None, None, false),
+            ("surrounding lines", Some(0), None, true),
+            ("surrounding lines", None, Some(4096), true),
+            ("surrounding lines", Some(4097), Some(0), false),
+            ("exact source span", Some(1), None, false),
+        ] {
+            let mut wire = baseline.clone();
+            wire["queries"][7]["context"] = serde_json::json!(context);
+            wire["queries"][7]["return"]["source_lines_before"] = serde_json::json!(before);
+            wire["queries"][7]["return"]["source_lines_after"] = serde_json::json!(after);
+            let parsed = parse_request(&serde_json::to_vec(&wire).unwrap()).unwrap();
+            assert_eq!(
+                port.validate_request_shape(&parsed).is_ok(),
+                valid,
+                "{context}: {before:?} / {after:?}"
+            );
+        }
     }
 
     #[test]

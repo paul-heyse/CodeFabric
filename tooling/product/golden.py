@@ -26,6 +26,7 @@ CASES = {
     "python-roots-live": "live_updates::live_python_search_paths_preserve_all_sources_and_equal_independent_clean_queries",
     "python-paths-live": "live_updates::live_python_raw_paths_and_root_initializer_keep_exact_source_identity",
     "decoded-source-live": "live_updates::live_mixed_decoded_sources_equal_original_bytes_and_independent_clean_queries",
+    "source-lines-live": "live_updates::source_line_windows_and_hard_limits_survive_public_delivery_and_reopen",
     "function-source-live": "live_updates::live_mixed_function_definitions_and_bodies_equal_exact_clean_source",
     "processing-pages": "live_updates::processing_remainder_pages_keep_exact_scope_across_reopen_and_updates",
 }
@@ -113,6 +114,7 @@ def main(argv=None) -> int:
                         "python-roots-live",
                         "python-paths-live",
                         "function-source-live",
+                        "source-lines-live",
                         "decoded-source-live",
                         "staged-live",
                         "processing-pages",
