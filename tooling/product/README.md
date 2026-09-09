@@ -53,3 +53,8 @@ The case has the same 600-second default harness deadline and explicit timeout o
 `just golden --case python-stubs-live` retains same-name `.py` and `.pyi` declarations in a
 namespace package, removes/restores the stub and verifies exact public call targets against their
 source-file identities and separate clean builds. It has a 600-second default harness deadline.
+
+`just golden --case python-roots-live` reverses/restores ordered import roots while retaining
+all captured Python files. It checks that root-level scripts remain queryable and a root-level
+module cannot shadow the configured roots, with independent expected targets and clean comparisons.
+It has a 600-second default harness deadline.

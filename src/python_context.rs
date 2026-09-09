@@ -1001,6 +1001,11 @@ fn discover_module_map(
             selected_roots.push(id.clone());
         }
     }
+    // Every captured Python source needs a query binding, including scripts/tests outside
+    // import roots. This local fallback changes the input map, never resolver search paths.
+    if !registered && !selected_roots.contains(&request.project_root_id) {
+        selected_roots.push(request.project_root_id.clone());
+    }
     for id in selected_roots {
         let root = manifest
             .root_bindings
@@ -1916,6 +1921,34 @@ mod tests {
             invalid.manifest.unapplied_checker_settings,
             Some(vec!["pyrefly.toml.python-version".to_owned()])
         );
+    }
+
+    #[test]
+    fn configured_import_roots_preserve_sources_outside_their_search_path() {
+        let mut request = base_request();
+        request
+            .files
+            .push(file("standalone.py", "file:standalone", "import pkg\n"));
+        let product = discover_python_context(&request).unwrap();
+        assert_eq!(product.manifest.module_roots, ["path:src-root"]);
+        assert_eq!(product.manifest.source_roots, ["path:src-root"]);
+        let standalone = product
+            .manifest
+            .module_map
+            .iter()
+            .find(|m| m.file_id == "file:standalone")
+            .unwrap();
+        assert_eq!(standalone.module_name, "standalone");
+        assert_eq!(standalone.root_id, "path:project-root");
+        let package = product
+            .manifest
+            .module_map
+            .iter()
+            .find(|m| m.file_id == "file:package")
+            .unwrap();
+        assert_eq!(package.module_name, "pkg");
+        assert_eq!(package.root_id, "path:src-root");
+        assert_eq!(product.manifest.module_map.len(), 2);
     }
 
     #[test]

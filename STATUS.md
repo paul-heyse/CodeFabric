@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `1c913767` (`Apply captured Python checker configuration during live updates`);
-Python source/stub coexistence and import precedence are the current implementation slice.
+Last production commit: `6e339a3e` (`Preserve Python source and stub identities in one checker context`);
+complete local source inventory with configured import roots is the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -305,6 +305,16 @@ identities. `just golden --case python-stubs-live` selects it. Sidecar strict ch
 tooling tests, tooling lint, governance and changed-file formatting pass. The unchanged root library
 retains the previous 955-warning baseline; integration checking/Clippy completes with no findings on this slice's changed lines. External roots, installed
 stub bundles and broader package/import behavior remain open.
+
+Configured search roots now retain Python scripts and other captured sources outside those roots
+as explicit checker inputs. The fallback input mapping does not add a resolver search path. Installed
+live/clean acceptance verifies all four source declarations, competing same-name imported modules,
+search-order reversal and exact restoration (73.85 s on 2026-09-09). An otherwise shadowing root-level
+module remains queryable without overriding either configured import root. Twelve context tests and
+198 tooling tests pass; default/featureless root checks, tooling lint, governance, docs navigation
+and changed-file formatting pass. Library Clippy retains the same 955 warning baseline.
+`just golden --case python-roots-live` selects the installed case. Full external roots and package
+mapping remain open.
 
 Remaining: additional project configuration settings and ordered external import roots; namespaces/re-exports and
 `.pyi` precedence across dependencies; external distribution/stub materialization and identity;

@@ -751,6 +751,110 @@ fn live_python_namespace_stub_precedence_equals_independent_clean_queries() {
     supervisor.stop();
 }
 
+fn ordered_python_import_observation(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    target: &str,
+) -> Vec<SemanticObservation> {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "function declarations",
+    );
+    let entities = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-entities"),
+        request.clone(),
+    );
+    let by_name = entities
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row["name"].as_str().unwrap(),
+                row["public_entity_id"].as_str().unwrap(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        by_name.keys().copied().collect::<BTreeSet<_>>(),
+        BTreeSet::from(["caller", "first_choice", "second_choice", "outside_choice"]),
+        "{phase}: import roots must not remove source inventory"
+    );
+    assert_eq!(entities.rows.len(), 4);
+    assert_eq!(entities.processing[0]["remaining_partitions"], 0);
+    request["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "calls",
+        "starting_from": [{"entity_id": by_name["caller"]}], "relationship": "calls", "direction": "outgoing",
+        "distance": "one relationship step", "return": {"limit": {"maximum_results": 32}}
+    }]);
+    let calls = public_query(fixture, stack, &format!("{phase}-calls"), request);
+    assert_eq!(calls.rows.len(), 1);
+    assert_eq!(
+        calls.rows[0]["public_target_entity_id"], by_name[target],
+        "{phase}: only the configured root order selects import resolution"
+    );
+    assert_ne!(
+        calls.rows[0]["public_target_entity_id"],
+        by_name["outside_choice"]
+    );
+    assert_eq!(calls.processing[0]["remaining_partitions"], 0);
+    vec![entities, calls]
+}
+
+#[test]
+fn live_python_search_paths_preserve_all_sources_and_equal_independent_clean_queries() {
+    let fixture = ProductionFixture::with_source(
+        b"from helper import selected\ndef caller():\n    return selected()\n",
+    );
+    let root = Path::new(&fixture.workspace.root_path_display);
+    for (directory, choice) in [("first", "first_choice"), ("second", "second_choice")] {
+        fs::create_dir(root.join(directory)).unwrap();
+        fs::write(
+            root.join(directory).join("helper.py"),
+            format!("def {choice}() -> int:\n    return 1\nselected = {choice}\n"),
+        )
+        .unwrap();
+    }
+    // Captured source outside the configured import roots must not shadow their selected module.
+    fs::write(
+        root.join("helper.py"),
+        b"def outside_choice() -> int:\n    return 9\nselected = outside_choice\n",
+    )
+    .unwrap();
+    let config = |first, second| format!("search-path = ['{first}', '{second}']\n");
+    fs::write(root.join("pyrefly.toml"), config("first", "second")).unwrap();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    OperationalStore::open(&fixture.state.join("operational.sqlite3"))
+        .unwrap()
+        .backup_to(&registration)
+        .unwrap();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let initial =
+        ordered_python_import_observation(&fixture, &stack, "roots-first", "first_choice");
+    for (phase, first, second, target) in [
+        ("roots-second", "second", "first", "second_choice"),
+        ("roots-restored", "first", "second", "first_choice"),
+    ] {
+        fs::write(root.join("pyrefly.toml"), config(first, second)).unwrap();
+        let live = ordered_python_import_observation(&fixture, &stack, phase, target);
+        let clean = clean_fixture(&fixture, &registration, &stack);
+        let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+        let expected =
+            ordered_python_import_observation(&clean, &stack, &format!("clean-{phase}"), target);
+        assert_eq!(live, expected, "{phase}: exact live/clean context equality");
+        if first == "first" {
+            assert_eq!(live, initial, "restored roots restore original identities");
+        }
+        clean_supervisor.stop();
+    }
+    supervisor.stop();
+}
+
 fn pending_semantic_candidate(fixture: &ProductionFixture) -> PathBuf {
     eprintln!(
         "waiting for semantic publication in {}",
