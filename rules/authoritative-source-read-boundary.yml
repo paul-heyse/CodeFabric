@@ -63,6 +63,10 @@ rule:
                     stopBy: end
             # The provider fixture reads the committed extractor toolchain identity.
             - pattern: 'async fn run_rustc($$$ARGS) -> Result<AcceptedRustcCompilation, ProviderFixtureError> { $$$BODY }'
+            # These production helpers capture configured compiler/extractor binaries and
+            # sysroot libraries. Workspace source still enters through secure_path.
+            - pattern: 'fn toolchain_inputs($$$ARGS) -> $RET { $$$BODY }'
+            - pattern: 'fn collect_toolchain($$$ARGS) -> Result<(), ProductionWorkspaceStartupError> { $$$BODY }'
             # ResultArtifactStore owns private daemon artifacts below its configured state root.
             - all:
                 - kind: impl_item
