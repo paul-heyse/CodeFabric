@@ -1939,7 +1939,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                                                 SafeErrorCode::ValidationRejected,
                                                 SafeErrorLayer::Validation,
                                                 false,
-                                                "query.validation_rejected",
+                                                "",
                                                 &context.correlation_id,
                                             )),
                                         },
@@ -1982,7 +1982,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                                                 SafeErrorCode::ValidationRejected,
                                                 SafeErrorLayer::Validation,
                                                 false,
-                                                "query.validation_rejected",
+                                                "",
                                                 &context.correlation_id,
                                             )),
                                         },
@@ -4068,6 +4068,10 @@ fn semantic_status(error: SemanticQueryError) -> Status {
             code: "RESOURCE_CAPACITY",
             ..
         } => (Code::ResourceExhausted, "RESOURCE_CAPACITY"),
+        SemanticQueryError::Phase {
+            code: "SEMANTIC_REFERENCE_UNAVAILABLE",
+            ..
+        } => (Code::InvalidArgument, "SEMANTIC_REFERENCE_UNAVAILABLE"),
         SemanticQueryError::Phase { .. } => (Code::FailedPrecondition, "SEMANTIC_REQUEST"),
     };
     public_status(code, public_code)
@@ -4178,6 +4182,7 @@ fn public_status(code: Code, public_code: &'static str) -> Status {
 
 fn public_error_detail(code: Code, public_code: &str) -> SafeErrorMetadata {
     let safe_code = match public_code {
+        "SEMANTIC_REFERENCE_UNAVAILABLE" => SafeErrorCode::ValidationRejected,
         "IDEMPOTENCY_CONFLICT" => SafeErrorCode::IdempotencyConflict,
         "CHALLENGE_EXPIRED" => SafeErrorCode::ContinuationExpired,
         "CHALLENGE_REPLAY" => SafeErrorCode::ContinuationReplayed,

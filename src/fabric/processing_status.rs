@@ -132,7 +132,7 @@ impl EntityQueryScope {
         match selector {
             "python:function" => languages.retain(|language| language == "python"),
             "rust:function" => languages.retain(|language| language == "rust"),
-            "function" => {}
+            "function" | "declarations" => {}
             _ => {
                 return Err(
                     "entity selector is not a compiled function declaration meaning".to_owned(),
@@ -158,11 +158,23 @@ impl EntityQueryScope {
     }
 
     pub(crate) fn predicate(&self) -> Result<crate::relational_program::ScalarExpression, String> {
+        self.predicate_for(
+            "query.result.semantic-entities",
+            "entity-language",
+            "analysis-context-id",
+        )
+    }
+
+    pub(crate) fn predicate_for(
+        &self,
+        relation: &str,
+        language_field: &str,
+        context_field: &str,
+    ) -> Result<crate::relational_program::ScalarExpression, String> {
         use crate::relational_program::{FieldId, ScalarExpression as E, ScalarOperator as O};
         use datafusion::common::ScalarValue;
         let any = |name: &str, values: Vec<ScalarValue>| -> Result<E, String> {
-            let field = FieldId::new(format!("query.result.semantic-entities.{name}"))
-                .map_err(|e| e.to_string())?;
+            let field = FieldId::new(format!("{relation}.{name}")).map_err(|e| e.to_string())?;
             Ok(values
                 .into_iter()
                 .map(|value| E::Call {
@@ -176,7 +188,7 @@ impl EntityQueryScope {
                 .unwrap_or(E::Literal(ScalarValue::Boolean(Some(false)))))
         };
         let language = any(
-            "entity-language",
+            language_field,
             self.languages
                 .iter()
                 .map(|value| ScalarValue::Utf8(Some(value.clone())))
@@ -190,7 +202,7 @@ impl EntityQueryScope {
             arguments: vec![
                 language,
                 any(
-                    "analysis-context-id",
+                    context_field,
                     self.contexts
                         .iter()
                         .map(|value| ScalarValue::FixedSizeBinary(16, Some(value.to_vec())))

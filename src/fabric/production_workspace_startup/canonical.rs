@@ -488,6 +488,11 @@ impl ProgrammaticTransformation for Canonical {
                             )
                             .otherwise(lit("canonical"))?
                             .alias("identity_state"),
+                            public_entity_id()
+                                .call(vec![col("entity_id"), col("entity_kind")])
+                                .alias("public_entity_id"),
+                            lit("entity").alias("subject_kind"),
+                            lit("declarations").alias("fact_family"),
                         ]),
                     )?
                     .build()?)
@@ -607,6 +612,9 @@ fn declaration_fields() -> Vec<FieldSpec> {
         ("workspace_id", DataType::FixedSizeBinary(16), false),
         ("declaration_id", DataType::FixedSizeBinary(16), true),
         ("identity_state", DataType::Utf8, false),
+        ("public_entity_id", DataType::Utf8, true),
+        ("subject_kind", DataType::Utf8, false),
+        ("fact_family", DataType::Utf8, false),
     ]);
     fields
 }
@@ -779,6 +787,33 @@ fn file_id_udf() -> Arc<ScalarUDF> {
                 identity::decode_public_id(IdentityDomain::SourceFile, None, text(&a[0], r)?)
                     .map_err(|e| invalid(&e.to_string()))
             })
+        }),
+    ))
+}
+
+fn public_entity_id() -> Arc<ScalarUDF> {
+    Arc::new(create_udf(
+        "codefabric_public_entity_id_v1",
+        vec![DataType::FixedSizeBinary(16), DataType::Utf8],
+        DataType::Utf8,
+        Volatility::Immutable,
+        Arc::new(|values| {
+            let arrays = ColumnarValue::values_to_arrays(values)?;
+            let values = (0..arrays[0].len())
+                .map(|row| {
+                    if arrays[0].is_null(row) || arrays[1].is_null(row) {
+                        return Ok(None);
+                    }
+                    identity::encode_public_id(
+                        IdentityDomain::Entity,
+                        Some(text(&arrays[1], row)?),
+                        fixed(&arrays[0], row)?,
+                    )
+                    .map(Some)
+                    .map_err(|error| invalid(&error.to_string()))
+                })
+                .collect::<Result<Vec<_>, DataFusionError>>()?;
+            Ok(ColumnarValue::Array(Arc::new(StringArray::from(values))))
         }),
     ))
 }

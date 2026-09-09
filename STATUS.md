@@ -15,6 +15,27 @@ function queries, independent Rust syntax publication and observed result-row tr
 External/generated compiler inputs, the other query forms and full coverage/freshness delivery
 remain active work.
 
+Declaration-fact retrieval now accepts exact public entity IDs and the meanings `declarations`
+or `declaration locations and provenance`. A native DataFusion semi join consumes the typed
+request relation, preserves each declaration occurrence and prevents repeated subjects from
+duplicating facts. Results carry canonical entity/occurrence IDs, exact source digest/range,
+language/context, raw kind and provider provenance. Language/context filters precede limits;
+processing uses the admitted Ruff Binding/rustc PublicItem partitions, independently of rows.
+Phrase/fact/prior-result subject resolution remains unavailable and is rejected explicitly.
+This is a second public form's first supported family, not completed RetrieveFacts or 4E scope.
+
+Validation on 2026-09-09: 42 affected canonical/processing/result/query-service tests pass,
+including the installed-client mixed-language declaration query, repeated subjects, a failed
+Rust target, a completed Python scope with no match, and unsupported-reference rejection.
+The empty case exposed and fixed schema validation using encoded page length as a memory
+bound; empty metadata-rich pages now seal and reopen within the configured bound. That fix
+is committed as `068e8fd4`. Valid daemon diagnostic references also now survive adapter enum
+projection (`e65bdbeb`); all 95 adapter tests and adapter lint/types pass. Root library Clippy
+completes with 958 existing warnings; strict root lint cleanliness is not claimed.
+The installed exact-activation restart check also passes (15.2 seconds); documentation
+navigation and whitespace checks pass. New validation rejections use released optional
+diagnostic fields rather than an unregistered diagnostic label.
+
 The latest 4E/5A slice serves Python, Rust or combined function declarations from native
 DataFusion canonical transformations. Language/context filters apply before the row limit;
 name and entity ID define stable default ordering. Exact-epoch processing partitions come

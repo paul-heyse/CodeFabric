@@ -902,6 +902,15 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         let workspace_lease = self.workspace_lease(&request.request.workspace_id)?;
         let workspace = workspace_lease.workspace().runtime();
         let authority = workspace.query_authority();
+        if authority.entity_processing().is_some() {
+            crate::production_query_recipe::validate_canonical_fact_references(&request.request)
+                .map_err(|message| SemanticQueryError::Phase {
+                    code: "SEMANTIC_REFERENCE_UNAVAILABLE",
+                    phase: "reference_resolution",
+                    pointer: "queries.about".to_owned(),
+                    message,
+                })?;
+        }
         let requirements = workspace_lease
             .workspace()
             .query_ports()
@@ -1017,6 +1026,13 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         }
 
         artifacts.set_phase("semantic_binding");
+        if authority.entity_processing().is_some()
+            && let Err(error) = crate::production_query_recipe::validate_canonical_fact_references(
+                &request.parsed().request,
+            )
+        {
+            return failed(&artifacts, "reference_resolution_unavailable", error);
+        }
         let ingress = match ports
             .ingress
             .project_resolved(&request, workspace.as_ref(), authority)
@@ -1148,11 +1164,12 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 );
             }
             for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
-                if !output
-                    .program()
-                    .output_fields
-                    .iter()
-                    .any(|field| field.as_str() == "query.result.semantic-entities.entity-language")
+                let declarations =
+                    output.relation_id().as_str() == "query.result.declaration-facts";
+                if !declarations
+                    && !output.program().output_fields.iter().any(|field| {
+                        field.as_str() == "query.result.semantic-entities.entity-language"
+                    })
                 {
                     continue;
                 }
@@ -1160,25 +1177,39 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     selection.query_id == *query_id
                         && selection.selection_id.as_ref() == "selection.looking-for"
                 });
-                let Some(SemanticClauseValue::Text(selector)) =
-                    selector.map(|selection| &selection.value)
-                else {
-                    return failed(
-                        &artifacts,
-                        "processing_scope",
-                        "canonical entity selector is missing",
-                    );
+                let selector = if declarations {
+                    "declarations"
+                } else {
+                    match selector.map(|selection| &selection.value) {
+                        Some(SemanticClauseValue::Text(value)) => value.as_ref(),
+                        _ => {
+                            return failed(
+                                &artifacts,
+                                "processing_scope",
+                                "canonical entity selector is missing",
+                            );
+                        }
+                    }
                 };
                 let scope =
                     match EntityQueryScope::from_request(&request.parsed().request, selector) {
                         Ok(scope) => scope,
                         Err(error) => return failed(&artifacts, "processing_scope", error),
                     };
-                let predicate = match scope.predicate() {
+                let predicate = match if declarations {
+                    scope.predicate_for("query.result.declaration-facts", "language", "context_id")
+                } else {
+                    scope.predicate()
+                } {
                     Ok(predicate) => predicate,
                     Err(error) => return failed(&artifacts, "processing_scope", error),
                 };
-                let summary = processing.summarize(&scope, 0);
+                let mut summary = processing.summarize(&scope, 0);
+                if declarations {
+                    // The same admitted Ruff Binding / rustc PublicItem partitions own all
+                    // declarations. Keep this conservative context scope for unknown subjects.
+                    "declarations".clone_into(&mut summary.family);
+                }
                 let coverage = match summary.coverage() {
                     Ok(coverage) => coverage,
                     Err(error) => return failed(&artifacts, "processing_scope", error),

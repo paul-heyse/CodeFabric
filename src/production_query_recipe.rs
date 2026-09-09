@@ -1,13 +1,10 @@
 //! Production construction of the released semantic-query program catalogs.
 //!
-//! This module is an application-owned composition boundary.  The compiled release privately
-//! constructs only programs whose semantic relation roles are present in the exact sealed
-//! [`ProgrammaticFabricEpoch`] and whose producer families are proved complete. It checks every
-//! epoch-owned relation and field before emitting the two catalogs consumed by the programmatic
-//! query ports. Callers may vary only source, policy, and resource inputs; they cannot supply a
-//! serialized semantic manifest, program, scope, catalog, or release pin. Pins emitted here use
-//! explicit typed framing. Semantic validity comes from exact relation/field checks and executed
-//! producer-closure proof, never from a digest alone.
+//! Programs consume actual relations and fields in one sealed [`ProgrammaticFabricEpoch`].
+//! Canonical relation availability determines executability; requested processing coverage is
+//! selected after authorization. Older catalogs retain their producer-availability checks.
+//! These application-owned definitions lower to native DataFusion operators. Callers supply
+//! source, policy and resource inputs, not executable programs or semantic authority.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -47,6 +44,9 @@ use crate::relational_semantic_query::{
 use crate::schema_contract::SchemaRole;
 use crate::semantic_query_contract::{COMPILED_V2_0_SCOPE_DEFINITIONS, ResultRole};
 use crate::semantic_release::{CompiledQueryProgram, SemanticQueryForm};
+
+mod facts;
+pub(crate) use facts::validate_canonical_fact_references;
 
 const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
     "codefabric.semantic-query.release.v2.3.0:datafusion=55.0.0:arrow=59.2.0";
@@ -494,7 +494,12 @@ fn compiled_released_form_programs(
                 detail: "canonical entity selection requires selected processing scope".to_owned(),
             });
         }
-        return validate_form_coverage(vec![compiled_find_entities_program(source)?]);
+        let mut programs = vec![compiled_find_entities_program(source)?];
+        // Older persisted epochs remain readable; a new form needs its actual field contract.
+        if let Some(program) = facts::declarations(epoch)? {
+            programs.push(program);
+        }
+        return validate_form_coverage(programs);
     }
     let binding_family = NativeSyntaxRelation::RuffBinding.as_str();
     let binding_available = closure.families.iter().any(|row| {

@@ -2520,6 +2520,160 @@ fn assert_mixed_public_entity_queries(
             .iter()
             .any(|name| name.ends_with("caller"))
     );
+    assert_mixed_public_declaration_facts(fixture, stack);
+}
+
+fn assert_mixed_public_declaration_facts(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+) {
+    use arrow::array::{Array, StringArray, UInt64Array};
+    let mut subjects = BTreeSet::new();
+    for batch in fresh_activation_relation_batches(fixture, "fact.code_declaration") {
+        let names = batch
+            .column_by_name("name")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let ids = batch
+            .column_by_name("public_entity_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            if (names.value(row) == "answer" || names.value(row).ends_with("caller"))
+                && !ids.is_null(row)
+            {
+                subjects.insert(ids.value(row).to_owned());
+            }
+        }
+    }
+    assert!(subjects.len() >= 2);
+    let mut about = subjects
+        .iter()
+        .map(|id| json!({"entity_id": id}))
+        .collect::<Vec<_>>();
+    about.push(about[0].clone()); // A repeated subject must not duplicate its facts.
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "request:declaration-facts",
+        "unused",
+    );
+    request["queries"] = json!([{
+        "request": "retrieve facts about code", "query_id": "facts",
+        "about": about, "facts": ["declaration locations and provenance"],
+        "return": {"limit": {"maximum_results": 32}}
+    }]);
+    let mut empty = request.clone();
+    empty["semantic_request_id"] = json!("request:declaration-empty");
+    empty["scope"]["languages"] = json!(["python"]);
+    empty["queries"][0]["about"] =
+        json!([{"entity_id": "entity:function:01010101010101010101010101010101"}]);
+    let mut unresolved = request.clone();
+    unresolved["semantic_request_id"] = json!("request:declaration-unresolved");
+    unresolved["queries"][0]["about"] = json!(["answer"]);
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "facts", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": request, "delivery": "resource"}},
+            {"id": "page", "operation": "read_resource", "uri": {"$ref": "facts.structured_content.pages.0.uri"}},
+            {"id": "empty", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": empty, "delivery": "resource"}},
+            {"id": "empty_page", "operation": "read_resource", "uri": {"$ref": "empty.structured_content.pages.0.uri"}},
+            {"id": "unresolved", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": unresolved, "delivery": "resource"}}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, "canonical-facts", &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let result = modern_structured(modern_step(&report, "facts"));
+    assert_eq!(result["execution_state"], "SUCCEEDED", "{report}");
+    assert_eq!(result["processing"][0]["family"], "declarations");
+    assert_eq!(result["processing"][0]["remaining_partitions"], 1);
+    assert_eq!(result["processing"][0]["additional_rows"], false);
+    let batches = |step: &str| {
+        let bytes = STANDARD
+            .decode(modern_step(&report, step)[0]["blob"].as_str().unwrap())
+            .unwrap();
+        arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None)
+            .unwrap()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>()
+    };
+    let mut seen = BTreeSet::new();
+    let mut languages = BTreeSet::new();
+    for batch in batches("page") {
+        let string = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+        };
+        let number = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap()
+        };
+        for row in 0..batch.num_rows() {
+            assert!(seen.insert(string("public_entity_id").value(row).to_owned()));
+            let language = string("language").value(row);
+            languages.insert(language.to_owned());
+            assert_eq!(string("identity_state").value(row), "canonical");
+            assert_eq!(
+                string("provider").value(row),
+                if language == "python" {
+                    "ruff"
+                } else {
+                    "rustc"
+                }
+            );
+            assert_eq!(
+                (
+                    number("start_byte").value(row),
+                    number("end_byte").value(row)
+                ),
+                if language == "python" {
+                    (4, 10)
+                } else {
+                    (11, 33)
+                }
+            );
+            assert_eq!(
+                batch.column_by_name("content_digest").unwrap().null_count(),
+                0
+            );
+        }
+    }
+    assert_eq!(seen, subjects);
+    assert_eq!(
+        languages,
+        BTreeSet::from(["python".to_owned(), "rust".to_owned()])
+    );
+    assert_eq!(
+        batches("empty_page")
+            .iter()
+            .map(RecordBatch::num_rows)
+            .sum::<usize>(),
+        0
+    );
+    let empty = modern_structured(modern_step(&report, "empty"));
+    assert_eq!(empty["processing"][0]["remaining_partitions"], 0);
+    assert_eq!(empty["processing"][0]["additional_rows"], false);
+    let unresolved = modern_structured(modern_step(&report, "unresolved"));
+    assert_eq!(unresolved["outcome"], "validation_rejection");
+    assert_eq!(unresolved["error"]["code"], "VALIDATION_REJECTED");
+    assert_eq!(
+        unresolved["issues"][0]["presentation_key"],
+        "query.validation.semantic_reference_unavailable"
+    );
 }
 
 fn assert_canonical_rust_calls(fixture: &ProductionFixture, expect_indirect: bool) {
