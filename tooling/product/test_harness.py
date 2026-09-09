@@ -160,12 +160,14 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         "cancellation",
         "python-live",
         "mixed-clean-live",
+        "staged-live",
     ]
 
 
+@pytest.mark.parametrize("case", ["mixed-clean-live", "staged-live"])
 @pytest.mark.parametrize(("override", "expected"), [(None, 600), (0.25, 0.25)])
 def test_clean_live_case_has_a_bounded_default_and_honors_explicit_deadline(
-    tmp_path, monkeypatch, override, expected
+    tmp_path, monkeypatch, override, expected, case
 ):
     from tooling.product import golden
     from tooling.product.process import Outcome
@@ -177,12 +179,9 @@ def test_clean_live_case_has_a_bounded_default_and_honors_explicit_deadline(
         return Outcome(command, 0, 0.1, "", "", False, False)
 
     monkeypatch.setattr(golden, "run", execute)
-    args = ["--case", "mixed-clean-live", "--output", str(tmp_path / "result.json")]
+    args = ["--case", case, "--output", str(tmp_path / "result.json")]
     if override is not None:
         args.extend(["--timeout", str(override)])
     assert golden.main(args) == 0
     assert len(observed) == 1 and observed[0][1] == expected
-    assert (
-        "test(=integration::daemon::live_updates::mixed_live_updates_equal_independent_clean_public_queries)"
-        in observed[0][0]
-    )
+    assert f"test(=integration::daemon::{golden.CASES[case]})" in observed[0][0]

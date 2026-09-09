@@ -63,6 +63,11 @@ impl FreshnessBarrier {
         self.admitted.fetch_add(1, Ordering::AcqRel) + 1
     }
 
+    /// Mirror an observation from a shared sequence into a narrower completion barrier.
+    pub(crate) fn admit_through(&self, watermark: u64) {
+        self.admitted.fetch_max(watermark, Ordering::AcqRel);
+    }
+
     /// Advance the reconciliation watermark monotonically.
     pub fn reconcile(&self, watermark: u64) {
         self.reconciled
@@ -84,9 +89,10 @@ impl FreshnessBarrier {
 
     /// A successful retry restores availability only after its observation is reconciled.
     pub fn restore(&self, watermark: u64) {
-        self.reconcile(watermark);
+        // Publish availability before waking completion waiters, so restoration cannot wake
+        // a strict request into the previous unavailable state.
         self.unavailable.store(false, Ordering::Release);
-        self.notify.notify_waiters();
+        self.reconcile(watermark);
     }
 
     /// Mark current source facts unavailable and wake pending admissions.

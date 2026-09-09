@@ -1,4 +1,4 @@
-# @generated from released Protobuf semantic identities b3:a5f9544f78fe2e3132e0f631c31369a8f4ff607731c7e647fca4184f8bde7e3a,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
+# @generated from released Protobuf semantic identities b3:2eae6d75ca2757c08ea204d013c066b9eb7ce2b027f1835f9b59370215dec085,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
 import datetime
 
 from google.protobuf import duration_pb2 as _duration_pb2
@@ -442,7 +442,7 @@ class GetStatusResponse(_message.Message):
     def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., lifecycle: _Optional[_Union[LifecycleState, str]] = ..., lifecycle_sequence: _Optional[int] = ..., failure: _Optional[_Union[SafeErrorMetadata, _Mapping]] = ..., active_epoch_id: _Optional[str] = ..., running_queries: _Optional[int] = ..., queued_queries: _Optional[int] = ..., canonical_public_status_json: _Optional[bytes] = ..., source_observations: _Optional[_Iterable[_Union[WorkspaceSourceObservation, _Mapping]]] = ...) -> None: ...
 
 class WorkspaceSourceObservation(_message.Message):
-    __slots__ = ("workspace_id", "selected_source_generation", "requested_watermark", "reconciled_watermark", "freshness", "watch_healthy", "rescan_required", "runnable_pending")
+    __slots__ = ("workspace_id", "selected_source_generation", "requested_watermark", "reconciled_watermark", "freshness", "watch_healthy", "rescan_required", "runnable_pending", "source_reconciled_watermark", "source_freshness", "semantic_pending")
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     SELECTED_SOURCE_GENERATION_FIELD_NUMBER: _ClassVar[int]
     REQUESTED_WATERMARK_FIELD_NUMBER: _ClassVar[int]
@@ -451,6 +451,9 @@ class WorkspaceSourceObservation(_message.Message):
     WATCH_HEALTHY_FIELD_NUMBER: _ClassVar[int]
     RESCAN_REQUIRED_FIELD_NUMBER: _ClassVar[int]
     RUNNABLE_PENDING_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_RECONCILED_WATERMARK_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FRESHNESS_FIELD_NUMBER: _ClassVar[int]
+    SEMANTIC_PENDING_FIELD_NUMBER: _ClassVar[int]
     workspace_id: str
     selected_source_generation: int
     requested_watermark: int
@@ -459,7 +462,10 @@ class WorkspaceSourceObservation(_message.Message):
     watch_healthy: bool
     rescan_required: bool
     runnable_pending: bool
-    def __init__(self, workspace_id: _Optional[str] = ..., selected_source_generation: _Optional[int] = ..., requested_watermark: _Optional[int] = ..., reconciled_watermark: _Optional[int] = ..., freshness: _Optional[_Union[SnapshotFreshness, str]] = ..., watch_healthy: _Optional[bool] = ..., rescan_required: _Optional[bool] = ..., runnable_pending: _Optional[bool] = ...) -> None: ...
+    source_reconciled_watermark: int
+    source_freshness: SnapshotFreshness
+    semantic_pending: bool
+    def __init__(self, workspace_id: _Optional[str] = ..., selected_source_generation: _Optional[int] = ..., requested_watermark: _Optional[int] = ..., reconciled_watermark: _Optional[int] = ..., freshness: _Optional[_Union[SnapshotFreshness, str]] = ..., watch_healthy: _Optional[bool] = ..., rescan_required: _Optional[bool] = ..., runnable_pending: _Optional[bool] = ..., source_reconciled_watermark: _Optional[int] = ..., source_freshness: _Optional[_Union[SnapshotFreshness, str]] = ..., semantic_pending: _Optional[bool] = ...) -> None: ...
 
 class ReferenceReadRequest(_message.Message):
     __slots__ = ("kind", "version")

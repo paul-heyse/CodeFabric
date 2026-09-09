@@ -35,7 +35,7 @@ use super::{ProductionWorkspaceStartupError, step};
 
 /// Leases survive provider joins, and every early failure releases only this capture's holders.
 pub(super) struct PreparedSourceInputs {
-    store: OperationalStore,
+    store: CaptureStore,
     image_store: SourceImageStore,
     capture: Option<InventoryCaptureBundle>,
     pub inventory: ChargedValue<ProviderSourceInventory>,
@@ -43,7 +43,47 @@ pub(super) struct PreparedSourceInputs {
     cancellation: Cancellation,
 }
 
+enum CaptureStore {
+    Capturing(OperationalStore),
+    Detached {
+        database: std::path::PathBuf,
+        writer: std::sync::Arc<std::sync::Mutex<()>>,
+    },
+}
+
 impl PreparedSourceInputs {
+    /// Source bytes and blob leases remain owned, but the operational writer is needed only
+    /// while capturing or releasing them. Checker/compiler execution uses immutable inputs.
+    pub(super) fn detach_writer(
+        &mut self,
+        database: std::path::PathBuf,
+        writer: std::sync::Arc<std::sync::Mutex<()>>,
+    ) {
+        self.store = CaptureStore::Detached { database, writer };
+    }
+
+    fn release_bundle(
+        &mut self,
+        bundle: InventoryCaptureBundle,
+    ) -> Result<(), ProductionWorkspaceStartupError> {
+        match &mut self.store {
+            CaptureStore::Capturing(store) => self
+                .image_store
+                .release_inventory_capture(store, bundle)
+                .map_err(|error| step("provider-source-release", error)),
+            CaptureStore::Detached { database, writer } => {
+                let _writer = writer
+                    .lock()
+                    .map_err(|error| step("source-release-writer", error))?;
+                let mut store = OperationalStore::open(database)
+                    .map_err(|error| step("source-release-store", error))?;
+                self.image_store
+                    .release_inventory_capture(&mut store, bundle)
+                    .map_err(|error| step("provider-source-release", error))
+            }
+        }
+    }
+
     pub fn inventory_for_language(
         &self,
         language: SourceLanguage,
@@ -85,9 +125,7 @@ impl PreparedSourceInputs {
 
     pub fn release(mut self) -> Result<(), ProductionWorkspaceStartupError> {
         if let Some(bundle) = self.capture.take() {
-            self.image_store
-                .release_inventory_capture(&mut self.store, bundle)
-                .map_err(|error| step("provider-source-release", error))?;
+            self.release_bundle(bundle)?;
         }
         Ok(())
     }
@@ -97,9 +135,7 @@ impl Drop for PreparedSourceInputs {
     fn drop(&mut self) {
         if let Some(bundle) = self.capture.take() {
             // Failure paths cannot publish; lease expiry remains the bounded recovery fallback.
-            let _ = self
-                .image_store
-                .release_inventory_capture(&mut self.store, bundle);
+            let _ = self.release_bundle(bundle);
         }
     }
 }
@@ -143,7 +179,7 @@ pub(super) fn capture_inputs(
             &cancellation,
             observe,
         )
-        .map_err(|error| step("complete-source-inventory", error))?;
+        .map_err(|error| inventory_failure("complete-source-inventory", error))?;
     let mut image_store = SourceImageStore::open_governed(
         &workspace_root.join("source-blobs"),
         SourceCapturePolicy::default(),
@@ -170,7 +206,7 @@ pub(super) fn capture_inputs(
             },
             observe,
         )
-        .map_err(|error| step("complete-source-capture", error))?;
+        .map_err(|error| capture_failure("complete-source-capture", error))?;
     // Construct ownership before any later fallible operation so all error paths release leases.
     let input_inventory = match provider_inventory(&capture, &budget) {
         Ok(inventory) => inventory,
@@ -182,7 +218,7 @@ pub(super) fn capture_inputs(
         }
     };
     let mut owned = PreparedSourceInputs {
-        store,
+        store: CaptureStore::Capturing(store),
         image_store,
         capture: Some(capture),
         inventory: input_inventory,
@@ -192,21 +228,24 @@ pub(super) fn capture_inputs(
     owned
         .capture()?
         .require_closed()
-        .map_err(|error| step("source-capture-pending", error))?;
-    // Until WP88 installs watcher sequence tokens, a second descriptor-relative full census
-    // detects edits/creation/deletion during this startup boundary, not a constant fence closure.
+        .map_err(|error| super::source_changed("source-capture-pending", error))?;
+    // The enclosing update operation also fences watcher events. This independent census
+    // detects edits/creation/deletion during capture before any provider consumes the bundle.
+    let CaptureStore::Capturing(store) = &mut owned.store else {
+        unreachable!("capture writer remains local until input closure")
+    };
     let checked = InventoryWalker::new_governed(InventoryLimits::default(), owned.budget.clone())
         .walk_selected_with_fence(
             &root,
-            &mut owned.store,
+            store,
             generation,
             generation,
             &owned.cancellation,
             observe,
         )
-        .map_err(|error| step("source-capture-reconciliation", error))?;
+        .map_err(|error| inventory_failure("source-capture-reconciliation", error))?;
     if checked.inventory().digest != inventory.inventory().digest {
-        return Err(step(
+        return Err(super::source_changed(
             "source-capture-reconciliation",
             "source inventory changed during capture",
         ));
@@ -258,7 +297,10 @@ fn provider_inventory(
                     )
                 }
                 InventoryCaptureDisposition::Pending | InventoryCaptureDisposition::Deferred => {
-                    return Err(step("source-disposition-pending", "source is still dirty"));
+                    return Err(super::source_changed(
+                        "source-disposition-pending",
+                        "source is still dirty",
+                    ));
                 }
                 InventoryCaptureDisposition::Unreadable => {
                     (ProviderInputDisposition::Unreadable, false)
@@ -711,6 +753,34 @@ fn python_discovery_memory_bounds(
     Ok((request, product))
 }
 
+fn inventory_failure(
+    phase: &'static str,
+    error: crate::inventory::InventoryError,
+) -> ProductionWorkspaceStartupError {
+    if matches!(error, crate::inventory::InventoryError::SourceChanged) {
+        super::source_changed(phase, error)
+    } else {
+        step(phase, error)
+    }
+}
+
+fn capture_failure(
+    phase: &'static str,
+    error: crate::source_image::SourceImageError,
+) -> ProductionWorkspaceStartupError {
+    use crate::source_image::SourceImageError;
+    if matches!(
+        error,
+        SourceImageError::GenerationChanged
+            | SourceImageError::Inventory(crate::inventory::InventoryError::SourceChanged)
+            | SourceImageError::StableRead(crate::secure_path::StableReadError::ChangedDuringRead)
+    ) {
+        super::source_changed(phase, error)
+    } else {
+        step(phase, error)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -759,7 +829,7 @@ mod tests {
             crate::disk_headroom::LocalDiskHeadroom::open(directory.path()).unwrap(),
         )
         .unwrap();
-        let first = capture_inputs(
+        let mut first = capture_inputs(
             &fabric_root,
             &database,
             &record,
@@ -769,6 +839,33 @@ mod tests {
             disk.clone(),
         )
         .unwrap();
+        first.detach_writer(
+            database.clone(),
+            std::sync::Arc::new(std::sync::Mutex::new(())),
+        );
+        let concurrent_writer = OperationalStore::open(&database).unwrap();
+        let reader = concurrent_writer.reader_factory().open().unwrap();
+        let leases = || {
+            reader
+                .with_connection(|connection| {
+                    connection.query_row(
+                        "SELECT COUNT(*) FROM source_blob_lease WHERE state_code=1",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )
+                })
+                .unwrap()
+        };
+        assert_eq!(
+            leases(),
+            1,
+            "immutable provider inputs still own their blob lease"
+        );
+        assert_eq!(
+            first.capture().unwrap().images()[0].bytes.as_ref(),
+            b"value = 1\n"
+        );
+        drop(concurrent_writer);
         let initial_product = discover_python_inputs(&first, &record).unwrap();
         let initial = provider_context(&initial_product).unwrap();
         let retained_budget = first.budget().clone();
@@ -788,6 +885,12 @@ mod tests {
                 ))
         );
         first.release().unwrap();
+        assert_eq!(
+            leases(),
+            0,
+            "provider cleanup releases through the serialized writer"
+        );
+        drop(reader);
         assert!(retained_budget.observation().used.memory_bytes > 0);
 
         std::fs::write(

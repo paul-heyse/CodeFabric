@@ -595,6 +595,8 @@ pub enum ProviderAdmissionUnknownCause {
 /// Application-owned cause for a provider lane that produced no accepted relation set.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderLaneGap {
+    /// Work is requested for a successor; this exact snapshot contains no semantic output yet.
+    Pending,
     RequiredInputAbsent,
     OptionalInputAbsent,
     ProviderFailure,
@@ -610,7 +612,9 @@ pub enum ProviderLaneGap {
 impl ProviderLaneGap {
     const fn terminal_status(self) -> TerminalStatus {
         match self {
-            Self::RequiredInputAbsent | Self::OptionalInputAbsent => TerminalStatus::Unknown,
+            Self::Pending | Self::RequiredInputAbsent | Self::OptionalInputAbsent => {
+                TerminalStatus::Unknown
+            }
             Self::ProviderFailure
             | Self::CompilationFailure
             | Self::TrustUnavailable
@@ -624,7 +628,9 @@ impl ProviderLaneGap {
 
     const fn remainder_reason(self) -> RemainderReason {
         match self {
-            Self::RequiredInputAbsent | Self::OptionalInputAbsent => RemainderReason::Unknown,
+            Self::Pending | Self::RequiredInputAbsent | Self::OptionalInputAbsent => {
+                RemainderReason::Unknown
+            }
             Self::ProviderFailure | Self::CompilationFailure | Self::TrustUnavailable => {
                 RemainderReason::ProviderUnavailable
             }
@@ -2749,6 +2755,7 @@ fn provider_gap_trailer(
 
 const fn provider_lane_gap_code(gap: ProviderLaneGap) -> u8 {
     match gap {
+        ProviderLaneGap::Pending => 11,
         ProviderLaneGap::RequiredInputAbsent => 1,
         ProviderLaneGap::OptionalInputAbsent => 2,
         ProviderLaneGap::ProviderFailure => 3,

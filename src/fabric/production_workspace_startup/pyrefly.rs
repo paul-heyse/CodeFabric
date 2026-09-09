@@ -56,9 +56,10 @@ pub(super) fn run(
     inputs: &PreparedSourceInputs,
     context: &ChargedValue<ProviderContextBinding>,
     context_manifest: &[u8],
-    scope: &StructuredCancellationScope,
     cancellation: Cancellation,
+    work: super::PublicationWork<'_>,
 ) -> Result<PyreflyOutcome, ProductionWorkspaceStartupError> {
+    let super::PublicationWork { scope, stage, .. } = work;
     let images = inputs
         .capture()?
         .images()
@@ -88,6 +89,10 @@ pub(super) fn run(
         gap: ProviderLaneGap::RequiredInputAbsent,
     };
     if images.is_empty() {
+        return Ok(outcome);
+    }
+    if stage == super::PublicationStage::Source {
+        outcome.gap = ProviderLaneGap::Pending;
         return Ok(outcome);
     }
     // A complete checker inventory is required. Never call a truncated batch complete.

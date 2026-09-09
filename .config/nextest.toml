@@ -52,3 +52,21 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 [[profile.ci.overrides]]
 filter = 'test(mixed_live_updates_equal_independent_clean_public_queries)'
 slow-timeout = { period = "60s", terminate-after = 10 }
+
+# Multiple paused semantic updates plus exact restart exercise owned recovery in one daemon.
+[[profile.default.overrides]]
+filter = 'test(source_current_publication_fences_delayed_semantics_and_resumes_after_restart)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+# The complete Python edit sequence now publishes source and semantic successors.
+[[profile.default.overrides]]
+filter = 'test(pragmatic_live_python_edits_converge_without_restart)'
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+[[profile.ci.overrides]]
+filter = 'test(pragmatic_live_python_edits_converge_without_restart)'
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+[[profile.ci.overrides]]
+filter = 'test(source_current_publication_fences_delayed_semantics_and_resumes_after_restart)'
+slow-timeout = { period = "60s", terminate-after = 5 }

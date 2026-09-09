@@ -1,7 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `a6d8569a` (`Reconcile live sources and enforce query freshness`).
+Last production commit: `6b6abffb` (`Compare mixed live queries with independent clean builds`);
+source-first publication is the current continuation.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -24,7 +25,8 @@ fact retrieval, one-step incoming/outgoing call traversal and Python lexical-ref
 result truncation. Exact declaration source spans now pass through the same client with independent
 disclosure authorization. Python call/source queries also pass after exact reopen. A running daemon now reconciles Python edits,
 additions, deletions and atomic saves, with current-source query barriers and exact successor epochs.
-Startup and updates still wait for semantic work before publication. The first useful release remains open.
+Live updates now publish source/syntax with semantic pending scope before their semantic successor.
+Fresh startup still completes its first provider pass before readiness. The first useful release remains open.
 
 The call-query continuation present at session start was preserved, exercised and committed in
 `80bc6d18`; declaration kinds/public subjects followed in `1a60e748`, and lexical references in
@@ -165,11 +167,46 @@ while Python queries remain usable. The repaired result also matches the origina
 `just golden --case mixed-clean-live` selects this case; its 600 s bound covers the repeated contained
 builds. The accompanying harness checks pass with all 188 tooling tests.
 
-Remaining live work includes broader clean/edit/context cases, syntax-first publication, retained provider/parser/compiler state, external roots, Git inclusion, an explicit polling
-profile, root replacement recovery, configuration/negative-dependency and delayed-completion cases.
-Current policies conservatively await the complete workspace provider pass; target/family-specific
-barriers and all-family scope remain open. Reconciliation currently rebuilds all selected relations;
+Remaining live work includes broader clean/edit/context cases, retained provider/parser/compiler
+state, external roots, Git inclusion, an explicit polling
+profile, root replacement recovery and broader configuration/negative-dependency and delayed-completion cases.
+Source-current queries can select the source stage; other strict policies conservatively await the
+complete workspace provider pass. Target/family-specific barriers and all-family scope remain open. Reconciliation currently rebuilds all selected relations;
 selective persistence and finite historical/candidate reclamation remain outcome 8 work.
+
+## Source-first live publication and semantic convergence
+
+Live updates publish a source/syntax epoch with pending Python checker and named Rust target scope,
+then a semantic successor at the same source generation. Source-current requests use their own census
+barrier and can select the first epoch; semantic-current/await-latest requests wait for the terminal
+provider pass. A terminal provider failure remains incomplete without leaving runnable work pending.
+The durable input-inventory relation records the publication stage, so exact reopen resumes unfinished
+semantic work. Older epochs without that field retain their terminal-provider interpretation.
+
+Public status separately exposes source reconciliation/freshness and whether the selected epoch awaits
+semantics, with optional-field compatibility across Rust/Python. Captures invalidated by concurrent
+edits retry as pending work. Candidate attempts have distinct physical namespaces; activation recovery
+preserves an unresolved candidate before admitting a newer publication.
+
+The debug-only `hold_semantic_update_publication` fixture pauses actual completed providers before
+activation, without bypassing containment or publication fences. Captured bytes retain their leases
+while releasing the exclusive operational writer before checker/compiler work. This permits source
+censuses during semantic execution; capture/release/census writes share one short-lived writer gate.
+
+Validation on 2026-09-09 against this continuation of `6b6abffb`: default/featureless `just root-check`
+passes. The final delegated-cgroup `just root-test-incremental` selection passes all 43 affected cases:
+mixed paused source/semantic publication, named target scope, strict deadline, obsolete completion and
+pending restart (168.05 s); complete Python edit/remove/atomic-save/empty/recreate/reopen (114.60 s);
+four-form mixed independent-clean comparison and compiler failure/repair (294.29 s); old-source-page
+and live disclosure checks (41.57 s); processing, query-service, watcher, barrier and capture ownership
+regressions. The capture check independently opens a writer while exact bytes/leases remain live,
+then verifies lease release. Native commands use the delegated scope and provider binaries below.
+Adapter lint/types and 106 tests, 190 tooling tests, generated protocol compatibility, governance,
+docs navigation, changed-file formatting and diff checks pass. Library Clippy completes with the same
+957 baseline warnings and no added findings; strict root lint and unrelated formatting remain open.
+
+Retained checker/parser/Cargo state, selective relation-version reuse, full scope, historical/candidate
+reclamation and the remaining outcomes 4–8 requirements are open. No outcome is closed by this slice.
 
 ## Outcome 4: real inputs, canonical facts and the first four forms
 
@@ -310,19 +347,20 @@ exactly N rows leave exhaustion unknown. `e65bdbeb` fixes released diagnostic en
 Current-source barriers and typed snapshot/workspace observations now run against the live update
 owner, as described above. Remaining: target/family-specific current selection, historical selectors,
 public remainder pagination and full generation/context/family convergence with terminal coverage.
-Whole-workspace provider completion is currently the conservative barrier for all strict policies.
+Whole-workspace provider completion is the conservative barrier for strict semantic policies;
+source-current uses the separate source publication barrier.
 
 ## Outcome 6: continuous updates — partial
 
 | Slice | Implemented foundation | Remaining delivery |
 |---|---|---|
 | 6A | Watch-before-census, owned native watcher, bounded coalesced queue, retained rescan obligation, periodic secure census and public observation/health | Git inclusion, selected external roots, polling profile, root recreation and ignore/config acceptance |
-| 6B | Whole-context replacement, monotonic generations, immediate stale observation, changed-input fences and successor activation | Mixed-language/negative-dependency/config coverage, deterministic delayed completion and independent clean comparison |
-| 6C | Startup/update reuse with exact complete version-vector activation; old source-page retention | Syntax-first publication, retained Tree-sitter/Pyrefly/Cargo state, changed-version reuse and fair scheduling |
-| 6D | Real persistent Python edit/add/delete/atomic-save/reopen case | Independent-clean runtime adapter and full semantic/identity/coverage edit corpus for both languages |
+| 6B | Whole-context replacement, monotonic generations, stale observation, changed-input fences, mixed clean comparison and delayed-completion rejection | Broader negative-dependency/config/context and owner-identity coverage |
+| 6C | Source/syntax then semantic publication, separate current barriers, exact pending-stage restart and old source-page retention | Retained Tree-sitter/Pyrefly/Cargo state, changed-version reuse and fair scheduling |
+| 6D | Persistent Python edits, four-form mixed independent-clean comparison, paused obsolete completion and pending restart | Full semantic/identity/coverage edit corpus, configuration and negative dependencies for both languages |
 
-The installed live test is distinct from startup-versus-restart validation. Python canonical identity
-continuity across unrelated edits still needs the independent incremental/clean corpus.
+The installed live test is distinct from startup-versus-restart validation. The mixed comparison retains canonical
+identity and relationships; the wider edit and rename-continuity corpus remains open.
 
 ## Outcome 7: full analyses and all eight forms — open
 
@@ -429,10 +467,11 @@ golden setup; `just sidecar-check` checks/lints rather than installing a fresh e
 1. Retain the validated one-step call-query slice and extend it with the remaining canonical families
    and traversal semantics. Full FollowRelationships is still open.
 2. Finish 4A–4D effective/external/generated inputs and canonical families needed by the first four forms;
-   complete 4E and 5A–5B, especially public remainder paging and real freshness barriers. Retain the broad
+   complete 4E and 5A–5B, especially public remainder paging and target/family-specific freshness barriers. Retain the broad
    workstation allowances and honest partial semantics.
-3. Connect 6A–6D continuous observation, invalidation, two-speed publication, retained providers and the
-   independent clean/incremental corpus. Only then claim the first useful release.
+3. Extend the implemented 6A–6D observation/invalidation/two-speed publication loop with retained
+   providers, external/configuration inputs and the full independent clean/incremental corpus.
+   Complete first-four semantics before claiming the first useful release.
 4. Continue 7A–7H and 8A–8F to the full plan acceptance: every family and all forms/composition, finite
    retention, actual native maintenance, recovery and representative performance. Add phase metrics and
    persistence improvements while integrating updates; optional performance mechanisms remain conditional.

@@ -11,12 +11,18 @@ use tokio::sync::mpsc;
 
 use crate::freshness::FreshnessBarrier;
 
-pub(crate) async fn selected_inventory_digest(
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SourceInventoryState {
+    pub(crate) digest: [u8; 32],
+    pub(crate) semantic_pending: bool,
+}
+
+pub(crate) async fn selected_inventory_state(
     epoch: &super::programmatic_epoch::ProgrammaticFabricEpoch,
     workspace: [u8; 16],
     generation: u64,
-) -> Result<Option<[u8; 32]>, String> {
-    use arrow_array::{Array, FixedSizeBinaryArray, UInt64Array};
+) -> Result<Option<SourceInventoryState>, String> {
+    use arrow_array::{Array, BooleanArray, FixedSizeBinaryArray, UInt64Array};
     let id =
         super::programmatic_schema::ProgrammaticRelationId::new("source.input_inventory_state");
     let Some(binding) = epoch.relation(&id) else {
@@ -61,17 +67,31 @@ pub(crate) async fn selected_inventory_digest(
     {
         return Err("selected source inventory has another workspace/generation".to_owned());
     }
-    fixed("inventory_digest")?
+    let digest = fixed("inventory_digest")?
         .value(0)
         .try_into()
-        .map(Some)
-        .map_err(|_| "invalid inventory digest width".to_owned())
+        .map_err(|_| "invalid inventory digest width".to_owned())?;
+    // Exact epochs published before source-first staging are terminal provider observations.
+    let semantic_pending = match batch.column_by_name("semantic_pending") {
+        None => false,
+        Some(column) => column
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .filter(|column| column.null_count() == 0)
+            .ok_or("invalid inventory semantic stage")?
+            .value(0),
+    };
+    Ok(Some(SourceInventoryState {
+        digest,
+        semantic_pending,
+    }))
 }
 
 /// One coalesced reconciliation obligation survives an overflowing notification queue.
 #[derive(Clone, Debug)]
 pub(crate) struct WorkspaceObservation {
     pub(crate) freshness: FreshnessBarrier,
+    pub(crate) source_freshness: FreshnessBarrier,
     wake: mpsc::Sender<()>,
     rescan_watermark: Arc<AtomicU64>,
     watch_healthy: Arc<AtomicBool>,
@@ -85,6 +105,7 @@ impl WorkspaceObservation {
         (
             Self {
                 freshness: FreshnessBarrier::default(),
+                source_freshness: FreshnessBarrier::default(),
                 wake,
                 rescan_watermark: Arc::new(AtomicU64::new(1)),
                 watch_healthy: Arc::new(AtomicBool::new(false)),
@@ -98,6 +119,7 @@ impl WorkspaceObservation {
     /// Callback-safe: finite state, no source reads, parsing or blocking queue send.
     pub(crate) fn request(&self, rescan: bool) -> u64 {
         let watermark = self.freshness.admit();
+        self.source_freshness.admit_through(watermark);
         if rescan {
             self.rescan_watermark.fetch_max(watermark, Ordering::AcqRel);
         }
@@ -113,7 +135,7 @@ impl WorkspaceObservation {
     }
 
     pub(crate) fn rescan_required(&self) -> bool {
-        self.rescan_watermark.load(Ordering::Acquire) > self.freshness.reconciled()
+        self.rescan_watermark.load(Ordering::Acquire) > self.source_freshness.reconciled()
     }
 
     pub(crate) fn watch_healthy(&self) -> bool {
@@ -134,7 +156,24 @@ impl WorkspaceObservation {
         }
     }
 
+    pub(crate) fn source_state_for(&self, generation: u64) -> crate::freshness::FreshnessState {
+        if self.source_freshness.state() == crate::freshness::FreshnessState::Unavailable {
+            crate::freshness::FreshnessState::Unavailable
+        } else if generation != self.published_generation.load(Ordering::Acquire) {
+            crate::freshness::FreshnessState::PotentiallyStale
+        } else {
+            self.source_freshness.state()
+        }
+    }
+
+    pub(crate) fn source_reconciled(&self, watermark: u64, generation: u64) {
+        self.published_generation
+            .store(generation, Ordering::Release);
+        self.source_freshness.restore(watermark);
+    }
+
     pub(crate) fn reconciled(&self, watermark: u64, generation: u64) {
+        self.source_reconciled(watermark, generation);
         self.published_generation
             .store(generation, Ordering::Release);
         self.freshness.restore(watermark);
@@ -320,6 +359,32 @@ mod tests {
         assert_eq!(observed.state_for(8), FreshnessState::Current);
         assert_eq!(observed.state_for(7), FreshnessState::PotentiallyStale);
         assert!(!observed.rescan_required());
+    }
+
+    #[tokio::test]
+    async fn source_publication_does_not_complete_the_semantic_barrier() {
+        let (observed, _) = WorkspaceObservation::new();
+        let first = observed.request(true);
+        observed.reconciled(first, 1);
+        observed.event(false);
+        let edit = observed.freshness.requested();
+        observed.source_reconciled(edit, 2);
+        assert_eq!(observed.source_state_for(2), FreshnessState::Current);
+        assert_eq!(observed.state_for(2), FreshnessState::PotentiallyStale);
+        assert_eq!(
+            observed.source_state_for(1),
+            FreshnessState::PotentiallyStale
+        );
+        assert!(!observed.rescan_required());
+        observed.reconciled(edit, 2);
+        assert_eq!(observed.state_for(2), FreshnessState::Current);
+        observed.event(false);
+        observed.reconciled(edit, 2);
+        assert_eq!(
+            observed.source_state_for(2),
+            FreshnessState::PotentiallyStale
+        );
+        assert_eq!(observed.state_for(2), FreshnessState::PotentiallyStale);
     }
 
     #[test]

@@ -69,6 +69,8 @@ pub enum ActivationStartupAssuranceFault {
     DurableAppendAcknowledgementLostBeforeReadback,
     /// Exit the real controlled daemon after binding its endpoint but before ready acknowledgement.
     ExitBeforeReadyAcknowledgement,
+    /// Pause completed live semantic candidates until a private harness marker is released.
+    HoldSemanticUpdatePublication,
 }
 
 /// Closed restart-required daemon configuration.
@@ -1078,6 +1080,7 @@ async fn serve_writer_fenced_v2(
                     Some(ProductionWorkspaceStartupAssuranceFault::DurableAppendAcknowledgementLostBeforeReadback)
                 }
                 ActivationStartupAssuranceFault::ExitBeforeReadyAcknowledgement => None,
+                ActivationStartupAssuranceFault::HoldSemanticUpdatePublication => Some(ProductionWorkspaceStartupAssuranceFault::HoldSemanticUpdatePublication),
             }),
         workspace_resources,
         daemon_task_scope.clone(),

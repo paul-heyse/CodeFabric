@@ -318,3 +318,262 @@ fn mixed_live_updates_equal_independent_clean_public_queries() {
     }
     supervisor.stop();
 }
+
+fn pending_semantic_candidate(fixture: &ProductionFixture) -> PathBuf {
+    eprintln!(
+        "waiting for semantic publication in {}",
+        fixture.state.display()
+    );
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let ready = fs::read_dir(&fixture.state)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("semantic-update-")
+                    && path
+                        .extension()
+                        .is_some_and(|extension| extension == "ready")
+            });
+        if let Some(ready) = ready {
+            return ready;
+        }
+        if Instant::now() >= deadline {
+            let journal = rusqlite::Connection::open_with_flags(
+                fixture
+                    .fabric_workspace_root()
+                    .join("fabric-commands.sqlite3"),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            let mut query = journal.prepare("SELECT state_kind, json_extract(CAST(record_jcs AS TEXT), '$.state') FROM fabric_command_record LIMIT 3").unwrap();
+            let states = query
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>();
+            panic!("semantic candidate did not reach publication pause: {states:?}");
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn source_current_query(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    mut request: Value,
+) -> (Value, Vec<RecordBatch>) {
+    eprintln!("source-current query: {phase}");
+    request["semantic_request_id"] = json!(format!("request:source-stage-{phase}"));
+    request["freshness"] = json!({"policy": "require_source_current", "deadline_ms": 30_000});
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "query", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": request, "delivery": "resource"}},
+            {"id": "page", "operation": "read_resource", "uri": {"$ref": "query.structured_content.pages.0.uri"}},
+            {"id": "status", "operation": "call_tool", "name": "get_code_graph_status"}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, phase, &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let result = modern_structured(modern_step(&report, "query")).clone();
+    assert_eq!(result["execution_state"], "SUCCEEDED", "{phase}: {result}");
+    assert_eq!(result["freshness"], "CURRENT", "{phase}: {result}");
+    let status = modern_structured(modern_step(&report, "status"));
+    let observation = &status["source_observations"][0];
+    assert_eq!(
+        observation["source_freshness"], "CURRENT",
+        "{phase}: {observation}"
+    );
+    assert_eq!(
+        observation["semantic_pending"], true,
+        "{phase}: {observation}"
+    );
+    assert_eq!(
+        observation["runnable_pending"], true,
+        "{phase}: {observation}"
+    );
+    let bytes = STANDARD
+        .decode(modern_step(&report, "page")[0]["blob"].as_str().unwrap())
+        .unwrap();
+    let rows = arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None)
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    (result, rows)
+}
+
+#[test]
+fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart() {
+    use arrow::array::StringArray;
+    let fixture = ProductionFixture::with_source_and_activation_startup_fault(
+        b"def original():\n    return 1\n",
+        Some("hold_semantic_update_publication"),
+    );
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let workspace = Path::new(&fixture.workspace.root_path_display);
+    fs::create_dir(workspace.join("src")).unwrap();
+    fs::write(workspace.join("Cargo.toml"), "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[lib]\ntest = false\ndoctest = false\n").unwrap();
+    fs::write(
+        workspace.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.join("src/lib.rs"),
+        b"pub fn rust_source() -> u32 { 7 }\n",
+    )
+    .unwrap();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "Python function declarations",
+    );
+    let initial = public_query(&fixture, &stack, "staged-initial", request.clone());
+    assert_eq!(initial.rows[0]["name"], "original");
+    fs::write(
+        workspace.join("sample.py"),
+        b"def obsolete():\n    return 2\ndef caller():\n    return obsolete()\n",
+    )
+    .unwrap();
+    let obsolete = pending_semantic_candidate(&fixture);
+    let (source, rows) = source_current_query(&fixture, &stack, "pending-source", request.clone());
+    let strings = |rows: &[RecordBatch], name: &str| {
+        rows.iter()
+            .flat_map(|batch| {
+                batch
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.unwrap().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        strings(&rows, "name").into_iter().collect::<BTreeSet<_>>(),
+        BTreeSet::from(["obsolete".to_owned(), "caller".to_owned()])
+    );
+    assert_eq!(source["processing"][0]["remaining_partitions"], 0);
+    let mut calls = request.clone();
+    calls["scope"]["languages"] = json!(["python"]);
+    calls["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "calls", "starting_from": strings(&rows, "public_entity_id").iter().map(|id| json!({"entity_id": id})).collect::<Vec<_>>(),
+        "relationship": "calls", "direction": "outgoing", "distance": "one relationship step", "return": {"limit": {"maximum_results": 32}}
+    }]);
+    let (pending, _) = source_current_query(&fixture, &stack, "pending-calls", calls);
+    assert_eq!(pending["source_generation"], source["source_generation"]);
+    assert_eq!(
+        pending["processing"][0]["remaining_partitions"], 1,
+        "{pending}"
+    );
+    assert_eq!(pending["processing"][0]["remainder"][0]["state"], "pending");
+    assert_eq!(
+        pending["processing"][0]["remainder"][0]["reason_code"],
+        "semantic_work_pending"
+    );
+    let rust = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "Rust function declarations",
+    );
+    let (rust_pending, rows) = source_current_query(&fixture, &stack, "pending-rust-target", rust);
+    assert!(rows.iter().all(|batch| batch.num_rows() == 0));
+    let rust_scope = &rust_pending["processing"][0];
+    assert_eq!(rust_scope["requested_partitions"], 1);
+    assert_eq!(rust_scope["remaining_partitions"], 1);
+    assert_eq!(rust_scope["remainder"][0]["scope_kind"], "cargo_target");
+    assert_eq!(rust_scope["remainder"][0]["target"], "fixture");
+    assert_eq!(rust_scope["remainder"][0]["state"], "pending");
+    let mut strict = request.clone();
+    strict["semantic_request_id"] = json!("request:staged-deadline");
+    strict["freshness"] = json!({"policy": "require_semantic_current", "deadline_ms": 250});
+    let scenario = modern_client_scenario(
+        &fixture,
+        &stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "deadline", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": strict}, "expect_error": "CLIENT_OPERATION_FAILED"}
+        ]),
+    );
+    let path = write_modern_client_scenario(&fixture, "semantic-deadline", &scenario);
+    let report = modern_client_report(&run_modern_client(&stack, &path));
+    assert!(
+        modern_step(&report, "deadline")["public_error"]
+            .as_str()
+            .unwrap()
+            .contains("FRESHNESS_DEADLINE"),
+        "{report}"
+    );
+
+    // Complete an older provider, hold its publication, then replace the source. It must
+    // be discarded even though it produced a valid output before the newer edit.
+    fs::write(
+        workspace.join("sample.py"),
+        b"def repaired():\n    return 3\n",
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while obsolete.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "obsolete provider publication was not cancelled"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    let repaired = pending_semantic_candidate(&fixture);
+    let (next_source, rows) =
+        source_current_query(&fixture, &stack, "repaired-source", request.clone());
+    assert_eq!(strings(&rows, "name"), ["repaired"]);
+    assert!(
+        next_source["source_generation"].as_u64().unwrap()
+            > source["source_generation"].as_u64().unwrap()
+    );
+    fs::write(repaired.with_extension("resume"), b"resume").unwrap();
+    let final_result = public_query(&fixture, &stack, "repaired-semantic", request.clone());
+    assert_eq!(final_result.rows[0]["name"], "repaired");
+
+    // Stop with the source stage durably selected and no terminal semantic successor.
+    fs::write(
+        workspace.join("sample.py"),
+        b"def after_restart():\n    return 4\n",
+    )
+    .unwrap();
+    let before_restart = pending_semantic_candidate(&fixture);
+    let (before, _) = source_current_query(&fixture, &stack, "before-restart", request.clone());
+    supervisor.stop();
+    assert!(
+        !before_restart.exists(),
+        "shutdown joins the paused publication owner"
+    );
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let resumed = pending_semantic_candidate(&fixture);
+    assert_eq!(
+        resumed, before_restart,
+        "reopen resumes the same source generation"
+    );
+    let (after, rows) = source_current_query(&fixture, &stack, "after-restart", request.clone());
+    assert!(before["epoch_id"].as_str().is_some());
+    assert_eq!(before["epoch_id"], after["epoch_id"]);
+    assert_eq!(before["source_generation"], after["source_generation"]);
+    assert_eq!(strings(&rows, "name"), ["after_restart"]);
+    fs::write(resumed.with_extension("resume"), b"resume").unwrap();
+    let final_result = public_query(&fixture, &stack, "resumed-semantic", request);
+    assert_eq!(final_result.rows[0]["name"], "after_restart");
+    supervisor.stop();
+}

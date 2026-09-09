@@ -1716,6 +1716,7 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                     let observed = authority.source_observation()?;
                     let generation = authority.activation_pins().source_generation.get();
                     let reconciled_watermark = observed.freshness.reconciled();
+                    let source_reconciled_watermark = observed.source_freshness.reconciled();
                     let requested_watermark = observed.freshness.requested();
                     Some(crate::rpc::generated::codefabric::cpgd::v2::WorkspaceSourceObservation {
                         workspace_id: runtime.public_workspace_id().ok()?,
@@ -1726,6 +1727,9 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
                         watch_healthy: observed.watch_healthy(),
                         rescan_required: observed.rescan_required(),
                         runnable_pending: reconciled_watermark < requested_watermark,
+                        source_reconciled_watermark: Some(source_reconciled_watermark),
+                        source_freshness: Some(i32::from(observed.source_state_for(generation) as u16)),
+                        semantic_pending: Some(authority.semantic_pending()),
                     })
                 }).collect();
                 let status_value = serde_json::json!({

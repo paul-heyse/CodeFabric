@@ -136,6 +136,7 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
         self.empty_start_outcome = False
         self.fail_status = False
         self.status_extra: dict[str, object] = {}
+        self.source_observations: list[query_pb.WorkspaceSourceObservation] = []
         self.unsafe_diagnostic = False
         self.progress_stage: int | None = None
         self.challenge_fault: str | None = None
@@ -270,6 +271,7 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
             running_queries=0,
             queued_queries=0,
             canonical_public_status_json=public,
+            source_observations=self.source_observations,
         )
 
     # pyrefly: ignore [bad-override]
@@ -1001,5 +1003,72 @@ def test_explicit_unspecified_snapshot_freshness_is_rejected(tmp_path: Path) -> 
             accepted = await _accepted_query(client)
             with pytest.raises(DaemonProtocolError, match="freshness"):
                 await client.watch_query(accepted, correlation_id="mcp-request:one")
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("stage", [None, False, True])
+def test_source_and_semantic_stage_presence_survives_status(
+    tmp_path: Path, stage: bool | None
+) -> None:
+    daemon = V2DaemonPortStub()
+    row = query_pb.WorkspaceSourceObservation(
+        workspace_id="workspace:one",
+        selected_source_generation=3,
+        requested_watermark=8,
+        reconciled_watermark=7 if stage else 8,
+        freshness=query_pb.SNAPSHOT_FRESHNESS_POTENTIALLY_STALE
+        if stage
+        else query_pb.SNAPSHOT_FRESHNESS_CURRENT,
+        watch_healthy=True,
+        rescan_required=False,
+        runnable_pending=bool(stage),
+    )
+    if stage is not None:
+        row.source_reconciled_watermark = 8
+        row.source_freshness = query_pb.SNAPSHOT_FRESHNESS_CURRENT
+        row.semantic_pending = stage
+    daemon.source_observations = [row]
+
+    async def exercise() -> None:
+        async with _client(tmp_path, daemon) as client:
+            status = await client.status(correlation_id="mcp-request:one")
+            observed = status.source_observations[0]
+            assert observed.semantic_pending is stage
+            assert observed.source_reconciled_watermark == (None if stage is None else 8)
+            assert observed.source_freshness == (None if stage is None else "CURRENT")
+            assert observed.runnable_pending is bool(stage)
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("fault", ["unspecified", "missing-stage", "reversed"])
+def test_invalid_source_stage_status_is_rejected(tmp_path: Path, fault: str) -> None:
+    daemon = V2DaemonPortStub()
+    row = query_pb.WorkspaceSourceObservation(
+        workspace_id="workspace:one",
+        selected_source_generation=3,
+        requested_watermark=8,
+        reconciled_watermark=7,
+        freshness=query_pb.SNAPSHOT_FRESHNESS_POTENTIALLY_STALE,
+        watch_healthy=True,
+        rescan_required=False,
+        runnable_pending=True,
+        source_reconciled_watermark=8,
+        source_freshness=query_pb.SNAPSHOT_FRESHNESS_CURRENT,
+        semantic_pending=True,
+    )
+    if fault == "unspecified":
+        row.source_freshness = query_pb.SNAPSHOT_FRESHNESS_UNSPECIFIED
+    elif fault == "missing-stage":
+        row.ClearField("semantic_pending")
+    else:
+        row.source_reconciled_watermark = 6
+    daemon.source_observations = [row]
+
+    async def exercise() -> None:
+        async with _client(tmp_path, daemon) as client:
+            with pytest.raises(DaemonProtocolError):
+                await client.status(correlation_id="mcp-request:one")
 
     asyncio.run(exercise())

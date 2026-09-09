@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use arrow_array::{BinaryArray, UInt64Array};
+use arrow_array::{BinaryArray, BooleanArray, UInt64Array};
 
 use super::{ProductionWorkspaceStartupError, input_observations};
 use crate::fabric::epoch_runtime::FabricSchemaRole;
@@ -13,6 +13,7 @@ use crate::source_image::InventoryCaptureBundle;
 pub(super) fn install(
     builder: &mut ProgrammaticFabricEpochBuilder,
     capture: &InventoryCaptureBundle,
+    stage: super::PublicationStage,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     let images = capture.images();
     // Capture already bounds the total bytes. Arrow owns these copies through publication;
@@ -68,6 +69,13 @@ pub(super) fn install(
         FabricSchemaRole::Source,
         "input_inventory_state",
         vec![
+            (
+                "semantic_pending",
+                false,
+                Arc::new(BooleanArray::from(vec![
+                    stage == super::PublicationStage::Source,
+                ])),
+            ),
             (
                 "workspace_id",
                 false,

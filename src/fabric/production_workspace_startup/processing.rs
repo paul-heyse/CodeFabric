@@ -34,6 +34,7 @@ pub(super) fn install(
     inventory: &ProviderSourceInventory,
     runs: &[AdmittedProviderResult],
     targets: &[RustTargetProgress],
+    publication: super::PublicationStage,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     let python = runs
         .iter()
@@ -108,22 +109,15 @@ pub(super) fn install(
                 );
             }
         }
+        if publication == super::PublicationStage::Source && calls.reason == "provider_not_run" {
+            calls.state = "pending";
+            calls.reason = "semantic_work_pending";
+        }
         rows.push(calls);
     }
     append_rust_partitions(&mut rows, runs, targets);
     if rust_requested && targets.is_empty() {
-        let partition = Partition {
-            family: "function-declarations",
-            language: "rust",
-            scope_kind: "workspace_context",
-            path: b".",
-            target: None,
-            target_kind: None,
-            context: None,
-            file: None,
-            state: "unavailable",
-            reason: "cargo_context_preparation_incomplete",
-        };
+        let partition = undiscovered_rust_partition(publication);
         rows.push(partition);
         rows.push(Partition {
             family: "call-targets",
@@ -132,6 +126,29 @@ pub(super) fn install(
         rows.push(unsupported_rust_references(partition));
     }
     register(builder, inventory, &rows)
+}
+
+fn undiscovered_rust_partition(publication: super::PublicationStage) -> Partition<'static> {
+    Partition {
+        family: "function-declarations",
+        language: "rust",
+        scope_kind: "workspace_context",
+        path: b".",
+        target: None,
+        target_kind: None,
+        context: None,
+        file: None,
+        state: if publication == super::PublicationStage::Source {
+            "pending"
+        } else {
+            "unavailable"
+        },
+        reason: if publication == super::PublicationStage::Source {
+            "semantic_work_pending"
+        } else {
+            "cargo_context_preparation_incomplete"
+        },
+    }
 }
 
 fn pyrefly_by_file(runs: &[AdmittedProviderResult]) -> BTreeMap<[u8; 16], &AdmittedProviderResult> {
@@ -189,6 +206,8 @@ fn append_rust_partitions<'a>(
             .and_then(|context| rust.get(&context).copied());
         let (state, reason) = if target.state == "processed" {
             family_state(run, RustcRelation::PublicItem.relation_id())
+        } else if target.state == "pending" {
+            ("pending", "semantic_work_pending")
         } else {
             ("unavailable", "compiler_target_unavailable")
         };

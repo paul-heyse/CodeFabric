@@ -1064,6 +1064,13 @@ def _source_observation(value: query_pb.WorkspaceSourceObservation) -> Workspace
             watch_healthy=value.watch_healthy,
             rescan_required=value.rescan_required,
             runnable_pending=value.runnable_pending,
+            source_reconciled_watermark=value.source_reconciled_watermark
+            if value.HasField("source_reconciled_watermark")
+            else None,
+            source_freshness=_freshness_state(value.source_freshness)
+            if value.HasField("source_freshness")
+            else None,
+            semantic_pending=value.semantic_pending if value.HasField("semantic_pending") else None,
         )
     except ValueError as error:
         raise DaemonProtocolError("incoherent workspace source observation") from error

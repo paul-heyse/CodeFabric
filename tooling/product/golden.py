@@ -20,6 +20,7 @@ CASES = {
     "cancellation": "wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation",
     "python-live": "pragmatic_live_python_edits_converge_without_restart",
     "mixed-clean-live": "live_updates::mixed_live_updates_equal_independent_clean_public_queries",
+    "staged-live": "live_updates::source_current_publication_fences_delayed_semantics_and_resumes_after_restart",
 }
 
 
@@ -37,7 +38,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--timeout",
         type=float,
-        help="per-case deadline; defaults to 240s, or 600s for mixed clean/live builds",
+        help="per-case deadline; defaults to 240s, or 600s for mixed clean/live and staged builds",
     )
     parser.add_argument(
         "--output", type=Path, default=ROOT / "target/product/golden.json"
@@ -95,7 +96,7 @@ def main(argv=None) -> int:
             timeout = (
                 args.timeout
                 if args.timeout is not None
-                else (600 if name == "mixed-clean-live" else 240)
+                else (600 if name in {"mixed-clean-live", "staged-live"} else 240)
             )
             outcome = run(command, cwd=ROOT, timeout=timeout)
             observation = {"case": name, **asdict(outcome)}

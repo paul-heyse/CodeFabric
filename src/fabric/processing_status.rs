@@ -466,6 +466,8 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
             || !matches!(
                 state.value(row),
                 "complete"
+                    | "pending"
+                    | "running"
                     | "partial"
                     | "unknown"
                     | "unavailable"
@@ -615,6 +617,37 @@ mod tests {
             first.coverage().unwrap().state(),
             ResultCompleteness::Unknown
         );
+    }
+
+    #[test]
+    fn pending_and_running_scope_reopen_without_becoming_complete() {
+        let original = fixture().batches[0].slice(0, 1);
+        for state in ["pending", "running"] {
+            let mut columns = original.columns().to_vec();
+            columns[original.schema().index_of("processing_state").unwrap()] =
+                Arc::new(StringArray::from(vec![state]));
+            columns[original.schema().index_of("reason").unwrap()] =
+                Arc::new(StringArray::from(vec!["semantic_work_pending"]));
+            let batch = RecordBatch::try_new(original.schema(), columns).unwrap();
+            validate(&batch, [1; 16], 3).unwrap();
+            let processing = EntityProcessingSnapshot {
+                batches: vec![ChargedValue::for_test(batch)],
+                generation: 3,
+                workspace: [1; 16],
+                epoch: fixture().epoch,
+            };
+            let summary = processing.summarize(
+                &EntityQueryScope {
+                    family: "function-declarations",
+                    languages: BTreeSet::from(["python".to_owned()]),
+                    contexts: BTreeSet::new(),
+                },
+                0,
+            );
+            assert_eq!(summary.completed_partitions, 0);
+            assert_eq!(summary.remaining_partitions, 1);
+            assert_eq!(summary.remainder[0].state, state);
+        }
     }
 
     #[test]

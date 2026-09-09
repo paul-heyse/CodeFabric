@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use super::{
     AuthorizationRef, CompiledSemanticRelease, DeltaActivationRuntimeAuthority, ExpectedHead,
     FabricCommandRuntime, OperationalStore, PrincipalId, ProductionWorkspaceResources,
-    ProductionWorkspaceStartupError, PublishedCandidateValidation,
+    ProductionWorkspaceStartupError, PublicationStage, PublishedCandidateValidation,
     SqliteProgrammaticActivationCommandStateStore, StructuredCancellationScope, WorkspaceId,
     WorkspaceRecord, WorkspaceSlot, activate_source_candidate, advance_source_generation,
     build_fresh_candidate, current_source_generation, step,
@@ -18,6 +18,7 @@ use crate::fabric::workspace_updates::{WorkspaceObservation, WorkspaceWatchContr
 use crate::resource_budget::{ResourceAmounts, ResourceClass};
 
 pub(super) struct SourceUpdateOwner {
+    pub hold_semantic_publication: bool,
     pub state_root: PathBuf,
     pub database: PathBuf,
     pub record: WorkspaceRecord,
@@ -78,15 +79,22 @@ impl SourceUpdateOwner {
         let mut periodic = tokio::time::interval(Duration::from_secs(30));
         periodic.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         periodic.tick().await;
+        let mut needs_recovery = false;
         loop {
             tokio::select! {
                 () = scope.cancelled() => break,
                 hint = receiver.recv() => if hint.is_none() { break; },
                 _ = periodic.tick() => { observation.request(true); }
             }
-            match Box::pin(self.reconcile(&observation, &mut receiver, &scope)).await {
+            match Box::pin(self.reconcile(&observation, &mut receiver, &scope, &mut needs_recovery))
+                .await
+            {
                 Ok(true) => {}
                 Ok(false) => {
+                    observation.request(true);
+                }
+                Err(error) if error.source_changed => {
+                    // An edit racing a secure capture is still pending work, not an outage.
                     observation.request(true);
                 }
                 Err(error) => {
@@ -95,6 +103,7 @@ impl SourceUpdateOwner {
                     }
                     tracing::warn!(workspace = %self.record.public_id(), %error, "source reconciliation unavailable");
                     observation.freshness.mark_unavailable();
+                    observation.source_freshness.mark_unavailable();
                     watch.reinstall();
                     tokio::select! {
                         () = scope.cancelled() => break,
@@ -116,6 +125,7 @@ impl SourceUpdateOwner {
         let record = self.record.clone();
         let budget = self.resources.budget().clone();
         let observed = observation.clone();
+        let writer = Arc::clone(self.resources.operational_writer());
         let guard = budget
             .try_reserve(
                 ResourceClass::Control,
@@ -128,6 +138,9 @@ impl SourceUpdateOwner {
             .map_err(|error| step("source-census-admission", error))?;
         scope
             .spawn_blocking_owned("census", guard, move |cancellation| {
+                let _writer = writer
+                    .lock()
+                    .map_err(|error| step("source-census-writer", error))?;
                 let watermark = observed.freshness.requested();
                 let events = observed.event_revision();
                 let mut store = OperationalStore::open(&database)
@@ -174,6 +187,7 @@ impl SourceUpdateOwner {
     ) -> Result<(), ProductionWorkspaceStartupError> {
         let database = self.database.clone();
         let workspace = self.record.workspace_id;
+        let writer = Arc::clone(self.resources.operational_writer());
         let guard = self
             .resources
             .budget()
@@ -188,6 +202,9 @@ impl SourceUpdateOwner {
             .map_err(|error| step("source-generation-admission", error))?;
         scope
             .spawn_blocking_owned("advance-generation", guard, move |_| {
+                let _writer = writer
+                    .lock()
+                    .map_err(|error| step("source-generation-writer", error))?;
                 let mut store = OperationalStore::open(&database)
                     .map_err(|error| step("source-generation-store", error))?;
                 advance_source_generation(&mut store, workspace, generation)
@@ -201,12 +218,148 @@ impl SourceUpdateOwner {
         Ok(())
     }
 
+    /// The enclosing static configuration rejects this seam in release builds. It remains
+    /// deadline/cancellation bounded and never bypasses providers, activation or source fences.
+    async fn assurance_pause(
+        &self,
+        generation: u64,
+        scope: &StructuredCancellationScope,
+    ) -> Result<(), ProductionWorkspaceStartupError> {
+        if !cfg!(debug_assertions) {
+            return Err(step("semantic-assurance", "debug build required"));
+        }
+        let marker = self.state_root.join(format!(
+            "semantic-update-{}-{generation}",
+            super::lower_hex(&self.record.workspace_id)
+        ));
+        let ready = marker.with_extension("ready");
+        let resume = marker.with_extension("resume");
+        tokio::fs::write(&ready, generation.to_be_bytes())
+            .await
+            .map_err(|error| step("semantic-assurance-ready", error))?;
+        let result = tokio::time::timeout(Duration::from_secs(120), async {
+            loop {
+                if tokio::fs::try_exists(&resume)
+                    .await
+                    .map_err(|error| step("semantic-assurance-resume", error))?
+                {
+                    return Ok(());
+                }
+                tokio::select! {
+                    () = scope.cancelled() => return Err(step("semantic-assurance", "cancelled")),
+                    () = tokio::time::sleep(Duration::from_millis(20)) => {}
+                }
+            }
+        })
+        .await
+        .map_err(|_| step("semantic-assurance", "deadline"));
+        let _ = tokio::fs::remove_file(ready).await;
+        let _ = tokio::fs::remove_file(resume).await;
+        result?
+    }
+
+    async fn recover_publication(&self) -> Result<(), ProductionWorkspaceStartupError> {
+        // Preserve the exact candidate/validation while a durable activation is unresolved.
+        // A newer census must not replace that authority or submit another publication.
+        let diagnostics = super::RelationalInterruptedCommitDiagnostics::new(
+            WorkspaceId::from_bytes(self.record.workspace_id),
+            Arc::new(super::FailClosedInterruptionDiagnostics),
+        );
+        let recovery = self
+            .runtime
+            .recover_and_open_bounded(
+                super::CommandRecoveryPageSize::new(128).expect("bounded recovery page"),
+                std::num::NonZeroUsize::new(8).expect("nonzero recovery sweeps"),
+                &diagnostics,
+            )
+            .await
+            .map_err(|error| step("source-publication-recovery", error))?;
+        if !matches!(
+            recovery.state(),
+            crate::fabric::command_runtime::FabricCommandStartupRecoveryState::Ready
+        ) {
+            return Err(step(
+                "source-publication-recovery",
+                "durable selection remains unresolved",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn build_observed_candidate(
+        &self,
+        stage: PublicationStage,
+        digest: [u8; 32],
+        events: u64,
+        observation: &WorkspaceObservation,
+        receiver: &mut mpsc::Receiver<()>,
+        scope: &StructuredCancellationScope,
+    ) -> Result<Option<super::FreshCandidate>, ProductionWorkspaceStartupError> {
+        let build_scope = scope
+            .child("capture-and-publish")
+            .map_err(|error| step("source-build-scope", error))?;
+        let build = async {
+            let fresh = build_fresh_candidate(
+                &self.state_root,
+                &self.database,
+                &self.record,
+                &self.release,
+                self.runtime.fence(),
+                super::PublicationWork {
+                    resources: &self.resources,
+                    scope: &build_scope,
+                    stage,
+                },
+            )
+            .await?;
+            if stage == PublicationStage::Semantic && self.hold_semantic_publication {
+                self.assurance_pause(fresh.pins.source_generation.get(), &build_scope)
+                    .await?;
+            }
+            Ok::<_, ProductionWorkspaceStartupError>(fresh)
+        };
+        tokio::pin!(build);
+        loop {
+            tokio::select! {
+                result = &mut build => return result.map(Some),
+                () = scope.cancelled() => { build_scope.cancel(); let _ = build.await; return Ok(None); },
+                _ = receiver.recv() => {
+                    if observation.event_revision() != events {
+                        build_scope.cancel(); let _ = build.await; return Ok(None);
+                    }
+                    // A source-current query can request another census during compiler work.
+                    // Refresh requests do not cancel or postpone the semantic successor.
+                    let census = self.census(observation, scope).await;
+                    match census {
+                        Ok(Some((current, current_generation, watermark, checked_events)))
+                            if current == digest && checked_events == events => {
+                            if let Ok(selected) = self.slot.lease() {
+                                let authority = selected.workspace().runtime().query_authority();
+                                if authority.source_inventory_digest() == Some(current)
+                                    && authority.activation_pins().source_generation.get() == current_generation {
+                                    observation.source_reconciled(watermark, current_generation);
+                                }
+                            }
+                        }
+                        Ok(_) => { build_scope.cancel(); let _ = build.await; return Ok(None); }
+                        Err(error) => { build_scope.cancel(); let _ = build.await; return Err(error); }
+                    }
+                }
+            }
+        }
+    }
+
     async fn reconcile(
         &self,
         observation: &WorkspaceObservation,
         receiver: &mut mpsc::Receiver<()>,
         scope: &StructuredCancellationScope,
+        needs_recovery: &mut bool,
     ) -> Result<bool, ProductionWorkspaceStartupError> {
+        if *needs_recovery {
+            self.recover_publication().await?;
+            *needs_recovery = false;
+        }
         let Some((digest, generation, watermark, events)) = self.census(observation, scope).await?
         else {
             return Ok(false);
@@ -216,74 +369,82 @@ impl SourceUpdateOwner {
             .lease()
             .map_err(|error| step("source-update-selected", error))?;
         let authority = selected.workspace().runtime().query_authority();
-        if authority.source_inventory_digest() == Some(digest)
-            && authority.activation_pins().source_generation.get() == generation
-        {
-            observation.reconciled(
-                watermark,
-                authority.activation_pins().source_generation.get(),
-            );
-            return Ok(true);
+        let unchanged = authority.source_inventory_digest() == Some(digest)
+            && authority.activation_pins().source_generation.get() == generation;
+        if unchanged {
+            observation.source_reconciled(watermark, generation);
+            if !authority.semantic_pending() {
+                observation.reconciled(watermark, generation);
+                return Ok(true);
+            }
         }
-        let expected_head = ExpectedHead::Epoch(selected.workspace().selection().epoch_id());
+        let mut expected_head = ExpectedHead::Epoch(selected.workspace().selection().epoch_id());
         drop(selected);
-        let workspace = self.record.workspace_id;
-        self.advance_generation(generation, scope).await?;
-        let build_scope = scope
-            .child("capture-and-publish")
-            .map_err(|error| step("source-build-scope", error))?;
-        let build = build_fresh_candidate(
-            &self.state_root,
-            &self.database,
-            &self.record,
-            &self.release,
-            self.runtime.fence(),
-            &self.resources,
-            &build_scope,
-        );
-        tokio::pin!(build);
-        let fresh = loop {
-            tokio::select! {
-                result = &mut build => break result?,
-                () = scope.cancelled() => { build_scope.cancel(); let _ = build.await; return Ok(false); },
-                _ = receiver.recv() => {
-                    if observation.event_revision() != events {
-                        build_scope.cancel(); let _ = build.await; return Ok(false);
-                    }
+        let stages = if unchanged {
+            // Reopen or retry of a durable source-only epoch must resume semantic work.
+            &[PublicationStage::Semantic][..]
+        } else {
+            self.advance_generation(generation, scope).await?;
+            &[PublicationStage::Source, PublicationStage::Semantic][..]
+        };
+        for &stage in stages {
+            let Some(fresh) = Box::pin(self.build_observed_candidate(
+                stage,
+                digest,
+                events,
+                observation,
+                receiver,
+                scope,
+            ))
+            .await?
+            else {
+                return Ok(false);
+            };
+            let Some((current_digest, current_generation, checked_watermark, checked_events)) =
+                self.census(observation, scope).await?
+            else {
+                return Ok(false);
+            };
+            let candidate = crate::fabric::workspace_updates::selected_inventory_state(
+                &fresh.candidate,
+                self.record.workspace_id,
+                fresh.pins.source_generation.get(),
+            )
+            .await
+            .map_err(|error| step("source-candidate-inventory", error))?;
+            if candidate.is_none_or(|state| state.digest != current_digest)
+                || current_digest != digest
+                || fresh.pins.source_generation.get() != current_generation
+                || checked_events != events
+                || observation.event_revision() != checked_events
+            {
+                return Ok(false);
+            }
+            self.validation.replace_with(&fresh.validation);
+            *needs_recovery = true;
+            activate_source_candidate(
+                &fresh,
+                expected_head,
+                WorkspaceId::from_bytes(self.record.workspace_id),
+                self.principal,
+                self.authorization,
+                &self.runtime,
+                &self.activation,
+                &self.state_store,
+                &self.release,
+            )
+            .await?;
+            *needs_recovery = false;
+            expected_head = ExpectedHead::Epoch(fresh.pins.epoch);
+            match stage {
+                PublicationStage::Source => {
+                    observation.source_reconciled(checked_watermark, current_generation);
+                }
+                PublicationStage::Semantic => {
+                    observation.reconciled(checked_watermark, current_generation);
                 }
             }
-        };
-        let Some((current_digest, _, checked_watermark, checked_events)) =
-            self.census(observation, scope).await?
-        else {
-            return Ok(false);
-        };
-        let candidate_digest = crate::fabric::workspace_updates::selected_inventory_digest(
-            &fresh.candidate,
-            workspace,
-            fresh.pins.source_generation.get(),
-        )
-        .await
-        .map_err(|error| step("source-candidate-inventory", error))?;
-        if candidate_digest != Some(current_digest)
-            || observation.event_revision() != checked_events
-        {
-            return Ok(false);
         }
-        self.validation.replace_with(&fresh.validation);
-        activate_source_candidate(
-            &fresh,
-            expected_head,
-            WorkspaceId::from_bytes(workspace),
-            self.principal,
-            self.authorization,
-            &self.runtime,
-            &self.activation,
-            &self.state_store,
-            &self.release,
-        )
-        .await?;
-        observation.reconciled(checked_watermark, fresh.pins.source_generation.get());
         Ok(true)
     }
 }

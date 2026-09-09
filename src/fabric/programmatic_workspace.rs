@@ -45,7 +45,7 @@ pub struct WorkspaceEpochQueryAuthority {
     entity_processing: Option<Arc<super::processing_status::EntityProcessingSnapshot>>,
     source_disclosure: Option<Arc<super::source_disclosure::SourceDisclosureAuthority>>,
     source_observation: Option<Arc<super::workspace_updates::WorkspaceObservation>>,
-    source_inventory_digest: Option<[u8; 32]>,
+    source_inventory: Option<super::workspace_updates::SourceInventoryState>,
 }
 
 impl fmt::Debug for WorkspaceEpochQueryAuthority {
@@ -132,17 +132,17 @@ impl WorkspaceEpochQueryAuthority {
             entity_processing: None,
             source_disclosure: None,
             source_observation: None,
-            source_inventory_digest: None,
+            source_inventory: None,
         })
     }
 
     pub(crate) fn with_source_observation(
         mut self,
         observation: Arc<super::workspace_updates::WorkspaceObservation>,
-        digest: Option<[u8; 32]>,
+        inventory: Option<super::workspace_updates::SourceInventoryState>,
     ) -> Self {
         self.source_observation = Some(observation);
-        self.source_inventory_digest = digest;
+        self.source_inventory = inventory;
         self
     }
 
@@ -153,7 +153,12 @@ impl WorkspaceEpochQueryAuthority {
     }
 
     pub(crate) fn source_inventory_digest(&self) -> Option<[u8; 32]> {
-        self.source_inventory_digest
+        self.source_inventory.map(|state| state.digest)
+    }
+
+    pub(crate) fn semantic_pending(&self) -> bool {
+        self.source_inventory
+            .is_some_and(|state| state.semantic_pending)
     }
 
     pub(crate) fn with_source_disclosure(

@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:a5f9544f78fe2e3132e0f631c31369a8f4ff607731c7e647fca4184f8bde7e3a
+// canonical_digest: b3:2eae6d75ca2757c08ea204d013c066b9eb7ce2b027f1835f9b59370215dec085
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
@@ -273,6 +273,10 @@ message WorkspaceSourceObservation {
   bool watch_healthy = 6;
   bool rescan_required = 7;
   bool runnable_pending = 8;
+  // Optional for exact compatibility with pre-staging daemons.
+  optional uint64 source_reconciled_watermark = 9;
+  optional SnapshotFreshness source_freshness = 10;
+  optional bool semantic_pending = 11;
 }
 
 message ReferenceReadRequest {

@@ -316,6 +316,9 @@ class WorkspaceSourceObservation(StrictWireModel):
     watch_healthy: bool
     rescan_required: bool
     runnable_pending: bool
+    source_reconciled_watermark: NonNegativeInt | None = None
+    source_freshness: SnapshotFreshness | None = None
+    semantic_pending: bool | None = None
 
     @model_validator(mode="after")
     def coherent_watermarks(self) -> WorkspaceSourceObservation:
@@ -323,6 +326,16 @@ class WorkspaceSourceObservation(StrictWireModel):
             raise ValueError("source reconciliation exceeds requested observation")
         if self.runnable_pending != (self.reconciled_watermark < self.requested_watermark):
             raise ValueError("source pending work disagrees with observation watermarks")
+        if (self.source_reconciled_watermark is None) != (self.source_freshness is None) or (
+            (self.source_freshness is None) != (self.semantic_pending is None)
+        ):
+            raise ValueError("incomplete source/semantic stage observation")
+        if self.source_reconciled_watermark is not None and not (
+            self.reconciled_watermark
+            <= self.source_reconciled_watermark
+            <= self.requested_watermark
+        ):
+            raise ValueError("source stage watermarks are out of order")
         return self
 
 

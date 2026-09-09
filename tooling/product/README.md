@@ -31,3 +31,9 @@ in the comparison. Operational generations/provider runs and the snapshot-bound 
 are excluded. This measured case has a 600 s default deadline; `--timeout` overrides it explicitly.
 Contained providers require delegated cgroups and the configured provider binaries, as recorded in
 [STATUS.md](../../STATUS.md). Broader edit/context and semantic coverage remain open.
+
+`just golden --case staged-live` holds a real completed semantic candidate before publication, queries
+current source and pending checker/compiler scope, checks a semantic deadline, replaces the held
+candidate with a newer edit, and restarts from a durable pending source epoch. Its private debug-only
+pause has cancellation and a deadline; release builds reject the fault configuration. This case also
+has a 600 s harness bound for repeated contained builds.

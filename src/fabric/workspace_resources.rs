@@ -23,6 +23,7 @@ use crate::resource_budget::{
 #[derive(Clone)]
 pub(crate) struct ProductionWorkspaceResources {
     budget: ResourceBudget,
+    operational_writer: Arc<std::sync::Mutex<()>>,
     native: WorkspaceFabricResources,
     scheduler: WorkspaceResourceCoordinator,
     config: ProductionActiveWorkspaceConfig,
@@ -115,6 +116,7 @@ impl ProductionWorkspaceResources {
         )
         .map_err(|error| error.to_string())?;
         Ok(Self {
+            operational_writer: Arc::new(std::sync::Mutex::new(())),
             budget,
             native,
             scheduler,
@@ -125,6 +127,11 @@ impl ProductionWorkspaceResources {
             local_store,
             local_store_state_root,
         })
+    }
+
+    /// Serializes short operational writes; provider computation never retains this gate.
+    pub(crate) fn operational_writer(&self) -> &Arc<std::sync::Mutex<()>> {
+        &self.operational_writer
     }
 
     /// Complete the fixed physical directory bootstrap while retaining this workspace owner

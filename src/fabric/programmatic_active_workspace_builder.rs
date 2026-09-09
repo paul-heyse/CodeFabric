@@ -351,7 +351,7 @@ impl ProductionActiveWorkspaceBuilder {
             tracing::warn!(%error, "cannot reconstruct selected processing scope");
             Self::invalid("processing-scope")
         })?;
-        let inventory_digest = super::workspace_updates::selected_inventory_digest(
+        let inventory_digest = super::workspace_updates::selected_inventory_state(
             &epoch,
             *selection.workspace_id().as_bytes(),
             pins.source_generation.get(),

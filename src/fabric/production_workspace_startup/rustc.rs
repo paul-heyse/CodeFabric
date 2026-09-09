@@ -113,9 +113,10 @@ pub(super) fn run(
     release: &CompiledSemanticRelease,
     inputs: &PreparedSourceInputs,
     record: &WorkspaceRecord,
-    scope: &StructuredCancellationScope,
     cancellation: &Cancellation,
+    work: super::PublicationWork<'_>,
 ) -> Result<RustcOutcome, ProductionWorkspaceStartupError> {
+    let super::PublicationWork { scope, stage, .. } = work;
     let inventory = inputs.inventory_for_language(SourceLanguage::Rust)?;
     let mut outcome = RustcOutcome {
         source_pin: SourcePin(inventory.identity()),
@@ -140,6 +141,21 @@ pub(super) fn run(
             return Ok(outcome);
         }
     };
+    if stage == super::PublicationStage::Source {
+        outcome.gap = ProviderLaneGap::Pending;
+        outcome.progress = targets
+            .into_iter()
+            .map(|target| RustTargetProgress {
+                manifest: target.manifest,
+                target: target.target.name,
+                target_kind: target.target.kind.as_str().to_owned(),
+                context_id: None,
+                state: "pending",
+                detail: "semantic_work_pending".to_owned(),
+            })
+            .collect();
+        return Ok(outcome);
+    }
     let mut contexts = Vec::new();
     for target in targets {
         let mut progress = RustTargetProgress {

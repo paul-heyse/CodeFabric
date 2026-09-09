@@ -131,6 +131,7 @@ pub(crate) struct ProductionWorkspaceStartup {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProductionWorkspaceStartupAssuranceFault {
     DurableAppendAcknowledgementLostBeforeReadback,
+    HoldSemanticUpdatePublication,
 }
 
 impl ProductionWorkspaceStartup {
@@ -176,12 +177,25 @@ impl ProductionWorkspaceStartup {
 pub(crate) struct ProductionWorkspaceStartupError {
     step: &'static str,
     detail: String,
+    source_changed: bool,
 }
 
 fn step(step: &'static str, error: impl std::fmt::Display) -> ProductionWorkspaceStartupError {
     ProductionWorkspaceStartupError {
         step,
         detail: error.to_string(),
+        source_changed: false,
+    }
+}
+
+fn source_changed(
+    step: &'static str,
+    error: impl std::fmt::Display,
+) -> ProductionWorkspaceStartupError {
+    ProductionWorkspaceStartupError {
+        step,
+        detail: error.to_string(),
+        source_changed: true,
     }
 }
 
@@ -499,6 +513,19 @@ fn inprocess_operational_ceilings() -> Result<ProviderResourceCeilings, Provider
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PublicationStage {
+    Source,
+    Semantic,
+}
+
+#[derive(Clone, Copy)]
+struct PublicationWork<'a> {
+    resources: &'a ProductionWorkspaceResources,
+    scope: &'a StructuredCancellationScope,
+    stage: PublicationStage,
+}
+
 struct FreshNativeSource {
     builder: ProgrammaticFabricEpochBuilder,
     workspace_root: PathBuf,
@@ -518,16 +545,24 @@ fn build_fresh_native_source(
     operational_database: &Path,
     record: &WorkspaceRecord,
     release: &CompiledSemanticRelease,
-    workspace_resources: &ProductionWorkspaceResources,
     cancellation: crate::cancellation::Cancellation,
-    provider_scope: &StructuredCancellationScope,
+    work: PublicationWork<'_>,
 ) -> Result<FreshNativeSource, ProductionWorkspaceStartupError> {
+    let PublicationWork {
+        resources: workspace_resources,
+        stage,
+        ..
+    } = work;
     crate::process_memory::admit(crate::resource_budget::ResourceClass::Data)
         .map_err(|error| step("source-memory-headroom", error))?;
     let workspace_root = state_root
         .join("fabric")
         .join(lower_hex(&record.workspace_id));
     private_directory(&workspace_root)?;
+    let writer = Arc::clone(workspace_resources.operational_writer());
+    let capture_writer = writer
+        .lock()
+        .map_err(|error| step("source-capture-writer", error))?;
     let mut store = OperationalStore::open(operational_database)
         .map_err(|error| step("operational-store-open", error))?;
     let mut generation = current_source_generation(&store, record.workspace_id)
@@ -537,7 +572,7 @@ fn build_fresh_native_source(
             .map_err(|error| step("source-generation-genesis", error))?;
     }
     drop(store);
-    let prepared_inputs = inputs::capture_inputs(
+    let mut prepared_inputs = inputs::capture_inputs(
         &workspace_root,
         operational_database,
         record,
@@ -546,6 +581,8 @@ fn build_fresh_native_source(
         cancellation.clone(),
         workspace_resources.source_blob_disk().clone(),
     )?;
+    prepared_inputs.detach_writer(operational_database.to_owned(), Arc::clone(&writer));
+    drop(capture_writer);
     let inventory_digest = prepared_inputs.inventory.identity();
     let context_product = inputs::discover_python_inputs(&prepared_inputs, record)?;
     let prepared_context = inputs::provider_context(&context_product)?;
@@ -591,12 +628,20 @@ fn build_fresh_native_source(
         )));
     }
 
+    // Each candidate owns a fresh physical namespace. A retry/restart may retain an earlier
+    // unselected candidate with the same source generation; never create over its Delta log.
+    let attempt = crate::identity::random_registration_nonce()
+        .map_err(|error| step("candidate-attempt", error))?;
     let epoch_id = EpochId::from_bytes(digest16(
-        b"codefabric.fresh-activation.epoch.v1\0",
+        match stage {
+            PublicationStage::Source => b"codefabric.source-activation.epoch.v1\0".as_slice(),
+            PublicationStage::Semantic => b"codefabric.fresh-activation.epoch.v1\0".as_slice(),
+        },
         &[
             &record.workspace_id,
             &generation.to_be_bytes(),
             &inventory_digest,
+            &attempt,
         ],
     ));
     let builder = ProgrammaticFabricEpochBuilder::try_new_governed(
@@ -785,16 +830,16 @@ fn build_fresh_native_source(
         &prepared_inputs,
         &prepared_context,
         &context_product.canonical_manifest,
-        provider_scope,
         cancellation.clone(),
+        work,
     )?;
     let rustc = rustc::run(
         &workspace_root,
         release,
         &prepared_inputs,
         record,
-        provider_scope,
         &cancellation,
+        work,
     )?;
     let authority = ProductionProviderAuthority::try_new(
         ExactProviderLaneAuthority::try_new(
@@ -851,13 +896,14 @@ fn build_fresh_native_source(
         &prepared_inputs.inventory,
         &admitted_runs,
         &rustc.progress,
+        stage,
     )?;
     input_observations::install_input_observations(
         &mut builder,
         &prepared_inputs.inventory,
         &admitted_runs,
     )?;
-    source_context::install(&mut builder, prepared_inputs.capture()?)?;
+    source_context::install(&mut builder, prepared_inputs.capture()?, stage)?;
     canonical::install(
         &mut builder,
         &prepared_inputs.inventory,
@@ -921,9 +967,13 @@ async fn build_fresh_candidate(
     record: &WorkspaceRecord,
     release: &Arc<CompiledSemanticRelease>,
     fence: super::command::WriterFence,
-    workspace_resources: &ProductionWorkspaceResources,
-    task_scope: &StructuredCancellationScope,
+    work: PublicationWork<'_>,
 ) -> Result<FreshCandidate, ProductionWorkspaceStartupError> {
+    let PublicationWork {
+        resources: workspace_resources,
+        scope: task_scope,
+        stage,
+    } = work;
     let guard = workspace_resources
         .budget()
         .try_reserve(
@@ -955,9 +1005,12 @@ async fn build_fresh_candidate(
                 &operation_database,
                 &operation_record,
                 &operation_release,
-                &operation_resources,
                 cancellation,
-                &provider_scope,
+                PublicationWork {
+                    resources: &operation_resources,
+                    scope: &provider_scope,
+                    stage,
+                },
             )
         })
         .await
@@ -989,6 +1042,19 @@ async fn build_fresh_candidate(
         )
         .await
         .map_err(|error| step("candidate-publish", error))?;
+    Box::pin(reopen_published_candidate(
+        publication,
+        record,
+        workspace_resources,
+    ))
+    .await
+}
+
+async fn reopen_published_candidate(
+    publication: FreshCandidatePublication,
+    record: &WorkspaceRecord,
+    workspace_resources: &ProductionWorkspaceResources,
+) -> Result<FreshCandidate, ProductionWorkspaceStartupError> {
     let candidate = Arc::new(
         ProgrammaticFabricEpochBuilder::try_new_governed(
             publication.pins.epoch,
@@ -1339,8 +1405,11 @@ async fn compose_production_workspace(
                     record,
                     &release,
                     writer_lease.fence(),
-                    &workspace_resources,
-                    &task_scope,
+                    PublicationWork {
+                        resources: &workspace_resources,
+                        scope: &task_scope,
+                        stage: PublicationStage::Semantic,
+                    },
                 )
                 .await?,
             )
@@ -1549,6 +1618,8 @@ async fn compose_production_workspace(
         Err(primary) => return Err(shutdown_after_startup_error(command_runtime, primary).await),
     };
     let update_owner = updates::SourceUpdateOwner {
+        hold_semantic_publication: assurance_fault
+            == Some(ProductionWorkspaceStartupAssuranceFault::HoldSemanticUpdatePublication),
         state_root: state_root.to_owned(),
         database: operational_database.to_owned(),
         record: record.clone(),

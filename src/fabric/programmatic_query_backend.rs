@@ -891,8 +891,12 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         // Current-required requests force a census even if an OS notification was lost or
         // is still inside the native debounce window. The workspace coalesces all requests.
         observation.request(true);
-        observation
-            .freshness
+        let barrier = if request.request.freshness_policy == FreshnessPolicy::RequireSourceCurrent {
+            &observation.source_freshness
+        } else {
+            &observation.freshness
+        };
+        barrier
             .admit_query(
                 crate::freshness::FreshnessAdmission::AwaitLatest,
                 std::time::Duration::from_millis(
@@ -1037,7 +1041,18 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             authority
                 .source_observation()
                 .map_or(FreshnessState::Current, |observation| {
-                    observation.state_for(authority.activation_pins().source_generation.get())
+                    if matches!(
+                    request.request.freshness_policy,
+                    crate::semantic_query_contract::FreshnessPolicy::RequireSourceCurrent
+                        | crate::semantic_query_contract::FreshnessPolicy::BestAvailableSnapshot
+                ) {
+                        observation
+                            .source_state_for(authority.activation_pins().source_generation.get())
+                    } else if authority.semantic_pending() {
+                        FreshnessState::PotentiallyStale
+                    } else {
+                        observation.state_for(authority.activation_pins().source_generation.get())
+                    }
                 });
         if request.request.freshness_policy
             != crate::semantic_query_contract::FreshnessPolicy::BestAvailableSnapshot

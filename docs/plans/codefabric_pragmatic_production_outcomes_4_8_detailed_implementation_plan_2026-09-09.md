@@ -1,6 +1,6 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `734821db` (`Publish canonical Python call occurrences and checker-resolved edges`) and the validated call-query continuation described in §1.4.
+Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `6b6abffb` (`Compare mixed live queries with independent clean builds`) and the source-first publication continuation described below.
 
 This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Implementation is underway. The status notes distinguish demonstrated committed behavior, uncommitted work and remaining acceptance; writing or updating this plan is not implementation evidence.
 
@@ -96,11 +96,11 @@ non-identity source mappings, remaining subjects/directives and composition rema
 | 4D | Partial, committed | Remaining canonical families, authority/unknowns and external/generated/edit-time identity |
 | 4E | Four limited forms demonstrated | Extend calls and SourceContext, broaden first-four meanings and composition |
 | 5A | Partial; call and lexical-reference scopes demonstrated | Query dependency/owner scope, all families, public paging, efficient authorized live status |
-| 5B | Typed processing/truncation delivered in part | Real freshness policies and observable generation/context/family convergence |
-| 6A | Open; infrastructure only | Daemon-owned notify/gix watch, reconciliation and overflow/rescan recovery |
-| 6B | Open; identity/admission foundations | Immediate invalidation, deletions/replacements, negative dependencies and obsolete completions |
-| 6C | Open; startup and blob reuse exist | Shared update orchestration, two-speed snapshots and retained Tree-sitter/Pyrefly/Cargo state |
-| 6D | Open; helpers/expectations only | Persistent incremental daemon versus independent clean rebuild with real semantic comparisons |
+| 5B | Partial live source/semantic barriers and typed status | Target/family-specific convergence, historical selection and remainder paging |
+| 6A | Partial native watch/census/rescan loop | Git inclusion, external roots, polling profile and root/config recovery |
+| 6B | Partial live replacement and generation fences | Negative/configuration dependencies, complete identity rules and broader races |
+| 6C | Partial shared orchestration and source/semantic stages | Retained Tree-sitter/Pyrefly/Cargo state, selective persistence and scheduling |
+| 6D | Limited mixed clean/live comparison and deterministic publication pause | Broader language/context/edit corpus and all-family comparisons |
 | 7A | Open; selected lexical/call prerequisites | Complete production Python semantics, canonical/query consumers and invalidation |
 | 7B | Open; existing algorithms not full production behavior | Correct Python CFG/evaluation/dataflow and actual accepted input wiring |
 | 7C | Open | Python memory/effects/resources/exceptions/capture/async/concurrency on 7B |
@@ -296,8 +296,9 @@ secure source census and await an exact successor; racing selection retries with
 Best-available snapshots retain actual freshness. Snapshot freshness/context and separate live workspace
 watermarks/watch health/rescan/runnable state cross the typed wire. Retained old source pages pass
 across live publication. Target/family-specific barriers, historical selectors, public remainder paging
-and all-family terminal convergence remain open; full provider-pass completion is the current
-conservative implementation for every strict policy.
+and all-family terminal convergence remain open. Source-current now selects a durably staged
+source/syntax epoch while semantic work remains pending; the other strict policies conservatively
+await the full provider pass. Status distinguishes source freshness and selected semantic pending.
 
 **Surfaces:** `src/query_service.rs`, snapshot selection, `src/semantic_query_contract.rs`, released Protobuf files under `contracts/`, generated Rust/Python clients, adapter DTOs/status tools.
 
@@ -338,8 +339,9 @@ Git inclusion, excluded native watch topology, explicit polling and root/config 
 stale observation are wired into live updates. Providers and activation reuse exact source/context
 pins; new events cancel or invalidate older candidate work. Python edit/delete/atomic-save scenarios
 pass. Mixed Python/Rust call-target edits and compiler failure/repair now match independent clean
-state for the four implemented query forms. Configuration/negative-dependency and delayed-completion
-acceptance remain open.
+state for the four implemented query forms. Deterministically paused completed providers are rejected
+after a newer edit; exact pending-stage restart resumes the same generation. Broader configuration,
+negative-dependency and context acceptance remain open.
 
 **Surfaces:** source/context relations, provider/analysis scheduling, owner-replacement normalization and activation inputs.
 
@@ -356,9 +358,13 @@ acceptance remain open.
 
 **Current status — partial orchestration reuse.** Startup capture/providers/normalization/publication
 now serve serialized updates, and old source pages remain readable during successor publication.
-Epoch retirement is separate from workspace admission shutdown. Publication still waits for semantic
-completion and rebuilds all selected relations. Syntax-first publication, retained checker/parser/Cargo
-state, unchanged-version reuse and update scheduling remain open.
+Epoch retirement is separate from workspace admission shutdown. Live updates now publish source/syntax
+with pending checker/named compiler target scope, then a semantic successor at the same generation.
+A durable stage marker supports exact pending-stage reopen. Source-current queries use a distinct
+barrier; terminal semantic failures remain incomplete without endless pending work. The deterministic mixed Python/Rust pause/deadline/obsolete-completion/restart case passes
+(168.05 s), including named pending Cargo targets. Capture bytes/leases outlive the short operational
+writer, allowing censuses during semantic work. Fresh startup still waits for its first provider pass. Retained checker/parser/Cargo state,
+unchanged-version reuse, selective persistence and update scheduling remain open.
 
 **Surfaces:** source-wave commands, candidate/activation builders, `src/fabric/production_workspace_startup.rs` reused as shared preparation/composition helpers, provider services and runtime scheduler.
 
@@ -382,7 +388,10 @@ state and provider caches. Four-form comparisons preserve canonical identity/rel
 positions, precision, order, coverage and source bytes; operational generations/provider runs and
 the explicitly snapshot-bound source-context handle differ. Independent names/call pairs and the
 repaired-to-original comparison pass (259.56 s, 2026-09-09). The broader edit corpus, all-family
-coverage, configuration/negative imports and deterministic delayed completion remain open.
+coverage, configuration/negative imports remain open. A separate source-stage case deterministically holds a completed provider candidate,
+rejects it after a newer edit, and resumes a pending generation after exact restart; mixed Python/Rust
+target coverage passes (168.05 s). The final two-stage clean comparison passes (294.29 s), as do the
+full Python edit sequence (114.60 s) and retained source-page checks (41.57 s), within 43 affected tests.
 
 **Surfaces:** `tooling/product/corpus.py`, `edits.json`, daemon integration fixture, modern driver and golden case selection.
 
@@ -755,9 +764,10 @@ coverage. Current policies use whole-workspace census/publication barriers; type
 and separate live source observations are exposed. Preserve these working paths while extending the
 remaining semantic meanings and composition.
 
-Continue **6A–6D** with mixed Python/Rust edits and independent clean-state comparison, configuration
-and negative-dependency/delayed-completion cases, selected external input roots, Git inclusion, polling,
-root recovery, syntax-first publication and retained provider state. Extend **5A–5B** with public
+Continue **6A–6D** by extending the mixed Python/Rust independent-clean and delayed-completion corpus
+with configuration and negative dependencies, selected external input roots, Git inclusion, polling
+and root recovery. Add retained provider state and selective persistence to the implemented source-first
+publication loop. Extend **5A–5B** with public
 remainder pagination and target/family-specific barriers. Add phase metrics and selective persistence
 as these consumers become real.
 

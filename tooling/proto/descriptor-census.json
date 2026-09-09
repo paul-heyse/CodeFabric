@@ -5185,10 +5185,62 @@
               "proto3_optional": false,
               "type": "TYPE_BOOL",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "sourceReconciledWatermark",
+              "label": "LABEL_OPTIONAL",
+              "name": "source_reconciled_watermark",
+              "number": 9,
+              "oneof": "_source_reconciled_watermark",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "sourceFreshness",
+              "label": "LABEL_OPTIONAL",
+              "name": "source_freshness",
+              "number": 10,
+              "oneof": "_source_freshness",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.cpgd.v2.SnapshotFreshness"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "semanticPending",
+              "label": "LABEL_OPTIONAL",
+              "name": "semantic_pending",
+              "number": 11,
+              "oneof": "_semantic_pending",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_BOOL",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v2.WorkspaceSourceObservation",
-          "oneofs": [],
+          "oneofs": [
+            {
+              "name": "_source_reconciled_watermark",
+              "options": {}
+            },
+            {
+              "name": "_source_freshness",
+              "options": {}
+            },
+            {
+              "name": "_semantic_pending",
+              "options": {}
+            }
+          ],
           "options": {},
           "reserved_names": [],
           "reserved_ranges": []
