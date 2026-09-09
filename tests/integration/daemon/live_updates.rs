@@ -473,6 +473,151 @@ fn mixed_live_updates_equal_independent_clean_public_queries() {
     supervisor.stop();
 }
 
+/// Independent expected calls accompany clean/live equality, including semantic unknowns.
+fn python_context_calls(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    selected: Option<&str>,
+    dependency_present: bool,
+) -> Vec<SemanticObservation> {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "function declarations",
+    );
+    let entities = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-entities"),
+        request.clone(),
+    );
+    let by_id = entities
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row["public_entity_id"].as_str().unwrap(),
+                row["name"].as_str().unwrap(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut names = BTreeSet::from(["caller", "legacy", "current"]);
+    if dependency_present {
+        names.insert("imported");
+    }
+    assert_eq!(
+        by_id.values().copied().collect::<BTreeSet<_>>(),
+        names,
+        "{phase}"
+    );
+    assert_eq!(entities.processing[0]["remaining_partitions"], 0, "{phase}");
+    let caller = by_id.iter().find(|(_, name)| **name == "caller").unwrap().0;
+    request["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "calls",
+        "starting_from": [{"entity_id": caller}], "relationship": "calls", "direction": "outgoing",
+        "distance": "one relationship step", "return": {"limit": {"maximum_results": 32}}
+    }]);
+    let calls = public_query(fixture, stack, &format!("{phase}-calls"), request);
+    assert_eq!(
+        calls.rows.len(),
+        2,
+        "{phase}: both call occurrences survive unresolved imports"
+    );
+    let targets = calls
+        .rows
+        .iter()
+        .map(|row| {
+            assert_eq!(row["public_source_entity_id"].as_str(), Some(*caller));
+            row["public_target_entity_id"].as_str().map(|id| by_id[id])
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        targets,
+        BTreeSet::from([
+            selected,
+            (dependency_present && selected.is_some()).then_some("imported")
+        ]),
+        "{phase}"
+    );
+    assert_eq!(
+        calls.processing[0]["remaining_partitions"],
+        if selected.is_none() {
+            1 + u64::from(dependency_present)
+        } else {
+            u64::from(!dependency_present)
+        },
+        "{phase}: unknown import or unsupported context scope"
+    );
+    vec![entities, calls]
+}
+
+#[test]
+fn live_python_context_and_negative_imports_equal_independent_clean_queries() {
+    let fixture = ProductionFixture::with_source(b"import sys\nfrom dependency import imported\ndef legacy():\n    return 1\ndef current():\n    return 2\nif sys.version_info >= (3, 14) and sys.platform == 'linux':\n    selected = current\nelse:\n    selected = legacy\ndef caller():\n    return selected() + imported()\n");
+    let root = Path::new(&fixture.workspace.root_path_display);
+    fs::write(
+        root.join("pyrefly.toml"),
+        "python-version = '3.14'\npython-platform = 'linux'\n",
+    )
+    .unwrap();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    OperationalStore::open(&fixture.state.join("operational.sqlite3"))
+        .unwrap()
+        .backup_to(&registration)
+        .unwrap();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let initial = python_context_calls(&fixture, &stack, "missing-import", Some("current"), false);
+    for (phase, version, platform, present, selected) in [
+        ("import-created", "3.14", "linux", true, Some("current")),
+        ("older-python", "3.12", "linux", true, Some("legacy")),
+        ("other-platform", "3.14", "win32", true, Some("legacy")),
+        ("unsupported-setting", "3.14", "linux", true, None),
+        ("import-deleted", "3.14", "linux", false, Some("current")),
+    ] {
+        fs::write(
+            root.join("pyrefly.toml"),
+            format!(
+                "python-version = '{version}'\npython-platform = '{platform}'\n{}",
+                if selected.is_none() {
+                    "unhandled-setting = true\n"
+                } else {
+                    ""
+                }
+            ),
+        )
+        .unwrap();
+        if present {
+            fs::write(
+                root.join("dependency.py"),
+                b"def imported():\n    return 4\n",
+            )
+            .unwrap();
+        } else {
+            fs::remove_file(root.join("dependency.py")).unwrap();
+        }
+        let live = python_context_calls(&fixture, &stack, phase, selected, present);
+        let clean = clean_fixture(&fixture, &registration, &stack);
+        let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+        let expected =
+            python_context_calls(&clean, &stack, &format!("clean-{phase}"), selected, present);
+        assert_eq!(
+            live, expected,
+            "{phase}: context/dependency replacement must equal clean semantics"
+        );
+        if !present {
+            assert_eq!(
+                live, initial,
+                "restoring the original inputs restores their exact semantics"
+            );
+        }
+        clean_supervisor.stop();
+    }
+    supervisor.stop();
+}
+
 fn pending_semantic_candidate(fixture: &ProductionFixture) -> PathBuf {
     eprintln!(
         "waiting for semantic publication in {}",

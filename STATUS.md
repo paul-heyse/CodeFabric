@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `99b77ec0` (`Publish live source snapshots before semantic convergence`);
-public processing continuation is the current implementation slice.
+Last production commit: `730a346d` (`Page retained processing scope through the public daemon`);
+captured Python configuration and live context/dependency acceptance are the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -280,7 +280,20 @@ imported aliases and bound methods are tested. The sidecar maps coordinates to c
 pins, and the daemon independently validates file, digest and range. Synthesized/unavailable or
 out-of-inventory definitions remain explicit gaps; qualified display names are not identity.
 
-Remaining: project configuration and ordered external import roots; namespaces/re-exports and
+The current change admits captured project configuration when the effective manifest accounts for
+all checker settings. Version, platform and ordered workspace search paths are installed from that
+manifest; artifact digests remain part of context identity. Unapplied checker settings, unmaterialized
+project dependencies and older configurations without a setting census remain unavailable. No ambient
+interpreter, imports or checker configuration are consulted. The installed live/clean scenario passes Python 3.14-to-3.12 and Linux-to-Windows selections,
+previously missing import creation/deletion, unsupported-setting invalidation and restoration of the
+original source/context identities (165.86 s on 2026-09-09). Both call occurrences survive missing
+imports; unrelated resolved calls remain usable. Unsupported checker configuration qualifies the
+whole selected context. Twelve root discovery/capture tests, all 31 sidecar tests and 194 tooling
+tests pass. Sidecar strict lint, default/featureless root checks, governance, docs navigation and
+changed-file formatting pass. Root library Clippy retains 955 baseline warnings with no added findings.
+`just golden --case python-context-live` selects the installed scenario.
+
+Remaining: additional project configuration settings and ordered external import roots; namespaces/re-exports and
 `.pyi` precedence across dependencies; external distribution/stub materialization and identity;
 canonical structural type/member/import/reference output and all declared/computed/expected/narrowed
 propositions; full overload/descriptor/decorator semantics; retained checker updates and context
@@ -388,7 +401,7 @@ source-current uses the separate source publication barrier.
 | 6A | Watch-before-census, owned native watcher, bounded coalesced queue, retained rescan obligation, periodic secure census and public observation/health | Git inclusion, selected external roots, polling profile, root recreation and ignore/config acceptance |
 | 6B | Whole-context replacement, monotonic generations, stale observation, changed-input fences, mixed clean comparison and delayed-completion rejection | Broader negative-dependency/config/context and owner-identity coverage |
 | 6C | Source/syntax then semantic publication, separate current barriers, exact pending-stage restart and old source-page retention | Retained Tree-sitter/Pyrefly/Cargo state, changed-version reuse and fair scheduling |
-| 6D | Persistent Python edits, four-form mixed independent-clean comparison, paused obsolete completion and pending restart | Full semantic/identity/coverage edit corpus, configuration and negative dependencies for both languages |
+| 6D | Persistent Python edits, mixed clean comparison, Python version/platform/negative imports, obsolete completion and pending restart | Full semantic/identity/coverage edit corpus, external inputs and Rust configuration/dependency cases |
 
 The installed live test is distinct from startup-versus-restart validation. The mixed comparison retains canonical
 identity and relationships; the wider edit and rename-continuity corpus remains open.

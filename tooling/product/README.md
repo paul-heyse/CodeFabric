@@ -43,3 +43,9 @@ the fact/manifest resources, restarts the daemon, repairs the workspace and read
 64-row and 2-row processing pages from the original exact snapshot. The paging tool resumes the
 accepted daemon query ID and releases its separate resource after the final page. The default
 case deadline is 600 seconds; `--timeout` overrides it.
+
+`just golden --case python-context-live` changes the captured Python version/platform, adds and
+removes a previously missing import, and selects an unsupported checker setting. Public declarations,
+call occurrences, canonical targets/unknowns and processing scope are checked against independent
+expectations and separate clean daemons. The initial inputs are restored to check identity recovery.
+The case has the same 600-second default harness deadline and explicit timeout override.

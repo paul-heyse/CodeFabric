@@ -63,6 +63,8 @@ struct Manifest {
     typeshed_bundle_digest: Option<String>,
     lockfile_artifacts: Vec<Artifact>,
     project_config_artifacts: Vec<Artifact>,
+    #[serde(default)]
+    unapplied_checker_settings: Option<Vec<String>>,
     #[serde(deserialize_with = "required_nullable_digest")]
     pyrefly_bundle_digest: Option<String>,
     ruff_bundle_digest: String,
@@ -149,7 +151,7 @@ impl SelectedPyreflyPreparation {
         {
             remainders.push(PreparationRemainder::PyreflyBundleAuthorityUnavailable);
         }
-        if !selected.manifest.project_config_artifacts.is_empty() {
+        if !selected.configuration_applied() {
             remainders.push(PreparationRemainder::CheckerConfigurationAuthorityUnavailable);
         }
         if !selected.manifest.dependency_roots.is_empty()
@@ -245,6 +247,13 @@ impl SelectedPyreflyPreparation {
         result
     }
 
+    fn configuration_applied(&self) -> bool {
+        match &self.manifest.unapplied_checker_settings {
+            Some(settings) => settings.is_empty(),
+            None => self.manifest.project_config_artifacts.is_empty(),
+        }
+    }
+
     pub(super) fn config_for_root(&self, root: &Path) -> Result<ConfigFile, String> {
         let paths = |ids: &[String]| {
             ids.iter()
@@ -314,7 +323,7 @@ impl SelectedPyreflyPreparation {
         if !remainders.is_empty() {
             return Err(PreparationError::Unavailable(remainders));
         }
-        if !selected.manifest.project_config_artifacts.is_empty()
+        if !selected.configuration_applied()
             || !selected.manifest.lockfile_artifacts.is_empty()
             || !selected.manifest.stub_roots.is_empty()
             || !selected.manifest.dependency_roots.is_empty()
@@ -534,6 +543,45 @@ pub(crate) fn test_manifest(version: &str, platform: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captured_configuration_requires_complete_application_of_checker_settings() {
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&test_manifest("3.14", "linux")).unwrap();
+        manifest["project_config_artifacts"] = serde_json::json!([{
+            "file_id": "file:config", "digest": super::super::b3(b"python-version='3.14'")
+        }]);
+        // Older artifacts without a setting census remain explicitly unavailable.
+        for settings in [None, Some(serde_json::json!(["pyrefly.toml.unhandled"]))] {
+            if let Some(settings) = settings {
+                manifest["unapplied_checker_settings"] = settings;
+            }
+            assert!(matches!(
+                SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap()),
+                Err(PreparationError::Unavailable(ref reasons)) if reasons.contains(&PreparationRemainder::CheckerConfigurationAuthorityUnavailable)
+            ));
+        }
+        manifest["unapplied_checker_settings"] = serde_json::json!([]);
+        let selected =
+            SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                .unwrap();
+        let root = super::super::tests::claim_001_temp_root("captured-configuration");
+        std::fs::create_dir_all(&root).unwrap();
+        let config = selected.config_for_root(&root).unwrap();
+        assert_eq!(
+            config.python_environment.python_version,
+            Some(PythonVersion {
+                major: 3,
+                minor: 14,
+                micro: 0
+            })
+        );
+        assert_eq!(
+            config.python_environment.python_platform,
+            Some(PythonPlatform::new("linux"))
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn selected_context_accepts_embedded_bundles_and_rejects_substitution() {

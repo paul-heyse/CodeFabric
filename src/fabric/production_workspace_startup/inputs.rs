@@ -643,6 +643,10 @@ fn python_product_memory_bytes(product: &PythonContextDiscoveryProduct) -> u64 {
         bytes += (values.capacity() * std::mem::size_of::<String>()) as u64;
         bytes += values.iter().map(|v| v.capacity() as u64).sum::<u64>();
     }
+    if let Some(values) = &manifest.unapplied_checker_settings {
+        bytes += (values.capacity() * std::mem::size_of::<String>()) as u64;
+        bytes += values.iter().map(|v| v.capacity() as u64).sum::<u64>();
+    }
     for values in [
         &manifest.lockfile_artifacts,
         &manifest.project_config_artifacts,

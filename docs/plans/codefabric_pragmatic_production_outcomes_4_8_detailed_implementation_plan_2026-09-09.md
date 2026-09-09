@@ -1,6 +1,6 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `99b77ec0` (`Publish live source snapshots before semantic convergence`) and the public processing continuation described below.
+Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `730a346d` (`Page retained processing scope through the public daemon`) and the captured Python configuration change described below.
 
 This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Implementation is underway. The status notes distinguish demonstrated committed behavior, uncommitted work and remaining acceptance; writing or updating this plan is not implementation evidence.
 
@@ -207,7 +207,7 @@ Shared runtime interfaces should stay small:
 
 ### 4B. Complete effective Python contexts and bulk semantic extraction
 
-**Current status — partial, committed.** Configured version/platform, captured contained inputs, raw semantic output and one-checker chunked inventories work. Item 3 is implemented within the current bounds (`1301df5a`); do not recreate the old 64-module ceiling. Item 7 now includes the narrow definition-index seam (`92bb153d`) used to normalize actual cross-module and bound-method targets. External configuration/roots/stubs, complete type/member/import/reference propositions and retained update state remain. The 70-module scenario demonstrates selected semantics, not complete context acceptance.
+**Current status — partial, committed.** Configured version/platform, captured contained inputs, raw semantic output and one-checker chunked inventories work. Item 3 is implemented within the current bounds (`1301df5a`); do not recreate the old 64-module ceiling. Item 7 now includes the narrow definition-index seam (`92bb153d`) used to normalize actual cross-module and bound-method targets. Captured configuration with fully applied version/platform/search settings now reaches the checker; unapplied settings remain scoped unavailable. The installed live/clean case passes version/platform changes, missing import creation/deletion, unsupported configuration and exact restoration (165.86 s). External roots/stubs, additional configuration, complete type/member/import/reference propositions and retained update state remain. The 70-module scenario demonstrates selected semantics, not complete context acceptance.
 
 **Surfaces:** `src/python_context.rs`, `src/analysis_context.rs`, startup `inputs.rs`/`pyrefly.rs`, `src/pyrefly_service.rs`, `pyrefly-sidecar/src/`, `third_party/pyrefly/lib/query.rs` and the pinned configuration/module-resolution seams.
 
@@ -390,7 +390,7 @@ state and provider caches. Four-form comparisons preserve canonical identity/rel
 positions, precision, order, coverage and source bytes; operational generations/provider runs and
 the explicitly snapshot-bound source-context handle differ. Independent names/call pairs and the
 repaired-to-original comparison pass (259.56 s, 2026-09-09). The broader edit corpus, all-family
-coverage, configuration/negative imports remain open. A separate source-stage case deterministically holds a completed provider candidate,
+coverage and Rust/external configuration/dependency cases remain open. Python version/platform changes, negative import creation/deletion, unsupported configuration and exact restoration now pass against independent clean state through public declarations/calls (165.86 s); `python-context-live` selects that case. A separate source-stage case deterministically holds a completed provider candidate,
 rejects it after a newer edit, and resumes a pending generation after exact restart; mixed Python/Rust
 target coverage passes (168.05 s). The final two-stage clean comparison passes (294.29 s), as do the
 full Python edit sequence (114.60 s) and retained source-page checks (41.57 s), within 43 affected tests.

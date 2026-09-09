@@ -188,6 +188,10 @@ pub struct PythonAnalysisContextManifest {
     pub typeshed_bundle_digest: Option<String>,
     pub lockfile_artifacts: Vec<PythonContextArtifact>,
     pub project_config_artifacts: Vec<PythonContextArtifact>,
+    /// Captured checker settings not represented by the effective manifest. Absence retains
+    /// compatibility with contexts containing no project configuration artifacts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unapplied_checker_settings: Option<Vec<String>>,
     pub pyrefly_bundle_digest: Option<String>,
     pub ruff_bundle_digest: String,
     pub provider_bundle_version: String,
@@ -532,6 +536,13 @@ pub fn discover_python_context(
         &mut diagnostics,
     )?;
     manifest.platforms = selected_platforms(request, pyrefly.as_ref(), pyproject.as_ref())?;
+    if !manifest.project_config_artifacts.is_empty() {
+        manifest.unapplied_checker_settings = Some(unapplied_checker_settings(
+            request,
+            pyrefly.as_ref(),
+            pyproject.as_ref(),
+        ));
+    }
     manifest.module_map = discover_module_map(request, &manifest)?;
     let canonical_manifest = canonical_json(&manifest)?;
     let manifest_fingerprint = crate::integrity::digest_bytes(&canonical_manifest);
@@ -660,6 +671,7 @@ fn assemble_manifest(
             typeshed_bundle_digest: request.typeshed_bundle_digest.as_ref().map(digest_string),
             lockfile_artifacts: input.lock_artifacts,
             project_config_artifacts,
+            unapplied_checker_settings: None,
             pyrefly_bundle_digest: request.pyrefly_bundle_digest.as_ref().map(digest_string),
             ruff_bundle_digest: digest_string(&request.ruff_bundle_digest),
             provider_bundle_version: request.provider_bundle_version.clone(),
@@ -1346,6 +1358,77 @@ fn configured_package_roots(
     }
 }
 
+/// Only settings actually consumed by discovery and installed by the sidecar count as applied.
+/// Unknown checker settings qualify the context instead of being silently replaced by defaults.
+fn unapplied_checker_settings(
+    request: &PythonContextDiscoveryRequest,
+    standalone: Option<&toml::Value>,
+    project: Option<&toml::Value>,
+) -> Vec<String> {
+    let mut result = BTreeSet::new();
+    if request
+        .workspace_profile
+        .as_ref()
+        .is_some_and(|p| p.profile_artifact.is_some())
+    {
+        result.insert("workspace-profile-artifact".to_owned());
+    }
+    for (prefix, document) in [
+        ("pyrefly.toml", standalone),
+        (
+            "tool.pyrefly",
+            project
+                .and_then(|p| p.get("tool"))
+                .and_then(|p| p.get("pyrefly")),
+        ),
+    ] {
+        if let Some(document) = document {
+            checker_settings_remainder(prefix, document, false, &mut result);
+        }
+    }
+    if let Some(project) = project.and_then(|p| p.get("project")) {
+        for key in ["dependencies", "optional-dependencies"] {
+            if let Some(value) = project.get(key)
+                && !value.as_array().is_some_and(Vec::is_empty)
+                && !value.as_table().is_some_and(toml::Table::is_empty)
+            {
+                result.insert(format!("project.{key}"));
+            }
+        }
+        if project.get("requires-python").is_some_and(|v| !v.is_str()) {
+            result.insert("project.requires-python".to_owned());
+        }
+    }
+    result.into_iter().collect()
+}
+
+fn checker_settings_remainder(
+    prefix: &str,
+    document: &toml::Value,
+    environment: bool,
+    result: &mut BTreeSet<String>,
+) {
+    let Some(table) = document.as_table() else {
+        result.insert(prefix.to_owned());
+        return;
+    };
+    for (key, value) in table {
+        let applied = match key.as_str() {
+            "python-version" | "python_version" => value.is_str(),
+            "python-platform" if !environment => value.is_str() || value.is_array(),
+            "search-path" | "search_path" if !environment => value.is_array(),
+            "environment" if !environment => {
+                checker_settings_remainder(&format!("{prefix}.environment"), value, true, result);
+                true
+            }
+            _ => false,
+        };
+        if !applied {
+            result.insert(format!("{prefix}.{key}"));
+        }
+    }
+}
+
 fn configuration_origin(file: Option<&PythonDiscoveryFile>) -> &str {
     file.and_then(|file| {
         file.relative_path
@@ -1795,6 +1878,47 @@ mod tests {
     }
 
     #[test]
+    fn captured_checker_settings_are_applied_or_retain_their_exact_remainder() {
+        let mut request = base_request();
+        request.files.push(file(
+            "pyrefly.toml",
+            "file:pyrefly",
+            "python-version='3.13'\npython-platform='win32'\nsearch-path=['src']\n",
+        ));
+        let supported = discover_python_context(&request).unwrap();
+        assert_eq!(supported.manifest.unapplied_checker_settings, Some(vec![]));
+        assert_eq!(supported.manifest.python_language_version, "3.13");
+        assert_eq!(supported.manifest.platforms, ["win32"]);
+        request.files.pop();
+        request.files.push(file("pyrefly.toml", "file:pyrefly", "python-version='3.13'\nunknown-feature=true\n[environment]\npython_version='3.13'\ninterpreter='private-selection'\n"));
+        let unsupported = discover_python_context(&request).unwrap();
+        assert_eq!(
+            unsupported.manifest.unapplied_checker_settings,
+            Some(vec![
+                "pyrefly.toml.environment.interpreter".to_owned(),
+                "pyrefly.toml.unknown-feature".to_owned(),
+            ])
+        );
+        assert_ne!(
+            supported.context.analysis_context_id,
+            unsupported.context.analysis_context_id
+        );
+        assert_ne!(
+            supported.manifest.project_config_artifacts,
+            unsupported.manifest.project_config_artifacts
+        );
+        request.files.pop();
+        request
+            .files
+            .push(file("pyrefly.toml", "file:pyrefly", "python-version=314\n"));
+        let invalid = discover_python_context(&request).unwrap();
+        assert_eq!(
+            invalid.manifest.unapplied_checker_settings,
+            Some(vec!["pyrefly.toml.python-version".to_owned()])
+        );
+    }
+
+    #[test]
     fn py_context_discovery_conformance() {
         assert!(version_satisfies(PythonMinor(3, 13), ">=3.12,<4").unwrap());
         assert!(!version_satisfies(PythonMinor(3, 13), "==3.12.*").unwrap());
@@ -1921,6 +2045,7 @@ mod tests {
             "typeshed_bundle_digest",
             "lockfile_artifacts",
             "project_config_artifacts",
+            "unapplied_checker_settings",
             "pyrefly_bundle_digest",
             "ruff_bundle_digest",
             "provider_bundle_version",
