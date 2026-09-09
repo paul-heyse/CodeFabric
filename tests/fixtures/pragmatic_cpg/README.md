@@ -4,4 +4,6 @@
 
 `edits.json` covers edit, rename/import repair, deletion, Rust compile failure/repair and Cargo feature-context change. Run it only in a copied temporary workspace. After each change, the real service must report pending/failed scope honestly and eventually compare with a clean rebuild where convergence is possible. Missing imports/compile errors should converge to explicit failure/remainder, never stale-current facts.
 
+`analysis_cases.json` preserves the source examples and target fact/absence expectations from the retired runtime proof program. The Rust test currently exercises real syntax and explicit missing-analysis scope for its branch, loop, return and nested-callable cases. The target semantic assertions still need the outcome 7 analysis adapter; they are not claimed to pass today.
+
 Current harness support and runtime-dependent adapters are described in [product tooling](../../../tooling/product/README.md). These fixtures do not claim the current daemon already provides the expected semantics. Extend them alongside the production backlog; no automatically accepted snapshots or generated expectations.

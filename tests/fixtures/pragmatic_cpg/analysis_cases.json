@@ -1,0 +1,156 @@
+{
+  "description": "Preserved independent analysis examples. Each fact is [kind, owner, source witness, target witness]. Witnesses must be mapped to actual source occurrences; they are not fabricated canonical IDs.",
+  "validation_scope": "Current Rust tests exercise real syntax and explicit missing-analysis scope for the four required-analysis cases. The target present/absent/unknown expectations await the production analysis adapters in outcome 7 and are not claimed to pass.",
+  "cases": [
+    {
+      "id": "branch",
+      "source": "def choose(flag):\n    if flag:\n        value = 1\n    else:\n        value = 2\n    return value\n",
+      "requires_analysis": true,
+      "present": [
+        [
+          "CfgNode",
+          "choose",
+          "if@2",
+          "if@2"
+        ],
+        [
+          "CfgEdge",
+          "choose",
+          "if@2",
+          "value@3"
+        ],
+        [
+          "CfgEdge",
+          "choose",
+          "if@2",
+          "value@5"
+        ],
+        [
+          "EvaluationOrder",
+          "choose",
+          "literal:1@3",
+          "value@3"
+        ],
+        [
+          "DefUse",
+          "choose",
+          "value@3",
+          "value@6"
+        ],
+        [
+          "DefUse",
+          "choose",
+          "value@5",
+          "value@6"
+        ],
+        [
+          "ReachingDefinition",
+          "choose",
+          "value@3",
+          "value@6"
+        ],
+        [
+          "ReachingDefinition",
+          "choose",
+          "value@5",
+          "value@6"
+        ],
+        [
+          "LiveAt",
+          "choose",
+          "value",
+          "return-entry@6"
+        ],
+        [
+          "ValueFlow",
+          "choose",
+          "literal:1@3",
+          "value@6"
+        ],
+        [
+          "ValueFlow",
+          "choose",
+          "literal:2@5",
+          "value@6"
+        ]
+      ],
+      "absent": []
+    },
+    {
+      "id": "loop",
+      "source": "def count(n):\n    while n:\n        n -= 1\n    return n\n",
+      "requires_analysis": true,
+      "present": [
+        [
+          "CfgEdge",
+          "count",
+          "assignment-exit@3",
+          "while-test@2"
+        ]
+      ],
+      "absent": []
+    },
+    {
+      "id": "return",
+      "source": "def stop():\n    return 1\n    unreachable()\n",
+      "requires_analysis": true,
+      "present": [],
+      "absent": [
+        [
+          "CfgEdge",
+          "stop",
+          "return@2",
+          "call@3"
+        ]
+      ]
+    },
+    {
+      "id": "nested_callable",
+      "source": "def outer():\n    def inner():\n        return 1\n    return inner\n",
+      "requires_analysis": true,
+      "present": [
+        [
+          "Owner",
+          "outer.inner",
+          "return@3",
+          "outer.inner"
+        ]
+      ],
+      "absent": [
+        [
+          "Owner",
+          "outer",
+          "return@3",
+          "outer"
+        ],
+        [
+          "CfgEdge",
+          "outer",
+          "def-inner@2",
+          "return@3"
+        ]
+      ]
+    },
+    {
+      "id": "known_empty",
+      "source": "# No callable bodies or dynamic calls.\n",
+      "requires_analysis": false,
+      "present": [],
+      "absent": []
+    },
+    {
+      "id": "dynamic_call",
+      "source": "target = getattr(obj, name)\ntarget()\n",
+      "requires_analysis": false,
+      "present": [],
+      "absent": [],
+      "unknown": [
+        {
+          "owner": "module",
+          "occurrence": "call@2",
+          "cause": "DynamicDispatch"
+        }
+      ]
+    }
+  ]
+}

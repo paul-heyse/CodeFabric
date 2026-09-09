@@ -2349,7 +2349,6 @@ mod tests {
         assert_eq!(release.observation().provider_relations, 53);
         assert_eq!(release.observation().transformations, 53);
         assert_eq!(release.observation().query_forms, 8);
-        assert_eq!(release.observation().proof_expectations, 53);
     }
 
     fn real_native_run() -> ProviderNativeSyntaxRun {

@@ -69,11 +69,6 @@ use crate::rust_mir_derived_analysis::{
 };
 use crate::rustc_relation_schema::RustcRelation;
 use crate::schema_contract::FIELD_ID_METADATA_KEY;
-#[cfg(test)]
-use crate::semantic_release::{
-    AnalysisDisposition, AnalysisGapReason, AnalysisGapRetryability, AnalysisPrecision,
-    RequiredAnalysisFamily, RequiredAnalysisObservation,
-};
 use crate::semantic_release::{
     CompiledQueryProgram, CompiledTransformationProgram, SemanticReleaseError,
     TransformationProgramIdentity,
@@ -2410,67 +2405,6 @@ pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
         derived,
         census: census_observation,
     })
-}
-
-#[cfg(test)]
-fn required_analysis_observations(
-    observation: &DerivedAnalysisCompositionObservation,
-) -> Vec<RequiredAnalysisObservation> {
-    let producers = observation.producers.iter().filter_map(|producer| {
-        let family = RequiredAnalysisFamily::from_relation(producer.family_id.as_str())?;
-        let disposition = match &producer.completeness {
-            DerivedCompletenessPolicy::Complete => AnalysisDisposition::Complete {
-                precision: match &producer.precision {
-                    DerivedPrecisionPolicy::Exact => AnalysisPrecision::Exact,
-                    DerivedPrecisionPolicy::SoundMay => AnalysisPrecision::SoundMay,
-                    DerivedPrecisionPolicy::SoundMust => AnalysisPrecision::SoundMust,
-                    DerivedPrecisionPolicy::Bounded { max_steps } => AnalysisPrecision::Bounded {
-                        max_steps: max_steps.get(),
-                    },
-                },
-            },
-            DerivedCompletenessPolicy::Partial { .. }
-            | DerivedCompletenessPolicy::Unknown { .. } => AnalysisDisposition::Incomplete,
-        };
-        Some(RequiredAnalysisObservation {
-            family,
-            disposition,
-        })
-    });
-    let remainders = observation.remainders.iter().filter_map(|remainder| {
-        let family = RequiredAnalysisFamily::from_relation(remainder.family_id.as_str())?;
-        Some(RequiredAnalysisObservation {
-            family,
-            disposition: AnalysisDisposition::Unavailable {
-                reason: match remainder.reason {
-                    DerivedRemainderReason::Unsupported => AnalysisGapReason::Unsupported,
-                    DerivedRemainderReason::ProviderUnavailable => {
-                        AnalysisGapReason::ProviderUnavailable
-                    }
-                    DerivedRemainderReason::ResourceLimit => AnalysisGapReason::ResourceLimit,
-                    DerivedRemainderReason::AlgorithmUnavailable => {
-                        AnalysisGapReason::AlgorithmUnavailable
-                    }
-                    DerivedRemainderReason::PrivateCompilerEvidenceUnavailable => {
-                        AnalysisGapReason::PrivateCompilerEvidenceUnavailable
-                    }
-                    DerivedRemainderReason::TypedTransformationAdapterUnavailable => {
-                        AnalysisGapReason::TypedTransformationAdapterUnavailable
-                    }
-                },
-                retryability: match remainder.retryability {
-                    DerivedRemainderRetryability::Retryable => AnalysisGapRetryability::Retryable,
-                    DerivedRemainderRetryability::RequiresReleaseChange => {
-                        AnalysisGapRetryability::RequiresReleaseChange
-                    }
-                    DerivedRemainderRetryability::PermanentlyUnsupported => {
-                        AnalysisGapRetryability::PermanentlyUnsupported
-                    }
-                },
-            },
-        })
-    });
-    producers.chain(remainders).collect()
 }
 
 fn released_producer_closure_catalog(
@@ -10077,57 +10011,25 @@ mod tests {
             .await;
             assert!(raw.iter().any(|batch| batch.num_rows() > 0));
         }
-        let release = crate::fabric::production_kernel::compile_test_semantic_release();
-        let proof = release.proof();
-        // Execute the immutable branch/loop/return/nested-owner examples through the real
-        // Tree-sitter/Ruff adapters and released composition. No target CFG facts are invented:
-        // absent implementations must produce their actual source-bound required remainders.
+        let examples: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/pragmatic_cpg/analysis_cases.json"
+        )).unwrap();
         let mut exercised = 0;
-        for example in proof.conformance_fixtures() {
-            if example.required_families().is_empty() {
+        for example in examples["cases"].as_array().unwrap() {
+            if example["requires_analysis"] != true {
                 continue;
             }
             let fixture = exact_workspace_fixture_from(
-                [(21, example.source()), (22, "sentinel = 1\n")],
+                [(21, example["source"].as_str().unwrap()), (22, "sentinel = 1\n")],
                 [(31, "value: int = 1\n"), (32, "other: int = 2\n")],
                 [41, 42],
                 65,
             );
             let (sealed, observation, _, _) = execute_existing_fixture(&fixture, 97).await;
             assert_required_python_gaps(&sealed, &observation).await;
-            let analyses: Vec<_> = required_analysis_observations(&observation)
-                .into_iter()
-                .filter(|row| example.required_families().contains(&row.family))
-                .collect();
-            let result = crate::semantic_release::FixtureResult {
-                fixture_id: example.id(),
-                source: example.source(),
-                facts: &[],
-                unknowns: &[],
-                analyses: &analyses,
-            };
-            assert_eq!(
-                proof.validate_fixture_result(&result).unwrap(),
-                crate::semantic_release::RequiredAnalysisConformance::PendingImplementation
-            );
-            let mut false_complete = analyses.clone();
-            false_complete[0].disposition = AnalysisDisposition::Complete {
-                precision: AnalysisPrecision::Exact,
-            };
-            assert!(
-                proof
-                    .validate_fixture_result(&crate::semantic_release::FixtureResult {
-                        analyses: &false_complete,
-                        ..result
-                    })
-                    .is_err()
-            );
             exercised += 1;
         }
-        assert_eq!(
-            exercised, 4,
-            "required source fixtures must remain executable"
-        );
+        assert_eq!(exercised, 4);
     }
 
     #[tokio::test]

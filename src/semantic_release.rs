@@ -12,15 +12,6 @@ use std::time::{Duration, Instant};
 use arrow_schema::SchemaRef;
 use thiserror::Error;
 
-mod independent;
-
-pub use independent::{
-    AnalysisDisposition, AnalysisGapReason, AnalysisGapRetryability, AnalysisPrecision,
-    ConformanceFixture, FixtureAssertion, FixtureFact, FixtureFactKind, FixtureResult,
-    FixtureUnknown, FixtureUnknownCause, RequiredAnalysisConformance, RequiredAnalysisFamily,
-    RequiredAnalysisObservation,
-};
-
 use crate::provider_contracts::{
     AdmittedProviderResult, CancellationProbe, ProviderBuildIdentity, ProviderContextBinding,
     ProviderContractError, ProviderFamilyIdentity, ProviderFamilyRequest, ProviderIdentity,
@@ -35,7 +26,6 @@ const CURRENT_SUITE: &str = "codefabric-relational-data-fabric@2.3.0";
 const MAX_PROGRAM_IDENTITY_BYTES: usize = 512;
 const MAX_PROVIDER_FAMILIES: usize = 4_096;
 const MAX_TRANSFORMATIONS: usize = 8_192;
-const MAX_PROOF_EXPECTATIONS: usize = 16_384;
 const MAX_QUERY_RELATIONS: usize = 4_096;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -84,12 +74,9 @@ macro_rules! program_identity {
 
 program_identity!(TransformationProgramIdentity);
 program_identity!(QueryProgramIdentity);
-program_identity!(ProofProgramIdentity);
 program_identity!(PolicyProgramIdentity);
 program_identity!(TransformationIdentity);
 program_identity!(QueryIdentity);
-program_identity!(ProofExpectationIdentity);
-program_identity!(CausalFaultIdentity);
 
 /// The eight released query forms. These values are application program identities, not wire
 /// spellings and not executor-generated observations.
@@ -350,89 +337,6 @@ impl QueryProgramDefinition {
     }
 }
 
-/// One independently declared proof expectation.
-#[derive(Clone, Debug)]
-pub(crate) struct ProofExpectationDefinition {
-    identity: ProofExpectationIdentity,
-    relation: ProviderRelationIdentity,
-    minimum_rows: u64,
-}
-
-impl ProofExpectationDefinition {
-    pub(crate) const fn new(
-        identity: ProofExpectationIdentity,
-        relation: ProviderRelationIdentity,
-        minimum_rows: u64,
-    ) -> Self {
-        Self {
-            identity,
-            relation,
-            minimum_rows,
-        }
-    }
-}
-
-/// Required causal effect for a release proof fault.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CausalEffect {
-    RejectAdmission,
-    ChangeTransformation,
-    ChangeQuery,
-    ChangeProofTerminal,
-}
-
-/// One independently declared causal fault.
-#[derive(Clone, Debug)]
-pub(crate) struct CausalFaultDefinition {
-    identity: CausalFaultIdentity,
-    target_relation: ProviderRelationIdentity,
-    effect: CausalEffect,
-}
-
-impl CausalFaultDefinition {
-    pub(crate) const fn new(
-        identity: CausalFaultIdentity,
-        target_relation: ProviderRelationIdentity,
-        effect: CausalEffect,
-    ) -> Self {
-        Self {
-            identity,
-            target_relation,
-            effect,
-        }
-    }
-}
-
-/// Closed proof program definition.
-#[derive(Clone, Debug)]
-pub(crate) struct ProofProgramDefinition {
-    identity: ProofProgramIdentity,
-    expectations: Vec<ProofExpectationDefinition>,
-    faults: Vec<CausalFaultDefinition>,
-    independent: independent::IndependentProofDefinition,
-}
-
-impl ProofProgramDefinition {
-    pub(crate) fn try_new(
-        identity: ProofProgramIdentity,
-        expectations: Vec<ProofExpectationDefinition>,
-        faults: Vec<CausalFaultDefinition>,
-    ) -> Result<Self, SemanticReleaseError> {
-        if expectations.is_empty()
-            || expectations.len() > MAX_PROOF_EXPECTATIONS
-            || faults.is_empty()
-        {
-            return Err(SemanticReleaseError::EmptyOrOversizedProofProgram);
-        }
-        Ok(Self {
-            identity,
-            expectations,
-            faults,
-            independent: independent::current_definition(),
-        })
-    }
-}
-
 /// One lane's compiled policy ceiling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct LanePolicyDefinition {
@@ -493,7 +397,6 @@ pub(crate) enum ReleaseComponent {
     Provider,
     Transformation,
     Query,
-    Proof,
     Policy,
 }
 
@@ -504,7 +407,6 @@ pub(crate) struct CurrentSemanticReleaseDefinition {
     providers: ProviderProgramDefinition,
     transformations: TransformationProgramDefinition,
     queries: QueryProgramDefinition,
-    proof: ProofProgramDefinition,
     policy: PolicyProgramDefinition,
     dependencies: Vec<ProgramDependency>,
 }
@@ -516,7 +418,6 @@ pub(crate) struct CurrentSemanticReleaseDefinitionParts {
     pub providers: ProviderProgramDefinition,
     pub transformations: TransformationProgramDefinition,
     pub queries: QueryProgramDefinition,
-    pub proof: ProofProgramDefinition,
     pub policy: PolicyProgramDefinition,
     pub dependencies: Vec<ProgramDependency>,
 }
@@ -528,7 +429,6 @@ impl CurrentSemanticReleaseDefinition {
             providers: parts.providers,
             transformations: parts.transformations,
             queries: parts.queries,
-            proof: parts.proof,
             policy: parts.policy,
             dependencies: parts.dependencies,
         }
@@ -825,62 +725,6 @@ impl CompiledQueryProgram {
     }
 }
 
-/// Immutable behavior-bearing proof program.
-#[derive(Clone, Debug)]
-pub struct CompiledProofProgram {
-    identity: ProofProgramIdentity,
-    expectations: Arc<[ProofExpectationDefinition]>,
-    faults: Arc<[CausalFaultDefinition]>,
-    independent: independent::IndependentProofContract,
-}
-
-/// Independent proof input constructed from the compiled release, not provider output.
-#[derive(Clone, Debug)]
-pub struct CompiledProofInput {
-    pub program_identity: ProofProgramIdentity,
-    pub expectations: Arc<[(ProofExpectationIdentity, ProviderRelationIdentity, u64)]>,
-    pub faults: Arc<[(CausalFaultIdentity, ProviderRelationIdentity, CausalEffect)]>,
-}
-
-impl CompiledProofProgram {
-    /// Content identity of all compiled proof operands, including independent source examples.
-    #[must_use]
-    pub const fn identity(&self) -> &ProofProgramIdentity {
-        &self.identity
-    }
-
-    #[must_use]
-    pub fn construct_input(&self) -> CompiledProofInput {
-        CompiledProofInput {
-            program_identity: self.identity.clone(),
-            expectations: Arc::from(
-                self.expectations
-                    .iter()
-                    .map(|expectation| {
-                        (
-                            expectation.identity.clone(),
-                            expectation.relation.clone(),
-                            expectation.minimum_rows,
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            faults: Arc::from(
-                self.faults
-                    .iter()
-                    .map(|fault| {
-                        (
-                            fault.identity.clone(),
-                            fault.target_relation.clone(),
-                            fault.effect,
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-        }
-    }
-}
-
 /// Immutable behavior-bearing policy program.
 #[derive(Clone, Debug)]
 pub struct CompiledPolicyProgram {
@@ -910,7 +754,6 @@ pub struct CompiledSemanticRelease {
     providers: CompiledProviderProgram,
     transformations: CompiledTransformationProgram,
     queries: CompiledQueryProgram,
-    proof: CompiledProofProgram,
     policy: CompiledPolicyProgram,
     observation: CompiledReleaseObservation,
 }
@@ -923,14 +766,11 @@ pub struct CompiledReleaseObservation {
     pub provider_program: ProviderProgramIdentity,
     pub transformation_program: TransformationProgramIdentity,
     pub query_program: QueryProgramIdentity,
-    pub proof_program: ProofProgramIdentity,
     pub policy_program: PolicyProgramIdentity,
     pub provider_lanes: usize,
     pub provider_relations: usize,
     pub transformations: usize,
     pub query_forms: usize,
-    pub proof_expectations: usize,
-    pub causal_faults: usize,
 }
 
 impl CompiledSemanticRelease {
@@ -939,7 +779,7 @@ impl CompiledSemanticRelease {
     /// # Errors
     ///
     /// Rejects stale/conflated identities, an open dependency graph, relation/schema conflicts,
-    /// missing provider/policy lanes, incomplete query forms, or incomplete proof coverage.
+    /// missing provider/policy lanes, incomplete query forms, or open relation dependencies.
     pub(crate) fn compile(
         definition: CurrentSemanticReleaseDefinition,
     ) -> Result<Self, SemanticReleaseError> {
@@ -955,27 +795,22 @@ impl CompiledSemanticRelease {
         let transformations = compile_transformations(definition.transformations, available)?;
         let all_relations = transformation_relation_schemas(&providers, &transformations)?;
         let queries = compile_queries(definition.queries, &all_relations, &policy)?;
-        let proof = compile_proof(definition.proof, &all_relations, &queries)?;
         let observation = CompiledReleaseObservation {
             suite: definition.suite.clone(),
             provider_program: providers.identity.clone(),
             transformation_program: transformations.identity.clone(),
             query_program: queries.identity.clone(),
-            proof_program: proof.identity.clone(),
             policy_program: policy.identity.clone(),
             provider_lanes: providers.lane_count(),
             provider_relations: providers.relation_count(),
             transformations: transformations.transformations.len(),
             query_forms: queries.queries.len(),
-            proof_expectations: proof.expectations.len(),
-            causal_faults: proof.faults.len(),
         };
         Ok(Self {
             suite: definition.suite,
             providers,
             transformations,
             queries,
-            proof,
             policy,
             observation,
         })
@@ -1002,11 +837,6 @@ impl CompiledSemanticRelease {
     }
 
     #[must_use]
-    pub const fn proof(&self) -> &CompiledProofProgram {
-        &self.proof
-    }
-
-    #[must_use]
     pub const fn policy(&self) -> &CompiledPolicyProgram {
         &self.policy
     }
@@ -1024,7 +854,6 @@ fn validate_program_identities(
         definition.providers.identity.as_str(),
         definition.transformations.identity.as_str(),
         definition.queries.identity.as_str(),
-        definition.proof.identity.as_str(),
         definition.policy.identity.as_str(),
     ];
     if identities.into_iter().collect::<BTreeSet<_>>().len() != identities.len() {
@@ -1039,9 +868,6 @@ fn validate_dependencies(dependencies: &[ProgramDependency]) -> Result<(), Seman
         ProgramDependency::new(ReleaseComponent::Transformation, ReleaseComponent::Provider),
         ProgramDependency::new(ReleaseComponent::Query, ReleaseComponent::Transformation),
         ProgramDependency::new(ReleaseComponent::Query, ReleaseComponent::Policy),
-        ProgramDependency::new(ReleaseComponent::Proof, ReleaseComponent::Provider),
-        ProgramDependency::new(ReleaseComponent::Proof, ReleaseComponent::Transformation),
-        ProgramDependency::new(ReleaseComponent::Proof, ReleaseComponent::Query),
     ]);
     let observed = dependencies.iter().copied().collect::<BTreeSet<_>>();
     if observed != required || observed.len() != dependencies.len() {
@@ -1241,91 +1067,15 @@ fn compile_queries(
     })
 }
 
-fn compile_proof(
-    mut definition: ProofProgramDefinition,
-    available: &BTreeMap<ProviderRelationIdentity, (ProviderSchemaIdentity, SchemaRef)>,
-    queries: &CompiledQueryProgram,
-) -> Result<CompiledProofProgram, SemanticReleaseError> {
-    let required = queries
-        .queries
-        .values()
-        .flat_map(|query| query.required_relations.iter().cloned())
-        .collect::<BTreeSet<_>>();
-    let mut expectation_ids = BTreeSet::new();
-    let mut expected_relations = BTreeSet::new();
-    for expectation in &definition.expectations {
-        if !expectation_ids.insert(expectation.identity.clone())
-            || !expected_relations.insert(expectation.relation.clone())
-            || !available.contains_key(&expectation.relation)
-        {
-            return Err(SemanticReleaseError::InvalidProofProgram);
-        }
-    }
-    if !required.is_subset(&expected_relations) {
-        return Err(SemanticReleaseError::ProofCoverage);
-    }
-    let mut fault_ids = BTreeSet::new();
-    for fault in &definition.faults {
-        if !fault_ids.insert(fault.identity.clone())
-            || !available.contains_key(&fault.target_relation)
-        {
-            return Err(SemanticReleaseError::InvalidProofProgram);
-        }
-    }
-    // Construction order is not semantic authority. Retain the same canonical order that is
-    // hashed, including for consumers that select one declared expectation or causal effect.
-    definition
-        .expectations
-        .sort_by(|left, right| left.identity.cmp(&right.identity));
-    definition
-        .faults
-        .sort_by(|left, right| left.identity.cmp(&right.identity));
-    let independent = independent::IndependentProofContract::compile(definition.independent)?;
-    let mut digest = blake3::Hasher::new();
-    digest.update(b"codefabric.compiled-proof-program.operands.v1\0");
-    independent::hash_frame(&mut digest, definition.identity.as_str().as_bytes());
-    independent::hash_count(&mut digest, definition.expectations.len());
-    for expectation in &definition.expectations {
-        independent::hash_frame(&mut digest, expectation.identity.as_str().as_bytes());
-        independent::hash_frame(&mut digest, expectation.relation.as_str().as_bytes());
-        digest.update(&expectation.minimum_rows.to_be_bytes());
-    }
-    independent::hash_count(&mut digest, definition.faults.len());
-    for fault in &definition.faults {
-        independent::hash_frame(&mut digest, fault.identity.as_str().as_bytes());
-        independent::hash_frame(&mut digest, fault.target_relation.as_str().as_bytes());
-        digest.update(&[match fault.effect {
-            CausalEffect::RejectAdmission => 0,
-            CausalEffect::ChangeTransformation => 1,
-            CausalEffect::ChangeQuery => 2,
-            CausalEffect::ChangeProofTerminal => 3,
-        }]);
-    }
-    digest.update(&independent.content_identity());
-    let identity = ProofProgramIdentity::try_new(format!(
-        "codefabric.compiled-proof-program.v1.b3:{}",
-        digest.finalize().to_hex()
-    ))?;
-    Ok(CompiledProofProgram {
-        identity,
-        expectations: Arc::from(definition.expectations),
-        faults: Arc::from(definition.faults),
-        independent,
-    })
-}
-
 /// Standard v2.3 component dependency graph.
 #[must_use]
 pub(crate) fn current_dependency_graph() -> Vec<ProgramDependency> {
-    vec![
+    Vec::from([
         ProgramDependency::new(ReleaseComponent::Provider, ReleaseComponent::Policy),
         ProgramDependency::new(ReleaseComponent::Transformation, ReleaseComponent::Provider),
         ProgramDependency::new(ReleaseComponent::Query, ReleaseComponent::Transformation),
         ProgramDependency::new(ReleaseComponent::Query, ReleaseComponent::Policy),
-        ProgramDependency::new(ReleaseComponent::Proof, ReleaseComponent::Provider),
-        ProgramDependency::new(ReleaseComponent::Proof, ReleaseComponent::Transformation),
-        ProgramDependency::new(ReleaseComponent::Proof, ReleaseComponent::Query),
-    ]
+    ])
 }
 
 /// Construct the sole target suite identity once.
@@ -1338,8 +1088,8 @@ pub(crate) fn current_suite_identity() -> Result<SuiteIdentity, SemanticReleaseE
 ///
 /// This is a transition constructor, not a runtime selector: callers must explicitly invoke it
 /// once and inject the returned value. Every admitted provider relation becomes an explicit
-/// identity-preserving release transformation input; the query and proof products are then
-/// compiled against those exact relation values.
+/// identity-preserving release transformation input; queries are built against those exact
+/// relation values. Expected facts and fault scenarios belong to tests, not this runtime model.
 pub(crate) fn compile_current_v23_release(
     providers: ProviderProgramDefinition,
 ) -> Result<CompiledSemanticRelease, SemanticReleaseError> {
@@ -1392,37 +1142,6 @@ pub(crate) fn compile_current_v23_release(
             )
         })
         .collect::<Result<Vec<_>, SemanticReleaseError>>()?;
-    let expectations = admitted_relations
-        .iter()
-        .enumerate()
-        .map(|(ordinal, relation)| {
-            Ok(ProofExpectationDefinition::new(
-                ProofExpectationIdentity::try_new(format!(
-                    "codefabric.proof.v2.3.relation-present.{ordinal}"
-                ))?,
-                relation.clone(),
-                0,
-            ))
-        })
-        .collect::<Result<Vec<_>, SemanticReleaseError>>()?;
-    let effects = [
-        CausalEffect::RejectAdmission,
-        CausalEffect::ChangeTransformation,
-        CausalEffect::ChangeQuery,
-        CausalEffect::ChangeProofTerminal,
-    ];
-    let faults = effects
-        .into_iter()
-        .enumerate()
-        .map(|(ordinal, effect)| {
-            Ok(CausalFaultDefinition::new(
-                CausalFaultIdentity::try_new(format!("codefabric.proof.v2.3.fault.{ordinal}"))?,
-                admitted_relations[ordinal % admitted_relations.len()].clone(),
-                effect,
-            ))
-        })
-        .collect::<Result<Vec<_>, SemanticReleaseError>>()?;
-
     let syntax_ceiling = ProviderResourceCeilings::try_new(ProviderResourceCeilingSpec {
         max_relations: MAX_PROVIDER_FAMILIES,
         max_batches_per_relation: 65_536,
@@ -1479,11 +1198,6 @@ pub(crate) fn compile_current_v23_release(
                 QueryProgramIdentity::try_new("codefabric.query-program.v2.3")?,
                 queries,
             )?,
-            proof: ProofProgramDefinition::try_new(
-                ProofProgramIdentity::try_new("codefabric.proof-program.v2.3")?,
-                expectations,
-                faults,
-            )?,
             policy,
             dependencies: current_dependency_graph(),
         },
@@ -1493,12 +1207,6 @@ pub(crate) fn compile_current_v23_release(
 /// Release compiler failures. No variant permits fallback to a marker or runtime registry.
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum SemanticReleaseError {
-    #[error("independent release proof contract is invalid: {0}")]
-    InvalidIndependentProof(&'static str),
-    #[error("required analysis observations violate release proof: {0}")]
-    InvalidRequiredAnalysisObservation(&'static str),
-    #[error("independent source fixture result differs from its released expectation: {0}")]
-    IndependentFixtureMismatch(&'static str),
     #[error("application provider contract is invalid: {0}")]
     ProviderContract(#[from] ProviderContractError),
     #[error("program identity is empty, padded, control-bearing, or oversized")]
@@ -1545,12 +1253,6 @@ pub enum SemanticReleaseError {
     QueryFormCoverage,
     #[error("query form is not compiled into this release")]
     UnknownQueryForm,
-    #[error("proof program is empty or oversized")]
-    EmptyOrOversizedProofProgram,
-    #[error("proof expectation or fault is duplicated or references an unavailable relation")]
-    InvalidProofProgram,
-    #[error("proof expectations do not cover every query dependency")]
-    ProofCoverage,
     #[error("policy program is empty or invalid")]
     InvalidPolicyProgram,
     #[error("policy program does not cover exactly every provider lane")]
@@ -1697,22 +1399,6 @@ mod tests {
                 .unwrap()
             })
             .collect::<Vec<_>>();
-        let expectations = normalized_relations
-            .iter()
-            .enumerate()
-            .map(|(index, relation)| {
-                ProofExpectationDefinition::new(
-                    ProofExpectationIdentity::try_new(format!("expectation.{index}")).unwrap(),
-                    relation.clone(),
-                    0,
-                )
-            })
-            .collect::<Vec<_>>();
-        let faults = vec![CausalFaultDefinition::new(
-            CausalFaultIdentity::try_new("fault.remove.normalized.0").unwrap(),
-            normalized_relations[0].clone(),
-            CausalEffect::ChangeQuery,
-        )];
         let ceilings = ceilings(64, 1_000_000);
         CurrentSemanticReleaseDefinition::new(CurrentSemanticReleaseDefinitionParts {
             suite: current_suite_identity().unwrap(),
@@ -1730,12 +1416,6 @@ mod tests {
             queries: QueryProgramDefinition::try_new(
                 QueryProgramIdentity::try_new("codefabric.query-program.v2.3").unwrap(),
                 queries,
-            )
-            .unwrap(),
-            proof: ProofProgramDefinition::try_new(
-                ProofProgramIdentity::try_new("codefabric.proof-program.v2.3").unwrap(),
-                expectations,
-                faults,
             )
             .unwrap(),
             policy: PolicyProgramDefinition::try_new(
@@ -1763,8 +1443,6 @@ mod tests {
         assert_eq!(release.observation().provider_relations, 4);
         assert_eq!(release.observation().transformations, 4);
         assert_eq!(release.observation().query_forms, 8);
-        assert_eq!(release.observation().proof_expectations, 4);
-        assert_eq!(release.observation().causal_faults, 1);
         assert!(!release.transformations().is_empty());
         assert!(!release.queries().is_empty());
     }
@@ -1793,13 +1471,6 @@ mod tests {
         assert_eq!(
             CompiledSemanticRelease::compile(missing_query).unwrap_err(),
             SemanticReleaseError::QueryFormCoverage
-        );
-
-        let mut missing_expectation = fixture_definition();
-        missing_expectation.proof.expectations.pop();
-        assert_eq!(
-            CompiledSemanticRelease::compile(missing_expectation).unwrap_err(),
-            SemanticReleaseError::ProofCoverage
         );
 
         let mut missing_policy = fixture_definition();
@@ -1892,9 +1563,6 @@ mod tests {
         assert_eq!(transformation.inputs[0].as_str(), "tree-sitter.raw");
         assert_eq!(transformation.output.as_str(), "normalized.0");
 
-        let proof = release.proof().construct_input();
-        assert_eq!(proof.expectations.len(), 4);
-        assert_eq!(proof.faults.len(), 1);
     }
 
     #[cfg(feature = "data-fabric")]
@@ -1938,17 +1606,12 @@ mod tests {
 
     #[cfg(feature = "data-fabric")]
     #[tokio::test]
-    async fn semantic_release_provider_to_proof_fixture() {
+    async fn semantic_release_provider_to_query_fixture() {
         let target = ProviderRelationIdentity::try_new("normalized.0").unwrap();
         let mut definition = fixture_definition();
         for query in &mut definition.queries.queries {
             query.required_relations = vec![target.clone()];
         }
-        definition.proof.expectations = vec![ProofExpectationDefinition::new(
-            ProofExpectationIdentity::try_new("expectation.provider-to-proof").unwrap(),
-            target.clone(),
-            2,
-        )];
         let release = CompiledSemanticRelease::compile(definition).unwrap();
 
         let (_, cancellation) = CancellationProbe::pair(64).unwrap();
@@ -2011,17 +1674,6 @@ mod tests {
             assert_eq!(result.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
         }
 
-        let proof = release.proof().construct_input();
-        let proof_passes = |row_count: usize| {
-            proof.expectations.iter().all(|(_, relation, minimum)| {
-                relation == &target && u64::try_from(row_count).unwrap() >= *minimum
-            })
-        };
-        assert!(proof_passes(transformed_rows));
-        assert!(
-            !proof_passes(1),
-            "a causal provider-row loss must change the independent proof terminal"
-        );
     }
 
     #[test]

@@ -328,7 +328,7 @@ semantic-request-contract-integrity-check:
 [group('test')]
 semantic-request-program-check:
     cargo test --locked --no-default-features --features release-compiler --lib semantic_release::tests::compiled_release_query_program_operations
-    cargo test --locked --no-default-features --features semantic-release --lib semantic_release::tests::semantic_release_provider_to_proof_fixture
+    cargo test --locked --no-default-features --features semantic-release --lib semantic_release::tests::semantic_release_provider_to_query_fixture
     cargo test --locked --no-default-features --features semantic-release --lib semantic_release::tests::compiled_release_query_program_executes_datafusion_fixture
     cargo nextest run --locked --lib -E 'test(/(all_eight_released_forms_compile_from_typed_program_rows|epoch_bound_ingress_consumes_every_typed_relation_row_once|epoch_bound_direct_compiler_lowers_exact_programs_returns_and_handoffs)/)' --no-tests=fail
     cargo nextest run --locked --lib -E 'test(/(all_eight_epoch_bound_forms_execute_through_one_real_authorized_child|relational_program_executes_only_through_authorized_child_inputs)/)' --no-tests=fail
