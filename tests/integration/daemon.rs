@@ -2378,10 +2378,21 @@ fn assert_mixed_public_entity_queries(
         "SUCCEEDED",
         "{report}"
     );
-    let python_scope =
-        &python_manifest["canonical_semantic_response"]["query_scope"]["q1"]["processing"];
-    let rust_scope =
-        &rust_manifest["canonical_semantic_response"]["query_scope"]["q1"]["processing"];
+    let python_scope = &python_manifest["processing"][0]["processing"];
+    let rust_scope = &rust_manifest["processing"][0]["processing"];
+    let public_python = &modern_structured(modern_step(&report, "python"))["processing"][0];
+    let public_rust = &modern_structured(modern_step(&report, "rust"))["processing"][0];
+    assert_eq!(public_python["remaining_partitions"], 0);
+    assert_eq!(public_python["maximum_rows"], 1);
+    assert_eq!(public_rust["remaining_partitions"], 1);
+    assert_eq!(public_rust["remainder"][0]["target"], "broken");
+    assert_eq!(public_rust["remainder"][0]["state"], "unavailable");
+    assert_eq!(public_rust["remainder"][0]["target_kind"], "binary");
+    assert_eq!(
+        public_rust["source_generation"],
+        rust_scope["source_generation"]
+    );
+    assert!(public_rust["additional_rows"].is_null());
     assert_eq!(python_scope["requested_partitions"], 1, "{python_manifest}");
     assert_eq!(python_scope["remaining_partitions"], 0, "{python_manifest}");
     assert_eq!(

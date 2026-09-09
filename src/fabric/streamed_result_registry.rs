@@ -43,6 +43,7 @@ fn validate_budget_workspace(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StreamedResultRegistration {
+    pub processing: Vec<super::processing_status::QueryProcessing>,
     pub package_id: String,
     pub manifest_resource_id: String,
     pub manifest: StreamedResultResourceRegistration,
@@ -538,6 +539,7 @@ impl StreamedResultRegistry {
             return Err(StreamedResultRegistryError::ResourceIdentityCollision);
         }
         let public_manifest = PublicManifest {
+            processing: &manifest.processing,
             format: "codefabric.public-streamed-result.v2",
             package_id: &package_id,
             epoch_id: &manifest.epoch_id,
@@ -601,6 +603,7 @@ impl StreamedResultRegistry {
             expires_at_unix_ms: lease_expires_at_unix_ms,
         };
         let registration = StreamedResultRegistration {
+            processing: manifest.processing.clone(),
             package_id: package_id.clone(),
             manifest_resource_id: manifest_resource_id.clone(),
             manifest: manifest_registration.clone(),
@@ -866,6 +869,13 @@ impl StreamedResultRegistry {
         }
         pages.sort_by_key(|resource| resource.page_ordinal);
         Ok(StreamedResultRegistration {
+            processing: package
+                .package
+                .as_ref()
+                .ok_or(StreamedResultRegistryError::Released)?
+                .manifest()
+                .processing
+                .clone(),
             package_id: package.package_id.clone(),
             manifest_resource_id: package.manifest_resource_id.clone(),
             manifest: manifest.ok_or(StreamedResultRegistryError::ResourceIdentityCollision)?,
@@ -1335,6 +1345,7 @@ fn authorize_result_values(
 
 #[derive(Serialize)]
 struct PublicManifest<'a> {
+    processing: &'a [super::processing_status::QueryProcessing],
     format: &'static str,
     package_id: &'a str,
     epoch_id: &'a str,

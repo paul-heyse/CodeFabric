@@ -3049,6 +3049,11 @@ async fn event_to_wire(
                 return Err(public_status(Code::DataLoss, "RESULT_EVENT_BINDING"));
             }
             Event::ResultReady(ResultReadyEvent {
+                processing: registration
+                    .processing
+                    .into_iter()
+                    .map(processing_summary)
+                    .collect::<Result<_, _>>()?,
                 header: Some(header()),
                 package_id: registration.package_id.clone(),
                 manifest: Some(ResourceDescriptor {
@@ -3920,6 +3925,62 @@ fn safe_error(
         },
         correlation_id: correlation_id.to_owned(),
     }
+}
+
+fn processing_summary(
+    value: crate::fabric::processing_status::QueryProcessing,
+) -> Result<crate::rpc::generated::codefabric::cpgd::v2::QueryProcessingSummary, Status> {
+    use crate::rpc::generated::codefabric::cpgd::v2::{
+        ProcessingRemainder, ProcessingState, QueryProcessingSummary,
+    };
+    if !value.validate() {
+        return Err(public_status(Code::DataLoss, "RESULT_EVENT_BINDING"));
+    }
+    let summary = value.processing;
+    let remainder = summary
+        .remainder
+        .into_iter()
+        .map(|row| {
+            let state = match row.state.as_str() {
+                "pending" => ProcessingState::Pending,
+                "running" => ProcessingState::Running,
+                "partial" => ProcessingState::Partial,
+                "unknown" => ProcessingState::Unknown,
+                "unavailable" => ProcessingState::Unavailable,
+                "excluded" => ProcessingState::Excluded,
+                "limited" => ProcessingState::Limited,
+                "unsupported" => ProcessingState::Unsupported,
+                "failed" => ProcessingState::Failed,
+                "cancelled" => ProcessingState::Cancelled,
+                _ => return Err(public_status(Code::DataLoss, "RESULT_EVENT_BINDING")),
+            };
+            Ok(ProcessingRemainder {
+                language: row.language,
+                scope_kind: row.scope_kind,
+                path: row.path,
+                path_bytes: row.path_bytes,
+                target: row.target,
+                target_kind: row.target_kind,
+                analysis_context_id: row.analysis_context_id,
+                state: state as i32,
+                reason_code: row.reason,
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(QueryProcessingSummary {
+        query_id: value.query_id,
+        source_generation: summary.source_generation,
+        scope: summary.scope,
+        family: summary.family,
+        languages: summary.languages,
+        requested_partitions: summary.requested_partitions,
+        completed_partitions: summary.completed_partitions,
+        remaining_partitions: summary.remaining_partitions,
+        remainder,
+        next_offset: summary.next_offset.map(|value| value as u64),
+        maximum_rows: value.maximum_rows,
+        additional_rows: value.additional_rows,
+    })
 }
 
 fn terminal_safe_code(state: QueryTerminalState) -> SafeErrorCode {

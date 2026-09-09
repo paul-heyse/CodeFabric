@@ -22,7 +22,7 @@ A failed target retains other target facts and identifies the unfinished target.
 queries remain complete when only Rust compilation failed. Missing capture, unsupported work,
 provider timeout, cancellation and resource limits retain distinct reason codes. Processing
 coverage and result-row bounds are separate; actual truncation observation, public remainder
-pagination, typed wire projection and broader scope/freshness semantics are still pending.
+pagination and broader scope/freshness semantics are still pending.
 
 Validation on 2026-09-09: 14 focused query/scope tests pass; the installed-client mixed-language
 query and guarded-input/resource scenario both pass after the final ordering/filter changes.
@@ -30,6 +30,22 @@ The mixed case checks actual function names/languages and one failed target, not
 Root library Clippy completes with the existing warning backlog; strict root lint cleanliness
 is not claimed. All four golden cases pass, including exact reopen and cancellation. Changes
 remain in the canonical working tree and are integrated in small commits.
+
+Processing now has typed Protobuf fields on the result event and strict Pydantic projections
+on the FastMCP tool output. The same summary is retained with the exact result package for
+replay/reopen. It includes source generation, requested/completed/remaining partitions, bounded
+remainder details, raw path bytes with optional UTF-8 display text, target/kind and known context,
+and an optional result-exhaustion observation. Absent exhaustion is preserved as unknown rather
+than converted to false. Public target kinds use the context manifest vocabulary, not Rust debug
+formatting. The initial explanation is bounded to 64 partitions; fetching subsequent detail
+pages remains work. Protobuf additions preserve existing field numbers and the compatibility
+baseline; no dependency versions changed.
+
+Typed delivery validation on 2026-09-09: 92 adapter tests, adapter lint/types and `just proto-check`
+pass. All 28 selected scope/package/registry/mixed-service tests pass; the new typed package
+reopen/corruption test and final mixed-client target-kind check also pass. Root Clippy completes
+with 958 existing warnings, so this is not a strict root lint pass. This extends 5A/5B; it does
+not close public remainder pagination, full freshness policy behavior or live processing status.
 
 Current production work, 2026-09-08–09:
 

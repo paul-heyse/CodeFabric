@@ -201,6 +201,8 @@ pub struct StreamedResultPackageManifest {
     pub epoch_id: String,
     pub query_execution: String,
     pub canonical_semantic_response: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub processing: Vec<super::processing_status::QueryProcessing>,
     pub total_rows: u64,
     pub total_pages: u64,
     pub total_bytes: u64,
@@ -667,6 +669,37 @@ impl StreamedResultPackageBuilder {
         epoch_id: EpochId,
         query_execution: QueryExecutionPin,
         canonical_semantic_response: &[u8],
+        relations: Vec<StreamedRelationInput>,
+        lease: ResultResourceLease,
+        cancellation: &Cancellation,
+        deadline: Instant,
+        publication_intent: &dyn ResultPublicationIntentRecorder,
+    ) -> Result<SealedStreamedResultPackage, StreamedResultPackageError> {
+        self.seal_with_processing(
+            epoch_id,
+            query_execution,
+            canonical_semantic_response,
+            Vec::new(),
+            relations,
+            lease,
+            cancellation,
+            deadline,
+            publication_intent,
+        )
+        .await
+    }
+
+    /// Seal query-scoped processing with the same immutable snapshot and result lease.
+    ///
+    /// # Errors
+    /// Same bounded publication failures as [`Self::seal`].
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    pub(crate) async fn seal_with_processing(
+        &self,
+        epoch_id: EpochId,
+        query_execution: QueryExecutionPin,
+        canonical_semantic_response: &[u8],
+        processing: Vec<super::processing_status::QueryProcessing>,
         mut relations: Vec<StreamedRelationInput>,
         lease: ResultResourceLease,
         cancellation: &Cancellation,
@@ -908,6 +941,7 @@ impl StreamedResultPackageBuilder {
                 epoch_id: hex(epoch_id.as_bytes()),
                 query_execution: query_hex,
                 canonical_semantic_response: response,
+                processing,
                 total_rows,
                 total_pages: u64::try_from(pages.len())
                     .map_err(|_| StreamedResultPackageError::CounterOverflow)?,
@@ -1303,7 +1337,17 @@ fn validate_manifest(
         || manifest.relations.len() > limits.max_relations.get()
         || manifest.pages.is_empty()
         || manifest.pages.len() > limits.max_pages.get()
+        || manifest.processing.len() > manifest.relations.len()
+        || manifest.processing.iter().any(|value| !value.validate())
     {
+        return Err(StreamedResultPackageError::ManifestShape);
+    }
+    let processing_ids = manifest
+        .processing
+        .iter()
+        .map(|value| &value.query_id)
+        .collect::<BTreeSet<_>>();
+    if processing_ids.len() != manifest.processing.len() {
         return Err(StreamedResultPackageError::ManifestShape);
     }
     let total_rows = manifest.pages.iter().try_fold(0_u64, |total, page| {
@@ -2438,6 +2482,74 @@ mod tests {
             .reopen(tampered, epoch, query, lease)
             .await,
             Err(StreamedResultPackageError::ObjectStore(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn processing_summary_reopens_with_result_and_rejects_corrupt_counts() {
+        use super::super::processing_status::{
+            EntityProcessingSummary, ProcessingRemainder, QueryProcessing,
+        };
+        let sink = Arc::new(RecordingSink::new(None));
+        let builder =
+            StreamedResultPackageBuilder::new(sink.clone(), limits(2), test_resource_budget());
+        let (epoch, query, lease) = pins();
+        let processing = vec![QueryProcessing {
+            query_id: "q1".to_owned(),
+            maximum_rows: Some(2),
+            additional_rows: Some(false),
+            processing: EntityProcessingSummary {
+                source_generation: 7,
+                requested_partitions: 2,
+                completed_partitions: 1,
+                remaining_partitions: 1,
+                scope: "selected_cargo_targets".to_owned(),
+                family: "function-declarations".to_owned(),
+                languages: vec!["rust".to_owned()],
+                next_offset: None,
+                remainder: vec![ProcessingRemainder {
+                    language: "rust".to_owned(),
+                    scope_kind: "cargo_target".to_owned(),
+                    path: None,
+                    path_bytes: b"raw-\xff/Cargo.toml".to_vec(),
+                    target: Some("broken".to_owned()),
+                    target_kind: Some("binary".to_owned()),
+                    analysis_context_id: None,
+                    state: "unavailable".to_owned(),
+                    reason: "compiler_target_unavailable".to_owned(),
+                }],
+            },
+        }];
+        let sealed = builder
+            .seal_with_processing(
+                epoch,
+                query,
+                b"{}",
+                processing.clone(),
+                vec![relation(&[1, 2], 2)],
+                lease,
+                &Cancellation::default(),
+                Instant::now() + Duration::from_secs(5),
+                &AcceptPublicationIntent,
+            )
+            .await
+            .unwrap();
+        let reopened = builder
+            .reopen(sealed.manifest_path().clone(), epoch, query, lease)
+            .await
+            .unwrap();
+        assert_eq!(reopened.manifest().processing, processing);
+        let mut corrupt = reopened.manifest().clone();
+        corrupt.processing[0].processing.remaining_partitions = 0;
+        assert!(matches!(
+            validate_manifest(&corrupt, limits(2)),
+            Err(StreamedResultPackageError::ManifestShape)
+        ));
+        corrupt = reopened.manifest().clone();
+        corrupt.processing[0].processing.remainder[0].path = Some("lossy replacement".to_owned());
+        assert!(matches!(
+            validate_manifest(&corrupt, limits(2)),
+            Err(StreamedResultPackageError::ManifestShape)
         ));
     }
 

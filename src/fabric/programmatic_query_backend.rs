@@ -1134,7 +1134,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "scope authorization returned a resource-policy identity outside the admitted epoch",
             );
         }
-        let mut processing_by_query = serde_json::Map::new();
+        let mut processing_summaries = Vec::new();
         if let Some(processing) = authority.entity_processing() {
             use super::processing_status::{ENTITY_PROCESSING_RELATION, EntityQueryScope};
             if !authorization
@@ -1194,10 +1194,12 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     .iter()
                     .find(|clause| clause.query_id() == query_id.as_ref())
                     .map(crate::semantic_query_contract::SemanticQueryClause::maximum_results);
-                processing_by_query.insert(query_id.to_string(), serde_json::json!({
-                    "processing": summary,
-                    "result_bound": {"maximum_rows": maximum, "additional_rows": "not_reported"},
-                }));
+                processing_summaries.push(super::processing_status::QueryProcessing {
+                    query_id: query_id.to_string(),
+                    processing: summary,
+                    maximum_rows: maximum.map(|value| value as u64),
+                    additional_rows: None,
+                });
             }
         }
         let mut handoffs_by_output = BTreeMap::new();
@@ -1286,7 +1288,6 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             "format": "codefabric.semantic-query-response.v2",
             "semantic_request_id": request.parsed().request.semantic_request_id,
             "snapshot": &snapshot,
-            "query_scope": processing_by_query,
         });
         let canonical_response = match serde_json_canonicalizer::to_vec(&response) {
             Ok(response) => response,
@@ -1294,6 +1295,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         };
         let transaction = transaction
             .with_canonical_semantic_response(canonical_response)
+            .with_processing(processing_summaries)
             .with_deadline(context.deadline());
         if cancellation.is_cancelled() {
             return cancelled(

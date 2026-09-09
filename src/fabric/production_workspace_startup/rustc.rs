@@ -145,7 +145,7 @@ pub(super) fn run(
         let mut progress = RustTargetProgress {
             manifest: target.manifest.clone(),
             target: target.target.name.clone(),
-            target_kind: format!("{:?}", target.target.kind),
+            target_kind: target.target.kind.as_str().to_owned(),
             context_id: None,
             state: "unavailable",
             detail: String::new(),

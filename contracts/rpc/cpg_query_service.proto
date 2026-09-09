@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:9c6dfae80869040523f1d6de6a9895c45651696d1e9f41e65275c7a608715eaa
+// canonical_digest: b3:ac25c9f16ed7dc207520d9fdc2088d2f7d17ced516867dc5b1e2bbc5dfa3120a
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
@@ -539,6 +539,52 @@ message ResultReadyEvent {
   uint64 total_pages = 5;
   uint64 total_bytes = 6;
   repeated ResourceDescriptor pages = 7;
+  // Immutable query dependency scope at this result's pinned source generation.
+  repeated QueryProcessingSummary processing = 8;
+}
+
+enum ProcessingState {
+  PROCESSING_STATE_UNSPECIFIED = 0;
+  PROCESSING_STATE_PENDING = 1;
+  PROCESSING_STATE_RUNNING = 2;
+  PROCESSING_STATE_COMPLETE = 3;
+  PROCESSING_STATE_PARTIAL = 4;
+  PROCESSING_STATE_UNKNOWN = 5;
+  PROCESSING_STATE_UNAVAILABLE = 6;
+  PROCESSING_STATE_EXCLUDED = 7;
+  PROCESSING_STATE_LIMITED = 8;
+  PROCESSING_STATE_UNSUPPORTED = 9;
+  PROCESSING_STATE_FAILED = 10;
+  PROCESSING_STATE_CANCELLED = 11;
+}
+
+message ProcessingRemainder {
+  string language = 1;
+  string scope_kind = 2;
+  // Raw path is authoritative; display text is absent for non-UTF-8 paths.
+  bytes path_bytes = 3;
+  optional string path = 4;
+  optional string target = 5;
+  ProcessingState state = 6;
+  string reason_code = 7;
+  optional string target_kind = 8;
+  optional string analysis_context_id = 9;
+}
+
+message QueryProcessingSummary {
+  string query_id = 1;
+  uint64 source_generation = 2;
+  string scope = 3;
+  string family = 4;
+  repeated string languages = 5;
+  uint64 requested_partitions = 6;
+  uint64 completed_partitions = 7;
+  uint64 remaining_partitions = 8;
+  repeated ProcessingRemainder remainder = 9;
+  optional uint64 next_offset = 10;
+  optional uint64 maximum_rows = 11;
+  // Absence means result exhaustion was not observed. False is meaningful.
+  optional bool additional_rows = 12;
 }
 
 message TerminalEvent {

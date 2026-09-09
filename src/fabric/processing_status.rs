@@ -8,7 +8,7 @@ use arrow_array::{
     Array, BinaryArray, FixedSizeBinaryArray, RecordBatch, StringArray, UInt64Array,
 };
 use futures::StreamExt as _;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -24,17 +24,72 @@ pub(crate) struct EntityProcessingSnapshot {
     epoch: super::epoch_runtime::FabricEpochId,
 }
 
-#[derive(Serialize)]
-pub(crate) struct EntityProcessingSummary {
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct EntityProcessingSummary {
     pub source_generation: u64,
     pub requested_partitions: u64,
     pub completed_partitions: u64,
     pub remaining_partitions: u64,
-    pub scope: &'static str,
-    pub family: &'static str,
+    pub scope: String,
+    pub family: String,
     pub remainder: Vec<ProcessingRemainder>,
     pub next_offset: Option<usize>,
     pub languages: Vec<String>,
+}
+
+/// Query-selected processing and output bounds retained with the immutable result package.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryProcessing {
+    pub query_id: String,
+    pub processing: EntityProcessingSummary,
+    pub maximum_rows: Option<u64>,
+    /// None means exhaustion was not observed; false is an observed complete result.
+    pub additional_rows: Option<bool>,
+}
+
+impl QueryProcessing {
+    pub(crate) fn validate(&self) -> bool {
+        let value = &self.processing;
+        !self.query_id.is_empty()
+            && value.source_generation > 0
+            && !value.scope.is_empty()
+            && !value.family.is_empty()
+            && value
+                .completed_partitions
+                .checked_add(value.remaining_partitions)
+                == Some(value.requested_partitions)
+            && value.remainder.len() <= REMAINDER_PAGE_SIZE
+            && u64::try_from(value.remainder.len()).is_ok_and(|n| n <= value.remaining_partitions)
+            && value.next_offset
+                == ((value.remainder.len() as u64) < value.remaining_partitions)
+                    .then_some(value.remainder.len())
+            && self.maximum_rows != Some(0)
+            && value
+                .languages
+                .iter()
+                .all(|language| matches!(language.as_str(), "python" | "rust"))
+            && value.remainder.iter().all(|row| {
+                value.languages.contains(&row.language)
+                    && !row.scope_kind.is_empty()
+                    && !row.reason.is_empty()
+                    && row.path.as_deref() == std::str::from_utf8(&row.path_bytes).ok()
+                    && matches!(
+                        row.state.as_str(),
+                        "pending"
+                            | "running"
+                            | "partial"
+                            | "unknown"
+                            | "unavailable"
+                            | "excluded"
+                            | "limited"
+                            | "unsupported"
+                            | "failed"
+                            | "cancelled"
+                    )
+            })
+    }
 }
 
 pub(crate) struct EntityQueryScope {
@@ -146,15 +201,20 @@ impl EntityQueryScope {
     }
 }
 
-#[derive(Serialize)]
-pub(crate) struct ProcessingRemainder {
-    language: String,
-    scope_kind: String,
-    path: Option<String>,
-    path_bytes: Vec<u8>,
-    target: Option<String>,
-    state: String,
-    reason: String,
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessingRemainder {
+    pub language: String,
+    pub scope_kind: String,
+    pub path: Option<String>,
+    pub path_bytes: Vec<u8>,
+    pub target: Option<String>,
+    #[serde(default)]
+    pub target_kind: Option<String>,
+    #[serde(default)]
+    pub analysis_context_id: Option<String>,
+    pub state: String,
+    pub reason: String,
 }
 
 impl EntityProcessingSnapshot {
@@ -221,8 +281,8 @@ impl EntityProcessingSnapshot {
             requested_partitions: 0,
             completed_partitions: 0,
             remaining_partitions: 0,
-            scope: "requested_python_sources_and_selected_cargo_targets",
-            family: "function-declarations",
+            scope: "requested_python_sources_and_selected_cargo_targets".to_owned(),
+            family: "function-declarations".to_owned(),
             remainder: Vec::new(),
             next_offset: None,
             languages: scope.languages.iter().cloned().collect(),
@@ -233,6 +293,9 @@ impl EntityProcessingSnapshot {
             let reasons = strings(batch, "reason").expect("validated processing schema");
             let kinds = strings(batch, "scope_kind").expect("validated processing schema");
             let targets = strings(batch, "target_name").expect("validated processing schema");
+            let target_kinds = batch
+                .column_by_name("target_kind")
+                .and_then(|array| array.as_any().downcast_ref::<StringArray>());
             let paths = binary(batch, "relative_path").expect("validated processing schema");
             let contexts = batch
                 .column_by_name("context_id")
@@ -268,6 +331,20 @@ impl EntityProcessingSnapshot {
                     path: String::from_utf8(paths.value(row).to_vec()).ok(),
                     path_bytes: paths.value(row).to_vec(),
                     target: (!targets.is_null(row)).then(|| targets.value(row).to_owned()),
+                    target_kind: target_kinds
+                        .filter(|array| !array.is_null(row))
+                        .map(|array| array.value(row).to_owned()),
+                    analysis_context_id: (!contexts.is_null(row)).then(|| {
+                        crate::identity::encode_public_id(
+                            crate::identity::IdentityDomain::AnalysisContext,
+                            None,
+                            contexts
+                                .value(row)
+                                .try_into()
+                                .expect("validated context width"),
+                        )
+                        .expect("context identities have no kind slug")
+                    }),
                     state: states.value(row).to_owned(),
                     reason: reasons.value(row).to_owned(),
                 });
@@ -340,6 +417,9 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
     let state = strings(batch, "processing_state")?;
     let reason = strings(batch, "reason")?;
     let _ = strings(batch, "target_name")?;
+    if batch.column_by_name("target_kind").is_some() {
+        let _ = strings(batch, "target_kind")?;
+    }
     let kinds = strings(batch, "scope_kind")?;
     let paths = binary(batch, "relative_path")?;
     for required in [family as &dyn Array, language, state, reason, kinds, paths] {

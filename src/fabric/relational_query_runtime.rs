@@ -301,6 +301,7 @@ pub struct RelationalQueryTransaction {
     observed_at_unix_ms: i64,
     cancellation: Cancellation,
     canonical_semantic_response: Option<Arc<[u8]>>,
+    processing: Vec<super::processing_status::QueryProcessing>,
     deadline: Option<Instant>,
 }
 
@@ -360,6 +361,7 @@ impl RelationalQueryTransaction {
             observed_at_unix_ms,
             cancellation,
             canonical_semantic_response: None,
+            processing: Vec::new(),
             deadline: None,
         })
     }
@@ -368,6 +370,14 @@ impl RelationalQueryTransaction {
     #[must_use]
     pub fn with_canonical_semantic_response(mut self, response: impl Into<Arc<[u8]>>) -> Self {
         self.canonical_semantic_response = Some(response.into());
+        self
+    }
+
+    pub(crate) fn with_processing(
+        mut self,
+        processing: Vec<super::processing_status::QueryProcessing>,
+    ) -> Self {
+        self.processing = processing;
         self
     }
 
@@ -680,6 +690,7 @@ impl RelationalQueryRuntime {
             observed_at_unix_ms,
             cancellation,
             canonical_semantic_response: _,
+            processing: _,
             deadline: _,
         } = transaction;
         let work = resources
@@ -853,6 +864,7 @@ impl RelationalQueryRuntime {
             observed_at_unix_ms,
             cancellation,
             canonical_semantic_response,
+            processing,
             deadline,
         } = transaction;
         let canonical_semantic_response = canonical_semantic_response
@@ -958,10 +970,11 @@ impl RelationalQueryRuntime {
                     });
                 }
                 let package = builder
-                    .seal(
+                    .seal_with_processing(
                         epoch_id,
                         query_execution,
                         &canonical_semantic_response,
+                        processing,
                         relation_streams,
                         result_lease,
                         &seal_cancellation,

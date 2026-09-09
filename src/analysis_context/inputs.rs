@@ -194,6 +194,21 @@ pub enum RustTargetKind {
     ProcMacro,
 }
 
+impl RustTargetKind {
+    /// Stable application vocabulary shared by context manifests and processing scope.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Library => "library",
+            Self::Binary => "binary",
+            Self::Example => "example",
+            Self::Test => "test",
+            Self::Benchmark => "benchmark",
+            Self::ProcMacro => "proc_macro",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RustTargetSettings {

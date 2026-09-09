@@ -25,6 +25,41 @@ ROOT = Path(__file__).resolve().parents[2]
 DESCRIPTOR_PATH = ROOT / "tooling/proto/production-descriptor.pb"
 
 
+def test_processing_wire_preserves_explicit_false_and_raw_paths() -> None:
+    summary = cpg.QueryProcessingSummary(
+        query_id="q1",
+        source_generation=4,
+        requested_partitions=2,
+        completed_partitions=1,
+        remaining_partitions=1,
+        remainder=[
+            cpg.ProcessingRemainder(
+                language="rust",
+                scope_kind="cargo_target",
+                path_bytes=b"bad-\xff/Cargo.toml",
+                state=cpg.PROCESSING_STATE_UNAVAILABLE,
+                reason_code="compiler_target_unavailable",
+            )
+        ],
+    )
+    assert not summary.HasField("additional_rows")
+    assert not summary.HasField("next_offset")
+    summary.additional_rows = False
+    summary.next_offset = 0
+    decoded = cpg.QueryProcessingSummary.FromString(summary.SerializeToString())
+    assert decoded.HasField("additional_rows") and decoded.additional_rows is False
+    assert decoded.HasField("next_offset") and decoded.next_offset == 0
+    assert not decoded.remainder[0].HasField("path")
+    assert decoded.remainder[0].path_bytes == b"bad-\xff/Cargo.toml"
+    dynamic = _dynamic_message(
+        _production_descriptor_pool(), "codefabric.cpgd.v2.QueryProcessingSummary"
+    )
+    dynamic.ParseFromString(summary.SerializeToString())
+    assert dynamic.SerializeToString(deterministic=True) == summary.SerializeToString(
+        deterministic=True
+    )
+
+
 def _clear_derived_json_names(messages: Iterable[descriptor_pb2.DescriptorProto]) -> None:
     for message in messages:
         for field in message.field:

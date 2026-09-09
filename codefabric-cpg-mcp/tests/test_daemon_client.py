@@ -27,9 +27,49 @@ from codefabric_cpg_mcp.daemon import (
     ReferenceSelector,
     StringInputAnswer,
 )
+from codefabric_cpg_mcp.daemon.client import _processing_summary
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2 as query_pb
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2_grpc as query_grpc
 from codefabric_cpg_mcp.settings import Settings
+
+
+def test_typed_processing_rejects_inconsistent_scope_and_preserves_unknown_exhaustion() -> None:
+    message = query_pb.QueryProcessingSummary(
+        query_id="q1",
+        source_generation=3,
+        scope="selected_targets",
+        family="function-declarations",
+        languages=["rust"],
+        requested_partitions=2,
+        completed_partitions=1,
+        remaining_partitions=1,
+        remainder=[
+            query_pb.ProcessingRemainder(
+                language="rust",
+                scope_kind="cargo_target",
+                path_bytes=b"Cargo.toml",
+                path="Cargo.toml",
+                target="broken",
+                state=query_pb.PROCESSING_STATE_UNAVAILABLE,
+                reason_code="compiler_target_unavailable",
+            )
+        ],
+    )
+    assert _processing_summary(message).additional_rows is None
+    message.additional_rows = False
+    assert _processing_summary(message).additional_rows is False
+    message.completed_partitions = 2
+    with pytest.raises(DaemonProtocolError, match="invalid typed processing"):
+        _processing_summary(message)
+    message.completed_partitions = 1
+    # The wire accepts unknown enum numbers even though the generated stub is closed.
+    message.remainder[0].MergeFromString(b"\x30\xe7\x07")
+    with pytest.raises(DaemonProtocolError, match="invalid typed processing"):
+        _processing_summary(message)
+    message.remainder[0].state = query_pb.PROCESSING_STATE_UNAVAILABLE
+    message.remainder[0].path = "another-file"
+    with pytest.raises(DaemonProtocolError, match="invalid typed processing"):
+        _processing_summary(message)
 
 
 def _settings(

@@ -215,6 +215,74 @@
           ]
         },
         {
+          "full_name": "codefabric.cpgd.v2.ProcessingState",
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": [],
+          "values": [
+            {
+              "name": "PROCESSING_STATE_UNSPECIFIED",
+              "number": 0,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_PENDING",
+              "number": 1,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_RUNNING",
+              "number": 2,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_COMPLETE",
+              "number": 3,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_PARTIAL",
+              "number": 4,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_UNKNOWN",
+              "number": 5,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_UNAVAILABLE",
+              "number": 6,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_EXCLUDED",
+              "number": 7,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_LIMITED",
+              "number": 8,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_UNSUPPORTED",
+              "number": 9,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_FAILED",
+              "number": 10,
+              "options": {}
+            },
+            {
+              "name": "PROCESSING_STATE_CANCELLED",
+              "number": 11,
+              "options": {}
+            }
+          ]
+        },
+        {
           "full_name": "codefabric.cpgd.v2.ProgressStage",
           "options": {},
           "reserved_names": [],
@@ -2519,6 +2587,150 @@
           "fields": [
             {
               "default_value": null,
+              "has_presence": false,
+              "json_name": "language",
+              "label": "LABEL_OPTIONAL",
+              "name": "language",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "scopeKind",
+              "label": "LABEL_OPTIONAL",
+              "name": "scope_kind",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "pathBytes",
+              "label": "LABEL_OPTIONAL",
+              "name": "path_bytes",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BYTES",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "path",
+              "label": "LABEL_OPTIONAL",
+              "name": "path",
+              "number": 4,
+              "oneof": "_path",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "target",
+              "label": "LABEL_OPTIONAL",
+              "name": "target",
+              "number": 5,
+              "oneof": "_target",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "state",
+              "label": "LABEL_OPTIONAL",
+              "name": "state",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_ENUM",
+              "type_name": ".codefabric.cpgd.v2.ProcessingState"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "reasonCode",
+              "label": "LABEL_OPTIONAL",
+              "name": "reason_code",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "targetKind",
+              "label": "LABEL_OPTIONAL",
+              "name": "target_kind",
+              "number": 8,
+              "oneof": "_target_kind",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "analysisContextId",
+              "label": "LABEL_OPTIONAL",
+              "name": "analysis_context_id",
+              "number": 9,
+              "oneof": "_analysis_context_id",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.cpgd.v2.ProcessingRemainder",
+          "oneofs": [
+            {
+              "name": "_path",
+              "options": {}
+            },
+            {
+              "name": "_target",
+              "options": {}
+            },
+            {
+              "name": "_target_kind",
+              "options": {}
+            },
+            {
+              "name": "_analysis_context_id",
+              "options": {}
+            }
+          ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
               "has_presence": true,
               "json_name": "header",
               "label": "LABEL_OPTIONAL",
@@ -2895,6 +3107,185 @@
           ],
           "full_name": "codefabric.cpgd.v2.QueryPreparation",
           "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "queryId",
+              "label": "LABEL_OPTIONAL",
+              "name": "query_id",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "sourceGeneration",
+              "label": "LABEL_OPTIONAL",
+              "name": "source_generation",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "scope",
+              "label": "LABEL_OPTIONAL",
+              "name": "scope",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "family",
+              "label": "LABEL_OPTIONAL",
+              "name": "family",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "languages",
+              "label": "LABEL_REPEATED",
+              "name": "languages",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "requestedPartitions",
+              "label": "LABEL_OPTIONAL",
+              "name": "requested_partitions",
+              "number": 6,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "completedPartitions",
+              "label": "LABEL_OPTIONAL",
+              "name": "completed_partitions",
+              "number": 7,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "remainingPartitions",
+              "label": "LABEL_OPTIONAL",
+              "name": "remaining_partitions",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "remainder",
+              "label": "LABEL_REPEATED",
+              "name": "remainder",
+              "number": 9,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v2.ProcessingRemainder"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "nextOffset",
+              "label": "LABEL_OPTIONAL",
+              "name": "next_offset",
+              "number": 10,
+              "oneof": "_next_offset",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "maximumRows",
+              "label": "LABEL_OPTIONAL",
+              "name": "maximum_rows",
+              "number": 11,
+              "oneof": "_maximum_rows",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "additionalRows",
+              "label": "LABEL_OPTIONAL",
+              "name": "additional_rows",
+              "number": 12,
+              "oneof": "_additional_rows",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_BOOL",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.cpgd.v2.QueryProcessingSummary",
+          "oneofs": [
+            {
+              "name": "_next_offset",
+              "options": {}
+            },
+            {
+              "name": "_maximum_rows",
+              "options": {}
+            },
+            {
+              "name": "_additional_rows",
+              "options": {}
+            }
+          ],
           "options": {},
           "reserved_names": [],
           "reserved_ranges": []
@@ -3915,6 +4306,19 @@
               "proto3_optional": false,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.cpgd.v2.ResourceDescriptor"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "processing",
+              "label": "LABEL_REPEATED",
+              "name": "processing",
+              "number": 8,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v2.QueryProcessingSummary"
             }
           ],
           "full_name": "codefabric.cpgd.v2.ResultReadyEvent",

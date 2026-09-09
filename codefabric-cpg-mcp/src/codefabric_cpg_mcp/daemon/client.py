@@ -23,6 +23,9 @@ from ..contracts.json import canonicalize_json, canonicalize_value, checksum
 from ..contracts.wire_models import (
     JSON_OBJECT_ADAPTER,
     JsonObject,
+    ProcessingRemainder,
+    ProcessingState,
+    QueryProcessingSummary,
     QueryToolInput,
     ValidateToolInput,
 )
@@ -532,6 +535,8 @@ class DaemonQueryResult(_PortModel):
     daemon_query_id: NonEmptyString
     execution_state: QueryState
     epoch_id: str | None
+    source_generation: PositiveInt | None = None
+    processing: tuple[QueryProcessingSummary, ...] = ()
     package_id: str | None
     manifest: ResourceHandle | None
     pages: tuple[ResourceHandle, ...]
@@ -978,6 +983,53 @@ def _safe_error_identity(error: SafeError | None) -> tuple[object, ...] | None:
     )
 
 
+def _processing_summary(value: query_pb.QueryProcessingSummary) -> QueryProcessingSummary:
+    states: dict[int, ProcessingState] = {
+        query_pb.PROCESSING_STATE_PENDING: "pending",
+        query_pb.PROCESSING_STATE_RUNNING: "running",
+        query_pb.PROCESSING_STATE_PARTIAL: "partial",
+        query_pb.PROCESSING_STATE_UNKNOWN: "unknown",
+        query_pb.PROCESSING_STATE_UNAVAILABLE: "unavailable",
+        query_pb.PROCESSING_STATE_EXCLUDED: "excluded",
+        query_pb.PROCESSING_STATE_LIMITED: "limited",
+        query_pb.PROCESSING_STATE_UNSUPPORTED: "unsupported",
+        query_pb.PROCESSING_STATE_FAILED: "failed",
+        query_pb.PROCESSING_STATE_CANCELLED: "cancelled",
+    }
+    try:
+        return QueryProcessingSummary(
+            query_id=value.query_id,
+            source_generation=value.source_generation,
+            scope=value.scope,
+            family=value.family,
+            languages=cast(tuple[Literal["python", "rust"], ...], tuple(value.languages)),
+            requested_partitions=value.requested_partitions,
+            completed_partitions=value.completed_partitions,
+            remaining_partitions=value.remaining_partitions,
+            remainder=tuple(
+                ProcessingRemainder(
+                    language=cast(Literal["python", "rust"], row.language),
+                    scope_kind=row.scope_kind,
+                    path_bytes=tuple(row.path_bytes),
+                    path=row.path if row.HasField("path") else None,
+                    target=row.target if row.HasField("target") else None,
+                    target_kind=row.target_kind if row.HasField("target_kind") else None,
+                    analysis_context_id=row.analysis_context_id
+                    if row.HasField("analysis_context_id")
+                    else None,
+                    state=states[row.state],
+                    reason_code=row.reason_code,
+                )
+                for row in value.remainder
+            ),
+            next_offset=value.next_offset if value.HasField("next_offset") else None,
+            maximum_rows=value.maximum_rows if value.HasField("maximum_rows") else None,
+            additional_rows=value.additional_rows if value.HasField("additional_rows") else None,
+        )
+    except (KeyError, ValidationError) as error:
+        raise DaemonProtocolError("invalid typed processing scope") from error
+
+
 def _query_event_identity(event: query_pb.QueryEvent) -> tuple[object, ...]:
     """Project one event to content identity independent of session/cursor/handle reissue."""
 
@@ -1011,6 +1063,7 @@ def _query_event_identity(event: query_pb.QueryEvent) -> tuple[object, ...]:
             value.total_rows,
             value.total_pages,
             value.total_bytes,
+            tuple(_processing_summary(item).model_dump_json() for item in value.processing),
         )
     if kind == "terminal":
         value = event.terminal
@@ -1610,6 +1663,7 @@ class CpgDaemonClient:
             raise DaemonProtocolError("accepted query authority differs from the active session")
         cursor: bytes | None = None
         epoch_id: str | None = None
+        source_generation: int | None = None
         result_ready: query_pb.ResultReadyEvent | None = None
         terminal: query_pb.TerminalEvent | None = None
         last_sequence = 0
@@ -1663,6 +1717,7 @@ class CpgDaemonClient:
                     cursor = bytes(header.cursor)
                     if kind == "snapshot_pinned":
                         epoch_id = payload.epoch_id
+                        source_generation = payload.source_generation
                     elif kind == "progress":
                         if progress is not None and not replayed:
                             total = payload.total if payload.HasField("total") else None
@@ -1713,6 +1768,7 @@ class CpgDaemonClient:
         page_resources: tuple[ResourceHandle, ...] = ()
         package_id: str | None = None
         rows = pages = bytes_count = 0
+        processing: tuple[QueryProcessingSummary, ...] = ()
         if result_ready is not None:
             if not result_ready.HasField("manifest"):
                 raise DaemonProtocolError("result-ready event omitted its manifest resource")
@@ -1736,6 +1792,11 @@ class CpgDaemonClient:
             rows = result_ready.total_rows
             pages = result_ready.total_pages
             bytes_count = result_ready.total_bytes
+            processing = tuple(_processing_summary(item) for item in result_ready.processing)
+            if len({item.query_id for item in processing}) != len(processing) or any(
+                item.source_generation != source_generation for item in processing
+            ):
+                raise DaemonProtocolError("processing scope differs from the pinned query")
         terminal_error = _safe_error(terminal.error) if terminal.HasField("error") else None
         authority = self._assert_authority(terminal.header.authority)
         return DaemonQueryResult(
@@ -1744,6 +1805,8 @@ class CpgDaemonClient:
             daemon_query_id=accepted.daemon_query_id,
             execution_state=state,
             epoch_id=epoch_id,
+            source_generation=source_generation,
+            processing=processing,
             package_id=package_id,
             manifest=manifest,
             pages=page_resources,

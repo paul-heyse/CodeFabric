@@ -1,4 +1,4 @@
-# @generated from released Protobuf semantic identities b3:9c6dfae80869040523f1d6de6a9895c45651696d1e9f41e65275c7a608715eaa,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
+# @generated from released Protobuf semantic identities b3:ac25c9f16ed7dc207520d9fdc2088d2f7d17ced516867dc5b1e2bbc5dfa3120a,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
 import datetime
 
 from google.protobuf import duration_pb2 as _duration_pb2
@@ -152,6 +152,21 @@ class ReservedControlOperation(int, metaclass=_enum_type_wrapper.EnumTypeWrapper
     RESERVED_CONTROL_OPERATION_GET_STATUS: _ClassVar[ReservedControlOperation]
     RESERVED_CONTROL_OPERATION_CANCEL_QUERY: _ClassVar[ReservedControlOperation]
     RESERVED_CONTROL_OPERATION_RELEASE_RESOURCE: _ClassVar[ReservedControlOperation]
+
+class ProcessingState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    PROCESSING_STATE_UNSPECIFIED: _ClassVar[ProcessingState]
+    PROCESSING_STATE_PENDING: _ClassVar[ProcessingState]
+    PROCESSING_STATE_RUNNING: _ClassVar[ProcessingState]
+    PROCESSING_STATE_COMPLETE: _ClassVar[ProcessingState]
+    PROCESSING_STATE_PARTIAL: _ClassVar[ProcessingState]
+    PROCESSING_STATE_UNKNOWN: _ClassVar[ProcessingState]
+    PROCESSING_STATE_UNAVAILABLE: _ClassVar[ProcessingState]
+    PROCESSING_STATE_EXCLUDED: _ClassVar[ProcessingState]
+    PROCESSING_STATE_LIMITED: _ClassVar[ProcessingState]
+    PROCESSING_STATE_UNSUPPORTED: _ClassVar[ProcessingState]
+    PROCESSING_STATE_FAILED: _ClassVar[ProcessingState]
+    PROCESSING_STATE_CANCELLED: _ClassVar[ProcessingState]
 LIFECYCLE_STATE_UNSPECIFIED: LifecycleState
 LIFECYCLE_STATE_BOOTSTRAPPING: LifecycleState
 LIFECYCLE_STATE_READY: LifecycleState
@@ -246,6 +261,18 @@ RESERVED_CONTROL_OPERATION_HANDSHAKE: ReservedControlOperation
 RESERVED_CONTROL_OPERATION_GET_STATUS: ReservedControlOperation
 RESERVED_CONTROL_OPERATION_CANCEL_QUERY: ReservedControlOperation
 RESERVED_CONTROL_OPERATION_RELEASE_RESOURCE: ReservedControlOperation
+PROCESSING_STATE_UNSPECIFIED: ProcessingState
+PROCESSING_STATE_PENDING: ProcessingState
+PROCESSING_STATE_RUNNING: ProcessingState
+PROCESSING_STATE_COMPLETE: ProcessingState
+PROCESSING_STATE_PARTIAL: ProcessingState
+PROCESSING_STATE_UNKNOWN: ProcessingState
+PROCESSING_STATE_UNAVAILABLE: ProcessingState
+PROCESSING_STATE_EXCLUDED: ProcessingState
+PROCESSING_STATE_LIMITED: ProcessingState
+PROCESSING_STATE_UNSUPPORTED: ProcessingState
+PROCESSING_STATE_FAILED: ProcessingState
+PROCESSING_STATE_CANCELLED: ProcessingState
 
 class RequestContext(_message.Message):
     __slots__ = ("correlation_id", "remaining_budget")
@@ -832,7 +859,7 @@ class ResourceDescriptor(_message.Message):
     def __init__(self, kind: _Optional[_Union[ResourceKind, str]] = ..., public_handle: _Optional[str] = ..., package_id: _Optional[str] = ..., page_ordinal: _Optional[int] = ..., media_type: _Optional[str] = ..., byte_length: _Optional[int] = ..., content_checksum: _Optional[str] = ..., expires_at_unix_ms: _Optional[int] = ..., authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ...) -> None: ...
 
 class ResultReadyEvent(_message.Message):
-    __slots__ = ("header", "package_id", "manifest", "total_rows", "total_pages", "total_bytes", "pages")
+    __slots__ = ("header", "package_id", "manifest", "total_rows", "total_pages", "total_bytes", "pages", "processing")
     HEADER_FIELD_NUMBER: _ClassVar[int]
     PACKAGE_ID_FIELD_NUMBER: _ClassVar[int]
     MANIFEST_FIELD_NUMBER: _ClassVar[int]
@@ -840,6 +867,7 @@ class ResultReadyEvent(_message.Message):
     TOTAL_PAGES_FIELD_NUMBER: _ClassVar[int]
     TOTAL_BYTES_FIELD_NUMBER: _ClassVar[int]
     PAGES_FIELD_NUMBER: _ClassVar[int]
+    PROCESSING_FIELD_NUMBER: _ClassVar[int]
     header: QueryEventHeader
     package_id: str
     manifest: ResourceDescriptor
@@ -847,7 +875,58 @@ class ResultReadyEvent(_message.Message):
     total_pages: int
     total_bytes: int
     pages: _containers.RepeatedCompositeFieldContainer[ResourceDescriptor]
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., package_id: _Optional[str] = ..., manifest: _Optional[_Union[ResourceDescriptor, _Mapping]] = ..., total_rows: _Optional[int] = ..., total_pages: _Optional[int] = ..., total_bytes: _Optional[int] = ..., pages: _Optional[_Iterable[_Union[ResourceDescriptor, _Mapping]]] = ...) -> None: ...
+    processing: _containers.RepeatedCompositeFieldContainer[QueryProcessingSummary]
+    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., package_id: _Optional[str] = ..., manifest: _Optional[_Union[ResourceDescriptor, _Mapping]] = ..., total_rows: _Optional[int] = ..., total_pages: _Optional[int] = ..., total_bytes: _Optional[int] = ..., pages: _Optional[_Iterable[_Union[ResourceDescriptor, _Mapping]]] = ..., processing: _Optional[_Iterable[_Union[QueryProcessingSummary, _Mapping]]] = ...) -> None: ...
+
+class ProcessingRemainder(_message.Message):
+    __slots__ = ("language", "scope_kind", "path_bytes", "path", "target", "state", "reason_code", "target_kind", "analysis_context_id")
+    LANGUAGE_FIELD_NUMBER: _ClassVar[int]
+    SCOPE_KIND_FIELD_NUMBER: _ClassVar[int]
+    PATH_BYTES_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    TARGET_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    REASON_CODE_FIELD_NUMBER: _ClassVar[int]
+    TARGET_KIND_FIELD_NUMBER: _ClassVar[int]
+    ANALYSIS_CONTEXT_ID_FIELD_NUMBER: _ClassVar[int]
+    language: str
+    scope_kind: str
+    path_bytes: bytes
+    path: str
+    target: str
+    state: ProcessingState
+    reason_code: str
+    target_kind: str
+    analysis_context_id: str
+    def __init__(self, language: _Optional[str] = ..., scope_kind: _Optional[str] = ..., path_bytes: _Optional[bytes] = ..., path: _Optional[str] = ..., target: _Optional[str] = ..., state: _Optional[_Union[ProcessingState, str]] = ..., reason_code: _Optional[str] = ..., target_kind: _Optional[str] = ..., analysis_context_id: _Optional[str] = ...) -> None: ...
+
+class QueryProcessingSummary(_message.Message):
+    __slots__ = ("query_id", "source_generation", "scope", "family", "languages", "requested_partitions", "completed_partitions", "remaining_partitions", "remainder", "next_offset", "maximum_rows", "additional_rows")
+    QUERY_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    SCOPE_FIELD_NUMBER: _ClassVar[int]
+    FAMILY_FIELD_NUMBER: _ClassVar[int]
+    LANGUAGES_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_PARTITIONS_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_PARTITIONS_FIELD_NUMBER: _ClassVar[int]
+    REMAINING_PARTITIONS_FIELD_NUMBER: _ClassVar[int]
+    REMAINDER_FIELD_NUMBER: _ClassVar[int]
+    NEXT_OFFSET_FIELD_NUMBER: _ClassVar[int]
+    MAXIMUM_ROWS_FIELD_NUMBER: _ClassVar[int]
+    ADDITIONAL_ROWS_FIELD_NUMBER: _ClassVar[int]
+    query_id: str
+    source_generation: int
+    scope: str
+    family: str
+    languages: _containers.RepeatedScalarFieldContainer[str]
+    requested_partitions: int
+    completed_partitions: int
+    remaining_partitions: int
+    remainder: _containers.RepeatedCompositeFieldContainer[ProcessingRemainder]
+    next_offset: int
+    maximum_rows: int
+    additional_rows: bool
+    def __init__(self, query_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., scope: _Optional[str] = ..., family: _Optional[str] = ..., languages: _Optional[_Iterable[str]] = ..., requested_partitions: _Optional[int] = ..., completed_partitions: _Optional[int] = ..., remaining_partitions: _Optional[int] = ..., remainder: _Optional[_Iterable[_Union[ProcessingRemainder, _Mapping]]] = ..., next_offset: _Optional[int] = ..., maximum_rows: _Optional[int] = ..., additional_rows: _Optional[bool] = ...) -> None: ...
 
 class TerminalEvent(_message.Message):
     __slots__ = ("header", "state", "error")

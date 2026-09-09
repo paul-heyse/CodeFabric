@@ -935,6 +935,8 @@ def create_server(
                 semantic_request_id=result.semantic_request_id,
                 execution_state=cast(Any, result.execution_state),
                 epoch_id=result.epoch_id,
+                source_generation=result.source_generation,
+                processing=result.processing,
                 package_id=result.package_id,
                 manifest=manifest,
                 pages=pages,

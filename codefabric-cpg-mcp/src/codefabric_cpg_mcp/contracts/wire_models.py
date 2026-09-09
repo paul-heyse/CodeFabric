@@ -161,6 +161,71 @@ class InputRequirementProjection(StrictWireModel):
     authorized_choices: tuple[JsonObject, ...] = ()
 
 
+type ProcessingState = Literal[
+    "pending",
+    "running",
+    "partial",
+    "unknown",
+    "unavailable",
+    "excluded",
+    "limited",
+    "unsupported",
+    "failed",
+    "cancelled",
+]
+
+
+class ProcessingRemainder(StrictWireModel):
+    language: Literal["python", "rust"]
+    scope_kind: NonEmptyString
+    path_bytes: tuple[Annotated[int, Field(ge=0, le=255)], ...]
+    path: str | None = None
+    target: str | None = None
+    target_kind: str | None = None
+    analysis_context_id: str | None = None
+    state: ProcessingState
+    reason_code: NonEmptyString
+
+    @model_validator(mode="after")
+    def exact_path(self) -> ProcessingRemainder:
+        try:
+            text = bytes(self.path_bytes).decode("utf-8")
+        except UnicodeDecodeError:
+            text = None
+        if self.path != text:
+            raise ValueError("processing path text differs from its raw bytes")
+        return self
+
+
+class QueryProcessingSummary(StrictWireModel):
+    query_id: NonEmptyString
+    source_generation: PositiveInt
+    scope: NonEmptyString
+    family: NonEmptyString
+    languages: tuple[Literal["python", "rust"], ...]
+    requested_partitions: NonNegativeInt
+    completed_partitions: NonNegativeInt
+    remaining_partitions: NonNegativeInt
+    remainder: tuple[ProcessingRemainder, ...]
+    next_offset: NonNegativeInt | None = None
+    maximum_rows: PositiveInt | None = None
+    additional_rows: bool | None = None
+
+    @model_validator(mode="after")
+    def exact_counts(self) -> QueryProcessingSummary:
+        if self.completed_partitions + self.remaining_partitions != self.requested_partitions:
+            raise ValueError("processing partition counts disagree")
+        count = len(self.remainder)
+        if count > min(self.remaining_partitions, 64):
+            raise ValueError("processing remainder page exceeds its scope")
+        expected_next = count if count < self.remaining_partitions else None
+        if self.next_offset != expected_next:
+            raise ValueError("processing remainder pagination disagrees")
+        if any(row.language not in self.languages for row in self.remainder):
+            raise ValueError("processing remainder is outside its language scope")
+        return self
+
+
 class QueryToolOutput(StrictWireModel):
     """One strict object with branch invariants for both terminal start outcomes."""
 
@@ -169,6 +234,8 @@ class QueryToolOutput(StrictWireModel):
     semantic_request_id: str | None = None
     execution_state: Literal["SUCCEEDED", "FAILED", "CANCELLED", "LOST"] | None = None
     epoch_id: str | None = None
+    source_generation: PositiveInt | None = None
+    processing: tuple[QueryProcessingSummary, ...] = ()
     package_id: str | None = None
     manifest: ResourceReference | None = None
     pages: tuple[ResourceReference, ...] = ()
