@@ -1297,7 +1297,9 @@ fn validate_page(
     validate_result_ipc_allocation_profile(bytes, allocation_limit)?;
     let mut reader = StreamReader::try_new(Cursor::new(bytes), None)
         .map_err(StreamedResultPackageError::Arrow)?;
-    let schema_bytes = encode_page(&reader.schema(), &[], bytes.len())?;
+    // Encoding preflight includes in-memory schema metadata, which can exceed the compact
+    // bytes of a valid empty IPC page. Use the admitted allocation bound, not wire length.
+    let schema_bytes = encode_page(&reader.schema(), &[], allocation_limit)?;
     if hex(&digest(&schema_bytes)) != page.schema_checksum {
         return Err(StreamedResultPackageError::PageSchemaIntegrity(
             page.page_ordinal,
@@ -2337,6 +2339,69 @@ mod tests {
         ));
         assert_eq!(sink.object_count().await, 1);
         assert_eq!(budget.observation().used.disk_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn empty_metadata_rich_results_use_the_admitted_schema_allocation_bound() {
+        let schema = Arc::new(Schema::new(
+            (0..20)
+                .map(|column| {
+                    Field::new(format!("column_{column}"), DataType::Int64, false).with_metadata(
+                        (0..16)
+                            .map(|key| (format!("key-{key}"), format!("value-{key}")))
+                            .collect(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ));
+        let batch = RecordBatch::new_empty(schema.clone());
+        let mut envelope = limits(1);
+        envelope.max_page_bytes = NonZeroUsize::new(65_536).unwrap();
+        let encoded = encode_page(
+            &schema,
+            std::slice::from_ref(&batch),
+            envelope.max_page_bytes.get(),
+        )
+        .unwrap();
+        assert!(
+            preflight_schema(&schema, encoded.len()).is_err(),
+            "fixture must distinguish wire bytes from schema allocation estimate"
+        );
+        for emit_empty_batch in [false, true] {
+            let sink = Arc::new(RecordingSink::new(None));
+            let builder = StreamedResultPackageBuilder::new(sink, envelope, test_resource_budget());
+            let mut input = relation(&[], 1);
+            input.schema = schema.clone();
+            input.stream = Box::pin(RecordBatchStreamAdapter::new(
+                schema.clone(),
+                stream::iter(emit_empty_batch.then(|| Ok(batch.clone())).into_iter()),
+            ));
+            let (epoch, query, lease) = pins();
+            let sealed = builder
+                .seal(
+                    epoch,
+                    query,
+                    b"{}",
+                    vec![input],
+                    lease.clone(),
+                    &Cancellation::default(),
+                    Instant::now() + Duration::from_secs(5),
+                    &AcceptPublicationIntent,
+                )
+                .await
+                .unwrap();
+            assert_eq!(sealed.manifest().total_rows, 0);
+            assert_eq!(sealed.manifest().total_pages, 1);
+            let reopened = builder
+                .reopen(sealed.manifest_path().clone(), epoch, query, lease)
+                .await
+                .unwrap();
+            assert_eq!(reopened.manifest().total_rows, 0);
+            assert_eq!(
+                reopened.manifest().pages[0].schema_checksum,
+                sealed.manifest().pages[0].schema_checksum
+            );
+        }
     }
 
     #[tokio::test]
