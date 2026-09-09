@@ -2698,6 +2698,7 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>)
             }
         }
         SemanticBackendOutcome::Failed { error, .. } => {
+            tracing::warn!(query_id, error = %error, "semantic query execution failed");
             let public_code = if matches!(
                 error,
                 SemanticQueryError::Phase {
@@ -4058,6 +4059,10 @@ fn terminal_state(state: QueryTerminalState) -> QueryExecutionState {
 
 fn semantic_status(error: SemanticQueryError) -> Status {
     let (code, public_code) = match error {
+        SemanticQueryError::Phase {
+            code: "SOURCE_ACCESS_DENIED",
+            ..
+        } => (Code::PermissionDenied, "SOURCE_ACCESS_DENIED"),
         SemanticQueryError::RequestTooLarge => {
             (Code::ResourceExhausted, "SEMANTIC_REQUEST_CAPACITY")
         }
@@ -4129,6 +4134,9 @@ fn coordinator_status(error: QueryCoordinatorError) -> Status {
 
 fn result_status(error: StreamedResultRegistryError) -> Status {
     let (code, public_code) = match error {
+        StreamedResultRegistryError::SourceAccessDenied => {
+            (Code::PermissionDenied, "SOURCE_ACCESS_DENIED")
+        }
         StreamedResultRegistryError::UnknownPackage
         | StreamedResultRegistryError::UnknownResource => (Code::NotFound, "RESOURCE_NOT_FOUND"),
         StreamedResultRegistryError::WrongOwner
@@ -4214,6 +4222,7 @@ fn public_error_detail(code: Code, public_code: &str) -> SafeErrorMetadata {
             if value.starts_with("SESSION_")
                 || value.starts_with("REQUEST_")
                 || value.starts_with("WORKSPACE_")
+                || value.starts_with("SOURCE_ACCESS_")
                 || value.starts_with("OPERATION_")
                 || value.ends_with("_BINDING") =>
         {

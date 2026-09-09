@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
@@ -2202,6 +2202,232 @@ fn assert_canonical_python_calls(fixture: &ProductionFixture) {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn pragmatic_public_source_context_is_exact_and_separately_authorized() {
+    use arrow::array::{Array, BinaryArray, BooleanArray, StringArray, StructArray, UInt64Array};
+    let fixture = ProductionFixture::with_source(
+        "# π\r\ndef café(value):\r\n    return value\r\n".as_bytes(),
+    );
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let target = fresh_activation_relation_batches(&fixture, "fact.code_declaration")
+        .into_iter()
+        .find_map(|batch| {
+            let names = batch
+                .column_by_name("name")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let ids = batch
+                .column_by_name("public_entity_id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            (0..batch.num_rows())
+                .find(|row| names.value(*row) == "café")
+                .map(|row| ids.value(row).to_owned())
+        })
+        .expect("real Unicode declaration");
+    let mut request = semantic_request(&fixture.workspace.public_id(), "request:source", "unused");
+    request["queries"] = json!([{
+        "request": "retrieve source and syntax context", "query_id": "source",
+        "about": [{"entity_id": target}], "context": "exact source span",
+        "return": {"maximum_source_bytes": 32, "limit": {"maximum_results": 32}}
+    }]);
+    let run = |phase: &str, allowed: bool| {
+        let mut steps = Vec::new();
+        if !allowed {
+            let metadata = semantic_request(
+                &fixture.workspace.public_id(),
+                &format!("request:{phase}-metadata"),
+                "Python function declarations",
+            );
+            steps.push(json!({"id": "metadata", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": metadata, "delivery": "resource"}}));
+        }
+        for (id, bound) in [("full", 32), ("limited", 4)] {
+            let mut selected = request.clone();
+            selected["semantic_request_id"] = json!(format!("request:source-{phase}-{id}"));
+            selected["queries"][0]["return"]["maximum_source_bytes"] = json!(bound);
+            steps.push(json!({"id": id, "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": selected, "delivery": "resource"}}));
+            if !allowed {
+                steps.last_mut().unwrap()["expect_error"] = json!("CLIENT_OPERATION_FAILED");
+            }
+            if allowed {
+                steps.push(json!({"id": format!("{id}_page"), "operation": "read_resource", "uri": {"$ref": format!("{id}.structured_content.pages.0.uri")}}));
+            }
+        }
+        let scenario =
+            modern_client_scenario(&fixture, &stack, "policy-one", json!([]), json!(steps));
+        let path = write_modern_client_scenario(&fixture, phase, &scenario);
+        let report = modern_client_report(&run_modern_client(&stack, &path));
+        if !allowed {
+            assert_eq!(
+                modern_structured(modern_step(&report, "metadata"))["execution_state"],
+                "SUCCEEDED"
+            );
+        }
+        for id in ["full", "limited"] {
+            if !allowed {
+                assert_eq!(
+                    modern_step(&report, id)["error_code"],
+                    "CLIENT_OPERATION_FAILED"
+                );
+                assert_eq!(
+                    modern_step(&report, id)["public_error"],
+                    "PERMISSION_DENIED:NOT_AUTHORIZED"
+                );
+                continue;
+            }
+            let result = modern_structured(modern_step(&report, id));
+            assert_eq!(result["execution_state"], "SUCCEEDED", "{result}");
+            assert_eq!(result["processing"][0]["family"], "source-context");
+            let bytes = STANDARD
+                .decode(
+                    modern_step(&report, &format!("{id}_page"))[0]["blob"]
+                        .as_str()
+                        .unwrap(),
+                )
+                .unwrap();
+            let batches =
+                arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None)
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect::<Vec<_>>();
+            assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+            let batch = batches.iter().find(|batch| batch.num_rows() > 0).unwrap();
+            assert!(
+                batch.column_by_name("source_bytes").is_none(),
+                "private whole-file bytes leaked"
+            );
+            let context = batch
+                .column_by_name("source_context")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StructArray>()
+                .unwrap();
+            let number = |name| {
+                context
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<UInt64Array>()
+                    .unwrap()
+                    .value(0)
+            };
+            let delivered_column = if id == "full" { 9 } else { 8 };
+            assert_eq!(
+                (number("start_byte"), number("end_byte")),
+                (10, 6 + delivered_column)
+            );
+            assert_eq!((number("start_line"), number("start_byte_column")), (2, 4));
+            assert_eq!(
+                (number("end_line"), number("end_byte_column")),
+                (2, delivered_column)
+            );
+            let text = context
+                .column_by_name("text")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let raw = context
+                .column_by_name("bytes")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .unwrap();
+            let complete = context
+                .column_by_name("complete")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<BooleanArray>()
+                .unwrap()
+                .value(0);
+            if id == "full" {
+                assert_eq!(text.value(0), "café");
+                assert!(raw.is_null(0));
+                assert_eq!((number("returned_bytes"), number("omitted_bytes")), (5, 0));
+                assert!(complete);
+            } else {
+                assert!(text.is_null(0));
+                assert_eq!(raw.value(0), b"caf\xc3");
+                assert_eq!((number("returned_bytes"), number("omitted_bytes")), (4, 1));
+                assert!(!complete);
+            }
+        }
+    };
+    run("source-denied", false);
+    let policy = |allow| {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, allow)
+            .unwrap();
+    };
+    policy(true);
+    run("source-allowed", true);
+    // Keep the same live client/session across revocation of an already published page.
+    let mut retained_request = request.clone();
+    retained_request["semantic_request_id"] = json!("request:source-retained-revocation");
+    let scenario = modern_client_scenario(
+        &fixture,
+        &stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "source", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": retained_request, "delivery": "resource"}},
+        {"id": "before", "operation": "read_resource", "uri": {"$ref": "source.structured_content.manifest.uri"}},
+            {"id": "revoke", "operation": "barrier", "name": "source-policy"},
+            {"id": "after", "operation": "read_resource", "uri": {"$ref": "source.structured_content.pages.0.uri"}, "expect_error": "CLIENT_OPERATION_FAILED"}
+        ]),
+    );
+    let path = write_modern_client_scenario(&fixture, "source-retained", &scenario);
+    let mut client = spawn_modern_client(&stack, &path);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !path.parent().unwrap().join("source-policy.ready").exists() {
+        assert!(
+            client.try_wait().unwrap().is_none(),
+            "source client exited before revocation barrier"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "source client did not reach revocation barrier"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    policy(false);
+    fs::write(
+        path.parent().unwrap().join("source-policy.resume"),
+        b"resume\n",
+    )
+    .unwrap();
+    let report = modern_client_report(&client.wait_with_output().unwrap());
+    assert_eq!(
+        modern_step(&report, "after")["error_code"],
+        "CLIENT_OPERATION_FAILED"
+    );
+    assert_eq!(
+        modern_step(&report, "after")["public_error"],
+        "PERMISSION_DENIED:NOT_AUTHORIZED"
+    );
+    policy(true);
+    fs::write(
+        fixture._root.path().join("workspace/sample.py"),
+        b"def changed():\n    pass\n",
+    )
+    .unwrap();
+    run("source-disk-changed", true);
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    run("source-reopen", true);
+    policy(false);
+    run("source-revoked", false);
+    supervisor.stop();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn pragmatic_python_public_lexical_references() {
     const SOURCE: &str =
         "def leaf(value):\n    return value\ndef caller():\n    return leaf(1) + leaf(2)\n";
@@ -3381,6 +3607,103 @@ fn assert_mixed_public_declaration_facts(
     assert_eq!(
         unresolved["issues"][0]["presentation_key"],
         "query.validation.semantic_reference_unavailable"
+    );
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+    }
+    let mut source = semantic_request(
+        &fixture.workspace.public_id(),
+        "request:mixed-source",
+        "unused",
+    );
+    source["queries"] = json!([{
+        "request": "retrieve source and syntax context", "query_id": "source",
+        "about": subjects.iter().map(|id| json!({"entity_id": id})).collect::<Vec<_>>(),
+        "context": "exact source span", "return": {"maximum_source_bytes": 1024, "limit": {"maximum_results": 32}}
+    }]);
+    let mut empty_source = source.clone();
+    empty_source["semantic_request_id"] = json!("request:mixed-source-empty");
+    empty_source["queries"][0]["about"] =
+        json!([{"entity_id": "entity:function:01010101010101010101010101010101"}]);
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "source", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": source, "delivery": "resource"}},
+            {"id": "page", "operation": "read_resource", "uri": {"$ref": "source.structured_content.pages.0.uri"}},
+            {"id": "empty", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": empty_source, "delivery": "resource"}},
+            {"id": "empty_page", "operation": "read_resource", "uri": {"$ref": "empty.structured_content.pages.0.uri"}}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, "mixed-source", &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    assert_eq!(
+        modern_structured(modern_step(&report, "source"))["processing"][0]["remaining_partitions"],
+        1
+    );
+    let mut contexts = BTreeMap::new();
+    let mut source_subjects = BTreeSet::new();
+    for id in ["page", "empty_page"] {
+        let bytes = STANDARD
+            .decode(modern_step(&report, id)[0]["blob"].as_str().unwrap())
+            .unwrap();
+        for batch in
+            arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None).unwrap()
+        {
+            let batch = batch.unwrap();
+            if id == "empty_page" {
+                assert_eq!(batch.num_rows(), 0);
+                continue;
+            }
+            assert!(batch.column_by_name("source_bytes").is_none());
+            let languages = batch
+                .column_by_name("language")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let context = batch
+                .column_by_name("source_context")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StructArray>()
+                .unwrap();
+            let text = context
+                .column_by_name("text")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let ids = batch
+                .column_by_name("public_entity_id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            for row in 0..batch.num_rows() {
+                assert!(source_subjects.insert(ids.value(row).to_owned()));
+                contexts
+                    .entry(languages.value(row).to_owned())
+                    .or_insert_with(BTreeSet::new)
+                    .insert(text.value(row).to_owned());
+            }
+        }
+    }
+    assert_eq!(source_subjects, subjects);
+    assert_eq!(
+        contexts,
+        BTreeMap::from([
+            ("python".to_owned(), BTreeSet::from(["answer".to_owned()])),
+            (
+                "rust".to_owned(),
+                BTreeSet::from(["pub fn caller() -> u32".to_owned()])
+            ),
+        ])
     );
 }
 

@@ -191,6 +191,12 @@
         "include_query_result": {
           "type": "boolean"
         },
+        "maximum_source_bytes": {
+          "description": "Maximum returned bytes per source span; only for source-context requests.",
+          "minimum": 1,
+          "maximum": 1048576,
+          "type": "integer"
+        },
         "limit": {
           "$ref": "#/$defs/return_limit"
         },

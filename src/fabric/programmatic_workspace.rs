@@ -43,6 +43,7 @@ pub struct WorkspaceEpochQueryAuthority {
     result_limits: ArrowResultResourceLimits,
     result_lease_millis: NonZeroU64,
     entity_processing: Option<Arc<super::processing_status::EntityProcessingSnapshot>>,
+    source_disclosure: Option<Arc<super::source_disclosure::SourceDisclosureAuthority>>,
 }
 
 impl fmt::Debug for WorkspaceEpochQueryAuthority {
@@ -127,7 +128,24 @@ impl WorkspaceEpochQueryAuthority {
             result_limits,
             result_lease_millis,
             entity_processing: None,
+            source_disclosure: None,
         })
+    }
+
+    pub(crate) fn with_source_disclosure(
+        mut self,
+        authority: Arc<super::source_disclosure::SourceDisclosureAuthority>,
+    ) -> Self {
+        self.source_disclosure = Some(authority);
+        self
+    }
+
+    pub(crate) fn source_disclosure(
+        &self,
+    ) -> Result<&Arc<super::source_disclosure::SourceDisclosureAuthority>, String> {
+        self.source_disclosure
+            .as_ref()
+            .ok_or_else(|| "source disclosure authority is unavailable".to_owned())
     }
 
     pub(crate) fn with_entity_processing(

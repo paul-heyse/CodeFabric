@@ -1283,6 +1283,20 @@ async fn serve_writer_fenced_v2(
             .await;
         }
     };
+    match crate::operational_store::OperationalReaderFactory::for_database(&operational_database) {
+        Ok(reader) => results.install_source_disclosure_reader(reader),
+        Err(error) => {
+            return finish_writer_fenced_v2(
+                startup,
+                workspace,
+                false,
+                Some(DaemonError::Config(format!(
+                    "source disclosure reader: {error}"
+                ))),
+            )
+            .await;
+        }
+    }
     let backend = Arc::new(ProgrammaticSemanticQueryBackend::new(
         Arc::clone(&startup.release),
         Arc::clone(&startup.workspace_slots),

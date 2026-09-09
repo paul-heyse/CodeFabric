@@ -592,6 +592,15 @@ impl ApplicationOwnedSemanticIngressPort {
                 }
             }
             validate_clause_values(clause)?;
+            if let Some(limit) = return_spec(clause).and_then(|spec| spec.maximum_source_bytes)
+                && (!matches!(clause, SemanticQueryClause::RetrieveSourceContext { .. })
+                    || limit == 0
+                    || limit > 1024 * 1024)
+            {
+                return Err(rejected(
+                    "source byte limit requires a source-context block and must be in 1..=1048576",
+                ));
+            }
             let maximum_results = clause.maximum_results();
             if maximum_results == 0
                 || maximum_results > self.limits.compiler().max_explicit_result_rows()

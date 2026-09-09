@@ -288,7 +288,14 @@ def _validate_steps(raw: Any) -> tuple[dict[str, Any], ...]:
     checked: list[dict[str, Any]] = []
     allowed_by_operation = {
         "discover": {"id", "operation"},
-        "call_tool": {"id", "operation", "name", "arguments", "timeout_seconds"},
+        "call_tool": {
+            "id",
+            "operation",
+            "name",
+            "arguments",
+            "timeout_seconds",
+            "expect_error",
+        },
         "read_resource": {"id", "operation", "uri", "expect_error"},
         "complete": {
             "id",
@@ -308,6 +315,7 @@ def _validate_steps(raw: Any) -> tuple[dict[str, Any], ...]:
             "timeout_seconds",
         },
         "sleep": {"id", "operation", "duration_ms"},
+        "barrier": {"id", "operation", "name"},
     }
     for entry in raw:
         if not isinstance(entry, dict):
@@ -365,6 +373,10 @@ def _validate_steps(raw: Any) -> tuple[dict[str, Any], ...]:
                 )
         if operation == "sleep":
             _integer(entry.get("duration_ms"), 0, 60_000, "SCENARIO_SLEEP_INVALID")
+        if operation == "barrier":
+            name = entry.get("name")
+            if not isinstance(name, str) or STEP_ID.fullmatch(name) is None:
+                _fail("SCENARIO_BARRIER_INVALID")
         expected_error = entry.get("expect_error")
         if expected_error is not None and expected_error not in EXPECTED_STEP_ERRORS:
             _fail("SCENARIO_EXPECTED_ERROR_INVALID")
@@ -777,6 +789,15 @@ async def _execute_step(
     if operation == "sleep":
         await asyncio.sleep(resolved["duration_ms"] / 1_000)
         return {"slept_ms": resolved["duration_ms"]}
+    if operation == "barrier":
+        # Test-controller rendezvous in the private scenario directory. No arbitrary paths.
+        ready = Path(f"{resolved['name']}.ready")
+        resume = Path(f"{resolved['name']}.resume")
+        await asyncio.to_thread(ready.touch, mode=0o600, exist_ok=False)
+        async with asyncio.timeout(default_timeout):
+            while not resume.exists():
+                await asyncio.sleep(0.01)
+        return {"resumed": True}
     _fail("SCENARIO_OPERATION_INVALID")
 
 
@@ -871,7 +892,10 @@ async def _run(scenario: Scenario, stack: dict[str, str]) -> tuple[dict[str, Any
                     observed_error = _error_code(error)
                     if observed_error != expected_error:
                         raise
-                    result = {"error_code": observed_error}
+                    result = {
+                        "error_code": observed_error,
+                        "public_error": _public_error(error),
+                    }
                 else:
                     if expected_error is not None:
                         _fail("EXPECTED_STEP_ERROR_NOT_OBSERVED")

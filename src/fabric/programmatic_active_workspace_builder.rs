@@ -206,6 +206,7 @@ pub(crate) struct ProductionActiveWorkspaceBuilder {
     delta_ports: ProgrammaticDeltaRuntimePorts,
     activation_authority: Arc<DeltaActivationRuntimeAuthority>,
     resources: ProductionWorkspaceResources,
+    source_disclosure: Arc<super::source_disclosure::SourceDisclosureAuthority>,
 }
 
 impl ProductionActiveWorkspaceBuilder {
@@ -222,6 +223,7 @@ impl ProductionActiveWorkspaceBuilder {
         delta_ports: ProgrammaticDeltaRuntimePorts,
         activation_authority: Arc<DeltaActivationRuntimeAuthority>,
         resources: ProductionWorkspaceResources,
+        source_disclosure: Arc<super::source_disclosure::SourceDisclosureAuthority>,
     ) -> Self {
         Self {
             release,
@@ -231,6 +233,7 @@ impl ProductionActiveWorkspaceBuilder {
             delta_ports,
             activation_authority,
             resources,
+            source_disclosure,
         }
     }
 
@@ -360,6 +363,7 @@ impl ProductionActiveWorkspaceBuilder {
                 self.config.result_lease_millis,
             )
             .map_err(|_| Self::invalid("query-authority"))?
+            .with_source_disclosure(Arc::clone(&self.source_disclosure))
             .with_entity_processing(entity_processing)
             .map_err(|_| Self::invalid("processing-scope-binding"))?,
         );

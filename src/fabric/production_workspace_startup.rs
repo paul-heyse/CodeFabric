@@ -114,6 +114,7 @@ mod processing;
 mod pyrefly;
 mod rust_syntax;
 mod rustc;
+mod source_context;
 
 /// Joined owner retained by the daemon after one workspace reaches queryable authority.
 pub(crate) struct ProductionWorkspaceStartup {
@@ -839,6 +840,7 @@ fn build_fresh_native_source(
         &prepared_inputs.inventory,
         &admitted_runs,
     )?;
+    source_context::install(&mut builder, prepared_inputs.capture()?)?;
     canonical::install(
         &mut builder,
         &prepared_inputs.inventory,
@@ -1286,6 +1288,13 @@ async fn compose_production_workspace(
             delta_ports,
             Arc::clone(&activation),
             workspace_resources.clone(),
+            Arc::new(super::source_disclosure::SourceDisclosureAuthority::new(
+                crate::operational_store::OperationalReaderFactory::for_database(
+                    operational_database,
+                )
+                .map_err(|error| step("source-disclosure-reader", error))?,
+                record.workspace_id,
+            )),
         ));
 
     let fresh = match &selection {

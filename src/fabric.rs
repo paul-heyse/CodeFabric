@@ -113,6 +113,8 @@ pub mod retention_command_effect;
 pub mod rollback_command_effect;
 #[cfg(feature = "daemon")]
 pub mod source_context;
+pub mod source_context_query;
+pub(crate) mod source_disclosure;
 #[cfg(feature = "daemon")]
 pub mod source_wave_command_effect;
 #[cfg(feature = "daemon")]

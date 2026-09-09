@@ -20,13 +20,19 @@ use crate::semantic_query_contract::{
 pub(super) fn declarations(
     epoch: &ProgrammaticFabricEpoch,
 ) -> Result<Option<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
-    subject_facts(epoch, false)
+    subject_facts(epoch, false, false)
 }
 
 pub(super) fn calls(
     epoch: &ProgrammaticFabricEpoch,
 ) -> Result<Option<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
-    subject_facts(epoch, true)
+    subject_facts(epoch, true, false)
+}
+
+pub(super) fn source_context(
+    epoch: &ProgrammaticFabricEpoch,
+) -> Result<Option<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
+    subject_facts(epoch, false, true)
 }
 
 // One compact plan keeps request identity matching, family selection and projection together.
@@ -34,8 +40,17 @@ pub(super) fn calls(
 fn subject_facts(
     epoch: &ProgrammaticFabricEpoch,
     calls: bool,
+    source_context: bool,
 ) -> Result<Option<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
-    let (source_id, output_id, input_id, input_prefix, form) = if calls {
+    let (source_id, output_id, input_id, input_prefix, form) = if source_context {
+        (
+            "fact.code_source_context",
+            "query.result.source-context",
+            "query.input.source-subjects",
+            "for-inputs",
+            ReleasedSemanticForm::RetrieveSourceAndSyntaxContext,
+        )
+    } else if calls {
         (
             if epoch
                 .relation(&ProgrammaticRelationId::new(
@@ -88,7 +103,7 @@ fn subject_facts(
         Ok(fields[index].clone())
     };
     let output_field = |name: &str| release_field_id(&format!("{output_id}.{name}"));
-    let projections = schema
+    let mut projections = schema
         .fields()
         .iter()
         .zip(&fields)
@@ -100,6 +115,18 @@ fn subject_facts(
             })
         })
         .collect::<Result<Vec<_>, ProductionQueryRecipeError>>()?;
+    let bytes_relation = if source_context {
+        let Some(bytes) = source_bytes_definition(epoch)? else {
+            return Ok(None);
+        };
+        projections.push(ProgramProjectionField {
+            input_field_id: release_field_id("source.exact_source_bytes.source_bytes")?,
+            output_field_id: output_field("source_bytes")?,
+        });
+        Some(bytes)
+    } else {
+        None
+    };
     let output_fields = projections
         .iter()
         .map(|field| field.output_field_id.clone())
@@ -122,7 +149,22 @@ fn subject_facts(
             output_fields,
         }
     };
-    let meanings: &[(&str, &str, &[&str], &str)] = if calls {
+    let meanings: &[(&str, &str, &[&str], &str)] = if source_context {
+        &[
+            (
+                "selection.context",
+                "context_kind",
+                &["exact source span"],
+                "exact source span",
+            ),
+            (
+                "selection.text-handling",
+                "text_handling",
+                &["lossless UTF-8 else bytes"],
+                "lossless UTF-8 else bytes",
+            ),
+        ]
+    } else if calls {
         &[
             (
                 "selection.relationship",
@@ -228,10 +270,17 @@ fn subject_facts(
             "declaration_id",
         ]
     };
-    Ok(Some(ProductionSemanticFormProgram {
+    let mut program = ProductionSemanticFormProgram {
         form,
         program_binding_id: Arc::from(binding),
-        output_role_id: Arc::from(ResultRole::Facts.released_id()),
+        output_role_id: Arc::from(
+            if source_context {
+                ResultRole::SourceContexts
+            } else {
+                ResultRole::Facts
+            }
+            .released_id(),
+        ),
         root_node_id: node("limit"),
         output_relation_id: output_relation.clone(),
         output_fields: output_fields.clone(),
@@ -353,6 +402,85 @@ fn subject_facts(
         returns: Vec::new(),
         consumer_slots: Vec::new(),
         required_fact_families: Vec::new(),
+    };
+    if let Some(bytes) = bytes_relation {
+        let mut joined_fields = fields.clone();
+        joined_fields.extend(bytes.fields.clone());
+        for operator in &mut program.operators {
+            if operator.ordinal >= 4 {
+                operator.ordinal += 2;
+            }
+            if operator.node_id == node("project") {
+                operator.input_node_ids = vec![node("source-pins")];
+            }
+        }
+        program.operators.insert(
+            4,
+            operator(
+                "source-bytes",
+                4,
+                &[],
+                ProgramRelationalOperator::Input {
+                    relation_id: bytes.relation_id.clone(),
+                },
+                bytes.fields.clone(),
+            ),
+        );
+        let predicates = [
+            "workspace_id",
+            "source_generation",
+            "file_id",
+            "content_digest",
+        ]
+        .into_iter()
+        .map(|name| {
+            Ok(ProgramJoinPredicate {
+                left_field_id: source_field(name)?,
+                right_field_id: release_field_id(&format!("source.exact_source_bytes.{name}"))?,
+                scalar_operator: ScalarOperator::Equal,
+            })
+        })
+        .collect::<Result<_, ProductionQueryRecipeError>>()?;
+        program.operators.insert(
+            5,
+            operator(
+                "source-pins",
+                5,
+                &["families", "source-bytes"],
+                ProgramRelationalOperator::Join {
+                    kind: JoinKind::Inner,
+                    predicates,
+                },
+                joined_fields,
+            ),
+        );
+        program.relations.push(bytes);
+    }
+    Ok(Some(program))
+}
+
+fn source_bytes_definition(
+    epoch: &ProgrammaticFabricEpoch,
+) -> Result<Option<ProductionRelationDefinition>, ProductionQueryRecipeError> {
+    let id = "source.exact_source_bytes";
+    let Some(relation) = epoch.relation(&ProgrammaticRelationId::new(id)) else {
+        return Ok(None);
+    };
+    let fields = (0..relation.contract.logical_schema().fields().len())
+        .map(|index| {
+            relation
+                .contract
+                .field_id_at(SchemaRole::Logical, index)
+                .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                    detail: error.to_string(),
+                })
+                .and_then(release_field_id)
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(Some(ProductionRelationDefinition {
+        relation_id: release_relation_id(id)?,
+        fields,
+        authority: ProductionRelationAuthority::Epoch,
     }))
 }
 
@@ -365,6 +493,7 @@ pub(crate) fn validate_canonical_fact_references(
         let references = match clause {
             SemanticQueryClause::RetrieveFacts { about, .. } => about,
             SemanticQueryClause::FollowRelationships { starting_from, .. } => starting_from,
+            SemanticQueryClause::RetrieveSourceContext { for_inputs, .. } => for_inputs,
             _ => continue,
         };
         for reference in references {

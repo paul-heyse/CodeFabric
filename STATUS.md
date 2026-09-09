@@ -2,7 +2,7 @@
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
 Last production commit: `5964e5ff` (`Expose Python lexical reference witnesses with independent family coverage`).
-The three completed query slices and their validation are recorded below.
+The completed query slices and their validation are recorded below.
 
 ## Current handoff
 
@@ -21,7 +21,8 @@ Fresh daemon startup captures real Python/Rust inputs, runs contained semantic p
 publishes exact Delta versions. Canonical declarations, Python lexical references and Python/Rust
 call occurrences exist. Installed FastMCP clients have exercised function search and declaration
 fact retrieval, one-step incoming/outgoing call traversal and Python lexical-reference traversal with scoped processing and observed
-result truncation. Python call queries also pass after exact reopen. A running daemon does **not yet** continuously update the graph;
+result truncation. Exact declaration source spans now pass through the same client with independent
+disclosure authorization. Python call/source queries also pass after exact reopen. A running daemon does **not yet** continuously update the graph;
 startup still waits for semantic work before publication. The first useful release remains open.
 
 The call-query continuation present at session start was preserved, exercised and committed in
@@ -98,6 +99,31 @@ Default and featureless `just root-check`, governance, docs navigation and chang
 Library Clippy completes with 958 existing warnings and no new findings; strict lint remains open.
 Full semantic references remain open.
 
+## Exact source-context queries and live disclosure authorization
+
+`RetrieveSourceContext` now selects canonical declaration subjects with the `exact source span`
+meaning. Captured bytes are stored once per file in `source.exact_source_bytes` and joined through
+workspace/generation/file/digest pins at query time. `fact.code_source_context` stores descriptors.
+The bounded native projection removes whole-file bytes from public output and returns a source-context
+identity, lossless UTF-8 or binary, half-open delivered byte positions, one-based line numbers,
+zero-based byte columns and exact returned/omitted byte counts. `return.maximum_source_bytes` is an
+independent per-span limit in 1..=1048576. Python declaration spans currently identify declaration
+names; Rust spans retain the compiler's declaration range. Surrounding syntax/body expansion is open.
+
+Workspace registration defaults to metadata disclosure. `WorkspaceRegistry::set_source_disclosure`
+explicitly grants/revokes source access and advances the policy revision. Preparation, native batches
+and every result-resource chunk recheck live policy. Query-local scalar capabilities retain exact
+function identity, stay within the private child session and bypass shared plan caches.
+
+Installed-client evidence on 2026-09-09: Unicode/CRLF positions, a limit splitting UTF-8, disk changes,
+exact reopen, metadata access while source is denied and same-session revocation of an unread
+published page pass (21.04 s after the final coordinate refinement). The mixed Python/Rust source/empty/failed-target scenario, including
+the previous declarations/calls/reference checks, passes (67.56 s). Nineteen focused compiler,
+request-authority and source-materialization tests pass. Default/featureless root checks, 95 adapter
+tests, 186 tooling tests, docs navigation and governance pass. Strict lint remains open on the
+existing backlog; final library Clippy completes with 958 warnings and no new findings. This does not close source
+syntax coverage, complete public-form semantics, composition, freshness or outcomes 4–8.
+
 ## Outcome 4: real inputs, canonical facts and the first four forms
 
 ### 4A — Rust contexts and production compilation: partial
@@ -158,8 +184,8 @@ syntax/binding IDs remain observations within their admitted source/context/run.
 Remaining: full source/lexical/CST feature census; retained parsers/query packs and incremental trees;
 complete trivia/index/coordinate handling; non-identity decoded source mappings (for example BOM or
 non-UTF-8 Python encodings); reversible compiler paths and source presentation; rename/case-collision
-semantics; incomplete-edit behavior during actual live updates. No source-context public form is
-implemented for the canonical production release yet.
+semantics; incomplete-edit behavior during actual live updates. Exact declaration-span source
+retrieval is implemented; richer syntax/body/source-context selection remains open.
 
 ### 4D — canonical normalization: partial
 
@@ -172,6 +198,7 @@ The committed canonical catalog includes:
 | `fact.code_entity_selector` | Canonical declaration-kind selectors and reusable public entity IDs for Python/Rust |
 | `fact.code_reference` | Python lexical read/write occurrences joined to bindings/declarations through exact source/context/run pins; unresolved targets retained; project-aware semantic and Rust references remain open |
 | `fact.code_relationship_selector` | Public call and lexical-reference witnesses, native subject selection and reusable occurrence/endpoint IDs |
+| `fact.code_source_context`, `source.exact_source_bytes` | Canonical declaration source descriptors and captured bytes selected through exact pins; independent live disclosure checks and bounded native output |
 | `fact.code_call_site` | Python and Rust call occurrences, caller/target identity when established, resolution/dispatch, exact or explicitly unavailable source mapping, raw provider provenance |
 
 Native DataFusion joins/projections construct these relations. Rust uses actual stable crate/definition
@@ -199,7 +226,7 @@ Raw provider coverage is not complete canonical-family coverage.
 | FindEntities | Installed client returns canonical functions and selected additional Python/Rust declaration kinds with reusable public IDs; language/context filters precede limits; stable name/entity ordering | Remaining kinds/representations, source boundaries, semantic name/ambiguity resolution and full directives |
 | RetrieveFacts | Explicit canonical entity IDs; `declarations` or `declaration locations and provenance`; native semi join prevents repeated subjects duplicating occurrences; partial and empty cases tested | Types, members, call/derived families, point filters, broad family expansion and phrase/fact/prior-result resolution |
 | FollowRelationships | Installed Python/Rust one-step calls and Python lexical references, repeated occurrences, scoped unknowns and limits | project-aware semantic references/imports, Rust references, candidates, full direction/distance/stop/filter behavior and composition |
-| RetrieveSourceContext | Existing source storage/lease infrastructure only | Canonical production form, exact selected bytes after disk changes, separate disclosure authorization, coordinate and truncation delivery |
+| RetrieveSourceContext | Exact canonical declaration spans, independently authorized captured bytes, Unicode/CRLF coordinates and explicit byte truncation; disk-change/reopen/revocation/empty/mixed-language cases | Broader syntax/body and line-bound selection, non-identity decoded mappings, remaining subjects and composition |
 
 Unsupported subject meanings are explicitly rejected; they do not fall back to names. The generalized
 pragmatic expectation corpus is not fully connected to all public forms. The static four-form mixed-language

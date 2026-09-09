@@ -1826,6 +1826,14 @@ impl AuthorizedChildSession {
 
         let compiled =
             RelationalProgramCompiler::compile_with_bindings(&query_bindings, inputs, program)?;
+        let mut query_state = self.state.clone();
+        for function in &compiled.query_functions {
+            if query_state.register_udf(Arc::clone(function))?.is_some() {
+                return Err(ChildSessionError::RequestOwnedPlanAuthorityDrift(
+                    "query scalar capability collides with an installed function".to_owned(),
+                ));
+            }
+        }
         let expected_schema = Arc::new(compiled.plan.schema().as_arrow().clone());
         let probe_limit = self
             .max_output_rows
@@ -1835,7 +1843,7 @@ impl AuthorizedChildSession {
         let bounded_plan = LogicalPlanBuilder::from(compiled.plan)
             .limit(0, Some(probe_limit))?
             .build()?;
-        let optimized = self.state.optimize(&bounded_plan)?;
+        let optimized = query_state.optimize(&bounded_plan)?;
         let query_local_plan = CachedLogicalPlan::new(
             bounded_plan,
             optimized,
@@ -1843,15 +1851,18 @@ impl AuthorizedChildSession {
             compiled.observations,
         );
         if let Some(request_inputs) = request_inputs {
-            self.validate_request_owned_plan_authority(&query_local_plan, request_inputs)?;
+            self.validate_request_owned_plan_authority(
+                &query_local_plan,
+                request_inputs,
+                &query_state,
+            )?;
         }
 
         // Physical planning and execution are intentionally fresh. `query_local_plan` is a local
         // digest/validation carrier and is never looked up in or inserted into the epoch cache.
-        let physical_plan = self
-            .state
+        let physical_plan = query_state
             .query_planner()
-            .create_physical_plan(query_local_plan.optimized_plan(), &self.state)
+            .create_physical_plan(query_local_plan.optimized_plan(), &query_state)
             .await?;
         let expected_schema = Arc::clone(query_local_plan.output_schema());
         let observations = query_local_plan.observations().clone();
@@ -1864,7 +1875,7 @@ impl AuthorizedChildSession {
         }
         let stream = super::native_operations::bind_stream(execute_stream(
             physical_plan,
-            self.state.task_ctx(),
+            query_state.task_ctx(),
         )?);
         Ok(ChildProgramStream {
             schema: expected_schema,
@@ -1963,6 +1974,7 @@ impl AuthorizedChildSession {
         &self,
         plan: &CachedLogicalPlan,
         request_inputs: &RequestOwnedRelationCollection,
+        query_state: &SessionState,
     ) -> Result<(), ChildSessionError> {
         if plan.compiled_plan().schema().as_arrow() != plan.output_schema().as_ref()
             || plan.optimized_plan().schema().as_arrow() != plan.output_schema().as_ref()
@@ -1977,7 +1989,7 @@ impl AuthorizedChildSession {
             ("optimized", plan.optimized_plan()),
         ] {
             let mut observed_request_relations = BTreeSet::new();
-            validate_logical_plan_references(logical_plan, &self.state, true, |scan| {
+            validate_logical_plan_references(logical_plan, query_state, true, |scan| {
                 if let Some(request_input) = request_inputs
                     .iter()
                     .find(|input| input.table_reference() == &scan.table_name)

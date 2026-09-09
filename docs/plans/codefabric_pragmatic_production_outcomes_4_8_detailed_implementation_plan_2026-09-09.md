@@ -74,8 +74,19 @@ IDs, provider reference kinds, exact byte positions and independent requested fa
 Complete/unknown-target Python source, exact reopen and explicit unsupported Rust reference scope
 pass through the installed client. Final selected scenarios take 30.39 s (Python) and 64.48 s (mixed
 Rust); three processing cases, default/featureless root checks and governance/docs/format checks pass.
-Affected library Clippy retains 958 warnings. SourceContext, live freshness/updates, the remaining
+Affected library Clippy retains 958 warnings. Broader SourceContext semantics, live freshness/updates, the remaining
 semantic families/forms, maintenance, retention and sustained workload acceptance remain unfinished.
+
+**Source-context continuation:** canonical declaration subjects now retrieve `exact source span`
+from captured exact-version bytes, with separate live source-disclosure policy and a per-span
+`return.maximum_source_bytes` limit. Whole-file bytes are excluded from public results; output
+retains lossless UTF-8/binary, source-context identity, delivered byte/line coordinates and exact
+omitted bytes. Installed Python tests cover Unicode/CRLF, split-character truncation, disk changes,
+exact reopen, metadata-only access and same-session revocation of a published page (21.04 s after final coordinate refinement).
+The mixed Python/Rust source/empty/failed-target scenario passes (67.56 s); compilation contexts
+remain distinct. Nineteen focused native/request/source tests, root default/featureless checks,
+95 adapter tests, 186 tooling tests and governance/docs checks pass. Full context expansion,
+non-identity source mappings, remaining subjects/directives and composition remain required.
 
 | Slice | Current status | Next unmet boundary |
 |---|---|---|
@@ -83,7 +94,7 @@ semantic families/forms, maintenance, retention and sustained workload acceptanc
 | 4B | Partial, committed | Complete effective external Python contexts and semantic output; retain chunking and definition anchors |
 | 4C | Partial, committed | Full source/syntax/coordinate/path behavior and parser reuse/live edits |
 | 4D | Partial, committed | Remaining canonical families, authority/unknowns and external/generated/edit-time identity |
-| 4E | Three limited forms demonstrated | Extend calls, implement SourceContext, broaden first-four meanings and composition |
+| 4E | Four limited forms demonstrated | Extend calls and SourceContext, broaden first-four meanings and composition |
 | 5A | Partial; call and lexical-reference scopes demonstrated | Query dependency/owner scope, all families, public paging, efficient authorized live status |
 | 5B | Typed processing/truncation delivered in part | Real freshness policies and observable generation/context/family convergence |
 | 6A | Open; infrastructure only | Daemon-owned notify/gix watch, reconciliation and overflow/rescan recovery |
@@ -243,7 +254,7 @@ Shared runtime interfaces should stay small:
 
 ### 4E. First four production query forms and mixed-language demonstration
 
-**Current status — partial.** Installed clients exercise canonical function and selected additional declaration-kind FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. Installed FollowRelationships queries execute one-step Python/Rust calls and exact Python reopen. The continuation adds explicit Python lexical-reference traversal, preserving write/read/call/type/import kinds, reusable occurrence endpoints and unresolved/unsupported family scope; project-aware semantic references and full traversal remain open. SourceContext has no canonical production form yet. All broader meanings, source/representation scopes, semantic reference resolution, stop/filter/distance behavior and composition remain required. The first-four acceptance below is open.
+**Current status — partial.** Installed clients exercise canonical function and selected additional declaration-kind FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. Installed FollowRelationships queries execute one-step Python/Rust calls and exact Python reopen. The continuation adds explicit Python lexical-reference traversal, preserving write/read/call/type/import kinds, reusable occurrence endpoints and unresolved/unsupported family scope; project-aware semantic references and full traversal remain open. SourceContext now serves exact canonical declaration spans with live independent disclosure checks, lossless byte limits and coordinates; richer syntax/body context selection remains open. All broader meanings, source/representation scopes, semantic reference resolution, stop/filter/distance behavior and composition remain required. The first-four acceptance below is open.
 
 **Prerequisites:** 4D and 5A–5B. **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, `src/semantic_query_contract.rs`, existing child catalog and adapter.
 
@@ -716,7 +727,7 @@ client, including implicit-call coverage, exact reopen and declaration regressio
 working path while extending canonical families, reference/import traversal and full distance/stop/filter
 semantics. FollowRelationships as a whole remains open.
 
-Then finish remaining **4A–4D** effective/external/generated inputs and canonical families for **4E**, plus **5A–5B** full query scope, public remainder pagination and actual freshness barriers. Do not redo contained Cargo startup, path-dependency/target discovery, Rust syntax, chunked Python inventories or canonical declarations/calls: extend those working implementations. Complete RetrieveSourceContext and the first four forms' actual meanings/composition. Recheck the static mixed-language acceptance against real providers/public answers.
+Then finish remaining **4A–4D** effective/external/generated inputs and canonical families for **4E**, plus **5A–5B** full query scope, public remainder pagination and actual freshness barriers. Do not redo contained Cargo startup, path-dependency/target discovery, Rust syntax, chunked Python inventories or canonical declarations/calls: extend those working implementations. Extend RetrieveSourceContext beyond exact declaration spans and complete the first four forms' actual meanings/composition. Recheck the static mixed-language acceptance against real providers/public answers.
 
 Proceed to **6A–6D** using shared startup/update operations, watch-first reconciliation, immediate invalidation, two-speed publication, retained providers and the independent clean/incremental corpus. This is the outstanding boundary for a continuously useful first release. Add phase metrics and selective persistence as these consumers become real.
 

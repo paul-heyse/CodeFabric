@@ -267,6 +267,74 @@ impl SelectedQueryOutput {
         self
     }
 
+    /// Replace the private full-image input with the bounded authorized source result.
+    pub(crate) fn with_source_context(
+        mut self,
+        parameters: super::source_context_query::SourceContextParameters,
+    ) -> Result<Self, crate::relational_program::RelationalProgramError> {
+        use crate::relational_program::{
+            FieldId, NamedExpression, RelationalExpression, ScalarExpression,
+        };
+        let binding = self.program_result_binding.as_ref().ok_or_else(|| {
+            crate::relational_program::RelationalProgramError::InvalidProgram(
+                "source result schema is absent".to_owned(),
+            )
+        })?;
+        let prefix = self.relation_id.as_str();
+        let output_id = FieldId::new(format!("{prefix}.source_context"))?;
+        let mut fields = binding
+            .schema()
+            .fields()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        fields.push(Arc::new(arrow_schema::Field::new(
+            "source_context",
+            super::source_context_query::output_type(),
+            true,
+        )));
+        let mut ids = binding.field_ids().to_vec();
+        ids.push(output_id.clone());
+        let extended = SupplementalProgramRelationBinding::try_new(
+            self.relation_id.clone(),
+            binding.table_reference().clone(),
+            Arc::new(arrow_schema::Schema::new(fields)),
+            ids,
+            binding.authority_pin(),
+        )?;
+        let mut expressions = self
+            .program
+            .output_fields
+            .iter()
+            .filter(|id| id.as_str() != format!("{prefix}.source_bytes"))
+            .map(|id| NamedExpression {
+                field_id: id.clone(),
+                expression: ScalarExpression::Field(id.clone()),
+            })
+            .collect::<Vec<_>>();
+        let arguments = super::source_context_query::INPUT_FIELDS
+            .iter()
+            .map(|name| FieldId::new(format!("{prefix}.{name}")).map(ScalarExpression::Field))
+            .collect::<Result<_, _>>()?;
+        expressions.push(NamedExpression {
+            field_id: output_id,
+            expression: ScalarExpression::SourceContext {
+                parameters,
+                arguments,
+            },
+        });
+        self.program.output_fields = expressions
+            .iter()
+            .map(|expression| expression.field_id.clone())
+            .collect();
+        self.program.root = RelationalExpression::Projection {
+            input: Box::new(self.program.root),
+            expressions,
+        };
+        self.program_result_binding = Some(extended);
+        Ok(self)
+    }
+
     /// Fetch one extra authorized row when the execution grant has room. Only the selected
     /// rows enter the package; the extra row establishes truncation without a second scan.
     pub(crate) fn with_result_observation(

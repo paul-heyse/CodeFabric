@@ -902,6 +902,22 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         let workspace_lease = self.workspace_lease(&request.request.workspace_id)?;
         let workspace = workspace_lease.workspace().runtime();
         let authority = workspace.query_authority();
+        if request.request.queries.iter().any(|clause| {
+            matches!(
+                clause,
+                crate::semantic_query_contract::SemanticQueryClause::RetrieveSourceContext { .. }
+            )
+        }) {
+            authority
+                .source_disclosure()
+                .and_then(|authority| authority.authorize())
+                .map_err(|message| SemanticQueryError::Phase {
+                    code: "SOURCE_ACCESS_DENIED",
+                    phase: "source_authorization",
+                    pointer: "queries.about".to_owned(),
+                    message,
+                })?;
+        }
         if authority.entity_processing().is_some() {
             crate::production_query_recipe::validate_canonical_fact_references(&request.request)
                 .map_err(|message| SemanticQueryError::Phase {
@@ -1164,8 +1180,9 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 );
             }
             for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
-                let declarations =
-                    output.relation_id().as_str() == "query.result.declaration-facts";
+                let source_context = output.relation_id().as_str() == "query.result.source-context";
+                let declarations = source_context
+                    || output.relation_id().as_str() == "query.result.declaration-facts";
                 let calls = output.relation_id().as_str() == "query.result.call-facts";
                 if !declarations
                     && !calls
@@ -1235,6 +1252,9 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     // declarations. Keep this conservative context scope for unknown subjects.
                     "declarations".clone_into(&mut summary.family);
                 }
+                if source_context {
+                    "source-context".clone_into(&mut summary.family);
+                }
                 let coverage = match summary.coverage() {
                     Ok(coverage) => coverage,
                     Err(error) => return failed(&artifacts, "processing_scope", error),
@@ -1264,6 +1284,54 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     additional_rows: None,
                 });
             }
+        }
+        for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
+            if output.relation_id().as_str() != "query.result.source-context" {
+                continue;
+            }
+            let source_authority = match authority.source_disclosure() {
+                Ok(authority) => Arc::clone(authority),
+                Err(error) => return failed(&artifacts, "source_authorization", error),
+            };
+            let grant = match source_authority.authorize() {
+                Ok(grant) => grant,
+                Err(error) => return failed(&artifacts, "source_authorization", error),
+            };
+            let maximum_source_bytes = request.parsed().request.queries.iter().find_map(|clause| {
+                if clause.query_id() != query_id.as_ref() { return None; }
+                match clause {
+                    crate::semantic_query_contract::SemanticQueryClause::RetrieveSourceContext { return_spec, .. } => return_spec.as_ref().and_then(|spec| spec.maximum_source_bytes),
+                    _ => None,
+                }
+            }).unwrap_or(1024 * 1024);
+            let access_scope = match encode_public_id(
+                IdentityDomain::AccessScope,
+                None,
+                authorization.access_scope()[..16]
+                    .try_into()
+                    .expect("access scope width"),
+            ) {
+                Ok(scope) => scope,
+                Err(error) => return failed(&artifacts, "source_authorization", error.to_string()),
+            };
+            let parameters = super::source_context_query::SourceContextParameters {
+                authority: source_authority,
+                policy_identity: format!(
+                    "b3:{}",
+                    blake3::Hash::from_bytes(grant.authorization_fingerprint).to_hex()
+                ),
+                grant,
+                workspace_id: snapshot.workspace_id.clone(),
+                snapshot_id: snapshot.snapshot_id.clone(),
+                authorization_scope: access_scope,
+                maximum_source_bytes,
+            };
+            *output = match output.clone().with_source_context(parameters) {
+                Ok(output) => output,
+                Err(error) => {
+                    return failed(&artifacts, "source_materialization", error.to_string());
+                }
+            };
         }
         let mut handoffs_by_output = BTreeMap::new();
         for request_input in handoff.request_inputs {

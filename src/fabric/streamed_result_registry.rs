@@ -214,6 +214,7 @@ pub struct StreamedResultRegistry {
     budget: ResourceBudget,
     maximum_chunk_bytes: usize,
     package_builder: OnceLock<StreamedResultPackageBuilder>,
+    source_disclosure_reader: OnceLock<crate::operational_store::OperationalReaderFactory>,
     results: Mutex<ResultRegistryState>,
     references: Mutex<BTreeMap<String, ReferenceEntry>>,
 }
@@ -234,6 +235,7 @@ impl StreamedResultRegistry {
             budget,
             maximum_chunk_bytes,
             package_builder: OnceLock::new(),
+            source_disclosure_reader: OnceLock::new(),
             results: Mutex::new(ResultRegistryState::default()),
             references: Mutex::new(BTreeMap::new()),
         })
@@ -243,6 +245,13 @@ impl StreamedResultRegistry {
     /// composition binding gives restart recovery the same sink and limits as initial sealing.
     pub(crate) fn install_package_builder(&self, builder: StreamedResultPackageBuilder) {
         let _ = self.package_builder.set(builder);
+    }
+
+    pub(crate) fn install_source_disclosure_reader(
+        &self,
+        reader: crate::operational_store::OperationalReaderFactory,
+    ) {
+        let _ = self.source_disclosure_reader.set(reader);
     }
 
     /// Register one bounded reference projection behind an unpredictable daemon-owned handle.
@@ -707,6 +716,7 @@ impl StreamedResultRegistry {
                 ..ResourceAmounts::default()
             },
         )?;
+        let mut source_authority = None;
         let (source, total_length, expected_checksum) =
             if let StreamedResourceSelector::Reference(selector) = &request.selector {
                 let references = self.references.lock().await;
@@ -737,6 +747,27 @@ impl StreamedResultRegistry {
                         .packages
                         .get(&resource.package_id)
                         .ok_or(StreamedResultRegistryError::UnknownPackage)?;
+                    if package
+                        .package
+                        .as_ref()
+                        .ok_or(StreamedResultRegistryError::Released)?
+                        .manifest()
+                        .relations
+                        .iter()
+                        .any(|relation| relation.relation_id == "query.result.source-context")
+                    {
+                        let authority = super::source_disclosure::SourceDisclosureAuthority::new(
+                            self.source_disclosure_reader
+                                .get()
+                                .ok_or(StreamedResultRegistryError::SourceAccessDenied)?
+                                .clone(),
+                            *resource.workspace_id.as_bytes(),
+                        );
+                        authority
+                            .authorize()
+                            .map_err(|_| StreamedResultRegistryError::SourceAccessDenied)?;
+                        source_authority = Some(authority);
+                    }
                     let source = match resource.selector {
                         StreamedResourceSelector::Manifest => {
                             ResultReadSource::Manifest(package.manifest_bytes.clone())
@@ -796,6 +827,12 @@ impl StreamedResultRegistry {
         };
         let next_offset =
             u64::try_from(end).map_err(|_| StreamedResultRegistryError::RangeOverflow)?;
+        // Recheck after asynchronous object I/O, before disclosing any bytes.
+        if let Some(authority) = source_authority {
+            authority
+                .authorize()
+                .map_err(|_| StreamedResultRegistryError::SourceAccessDenied)?;
+        }
         Ok(StreamedResourceChunk {
             public_handle: request.public_handle,
             offset: request.offset,
@@ -1495,6 +1532,8 @@ const fn decode_nibble(byte: u8) -> Result<u8, StreamedResultRegistryError> {
 
 #[derive(Debug, Error)]
 pub enum StreamedResultRegistryError {
+    #[error("source disclosure is not authorized")]
+    SourceAccessDenied,
     #[error("result resource budget is not owned by the selected workspace lineage")]
     BudgetOwnerMismatch,
     #[error(transparent)]

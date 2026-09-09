@@ -37,6 +37,7 @@ mod calls;
 mod processing;
 mod python_calls;
 mod relationship_selector;
+mod source_context;
 
 pub(super) fn install_processing(
     builder: &mut ProgrammaticFabricEpochBuilder,
@@ -79,6 +80,7 @@ pub(super) fn install(
         Kind::EntitySelector,
         Kind::CallSelector,
         Kind::RelationshipSelector,
+        Kind::SourceContext,
     ] {
         builder
             .add_transformation(Arc::new(Canonical::new(kind, inventory)))
@@ -109,6 +111,7 @@ enum Kind {
     EntitySelector,
     CallSelector,
     RelationshipSelector,
+    SourceContext,
 }
 
 struct Canonical {
@@ -154,6 +157,11 @@ impl Canonical {
                 relationship_selector::RELATION,
                 relationship_selector::fields(),
                 vec![call_selector::RELATION, REFERENCE, ENTITY],
+            ),
+            Kind::SourceContext => (
+                source_context::RELATION,
+                source_context::fields(),
+                vec![DECLARATION, SOURCE],
             ),
             Kind::CallSite {
                 python,
@@ -490,6 +498,7 @@ impl ProgrammaticTransformation for Canonical {
             Kind::Processing { pyrefly } => processing::build(inputs, pyrefly),
             Kind::CallSelector => call_selector::build(inputs),
             Kind::RelationshipSelector => relationship_selector::build(inputs),
+            Kind::SourceContext => source_context::build(inputs),
             Kind::Source => self.source(inputs),
             Kind::Reference { python: true } => self.references(inputs),
             Kind::Reference { python: false } => empty(reference_fields()),

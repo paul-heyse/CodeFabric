@@ -883,6 +883,8 @@ pub struct ReturnLimit {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReturnSpec {
+    /// Explicit byte limit per returned source span; independent of result-row limits.
+    pub maximum_source_bytes: Option<usize>,
     #[serde(default)]
     pub include: Vec<String>,
     #[serde(default)]

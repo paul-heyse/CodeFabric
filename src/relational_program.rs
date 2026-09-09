@@ -296,6 +296,11 @@ pub enum ScalarExpression {
     Field(FieldId),
     /// A typed Arrow scalar value.
     Literal(ScalarValue),
+    /// Exact source-span materialization with daemon-bound snapshot and disclosure authority.
+    SourceContext {
+        parameters: crate::fabric::source_context_query::SourceContextParameters,
+        arguments: Vec<ScalarExpression>,
+    },
     /// One native scalar operation. Arity and type are checked during compilation.
     Call {
         operator: ScalarOperator,
@@ -465,6 +470,8 @@ pub struct CompilationObservations {
 pub struct CompiledRelationalProgram {
     pub plan: LogicalPlan,
     pub observations: CompilationObservations,
+    /// Exact daemon-owned scalar capabilities required only by this query execution.
+    pub(crate) query_functions: Vec<Arc<datafusion::logical_expr::ScalarUDF>>,
 }
 
 /// Fail-closed binding, typing, and native planning failures.
@@ -597,6 +604,7 @@ impl RelationalProgramCompiler {
             bindings: bindings.clone(),
             input_plans,
             observations: CompilationObservations::default(),
+            query_functions: Vec::new(),
         };
         state
             .observations
@@ -609,6 +617,7 @@ impl RelationalProgramCompiler {
         Ok(CompiledRelationalProgram {
             plan: bound.plan,
             observations: state.observations,
+            query_functions: state.query_functions,
         })
     }
 }
@@ -979,6 +988,7 @@ struct BoundPlan {
 }
 
 struct CompileState {
+    query_functions: Vec<Arc<datafusion::logical_expr::ScalarUDF>>,
     bindings: ProgramBindings,
     input_plans: BTreeMap<RelationId, LogicalPlan>,
     observations: CompilationObservations,
@@ -1321,6 +1331,32 @@ impl CompileState {
                 Ok(Expr::Column(field.column.clone()))
             }
             ScalarExpression::Literal(value) => Ok(Expr::Literal(value.clone(), None)),
+            ScalarExpression::SourceContext {
+                parameters,
+                arguments,
+            } => {
+                self.require_intrinsic(RelationalPrimitive::ScalarFunction)?;
+                if arguments.len() != crate::fabric::source_context_query::INPUT_FIELDS.len() {
+                    return Err(RelationalProgramError::InvalidProgram(
+                        "source materializer input width differs from its closed contract"
+                            .to_owned(),
+                    ));
+                }
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.compile_scalar(argument, fields, schema))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let function = crate::fabric::source_context_query::function(parameters.clone());
+                let expression =
+                    Expr::ScalarFunction(datafusion::logical_expr::expr::ScalarFunction::new_udf(
+                        Arc::clone(&function),
+                        arguments,
+                    ));
+                self.query_functions.push(function);
+                expression.get_type(schema)?;
+                expression.nullable(schema)?;
+                Ok(expression)
+            }
             ScalarExpression::Call {
                 operator,
                 arguments,

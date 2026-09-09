@@ -205,7 +205,7 @@ pub struct OperationalStore {
 }
 
 /// Cloneable factory for independent transactionally consistent read connections.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct OperationalReaderFactory {
     database_path: PathBuf,
 }
@@ -780,6 +780,15 @@ impl OperationalStore {
 }
 
 impl OperationalReaderFactory {
+    /// Bind an existing database without taking writer ownership or performing migrations.
+    pub(crate) fn for_database(path: &Path) -> Result<Self, OperationalStoreError> {
+        let factory = Self {
+            database_path: path.to_path_buf(),
+        };
+        factory.open()?;
+        Ok(factory)
+    }
+
     /// Open a separate read-only, query-only connection.
     ///
     /// # Errors

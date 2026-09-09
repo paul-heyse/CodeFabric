@@ -86,6 +86,46 @@ pub struct WorkspaceRecord {
     pub updated_at: String,
 }
 
+/// Exact live policy revision authorizing source bytes for a registered workspace.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct SourceDisclosureGrant {
+    pub(crate) authorization_revision: u64,
+    pub(crate) authorization_fingerprint: [u8; 32],
+}
+
+pub(crate) fn read_source_disclosure(
+    reader: &crate::operational_store::OperationalReader,
+    workspace: [u8; 16],
+) -> Result<Option<SourceDisclosureGrant>, WorkspaceRegistryError> {
+    let row: Option<(i64, Vec<u8>, Vec<u8>)> = reader.with_connection(|connection| {
+        connection.query_row(
+            "SELECT authorization_revision, authorization_fingerprint, allowed_source_disclosure_rules FROM workspace_registration WHERE workspace_id=?1",
+            [workspace.as_slice()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional()
+    })?;
+    let Some((revision, fingerprint, rules)) = row else {
+        return Ok(None);
+    };
+    if rules.len() > 4096 {
+        return Err(WorkspaceRegistryError::Persisted(
+            "source policy exceeds its bounded representation".to_owned(),
+        ));
+    }
+    let rules: Vec<String> = serde_json::from_slice(&rules)
+        .map_err(|error| WorkspaceRegistryError::Persisted(error.to_string()))?;
+    if !rules.iter().any(|rule| rule == "source") {
+        return Ok(None);
+    }
+    Ok(Some(SourceDisclosureGrant {
+        authorization_revision: u64::try_from(revision).map_err(|_| {
+            WorkspaceRegistryError::Persisted("invalid source authorization revision".to_owned())
+        })?,
+        authorization_fingerprint: fingerprint.try_into().map_err(|_| {
+            WorkspaceRegistryError::Persisted("invalid source authorization fingerprint".to_owned())
+        })?,
+    }))
+}
+
 mod workspace_id_serde {
     use serde::{Deserialize as _, Deserializer, Serializer};
 
@@ -534,6 +574,34 @@ impl<'store> WorkspaceRegistry<'store> {
             )?;
             insert_nested_exclusions(transaction, workspace_id, &root.bytes, authorization, &now)?;
             audit(transaction, Some(workspace_id), 1_030, "workspace-relink", &now)?;
+            read_workspace(transaction, workspace_id)
+        })
+    }
+
+    /// Allow or revoke exact source disclosure separately from metadata and fact access.
+    ///
+    /// # Errors
+    /// Returns a not-found, identity, revision-overflow or persistence error.
+    pub fn set_source_disclosure(
+        &mut self,
+        workspace_id: [u8; 16],
+        allow_source: bool,
+    ) -> Result<WorkspaceRecord, WorkspaceRegistryError> {
+        let now = timestamp()?;
+        self.store.write_transaction(|transaction| {
+            let record = read_workspace(transaction, workspace_id)?;
+            let mut root = authorized_root_from_record(&record);
+            root.disclosure_rules = if allow_source { vec!["metadata".to_owned(), "source".to_owned()] } else { vec!["metadata".to_owned()] };
+            if root.disclosure_rules == record.allowed_source_disclosure_rules { return Ok(record); }
+            let revision = record.authorization_revision.checked_add(1).ok_or_else(|| WorkspaceRegistryError::Persisted("source authorization revision overflow".to_owned()))?;
+            let registration = record.registration_revision.checked_add(1).ok_or_else(|| WorkspaceRegistryError::Persisted("registration revision overflow".to_owned()))?;
+            let fingerprint = authorization_fingerprint(workspace_id, &root, revision)?;
+            let rules = serde_json::to_vec(&root.disclosure_rules).map_err(|error| WorkspaceRegistryError::Persisted(error.to_string()))?;
+            transaction.execute(
+                "UPDATE workspace_registration SET registration_revision=?2, authorization_revision=?3, authorization_fingerprint=?4, allowed_source_disclosure_rules=?5, updated_at=?6 WHERE workspace_id=?1",
+                params![workspace_id.as_slice(), sqlite_u64(registration, "registration_revision")?, sqlite_u64(revision, "authorization_revision")?, fingerprint.as_slice(), rules, &now],
+            )?;
+            audit(transaction, Some(workspace_id), 1_040, "workspace-source-disclosure", &now)?;
             read_workspace(transaction, workspace_id)
         })
     }

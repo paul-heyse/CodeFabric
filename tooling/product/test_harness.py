@@ -1,5 +1,6 @@
 """Harness tests use controlled children; they do not claim product correctness."""
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -9,6 +10,35 @@ import pytest
 from tooling.product.corpus import apply_edit, clean_incremental, compare
 from tooling.product.golden import select
 from tooling.product.process import run
+
+
+def test_modern_client_barrier_observes_controller_and_has_a_deadline(
+    tmp_path, monkeypatch
+):
+    from tooling.fastmcp4_modern_client_driver import (
+        DriverError,
+        _execute_step,
+        _validate_steps,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    step = {"id": "checkpoint", "operation": "barrier", "name": "policy"}
+    _validate_steps([step])
+    with pytest.raises(DriverError, match="SCENARIO_BARRIER_INVALID"):
+        _validate_steps([{**step, "name": "../escape"}])
+
+    async def exercise():
+        task = asyncio.create_task(_execute_step(None, step, {}, 1.0))
+        async with asyncio.timeout(1):
+            while not Path("policy.ready").exists():
+                await asyncio.sleep(0.01)
+        assert not task.done()
+        Path("policy.resume").write_text("resume\n")
+        assert await task == {"resumed": True}
+        with pytest.raises(TimeoutError):
+            await _execute_step(None, {**step, "name": "no-controller"}, {}, 0.02)
+
+    asyncio.run(exercise())
 
 
 def test_guard_choice_uses_live_label_and_rejects_missing_or_ambiguous_choices():
