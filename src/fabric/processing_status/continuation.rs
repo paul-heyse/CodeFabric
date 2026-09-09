@@ -110,6 +110,13 @@ pub(super) fn ordered(frame: DataFrame) -> Result<DataFrame, String> {
     }
     if frame
         .schema()
+        .field_with_unqualified_name("target_platform")
+        .is_ok()
+    {
+        names.push("target_platform");
+    }
+    if frame
+        .schema()
         .field_with_unqualified_name("owner_entity_id")
         .is_ok()
     {

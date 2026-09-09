@@ -1667,6 +1667,225 @@ fn custom_cargo_build_input_changes_context_and_matches_clean_public_results() {
     supervisor.stop();
 }
 
+fn cargo_target_observation(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    leaf: Option<&str>,
+    missing: Option<&str>,
+) -> Vec<SemanticObservation> {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "Rust function declarations",
+    );
+    request["scope"]["languages"] = json!(["rust"]);
+    let entities = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-entities"),
+        request.clone(),
+    );
+    let remaining = u64::from(missing.is_some());
+    assert_eq!(
+        entities.processing[0]["requested_partitions"],
+        u64::from(leaf.is_some()) + remaining
+    );
+    assert_eq!(entities.processing[0]["remaining_partitions"], remaining);
+    if let Some(missing) = missing {
+        assert_eq!(
+            entities.processing[0]["remainder"][0]["target_platform"],
+            missing
+        );
+        assert_eq!(
+            entities.processing[0]["remainder"][0]["state"],
+            "unavailable"
+        );
+    }
+    let Some(leaf) = leaf else {
+        assert!(entities.rows.is_empty());
+        return vec![entities];
+    };
+    if entities.rows.is_empty() {
+        print_cargo_failure(fixture);
+    }
+    assert_eq!(
+        entities
+            .rows
+            .iter()
+            .map(|row| row["name"].as_str().unwrap())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["fixture::caller", leaf])
+    );
+    let by_name = entities
+        .rows
+        .iter()
+        .map(|row| (row["name"].as_str().unwrap(), &row["public_entity_id"]))
+        .collect::<BTreeMap<_, _>>();
+    request["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "calls",
+        "starting_from": [{"entity_id": by_name["fixture::caller"]}],
+        "relationship": "calls", "direction": "outgoing", "distance": "one relationship step"
+    }]);
+    let calls = public_query(fixture, stack, &format!("{phase}-calls"), request.clone());
+    assert_eq!(calls.rows.len(), 1);
+    assert_eq!(calls.rows[0]["public_target_entity_id"], *by_name[leaf]);
+    assert_eq!(calls.processing[0]["remaining_partitions"], 0);
+    request["queries"] = json!([{
+        "request": "retrieve source and syntax context", "query_id": "source",
+        "about": [{"entity_id": by_name[leaf]}], "context": "function body"
+    }]);
+    let source = public_query(fixture, stack, &format!("{phase}-source"), request);
+    assert_eq!(source.rows.len(), 1);
+    assert_eq!(
+        source.rows[0]["source_context"]["text"],
+        if leaf == "fixture::selected" {
+            "{ 1 }"
+        } else {
+            "{ 2 }"
+        }
+    );
+    vec![entities, calls, source]
+}
+
+fn selected_compiler_host() -> String {
+    let compiler_identity: Value = serde_json::from_slice(include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/rustc-extractor/toolchain-identity.json"
+    )))
+    .unwrap();
+    let version = std::process::Command::new("rustup")
+        .args([
+            "run",
+            compiler_identity["toolchain"].as_str().unwrap(),
+            "rustc",
+            "-vV",
+        ])
+        .output()
+        .unwrap();
+    assert!(version.status.success());
+    let version = String::from_utf8(version.stdout).unwrap();
+    version
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .unwrap()
+        .to_owned()
+}
+
+fn write_cargo_platform_fixture(root: &Path) {
+    fs::create_dir(root.join("src")).unwrap();
+    fs::create_dir(root.join(".cargo")).unwrap();
+    fs::write(root.join("Cargo.toml"), "[package]\nname = 'fixture'\nversion = '0.1.0'\nedition = '2024'\n[lib]\ntest = false\ndoctest = false\n").unwrap();
+    fs::write(
+        root.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = 'fixture'\nversion = '0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/lib.rs"), b"#[cfg(selected)]\npub fn selected() -> u32 { 1 }\n#[cfg(not(selected))]\npub fn alternate() -> u32 { 2 }\npub fn caller() -> u32 {\n    #[cfg(selected)] { selected() }\n    #[cfg(not(selected))] { alternate() }\n}\n").unwrap();
+}
+
+#[test]
+fn cargo_configured_platforms_and_flags_converge_with_clean_public_queries() {
+    let fixture = ProductionFixture::with_source(b"marker = 1\n");
+    let root = Path::new(&fixture.workspace.root_path_display);
+    write_cargo_platform_fixture(root);
+    let missing = "codefabric-missing-platform";
+    fs::write(
+        root.join(".cargo/config.toml"),
+        format!("[build]\ntarget = '{missing}'\n"),
+    )
+    .unwrap();
+    let host = selected_compiler_host();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+        store.backup_to(&registration).unwrap();
+    }
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    cargo_target_observation(
+        &fixture,
+        &stack,
+        "cargo-platform-missing",
+        None,
+        Some(missing),
+    );
+    fs::write(
+        root.join(".cargo/config.toml"),
+        format!("[build]\ntarget = ['host-tuple', '{host}', '{missing}', '{missing}']\n"),
+    )
+    .unwrap();
+    let partial = cargo_target_observation(
+        &fixture,
+        &stack,
+        "cargo-platform-mixed",
+        Some("fixture::alternate"),
+        Some(missing),
+    );
+    fs::write(
+        root.join(".cargo/config"),
+        "[build]\ntarget = 'host-tuple'\nrustflags = ['--cfg', 'selected']\n",
+    )
+    .unwrap();
+    let selected = cargo_target_observation(
+        &fixture,
+        &stack,
+        "cargo-platform-selected",
+        Some("fixture::selected"),
+        None,
+    );
+    assert_ne!(
+        partial[0].rows[0]["context_id"],
+        selected[0].rows[0]["context_id"]
+    );
+    fs::write(
+        root.join(".cargo/config.toml"),
+        "[build]\ntarget = 'another-missing-platform'\nrustflags = ['--cfg', 'ignored_flag']\n",
+    )
+    .unwrap();
+    let unchanged = cargo_target_observation(
+        &fixture,
+        &stack,
+        "cargo-platform-ignored",
+        Some("fixture::selected"),
+        None,
+    );
+    assert_eq!(
+        selected, unchanged,
+        "unselected configuration must not change the effective context"
+    );
+    let clean = clean_fixture(&fixture, &registration, &stack);
+    let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        unchanged,
+        cargo_target_observation(
+            &clean,
+            &stack,
+            "cargo-platform-clean",
+            Some("fixture::selected"),
+            None
+        )
+    );
+    clean_supervisor.stop();
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        unchanged,
+        cargo_target_observation(
+            &fixture,
+            &stack,
+            "cargo-platform-reopened",
+            Some("fixture::selected"),
+            None
+        )
+    );
+    supervisor.stop();
+}
+
 fn encoded_sources(utf8: bool) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let python = if utf8 {
         "# coding: utf-8\r\n# é\r\nfrom helper import café\r\ndef caller():\r\n    return café()\r\n".as_bytes()

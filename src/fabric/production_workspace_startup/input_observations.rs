@@ -286,6 +286,13 @@ pub(super) fn install_rust_target_progress(
                 )),
             ),
             (
+                "target_platform",
+                true,
+                Arc::new(StringArray::from_iter(
+                    progress.iter().map(|row| row.target_platform.as_deref()),
+                )),
+            ),
+            (
                 "context_id",
                 true,
                 id16_array(progress.iter().map(|row| row.context_id.as_ref())),

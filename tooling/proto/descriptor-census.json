@@ -2780,6 +2780,19 @@
               "proto3_optional": true,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "targetPlatform",
+              "label": "LABEL_OPTIONAL",
+              "name": "target_platform",
+              "number": 11,
+              "oneof": "_target_platform",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v2.ProcessingRemainder",
@@ -2802,6 +2815,10 @@
             },
             {
               "name": "_entity_id",
+              "options": {}
+            },
+            {
+              "name": "_target_platform",
               "options": {}
             }
           ],

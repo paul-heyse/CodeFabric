@@ -1036,6 +1036,9 @@ def _processing_summary(value: query_pb.QueryProcessingSummary) -> QueryProcessi
                     path=row.path if row.HasField("path") else None,
                     target=row.target if row.HasField("target") else None,
                     target_kind=row.target_kind if row.HasField("target_kind") else None,
+                    target_platform=row.target_platform
+                    if row.HasField("target_platform")
+                    else None,
                     analysis_context_id=row.analysis_context_id
                     if row.HasField("analysis_context_id")
                     else None,

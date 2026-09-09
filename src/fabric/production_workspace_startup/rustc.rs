@@ -75,9 +75,24 @@ pub(super) struct RustTargetProgress {
     pub manifest: Vec<u8>,
     pub target: String,
     pub target_kind: String,
+    pub target_platform: Option<String>,
     pub context_id: Option<[u8; 16]>,
     pub state: &'static str,
     pub detail: String,
+}
+
+impl RustTargetProgress {
+    fn new(target: &targets::CargoTarget, state: &'static str, detail: &str) -> Self {
+        Self {
+            manifest: target.manifest.clone(),
+            target: target.target.name.clone(),
+            target_kind: target.target.kind.as_str().to_owned(),
+            target_platform: target.target_triple.clone(),
+            context_id: None,
+            state,
+            detail: detail.to_owned(),
+        }
+    }
 }
 
 impl RustcOutcome {
@@ -140,31 +155,21 @@ pub(super) fn run(
             return Ok(outcome);
         }
     };
+    let targets = match selected_toolchain() {
+        Ok((_, host)) => targets::resolve_host(targets, &host),
+        Err(_) => targets, // Preserve requested scope; each semantic preparation reports its failure.
+    };
     if stage == super::PublicationStage::Source {
         outcome.gap = ProviderLaneGap::Pending;
         outcome.progress = targets
             .into_iter()
-            .map(|target| RustTargetProgress {
-                manifest: target.manifest,
-                target: target.target.name,
-                target_kind: target.target.kind.as_str().to_owned(),
-                context_id: None,
-                state: "pending",
-                detail: "semantic_work_pending".to_owned(),
-            })
+            .map(|target| RustTargetProgress::new(&target, "pending", "semantic_work_pending"))
             .collect();
         return Ok(outcome);
     }
     let mut contexts = Vec::new();
     for target in targets {
-        let mut progress = RustTargetProgress {
-            manifest: target.manifest.clone(),
-            target: target.target.name.clone(),
-            target_kind: target.target.kind.as_str().to_owned(),
-            context_id: None,
-            state: "unavailable",
-            detail: String::new(),
-        };
+        let mut progress = RustTargetProgress::new(&target, "unavailable", "");
         let available = prepare_and_run(
             root,
             release,
@@ -614,9 +619,7 @@ struct ToolchainInputs {
     runtime_artifacts: Vec<ContextArtifactInput>,
 }
 
-fn toolchain_inputs(
-    cancellation: &Cancellation,
-) -> Result<ToolchainInputs, ProductionWorkspaceStartupError> {
+fn selected_toolchain() -> Result<(PathBuf, String), ProductionWorkspaceStartupError> {
     let selected = std::process::Command::new("rustup")
         .args(["which", "--toolchain", RUSTC_TOOLCHAIN, "rustc"])
         .output()
@@ -632,10 +635,6 @@ fn toolchain_inputs(
             .map_err(|error| step("rust-toolchain-location", error))?
             .trim(),
     );
-    let root = rustc
-        .parent()
-        .and_then(Path::parent)
-        .ok_or_else(|| step("rust-toolchain-location", "missing sysroot"))?;
     let version = std::process::Command::new(&rustc)
         .arg("-vV")
         .output()
@@ -660,6 +659,18 @@ fn toolchain_inputs(
         .find_map(|line| line.strip_prefix("host: "))
         .ok_or_else(|| step("rust-toolchain-host", "missing compiler host"))?
         .to_owned();
+    let root = rustc
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| step("rust-toolchain-location", "missing sysroot"))?
+        .to_owned();
+    Ok((root, host))
+}
+
+fn toolchain_inputs(
+    cancellation: &Cancellation,
+) -> Result<ToolchainInputs, ProductionWorkspaceStartupError> {
+    let (root, host) = selected_toolchain()?;
     let mut entries = Vec::new();
     entries.push(dependency(
         "cargo-home/config.toml",
@@ -674,7 +685,7 @@ fn toolchain_inputs(
     let mut bytes = 0;
     for path in ["bin/cargo", "bin/rustc", "lib"] {
         collect_toolchain(
-            root,
+            &root,
             &root.join(path),
             &mut entries,
             &mut bytes,
@@ -903,7 +914,14 @@ fn initial_selection(
         package_name: Some(selected.package.clone()),
         target: Some(selected.target.clone()),
         default_features: true,
-        target_triple: Some(host.to_owned()),
+        target_triple: Some(
+            selected
+                .target_triple
+                .as_deref()
+                .filter(|value| *value != "host-tuple")
+                .unwrap_or(host)
+                .to_owned(),
+        ),
         profile: Some("dev".into()),
         toolchain: Some(RustToolchainSettings {
             release: toolchain_release(),

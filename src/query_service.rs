@@ -4152,6 +4152,7 @@ fn processing_page_summary(
                 path_bytes: row.path_bytes,
                 target: row.target,
                 target_kind: row.target_kind,
+                target_platform: row.target_platform,
                 analysis_context_id: row.analysis_context_id,
                 entity_id: row.entity_id,
                 state: state as i32,

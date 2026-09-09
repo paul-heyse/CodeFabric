@@ -92,3 +92,8 @@ reflect the changed context and match an independent clean daemon. Build-script 
 remain observable. Outgoing direct and known-empty callers use their admitted MIR owner scope;
 incomplete build-script explanations carry the caller ID. Incoming queries retain broader scope,
 and exact reopen preserves the selected results. Its default harness deadline is 600 seconds.
+
+`just golden --case cargo-platforms-live` exercises captured Cargo platform selections, host
+alias deduplication, missing-target scope, selected rustflags and extensionless configuration
+precedence through installed queries, independent clean comparison and exact reopen. Its default
+harness deadline is 600 seconds.

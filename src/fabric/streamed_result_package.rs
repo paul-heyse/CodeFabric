@@ -2727,6 +2727,7 @@ mod tests {
                     path_bytes: b"raw-\xff/Cargo.toml".to_vec(),
                     target: Some("broken".to_owned()),
                     target_kind: Some("binary".to_owned()),
+                    target_platform: None,
                     analysis_context_id: None,
                     entity_id: None,
                     state: "unavailable".to_owned(),

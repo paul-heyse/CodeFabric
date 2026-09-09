@@ -10,6 +10,7 @@ pub(super) struct CargoTarget {
     pub manifest: Vec<u8>,
     pub package: String,
     pub target: RustTargetSettings,
+    pub target_triple: Option<String>,
 }
 
 #[allow(clippy::too_many_lines)] // Explicit targets override automatic discovery in one collector.
@@ -51,6 +52,7 @@ pub(super) fn discover(
                     CargoTarget {
                         manifest: manifest.relative_path.clone(),
                         package: package["name"].as_str().expect("package name").to_owned(),
+                        target_triple: None,
                         target: RustTargetSettings {
                             name,
                             kind,
@@ -159,7 +161,102 @@ pub(super) fn discover(
             "no captured Cargo target source is available",
         ));
     }
-    Ok(targets.into_values().collect())
+    let platforms = configured_platforms(files)?;
+    Ok(targets
+        .into_values()
+        .flat_map(|target| {
+            platforms.iter().map(move |platform| CargoTarget {
+                target_triple: platform.clone(),
+                ..target.clone()
+            })
+        })
+        .collect())
+}
+
+/// Cargo is invoked from the captured workspace root, so member-local configuration
+/// does not participate. The extensionless configuration wins, matching Cargo.
+fn configured_platforms(
+    files: &[ContextFileInput],
+) -> Result<Vec<Option<String>>, ProductionWorkspaceStartupError> {
+    let config = files
+        .iter()
+        .find(|file| file.relative_path == b".cargo/config")
+        .or_else(|| {
+            files
+                .iter()
+                .find(|file| file.relative_path == b".cargo/config.toml")
+        });
+    let Some(config) = config else {
+        return Ok(vec![None]);
+    };
+    let document: toml::Value = toml::from_str(
+        std::str::from_utf8(&config.contents)
+            .map_err(|error| step("rust-target-configuration", error))?,
+    )
+    .map_err(|error| step("rust-target-configuration", error))?;
+    let Some(target) = document.get("build").and_then(|build| build.get("target")) else {
+        return Ok(vec![None]);
+    };
+    let values = match target {
+        toml::Value::String(value) => vec![value.as_str()],
+        toml::Value::Array(values) => values
+            .iter()
+            .map(|value| {
+                value.as_str().ok_or_else(|| {
+                    step(
+                        "rust-target-configuration",
+                        "build.target contains a non-string value",
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => {
+            return Err(step(
+                "rust-target-configuration",
+                "build.target must be a string or array of strings",
+            ));
+        }
+    };
+    if values.is_empty()
+        || values.len() > 1024
+        || values
+            .iter()
+            .any(|value| value.is_empty() || value.len() > 16_384)
+    {
+        return Err(step(
+            "rust-target-configuration",
+            "build.target is empty or exceeds its selection bounds",
+        ));
+    }
+    Ok(values
+        .into_iter()
+        .map(|value| Some(value.to_owned()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect())
+}
+
+pub(super) fn resolve_host(targets: Vec<CargoTarget>, host: &str) -> Vec<CargoTarget> {
+    let mut selected = BTreeMap::new();
+    for mut target in targets {
+        if target
+            .target_triple
+            .as_deref()
+            .is_none_or(|value| value == "host-tuple")
+        {
+            target.target_triple = Some(host.to_owned());
+        }
+        selected.insert(
+            (
+                target.manifest.clone(),
+                target.target.name.clone(),
+                format!("{:?}", target.target.kind),
+                target.target_triple.clone(),
+            ),
+            target,
+        );
+    }
+    selected.into_values().collect()
 }
 
 pub(super) fn build_inputs(
@@ -341,5 +438,54 @@ mod tests {
         }
         let manifest = file("Cargo.toml", "[package]\nname = 'fixture'\n");
         assert!(build_inputs(&[manifest]).unwrap().is_empty());
+    }
+    #[test]
+    fn cargo_platform_configuration_resolves_host_alias_and_configuration_precedence() {
+        let mut files = vec![
+            file("Cargo.toml", "[package]\nname = 'fixture'\n"),
+            file("src/lib.rs", ""),
+        ];
+        let host = "x86_64-unknown-linux-gnu";
+        assert_eq!(
+            resolve_host(discover(&files).unwrap(), host)[0]
+                .target_triple
+                .as_deref(),
+            Some(host)
+        );
+        files.push(file(".cargo/config.toml", "[build]\ntarget = ['host-tuple', 'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu']\n"));
+        let selected = resolve_host(discover(&files).unwrap(), host);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|target| target.target_triple.as_deref().unwrap())
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from([host, "aarch64-unknown-linux-gnu"])
+        );
+        assert_eq!(selected.len(), 2);
+        files.push(file(
+            ".cargo/config",
+            "[build]\ntarget = 'wasm32-unknown-unknown'\n",
+        ));
+        let selected = resolve_host(discover(&files).unwrap(), host);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(
+            selected[0].target_triple.as_deref(),
+            Some("wasm32-unknown-unknown")
+        );
+    }
+
+    #[test]
+    fn cargo_platform_configuration_rejects_malformed_and_empty_selections() {
+        for value in ["3", "''", "[]", "['host-tuple', 1]"] {
+            let files = vec![
+                file("Cargo.toml", "[package]\nname = 'fixture'\n"),
+                file("src/lib.rs", ""),
+                file(
+                    ".cargo/config.toml",
+                    &format!("[build]\ntarget = {value}\n"),
+                ),
+            ];
+            assert!(discover(&files).is_err(), "{value}");
+        }
     }
 }

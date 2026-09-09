@@ -309,6 +309,7 @@ mod tests {
                 ("relative_path", &["Cargo.toml"; 2]),
                 ("target_name", &["lib"; 2]),
                 ("target_kind", &["library"; 2]),
+                ("target_platform", &["test-platform"; 2]),
                 ("context_id", &["A", "B"]),
                 ("file_id", &["NULL"; 2]),
                 ("family", &["call-targets"; 2]),

@@ -284,6 +284,8 @@ pub struct ProcessingRemainder {
     #[serde(default)]
     pub target_kind: Option<String>,
     #[serde(default)]
+    pub target_platform: Option<String>,
+    #[serde(default)]
     pub analysis_context_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entity_id: Option<String>,
@@ -452,9 +454,8 @@ impl EntityProcessingSnapshot {
             let reasons = strings(batch, "reason").expect("validated processing schema");
             let kinds = strings(batch, "scope_kind").expect("validated processing schema");
             let targets = strings(batch, "target_name").expect("validated processing schema");
-            let target_kinds = batch
-                .column_by_name("target_kind")
-                .and_then(|array| array.as_any().downcast_ref::<StringArray>());
+            let target_kinds = strings(batch, "target_kind").ok();
+            let target_platforms = strings(batch, "target_platform").ok();
             let paths = binary(batch, "relative_path").expect("validated processing schema");
             let contexts = batch
                 .column_by_name("context_id")
@@ -501,9 +502,8 @@ impl EntityProcessingSnapshot {
                     path: String::from_utf8(paths.value(row).to_vec()).ok(),
                     path_bytes: paths.value(row).to_vec(),
                     target: (!targets.is_null(row)).then(|| targets.value(row).to_owned()),
-                    target_kind: target_kinds
-                        .filter(|array| !array.is_null(row))
-                        .map(|array| array.value(row).to_owned()),
+                    target_kind: optional_string(target_kinds, row),
+                    target_platform: optional_string(target_platforms, row),
                     analysis_context_id: (!contexts.is_null(row)).then(|| {
                         public_processing_id(
                             crate::identity::IdentityDomain::AnalysisContext,
@@ -530,6 +530,12 @@ impl EntityProcessingSnapshot {
         .then_some(next);
         summary
     }
+}
+
+fn optional_string(array: Option<&StringArray>, row: usize) -> Option<String> {
+    array
+        .filter(|array| !array.is_null(row))
+        .map(|array| array.value(row).to_owned())
 }
 
 fn public_processing_id(
@@ -607,6 +613,9 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
     let _ = strings(batch, "target_name")?;
     if batch.column_by_name("target_kind").is_some() {
         let _ = strings(batch, "target_kind")?;
+    }
+    if batch.column_by_name("target_platform").is_some() {
+        let _ = strings(batch, "target_platform")?;
     }
     let kinds = strings(batch, "scope_kind")?;
     let paths = binary(batch, "relative_path")?;

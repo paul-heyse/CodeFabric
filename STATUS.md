@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `41438e2e` (`Run captured custom Cargo build scripts inside the selected containment`);
-Rust outgoing-call owner scope is the current implementation slice.
+Last production commit: `9cc99f76` (`Scope outgoing Rust call coverage to admitted caller bodies`);
+captured Cargo platform selection is the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -282,6 +282,26 @@ governance pass. Final affected Clippy retains the 955 library/36 integration wa
 no new code/file diagnostics; the final pure owner-selection refactor passes the six focused tests
 again. Changed-file formatting and docs navigation pass. Python owner scope, incoming dependency/
 frontier precision, other families, efficient status indexing and distinct host/target contexts remain open.
+
+## Captured Cargo platform and flag selection
+
+Requested Cargo targets now expand over the captured workspace `build.target` string or array.
+The dated compiler resolves `host-tuple`; repeated effective platforms are deduplicated before
+execution. Extensionless `.cargo/config` takes precedence over `.cargo/config.toml`, consistent
+with the contained Cargo working directory. Each pending or failed partition carries an optional
+typed target platform through exact persistence, remainder paging, Protobuf and the adapter.
+Missing platforms remain unavailable while a valid selected platform can publish useful facts.
+Malformed or empty selections fail discovery explicitly.
+
+On 2026-09-09 the installed `cargo-platforms-live` case passes in 198.82 s: missing platform,
+mixed valid/missing selections, host alias deduplication, cfg flag changes, configuration precedence,
+ignored configuration edits, independent clean reconstruction and exact reopen. It checks exact
+Rust declarations, outgoing call targets, source bodies, context changes and processing remainders.
+Four focused target/processing tests pass, along with 109 adapter tests, 212 tooling tests and
+lint/types. Default/featureless root checks and full governance pass. Six final focused target/processing/continuation cases pass after simplifying the processing
+and progress helpers (0.12 s). Affected Clippy retains the 955/36-warning baseline with no new
+code/file diagnostics. Changed-file formatting, docs navigation and whitespace checks pass. Full feature/profile selection, custom target-spec
+closure, registry/git/generated inputs, host/target separation and build caching remain open.
 
 ## Live source reconciliation and current query selection
 

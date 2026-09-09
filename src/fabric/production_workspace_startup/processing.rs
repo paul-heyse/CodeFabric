@@ -23,6 +23,7 @@ struct Partition<'a> {
     path: &'a [u8],
     target: Option<&'a str>,
     target_kind: Option<&'a str>,
+    target_platform: Option<&'a str>,
     context: Option<[u8; 16]>,
     file: Option<[u8; 16]>,
     state: &'static str,
@@ -88,6 +89,7 @@ pub(super) fn install(
             path,
             target: None,
             target_kind: None,
+            target_platform: None,
             context: run.map(|run| run.job().context().analysis_context_id()),
             file,
             state,
@@ -136,6 +138,7 @@ fn undiscovered_rust_partition(publication: super::PublicationStage) -> Partitio
         path: b".",
         target: None,
         target_kind: None,
+        target_platform: None,
         context: None,
         file: None,
         state: if publication == super::PublicationStage::Source {
@@ -218,6 +221,7 @@ fn append_rust_partitions<'a>(
             path: &target.manifest,
             target: Some(&target.target),
             target_kind: Some(&target.target_kind),
+            target_platform: target.target_platform.as_deref(),
             context: target.context_id,
             file: None,
             state,
@@ -358,6 +362,13 @@ fn register(
                 true,
                 Arc::new(StringArray::from_iter(
                     rows.iter().map(|row| row.target_kind),
+                )),
+            ),
+            (
+                "target_platform",
+                true,
+                Arc::new(StringArray::from_iter(
+                    rows.iter().map(|row| row.target_platform),
                 )),
             ),
             (

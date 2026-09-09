@@ -94,6 +94,11 @@ def test_typed_processing_rejects_inconsistent_scope_and_preserves_unknown_exhau
             )
         ],
     )
+    assert _processing_summary(message).remainder[0].target_platform is None
+    message.remainder[0].target_platform = "aarch64-unknown-linux-gnu"
+    assert _processing_summary(message).remainder[0].target_platform == "aarch64-unknown-linux-gnu"
+    message.remainder[0].ClearField("target_platform")
+    assert _processing_summary(message).remainder[0].target_platform is None
     assert _processing_summary(message).remainder[0].entity_id is None
     message.remainder[0].entity_id = "entity:function:caller"
     assert _processing_summary(message).remainder[0].entity_id == "entity:function:caller"

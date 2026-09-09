@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:f60cb27782bc0d83cb4828b08f627947b220232fe2f1e9060fe8c03fe14aaf04
+// canonical_digest: b3:fb21793a49c02d5e5955faa854dadeffd5a451f04d37cace345bf3ea8d3fc396
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
@@ -603,6 +603,8 @@ message ProcessingRemainder {
   optional string analysis_context_id = 9;
   // Present when the processing scope names one canonical code owner.
   optional string entity_id = 10;
+  // Selected Cargo platform; a custom target can be a captured target-specification path.
+  optional string target_platform = 11;
 }
 
 message QueryProcessingSummary {
