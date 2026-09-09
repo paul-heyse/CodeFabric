@@ -66,9 +66,13 @@ impl CompleteModuleInventory {
         changed_module_ids: &[String],
     ) -> Result<Self, String> {
         Self::validate_scope(
-            modules
-                .iter()
-                .map(|module| (module.module_id.as_str(), module.module_name.as_str())),
+            modules.iter().map(|module| {
+                (
+                    module.module_id.as_str(),
+                    module.file_id.as_str(),
+                    module.module_name.as_str(),
+                )
+            }),
             changed_module_ids,
         )?;
         // Query does not expose a sound affected set. Until that seam is proved, validated
@@ -77,13 +81,18 @@ impl CompleteModuleInventory {
     }
 
     pub(crate) fn validate_scope<'a>(
-        modules: impl IntoIterator<Item = (&'a str, &'a str)>,
+        modules: impl IntoIterator<Item = (&'a str, &'a str, &'a str)>,
         changed_module_ids: &[String],
     ) -> Result<(), String> {
         let mut ids = BTreeSet::new();
-        let mut names = BTreeSet::new();
-        for (id, name) in modules {
-            if id.is_empty() || name.is_empty() || !ids.insert(id) || !names.insert(name) {
+        let mut files = BTreeSet::new();
+        for (id, file, name) in modules {
+            if id.is_empty()
+                || file.is_empty()
+                || name.is_empty()
+                || !ids.insert(id)
+                || !files.insert(file)
+            {
                 return Err(
                     "Pyrefly complete inventory contains empty or duplicate identities".to_owned(),
                 );
@@ -122,7 +131,8 @@ struct ProviderView {
 }
 
 struct LoadedModule {
-    module_id: String,
+    file_id: String,
+    module_name: String,
     source_digest: String,
     provider_path: PathBuf,
 }
@@ -132,6 +142,7 @@ pub(crate) struct SemanticContext {
     view: ProviderView,
     query: Query,
     preparation: SelectedPyreflyPreparation,
+    /// Opaque input IDs own state; an import name may name several roots or a .py/.pyi pair.
     loaded: BTreeMap<String, LoadedModule>,
     completed_generations: u64,
     peak_loaded_modules: usize,
@@ -456,28 +467,39 @@ impl SemanticContext {
             .map(|module| self.preparation.module_path(&self.view.root, module))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let requested_names = modules
+        let mut unique_paths = BTreeSet::new();
+        for (module, path) in modules.iter().zip(&provider_paths) {
+            if !unique_paths.insert(path)
+                || self.loaded.get(&module.module_id).is_some_and(|loaded| {
+                    loaded.file_id != module.file_id
+                        || loaded.module_name != module.module_name
+                        || loaded.provider_path != *path
+                })
+            {
+                return Err("Pyrefly module identity or selected path was substituted".to_owned());
+            }
+        }
+        let requested_ids = modules
             .iter()
-            .map(|module| module.module_name.as_str())
+            .map(|module| module.module_id.as_str())
             .collect::<BTreeSet<_>>();
-        let removed_names = self
+        let removed_ids = self
             .loaded
             .keys()
-            .filter(|name| !requested_names.contains(name.as_str()))
+            .filter(|id| !requested_ids.contains(id.as_str()))
             .cloned()
             .collect::<Vec<_>>();
-        let mut removed = Vec::with_capacity(removed_names.len());
-        let mut removed_module_ids = Vec::with_capacity(removed_names.len());
-        for name in removed_names {
-            let target = self.loaded.get(&name).unwrap().provider_path.clone();
+        let mut removed = Vec::with_capacity(removed_ids.len());
+        let mut removed_module_ids = Vec::with_capacity(removed_ids.len());
+        for id in removed_ids {
+            let target = self.loaded.get(&id).unwrap().provider_path.clone();
             match std::fs::remove_file(&target) {
                 Ok(()) => removed.push(target),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(format!("remove stale Pyrefly provider source: {error}")),
             }
-            if let Some(module) = self.loaded.remove(&name) {
-                removed_module_ids.push(module.module_id);
-            }
+            self.loaded.remove(&id);
+            removed_module_ids.push(id);
         }
         removed_module_ids.sort();
         if !removed_module_ids.is_empty() {
@@ -491,15 +513,7 @@ impl SemanticContext {
         let mut modified = Vec::new();
         let mut resolved = Vec::with_capacity(modules.len());
         for ((module, target), bytes) in modules.iter().zip(&provider_paths).zip(&source_bytes) {
-            match self.loaded.get(&module.module_name) {
-                Some(loaded)
-                    if loaded.module_id != module.module_id || loaded.provider_path != *target =>
-                {
-                    return Err(format!(
-                        "Pyrefly module identity changed for {}",
-                        module.module_name
-                    ));
-                }
+            match self.loaded.get(&module.module_id) {
                 Some(loaded) if loaded.source_digest == module.source_digest => {}
                 Some(_) => {
                     write_provider_source(target, bytes)?;
@@ -511,9 +525,10 @@ impl SemanticContext {
                 }
             }
             self.loaded.insert(
-                module.module_name.clone(),
+                module.module_id.clone(),
                 LoadedModule {
-                    module_id: module.module_id.clone(),
+                    file_id: module.file_id.clone(),
+                    module_name: module.module_name.clone(),
                     source_digest: module.source_digest.clone(),
                     provider_path: target.clone(),
                 },
@@ -1519,7 +1534,20 @@ mod tests {
                 .analyze_modules(&inventory_run(2), &complete([changed.clone()]))
                 .is_err()
         );
-        assert_eq!(context.loaded["main"].source_digest, module.source_digest);
+        assert_eq!(
+            context.loaded["module:main"].source_digest,
+            module.source_digest
+        );
+        changed = module.clone();
+        changed.module_name = "substituted".to_owned();
+        assert!(
+            context
+                .analyze_modules(&inventory_run(2), &complete([changed]))
+                .is_err()
+        );
+        assert_eq!(context.lifecycle_observation(), (1, 1, 1));
+        assert!(context.view.root.join("main.py").is_file());
+        assert!(!context.view.root.join("substituted.py").exists());
         changed = module.clone();
         changed.source_byte_length += 1;
         assert!(read_module_source(&changed).is_err());
@@ -1713,6 +1741,92 @@ mod tests {
     }
 
     #[test]
+    fn selected_stub_and_source_inputs_coexist_and_deletion_changes_import_resolution() {
+        let root = claim_001_temp_root("stub-and-source");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&preparation::test_manifest("3.14", "linux")).unwrap();
+        manifest["module_map"] = serde_json::json!([
+            {"module_name": "main", "file_id": "file:main", "relative_path": b"main.py".as_slice(), "root_id": "workspace", "is_stub": false, "is_package": false},
+            {"module_name": "helper", "file_id": "file:implementation", "relative_path": b"helper.py".as_slice(), "root_id": "workspace", "is_stub": false, "is_package": false},
+            {"module_name": "helper", "file_id": "file:stub", "relative_path": b"helper.pyi".as_slice(), "root_id": "workspace", "is_stub": true, "is_package": false}
+        ]);
+        let preparation =
+            SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                .unwrap();
+        let mut context = SemanticContext::new(&root, "stub-and-source", preparation).unwrap();
+        let main = inventory_module(
+            &root,
+            "main",
+            b"from helper import selected\nvalue = selected()\n",
+        );
+        let mut implementation = inventory_module(
+            &root,
+            "implementation",
+            b"def implemented() -> int:\n    return 1\nselected = implemented\n",
+        );
+        implementation.module_name = "helper".to_owned();
+        let mut stub = inventory_module(
+            &root,
+            "stub",
+            b"def promised() -> str: ...\nselected = promised\n",
+        );
+        stub.module_name = "helper".to_owned();
+        for (generation, include_stub, expected, target_file) in [
+            (1, true, "helper.promised", "file:stub"),
+            (2, false, "helper.implemented", "file:implementation"),
+            (3, true, "helper.promised", "file:stub"),
+        ] {
+            let mut modules = vec![main.clone(), implementation.clone()];
+            if include_stub {
+                modules.push(stub.clone());
+            }
+            let result = context
+                .analyze_modules(
+                    &inventory_run(generation),
+                    &CompleteModuleInventory::try_new(modules, &[]).unwrap(),
+                )
+                .unwrap();
+            assert_eq!(result.modules.len(), if include_stub { 3 } else { 2 });
+            assert_eq!(inventory_call_targets(&result.modules[0]), [expected]);
+            let calls = result.modules[0]
+                .relations
+                .iter()
+                .find(|r| r.relation == PyreflyRelation::CallTarget)
+                .unwrap();
+            let batches = StreamReader::try_new(Cursor::new(&calls.arrow_ipc), None)
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>();
+            let targets = batches
+                .iter()
+                .flat_map(|b| {
+                    b.column_by_name("target_file_id")
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap()
+                        .iter()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(targets, [Some(target_file)]);
+            assert_eq!(
+                result.removed_module_ids,
+                if include_stub {
+                    vec![]
+                } else {
+                    vec!["module:stub".to_owned()]
+                }
+            );
+        }
+        assert!(context.view.root.join("helper.py").is_file());
+        assert!(context.view.root.join("helper.pyi").is_file());
+        assert_eq!(context.lifecycle_observation(), (3, 3, 3));
+        drop(context);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn selected_ordered_source_roots_causally_choose_import_resolution() {
         for (first, second, expected) in [
             ("first", "second", "helper.first_choice"),
@@ -1726,33 +1840,38 @@ mod tests {
                 serde_json::json!({"root_id": "first", "relative_path": b"first".as_slice()}),
                 serde_json::json!({"root_id": "second", "relative_path": b"second".as_slice()}),
             ]);
-            let preparation = SelectedPyreflyPreparation::test_only_from_manifest(
-                &serde_json::to_vec(&manifest).unwrap(),
-            )
-            .unwrap();
+            manifest["module_map"].as_array_mut().unwrap().extend([
+                serde_json::json!({"module_name": "helper", "file_id": "file:first", "relative_path": b"first/helper.py".as_slice(), "root_id": "first", "is_stub": false, "is_package": false}),
+                serde_json::json!({"module_name": "helper", "file_id": "file:second", "relative_path": b"second/helper.py".as_slice(), "root_id": "second", "is_stub": false, "is_package": false}),
+            ]);
+            let preparation =
+                SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                    .unwrap();
             let mut context = SemanticContext::new(&root, "selected-roots", preparation).unwrap();
-            // Explicit test authority supplies the root content; production root leases
-            // remain unavailable until the retained source installation packet.
-            std::fs::write(
-                context.view.root.join("first/helper.py"),
+            let main = inventory_module(
+                &root,
+                "main",
+                b"from helper import selected\nvalue = selected()\n",
+            );
+            let mut first_input = inventory_module(
+                &root,
+                "first",
                 b"def first_choice() -> int:\n    return 1\nselected = first_choice\n",
-            )
-            .unwrap();
-            std::fs::write(
-                context.view.root.join("second/helper.py"),
+            );
+            let mut second_input = inventory_module(
+                &root,
+                "second",
                 b"def second_choice() -> str:\n    return 'x'\nselected = second_choice\n",
-            )
-            .unwrap();
+            );
+            first_input.module_name = "helper".to_owned();
+            second_input.module_name = "helper".to_owned();
             let result = context
                 .analyze_modules(
                     &inventory_run(1),
-                    &complete([inventory_module(
-                        &root,
-                        "main",
-                        b"from helper import selected\nvalue = selected()\n",
-                    )]),
+                    &complete([main, first_input, second_input]),
                 )
                 .unwrap();
+            assert_eq!(result.modules.len(), 3);
             assert_eq!(inventory_call_targets(&result.modules[0]), [expected]);
             drop(context);
             std::fs::remove_dir_all(root).unwrap();
@@ -1796,7 +1915,7 @@ mod tests {
                 .keys()
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
-            ["a", "b"]
+            ["module:a", "module:b"]
         );
         assert_eq!(
             std::fs::read(provider_module_path(&context.view.root, "b").unwrap()).unwrap(),
@@ -1867,6 +1986,9 @@ mod tests {
         assert!(
             CompleteModuleInventory::try_new(vec![module.clone()], &["absent".to_owned()]).is_err()
         );
+        let mut substituted = module.clone();
+        substituted.module_id = "module:another".to_owned();
+        assert!(CompleteModuleInventory::try_new(vec![module.clone(), substituted], &[]).is_err());
         assert!(
             CompleteModuleInventory::try_new(
                 vec![module],

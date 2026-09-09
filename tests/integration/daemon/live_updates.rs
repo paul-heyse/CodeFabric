@@ -618,6 +618,139 @@ fn live_python_context_and_negative_imports_equal_independent_clean_queries() {
     supervisor.stop();
 }
 
+fn python_stub_observation(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    has_stub: bool,
+) -> Vec<SemanticObservation> {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "function declarations",
+    );
+    let entities = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-entities"),
+        request.clone(),
+    );
+    let source_root = codefabric::secure_path::SecureRoot::authorize(
+        codefabric::secure_path::RootAuthorizationRecord::try_from(&fixture.workspace).unwrap(),
+    )
+    .unwrap();
+    let file_id = |path: &str| {
+        use std::fmt::Write as _;
+        let path = codefabric::secure_path::PlatformPath::from_raw_relative_bytes(
+            codefabric::identity::PlatformCode::Unix,
+            path.as_bytes().to_vec(),
+        )
+        .unwrap();
+        codefabric::identity::source_file_identity(&source_root.workspace_path(&path).unwrap())
+            .unwrap()
+            .id
+            .iter()
+            .fold(String::with_capacity(32), |mut text, byte| {
+                write!(text, "{byte:02x}").unwrap();
+                text
+            })
+    };
+    let by_file = entities
+        .rows
+        .iter()
+        .map(|row| (row["file_id"].as_str().unwrap(), row))
+        .collect::<BTreeMap<_, _>>();
+    let mut expected = vec![("sample.py", "caller"), ("ns/helper.py", "selected")];
+    if has_stub {
+        expected.push(("ns/helper.pyi", "selected"));
+    }
+    assert_eq!(
+        entities.rows.len(),
+        expected.len(),
+        "{phase}: same-name source and stub declarations remain distinct"
+    );
+    for (path, name) in expected {
+        assert_eq!(by_file[file_id(path).as_str()]["name"], name);
+    }
+    let caller = &by_file[file_id("sample.py").as_str()]["public_entity_id"];
+    let target = &by_file[file_id(if has_stub {
+        "ns/helper.pyi"
+    } else {
+        "ns/helper.py"
+    })
+    .as_str()]["public_entity_id"];
+    if has_stub {
+        assert_ne!(
+            target,
+            &by_file[file_id("ns/helper.py").as_str()]["public_entity_id"]
+        );
+    }
+    assert_eq!(entities.processing[0]["remaining_partitions"], 0);
+    request["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "calls",
+        "starting_from": [{"entity_id": caller}], "relationship": "calls", "direction": "outgoing",
+        "distance": "one relationship step", "return": {"limit": {"maximum_results": 32}}
+    }]);
+    let calls = public_query(fixture, stack, &format!("{phase}-calls"), request);
+    assert_eq!(calls.rows.len(), 1, "{phase}: one captured call occurrence");
+    assert_eq!(&calls.rows[0]["public_source_entity_id"], caller);
+    assert_eq!(&calls.rows[0]["public_target_entity_id"], target);
+    assert_eq!(
+        calls.processing[0]["remaining_partitions"], 0,
+        "{phase}: complete local import targets"
+    );
+    vec![entities, calls]
+}
+
+#[test]
+fn live_python_namespace_stub_precedence_equals_independent_clean_queries() {
+    const STUB: &[u8] = b"def selected() -> str: ...\n";
+    let fixture = ProductionFixture::with_source(
+        b"from ns.helper import selected\ndef caller():\n    return selected()\n",
+    );
+    let root = Path::new(&fixture.workspace.root_path_display);
+    // No __init__.py: the effective roots must preserve PEP 420 namespace resolution.
+    fs::create_dir(root.join("ns")).unwrap();
+    fs::write(
+        root.join("ns/helper.py"),
+        b"def selected() -> int:\n    return 1\n",
+    )
+    .unwrap();
+    fs::write(root.join("ns/helper.pyi"), STUB).unwrap();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    OperationalStore::open(&fixture.state.join("operational.sqlite3"))
+        .unwrap()
+        .backup_to(&registration)
+        .unwrap();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let initial = python_stub_observation(&fixture, &stack, "stub-initial", true);
+    for (phase, has_stub) in [("stub-removed", false), ("stub-restored", true)] {
+        if has_stub {
+            fs::write(root.join("ns/helper.pyi"), STUB).unwrap();
+        } else {
+            fs::remove_file(root.join("ns/helper.pyi")).unwrap();
+        }
+        let live = python_stub_observation(&fixture, &stack, phase, has_stub);
+        let clean = clean_fixture(&fixture, &registration, &stack);
+        let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+        let expected = python_stub_observation(&clean, &stack, &format!("clean-{phase}"), has_stub);
+        assert_eq!(
+            live, expected,
+            "{phase}: complete local namespace/stub semantics"
+        );
+        if has_stub {
+            assert_eq!(
+                live, initial,
+                "recreated stub restores canonical source and semantic identities"
+            );
+        }
+        clean_supervisor.stop();
+    }
+    supervisor.stop();
+}
+
 fn pending_semantic_candidate(fixture: &ProductionFixture) -> PathBuf {
     eprintln!(
         "waiting for semantic publication in {}",

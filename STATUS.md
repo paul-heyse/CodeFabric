@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `730a346d` (`Page retained processing scope through the public daemon`);
-captured Python configuration and live context/dependency acceptance are the current implementation slice.
+Last production commit: `1c913767` (`Apply captured Python checker configuration during live updates`);
+Python source/stub coexistence and import precedence are the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -292,6 +292,19 @@ whole selected context. Twelve root discovery/capture tests, all 31 sidecar test
 tests pass. Sidecar strict lint, default/featureless root checks, governance, docs navigation and
 changed-file formatting pass. Root library Clippy retains 955 baseline warnings with no added findings.
 `just golden --case python-context-live` selects the installed scenario.
+
+The current sidecar change owns retained modules by input/file identity rather than import name.
+A source/stub pair and same-name modules in ordered roots can be checked together. Duplicate file/input
+identities and substituted file/name/path bindings are rejected before checker mutation. Deletion
+reconstructs the checker so a removed stub cannot survive in its private handles. All 32 sidecar tests
+pass, including exact stub target-file selection, deletion/recreation, fully captured ordered roots
+and identity-substitution rejection before mutation. Installed namespace/source/stub live/clean
+acceptance passes (72.87 s on 2026-09-09): same-name declarations remain distinct, calls select the
+stub's exact source owner, removal selects the implementation and recreation restores the original
+identities. `just golden --case python-stubs-live` selects it. Sidecar strict checking/lint, all 196
+tooling tests, tooling lint, governance and changed-file formatting pass. The unchanged root library
+retains the previous 955-warning baseline; integration checking/Clippy completes with no findings on this slice's changed lines. External roots, installed
+stub bundles and broader package/import behavior remain open.
 
 Remaining: additional project configuration settings and ordered external import roots; namespaces/re-exports and
 `.pyi` precedence across dependencies; external distribution/stub materialization and identity;

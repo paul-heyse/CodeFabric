@@ -49,3 +49,7 @@ removes a previously missing import, and selects an unsupported checker setting.
 call occurrences, canonical targets/unknowns and processing scope are checked against independent
 expectations and separate clean daemons. The initial inputs are restored to check identity recovery.
 The case has the same 600-second default harness deadline and explicit timeout override.
+
+`just golden --case python-stubs-live` retains same-name `.py` and `.pyi` declarations in a
+namespace package, removes/restores the stub and verifies exact public call targets against their
+source-file identities and separate clean builds. It has a 600-second default harness deadline.

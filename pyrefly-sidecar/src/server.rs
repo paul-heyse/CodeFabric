@@ -485,10 +485,13 @@ fn validate_complete_inventory(
         ));
     }
     crate::pyrefly_link::CompleteModuleInventory::validate_scope(
-        start
-            .modules
-            .iter()
-            .map(|module| (module.module_id.as_str(), module.module_name.as_str())),
+        start.modules.iter().map(|module| {
+            (
+                module.module_id.as_str(),
+                module.file_id.as_str(),
+                module.module_name.as_str(),
+            )
+        }),
         &start.changed_module_ids,
     )
     .map_err(Status::invalid_argument)
@@ -1284,11 +1287,13 @@ mod tests {
             modules: vec![
                 ModuleRequest {
                     module_id: "a".to_owned(),
+                    file_id: "file:a".to_owned(),
                     module_name: "a".to_owned(),
                     ..ModuleRequest::default()
                 },
                 ModuleRequest {
                     module_id: "b".to_owned(),
+                    file_id: "file:b".to_owned(),
                     module_name: "b".to_owned(),
                     ..ModuleRequest::default()
                 },
@@ -1315,6 +1320,8 @@ mod tests {
         assert!(validate_complete_inventory(&request).is_err());
         request.changed_module_ids.clear();
         request.modules[1].module_name = "a".to_owned();
+        validate_complete_inventory(&request).unwrap();
+        request.modules[1].file_id = "file:a".to_owned();
         assert!(validate_complete_inventory(&request).is_err());
         request.modules.clear();
         validate_complete_inventory(&request).unwrap();

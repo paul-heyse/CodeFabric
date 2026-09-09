@@ -34,7 +34,6 @@ pub(crate) enum PreparationRemainder {
     UnsupportedNamespaceOrImportPolicy,
     UnsupportedPythonVersion,
     UnsupportedPlatforms,
-    AmbiguousModuleSelection,
 }
 
 #[derive(Debug)]
@@ -234,15 +233,6 @@ impl SelectedPyreflyPreparation {
                 && self.manifest.platforms.iter().any(|p| p == "all"))
         {
             result.push(PreparationRemainder::UnsupportedPlatforms);
-        }
-        let mut names = BTreeSet::new();
-        if self
-            .manifest
-            .module_map
-            .iter()
-            .any(|module| !names.insert(&module.module_name))
-        {
-            result.push(PreparationRemainder::AmbiguousModuleSelection);
         }
         result
     }
