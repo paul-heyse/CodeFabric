@@ -22,7 +22,8 @@ done
 
 # docs/ contains the retired infrastructure specification and historical plans. The
 # datafusion skill REFERENCE is a generic library-capability index, not live project
-# authority; all executable/configuration surfaces remain in scope.
+# authority. Vendored packages retain their upstream packaging; their activated Rust
+# dependencies are checked above. Application executable/configuration surfaces stay in scope.
 legacy_backend='ma''turin'
 legacy_native_package='codefabric.''_native'
 legacy_stub='_native.''pyi'
@@ -32,6 +33,7 @@ legacy_packaging_hits="$({
   rg -n --hidden \
     -g '!.git/**' \
     -g '!docs/**' \
+    -g '!third_party/**' \
     -g '!.claude/skills/**/REFERENCE.md' \
     -g '!tooling/ci/test_wave0_reconciliation.py' \
     -e "${legacy_backend}|${legacy_native_package}|${legacy_stub}|${legacy_python_tree}|${legacy_test_tree}" . || true
