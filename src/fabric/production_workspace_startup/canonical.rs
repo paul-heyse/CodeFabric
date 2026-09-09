@@ -32,6 +32,8 @@ use crate::provider_contracts::ProviderSourceInventory;
 use crate::provider_native_syntax::NativeSyntaxRelation;
 use crate::rustc_relation_schema::RustcRelation;
 
+mod calls;
+
 const SOURCE: &str = "source.code_file";
 const DECLARATION: &str = "fact.code_declaration";
 const ENTITY: &str = "fact.code_entity";
@@ -50,6 +52,7 @@ pub(super) fn install(
         Kind::Source,
         Kind::Declaration { python, rust },
         Kind::Reference { python },
+        Kind::CallSite { rust },
         Kind::Entity,
         Kind::EntitySelector,
     ] {
@@ -65,6 +68,7 @@ enum Kind {
     Source,
     Declaration { python: bool, rust: bool },
     Reference { python: bool },
+    CallSite { rust: bool },
     Entity,
     EntitySelector,
 }
@@ -94,6 +98,11 @@ impl Canonical {
                 },
             ),
             Kind::Entity => (ENTITY, entity_fields(), vec![DECLARATION]),
+            Kind::CallSite { rust } => (
+                calls::RELATION,
+                calls::fields(),
+                if rust { calls::dependencies() } else { vec![] },
+            ),
             Kind::Reference { python } => (
                 REFERENCE,
                 reference_fields(),
@@ -141,6 +150,9 @@ impl Canonical {
         }
         if matches!(kind, Kind::Reference { .. }) {
             output = output.with_semantic_role("canonical.reference");
+        }
+        if matches!(kind, Kind::CallSite { .. }) {
+            output = output.with_semantic_role("canonical.call-site");
         }
         let identity =
             *blake3::hash(format!("codefabric.canonical-code.v1:{id}").as_bytes()).as_bytes();
@@ -412,6 +424,8 @@ impl ProgrammaticTransformation for Canonical {
             Kind::Source => self.source(inputs),
             Kind::Reference { python: true } => self.references(inputs),
             Kind::Reference { python: false } => empty(reference_fields()),
+            Kind::CallSite { rust: true } => calls::build(self.workspace, inputs),
+            Kind::CallSite { rust: false } => empty(calls::fields()),
             Kind::EntitySelector => {
                 let input = plan(inputs, ENTITY)?;
                 let project = |selector: Expr| -> Result<LogicalPlan, TransformationPlanError> {
@@ -1146,6 +1160,7 @@ mod tests {
             "fact.code_entity",
             "fact.code_declaration",
             "fact.code_reference",
+            "fact.code_call_site",
         ] {
             let batches = context.table(table).await.unwrap().collect().await.unwrap();
             assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 0);

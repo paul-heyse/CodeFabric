@@ -222,6 +222,21 @@ pass; exact installed restart passes. The final mixed-language daemon test reads
 parameter write at bytes 11–16 and read at 42–47 from persisted canonical references. Library
 Clippy completes with the existing 958-warning backlog. No dependency versions changed.
 
+Canonical Rust call publication now emits `fact.code_call_site` from typed compiler calls,
+terminators, stable item keys, admitted context/run scope and exact Tree-sitter call-expression
+ranges. Direct calls bind existing canonical caller and target IDs, including captured Cargo
+path dependencies. Two occurrences sharing a callee retain different call-site IDs. Indirect
+function-pointer targets stay unknown. Unmapped macro/lowered calls retain available target
+facts and an explicit source-mapping reason; their syntax occurrence is not guessed. Compiler
+block/instance keys stay explicitly provider-local provenance, separate from canonical IDs.
+This starts call normalization; Python calls, complete generated/lowered correspondence,
+external endpoints and public relationship/fact query forms remain work.
+
+Validation on 2026-09-09: the extended real mixed-language fixture passes direct, indirect,
+repeated-callee, macro and failed-target cases. The final seven selected canonical/provider/
+restart tests pass, including a real call to a captured path-dependency function and exact
+reopen. The root library check and Clippy complete with the existing warning backlog.
+
 ## Outcome 4 — selected Pyrefly context preparation
 
 Pyrefly 1.2.0's Query ignored configured runtime selection by retaining default system

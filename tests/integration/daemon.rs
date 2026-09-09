@@ -2123,7 +2123,7 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
     .unwrap();
     fs::write(
         workspace.join("src/other.rs"),
-        "pub fn target(v: u32) -> u32 { v + 1 }\n",
+        "pub fn target(v: u32) -> u32 { v + 1 }\npub fn indirect(f: fn(u32) -> u32) -> u32 { f(4) }\npub fn two_calls() -> u32 { target(4) + target(5) }\nmacro_rules! forward { ($value:expr) => { target($value) } }\npub fn through_macro() -> u32 { forward!(4) }\n",
     )
     .unwrap();
     if with_dependency {
@@ -2182,6 +2182,7 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
     );
     assert_canonical_rust_declaration(&fixture);
     assert_canonical_python_reference(&fixture);
+    assert_canonical_rust_calls(&fixture, !with_dependency);
     let mut targets = BTreeSet::new();
     for batch in fresh_activation_relation_batches(&fixture, "provider.rustc.call.v1") {
         let values = batch
@@ -2519,6 +2520,172 @@ fn assert_mixed_public_entity_queries(
             .iter()
             .any(|name| name.ends_with("caller"))
     );
+}
+
+fn assert_canonical_rust_calls(fixture: &ProductionFixture, expect_indirect: bool) {
+    use arrow::array::{Array, BinaryArray, Decimal128Array, StringArray};
+    let mut entities = std::collections::BTreeMap::new();
+    for batch in fresh_activation_relation_batches(fixture, "fact.code_entity") {
+        let names = batch
+            .column_by_name("name")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let ids = batch
+            .column_by_name("entity_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        let contexts = batch
+            .column_by_name("context_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            entities.insert(
+                (contexts.value(row).to_vec(), names.value(row).to_owned()),
+                ids.value(row).to_vec(),
+            );
+        }
+    }
+    let mut direct = false;
+    let mut indirect = false;
+    let mut macro_unmapped = false;
+    let mut dependency_target = false;
+    let mut repeated = std::collections::BTreeMap::<Vec<u8>, Vec<(Vec<u8>, Vec<u8>)>>::new();
+    for batch in fresh_activation_relation_batches(fixture, "fact.code_call_site") {
+        let text = |name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+        };
+        let binary = |name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .unwrap()
+        };
+        let number = |name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Decimal128Array>()
+                .unwrap()
+        };
+        for row in 0..batch.num_rows() {
+            if text("caller_name").value(row).ends_with("caller") {
+                let target_name = text("target_name").value(row);
+                assert!(target_name.ends_with("other::target"));
+                let context = binary("context_id").value(row).to_vec();
+                assert_eq!(
+                    binary("target_entity_id").value(row),
+                    entities[&(context.clone(), target_name.to_owned())]
+                );
+                assert_eq!(
+                    binary("caller_entity_id").value(row),
+                    entities[&(context, text("caller_name").value(row).to_owned())]
+                );
+                assert!(!binary("call_site_id").is_null(row));
+                assert_ne!(
+                    binary("call_site_id").value(row),
+                    binary("caller_entity_id").value(row)
+                );
+                assert_ne!(
+                    binary("call_site_id").value(row),
+                    binary("target_entity_id").value(row)
+                );
+                assert_eq!(
+                    (
+                        number("start_byte").value(row),
+                        number("end_byte").value(row)
+                    ),
+                    (36, 52)
+                );
+                assert_eq!(text("source_mapping").value(row), "exact_call_expression");
+                assert_eq!(text("dispatch_kind").value(row), "direct");
+                assert_eq!(text("resolution").value(row), "resolved_declaration");
+                assert!(text("unknown_reason").is_null(row));
+                assert_eq!(number("argument_count").value(row), 1);
+                direct = true;
+            }
+            if text("caller_name").value(row).ends_with("indirect") {
+                assert!(!binary("call_site_id").is_null(row));
+                assert!(binary("target_entity_id").is_null(row));
+                assert_eq!(text("dispatch_kind").value(row), "function-pointer");
+                assert_eq!(
+                    text("unknown_reason").value(row),
+                    "indirect_target_unresolved"
+                );
+                indirect = true;
+            }
+            if text("caller_name").value(row).ends_with("two_calls") {
+                assert!(!binary("call_site_id").is_null(row));
+                assert!(!binary("target_entity_id").is_null(row));
+                repeated
+                    .entry(binary("context_id").value(row).to_vec())
+                    .or_default()
+                    .push((
+                        binary("call_site_id").value(row).to_vec(),
+                        binary("target_entity_id").value(row).to_vec(),
+                    ));
+            }
+            if text("caller_name").value(row).ends_with("through_macro") {
+                assert!(
+                    binary("call_site_id").is_null(row),
+                    "macro expansion must not be assigned a guessed syntax occurrence"
+                );
+                assert!(
+                    !binary("target_entity_id").is_null(row),
+                    "known target semantics survive missing source mapping"
+                );
+                assert_eq!(
+                    text("unknown_reason").value(row),
+                    "source_call_site_unmapped"
+                );
+                macro_unmapped = true;
+            }
+            if text("caller_name").value(row).ends_with("other::target")
+                && text("raw_declared_target")
+                    .value(row)
+                    .ends_with("helper::increment")
+            {
+                assert!(!binary("call_site_id").is_null(row));
+                assert!(!binary("target_entity_id").is_null(row));
+                let key = (
+                    binary("context_id").value(row).to_vec(),
+                    text("target_name").value(row).to_owned(),
+                );
+                assert_eq!(binary("target_entity_id").value(row), entities[&key]);
+                assert!(text("unknown_reason").is_null(row));
+                dependency_target = true;
+            }
+        }
+    }
+    assert!(
+        direct,
+        "actual direct call normalized to canonical caller and target"
+    );
+    assert_eq!(indirect, expect_indirect);
+    assert_eq!(macro_unmapped, expect_indirect);
+    assert_eq!(dependency_target, !expect_indirect);
+    assert_eq!(!repeated.is_empty(), expect_indirect);
+    for calls in repeated.values() {
+        assert_eq!(calls.len(), 2, "two actual calls in this context");
+        assert_ne!(
+            calls[0].0, calls[1].0,
+            "distinct call sites survive a shared callee"
+        );
+        assert_eq!(calls[0].1, calls[1].1);
+    }
 }
 
 fn assert_canonical_python_reference(fixture: &ProductionFixture) {
