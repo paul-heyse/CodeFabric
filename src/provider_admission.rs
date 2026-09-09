@@ -1863,6 +1863,42 @@ fn pyrefly_workspace_source_pin(
     SourcePin(*hasher.finalize().as_bytes())
 }
 
+/// Snapshot identity for the exact set of compiler contexts; raw rows retain their run binding.
+pub(crate) fn rustc_context_set_pin(
+    contexts: impl IntoIterator<Item = ([u8; 16], ContextPin)>,
+) -> Result<ContextPin, ProviderAdmissionError> {
+    let mut selected = BTreeMap::new();
+    for (id, pin) in contexts {
+        if id == [0; 16]
+            || pin.0 == [0; 32]
+            || selected
+                .insert(id, pin)
+                .is_some_and(|previous| previous != pin)
+        {
+            return Err(
+                ProviderAdmissionError::InconsistentProviderWorkspaceAuthority {
+                    lane: ProviderNativeLane::Rustc,
+                },
+            );
+        }
+    }
+    if selected.len() == 1 {
+        return Ok(*selected.values().next().expect("one context"));
+    }
+    if selected.is_empty() {
+        return Err(ProviderAdmissionError::InvalidPlan(
+            "empty compiler context set".into(),
+        ));
+    }
+    let mut digest = blake3::Hasher::new();
+    digest.update(b"codefabric.rust-context-set.v1\0");
+    for (id, pin) in selected {
+        digest.update(&id);
+        digest.update(&pin.0);
+    }
+    Ok(ContextPin(*digest.finalize().as_bytes()))
+}
+
 fn aggregate_rustc_runs(
     runs: &[TrustQualifiedRustcCompilation],
     empty_source_pin: SourcePin,
@@ -1881,18 +1917,15 @@ fn aggregate_rustc_runs(
     let mut compilation_units = BTreeSet::new();
     let mut relation_sets = Vec::with_capacity(runs.len());
     let mut source_pin = None;
-    let mut context_pin = None;
+    let mut contexts = Vec::new();
     for qualified in runs {
         qualified
             .validate()
             .map_err(|error| ProviderAdmissionError::RustcTrustEvidence(error.to_string()))?;
         let run = qualified.accepted();
         if run.admission.workspace_id != first.workspace_id
-            || run.admission.analysis_context_id != first.analysis_context_id
             || run.admission.canonical_workspace_id != first.canonical_workspace_id
-            || run.admission.canonical_analysis_context_id != first.canonical_analysis_context_id
             || run.admission.source_generation != first.source_generation
-            || run.admission.context_manifest_digest != first.context_manifest_digest
             || run.admission.source_snapshot_manifest_digest
                 != first.source_snapshot_manifest_digest
             || run.admission.resource_profile_id != first.resource_profile_id
@@ -1904,16 +1937,17 @@ fn aggregate_rustc_runs(
             );
         }
         // One Cargo job legitimately emits several distinct crate/target compilation units.
-        if !compilation_units.insert(run.control.header.compilation_unit.as_str()) {
+        if !compilation_units.insert((
+            run.admission.canonical_analysis_context_id,
+            run.control.header.compilation_unit.as_str(),
+        )) {
             return Err(ProviderAdmissionError::DuplicateProviderPartition {
                 lane: ProviderNativeLane::Rustc,
                 partition: run.control.header.compilation_unit.as_str().to_owned(),
             });
         }
         let relation_set = AcceptedProviderRelationSet::from_rustc(run)?;
-        if source_pin.is_some_and(|pin| pin != relation_set.source_pin)
-            || context_pin.is_some_and(|pin| pin != relation_set.context_pin)
-        {
+        if source_pin.is_some_and(|pin| pin != relation_set.source_pin) {
             return Err(
                 ProviderAdmissionError::InconsistentProviderWorkspaceAuthority {
                     lane: ProviderNativeLane::Rustc,
@@ -1921,13 +1955,16 @@ fn aggregate_rustc_runs(
             );
         }
         source_pin = Some(relation_set.source_pin);
-        context_pin = Some(relation_set.context_pin);
+        contexts.push((
+            run.admission.canonical_analysis_context_id,
+            relation_set.context_pin,
+        ));
         relation_sets.push(relation_set);
     }
     merge_provider_relation_sets(
         &relation_sets,
         source_pin.expect("a non-empty rustc set has a source pin"),
-        context_pin.expect("a non-empty rustc set has a context pin"),
+        rustc_context_set_pin(contexts)?,
     )
 }
 
@@ -2562,7 +2599,7 @@ fn declared_coverage(
     if !matched {
         return Ok(None);
     }
-    if requested_units != binding.requested_units {
+    if requested_units > binding.requested_units {
         return Err(coverage_error(
             relation_name,
             &format!(
@@ -2570,6 +2607,22 @@ fn declared_coverage(
                 declared.family_value, binding.requested_units
             ),
         ));
+    }
+    if requested_units < binding.requested_units {
+        // A failed context need not discard facts returned by other selected contexts.
+        // Unreported work remains unknown; it cannot silently become an empty answer.
+        remainders.push(CoverageRemainder {
+            scope: coverage_scope(
+                &binding.api_family,
+                &declared.relation_identity,
+                usize::MAX,
+                usize::MAX,
+            ),
+            unit_count: binding.requested_units - requested_units,
+            reason: RemainderReason::Unknown,
+        });
+        requested_units = binding.requested_units;
+        any_unknown = true;
     }
     let status = if any_unknown {
         TerminalStatus::Unknown
@@ -4175,6 +4228,72 @@ pub(crate) mod tests {
                 cause: ProviderAdmissionUnknownCause::MissingCoverage
             }
         );
+    }
+
+    #[test]
+    fn compiler_context_set_is_order_independent_and_rejects_conflicting_identity() {
+        let first = ([1; 16], ContextPin([11; 32]));
+        let second = ([2; 16], ContextPin([12; 32]));
+        assert_eq!(rustc_context_set_pin([first]).unwrap(), first.1);
+        assert_eq!(
+            rustc_context_set_pin([first, second]).unwrap(),
+            rustc_context_set_pin([second, first, second]).unwrap()
+        );
+        assert_ne!(rustc_context_set_pin([first, second]).unwrap(), first.1);
+        assert!(rustc_context_set_pin([first, (first.0, second.1)]).is_err());
+    }
+
+    #[test]
+    fn missing_selected_work_retains_facts_with_counted_unknown_scope() {
+        let (mut plan, observed) = accepted_plan();
+        plan.bindings[0].requested_units = 3;
+        plan.contract.rows[0]
+            .unavailable_behavior
+            .allowed_statuses
+            .push(TerminalStatus::Unknown);
+        plan.contract.rows[0]
+            .unavailable_behavior
+            .allowed_reasons
+            .push(RemainderReason::Unknown);
+        let report = evaluate_provider_admission(&plan, &observed).unwrap();
+        assert!(matches!(
+            report.relations[0].disposition,
+            ProviderRegistrationDisposition::RegisteredUnknown { .. }
+        ));
+        let selected = report
+            .boundary
+            .families
+            .iter()
+            .find(|entry| entry.api_family == plan.bindings[0].api_family)
+            .unwrap();
+        let ProviderFamilyRunOutcome::Unknown {
+            trailer: Some(trailer),
+            ..
+        } = &selected.run
+        else {
+            panic!("missing work must be unknown")
+        };
+        assert_eq!(trailer.requested_units, 3);
+        assert_eq!(trailer.completed_units, 1);
+        assert_eq!(
+            trailer
+                .remainders
+                .iter()
+                .map(|remainder| remainder.unit_count)
+                .sum::<u64>(),
+            2
+        );
+        assert_eq!(trailer.remainders[0].reason, RemainderReason::Unknown);
+        let (plan, mut excess) = accepted_plan();
+        let relation = excess
+            .relations
+            .get_mut(&ProviderRelationIdentity::try_new("provider.ruff.coverage").unwrap())
+            .unwrap();
+        relation.batches.push(relation.batches[0].clone());
+        assert!(matches!(
+            evaluate_provider_admission(&plan, &excess),
+            Err(ProviderAdmissionError::InvalidCoverage { .. })
+        ));
     }
 
     #[test]

@@ -107,6 +107,14 @@ sysroot disk copy, though trusted toolchain bytes are still recaptured and verif
 and startup/incremental performance measurements remain outcome 8 work. External registry/git
 materialization, generated source maps and multiple selected targets remain open.
 
+The 4A/5A admission follow-up preserves returned facts when declared coverage reports fewer units
+than the selected request. Unreported units become a counted unknown remainder; over-reporting
+is still rejected. Compiler relation aggregation now binds an ordered-independent set of context
+identities while retaining each run's source/context qualification. The affected provider-admission
+tests pass, including missing work, conflicting context identity and changed-source rejection.
+This is admission support for multiple target scheduling, not completed query-scoped status or
+production multi-target scheduling; both remain active work.
+
 ## Outcome 4 — selected Pyrefly context preparation
 
 Pyrefly 1.2.0's Query ignored configured runtime selection by retaining default system
