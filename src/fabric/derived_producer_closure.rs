@@ -1154,7 +1154,7 @@ impl ReleaseProducerClosureIssue {
     }
 }
 
-/// Release-owned, row-decoded producer closure consumed by executable proof.
+/// Decoded producer coverage and dependencies consumed by query construction.
 ///
 /// This is derived from the exact DataFusion results and their compiled dependency observation.
 /// It is not constructible from counts, digests, plan text, or caller-authored declarations.
@@ -1480,10 +1480,60 @@ impl DerivedProducerClosureExecution {
         &self.release_evidence
     }
 
+    /// Check that decoded results retain the exact compilation identities.
+    pub(crate) fn validate_binding(&self) -> Result<(), &'static str> {
+        validate_release_producer_closure_binding(&self.release_evidence)
+    }
+
     #[must_use]
     pub fn is_conformant(&self) -> bool {
         self.release_evidence.is_conformant()
     }
+}
+
+fn validate_release_producer_closure_binding(
+    evidence: &ReleaseProducerClosureEvidence,
+) -> Result<(), &'static str> {
+    let authorities = evidence
+        .dependencies()
+        .iter()
+        .filter_map(|dependency| match dependency {
+            ProducerClosureCompilationDependency::ApplicationOwnedAuthority(value) => {
+                Some(value.as_ref())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    if authorities != BTreeSet::from([evidence.application_authority_id().as_ref()]) {
+        return Err("application authority dependency");
+    }
+    let semantic_classes = evidence
+        .dependencies()
+        .iter()
+        .filter_map(|dependency| match dependency {
+            ProducerClosureCompilationDependency::FactualSemanticClass(value) => {
+                Some(value.as_ref())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    if semantic_classes != BTreeSet::from([evidence.factual_semantic_class_id().as_ref()]) {
+        return Err("factual semantic-class dependency");
+    }
+    let releases = evidence
+        .dependencies()
+        .iter()
+        .filter_map(|dependency| match dependency {
+            ProducerClosureCompilationDependency::ImplementationRelease(value) => {
+                Some(value.as_ref())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    if releases != BTreeSet::from([evidence.implementation_release().as_ref()]) {
+        return Err("implementation-release dependency");
+    }
+    Ok(())
 }
 
 /// Compile the release-owned producer closure from the four exact relations sealed in one epoch.
@@ -4291,9 +4341,6 @@ mod tests {
         ProgrammaticFabricEpoch, ProgrammaticFabricEpochBuilder,
     };
     use crate::fabric::programmatic_schema::ProviderInput;
-    use crate::fabric::proof::{
-        ProofTerminalStatus, ReleaseProducerClosureProofInput, evaluate_release_producer_closure,
-    };
     use crate::schema_contract::{
         FIELD_ID_METADATA_KEY, FieldIndexMapping, RELATION_ID_METADATA_KEY, SchemaContract,
     };
@@ -5033,29 +5080,37 @@ mod tests {
         assert!(evidence.violations().is_empty());
         assert!(evidence.issues().is_empty());
 
-        let proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(&execution)
-                .expect("bind exact executed closure"),
-        );
-        assert_eq!(proof.terminal(), ProofTerminalStatus::Pass);
-        assert_eq!(proof.operation_id(), evidence.operation_id());
-        assert_eq!(
-            proof.implementation_release(),
-            evidence.implementation_release()
-        );
-        assert_eq!(
-            proof.application_authority_id(),
-            evidence.application_authority_id()
-        );
-        assert_eq!(
-            proof.factual_semantic_class_id(),
-            evidence.factual_semantic_class_id(),
-        );
-        assert_eq!(proof.families(), evidence.families());
-        assert_eq!(proof.query_requirements(), evidence.query_requirements());
-        assert_eq!(proof.violations(), evidence.violations());
-        assert_eq!(proof.issues(), evidence.issues());
-        assert_eq!(proof.dependencies(), evidence.dependencies());
+        execution
+            .validate_binding()
+            .expect("bind exact executed closure");
+        assert!(execution.is_conformant());
+
+        // Binding checks reject a substituted identity even when the decoded rows are valid.
+        for (dependency, expected) in [
+            (
+                ProducerClosureCompilationDependency::ApplicationOwnedAuthority(Arc::from(APP_AUTHORITY)),
+                "application authority dependency",
+            ),
+            (
+                ProducerClosureCompilationDependency::FactualSemanticClass(Arc::from(FACT_CLASS)),
+                "factual semantic-class dependency",
+            ),
+            (
+                ProducerClosureCompilationDependency::ImplementationRelease(Arc::clone(evidence.implementation_release())),
+                "implementation-release dependency",
+            ),
+        ] {
+            let mut substituted = execution.clone();
+            substituted.release_evidence.dependencies = evidence
+                .dependencies()
+                .iter()
+                .filter(|value| **value != dependency)
+                .cloned()
+                .collect::<Vec<_>>()
+                .into();
+            assert_eq!(substituted.validate_binding(), Err(expected));
+        }
+
     }
 
     #[tokio::test]
@@ -5340,11 +5395,9 @@ mod tests {
             execution.violation_schema()
         );
 
-        let proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(&execution)
-                .expect("bind empty executed closure as negative evidence"),
-        );
-        assert_eq!(proof.terminal(), ProofTerminalStatus::Fail);
+        execution.validate_binding().expect("bind empty executed closure as negative evidence");
+        let proof = execution.release_evidence();
+        assert!(!proof.is_conformant());
     }
 
     #[tokio::test]
@@ -5377,11 +5430,9 @@ mod tests {
                 && issue.subject_id().map(std::convert::AsRef::as_ref) == Some("family.empty-scope")
         }));
 
-        let proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(&execution)
-                .expect("bind zero-scope execution"),
-        );
-        assert_eq!(proof.terminal(), ProofTerminalStatus::Fail);
+        execution.validate_binding().expect("bind zero-scope execution");
+        let proof = execution.release_evidence();
+        assert!(!proof.is_conformant());
         assert!(proof.violations().is_empty());
     }
 
@@ -5421,11 +5472,9 @@ mod tests {
         assert!(execution.release_evidence().issues().iter().any(|issue| {
             issue.code() == "missing_compiled_release_dependency" && issue.subject_id().is_none()
         }));
-        let proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(&execution)
-                .expect("bind incomplete-dependency execution"),
-        );
-        assert_eq!(proof.terminal(), ProofTerminalStatus::Fail);
+        execution.validate_binding().expect("bind incomplete-dependency execution");
+        let proof = execution.release_evidence();
+        assert!(!proof.is_conformant());
         assert!(!proof.dependencies().contains(&missing));
     }
 
@@ -5456,17 +5505,13 @@ mod tests {
             ),
         )
         .await;
-        let valid_proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(&valid)
-                .expect("bind valid execution"),
-        );
-        let mutated_proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(&mutated)
-                .expect("bind mutated execution"),
-        );
+        valid.validate_binding().expect("bind valid execution");
+        let valid_proof = valid.release_evidence();
+        mutated.validate_binding().expect("bind mutated execution");
+        let mutated_proof = mutated.release_evidence();
 
-        assert_eq!(valid_proof.terminal(), ProofTerminalStatus::Pass);
-        assert_eq!(mutated_proof.terminal(), ProofTerminalStatus::Fail);
+        assert!(valid_proof.is_conformant());
+        assert!(!mutated_proof.is_conformant());
         assert!(mutated_proof.violations().iter().any(|row| {
             row.violation_code().as_ref() == "wrong_runtime_producer_authority"
                 && row.subject_id().as_ref() == "family.authority"

@@ -254,16 +254,16 @@ impl ProductionActiveWorkspaceBuilder {
         Self::validate_selection(&selection, chain, &epoch)?;
         let pins = selection.event().pins();
         let cancellation = ProducerClosureCancellation::new();
-        let proved = self
+        let execution = self
             .release
-            .prove_producer_closure(
+            .execute_producer_closure(
                 &epoch,
                 self.config.producer_bounds,
                 &cancellation,
                 self.resources.budget(),
             )
             .await
-            .map_err(|_| Self::invalid("producer-closure-proof"))?;
+            .map_err(|_| Self::invalid("producer-closure-validation"))?;
         let query_input = ProductionSemanticQueryRecipeInput::try_new(
             *pins.source_authority.as_bytes(),
             *pins.policy_set.as_bytes(),
@@ -272,7 +272,7 @@ impl ProductionActiveWorkspaceBuilder {
         .map_err(|_| Self::invalid("query-recipe-input"))?;
         let recipe = self
             .release
-            .compile_semantic_query_recipe(&epoch, query_input, proved.execution())
+            .compile_semantic_query_recipe(&epoch, query_input, &execution)
             .map_err(|_error| Self::invalid("query-recipe-compile"))?;
 
         let table_relations = epoch.relation_ids().cloned().collect::<BTreeSet<_>>();

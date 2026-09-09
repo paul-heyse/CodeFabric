@@ -10861,8 +10861,7 @@ mod tests {
             DerivedProducerClosureError, ProducerClosureCancellation,
             ProducerClosureNativeOperator, ProducerClosureResourceBounds,
         };
-        use crate::fabric::production_kernel::CompiledProducerClosureProofError;
-        use crate::fabric::proof::ProofTerminalStatus;
+        use crate::fabric::production_kernel::ProducerClosureValidationError;
 
         let fixture = exact_workspace_fixture();
         let release = crate::fabric::production_kernel::compile_test_semantic_release();
@@ -10895,29 +10894,28 @@ mod tests {
         let reserved_before = epoch.memory_reserved_bytes();
         let resource_budget = crate::fabric::workspace_resources::test_workspace_budget();
         let first = release
-            .prove_producer_closure(
+            .execute_producer_closure(
                 &epoch,
                 bounds,
                 &ProducerClosureCancellation::new(),
                 &resource_budget,
             )
             .await
-            .expect("decoded catalog rows prove the release closure");
-        assert_eq!(first.proof().terminal(), ProofTerminalStatus::Pass);
-        assert!(first.proof().families().len() >= accepted_analysis_families);
-        assert_eq!(first.proof().query_requirements().len(), 8);
-        assert!(first.proof().violations().is_empty());
-        assert!(first.proof().issues().is_empty());
+            .expect("decoded catalog rows validate the release closure");
+        assert!(first.is_conformant());
+        assert!(first.release_evidence().families().len() >= accepted_analysis_families);
+        assert_eq!(first.release_evidence().query_requirements().len(), 8);
+        assert!(first.release_evidence().violations().is_empty());
+        assert!(first.release_evidence().issues().is_empty());
         assert!(
             first
-                .execution()
                 .observation()
                 .operators()
                 .contains(&ProducerClosureNativeOperator::RecursiveQueryDistinct)
         );
 
         let restarted = release
-            .prove_producer_closure(
+            .execute_producer_closure(
                 &epoch,
                 bounds,
                 &ProducerClosureCancellation::new(),
@@ -10926,30 +10924,30 @@ mod tests {
             .await
             .expect("same exact epoch re-executes deterministically after transient state drops");
         assert_eq!(
-            first.execution().family_closure(),
-            restarted.execution().family_closure()
+            first.family_closure(),
+            restarted.family_closure()
         );
         assert_eq!(
-            first.execution().query_requirement_closure(),
-            restarted.execution().query_requirement_closure()
+            first.query_requirement_closure(),
+            restarted.query_requirement_closure()
         );
         assert_eq!(
-            first.execution().violations(),
-            restarted.execution().violations()
+            first.violations(),
+            restarted.violations()
         );
 
         let constrained = ProducerClosureResourceBounds::try_new(16, 1, 256, 16 * 1024 * 1024)
             .expect("one-row bound remains structurally valid");
         assert!(matches!(
             release
-                .prove_producer_closure(
+                .execute_producer_closure(
                     &epoch,
                     constrained,
                     &ProducerClosureCancellation::new(),
                     &resource_budget
                 )
                 .await,
-            Err(CompiledProducerClosureProofError::Closure(
+            Err(ProducerClosureValidationError::Closure(
                 DerivedProducerClosureError::OutputRowsExceeded { .. }
             ))
         ));
@@ -10959,9 +10957,9 @@ mod tests {
         assert!(!cancelled.cancel());
         assert!(matches!(
             release
-                .prove_producer_closure(&epoch, bounds, &cancelled, &resource_budget)
+                .execute_producer_closure(&epoch, bounds, &cancelled, &resource_budget)
                 .await,
-            Err(CompiledProducerClosureProofError::Closure(
+            Err(ProducerClosureValidationError::Closure(
                 DerivedProducerClosureError::Cancelled { .. }
             ))
         ));

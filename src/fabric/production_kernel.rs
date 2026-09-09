@@ -31,11 +31,6 @@ use super::programmatic_query_backend::{
 };
 use super::programmatic_schema::ProgrammaticRelationId;
 use super::programmatic_workspace::ProgrammaticWorkspaceRuntime;
-use super::proof::{
-    ProofError, ProofTerminalStatus,
-    ReleaseProducerClosureProofInput, ReleaseProducerClosureProofResult,
-    evaluate_release_producer_closure,
-};
 use crate::production_provider_recipe::{
     ProductionProviderAuthority, ProductionProviderCompositionError, ProductionProviderRecipeError,
     ProductionProviderRuns, admit_and_compose_production_relations,
@@ -159,7 +154,7 @@ impl CompiledSemanticRelease {
     ///
     /// The sealed epoch and resource bounds remain explicit operational inputs. Exact relation
     /// identities, providers, schemas, field roles, output contracts, semantic identities, and
-    /// proof programs are resolved or constructed privately by this release.
+    /// dependencies are resolved or constructed privately by this release.
     ///
     /// # Errors
     ///
@@ -172,39 +167,36 @@ impl CompiledSemanticRelease {
         compile_release_owned_derived_producer_closure(epoch, bounds).await
     }
 
-    /// Compile, execute, decode, and prove the release-owned producer closure for one exact epoch.
+    /// Execute the bounded producer closure and validate its decoded coverage and dependencies.
     ///
-    /// This is the sole production bridge from a sealed candidate into queryable producer
-    /// authority. The returned capability contains the actual decoded Arrow rows and can only be
-    /// constructed when their release binding is valid and their derived terminal status is
-    /// `Pass`. Cancellation or a resource failure returns no partially proved value.
+    /// Returns the existing execution result directly after validation. Cancellation, resource
+    /// failure, missing coverage, or mismatched identities prevent query construction.
     ///
     /// # Errors
-    ///
-    /// Returns a typed compilation, execution, cancellation, proof-binding, or semantic-closure
-    /// failure.
-    pub(crate) async fn prove_producer_closure(
+    /// Returns compilation, execution, cancellation, binding, or semantic-closure failures.
+    pub(crate) async fn execute_producer_closure(
         &self,
         epoch: &ProgrammaticFabricEpoch,
         bounds: ProducerClosureResourceBounds,
         cancellation: &ProducerClosureCancellation,
         resource_budget: &crate::resource_budget::ResourceBudget,
-    ) -> Result<ProvedDerivedProducerClosure, CompiledProducerClosureProofError> {
+    ) -> Result<DerivedProducerClosureExecution, ProducerClosureValidationError> {
         let compiled = self.compile_producer_closure(epoch, bounds).await?;
         let execution = compiled
             .execute_with_cancellation(&epoch.context(), cancellation, resource_budget)
             .await?;
-        let proof = evaluate_release_producer_closure(
-            ReleaseProducerClosureProofInput::try_from_execution(&execution)?,
-        );
-        if proof.terminal() != ProofTerminalStatus::Pass {
-            return Err(CompiledProducerClosureProofError::SemanticClosureRejected {
-                operation_id: Arc::clone(proof.operation_id()),
-                violation_rows: proof.violations().len(),
-                issue_rows: proof.issues().len(),
+        execution
+            .validate_binding()
+            .map_err(ProducerClosureValidationError::Binding)?;
+        let evidence = execution.release_evidence();
+        if !execution.is_conformant() {
+            return Err(ProducerClosureValidationError::SemanticClosureRejected {
+                operation_id: Arc::clone(evidence.operation_id()),
+                violation_rows: evidence.violations().len(),
+                issue_rows: evidence.issues().len(),
             });
         }
-        Ok(ProvedDerivedProducerClosure { execution, proof })
+        Ok(execution)
     }
 
     /// Compose the exact ingress, authorization, and snapshot ports for one compiled query recipe.
@@ -242,32 +234,13 @@ impl CompiledSemanticRelease {
     }
 }
 
-/// Non-forgeable successful producer closure retained for query-program compilation.
-#[derive(Clone, Debug)]
-pub(crate) struct ProvedDerivedProducerClosure {
-    execution: DerivedProducerClosureExecution,
-    proof: ReleaseProducerClosureProofResult,
-}
-
-impl ProvedDerivedProducerClosure {
-    #[must_use]
-    pub(crate) const fn execution(&self) -> &DerivedProducerClosureExecution {
-        &self.execution
-    }
-
-    #[must_use]
-    pub(crate) const fn proof(&self) -> &ReleaseProducerClosureProofResult {
-        &self.proof
-    }
-}
-
-/// Closed failures before a candidate can acquire proved producer authority.
+/// Failures while validating producer coverage and compilation dependencies.
 #[derive(Debug, Error)]
-pub(crate) enum CompiledProducerClosureProofError {
+pub(crate) enum ProducerClosureValidationError {
     #[error(transparent)]
     Closure(#[from] DerivedProducerClosureError),
-    #[error(transparent)]
-    Proof(#[from] ProofError),
+    #[error("producer closure binding differs at {0}")]
+    Binding(&'static str),
     #[error(
         "release producer closure {operation_id:?} was rejected by decoded rows: {violation_rows} violation rows, {issue_rows} structural issue rows"
     )]
