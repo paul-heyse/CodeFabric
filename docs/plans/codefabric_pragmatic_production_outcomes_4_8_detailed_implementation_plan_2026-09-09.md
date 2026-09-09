@@ -50,7 +50,7 @@ Runtime actions retain compact input/output references, selected context/snapsho
 
 ### 1.4 Progress checkpoint and how to execute the remaining scope
 
-**Committed through `80bc6d18`:** real mixed-language startup, captured Cargo dependency/multiple-target support, canonical declarations/references/calls, public function/declaration queries, typed processing and truncation, chunked Python inventories and exact checker-selected call definition anchors. Key commits and checks are recorded in STATUS and §9.1 below.
+**Committed through `1a60e748`:** real mixed-language startup, captured Cargo dependency/multiple-target support, canonical declarations/references/calls, public function/declaration queries, typed processing and truncation, chunked Python inventories and exact checker-selected call definition anchors. Key commits and checks are recorded in STATUS and §9.1 below.
 
 **Call-query continuation delivered as a limited slice:** `system.requested_processing_scope` and
 `system.entity_processing_scope` keep declaration and call coverage separate. Installed modern clients
@@ -234,7 +234,7 @@ Shared runtime interfaces should stay small:
 
 ### 4E. First four production query forms and mixed-language demonstration
 
-**Current status — partial.** Installed clients exercise canonical function and selected additional declaration-kind FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. Installed FollowRelationships queries execute one-step Python/Rust calls and exact Python reopen; full traversal is still open. SourceContext has no canonical production form yet. All broader meanings, source/representation scopes, semantic reference resolution, stop/filter/distance behavior and composition remain required. The first-four acceptance below is open.
+**Current status — partial.** Installed clients exercise canonical function and selected additional declaration-kind FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. Installed FollowRelationships queries execute one-step Python/Rust calls and exact Python reopen. The continuation adds explicit Python lexical-reference traversal, preserving write/read/call/type/import kinds, reusable occurrence endpoints and unresolved/unsupported family scope; project-aware semantic references and full traversal remain open. SourceContext has no canonical production form yet. All broader meanings, source/representation scopes, semantic reference resolution, stop/filter/distance behavior and composition remain required. The first-four acceptance below is open.
 
 **Prerequisites:** 4D and 5A–5B. **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, `src/semantic_query_contract.rs`, existing child catalog and adapter.
 
@@ -255,7 +255,7 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 
 ### 5A. One processing authority with a query dependency scope
 
-**Current status — partial.** Committed requested file/target and run/family relations drive canonical function/declaration query summaries independently of fact rows. Language/context filtering, reason categories and a retained first 64-row remainder page work. Validated call-family scope adds semantic gaps and conservative context-wide potential callers; real implicit-property/decorator and public call cases pass. Remaining: all-family/owner/dependency/frontier scope, public remainder paging, authorization-scoped efficient scans, live transitions, precision/next actions and a terminal-versus-runnable distinction. Do not turn semantic unknowns into endlessly pending jobs.
+**Current status — partial.** Committed requested file/target and run/family relations drive canonical function/declaration query summaries independently of fact rows. Language/context filtering, reason categories and a retained first 64-row remainder page work. Validated call-family scope adds semantic gaps and conservative context-wide potential callers; real implicit-property/decorator and public call cases pass. Lexical-reference scope now includes requested Ruff reference partitions, unresolved/candidate target gaps and explicitly unsupported Rust references. Remaining: all-family/owner/dependency/frontier scope, public remainder paging, authorization-scoped efficient scans, live transitions, precision/next actions and a terminal-versus-runnable distinction. Do not turn semantic unknowns into endlessly pending jobs.
 
 **Surfaces:** provider admission/input observations, processing relations, `src/fabric/production_workspace_startup/input_observations.rs`, query planning/status and lifecycle coordinator.
 

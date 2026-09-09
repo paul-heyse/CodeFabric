@@ -48,17 +48,7 @@ pub(super) fn install(
             Some((*file_id, run))
         })
         .collect::<BTreeMap<_, _>>();
-    let pyrefly = runs
-        .iter()
-        .filter(|run| run.job().lane() == ProviderLane::Pyrefly)
-        .flat_map(|run| match run.job().source().selection() {
-            ProviderSourceSelection::Inventory(inventory) => inventory
-                .selected_files()
-                .map(|(file, _)| (file, run))
-                .collect::<Vec<_>>(),
-            ProviderSourceSelection::File { .. } => Vec::new(),
-        })
-        .collect::<BTreeMap<_, _>>();
+    let pyrefly = pyrefly_by_file(runs);
     let mut rows = Vec::new();
     let mut rust_requested = false;
     for member in inventory.members() {
@@ -103,6 +93,7 @@ pub(super) fn install(
             reason,
         };
         rows.push(partition);
+        rows.push(python_references(partition, run));
         let mut calls = Partition {
             family: "call-targets",
             ..partition
@@ -138,8 +129,48 @@ pub(super) fn install(
             family: "call-targets",
             ..partition
         });
+        rows.push(unsupported_rust_references(partition));
     }
     register(builder, inventory, &rows)
+}
+
+fn pyrefly_by_file(runs: &[AdmittedProviderResult]) -> BTreeMap<[u8; 16], &AdmittedProviderResult> {
+    runs.iter()
+        .filter(|run| run.job().lane() == ProviderLane::Pyrefly)
+        .flat_map(|run| match run.job().source().selection() {
+            ProviderSourceSelection::Inventory(inventory) => inventory
+                .selected_files()
+                .map(|(file, _)| (file, run))
+                .collect::<Vec<_>>(),
+            ProviderSourceSelection::File { .. } => Vec::new(),
+        })
+        .collect()
+}
+
+fn python_references<'a>(
+    partition: Partition<'a>,
+    run: Option<&AdmittedProviderResult>,
+) -> Partition<'a> {
+    let (state, reason) = if partition.state == "complete" {
+        family_state(run, NativeSyntaxRelation::RuffReference.as_str())
+    } else {
+        (partition.state, partition.reason)
+    };
+    Partition {
+        family: "lexical-references",
+        state,
+        reason,
+        ..partition
+    }
+}
+
+fn unsupported_rust_references(partition: Partition<'_>) -> Partition<'_> {
+    Partition {
+        family: "lexical-references",
+        state: "unsupported",
+        reason: "rust_canonical_references_unimplemented",
+        ..partition
+    }
 }
 
 fn append_rust_partitions<'a>(
@@ -174,6 +205,7 @@ fn append_rust_partitions<'a>(
             reason,
         };
         rows.push(partition);
+        rows.push(unsupported_rust_references(partition));
         let mut calls = Partition {
             family: "call-targets",
             ..partition

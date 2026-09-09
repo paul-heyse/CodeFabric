@@ -1180,7 +1180,25 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                         && selection.selection_id.as_ref() == "selection.looking-for"
                 });
                 let selector = if calls {
-                    "calls"
+                    match validated
+                        .ingress()
+                        .selections
+                        .iter()
+                        .find(|selection| {
+                            selection.query_id == *query_id
+                                && selection.selection_id.as_ref() == "selection.relationship"
+                        })
+                        .map(|selection| &selection.value)
+                    {
+                        Some(SemanticClauseValue::Text(value)) => value.as_ref(),
+                        _ => {
+                            return failed(
+                                &artifacts,
+                                "processing_scope",
+                                "relationship family selection is absent",
+                            );
+                        }
+                    }
                 } else if declarations {
                     "declarations"
                 } else {

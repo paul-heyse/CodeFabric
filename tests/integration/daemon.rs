@@ -2202,6 +2202,207 @@ fn assert_canonical_python_calls(fixture: &ProductionFixture) {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn pragmatic_python_public_lexical_references() {
+    const SOURCE: &str =
+        "def leaf(value):\n    return value\ndef caller():\n    return leaf(1) + leaf(2)\n";
+    let stack = InstalledProductionStack::build();
+    for incomplete in [false, true] {
+        let source = if incomplete {
+            format!("{SOURCE}def unresolved():\n    return missing\n")
+        } else {
+            SOURCE.to_owned()
+        };
+        let fixture = ProductionFixture::with_source(source.as_bytes());
+        fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+        let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+        assert_public_lexical_references(&fixture, &stack, &source, incomplete, "fresh");
+        supervisor.stop();
+        if !incomplete {
+            let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+            assert_public_lexical_references(&fixture, &stack, &source, incomplete, "reopen");
+            supervisor.stop();
+        }
+    }
+}
+
+fn assert_public_lexical_references(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    source: &str,
+    incomplete: bool,
+    phase: &str,
+) {
+    use arrow::array::{Array, StringArray, UInt64Array};
+    let target = fresh_activation_relation_batches(fixture, "fact.code_declaration")
+        .into_iter()
+        .find_map(|batch| {
+            let names = batch
+                .column_by_name("name")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let ids = batch
+                .column_by_name("public_entity_id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            (0..batch.num_rows())
+                .find(|row| names.value(*row) == "leaf")
+                .map(|row| ids.value(row).to_owned())
+        })
+        .unwrap();
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "request:references",
+        "unused",
+    );
+    request["scope"]["languages"] = json!(["python"]);
+    request["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "references",
+        "starting_from": [{"entity_id": target}, {"entity_id": target}],
+        "relationship": "lexical references", "direction": "incoming", "distance": "one step",
+        "return": {"limit": {"maximum_results": 32}}
+    }]);
+    let mut steps = Vec::new();
+    for id in ["incoming", "limited", "empty"] {
+        let mut selected = request.clone();
+        selected["semantic_request_id"] = json!(format!("request:references-{phase}-{id}"));
+        if id == "limited" {
+            selected["queries"][0]["return"]["limit"]["maximum_results"] = json!(1);
+        }
+        if id == "empty" {
+            selected["queries"][0]["starting_from"] =
+                json!([{"entity_id": "entity:function:01010101010101010101010101010101"}]);
+        }
+        steps.push(json!({"id": id, "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": selected, "delivery": "resource"}}));
+        steps.push(json!({"id": format!("{id}_page"), "operation": "read_resource", "uri": {"$ref": format!("{id}.structured_content.pages.0.uri")}}));
+    }
+    let scenario = modern_client_scenario(fixture, stack, "policy-one", json!([]), json!(steps));
+    let path = write_modern_client_scenario(fixture, "canonical-references", &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let batches = |report: &Value, id: &str| {
+        let bytes = STANDARD
+            .decode(modern_step(report, id)[0]["blob"].as_str().unwrap())
+            .unwrap();
+        arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None)
+            .unwrap()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>()
+    };
+    let mut reference_ids = BTreeSet::new();
+    let mut positions = BTreeSet::new();
+    for id in ["incoming", "limited", "empty"] {
+        let result = modern_structured(modern_step(&report, id));
+        assert_eq!(result["execution_state"], "SUCCEEDED", "{result}");
+        assert_eq!(result["processing"][0]["family"], "lexical-references");
+        assert_eq!(
+            result["processing"][0]["remaining_partitions"],
+            u64::from(incomplete)
+        );
+        assert_eq!(result["processing"][0]["additional_rows"], id == "limited");
+        if incomplete {
+            assert_eq!(
+                result["processing"][0]["remainder"][0]["reason_code"],
+                "lexical_reference_targets_unknown"
+            );
+        }
+        let batches = batches(&report, &format!("{id}_page"));
+        assert_eq!(
+            batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
+            match id {
+                "incoming" => 3,
+                "limited" => 1,
+                _ => 0,
+            }
+        );
+        if id != "incoming" {
+            continue;
+        }
+        for batch in batches {
+            let text = |name| {
+                batch
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+            };
+            let starts = batch
+                .column_by_name("start_byte")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap();
+            for row in 0..batch.num_rows() {
+                assert_eq!(text("relationship_kind").value(row), "lexical-reference");
+                assert_eq!(text("reference_name").value(row), "leaf");
+                assert_eq!(
+                    text("reference_kind").value(row),
+                    if starts.value(row) == 4 {
+                        "write"
+                    } else {
+                        "call-reference"
+                    }
+                );
+                assert_eq!(text("resolution_scope").value(row), "lexical");
+                assert_eq!(text("public_target_entity_id").value(row), target);
+                assert!(text("public_call_site_id").is_null(row));
+                assert!(batch.column_by_name("argument_count").unwrap().is_null(row));
+                assert_eq!(
+                    text("public_source_entity_id").value(row),
+                    text("public_occurrence_id").value(row)
+                );
+                assert!(reference_ids.insert(text("public_occurrence_id").value(row).to_owned()));
+                positions.insert(starts.value(row) as usize);
+            }
+        }
+    }
+    assert_eq!(
+        positions,
+        source
+            .match_indices("leaf(")
+            .map(|(index, _)| index)
+            .collect()
+    );
+    request["semantic_request_id"] = json!(format!("request:references-{phase}-outgoing"));
+    request["queries"][0]["starting_from"] = json!(
+        reference_ids
+            .iter()
+            .map(|id| json!({"entity_id": id}))
+            .collect::<Vec<_>>()
+    );
+    request["queries"][0]["direction"] = json!("outgoing");
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "outgoing", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": request, "delivery": "resource"}},
+            {"id": "page", "operation": "read_resource", "uri": {"$ref": "outgoing.structured_content.pages.0.uri"}}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, "reference-endpoints", &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let result = modern_structured(modern_step(&report, "outgoing"));
+    assert_eq!(result["execution_state"], "SUCCEEDED", "{result}");
+    let returned = batches(&report, "page");
+    assert_eq!(returned.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
+    for batch in returned {
+        let ids = batch
+            .column_by_name("public_target_entity_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert!(ids.iter().all(|id| id == Some(target.as_str())));
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn pragmatic_python_public_declaration_kinds() {
     let fixture = ProductionFixture::with_source(
         b"import sys\ntype Alias[T] = list[T]\nmarker = 1\nclass Box:\n    def read(self, value: int) -> int:\n        return value\n",
@@ -3277,6 +3478,12 @@ fn assert_public_call_queries(
     context["scope"]["analysis_contexts"] =
         json!({"mode": "explicit", "context_ids": [context_id]});
     requests.push(("context", context));
+    if language == "rust" {
+        let mut references = request.clone();
+        references["queries"][0]["relationship"] = json!("lexical references");
+        references["queries"][0]["direction"] = json!("incoming");
+        requests.push(("unsupported_references", references));
+    }
     let mut steps = Vec::new();
     for (id, mut selected) in requests {
         selected["semantic_request_id"] = json!(format!("request:calls-{phase}-{id}"));
@@ -3291,6 +3498,26 @@ fn assert_public_call_queries(
     let scenario = modern_client_scenario(fixture, stack, "policy-one", json!([]), json!(steps));
     let path = write_modern_client_scenario(fixture, "canonical-calls", &scenario);
     let report = modern_client_report(&run_modern_client(stack, &path));
+    if language == "rust" {
+        let result = modern_structured(modern_step(&report, "unsupported_references"));
+        assert_eq!(result["execution_state"], "SUCCEEDED", "{result}");
+        assert_eq!(result["total_rows"], 0);
+        assert_eq!(result["processing"][0]["family"], "lexical-references");
+        assert_eq!(result["processing"][0]["completed_partitions"], 0);
+        assert!(
+            result["processing"][0]["remaining_partitions"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        for row in result["processing"][0]["remainder"].as_array().unwrap() {
+            assert_eq!(row["state"], "unsupported");
+            assert_eq!(
+                row["reason_code"],
+                "rust_canonical_references_unimplemented"
+            );
+        }
+    }
     let rows = |id: &str| {
         let result = modern_structured(modern_step(&report, id));
         assert_eq!(result["execution_state"], "SUCCEEDED", "{id}: {report}");

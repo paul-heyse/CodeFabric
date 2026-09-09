@@ -37,7 +37,16 @@ fn subject_facts(
 ) -> Result<Option<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
     let (source_id, output_id, input_id, input_prefix, form) = if calls {
         (
-            "fact.code_call_selector",
+            if epoch
+                .relation(&ProgrammaticRelationId::new(
+                    "fact.code_relationship_selector",
+                ))
+                .is_some()
+            {
+                "fact.code_relationship_selector"
+            } else {
+                "fact.code_call_selector"
+            },
             "query.result.call-facts",
             "query.input.call-subjects",
             "starting-from",
@@ -118,8 +127,17 @@ fn subject_facts(
             (
                 "selection.relationship",
                 "fact_family",
-                &["calls", "call relationships"],
-                "calls",
+                if source_id == "fact.code_relationship_selector" {
+                    &[
+                        "calls",
+                        "call relationships",
+                        "lexical references",
+                        "lexical-references",
+                    ]
+                } else {
+                    &["calls", "call relationships"]
+                },
+                "",
             ),
             (
                 "selection.direction",
@@ -163,7 +181,13 @@ fn subject_facts(
                     .map(|value| EpochBoundSelectionValueResolution {
                         request_value: SemanticClauseValue::Text(Arc::from(*value)),
                         execution_value: SemanticClauseValue::Text(Arc::from(
-                            if canonical.is_empty() {
+                            if *id == "selection.relationship" {
+                                match *value {
+                                    "call relationships" => "calls",
+                                    "lexical references" => "lexical-references",
+                                    value => value,
+                                }
+                            } else if canonical.is_empty() {
                                 *value
                             } else {
                                 *canonical
@@ -174,7 +198,18 @@ fn subject_facts(
             })
         })
         .collect::<Result<_, ProductionQueryRecipeError>>()?;
-    let ordering: &[&str] = if calls {
+    let ordering: &[&str] = if calls && source_id == "fact.code_relationship_selector" {
+        &[
+            "public_entity_id",
+            "context_id",
+            "file_id",
+            "start_byte",
+            "public_occurrence_id",
+            "provider_owner",
+            "provider_block_index",
+            "provider_instance_key",
+        ]
+    } else if calls {
         &[
             "public_entity_id",
             "context_id",

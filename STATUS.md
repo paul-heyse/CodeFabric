@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `80bc6d18` (`Serve canonical calls with scoped coverage through the modern client`).
-The current declaration-selection continuation and its validation are recorded below.
+Last production commit: `1a60e748` (`Expose canonical declaration kinds and reusable public query subjects`).
+The current lexical-reference continuation and its validation are recorded below.
 
 ## Current handoff
 
@@ -75,6 +75,27 @@ The adapter fast checks pass (95 tests plus lint/types), and the label-selection
 Library Clippy completes with the existing warning backlog; strict lint remains open as recorded above.
 Changed-file formatting, Python Ruff, docs navigation and `git diff --check` pass.
 Canonical coverage for additional kinds does not establish complete Python/Rust type/member semantics.
+
+## Public lexical-reference traversal
+
+A native `fact.code_relationship_selector` combines call witnesses with Python lexical references.
+The `lexical references` meaning follows one step from a reference occurrence to its target or, in
+reverse, from a target to each referring occurrence. Repeated request subjects do not multiply rows.
+Reference write/read/call/type/import kinds and lexical precision remain visible. Public occurrence
+and source/target IDs support subsequent traversal. Call-specific fields are null on reference rows;
+existing call facts retain their provider details. Older call-only catalogs retain their original path.
+
+Requested reference coverage comes from captured inputs and actual Ruff reference-family outcomes.
+Unresolved/candidate targets qualify otherwise completed partitions; Rust reference scope is explicitly
+unsupported. Incoming selection conservatively includes every requested file in the selected context.
+This is lexical coverage, not project-aware checker reference or import/export completeness.
+Validation on 2026-09-09: installed Python references pass across complete and unknown-target source,
+exact reopen, repeated subjects, occurrence-ID reuse, independent source positions/kinds, limits and
+empty results (30.39 s). The mixed Rust call/declaration/reference-unsupported scenario passes (64.48 s).
+Three focused processing cases pass; Python calls/exact reopen pass with the combined relation (17.49 s).
+Default and featureless `just root-check`, governance, docs navigation and changed-file formatting pass.
+Library Clippy completes with 958 existing warnings and no new findings; strict lint remains open.
+Full semantic references remain open.
 
 ## Outcome 4: real inputs, canonical facts and the first four forms
 
@@ -149,6 +170,7 @@ The committed canonical catalog includes:
 | `fact.code_entity`, `fact.code_declaration` | Python bindings and Rust stable compiler keys mapped through application identity recipes; declarations retain separate occurrence identity, exact source range, context and provenance |
 | `fact.code_entity_selector` | Canonical declaration-kind selectors and reusable public entity IDs for Python/Rust |
 | `fact.code_reference` | Python lexical read/write occurrences joined to bindings/declarations through exact source/context/run pins; unresolved targets retained; project-aware semantic and Rust references remain open |
+| `fact.code_relationship_selector` | Public call and lexical-reference witnesses, native subject selection and reusable occurrence/endpoint IDs |
 | `fact.code_call_site` | Python and Rust call occurrences, caller/target identity when established, resolution/dispatch, exact or explicitly unavailable source mapping, raw provider provenance |
 
 Native DataFusion joins/projections construct these relations. Rust uses actual stable crate/definition
@@ -175,7 +197,7 @@ Raw provider coverage is not complete canonical-family coverage.
 |---|---|---|
 | FindEntities | Installed client returns canonical functions and selected additional Python/Rust declaration kinds with reusable public IDs; language/context filters precede limits; stable name/entity ordering | Remaining kinds/representations, source boundaries, semantic name/ambiguity resolution and full directives |
 | RetrieveFacts | Explicit canonical entity IDs; `declarations` or `declaration locations and provenance`; native semi join prevents repeated subjects duplicating occurrences; partial and empty cases tested | Types, members, call/derived families, point filters, broad family expansion and phrase/fact/prior-result resolution |
-| FollowRelationships | Installed Python/Rust one-step incoming/outgoing calls, repeated sites, unknown targets, limits and exact Python reopen | references/imports, candidates, full direction/distance/stop/filter behavior and composition |
+| FollowRelationships | Installed Python/Rust one-step calls and Python lexical references, repeated occurrences, scoped unknowns and limits | project-aware semantic references/imports, Rust references, candidates, full direction/distance/stop/filter behavior and composition |
 | RetrieveSourceContext | Existing source storage/lease infrastructure only | Canonical production form, exact selected bytes after disk changes, separate disclosure authorization, coordinate and truncation delivery |
 
 Unsupported subject meanings are explicitly rejected; they do not fall back to names. The generalized
@@ -195,8 +217,8 @@ reason categories; coverage and row truncation are distinct.
 
 The first remainder page is bounded to 64 rows with `next_offset`; raw path bytes, optional display path,
 target/kind and known context survive projection. The summary is retained with the exact result package.
-The validated call-specific extension is described above and conservatively includes the selected
-context's potential callers. It does not yet derive exact owner/reverse-dependency scope.
+The validated call-specific extension and lexical-reference scope are described above and conservatively
+include the selected context's potential callers or referring files. It does not yet derive exact owner/reverse-dependency scope.
 
 Remaining: all family/owner dimensions; public remainder pagination; authorization-scoped efficient status
 scans; incoming reference/import and negative dependency/frontier propagation; shared live pending/running

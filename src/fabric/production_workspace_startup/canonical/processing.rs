@@ -29,7 +29,7 @@ pub(super) fn fields() -> Vec<FieldSpec> {
 }
 
 pub(super) fn dependencies(pyrefly: bool) -> Vec<&'static str> {
-    let mut result = vec![INPUT, super::calls::RELATION];
+    let mut result = vec![INPUT, super::calls::RELATION, super::REFERENCE];
     if pyrefly {
         result.extend([
             RUN,
@@ -77,7 +77,7 @@ pub(super) fn build(
         )?
         .alias("g")?
         .build()?;
-    let base = plan(inputs, INPUT)?;
+    let base = qualify_lexical_references(inputs)?;
     let fields = fields();
     let mut joined = LogicalPlanBuilder::from(base)
         .project(
@@ -173,6 +173,60 @@ pub(super) fn build(
                             .alias(*name),
                         _ => col(format!("b.{name}")),
                     })
+                })
+                .collect::<Result<Vec<_>, datafusion::common::DataFusionError>>()?,
+        )?
+        .build()?)
+}
+
+fn qualify_lexical_references(
+    inputs: &TransformationInputs,
+) -> Result<LogicalPlan, TransformationPlanError> {
+    let gaps = LogicalPlanBuilder::from(plan(inputs, super::REFERENCE)?)
+        .filter(
+            col("resolution")
+                .not_eq(lit("resolved"))
+                .or(col("target_entity_id").is_null()),
+        )?
+        .aggregate(
+            vec![col("context_id"), col("file_id"), col("source_generation")],
+            vec![count(lit(1_i64)).alias("gaps")],
+        )?
+        .alias("r")?
+        .build()?;
+    let base = LogicalPlanBuilder::from(plan(inputs, INPUT)?)
+        .alias("b")?
+        .join(
+            gaps,
+            JoinType::Left,
+            (
+                vec!["b.context_id", "b.file_id", "b.source_generation"],
+                vec!["r.context_id", "r.file_id", "r.source_generation"],
+            ),
+            None,
+        )?;
+    let incomplete = col("b.family")
+        .eq(lit("lexical-references"))
+        .and(col("b.processing_state").eq(lit("complete")))
+        .and(coalesce(vec![col("r.gaps"), lit(0_i64)]).gt(lit(0_i64)));
+    Ok(base
+        .project(
+            fields()
+                .iter()
+                .map(|(name, _, _)| {
+                    Ok(match *name {
+                        "processing_state" => {
+                            datafusion::logical_expr::when(incomplete.clone(), lit("partial"))
+                                .otherwise(col("b.processing_state"))?
+                        }
+                        "reason" => datafusion::logical_expr::when(
+                            incomplete.clone(),
+                            lit("lexical_reference_targets_unknown"),
+                        )
+                        .otherwise(col("b.reason"))?,
+                        _ => col(format!("b.{name}")),
+                    }
+                    .alias(*name))
                 })
                 .collect::<Result<Vec<_>, datafusion::common::DataFusionError>>()?,
         )?
