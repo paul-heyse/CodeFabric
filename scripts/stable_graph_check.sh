@@ -62,29 +62,25 @@ for pin in \
   require_one_version ${pin}
 done
 
-native_root="$PWD/third_party/native"
-delta_packages="$(printf '%s' "$metadata" | jq -r \
-  '.packages[] | select(.name | test("^deltalake($|-)")) | [.name, .version, .source] | @tsv' | sort)"
-printf '%s' "$metadata" | jq -e --arg native "$native_root" '
+# The resource-receipt forks are retired. Check exact upstream identities as
+# well as versions so an accidental second Arrow/Delta universe is rejected.
+delta_source='git+https://github.com/delta-io/delta-rs.git?rev=43a0cf10a313e5077c48637ad786a05359136bbb#43a0cf10a313e5077c48637ad786a05359136bbb'
+printf '%s' "$metadata" | jq -e --arg source "$delta_source" '
   [.packages[] | select(.name | test("^deltalake($|-)"))] as $packages
   | ($packages | length) == 4
     and ([$packages[].name] | sort) ==
       ["deltalake", "deltalake-aws", "deltalake-core", "deltalake-derive"]
-    and all($packages[]; .version == "1.0.0" and .source == null
-      and .manifest_path == ($native + "/delta-rs/crates/" +
-        (if .name == "deltalake" then .name else (.name | sub("^deltalake-"; "")) end) + "/Cargo.toml"))
-' >/dev/null || \
-  fail "unexpected delta-rs package family: $delta_packages"
-
-# Check the source selection of the amended packages in the existing resolved graph.
+    and all($packages[]; .version == "1.0.0" and .source == $source)
+' >/dev/null || fail "Delta packages do not share the pinned upstream revision"
 for package in arrow-array arrow-buffer arrow-data arrow-json arrow-schema arrow-select parquet buoyant_kernel buoyant_kernel_engine buoyant_kernel_derive tokio; do
-  printf '%s' "$metadata" | jq -e --arg name "$package" --arg native "$native_root" '
+  printf '%s' "$metadata" | jq -e --arg name "$package" '
     [.packages[] | select(.name == $name)] as $packages
     | ($packages | length) == 1
-      and all($packages[]; .source == null and
-        .manifest_path == ($native + "/" + $name + "/Cargo.toml"))
-  ' >/dev/null || fail "$package did not resolve to its integrated native source"
+      and all($packages[]; .source == "registry+https://github.com/rust-lang/crates.io-index")
+  ' >/dev/null || fail "$package did not resolve to its upstream release"
 done
+require_one_version tokio 1.53.1
+require_one_version buoyant_kernel_derive 1.1.0
 
 root="$(printf '%s' "$metadata" | jq -r '.packages[] | select(.name == "codefabric") | .id')"
 [ -n "$root" ] || fail 'root package metadata is absent'

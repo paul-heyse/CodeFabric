@@ -336,7 +336,7 @@ async fn open_activation_authority(
         let provision_root = root.clone();
         let provision_session = Arc::clone(&session);
         let version = executor
-            .run_bounded_mutation(
+            .run_mutation(
                 "activation-control-provision",
                 crate::resource_budget::ResourceClass::Control,
                 Instant::now() + Duration::from_secs(120),
@@ -899,7 +899,7 @@ async fn build_fresh_candidate(
     let publication = workspace_resources
         .native_execution(task_scope)
         .map_err(|error| step("candidate-publish-executor", error))?
-        .run_bounded_mutation(
+        .run_mutation(
             "candidate-publish",
             crate::resource_budget::ResourceClass::Data,
             Instant::now() + Duration::from_secs(120),

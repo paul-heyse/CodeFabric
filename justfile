@@ -963,18 +963,10 @@ advisory-policy-check:
 stable-graph-check:
     ./scripts/stable_graph_check.sh
 
-[doc("Run a native assurance harness against the integrated dependency sources")]
+[doc("Test real native ownership, shared resources, exact reads and maintenance")]
 [group('test')]
-native-assurance-test harness *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case "$1" in
-      joined|kernel|tokio|delta) native_harness="$1" ;;
-      *) printf 'Expected joined, kernel, tokio, or delta.\n' >&2; exit 2 ;;
-    esac
-    shift
-    cargo test --locked --manifest-path "tooling/native-dependencies/tests/$native_harness/Cargo.toml" \
-      --target-dir target/native-assurance "$@"
+native-assurance-test *args:
+    cargo nextest run --locked --lib -E 'test(workspace_native_execution::tests) | test(native_execution_lane::tests) | test(owned_local_store::tests) | test(resource_ownership::tests) | test(delta_exact::tests) | test(delta_guarded_maintenance::tests)' --no-tests=fail "$@"
 
 [doc("Run repository structural governance rules")]
 [group('gate')]

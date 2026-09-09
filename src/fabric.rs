@@ -57,13 +57,7 @@ pub mod explicit_unknown;
 pub mod graph_program;
 #[cfg(feature = "daemon")]
 pub(crate) mod native_execution_lane;
-#[cfg(feature = "daemon")]
-pub(crate) mod native_lane_resource_policy;
 pub(crate) mod native_operations;
-#[cfg(feature = "daemon")]
-pub(crate) mod native_resource_policy;
-#[cfg(feature = "daemon")]
-pub(crate) mod native_tokio_resource;
 #[cfg(feature = "daemon")]
 pub mod production_kernel;
 #[cfg(feature = "daemon")]

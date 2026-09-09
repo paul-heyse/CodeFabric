@@ -304,6 +304,45 @@ pub fn read_control_artifact(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>,
     Ok(first)
 }
 
+/// Read a daemon-published blob once through a bounded regular-file descriptor.
+/// Every path component rejects symlinks; nonblocking open also rejects a FIFO
+/// without waiting for a writer. The caller must verify the expected content
+/// digest before accepting these bytes. This does not authorize live source ingress.
+pub(crate) fn read_pinned_blob(
+    path: &Path,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, StableReadError> {
+    let parent = path.parent().ok_or(SecurePathError::SourceAccessDenied)?;
+    let name = path
+        .file_name()
+        .ok_or(SecurePathError::SourceAccessDenied)?;
+    let directory = open_absolute_directory_once(parent)?;
+    let descriptor = openat(
+        &directory,
+        name,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|_| SecurePathError::SourceAccessDenied)?;
+    let stat = fstat(&descriptor).map_err(|_| SecurePathError::OperatingSystem)?;
+    if !FileType::from_raw_mode(stat.st_mode).is_file() {
+        return Err(SecurePathError::SourceAccessDenied.into());
+    }
+    let mut file = std::fs::File::from(descriptor);
+    let size = stable_metadata(&file)?.size;
+    if size > maximum_bytes {
+        return Err(StableReadError::SizeLimitExceeded {
+            observed: size,
+            limit: maximum_bytes,
+        });
+    }
+    let capacity = usize::try_from(size).map_err(|_| StableReadError::SizeLimitExceeded {
+        observed: size,
+        limit: maximum_bytes,
+    })?;
+    read_bounded(&mut file, capacity)
+}
+
 /// Read one private administrative authority from the exact no-follow descriptor opened relative
 /// to its verified parent directory.
 ///
@@ -1111,6 +1150,36 @@ mod tests {
         let path = root.revalidate_git_path(&git_path).unwrap();
         assert_eq!(path.raw_relative_path_bytes, b"source.rs");
         assert!(decode_public_id(IdentityDomain::Workspace, None, &record.public_id()).is_ok());
+    }
+
+    #[test]
+    fn pinned_blob_read_rejects_oversize_links_and_nonregular_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let blob = root.join("blob");
+        std::fs::write(&blob, b"immutable").unwrap();
+        assert_eq!(read_pinned_blob(&blob, 9).unwrap(), b"immutable");
+        assert!(matches!(
+            read_pinned_blob(&blob, 8),
+            Err(StableReadError::SizeLimitExceeded { .. })
+        ));
+        let link = root.join("link");
+        std::os::unix::fs::symlink(&blob, &link).unwrap();
+        assert!(read_pinned_blob(&link, 9).is_err());
+        let parent_link = root.join("parent-link");
+        std::os::unix::fs::symlink(&root, &parent_link).unwrap();
+        assert!(read_pinned_blob(&parent_link.join("blob"), 9).is_err());
+        assert!(read_pinned_blob(&root, 9).is_err());
+        let fifo = root.join("fifo");
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            &fifo,
+            FileType::Fifo,
+            Mode::RUSR | Mode::WUSR,
+            0,
+        )
+        .unwrap();
+        assert!(read_pinned_blob(&fifo, 9).is_err());
     }
 
     #[test]

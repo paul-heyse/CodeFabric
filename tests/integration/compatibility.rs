@@ -46,26 +46,20 @@ fn wp02_behavioral_target_compile() {
     let metadata: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("Cargo metadata JSON");
     let packages = metadata["packages"].as_array().expect("resolved packages");
-    for (name, directory) in [
-        ("deltalake", "deltalake"),
-        ("deltalake-core", "core"),
-        ("deltalake-derive", "derive"),
-        ("deltalake-aws", "aws"),
+    for name in [
+        "deltalake",
+        "deltalake-core",
+        "deltalake-derive",
+        "deltalake-aws",
     ] {
         let mut matches = packages.iter().filter(|package| package["name"] == name);
         let package = matches.next().expect("selected native Delta package");
         assert!(matches.next().is_none(), "duplicate Delta package {name}");
         assert_eq!(package["version"], "1.0.0", "Delta version changed: {name}");
-        assert!(
-            package["source"].is_null(),
-            "non-native Delta source: {name}"
-        );
         assert_eq!(
-            Path::new(package["manifest_path"].as_str().expect("native manifest")),
-            root.join("third_party/native/delta-rs/crates")
-                .join(directory)
-                .join("Cargo.toml"),
-            "wrong native source selected for {name}"
+            package["source"],
+            "git+https://github.com/delta-io/delta-rs.git?rev=43a0cf10a313e5077c48637ad786a05359136bbb#43a0cf10a313e5077c48637ad786a05359136bbb",
+            "wrong pinned upstream source for {name}"
         );
     }
     let lock = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.lock"));

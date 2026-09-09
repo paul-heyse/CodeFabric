@@ -32,6 +32,28 @@ Next: outcome 3's reduced resource ownership and native-patch cleanup, including
 
 The [consolidated review](docs/reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md) and [selected domain documents](docs/spec_index/README.md) define the revised target. All Python/Rust fact families and eight query forms remain scope. First-release delivery, complete-product delivery and preparation readiness are different claims.
 
+## Outcome 3 in progress — upstream native libraries and owned execution
+
+On 2026-09-09, production execution stopped constructing generalized native allocation
+owners/policies. Native worker/thread/job envelopes, cancellation, joined runtime cleanup,
+owned-store mutation leases and shared DataFusion memory/spill pools remain. The receipt
+forks and their dedicated allocator harnesses are removed from the tree; Cargo selects the
+same upstream Arrow/Parquet 59.2.0, Tokio 1.53.1, Buoyant kernel/engine/derive versions and
+exact delta-rs revision. No dependency was downgraded. Git retains the previous sources.
+
+Pinned provider blobs now use one bounded, no-follow regular-file read and the caller's
+expected content digest. Symlinks in any component, oversized files and FIFOs are rejected.
+Both previously reported direct source-read findings are fixed.
+
+Validation: stable library compile, `just stable-graph-check`, `just governance-scan`
+and all four `just golden --timeout 360` cases pass against upstream dependencies. The
+focused resource/provider/maintenance run passed 64 cases; its real Pyrefly shutdown case
+then passed with the freshly verified sidecar binary supplied (65 affected cases total).
+All 28 selected feature-architecture/change-routing tooling tests pass. Native checkpoint,
+vacuum protection, exact reopen, cancellation, writer reconciliation and control headroom
+are among the passing cases. Whole-process RSS sampling/backpressure remains outcome 3
+work; this is not an allocator or OOM guarantee. Outcomes 4–8 remain open.
+
 ## Completed preparation
 
 [Preparation plan](docs/plans/codefabric_pragmatic_delivery_nonproduction_preparation_plan_2026-09-08.md), steps 1–8:

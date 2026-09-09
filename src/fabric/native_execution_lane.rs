@@ -16,7 +16,6 @@ use std::fmt::{Display, Write};
 use std::future::Future;
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
 use std::time::Instant;
 
 use thiserror::Error;
@@ -160,81 +159,6 @@ pub(crate) struct NativeLaneJoined {
     runtime_id: tokio::runtime::Id,
 }
 
-/// Native dependency policies installed for the lifetime of each dedicated OS
-/// thread. Construction must already have admitted their finite backing. Even a
-/// late worker starting after failure must install all required policies.
-pub(crate) trait NativeLaneResourcePolicy: Send + Sync + 'static {
-    /// Concrete native policies supply the original operation bank. None is
-    /// retained for the finite standalone lifecycle harness only.
-    fn runtime_admission(
-        &self,
-    ) -> Option<Arc<dyn tokio::runtime::resource::RuntimeAllocationAdmission>> {
-        None
-    }
-    /// Bind an allocation owner to one complete native operation. Concrete
-    /// policies reject reuse before any native runtime or worker is constructed.
-    fn begin_operation(&self) -> Result<(), NativeResourceFailure> {
-        Ok(())
-    }
-    fn enter_thread(&self);
-    fn exit_thread(&self);
-    fn check_available(&self) -> Result<(), NativeResourceFailure>;
-    fn joined(&self, proof: NativeLaneJoined) -> Result<(), NativeResourceFailure>;
-}
-
-/// Allocation-free native pressure crossing the joined execution boundary.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct NativeResourceFailure {
-    pub kind: &'static str,
-    pub requested: usize,
-    pub limit: usize,
-}
-impl From<NativeResourceFailure> for NativeLaneError {
-    fn from(failure: NativeResourceFailure) -> Self {
-        Self::NativeResourceExhausted {
-            kind: failure.kind,
-            requested: failure.requested,
-            limit: failure.limit,
-        }
-    }
-}
-
-impl From<tokio::runtime::resource::ResourceLayoutError> for NativeLaneError {
-    fn from(error: tokio::runtime::resource::ResourceLayoutError) -> Self {
-        NativeResourceFailure {
-            kind: error.kind,
-            requested: error.requested,
-            limit: error.limit,
-        }
-        .into()
-    }
-}
-impl From<tokio::runtime::resource::LocalRuntimeBuildError> for NativeLaneError {
-    fn from(error: tokio::runtime::resource::LocalRuntimeBuildError) -> Self {
-        match error {
-            tokio::runtime::resource::LocalRuntimeBuildError::Resource(error) => error.into(),
-            tokio::runtime::resource::LocalRuntimeBuildError::Io(error) => error.into(),
-        }
-    }
-}
-
-struct NativeResourceThreadContext(Option<Arc<dyn NativeLaneResourcePolicy>>);
-impl NativeResourceThreadContext {
-    fn enter(policy: Option<Arc<dyn NativeLaneResourcePolicy>>) -> Self {
-        if let Some(policy) = &policy {
-            policy.enter_thread();
-        }
-        Self(policy)
-    }
-}
-impl Drop for NativeResourceThreadContext {
-    fn drop(&mut self) {
-        if let Some(policy) = &self.0 {
-            policy.exit_thread();
-        }
-    }
-}
-
 impl NativeLaneJoined {
     pub(crate) const fn runtime_id(self) -> tokio::runtime::Id {
         self.runtime_id
@@ -274,12 +198,6 @@ pub(crate) enum NativeDiagnosticCategory {
 /// An admitted operation error; native error objects never cross the runtime boundary.
 #[derive(Debug, Error)]
 pub(crate) enum NativeLaneError {
-    #[error("native resource {kind} requires {requested}, limit {limit}")]
-    NativeResourceExhausted {
-        kind: &'static str,
-        requested: usize,
-        limit: usize,
-    },
     #[error(transparent)]
     AdmissionDenied(#[from] NativeAdmissionFailure),
     #[error("invalid native execution envelope: {0}")]
@@ -389,8 +307,7 @@ impl NativeLaneError {
                 | StructuredTaskError::ControlCapacityUnavailable
                 | StructuredTaskError::ObservationClosed) => Self::Registry(error),
             },
-            error @ (Self::NativeResourceExhausted { .. }
-            | Self::AdmissionDenied(_)
+            error @ (Self::AdmissionDenied(_)
             | Self::InvalidEnvelope(_)
             | Self::Budget(_)
             | Self::Cancelled
@@ -469,39 +386,12 @@ impl NativeExecutionLane {
         R: FnOnce(NativeLaneJoined) -> Result<(), RE> + Send + 'static,
         RE: Display,
     {
-        self.spawn_with_resource_policy(admission, None, operation, cleanup)
-            .await
-    }
-
-    /// Execute a complete native phase with allocation policies on the
-    /// coordinator, async workers and blocking workers. Failure is checked
-    /// before future construction, after its result and after every worker joins.
-    pub(crate) async fn spawn_with_resource_policy<T, F, O, C, CF, CE, R, RE>(
-        &self,
-        admission: NativeLaneAdmission<'_>,
-        resource_policy: Option<Arc<dyn NativeLaneResourcePolicy>>,
-        operation: O,
-        cleanup: NativeLaneCleanup<C, R>,
-    ) -> Result<TaskObservation<Result<T, NativeLaneError>>, NativeLaneError>
-    where
-        T: NativeLaneOutput,
-        F: Future<Output = Result<T, NativeLaneError>>,
-        O: FnOnce(Cancellation) -> F + Send + 'static,
-        C: FnOnce() -> CF + Send + 'static,
-        CF: Future<Output = Result<(), CE>>,
-        CE: Display,
-        R: FnOnce(NativeLaneJoined) -> Result<(), RE> + Send + 'static,
-        RE: Display,
-    {
         if IN_NATIVE_LANE.get() {
             return Err(NativeAdmissionFailure::NestedLane.into());
         }
         let reservation = admission
             .budget
             .try_reserve(admission.class, self.reservation)?;
-        if let Some(policy) = &resource_policy {
-            policy.begin_operation()?;
-        }
         let scope = admission.scope.clone();
         let output_budget = admission.budget.clone();
         let deadline = admission.deadline;
@@ -511,37 +401,21 @@ impl NativeExecutionLane {
                 return Err(NativeAdmissionFailure::NestedLane.into());
             }
             let _native_context = NativeThreadContext::enter();
-            let _resource_context = NativeResourceThreadContext::enter(resource_policy.clone());
-            let worker_start_policy = resource_policy.clone();
-            let worker_stop_policy = resource_policy.clone();
-            let on_start = move || {
-                    IN_NATIVE_LANE.set(true);
-                    if let Some(policy) = &worker_start_policy { policy.enter_thread(); }
-                };
-            let on_stop = move || {
-                    if let Some(policy) = &worker_stop_policy { policy.exit_thread(); }
-                    IN_NATIVE_LANE.set(false);
-                };
-            let runtime = if let Some(native) = resource_policy.as_ref().and_then(|policy| policy.runtime_admission()) {
-                let tasks = usize::try_from(envelope.native_task_slots.get()).map_err(|_| NativeLaneError::InvalidEnvelope("native task count overflow"))?;
-                tokio::runtime::resource::LocalRuntimeProfile {
-                    worker_threads: envelope.worker_threads.get(), blocking_threads: envelope.blocking_threads.get(),
-                    blocking_queue: tasks.max(envelope.worker_threads.get()), thread_stack_bytes: envelope.thread_stack_bytes.get(),
-                    async_tasks: tasks, blocking_tasks: tasks,
-                }.build(native, on_start, on_stop)?
-            } else {
-                Builder::new_multi_thread().worker_threads(envelope.worker_threads.get())
-                    .max_blocking_threads(envelope.blocking_threads.get()).thread_stack_size(envelope.thread_stack_bytes.get())
-                    .thread_name("cf-native-lane").on_thread_start(on_start).on_thread_stop(on_stop).enable_all().build()?
-            };
-            let operation_result = catch_unwind(AssertUnwindSafe(|| runtime.try_block_on(async {
+            let runtime = Builder::new_multi_thread()
+                .worker_threads(envelope.worker_threads.get())
+                .max_blocking_threads(envelope.blocking_threads.get())
+                .thread_stack_size(envelope.thread_stack_bytes.get())
+                .thread_name("cf-native-lane")
+                .on_thread_start(|| IN_NATIVE_LANE.set(true))
+                .on_thread_stop(|| IN_NATIVE_LANE.set(false))
+                .enable_all().build()?;
+            let operation_result = catch_unwind(AssertUnwindSafe(|| runtime.block_on(async {
                 if probe.is_cancelled() {
                     return Err(NativeLaneError::Cancelled);
                 }
                 if Instant::now() >= deadline {
                     return Err(NativeLaneError::Deadline);
                 }
-                if let Some(policy) = &resource_policy { policy.check_available()?; }
                 // The future is constructed inside the private runtime, including libraries
                 // that capture Handle::current while creating a table, engine or stream.
                 tokio::select! {
@@ -549,14 +423,13 @@ impl NativeExecutionLane {
                     () = scope.cancelled() => Err(NativeLaneError::Cancelled),
                     () = tokio::time::sleep_until(deadline.into()) => Err(NativeLaneError::Deadline),
                     result = operation(probe) => {
-                        if let Some(policy) = &resource_policy { policy.check_available()?; }
-                        let value = result.map_err(NativeLaneError::into_owned_failure)?;
+                                let value = result.map_err(NativeLaneError::into_owned_failure)?;
                         value.validate_retained_owner(&output_budget)?;
                         Ok(value)
                     },
                 }
                 // select drops the operation future here before any cleanup callback runs.
-            }).map_err(NativeLaneError::from).and_then(|result| result)));
+            })));
             let result = match operation_result {
                 Ok(result) => result,
                 Err(payload) => {
@@ -568,8 +441,7 @@ impl NativeExecutionLane {
                 }
             };
             let cleanup_outcome = catch_unwind(AssertUnwindSafe(|| {
-                runtime.try_block_on(async { (cleanup.before_join)().await.map_err(|error| diagnostic(&error)) })
-                    .unwrap_or_else(|error| Err(diagnostic(&error)))
+                runtime.block_on(async { (cleanup.before_join)().await.map_err(|error| diagnostic(&error)) })
             }));
             let before_join = {
                 let _entered = runtime.enter();
@@ -580,10 +452,6 @@ impl NativeExecutionLane {
             let runtime_id = runtime.handle().id();
             drop(runtime);
             let joined = NativeLaneJoined { runtime_id };
-            let resource_join = resource_policy.as_ref().map_or(Ok(()), |policy| policy.joined(joined));
-            // A first terminal cancellation/error stays primary. A failure from
-            // a hidden worker still rejects an otherwise successful result.
-            let result = result.and_then(|value| resource_join.map(|()| value).map_err(Into::into));
             let after_join = cleanup_result(catch_unwind(AssertUnwindSafe(|| {
                 (cleanup.after_join)(joined).map_err(|error| diagnostic(&error))
             })));
@@ -632,7 +500,7 @@ fn diagnostic(error: &impl Display) -> String {
 #[cfg(test)]
 mod tests {
     use std::future::{pending, ready};
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
@@ -697,159 +565,6 @@ mod tests {
             NonZeroUsize::new(1).unwrap(),
         )
         .unwrap()
-    }
-
-    thread_local! {
-        static TEST_RESOURCE_POLICY: Cell<bool> = const { Cell::new(false) };
-    }
-
-    #[derive(Default)]
-    struct TestResourcePolicy {
-        active_threads: AtomicUsize,
-        entered_threads: AtomicUsize,
-        failed: AtomicBool,
-        joined: AtomicBool,
-    }
-    impl NativeLaneResourcePolicy for TestResourcePolicy {
-        fn enter_thread(&self) {
-            assert!(!TEST_RESOURCE_POLICY.replace(true));
-            self.active_threads.fetch_add(1, Ordering::AcqRel);
-            self.entered_threads.fetch_add(1, Ordering::AcqRel);
-        }
-        fn exit_thread(&self) {
-            assert!(TEST_RESOURCE_POLICY.replace(false));
-            self.active_threads.fetch_sub(1, Ordering::AcqRel);
-        }
-        fn check_available(&self) -> Result<(), NativeResourceFailure> {
-            if self.failed.load(Ordering::Acquire) {
-                return Err(NativeResourceFailure {
-                    kind: "native test allocation",
-                    requested: 2,
-                    limit: 1,
-                });
-            }
-            Ok(())
-        }
-        fn joined(&self, _: NativeLaneJoined) -> Result<(), NativeResourceFailure> {
-            // Only the coordinator's context remains after runtime destruction.
-            assert_eq!(self.active_threads.load(Ordering::Acquire), 1);
-            self.joined.store(true, Ordering::Release);
-            self.check_available()
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn native_resource_policy_covers_all_workers_until_joined() {
-        let scope = scopes();
-        let budget = budget();
-        let policy = Arc::new(TestResourcePolicy::default());
-        let result = lane()
-            .spawn_with_resource_policy(
-                admission(&scope, &budget, ResourceClass::Data),
-                Some(policy.clone()),
-                |_| async {
-                    assert!(TEST_RESOURCE_POLICY.get());
-                    tokio::spawn(async {
-                        assert!(TEST_RESOURCE_POLICY.get());
-                    })
-                    .await
-                    .unwrap();
-                    tokio::task::spawn_blocking(|| assert!(TEST_RESOURCE_POLICY.get()))
-                        .await
-                        .unwrap();
-                    Ok(7_u64)
-                },
-                NativeLaneCleanup {
-                    before_join: || ready(Ok::<(), &str>(())),
-                    after_join: |_| Ok::<(), &str>(()),
-                },
-            )
-            .await
-            .unwrap()
-            .wait()
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(result, 7);
-        assert!(policy.joined.load(Ordering::Acquire));
-        assert!(policy.entered_threads.load(Ordering::Acquire) >= 4);
-        assert_eq!(policy.active_threads.load(Ordering::Acquire), 0);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn native_resource_failure_during_hidden_worker_join_overrides_success() {
-        let scope = scopes();
-        let budget = budget();
-        let policy = Arc::new(TestResourcePolicy::default());
-        let worker_policy = policy.clone();
-        let (release, wait) = mpsc::channel();
-        let result = lane()
-            .spawn_with_resource_policy(
-                admission(&scope, &budget, ResourceClass::Data),
-                Some(policy.clone()),
-                move |_| async move {
-                    let _background = tokio::task::spawn_blocking(move || {
-                        wait.recv().unwrap();
-                        assert!(TEST_RESOURCE_POLICY.get());
-                        worker_policy.failed.store(true, Ordering::Release);
-                    });
-                    Ok(7_u64)
-                },
-                NativeLaneCleanup {
-                    before_join: move || async move {
-                        release.send(()).unwrap();
-                        Ok::<(), &str>(())
-                    },
-                    after_join: |_| Ok::<(), &str>(()),
-                },
-            )
-            .await
-            .unwrap()
-            .wait()
-            .await
-            .unwrap();
-        assert!(matches!(
-            result,
-            Err(NativeLaneError::NativeResourceExhausted {
-                kind: "native test allocation",
-                ..
-            })
-        ));
-        assert!(policy.joined.load(Ordering::Acquire));
-        assert_eq!(policy.active_threads.load(Ordering::Acquire), 0);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn native_resource_failure_precedes_operation_factory() {
-        let scope = scopes();
-        let budget = budget();
-        let policy = Arc::new(TestResourcePolicy::default());
-        policy.failed.store(true, Ordering::Release);
-        let result = lane()
-            .spawn_with_resource_policy(
-                admission(&scope, &budget, ResourceClass::Data),
-                Some(policy.clone()),
-                |_| {
-                    panic!("failed native admission must precede factory execution");
-                    #[allow(unreachable_code)]
-                    ready(Ok(()))
-                },
-                NativeLaneCleanup {
-                    before_join: || ready(Ok::<(), &str>(())),
-                    after_join: |_| Ok::<(), &str>(()),
-                },
-            )
-            .await
-            .unwrap()
-            .wait()
-            .await
-            .unwrap();
-        assert!(matches!(
-            result,
-            Err(NativeLaneError::NativeResourceExhausted { .. })
-        ));
-        assert!(policy.joined.load(Ordering::Acquire));
-        assert_eq!(policy.active_threads.load(Ordering::Acquire), 0);
     }
 
     fn admission<'a>(

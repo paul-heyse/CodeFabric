@@ -1802,7 +1802,8 @@ fn verify_published_provider_tree<B: AsRef<[u8]>>(
         {
             return Err(SourceImageError::ProviderWorkspaceView);
         }
-        let actual = fs::read(path).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+        let actual = crate::secure_path::read_pinned_blob(&path, expected.as_ref().len() as u64)
+            .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
         if actual.as_slice() != expected.as_ref()
             || format!(
                 "b3:{}",

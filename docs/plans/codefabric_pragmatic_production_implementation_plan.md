@@ -57,6 +57,13 @@ After callers stop depending on generalized native receipt APIs, classify the lo
 
 **Done:** pressure/cancellation tests exercise real owners, budgets and cleanup; native-source changes compile and preserve affected behavior; `just stable-graph-check` and relevant feature/native tests pass. Resource measurements distinguish managed budgets from whole-process RSS.
 
+**Progress 2026-09-09:** generalized native allocation owners/policies and all receipt-only
+fork selections are removed. The same upstream versions compile, the exact graph and
+source-read governance checks pass, and all four golden daemon cases pass. Actual owned
+lane/store/pool/maintenance tests remain; the obsolete allocator harnesses are retired.
+Bounded pinned-blob reads fix both source-read findings. Finish whole-process RSS sampling
+and backpressure, then continue semantic provider and live-update integration.
+
 ## 5. Outcome 4 — Real mixed-language semantics through the first four forms
 
 Depends on outcomes 1–3 sufficiently to publish and serve. Reuse `provider_native_syntax.rs`, `source_image/`, `analysis_context.rs`, `production_provider_recipe.rs`, `provider_boundary.rs`, `provider_contracts`, normalization, Pyrefly sidecar, rustc extractor, `production_query_recipe.rs`, `relational_semantic_query.rs`, `query_service.rs` and the actual Arrow/Delta providers.
@@ -71,7 +78,7 @@ Wire `tests/fixtures/pragmatic_cpg/workspace` and independently justified `expec
 
 ## 6. Outcome 5 — Query-relevant progress and unfinished scope
 
-Build with outcome 4. Reuse actual processing/coverage/publication state in `provider_capability.rs`, query/status paths, lifecycle and adapter projections. Do not create an independent status authority.
+Build with outcome 4. Reuse actual processing/coverage/publication state in provider admission/input observations, query/status paths, lifecycle and adapter projections. Do not create an independent status authority.
 
 Separate installed support, per-snapshot processing coverage and release-test confidence. Every response identifies snapshot and source/context revision, requested/completed scope, pending/failed/cancelled/unsupported/excluded scope, precision, freshness, reason and retry/next action where known. Scope can be language/context/file/owner/family; paginate details. A references query must disclose unprocessed scopes that might contain more matches. If invalidation has not established an exact set, return the conservative larger scope and explain the uncertainty.
 
@@ -168,4 +175,8 @@ Old identifiers are navigation only. Preserve semantic and operational obligatio
 
 ## 12. Next action
 
-Outcomes 1–2 are complete. Continue outcome 3: simplify native receipt/resource consumers while preserving real budgets, ownership, cancellation and cleanup, then retire admission-only patches. Fix the two source-read structural findings in `source_image.rs` and `pyrefly_service.rs` as those provider boundaries are integrated. Outcomes 4–8 remain required. Resolve engineering choices directly in this editable plan when new evidence matters. Another design, plan review or status-artifact cycle is not a prerequisite.
+Outcomes 1–2 are complete. Outcome 3 has retired native receipt consumers and forks,
+with upstream compilation, real ownership/maintenance tests and all four golden cases
+passing. Finish daemon RSS sampling/backpressure; then wire real semantic providers and
+continue outcomes 4–8. Source-read structural findings are fixed. Resolve engineering choices
+directly in this editable plan when new evidence matters; no additional review cycle is required.

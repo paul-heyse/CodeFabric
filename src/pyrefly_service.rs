@@ -1225,33 +1225,11 @@ fn read_immutable_blob(
     input: &PyreflyModuleInput,
     allocation: &mut crate::provider_contracts::allocation::ProviderAllocation,
 ) -> Result<AdmittedImmutableBlob, PyreflyServiceError> {
-    use std::io::Read;
-
-    if !input.source_blob_path.is_absolute()
-        || !input.source_blob_path.is_file()
-        || input.source_blob_path.metadata().map_or(true, |metadata| {
-            metadata.len() > MAX_SOURCE_BYTES_PER_MODULE
-        })
-    {
-        return Err(PyreflyServiceError::Invalid(
-            "module source blob path or bounded size is invalid".to_owned(),
-        ));
-    }
-    let mut bytes = Vec::new();
-    std::fs::File::open(&input.source_blob_path)
-        .and_then(|file| {
-            file.take(MAX_SOURCE_BYTES_PER_MODULE + 1)
-                .read_to_end(&mut bytes)
-        })
-        .map_err(|source| PyreflyServiceError::Io {
-            path: input.source_blob_path.clone(),
-            source,
-        })?;
-    if bytes.len() as u64 > MAX_SOURCE_BYTES_PER_MODULE {
-        return Err(PyreflyServiceError::Invalid(
-            "source blob grew beyond the admitted bound".to_owned(),
-        ));
-    }
+    let bytes =
+        crate::secure_path::read_pinned_blob(&input.source_blob_path, MAX_SOURCE_BYTES_PER_MODULE)
+            .map_err(|error| {
+                PyreflyServiceError::Invalid(format!("immutable source blob read: {error}"))
+            })?;
     if b3(&bytes) != input.content_digest {
         return Err(PyreflyServiceError::Invalid(
             "immutable source blob digest differs".to_owned(),

@@ -1,1 +1,0 @@
-TPC-DS SQL is vendored from [datafusion-benchmarks](https://github.com/apache/datafusion-benchmarks) repository.
