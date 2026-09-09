@@ -7,6 +7,14 @@
 fail-fast = true
 slow-timeout = { period = "60s", terminate-after = 2 }
 
+[[profile.default.overrides]]
+filter = 'test(processing_remainder_pages_keep_exact_scope_across_reopen_and_updates)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+[[profile.ci.overrides]]
+filter = 'test(processing_remainder_pages_keep_exact_scope_across_reopen_and_updates)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
 [profile.ci]
 fail-fast = false
 # Retries are diagnostic, not a way to make a red test disappear. `flaky-result = "fail"`

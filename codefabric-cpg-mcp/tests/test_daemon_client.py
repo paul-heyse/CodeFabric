@@ -91,6 +91,30 @@ def test_typed_processing_rejects_inconsistent_scope_and_preserves_unknown_exhau
         _processing_summary(message)
 
 
+def test_processing_continuation_preserves_original_generation_and_offsets(tmp_path: Path) -> None:
+    daemon = V2DaemonPortStub()
+
+    async def exercise() -> None:
+        async with _client(tmp_path, daemon) as client:
+            middle = await client.processing_remainder(
+                "processing:one", "calls", 64, correlation_id="mcp-request:one"
+            )
+            last = await client.processing_remainder(
+                "processing:one", "calls", 128, correlation_id="mcp-request:one"
+            )
+            assert middle.epoch_id == last.epoch_id == "epoch:old"
+            assert middle.processing.source_generation == last.processing.source_generation == 3
+            assert middle.processing.next_offset == 128
+            assert middle.processing.remainder_handle == "processing:one"
+            assert last.processing.next_offset is None
+            assert last.processing.remainder_handle is None
+            assert [
+                row.path for row in middle.processing.remainder + last.processing.remainder
+            ] == [f"file_{index:03}.py" for index in range(64, 130)]
+
+    asyncio.run(exercise())
+
+
 def _settings(
     socket_path: Path,
     *,
@@ -146,6 +170,8 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
         self.snapshot_freshness: int | None = query_pb.SNAPSHOT_FRESHNESS_CURRENT
         self.disconnect_after: Literal["snapshot_pinned", "result_ready"] | None = None
         self.change_replayed_result = False
+        self.include_processing = False
+        self.change_replayed_processing = False
         self.replacement_daemon_generation = 7
         self.active_session_id = "session:one"
         self.active_session_generation = 3
@@ -228,6 +254,48 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
                     query_pb.RESERVED_CONTROL_OPERATION_RELEASE_RESOURCE,
                 ],
             ),
+        )
+
+    # pyrefly: ignore [bad-override]
+    async def ReadProcessingRemainder(
+        self, request: query_pb.ReadProcessingRemainderRequest, context: grpc.aio.ServicerContext
+    ) -> query_pb.ReadProcessingRemainderResponse:
+        self.assert_session(request.context, context)
+        assert request.daemon_query_id == "processing:one"
+        assert request.query_id == "calls"
+        assert request.offset in (64, 128)
+        end = min(request.offset + 64, 130)
+        summary = query_pb.QueryProcessingSummary(
+            query_id="calls",
+            source_generation=3,
+            scope="selected_sources",
+            family="call-targets",
+            languages=["python"],
+            requested_partitions=131,
+            completed_partitions=1,
+            remaining_partitions=130,
+            remainder_offset=request.offset,
+            remainder=[
+                query_pb.ProcessingRemainder(
+                    language="python",
+                    scope_kind="source_file",
+                    path_bytes=f"file_{index:03}.py".encode(),
+                    path=f"file_{index:03}.py",
+                    state=query_pb.PROCESSING_STATE_PENDING,
+                    reason_code="semantic_work_pending",
+                )
+                for index in range(request.offset, end)
+            ],
+        )
+        if end < 130:
+            summary.next_offset = end
+            summary.remainder_handle = "processing:one"
+        return query_pb.ReadProcessingRemainderResponse(
+            authority=self.authority(),
+            package_id="package:one",
+            epoch_id="epoch:old",
+            public_handle="processing:one",
+            processing=summary,
         )
 
     # pyrefly: ignore [bad-override]
@@ -461,6 +529,7 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
                     total_rows=(3 if self.change_replayed_result and self.watch_calls > 1 else 2),
                     total_pages=1,
                     total_bytes=len(self.page_content),
+                    processing=self.processing(),
                     pages=[
                         query_pb.ResourceDescriptor(
                             kind=query_pb.RESOURCE_KIND_RESULT_PAGE,
@@ -495,6 +564,40 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
             yield event
             if self.watch_calls == 1 and variant == self.disconnect_after:
                 await context.abort(grpc.StatusCode.UNAVAILABLE, "injected watch transport loss")
+
+    def processing(self) -> list[query_pb.QueryProcessingSummary]:
+        if not self.include_processing:
+            return []
+        return [
+            query_pb.QueryProcessingSummary(
+                query_id="calls",
+                source_generation=2,
+                scope="selected_python_sources",
+                family="call-targets",
+                languages=["python"],
+                requested_partitions=65,
+                completed_partitions=0,
+                remaining_partitions=65,
+                remainder=[
+                    query_pb.ProcessingRemainder(
+                        language="python",
+                        scope_kind="source_file",
+                        path_bytes=f"file_{index:03}.py".encode(),
+                        path=f"file_{index:03}.py",
+                        state=query_pb.PROCESSING_STATE_PARTIAL,
+                        reason_code=(
+                            "changed"
+                            if self.change_replayed_processing and self.watch_calls > 1
+                            else "unresolved_targets"
+                        ),
+                    )
+                    for index in range(64)
+                ],
+                next_offset=64,
+                remainder_handle=f"processing:{self.handshake_calls}",
+                remainder_offset=0,
+            )
+        ]
 
     # pyrefly: ignore [bad-override]
     async def CancelQuery(
@@ -826,6 +929,7 @@ def test_watch_reconnects_with_fresh_session_without_resubmitting_start(
     daemon = V2DaemonPortStub()
     daemon.disconnect_after = disconnect_after
     daemon.replacement_daemon_generation = replacement_daemon_generation
+    daemon.include_processing = True
 
     async def exercise() -> None:
         async with _client(tmp_path, daemon) as client:
@@ -851,6 +955,7 @@ def test_watch_reconnects_with_fresh_session_without_resubmitting_start(
             assert result.manifest.public_handle == daemon.public_handle
             assert result.manifest.public_handle != original_handle
             assert [page.public_handle for page in result.pages] == [daemon.page_handle]
+            assert result.processing[0].remainder_handle == "processing:2"
 
     asyncio.run(exercise())
     assert daemon.handshake_calls == 2
@@ -863,13 +968,17 @@ def test_watch_reconnects_with_fresh_session_without_resubmitting_start(
     ]
 
 
+@pytest.mark.parametrize("change_processing", [False, True])
 def test_watch_reconnect_rejects_changed_replayed_result_without_resubmitting_start(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    change_processing: bool,
 ) -> None:
     daemon = V2DaemonPortStub()
     daemon.disconnect_after = "result_ready"
-    daemon.change_replayed_result = True
+    daemon.change_replayed_result = not change_processing
+    daemon.include_processing = change_processing
+    daemon.change_replayed_processing = change_processing
 
     async def exercise() -> None:
         async with _client(tmp_path, daemon) as client:

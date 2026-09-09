@@ -44,6 +44,7 @@ fn validate_budget_workspace(
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StreamedResultRegistration {
     pub processing: Vec<super::processing_status::QueryProcessing>,
+    pub processing_handles: BTreeMap<String, String>,
     pub package_id: String,
     pub manifest_resource_id: String,
     pub manifest: StreamedResultResourceRegistration,
@@ -98,6 +99,7 @@ pub struct StreamedReferenceSelector {
 pub enum StreamedResourceSelector {
     Manifest,
     Page(u32),
+    Processing(String),
     Reference(StreamedReferenceSelector),
 }
 
@@ -215,6 +217,7 @@ pub struct StreamedResultRegistry {
     maximum_chunk_bytes: usize,
     package_builder: OnceLock<StreamedResultPackageBuilder>,
     source_disclosure_reader: OnceLock<crate::operational_store::OperationalReaderFactory>,
+    processing_reader: OnceLock<super::processing_status::ProcessingPageReader>,
     results: Mutex<ResultRegistryState>,
     references: Mutex<BTreeMap<String, ReferenceEntry>>,
 }
@@ -236,6 +239,7 @@ impl StreamedResultRegistry {
             maximum_chunk_bytes,
             package_builder: OnceLock::new(),
             source_disclosure_reader: OnceLock::new(),
+            processing_reader: OnceLock::new(),
             results: Mutex::new(ResultRegistryState::default()),
             references: Mutex::new(BTreeMap::new()),
         })
@@ -252,6 +256,13 @@ impl StreamedResultRegistry {
         reader: crate::operational_store::OperationalReaderFactory,
     ) {
         let _ = self.source_disclosure_reader.set(reader);
+    }
+
+    pub(crate) fn install_processing_reader(
+        &self,
+        reader: super::processing_status::ProcessingPageReader,
+    ) {
+        let _ = self.processing_reader.set(reader);
     }
 
     /// Register one bounded reference projection behind an unpredictable daemon-owned handle.
@@ -547,8 +558,28 @@ impl StreamedResultRegistry {
         if page_registrations.len() != manifest.pages.len() {
             return Err(StreamedResultRegistryError::ResourceIdentityCollision);
         }
+        let mut processing_handles = BTreeMap::new();
+        for summary in &manifest.processing {
+            if summary.selection.is_some() {
+                let handle = mint_result_handle(
+                    b"codefabric.public-processing-remainder-handle.v1",
+                    daemon_generation,
+                    &package_id,
+                    &summary.query_id,
+                )?;
+                if !resource_handles.insert(handle.clone()) {
+                    return Err(StreamedResultRegistryError::ResourceIdentityCollision);
+                }
+                processing_handles.insert(summary.query_id.clone(), handle);
+            }
+        }
         let public_manifest = PublicManifest {
-            processing: &manifest.processing,
+            processing: manifest
+                .processing
+                .iter()
+                .map(super::processing_status::QueryProcessing::public_copy)
+                .collect(),
+            processing_handles: &processing_handles,
             format: "codefabric.public-streamed-result.v2",
             package_id: &package_id,
             epoch_id: &manifest.epoch_id,
@@ -613,6 +644,7 @@ impl StreamedResultRegistry {
         };
         let registration = StreamedResultRegistration {
             processing: manifest.processing.clone(),
+            processing_handles: processing_handles.clone(),
             package_id: package_id.clone(),
             manifest_resource_id: manifest_resource_id.clone(),
             manifest: manifest_registration.clone(),
@@ -684,6 +716,26 @@ impl StreamedResultRegistry {
                 },
             )
         }));
+        resources.extend(processing_handles.iter().map(|(query_id, handle)| {
+            (
+                handle.clone(),
+                ResultResourceEntry {
+                    principal_id,
+                    workspace_id,
+                    daemon_generation,
+                    policy_generation,
+                    revocation_generation,
+                    package_id: package_id.clone(),
+                    selector: StreamedResourceSelector::Processing(query_id.clone()),
+                    media_type: "application/vnd.codefabric.processing-remainder".to_owned(),
+                    byte_length: 0,
+                    content_checksum: String::new(),
+                    expires_at_unix_ms: lease_expires_at_unix_ms,
+                    release_id: None,
+                    released: false,
+                },
+            )
+        }));
         let mut state = self.results.lock().await;
         if state.packages.contains_key(&package_id)
             || resources
@@ -695,6 +747,113 @@ impl StreamedResultRegistry {
         state.packages.insert(package_id, package_entry);
         state.resources.extend(resources);
         Ok(registration)
+    }
+
+    /// Read the next immutable processing page, using a resource distinct from fact pages.
+    /// The retained package pins the original epoch even after the fact resources are released.
+    pub(crate) async fn read_processing(
+        &self,
+        request: StreamedResourceRead,
+        deadline: std::time::Instant,
+    ) -> Result<
+        (String, EpochId, super::processing_status::QueryProcessing),
+        StreamedResultRegistryError,
+    > {
+        let StreamedResourceSelector::Processing(query_id) = &request.selector else {
+            return Err(StreamedResultRegistryError::UnknownResource);
+        };
+        let (package_id, epoch, summary, _package) = {
+            let state = self.results.lock().await;
+            let resource = state
+                .resources
+                .get(&request.public_handle)
+                .ok_or(StreamedResultRegistryError::UnknownResource)?;
+            authorize_result_resource(resource, &request)?;
+            if resource.selector != request.selector {
+                return Err(StreamedResultRegistryError::UnknownResource);
+            }
+            let package = state
+                .packages
+                .get(&resource.package_id)
+                .and_then(|entry| entry.package.as_ref())
+                .ok_or(StreamedResultRegistryError::Released)?;
+            let summary = package
+                .manifest()
+                .processing
+                .iter()
+                .find(|value| value.query_id == *query_id)
+                .ok_or(StreamedResultRegistryError::UnknownResource)?
+                .clone();
+            (
+                resource.package_id.clone(),
+                package.epoch_id(),
+                summary,
+                package.clone(),
+            )
+        };
+        let offset = usize::try_from(request.offset)
+            .map_err(|_| StreamedResultRegistryError::RangeOutsideResource)?;
+        if offset == 0
+            || !offset.is_multiple_of(64)
+            || request.offset >= summary.processing.remaining_partitions
+        {
+            return Err(StreamedResultRegistryError::RangeOutsideResource);
+        }
+        let reader = self
+            .processing_reader
+            .get()
+            .ok_or(StreamedResultRegistryError::RecoveryUnavailable)?;
+        let bytes = reader
+            .read(epoch, summary, offset, deadline)
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, "retained processing page could not be reconstructed");
+                StreamedResultRegistryError::ProcessingUnavailable
+            })?;
+        let summary: super::processing_status::QueryProcessing = serde_json::from_slice(&bytes)
+            .map_err(|_| StreamedResultRegistryError::ResourceIntegrity)?;
+        if !summary.validate_page(offset) || summary.query_id != *query_id {
+            return Err(StreamedResultRegistryError::ResourceIntegrity);
+        }
+        let state = self.results.lock().await;
+        let resource = state
+            .resources
+            .get(&request.public_handle)
+            .ok_or(StreamedResultRegistryError::UnknownResource)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| StreamedResultRegistryError::Expired)?
+            .as_millis();
+        let mut renewed = request;
+        renewed.observed_at_unix_ms =
+            i64::try_from(now).map_err(|_| StreamedResultRegistryError::Expired)?;
+        authorize_result_resource(resource, &renewed)?;
+        Ok((package_id, epoch, summary))
+    }
+
+    /// Find only the requested processing resource; already consumed fact pages are irrelevant.
+    pub(crate) async fn processing_handle(
+        &self,
+        query_id: &str,
+        request: &StreamedResourceRead,
+    ) -> Result<String, StreamedResultRegistryError> {
+        let state = self.results.lock().await;
+        let package = state
+            .packages
+            .values()
+            .find(|package| package.query_id == query_id)
+            .ok_or(StreamedResultRegistryError::UnknownPackage)?;
+        for handle in &package.resource_handles {
+            let resource = state
+                .resources
+                .get(handle)
+                .ok_or(StreamedResultRegistryError::ResourceIdentityCollision)?;
+            if resource.selector == request.selector {
+                authorize_result_resource(resource, request)?;
+                return Ok(handle.clone());
+            }
+        }
+        Err(StreamedResultRegistryError::UnknownResource)
     }
 
     /// Read one bounded manifest or page range after exact owner, token, and lease checks.
@@ -781,6 +940,9 @@ impl StreamedResultRegistry {
                             page_ordinal,
                         ),
                         StreamedResourceSelector::Reference(_) => unreachable!("handled above"),
+                        StreamedResourceSelector::Processing(_) => {
+                            return Err(StreamedResultRegistryError::UnknownResource);
+                        }
                     };
                     (
                         source,
@@ -878,6 +1040,7 @@ impl StreamedResultRegistry {
         }
         let mut manifest = None;
         let mut pages = Vec::new();
+        let mut processing_handles = BTreeMap::new();
         for handle in &package.resource_handles {
             let resource = state
                 .resources
@@ -899,6 +1062,9 @@ impl StreamedResultRegistry {
             match resource.selector {
                 StreamedResourceSelector::Manifest => manifest = Some(registration),
                 StreamedResourceSelector::Page(_) => pages.push(registration),
+                StreamedResourceSelector::Processing(ref query_id) => {
+                    processing_handles.insert(query_id.clone(), handle.clone());
+                }
                 StreamedResourceSelector::Reference(_) => {
                     return Err(StreamedResultRegistryError::ResourceIdentityCollision);
                 }
@@ -906,6 +1072,7 @@ impl StreamedResultRegistry {
         }
         pages.sort_by_key(|resource| resource.page_ordinal);
         Ok(StreamedResultRegistration {
+            processing_handles,
             processing: package
                 .package
                 .as_ref()
@@ -1382,7 +1549,9 @@ fn authorize_result_values(
 
 #[derive(Serialize)]
 struct PublicManifest<'a> {
-    processing: &'a [super::processing_status::QueryProcessing],
+    processing: Vec<super::processing_status::QueryProcessing>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    processing_handles: &'a BTreeMap<String, String>,
     format: &'static str,
     package_id: &'a str,
     epoch_id: &'a str,
@@ -1431,7 +1600,9 @@ fn result_resource_registration(
         public_handle: public_handle.to_owned(),
         page_ordinal: match resource.selector {
             StreamedResourceSelector::Page(page_ordinal) => Some(page_ordinal),
-            StreamedResourceSelector::Manifest | StreamedResourceSelector::Reference(_) => None,
+            StreamedResourceSelector::Manifest
+            | StreamedResourceSelector::Reference(_)
+            | StreamedResourceSelector::Processing(_) => None,
         },
         media_type: resource.media_type.clone(),
         byte_length: resource.byte_length,
@@ -1532,6 +1703,8 @@ const fn decode_nibble(byte: u8) -> Result<u8, StreamedResultRegistryError> {
 
 #[derive(Debug, Error)]
 pub enum StreamedResultRegistryError {
+    #[error("retained processing read is unavailable")]
+    ProcessingUnavailable,
     #[error("source disclosure is not authorized")]
     SourceAccessDenied,
     #[error("result resource budget is not owned by the selected workspace lineage")]

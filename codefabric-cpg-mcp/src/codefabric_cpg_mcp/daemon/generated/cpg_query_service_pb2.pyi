@@ -1,4 +1,4 @@
-# @generated from released Protobuf semantic identities b3:2eae6d75ca2757c08ea204d013c066b9eb7ce2b027f1835f9b59370215dec085,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
+# @generated from released Protobuf semantic identities b3:c8373c633afcc5859e801edf747248166c2167af2a91d1d55fbe0f8e62595493,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
 import datetime
 
 from google.protobuf import duration_pb2 as _duration_pb2
@@ -96,6 +96,8 @@ class SafeErrorCode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     SAFE_ERROR_CODE_INTERNAL: _ClassVar[SafeErrorCode]
     SAFE_ERROR_CODE_FRESHNESS_DEADLINE: _ClassVar[SafeErrorCode]
     SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_RESOURCE_RELEASED: _ClassVar[SafeErrorCode]
+    SAFE_ERROR_CODE_RESULT_NOT_RETAINED: _ClassVar[SafeErrorCode]
 
 class SafeDiagnosticReference(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -238,6 +240,8 @@ SAFE_ERROR_CODE_DAEMON_UNAVAILABLE: SafeErrorCode
 SAFE_ERROR_CODE_INTERNAL: SafeErrorCode
 SAFE_ERROR_CODE_FRESHNESS_DEADLINE: SafeErrorCode
 SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE: SafeErrorCode
+SAFE_ERROR_CODE_RESOURCE_RELEASED: SafeErrorCode
+SAFE_ERROR_CODE_RESULT_NOT_RETAINED: SafeErrorCode
 SAFE_DIAGNOSTIC_REFERENCE_UNSPECIFIED: SafeDiagnosticReference
 SAFE_DIAGNOSTIC_REFERENCE_LIFECYCLE_FAILED_CLOSED: SafeDiagnosticReference
 SAFE_DIAGNOSTIC_REFERENCE_QUERY_CHALLENGE_REJECTED: SafeDiagnosticReference
@@ -948,7 +952,7 @@ class ProcessingRemainder(_message.Message):
     def __init__(self, language: _Optional[str] = ..., scope_kind: _Optional[str] = ..., path_bytes: _Optional[bytes] = ..., path: _Optional[str] = ..., target: _Optional[str] = ..., state: _Optional[_Union[ProcessingState, str]] = ..., reason_code: _Optional[str] = ..., target_kind: _Optional[str] = ..., analysis_context_id: _Optional[str] = ...) -> None: ...
 
 class QueryProcessingSummary(_message.Message):
-    __slots__ = ("query_id", "source_generation", "scope", "family", "languages", "requested_partitions", "completed_partitions", "remaining_partitions", "remainder", "next_offset", "maximum_rows", "additional_rows")
+    __slots__ = ("query_id", "source_generation", "scope", "family", "languages", "requested_partitions", "completed_partitions", "remaining_partitions", "remainder", "next_offset", "maximum_rows", "additional_rows", "remainder_handle", "remainder_offset")
     QUERY_ID_FIELD_NUMBER: _ClassVar[int]
     SOURCE_GENERATION_FIELD_NUMBER: _ClassVar[int]
     SCOPE_FIELD_NUMBER: _ClassVar[int]
@@ -961,6 +965,8 @@ class QueryProcessingSummary(_message.Message):
     NEXT_OFFSET_FIELD_NUMBER: _ClassVar[int]
     MAXIMUM_ROWS_FIELD_NUMBER: _ClassVar[int]
     ADDITIONAL_ROWS_FIELD_NUMBER: _ClassVar[int]
+    REMAINDER_HANDLE_FIELD_NUMBER: _ClassVar[int]
+    REMAINDER_OFFSET_FIELD_NUMBER: _ClassVar[int]
     query_id: str
     source_generation: int
     scope: str
@@ -973,7 +979,35 @@ class QueryProcessingSummary(_message.Message):
     next_offset: int
     maximum_rows: int
     additional_rows: bool
-    def __init__(self, query_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., scope: _Optional[str] = ..., family: _Optional[str] = ..., languages: _Optional[_Iterable[str]] = ..., requested_partitions: _Optional[int] = ..., completed_partitions: _Optional[int] = ..., remaining_partitions: _Optional[int] = ..., remainder: _Optional[_Iterable[_Union[ProcessingRemainder, _Mapping]]] = ..., next_offset: _Optional[int] = ..., maximum_rows: _Optional[int] = ..., additional_rows: _Optional[bool] = ...) -> None: ...
+    remainder_handle: str
+    remainder_offset: int
+    def __init__(self, query_id: _Optional[str] = ..., source_generation: _Optional[int] = ..., scope: _Optional[str] = ..., family: _Optional[str] = ..., languages: _Optional[_Iterable[str]] = ..., requested_partitions: _Optional[int] = ..., completed_partitions: _Optional[int] = ..., remaining_partitions: _Optional[int] = ..., remainder: _Optional[_Iterable[_Union[ProcessingRemainder, _Mapping]]] = ..., next_offset: _Optional[int] = ..., maximum_rows: _Optional[int] = ..., additional_rows: _Optional[bool] = ..., remainder_handle: _Optional[str] = ..., remainder_offset: _Optional[int] = ...) -> None: ...
+
+class ReadProcessingRemainderRequest(_message.Message):
+    __slots__ = ("context", "daemon_query_id", "query_id", "offset")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    DAEMON_QUERY_ID_FIELD_NUMBER: _ClassVar[int]
+    QUERY_ID_FIELD_NUMBER: _ClassVar[int]
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
+    daemon_query_id: str
+    query_id: str
+    offset: int
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., daemon_query_id: _Optional[str] = ..., query_id: _Optional[str] = ..., offset: _Optional[int] = ...) -> None: ...
+
+class ReadProcessingRemainderResponse(_message.Message):
+    __slots__ = ("authority", "package_id", "epoch_id", "processing", "public_handle")
+    AUTHORITY_FIELD_NUMBER: _ClassVar[int]
+    PACKAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    EPOCH_ID_FIELD_NUMBER: _ClassVar[int]
+    PROCESSING_FIELD_NUMBER: _ClassVar[int]
+    PUBLIC_HANDLE_FIELD_NUMBER: _ClassVar[int]
+    authority: AuthorityGeneration
+    package_id: str
+    epoch_id: str
+    processing: QueryProcessingSummary
+    public_handle: str
+    def __init__(self, authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ..., package_id: _Optional[str] = ..., epoch_id: _Optional[str] = ..., processing: _Optional[_Union[QueryProcessingSummary, _Mapping]] = ..., public_handle: _Optional[str] = ...) -> None: ...
 
 class TerminalEvent(_message.Message):
     __slots__ = ("header", "state", "error")

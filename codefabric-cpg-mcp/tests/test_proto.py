@@ -172,6 +172,7 @@ def test_sole_generated_python_descriptor_matches_the_one_committed_fds() -> Non
         "WatchQuery",
         "CancelQuery",
         "ReadResource",
+        "ReadProcessingRemainder",
         "ReleaseResource",
     )
     assert pool.FindServiceByName("codefabric.provider.v1.ProviderControl")
@@ -183,7 +184,7 @@ def test_sole_generated_python_descriptor_matches_the_one_committed_fds() -> Non
 
 def test_v2_atomic_start_and_event_contracts_are_closed() -> None:
     service = cpg.DESCRIPTOR.services_by_name["CpgQueryService"]
-    assert len(service.methods) == 9
+    assert len(service.methods) == 10
     assert not {
         "StreamQuery",
         "AttachQuery",

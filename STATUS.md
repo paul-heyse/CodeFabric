@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `6b6abffb` (`Compare mixed live queries with independent clean builds`);
-source-first publication is the current continuation.
+Last production commit: `99b77ec0` (`Publish live source snapshots before semantic convergence`);
+public processing continuation is the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -208,6 +208,36 @@ docs navigation, changed-file formatting and diff checks pass. Library Clippy co
 Retained checker/parser/Cargo state, selective relation-version reuse, full scope, historical/candidate
 reclamation and the remaining outcomes 4–8 requirements are open. No outcome is closed by this slice.
 
+## Public processing remainder continuation
+
+`get_code_graph_processing` accepts the durable daemon query ID, query block ID and next offset.
+It returns a typed 64-row page from the original exact processing relation, with the same snapshot,
+source generation, family, language/context selection and total counts. Complete row ordering uses
+raw paths and the remaining scope keys. The private result manifest retains the table/version and
+selection; public manifests and wire messages omit storage addresses. DataFusion filters and pages
+the selected Delta version under the shared workspace budget and owned native lifetime.
+
+A separate resource keeps processing continuation alive after fact and manifest reads. After restart,
+the daemon authorizes the accepted query and reissues its retained resource; it does not resubmit the
+query. Principal, workspace, policy/revocation generation, expiry, block and offset checks precede reads;
+resource/session authority is checked again before delivery. The adapter releases the continuation
+when the final page arrives. Older results without a retained processing selection remain readable
+but cannot acquire a new continuation. Full historical query selection remains separate unfinished work.
+
+Validation on 2026-09-09: the installed 130-partition Python case passes across fact/manifest
+consumption, exact restart, whole-workspace repair, two remaining pages and invalid block/range/released
+resource requests (53.38 s). All 130 old paths retain their order and original incomplete scope.
+The broader run passes 57 processing/coordinator/service/retention/source regressions; its new
+negative-case failure exposed missing typed resource errors and an incorrect test expectation, both
+corrected in the final installed run. Adapter lint/types and 108 tests pass, including reconnect
+with renewed handles and rejection of changed processing facts. All 192 tooling tests, tooling lint,
+governance, docs navigation and default/featureless root checks pass. Library Clippy completes with
+955 existing warnings and no added lint categories; strict lint and baseline formatting remain open.
+Generated protocol compatibility passes (28 tests and generator verification).
+
+All-family/owner/dependency scope, indexed status aggregation, target/family-specific barriers and
+the full outcomes 4–8 target remain open.
+
 ## Outcome 4: real inputs, canonical facts and the first four forms
 
 ### 4A — Rust contexts and production compilation: partial
@@ -332,7 +362,7 @@ target/kind and known context survive projection. The summary is retained with t
 The validated call-specific extension and lexical-reference scope are described above and conservatively
 include the selected context's potential callers or referring files. It does not yet derive exact owner/reverse-dependency scope.
 
-Remaining: all family/owner dimensions; public remainder pagination; authorization-scoped efficient status
+Remaining: all family/owner dimensions; authorization-scoped efficient status
 scans; incoming reference/import and negative dependency/frontier propagation; shared live pending/running
 state; provider precision and actionable retry details; a clean distinction between terminal semantic
 unknowns and runnable pending work for convergence. Empty results alone never establish complete absence.
@@ -346,7 +376,8 @@ exactly N rows leave exhaustion unknown. `e65bdbeb` fixes released diagnostic en
 
 Current-source barriers and typed snapshot/workspace observations now run against the live update
 owner, as described above. Remaining: target/family-specific current selection, historical selectors,
-public remainder pagination and full generation/context/family convergence with terminal coverage.
+full generation/context/family convergence with terminal coverage. Public remainder continuation is
+implemented for the currently supported scopes, as described above.
 Whole-workspace provider completion is the conservative barrier for strict semantic policies;
 source-current uses the separate source publication barrier.
 
@@ -467,7 +498,7 @@ golden setup; `just sidecar-check` checks/lints rather than installing a fresh e
 1. Retain the validated one-step call-query slice and extend it with the remaining canonical families
    and traversal semantics. Full FollowRelationships is still open.
 2. Finish 4A–4D effective/external/generated inputs and canonical families needed by the first four forms;
-   complete 4E and 5A–5B, especially public remainder paging and target/family-specific freshness barriers. Retain the broad
+   complete 4E and 5A–5B, especially all-family scope and target/family-specific freshness barriers. Retain the broad
    workstation allowances and honest partial semantics.
 3. Extend the implemented 6A–6D observation/invalidation/two-speed publication loop with retained
    providers, external/configuration inputs and the full independent clean/incremental corpus.

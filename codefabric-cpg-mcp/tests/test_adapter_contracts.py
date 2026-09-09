@@ -114,7 +114,7 @@ def test_reference_projects_only_a_public_daemon_resource() -> None:
 
 
 def test_all_wire_schemas_are_draft_2020_12_and_fingerprinted() -> None:
-    assert len(WireSchemaName) == 12
+    assert len(WireSchemaName) == 13
     for mode in ("validation", "serialization"):
         fingerprints = dict(wire_schema_fingerprints(mode))
         assert set(fingerprints) == set(WireSchemaName)

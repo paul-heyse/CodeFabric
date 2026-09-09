@@ -49,6 +49,7 @@ from codefabric_cpg_mcp.daemon import (
     ResourceReadLimits,
     StringChallengeConstraints,
 )
+from codefabric_cpg_mcp.daemon.client import ProcessingPage
 from codefabric_cpg_mcp.server import (
     MODERN_PROTOCOL_VERSION,
     REFERENCE_RESOURCE_TEMPLATE,
@@ -164,6 +165,11 @@ class FakeDaemonPort:
                 reserved_result_pages=1,
             ),
         )
+
+    async def processing_remainder(
+        self, daemon_query_id: str, query_id: str, offset: int, *, correlation_id: str
+    ) -> ProcessingPage:
+        raise DaemonProtocolError("no processing continuation installed in this fixture")
 
     async def reference(
         self,
@@ -438,6 +444,7 @@ def test_fastmcp_registers_exact_modern_target_surface() -> None:
                 "query_code_graph",
                 "validate_code_graph_query",
                 "get_code_graph_status",
+                "get_code_graph_processing",
                 "get_code_graph_reference",
             }
             assert set(tools["query_code_graph"].input_schema["properties"]) == {

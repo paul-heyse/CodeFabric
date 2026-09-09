@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:2eae6d75ca2757c08ea204d013c066b9eb7ce2b027f1835f9b59370215dec085
+// canonical_digest: b3:c8373c633afcc5859e801edf747248166c2167af2a91d1d55fbe0f8e62595493
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
@@ -24,6 +24,7 @@ service CpgQueryService {
   rpc WatchQuery(WatchQueryRequest) returns (stream QueryEvent);
   rpc CancelQuery(CancelQueryRequest) returns (CancelQueryResponse);
   rpc ReadResource(ReadResourceRequest) returns (stream ResourceChunk);
+  rpc ReadProcessingRemainder(ReadProcessingRemainderRequest) returns (ReadProcessingRemainderResponse);
   rpc ReleaseResource(ReleaseResourceRequest) returns (ReleaseResourceResponse);
 }
 
@@ -113,6 +114,8 @@ enum SafeErrorCode {
   SAFE_ERROR_CODE_INTERNAL = 17;
   SAFE_ERROR_CODE_FRESHNESS_DEADLINE = 18;
   SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE = 19;
+  SAFE_ERROR_CODE_RESOURCE_RELEASED = 20;
+  SAFE_ERROR_CODE_RESULT_NOT_RETAINED = 21;
 }
 
 enum SafeDiagnosticReference {
@@ -613,6 +616,25 @@ message QueryProcessingSummary {
   optional uint64 maximum_rows = 11;
   // Absence means result exhaustion was not observed. False is meaningful.
   optional bool additional_rows = 12;
+  // Separate leased capability; reading fact pages does not release this continuation.
+  optional string remainder_handle = 13;
+  optional uint64 remainder_offset = 14;
+}
+
+message ReadProcessingRemainderRequest {
+  RequestContext context = 1;
+  string daemon_query_id = 2;
+  string query_id = 3;
+  uint64 offset = 4;
+}
+
+message ReadProcessingRemainderResponse {
+  AuthorityGeneration authority = 1;
+  string package_id = 2;
+  string epoch_id = 3;
+  QueryProcessingSummary processing = 4;
+  // Current leased resource, including on the terminal page so the adapter can release it.
+  string public_handle = 5;
 }
 
 message TerminalEvent {

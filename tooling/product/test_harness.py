@@ -161,10 +161,13 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         "python-live",
         "mixed-clean-live",
         "staged-live",
+        "processing-pages",
     ]
 
 
-@pytest.mark.parametrize("case", ["mixed-clean-live", "staged-live"])
+@pytest.mark.parametrize(
+    "case", ["mixed-clean-live", "staged-live", "processing-pages"]
+)
 @pytest.mark.parametrize(("override", "expected"), [(None, 600), (0.25, 0.25)])
 def test_clean_live_case_has_a_bounded_default_and_honors_explicit_deadline(
     tmp_path, monkeypatch, override, expected, case

@@ -74,6 +74,8 @@ class SafeErrorProjection(StrictWireModel):
         "QUERY_NOT_FOUND",
         "RESOURCE_NOT_FOUND",
         "RESOURCE_EXPIRED",
+        "RESOURCE_RELEASED",
+        "RESULT_NOT_RETAINED",
         "RANGE_NOT_SATISFIABLE",
         "CAPACITY_UNAVAILABLE",
         "CANCELLED",
@@ -212,17 +214,26 @@ class QueryProcessingSummary(StrictWireModel):
     next_offset: NonNegativeInt | None = None
     maximum_rows: PositiveInt | None = None
     additional_rows: bool | None = None
+    remainder_handle: NonEmptyString | None = None
+    remainder_offset: NonNegativeInt | None = None
 
     @model_validator(mode="after")
     def exact_counts(self) -> QueryProcessingSummary:
         if self.completed_partitions + self.remaining_partitions != self.requested_partitions:
             raise ValueError("processing partition counts disagree")
         count = len(self.remainder)
-        if count > min(self.remaining_partitions, 64):
+        offset = self.remainder_offset or 0
+        if (
+            offset % 64
+            or offset > self.remaining_partitions
+            or count != min(self.remaining_partitions - offset, 64)
+        ):
             raise ValueError("processing remainder page exceeds its scope")
-        expected_next = count if count < self.remaining_partitions else None
+        expected_next = offset + count if offset + count < self.remaining_partitions else None
         if self.next_offset != expected_next:
             raise ValueError("processing remainder pagination disagrees")
+        if self.remainder_handle is not None and self.next_offset is None:
+            raise ValueError("exhausted processing page has a continuation handle")
         if any(row.language not in self.languages for row in self.remainder):
             raise ValueError("processing remainder is outside its language scope")
         return self
@@ -351,6 +362,13 @@ class StatusToolOutput(StrictWireModel):
     source_observations: tuple[WorkspaceSourceObservation, ...] = ()
 
 
+class ProcessingToolOutput(StrictWireModel):
+    authority: AuthorityProjection
+    package_id: NonEmptyString
+    epoch_id: NonEmptyString
+    processing: QueryProcessingSummary
+
+
 class ReferenceToolOutput(StrictWireModel):
     reference_id: str
     resource: ResourceReference
@@ -369,6 +387,7 @@ class WireSchemaName(StrEnum):
     RESOURCE_REFERENCE = "ResourceReference"
     SAFE_ERROR_PROJECTION = "SafeErrorProjection"
     STATUS_TOOL_OUTPUT = "StatusToolOutput"
+    PROCESSING_TOOL_OUTPUT = "ProcessingToolOutput"
     VALIDATE_QUERY_OUTPUT = "ValidateQueryOutput"
     VALIDATE_TOOL_INPUT = "ValidateToolInput"
     VALIDATION_ISSUE = "ValidationIssue"
@@ -384,6 +403,7 @@ _WIRE_SCHEMA_ADAPTERS: dict[WireSchemaName, TypeAdapter[Any]] = {
     WireSchemaName.RESOURCE_REFERENCE: TypeAdapter(ResourceReference),
     WireSchemaName.SAFE_ERROR_PROJECTION: TypeAdapter(SafeErrorProjection),
     WireSchemaName.STATUS_TOOL_OUTPUT: TypeAdapter(StatusToolOutput),
+    WireSchemaName.PROCESSING_TOOL_OUTPUT: TypeAdapter(ProcessingToolOutput),
     WireSchemaName.VALIDATE_QUERY_OUTPUT: TypeAdapter(ValidateQueryOutput),
     WireSchemaName.VALIDATE_TOOL_INPUT: TypeAdapter(ValidateToolInput),
     WireSchemaName.VALIDATION_ISSUE: TypeAdapter(ValidationIssue),

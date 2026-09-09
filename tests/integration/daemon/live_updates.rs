@@ -1,6 +1,160 @@
 //! Real public queries against an incremental daemon and an independent clean state root.
 use super::*;
 
+#[test]
+fn processing_remainder_pages_keep_exact_scope_across_reopen_and_updates() {
+    let fixture = ProductionFixture::with_source(b"def start():\n    return 1\n");
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let root = Path::new(&fixture.workspace.root_path_display);
+    for index in 0..130 {
+        fs::write(
+            root.join(format!("unknown_{index:03}.py")),
+            format!("value = missing_{index:03}()\n"),
+        )
+        .unwrap();
+    }
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let find = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "Python function declarations",
+    );
+    let entities = public_query(&fixture, &stack, "remainder-initial", find.clone());
+    assert_eq!(entities.rows.len(), 1);
+    let start = entities
+        .rows
+        .iter()
+        .find(|row| row["name"] == "start")
+        .unwrap();
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "request:retained-remainder",
+        "Python function declarations",
+    );
+    request["scope"]["languages"] = json!(["python"]);
+    request["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "calls", "starting_from": [{"entity_id": start["public_entity_id"]}],
+        "relationship": "calls", "direction": "incoming", "distance": "one relationship step",
+        "return": {"limit": {"maximum_results": 32}}
+    }]);
+    let query_scenario = |name: &str| {
+        eprintln!("processing continuation: {name}");
+        let scenario = modern_client_scenario(
+            &fixture,
+            &stack,
+            "policy-one",
+            json!([]),
+            json!([
+                {"id": "query", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": request, "delivery": "resource"}},
+                {"id": "facts", "operation": "read_resource", "uri": {"$ref": "query.structured_content.pages.0.uri"}},
+                {"id": "manifest", "operation": "read_resource", "uri": {"$ref": "query.structured_content.manifest.uri"}}
+            ]),
+        );
+        let path = write_modern_client_scenario(&fixture, name, &scenario);
+        modern_client_report(&run_modern_client(&stack, &path))
+    };
+    let first_report = query_scenario("remainder-first");
+    let first = modern_structured(modern_step(&first_report, "query"));
+    assert_eq!(first["execution_state"], "SUCCEEDED", "{first}");
+    assert_eq!(first["total_rows"], 0);
+    let first_summary = &first["processing"][0];
+    assert_eq!(first_summary["requested_partitions"], 131);
+    assert_eq!(first_summary["remaining_partitions"], 130);
+    assert_eq!(first_summary["remainder"].as_array().unwrap().len(), 64);
+    assert_eq!(first_summary["next_offset"], 64);
+    assert!(first_summary["remainder_handle"].is_string());
+    let manifest_text = String::from_utf8(
+        STANDARD
+            .decode(
+                modern_step(&first_report, "manifest")[0]["blob"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        !manifest_text.contains("table_root"),
+        "private selected table leaked"
+    );
+    assert!(!manifest_text.contains(&fixture.state.to_string_lossy().to_string()));
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    for index in 0..130 {
+        fs::write(
+            root.join(format!("unknown_{index:03}.py")),
+            format!("value = {index}\n"),
+        )
+        .unwrap();
+    }
+    let repaired = public_query(&fixture, &stack, "remainder-repaired", find);
+    assert_eq!(repaired.rows.len(), 1);
+    let scenario = modern_client_scenario(
+        &fixture,
+        &stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "middle", "operation": "call_tool", "name": "get_code_graph_processing", "arguments": {"daemon_query_id": first["daemon_query_id"], "query_id": "calls", "offset": 64}},
+            {"id": "wrong-block", "operation": "call_tool", "name": "get_code_graph_processing", "arguments": {"daemon_query_id": first["daemon_query_id"], "query_id": "another-block", "offset": 64}, "expect_error": "CLIENT_OPERATION_FAILED"},
+            {"id": "outside", "operation": "call_tool", "name": "get_code_graph_processing", "arguments": {"daemon_query_id": first["daemon_query_id"], "query_id": "calls", "offset": 192}, "expect_error": "CLIENT_OPERATION_FAILED"},
+            {"id": "last", "operation": "call_tool", "name": "get_code_graph_processing", "arguments": {"daemon_query_id": first["daemon_query_id"], "query_id": "calls", "offset": 128}},
+            {"id": "released", "operation": "call_tool", "name": "get_code_graph_processing", "arguments": {"daemon_query_id": first["daemon_query_id"], "query_id": "calls", "offset": 64}, "expect_error": "CLIENT_OPERATION_FAILED"}
+        ]),
+    );
+    let path = write_modern_client_scenario(&fixture, "remainder-pages", &scenario);
+    let pages = modern_client_report(&run_modern_client(&stack, &path));
+    for (step, code) in [
+        ("wrong-block", "RESOURCE_NOT_FOUND"),
+        ("outside", "RANGE_NOT_SATISFIABLE"),
+        ("released", "RESOURCE_RELEASED"),
+    ] {
+        assert!(
+            modern_step(&pages, step)["public_error"]
+                .as_str()
+                .unwrap()
+                .contains(code),
+            "unexpected failure for {step}: {}",
+            modern_step(&pages, step)
+        );
+    }
+    assert_ne!(
+        modern_structured(modern_step(&pages, "middle"))["processing"]["remainder_handle"],
+        first_summary["remainder_handle"]
+    );
+    let mut paths = first_summary["remainder"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["path"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    for (name, offset, count) in [("middle", 64, 64), ("last", 128, 2)] {
+        let page = modern_structured(modern_step(&pages, name));
+        assert_eq!(page["epoch_id"], first["epoch_id"]);
+        let summary = &page["processing"];
+        assert_eq!(summary["source_generation"], first["source_generation"]);
+        assert_eq!(summary["remaining_partitions"], 130);
+        assert_eq!(summary["remainder_offset"], offset);
+        assert_eq!(summary["remainder"].as_array().unwrap().len(), count);
+        paths.extend(
+            summary["remainder"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["path"].as_str().unwrap().to_owned()),
+        );
+    }
+    assert_eq!(
+        paths,
+        (0..130)
+            .map(|index| format!("unknown_{index:03}.py"))
+            .collect::<Vec<_>>()
+    );
+    assert!(modern_structured(modern_step(&pages, "last"))["processing"]["next_offset"].is_null());
+    supervisor.stop();
+}
+
 fn clean_fixture(
     original: &ProductionFixture,
     registration: &Path,

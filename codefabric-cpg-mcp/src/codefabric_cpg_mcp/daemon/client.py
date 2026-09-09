@@ -80,6 +80,8 @@ type SafeErrorCode = Literal[
     "QUERY_NOT_FOUND",
     "RESOURCE_NOT_FOUND",
     "RESOURCE_EXPIRED",
+    "RESOURCE_RELEASED",
+    "RESULT_NOT_RETAINED",
     "RANGE_NOT_SATISFIABLE",
     "CAPACITY_UNAVAILABLE",
     "CANCELLED",
@@ -534,6 +536,14 @@ class DaemonStatus(_PortModel):
     source_observations: tuple[WorkspaceSourceObservation, ...] = ()
 
 
+class ProcessingPage(_PortModel):
+    public_handle: NonEmptyString
+    authority: AuthorityGeneration
+    package_id: NonEmptyString
+    epoch_id: NonEmptyString
+    processing: QueryProcessingSummary
+
+
 class DaemonQueryResult(_PortModel):
     authority: AuthorityGeneration
     semantic_request_id: NonEmptyString
@@ -578,6 +588,10 @@ class DaemonPort(Protocol):
     async def connect(self, *, correlation_id: str = "adapter-connect") -> None: ...
 
     async def status(self, *, correlation_id: str) -> DaemonStatus: ...
+
+    async def processing_remainder(
+        self, daemon_query_id: str, query_id: str, offset: int, *, correlation_id: str
+    ) -> ProcessingPage: ...
 
     async def reference(
         self,
@@ -1032,6 +1046,8 @@ def _processing_summary(value: query_pb.QueryProcessingSummary) -> QueryProcessi
             next_offset=value.next_offset if value.HasField("next_offset") else None,
             maximum_rows=value.maximum_rows if value.HasField("maximum_rows") else None,
             additional_rows=value.additional_rows if value.HasField("additional_rows") else None,
+            remainder_handle=value.remainder_handle if value.HasField("remainder_handle") else None,
+            remainder_offset=value.remainder_offset if value.HasField("remainder_offset") else None,
         )
     except (KeyError, ValidationError) as error:
         raise DaemonProtocolError("invalid typed processing scope") from error
@@ -1111,7 +1127,10 @@ def _query_event_identity(event: query_pb.QueryEvent) -> tuple[object, ...]:
             value.total_rows,
             value.total_pages,
             value.total_bytes,
-            tuple(_processing_summary(item).model_dump_json() for item in value.processing),
+            tuple(
+                _processing_summary(item).model_dump_json(exclude={"remainder_handle"})
+                for item in value.processing
+            ),
         )
     if kind == "terminal":
         value = event.terminal
@@ -1372,6 +1391,44 @@ class CpgDaemonClient:
             source_observations=tuple(
                 _source_observation(row) for row in response.source_observations
             ),
+        )
+
+    async def processing_remainder(
+        self, daemon_query_id: str, query_id: str, offset: int, *, correlation_id: str
+    ) -> ProcessingPage:
+        await self.connect(correlation_id=correlation_id)
+        if not daemon_query_id or not query_id or offset <= 0 or offset % 64:
+            raise ValueError("invalid processing continuation")
+        timeout = self.settings.query_timeout_seconds
+        try:
+            response = await self.stub.ReadProcessingRemainder(
+                query_pb.ReadProcessingRemainderRequest(
+                    context=self._context(correlation_id, timeout),
+                    daemon_query_id=daemon_query_id,
+                    query_id=query_id,
+                    offset=offset,
+                ),
+                metadata=self._metadata(),
+                timeout=timeout,
+            )
+        except grpc.aio.AioRpcError as error:
+            raise _typed_rpc_error(error) from None
+        page = _processing_summary(response.processing)
+        if (
+            page.query_id != query_id
+            or page.remainder_offset != offset
+            or (
+                page.remainder_handle is not None
+                and page.remainder_handle != response.public_handle
+            )
+        ):
+            raise DaemonProtocolError("processing continuation binding differs")
+        return ProcessingPage(
+            public_handle=response.public_handle,
+            authority=self._assert_authority(response.authority),
+            package_id=response.package_id,
+            epoch_id=response.epoch_id,
+            processing=page,
         )
 
     async def reference(

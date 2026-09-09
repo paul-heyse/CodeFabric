@@ -1,6 +1,6 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `6b6abffb` (`Compare mixed live queries with independent clean builds`) and the source-first publication continuation described below.
+Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `99b77ec0` (`Publish live source snapshots before semantic convergence`) and the public processing continuation described below.
 
 This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Implementation is underway. The status notes distinguish demonstrated committed behavior, uncommitted work and remaining acceptance; writing or updating this plan is not implementation evidence.
 
@@ -34,7 +34,7 @@ This is the current implementation baseline, reconciled from code, commits and r
 | Source/syntax | Production Python Tree-sitter/Ruff plus six Rust Tree-sitter relations; recoverable errors; Ruff callable/call-site/callable-syntax observations | Full source/lexical census, non-identity decoded byte mappings, reversible compiler paths, retained parsers and incremental behavior |
 | Canonical facts | `source.code_file`, entities/declarations/kind selectors, Python lexical references and Python/Rust call sites; native DataFusion normalization and exact storage type restoration | Full modules/classes/lambdas, imports/exports/semantic references/types/members/signatures/dispatch/instances, external/generated correspondence and edit-time identity/replacement |
 | Public forms | Installed-client FindEntities for canonical functions and selected additional declaration kinds, and RetrieveFacts for reusable exact-ID declaration facts; scoped partial/empty results and limits | One-step call traversal is demonstrated; SourceContext, broader first-four meanings and full composition remain open |
-| Processing/wire | Requested files/targets, provider run/family scopes, language/context summaries, typed Protobuf/Pydantic result processing, first 64 remainder rows and observed N+1 truncation | All-family/owner/dependency scope, public remainder paging, live state and real freshness barriers; call-specific scope is demonstrated |
+| Processing/wire | Requested files/targets, provider run/family scopes, language/context summaries, typed Protobuf/Pydantic result processing, bounded remainder continuation and observed N+1 truncation | All-family/owner/dependency scope, indexed status scans and target/family freshness barriers; call-specific scope is demonstrated |
 | Analyses | Substantial typed Python/MIR/common code and selected real raw provider inputs | Actual production wiring, corrected algorithms, canonical/public consumers and full family precision/replacement |
 | Updates/corpus | Source-wave/identity/activation seams and prepared independent expectations/edit helpers | Running notify/gix coordinator, invalidation, two-speed publication, retained providers, stale-result rejection and real clean/incremental convergence |
 | Persistence/maintenance | Exact reopen, immutable input deduplication, native checkpoints and retention-aware dry runs | Selective persistence/version reuse, native compaction/destructive vacuum, coordinated retention and real reclamation |
@@ -95,8 +95,8 @@ non-identity source mappings, remaining subjects/directives and composition rema
 | 4C | Partial, committed | Full source/syntax/coordinate/path behavior and parser reuse/live edits |
 | 4D | Partial, committed | Remaining canonical families, authority/unknowns and external/generated/edit-time identity |
 | 4E | Four limited forms demonstrated | Extend calls and SourceContext, broaden first-four meanings and composition |
-| 5A | Partial; call and lexical-reference scopes demonstrated | Query dependency/owner scope, all families, public paging, efficient authorized live status |
-| 5B | Partial live source/semantic barriers and typed status | Target/family-specific convergence, historical selection and remainder paging |
+| 5A | Partial; call and lexical-reference scopes demonstrated | Query dependency/owner scope, all families and efficient authorized live status |
+| 5B | Partial live source/semantic barriers and typed status | Target/family-specific convergence and historical query selection |
 | 6A | Partial native watch/census/rescan loop | Git inclusion, external roots, polling profile and root/config recovery |
 | 6B | Partial live replacement and generation fences | Negative/configuration dependencies, complete identity rules and broader races |
 | 6C | Partial shared orchestration and source/semantic stages | Retained Tree-sitter/Pyrefly/Cargo state, selective persistence and scheduling |
@@ -275,7 +275,7 @@ Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/d
 
 ### 5A. One processing authority with a query dependency scope
 
-**Current status — partial.** Committed requested file/target and run/family relations drive canonical function/declaration query summaries independently of fact rows. Language/context filtering, reason categories and a retained first 64-row remainder page work. Validated call-family scope adds semantic gaps and conservative context-wide potential callers; real implicit-property/decorator and public call cases pass. Lexical-reference scope now includes requested Ruff reference partitions, unresolved/candidate target gaps and explicitly unsupported Rust references. Remaining: all-family/owner/dependency/frontier scope, public remainder paging, authorization-scoped efficient scans, live transitions, precision/next actions and a terminal-versus-runnable distinction. Do not turn semantic unknowns into endlessly pending jobs.
+**Current status — partial.** Committed requested file/target and run/family relations drive canonical function/declaration query summaries independently of fact rows. Language/context filtering, reason categories and bounded public remainder continuation work. The daemon resumes an accepted query ID after restart, reads its retained exact Delta processing selection and preserves the original snapshot/counts through subsequent workspace repair; the 130-partition installed case passes with invalid block/range/released-resource checks (53.38 s). Validated call-family scope adds semantic gaps and conservative context-wide potential callers; real implicit-property/decorator and public call cases pass. Lexical-reference scope now includes requested Ruff reference partitions, unresolved/candidate target gaps and explicitly unsupported Rust references. Remaining: all-family/owner/dependency/frontier scope, authorization-scoped efficient scans, live transitions, precision/next actions and a terminal-versus-runnable distinction. Do not turn semantic unknowns into endlessly pending jobs.
 
 **Surfaces:** provider admission/input observations, processing relations, `src/fabric/production_workspace_startup/input_observations.rs`, query planning/status and lifecycle coordinator.
 
@@ -295,8 +295,10 @@ retained manifest/reopen and presence-safe truncation are implemented. Strict po
 secure source census and await an exact successor; racing selection retries within a deadline.
 Best-available snapshots retain actual freshness. Snapshot freshness/context and separate live workspace
 watermarks/watch health/rescan/runnable state cross the typed wire. Retained old source pages pass
-across live publication. Target/family-specific barriers, historical selectors, public remainder paging
-and all-family terminal convergence remain open. Source-current now selects a durably staged
+across live publication. Target/family-specific barriers, historical query selectors
+and all-family terminal convergence remain open. Public typed remainder pages now retain their
+original query selection across updates and exact restart; old results without selection metadata
+remain readable without acquiring a new continuation. Source-current now selects a durably staged
 source/syntax epoch while semantic work remains pending; the other strict policies conservatively
 await the full provider pass. Status distinguishes source freshness and selected semantic pending.
 
@@ -767,8 +769,8 @@ remaining semantic meanings and composition.
 Continue **6A–6D** by extending the mixed Python/Rust independent-clean and delayed-completion corpus
 with configuration and negative dependencies, selected external input roots, Git inclusion, polling
 and root recovery. Add retained provider state and selective persistence to the implemented source-first
-publication loop. Extend **5A–5B** with public
-remainder pagination and target/family-specific barriers. Add phase metrics and selective persistence
+publication loop. Extend **5A–5B** with all-family/owner/dependency scope, indexed status aggregation
+and target/family-specific barriers. Add phase metrics and selective persistence
 as these consumers become real.
 
 Finish remaining **4A–4D** effective/external/generated inputs and canonical families for **4E**.

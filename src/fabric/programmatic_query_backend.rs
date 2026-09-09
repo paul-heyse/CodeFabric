@@ -1408,6 +1408,15 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 }
                 processing_summaries.push(super::processing_status::QueryProcessing {
                     query_id: query_id.to_string(),
+                    selection: match super::processing_status::ProcessingSelection::for_query(
+                        authority.epoch(),
+                        &scope,
+                        &summary,
+                        *authority.workspace_id().as_bytes(),
+                    ) {
+                        Ok(selection) => selection,
+                        Err(error) => return failed(&artifacts, "processing_selection", error),
+                    },
                     processing: summary,
                     maximum_rows: maximum.map(|value| value as u64),
                     additional_rows: None,

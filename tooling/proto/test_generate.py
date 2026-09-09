@@ -143,6 +143,7 @@ def test_descriptor_census_covers_four_production_packages_and_well_known_depend
             "GetStatus",
             "Handshake",
             "ReadResource",
+            "ReadProcessingRemainder",
             "ReleaseResource",
             "StartQuery",
             "ValidateQuery",

@@ -1300,6 +1300,10 @@ async fn serve_writer_fenced_v2(
             .await;
         }
     }
+    results.install_processing_reader(crate::fabric::processing_status::ProcessingPageReader::new(
+        workspace.resources().clone(),
+        daemon_task_scope.clone(),
+    ));
     let backend = Arc::new(ProgrammaticSemanticQueryBackend::new(
         Arc::clone(&startup.release),
         Arc::clone(&startup.workspace_slots),

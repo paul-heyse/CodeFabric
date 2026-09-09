@@ -1732,6 +1732,16 @@ impl QueryCoordinator {
         query_id: &str,
         authority: QuerySessionAuthority,
     ) -> Result<WorkspaceId, QueryCoordinatorError> {
+        self.retained_result_selection(query_id, authority)
+            .await
+            .map(|(workspace, _)| workspace)
+    }
+
+    pub(crate) async fn retained_result_selection(
+        &self,
+        query_id: &str,
+        authority: QuerySessionAuthority,
+    ) -> Result<(WorkspaceId, RetainedPackageLocator), QueryCoordinatorError> {
         let state = self.state.lock().await;
         let handle = state
             .handles
@@ -1745,7 +1755,9 @@ impl QueryCoordinator {
         {
             return Err(QueryCoordinatorError::ResultNotReleasable);
         }
-        Ok(handle.operation.workspace_id)
+        let locator =
+            retained_locator(&handle.events).ok_or(QueryCoordinatorError::ResultNotReleasable)?;
+        Ok((handle.operation.workspace_id, locator))
     }
 
     /// Return the current accepted execution phase without exposing the mutable handle.

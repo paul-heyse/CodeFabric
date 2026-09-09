@@ -67,6 +67,19 @@ struct ProbeService {
 
 #[tonic::async_trait]
 impl CpgQueryService for ProbeService {
+    async fn read_processing_remainder(
+        &self,
+        _request: Request<
+            codefabric::rpc::generated::codefabric::cpgd::v2::ReadProcessingRemainderRequest,
+        >,
+    ) -> Result<
+        Response<codefabric::rpc::generated::codefabric::cpgd::v2::ReadProcessingRemainderResponse>,
+        Status,
+    > {
+        Err(Status::unimplemented(
+            "processing is exercised by the production daemon fixture",
+        ))
+    }
     async fn handshake(
         &self,
         request: Request<HandshakeRequest>,

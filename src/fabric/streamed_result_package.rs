@@ -2625,6 +2625,7 @@ mod tests {
                 exhaustion_probe: probe,
             });
             let processing = vec![QueryProcessing {
+                selection: None,
                 query_id: "q1".to_owned(),
                 maximum_rows: Some(2),
                 additional_rows: None,
@@ -2706,6 +2707,7 @@ mod tests {
             StreamedResultPackageBuilder::new(sink.clone(), limits(2), test_resource_budget());
         let (epoch, query, lease) = pins();
         let processing = vec![QueryProcessing {
+            selection: None,
             query_id: "q1".to_owned(),
             maximum_rows: Some(2),
             additional_rows: Some(false),

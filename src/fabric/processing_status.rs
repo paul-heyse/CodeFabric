@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+mod continuation;
+pub(crate) use continuation::{ProcessingPageReader, ProcessingSelection};
+
 pub(crate) const ENTITY_PROCESSING_RELATION: &str = "system.entity_processing_scope";
 const MAX_PARTITIONS: usize = 4_000_000;
 const REMAINDER_PAGE_SIZE: usize = 64;
@@ -47,11 +50,25 @@ pub struct QueryProcessing {
     pub maximum_rows: Option<u64>,
     /// None means exhaustion was not observed; false is an observed complete result.
     pub additional_rows: Option<bool>,
+    /// Private exact relation selection. Public projections must omit storage addresses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) selection: Option<ProcessingSelection>,
 }
 
 impl QueryProcessing {
+    pub(crate) fn public_copy(&self) -> Self {
+        let mut value = self.clone();
+        value.selection = None;
+        value
+    }
+
     pub(crate) fn validate(&self) -> bool {
+        self.validate_page(0)
+    }
+
+    pub(crate) fn validate_page(&self, offset: usize) -> bool {
         let value = &self.processing;
+        let end = offset.checked_add(value.remainder.len());
         !self.query_id.is_empty()
             && value.source_generation > 0
             && !value.scope.is_empty()
@@ -61,10 +78,18 @@ impl QueryProcessing {
                 .checked_add(value.remaining_partitions)
                 == Some(value.requested_partitions)
             && value.remainder.len() <= REMAINDER_PAGE_SIZE
-            && u64::try_from(value.remainder.len()).is_ok_and(|n| n <= value.remaining_partitions)
-            && value.next_offset
-                == ((value.remainder.len() as u64) < value.remaining_partitions)
-                    .then_some(value.remainder.len())
+            && end.is_some_and(|n| n as u64 <= value.remaining_partitions)
+            && offset.is_multiple_of(REMAINDER_PAGE_SIZE)
+            && value.remainder.len() as u64
+                == value
+                    .remaining_partitions
+                    .saturating_sub(offset as u64)
+                    .min(REMAINDER_PAGE_SIZE as u64)
+            && value.next_offset == end.filter(|n| (*n as u64) < value.remaining_partitions)
+            && self
+                .selection
+                .as_ref()
+                .is_none_or(|selection| selection.validate(value))
             && self.maximum_rows != Some(0)
             && value
                 .languages
@@ -251,11 +276,12 @@ impl EntityProcessingSnapshot {
         let Some(binding) = epoch.relation(&id) else {
             return Ok(None);
         };
-        let mut stream = epoch
+        let frame = epoch
             .context()
             .table(binding.table_reference.clone())
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        let mut stream = continuation::ordered(frame)?
             .limit(0, Some(MAX_PARTITIONS + 1))
             .map_err(|e| e.to_string())?
             .execute_stream()

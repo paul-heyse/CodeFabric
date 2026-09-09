@@ -43,6 +43,7 @@ from .contracts.wire_models import (
     AuthorityProjection,
     InputRequirementProjection,
     JsonObject,
+    ProcessingToolOutput,
     PublicStatusProjection,
     PublicToolMeta,
     QueryToolInput,
@@ -1050,6 +1051,46 @@ def create_server(
             raise
         except Exception:
             _LOGGER.error("redacted internal status presentation failure")
+            raise ToolError("INTERNAL") from None
+
+    @server.tool(
+        name="get_code_graph_processing",
+        version="2.3",
+        description="Read the next page of unfinished processing for an existing query snapshot.",
+        tags={"cpg", "status", "read"},
+        annotations=READ_ONLY,
+        output_schema=_output_schema(WireSchemaName.PROCESSING_TOOL_OUTPUT),
+    )
+    async def get_code_graph_processing(
+        daemon_query_id: Annotated[str, Field(min_length=1, max_length=256)],
+        query_id: Annotated[str, Field(min_length=1, max_length=256)],
+        offset: Annotated[int, Field(gt=0, le=2**64 - 1, multiple_of=64)],
+        ctx: Context = _CURRENT_CONTEXT,
+        port: DaemonPort = port_dependency,
+    ) -> ProcessingToolOutput:
+        try:
+            result = await port.processing_remainder(
+                daemon_query_id, query_id, offset, correlation_id=_correlation_id(ctx)
+            )
+            if result.processing.next_offset is None:
+                await port.release_resource(
+                    result.public_handle,
+                    release_id=f"release:{result.public_handle}",
+                    correlation_id=_correlation_id(ctx),
+                    timeout_seconds=port.current_settings().cancellation_cleanup_timeout_seconds,
+                )
+            return ProcessingToolOutput(
+                authority=_authority(result.authority),
+                package_id=result.package_id,
+                epoch_id=result.epoch_id,
+                processing=result.processing,
+            )
+        except DaemonRpcError as error:
+            raise ToolError(f"{error.status.name}:{error.error.code}") from None
+        except DaemonProtocolError:
+            raise ToolError("DAEMON_PROTOCOL_ERROR") from None
+        except Exception:
+            _LOGGER.error("redacted internal processing presentation failure")
             raise ToolError("INTERNAL") from None
 
     @server.tool(

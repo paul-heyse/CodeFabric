@@ -662,6 +662,48 @@ impl<B: SemanticQueryBackend> QueryApplicationService<B> {
         Ok(())
     }
 
+    async fn processing_resource(
+        &self,
+        query_id: &str,
+        session: &AuthorizedSession,
+        read: &StreamedResourceRead,
+    ) -> Result<String, Status> {
+        let (workspace, locator) = self
+            .coordinator
+            .retained_result_selection(query_id, query_session_authority(session)?)
+            .await
+            .map_err(coordinator_status)?;
+        if !session.workspace_ids().contains(&workspace) {
+            return Err(public_status(Code::PermissionDenied, "WORKSPACE_DENIED"));
+        }
+        match self.results.processing_handle(query_id, read).await {
+            Ok(handle) => return Ok(handle),
+            Err(StreamedResultRegistryError::UnknownPackage) => {}
+            Err(error) => return Err(result_status(error)),
+        }
+        match self
+            .results
+            .reissue_retained(
+                query_id,
+                session.principal_id(),
+                workspace,
+                session.daemon_generation(),
+                session.policy_generation(),
+                session.revocation_generation(),
+                &locator,
+                now_millis(),
+            )
+            .await
+        {
+            Ok(_) | Err(StreamedResultRegistryError::PackageIdentityCollision) => {}
+            Err(error) => return Err(result_status(error)),
+        }
+        self.results
+            .processing_handle(query_id, read)
+            .await
+            .map_err(result_status)
+    }
+
     async fn collect_retention(&self, observed_at_unix_ms: i64) -> Result<(), Status> {
         collect_retention_authority(&self.results, &self.coordinator, observed_at_unix_ms).await
     }
@@ -2379,6 +2421,73 @@ impl<B: SemanticQueryBackend> CpgQueryService for ProductionQueryService<B> {
 
     type ReadResourceStream = ResourceStream;
 
+    async fn read_processing_remainder(
+        &self,
+        request: Request<
+            crate::rpc::generated::codefabric::cpgd::v2::ReadProcessingRemainderRequest,
+        >,
+    ) -> Result<
+        Response<crate::rpc::generated::codefabric::cpgd::v2::ReadProcessingRemainderResponse>,
+        Status,
+    > {
+        use crate::rpc::generated::codefabric::cpgd::v2::ReadProcessingRemainderResponse;
+        let budget = request_budget(request.get_ref().context.as_ref())?;
+        let _admission = self.admission.data()?;
+        budget
+            .run(Box::pin(async {
+                let session = self
+                    .authorize(&request, SessionOperation::ReadResource, None)
+                    .await?;
+                validate_context(request.get_ref().context.as_ref(), &session)?;
+                let value = request.get_ref();
+                if value.daemon_query_id.is_empty()
+                    || value.daemon_query_id.len() > 256
+                    || value.query_id.is_empty()
+                    || value.query_id.len() > 256
+                {
+                    return Err(public_status(Code::InvalidArgument, "PROCESSING_SELECTOR"));
+                }
+                let offset = usize::try_from(value.offset)
+                    .map_err(|_| public_status(Code::OutOfRange, "PROCESSING_OFFSET"))?;
+                let mut read = StreamedResourceRead {
+                    principal_id: session.principal_id(),
+                    workspace_ids: Arc::new(session.workspace_ids().clone()),
+                    daemon_generation: session.daemon_generation(),
+                    policy_generation: session.policy_generation(),
+                    revocation_generation: session.revocation_generation(),
+                    public_handle: String::new(),
+                    selector: StreamedResourceSelector::Processing(value.query_id.clone()),
+                    offset: value.offset,
+                    maximum_bytes: 0,
+                    observed_at_unix_ms: now_millis(),
+                };
+                let public_handle = self
+                    .processing_resource(&value.daemon_query_id, &session, &read)
+                    .await?;
+                read.public_handle.clone_from(&public_handle);
+                let (package_id, epoch, summary) = self
+                    .results
+                    .read_processing(read, budget.deadline)
+                    .await
+                    .map_err(result_status)?;
+                // Recheck live session authority after native work and before disclosing a page.
+                self.authorize(&request, SessionOperation::ReadResource, None)
+                    .await?;
+                let handle = summary
+                    .processing
+                    .next_offset
+                    .map(|_| public_handle.clone());
+                Ok(Response::new(ReadProcessingRemainderResponse {
+                    authority: Some(authority(&session)),
+                    package_id,
+                    epoch_id: format!("snapshot:{}", hex(epoch.as_bytes())),
+                    processing: Some(processing_page_summary(summary, offset, handle)?),
+                    public_handle,
+                }))
+            }))
+            .await
+    }
+
     async fn read_resource(
         &self,
         request: Request<ReadResourceRequest>,
@@ -2918,22 +3027,26 @@ async fn watch_next(mut state: WatchState) -> Option<(Result<QueryEvent, Status>
             let policy_generation = state.policy_generation;
             let revocation_generation = state.revocation_generation;
             let authority = state.authority.clone();
-            let wire = bounded_stream_step(state.budget, &mut state.admission_permit, async move {
-                event_to_wire(
-                    &coordinator,
-                    &results,
-                    &query_id,
-                    principal_id,
-                    workspace_id,
-                    daemon_generation,
-                    policy_generation,
-                    revocation_generation,
-                    event,
-                    cursor,
-                    authority,
-                )
-                .await
-            })
+            let wire = bounded_stream_step(
+                state.budget,
+                &mut state.admission_permit,
+                Box::pin(async move {
+                    event_to_wire(
+                        &coordinator,
+                        &results,
+                        &query_id,
+                        principal_id,
+                        workspace_id,
+                        daemon_generation,
+                        policy_generation,
+                        revocation_generation,
+                        event,
+                        cursor,
+                        authority,
+                    )
+                    .await
+                }),
+            )
             .await;
             return Some((wire, state));
         }
@@ -3124,7 +3237,13 @@ async fn event_to_wire(
                 processing: registration
                     .processing
                     .into_iter()
-                    .map(processing_summary)
+                    .map(|value| {
+                        let handle = registration
+                            .processing_handles
+                            .get(&value.query_id)
+                            .cloned();
+                        processing_page_summary(value, 0, handle)
+                    })
                     .collect::<Result<_, _>>()?,
                 header: Some(header()),
                 package_id: registration.package_id.clone(),
@@ -3999,13 +4118,15 @@ fn safe_error(
     }
 }
 
-fn processing_summary(
+fn processing_page_summary(
     value: crate::fabric::processing_status::QueryProcessing,
+    offset: usize,
+    remainder_handle: Option<String>,
 ) -> Result<crate::rpc::generated::codefabric::cpgd::v2::QueryProcessingSummary, Status> {
     use crate::rpc::generated::codefabric::cpgd::v2::{
         ProcessingRemainder, ProcessingState, QueryProcessingSummary,
     };
-    if !value.validate() {
+    if !value.validate_page(offset) {
         return Err(public_status(Code::DataLoss, "RESULT_EVENT_BINDING"));
     }
     let summary = value.processing;
@@ -4052,6 +4173,8 @@ fn processing_summary(
         next_offset: summary.next_offset.map(|value| value as u64),
         maximum_rows: value.maximum_rows,
         additional_rows: value.additional_rows,
+        remainder_handle,
+        remainder_offset: Some(offset as u64),
     })
 }
 
@@ -4195,6 +4318,9 @@ fn coordinator_status(error: QueryCoordinatorError) -> Status {
             (Code::DeadlineExceeded, "QUERY_DEADLINE")
         }
         QueryCoordinatorError::AlreadyTerminal => (Code::FailedPrecondition, "QUERY_TERMINAL"),
+        QueryCoordinatorError::ResultNotReleasable => {
+            (Code::FailedPrecondition, "RESULT_NOT_RETAINED")
+        }
         QueryCoordinatorError::Cancelled => (Code::Cancelled, "QUERY_CANCELLED"),
         QueryCoordinatorError::NonCanonicalRequest
         | QueryCoordinatorError::CanonicalRequest(_)
@@ -4213,6 +4339,9 @@ fn coordinator_status(error: QueryCoordinatorError) -> Status {
 
 fn result_status(error: StreamedResultRegistryError) -> Status {
     let (code, public_code) = match error {
+        StreamedResultRegistryError::ProcessingUnavailable => {
+            (Code::Unavailable, "PROCESSING_UNAVAILABLE")
+        }
         StreamedResultRegistryError::SourceAccessDenied => {
             (Code::PermissionDenied, "SOURCE_ACCESS_DENIED")
         }
@@ -4279,6 +4408,8 @@ fn public_error_detail(code: Code, public_code: &str) -> SafeErrorMetadata {
         "QUERY_NOT_FOUND" => SafeErrorCode::QueryNotFound,
         "RESOURCE_NOT_FOUND" => SafeErrorCode::ResourceNotFound,
         "RESOURCE_EXPIRED" => SafeErrorCode::ResourceExpired,
+        "RESOURCE_RELEASED" => SafeErrorCode::ResourceReleased,
+        "RESULT_NOT_RETAINED" => SafeErrorCode::ResultNotRetained,
         "RESOURCE_RANGE" => SafeErrorCode::RangeNotSatisfiable,
         "QUERY_CAPACITY" | "SESSION_CAPACITY" | "CHALLENGE_CAPACITY" | "START_CAPACITY"
         | "RESOURCE_CAPACITY" => SafeErrorCode::CapacityUnavailable,

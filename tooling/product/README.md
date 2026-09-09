@@ -37,3 +37,9 @@ current source and pending checker/compiler scope, checks a semantic deadline, r
 candidate with a newer edit, and restarts from a durable pending source epoch. Its private debug-only
 pause has cancellation and a deadline; release builds reject the fault configuration. This case also
 has a 600 s harness bound for repeated contained builds.
+
+`just golden --case processing-pages` queries 130 unfinished Python source partitions, consumes
+the fact/manifest resources, restarts the daemon, repairs the workspace and reads the remaining
+64-row and 2-row processing pages from the original exact snapshot. The paging tool resumes the
+accepted daemon query ID and releases its separate resource after the final page. The default
+case deadline is 600 seconds; `--timeout` overrides it.

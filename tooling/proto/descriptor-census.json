@@ -643,6 +643,16 @@
               "name": "SAFE_ERROR_CODE_FRESHNESS_UNAVAILABLE",
               "number": 19,
               "options": {}
+            },
+            {
+              "name": "SAFE_ERROR_CODE_RESOURCE_RELEASED",
+              "number": 20,
+              "options": {}
+            },
+            {
+              "name": "SAFE_ERROR_CODE_RESULT_NOT_RETAINED",
+              "number": 21,
+              "options": {}
             }
           ]
         },
@@ -3320,6 +3330,32 @@
               "proto3_optional": true,
               "type": "TYPE_BOOL",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "remainderHandle",
+              "label": "LABEL_OPTIONAL",
+              "name": "remainder_handle",
+              "number": 13,
+              "oneof": "_remainder_handle",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "remainderOffset",
+              "label": "LABEL_OPTIONAL",
+              "name": "remainder_offset",
+              "number": 14,
+              "oneof": "_remainder_offset",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_UINT64",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v2.QueryProcessingSummary",
@@ -3334,6 +3370,14 @@
             },
             {
               "name": "_additional_rows",
+              "options": {}
+            },
+            {
+              "name": "_remainder_handle",
+              "options": {}
+            },
+            {
+              "name": "_remainder_offset",
               "options": {}
             }
           ],
@@ -3417,6 +3461,143 @@
               "options": {}
             }
           ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "context",
+              "label": "LABEL_OPTIONAL",
+              "name": "context",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v2.RequestContext"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "daemonQueryId",
+              "label": "LABEL_OPTIONAL",
+              "name": "daemon_query_id",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "queryId",
+              "label": "LABEL_OPTIONAL",
+              "name": "query_id",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "offset",
+              "label": "LABEL_OPTIONAL",
+              "name": "offset",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_UINT64",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.cpgd.v2.ReadProcessingRemainderRequest",
+          "oneofs": [],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "authority",
+              "label": "LABEL_OPTIONAL",
+              "name": "authority",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v2.AuthorityGeneration"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "packageId",
+              "label": "LABEL_OPTIONAL",
+              "name": "package_id",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "epochId",
+              "label": "LABEL_OPTIONAL",
+              "name": "epoch_id",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "processing",
+              "label": "LABEL_OPTIONAL",
+              "name": "processing",
+              "number": 4,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v2.QueryProcessingSummary"
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "publicHandle",
+              "label": "LABEL_OPTIONAL",
+              "name": "public_handle",
+              "number": 5,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.cpgd.v2.ReadProcessingRemainderResponse",
+          "oneofs": [],
           "options": {},
           "reserved_names": [],
           "reserved_ranges": []
@@ -5286,6 +5467,14 @@
               "name": "Handshake",
               "options": {},
               "output_type": ".codefabric.cpgd.v2.HandshakeResponse",
+              "server_streaming": false
+            },
+            {
+              "client_streaming": false,
+              "input_type": ".codefabric.cpgd.v2.ReadProcessingRemainderRequest",
+              "name": "ReadProcessingRemainder",
+              "options": {},
+              "output_type": ".codefabric.cpgd.v2.ReadProcessingRemainderResponse",
               "server_streaming": false
             },
             {
