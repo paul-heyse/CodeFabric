@@ -154,8 +154,12 @@ fn subject_facts(
             (
                 "selection.context",
                 "context_kind",
-                &["exact source span"],
-                "exact source span",
+                if schema.field_with_name("source_mapping").is_ok() {
+                    &["exact source span", "function definition", "function body"]
+                } else {
+                    &["exact source span"]
+                },
+                "",
             ),
             (
                 "selection.text-handling",

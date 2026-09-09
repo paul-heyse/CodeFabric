@@ -156,7 +156,11 @@ impl EntityQueryScope {
             return Err("unsupported entity language".to_owned());
         }
         match selector {
-            "function" | "declarations" | "calls" | "lexical-references" => {}
+            "function"
+            | "declarations"
+            | "calls"
+            | "lexical-references"
+            | "function-source-context" => {}
             selected
                 if crate::production_query_recipe::CANONICAL_ENTITY_SELECTORS
                     .iter()
@@ -184,6 +188,7 @@ impl EntityQueryScope {
             .collect::<Result<_, _>>()?;
         Ok(Self {
             family: match selector {
+                "function-source-context" => "function-source-context",
                 "calls" => "call-targets",
                 "lexical-references" => "lexical-references",
                 _ => "function-declarations",
@@ -486,7 +491,10 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
             || generations.value(row) != generation
             || !matches!(
                 family.value(row),
-                "function-declarations" | "call-targets" | "lexical-references"
+                "function-declarations"
+                    | "call-targets"
+                    | "lexical-references"
+                    | "function-source-context"
             )
             || !matches!(language.value(row), "python" | "rust")
             || !matches!(

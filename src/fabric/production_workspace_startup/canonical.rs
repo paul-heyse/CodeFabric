@@ -80,7 +80,7 @@ pub(super) fn install(
         Kind::EntitySelector,
         Kind::CallSelector,
         Kind::RelationshipSelector,
-        Kind::SourceContext,
+        Kind::SourceContext { python, rust },
     ] {
         builder
             .add_transformation(Arc::new(Canonical::new(kind, inventory)))
@@ -111,7 +111,10 @@ enum Kind {
     EntitySelector,
     CallSelector,
     RelationshipSelector,
-    SourceContext,
+    SourceContext {
+        python: bool,
+        rust: bool,
+    },
 }
 
 struct Canonical {
@@ -158,10 +161,10 @@ impl Canonical {
                 relationship_selector::fields(),
                 vec![call_selector::RELATION, REFERENCE, ENTITY],
             ),
-            Kind::SourceContext => (
+            Kind::SourceContext { python, rust } => (
                 source_context::RELATION,
                 source_context::fields(),
-                vec![DECLARATION, SOURCE],
+                source_context::dependencies(python, rust),
             ),
             Kind::CallSite {
                 python,
@@ -498,7 +501,7 @@ impl ProgrammaticTransformation for Canonical {
             Kind::Processing { pyrefly } => processing::build(inputs, pyrefly),
             Kind::CallSelector => call_selector::build(inputs),
             Kind::RelationshipSelector => relationship_selector::build(inputs),
-            Kind::SourceContext => source_context::build(inputs),
+            Kind::SourceContext { python, rust } => source_context::build(inputs, python, rust),
             Kind::Source => self.source(inputs),
             Kind::Reference { python: true } => self.references(inputs),
             Kind::Reference { python: false } => empty(reference_fields()),
@@ -1122,6 +1125,7 @@ mod tests {
         }
         if python {
             for relation in [
+                NativeSyntaxRelation::TreeSitterCstNode,
                 NativeSyntaxRelation::RuffCallable,
                 NativeSyntaxRelation::RuffCallSite,
                 NativeSyntaxRelation::RuffCallableSyntax,

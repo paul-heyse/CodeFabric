@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `38629d50` (`Preserve all Python source inputs with configured import roots`);
-raw Python source paths and exact diagnostic ownership are the current implementation slice.
+Last production commit: `4516a5a7` (`Preserve raw Python paths and exact diagnostic ownership`);
+function definition/body source context is the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -126,6 +126,33 @@ request-authority and source-materialization tests pass. Default/featureless roo
 tests, 186 tooling tests, docs navigation and governance pass. Strict lint remains open on the
 existing backlog; final library Clippy completes with 958 warnings and no new findings. This does not close source
 syntax coverage, complete public-form semantics, composition, freshness or outcomes 4–8.
+
+## Function definition and body source contexts
+
+`RetrieveSourceContext` now selects `function definition` and `function body` alongside the exact
+canonical declaration span. Native DataFusion joins the Python binding to its exact Tree-sitter name
+child and the Rust declaration header to the exact function-item start. Body selection follows the
+same parser run's named body child. File/digest/generation and parser owner keys prevent cross-file
+or nested-function substitution. Results identify the source-mapping method. Byte limits, lossless
+text/binary output and live source authorization use the existing materialization path; the actual
+context kind now participates in source-context identity. Older catalogs expose only the meanings
+supported by their schema.
+
+A separate `function-source-context` processing family starts from requested declaration partitions
+and marks unmapped function owners partial. Missing syntax, stale digests and different contexts
+cannot establish body absence; pending provider scope remains pending. Public summaries retain the
+source-context family label, and private remainder paging retains the selected internal family.
+The native scope regression passes for good/missing owners, stale digests, two Rust contexts and
+pending work. The initial 29-case source/canonical/processing selection passes, including the installed
+source-disclosure scenario (38.20 s). The mixed live/clean function scenario passes (206.25 s on 2026-09-09): nested Python definitions,
+CRLF/Unicode and byte truncation, Rust braces in strings/comments, edits and exact restoration all
+match independent source expectations and clean daemons. `just golden --case function-source-live`
+selects it. Default/featureless root checks, all 202 tooling tests, tooling lint, governance, docs
+navigation and changed-file formatting pass. Root library Clippy retains the 955-warning baseline;
+combined library/integration Clippy reports no findings on changed lines.
+Syntax nodes determine definition/body boundaries; separate decorator or attribute nodes need broader
+context selection. Full syntax outlines, surrounding-line selection, other source subjects and
+composition remain open.
 
 ## Live source reconciliation and current query selection
 

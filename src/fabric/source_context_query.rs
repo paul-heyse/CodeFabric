@@ -31,7 +31,7 @@ pub struct SourceContextParameters {
     pub(crate) maximum_source_bytes: usize,
 }
 
-pub(crate) const INPUT_FIELDS: [&str; 9] = [
+pub(crate) const INPUT_FIELDS: [&str; 10] = [
     "public_entity_id",
     "context_id",
     "file_id",
@@ -41,6 +41,7 @@ pub(crate) const INPUT_FIELDS: [&str; 9] = [
     "start_byte",
     "end_byte",
     "source_bytes",
+    "context_kind",
 ];
 
 pub(crate) fn output_type() -> DataType {
@@ -77,6 +78,7 @@ pub(crate) fn function(parameters: SourceContextParameters) -> Arc<ScalarUDF> {
             DataType::UInt64,
             DataType::UInt64,
             DataType::Binary,
+            DataType::Utf8,
         ],
         output_type(),
         Volatility::Volatile,
@@ -198,7 +200,7 @@ fn materialize(
                     IdentityDomain::AnalysisContext,
                 )?),
                 snapshot_id: Arc::from(parameters.snapshot_id.as_str()),
-                context_kind: Arc::from("exact source span"),
+                context_kind: Arc::from(typed::<StringArray>(&arrays, 9)?.value(row)),
                 policy_identity: Arc::from(parameters.policy_identity.as_str()),
                 source_bytes: source,
                 declared_byte_length: source.len(),

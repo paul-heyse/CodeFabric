@@ -1345,6 +1345,27 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                             );
                         }
                     }
+                } else if source_context {
+                    match validated
+                        .ingress()
+                        .selections
+                        .iter()
+                        .find(|selection| {
+                            selection.query_id == *query_id
+                                && selection.selection_id.as_ref() == "selection.context"
+                        })
+                        .map(|selection| &selection.value)
+                    {
+                        Some(SemanticClauseValue::Text(value))
+                            if matches!(
+                                value.as_ref(),
+                                "function definition" | "function body"
+                            ) =>
+                        {
+                            "function-source-context"
+                        }
+                        _ => "declarations",
+                    }
                 } else if declarations {
                     "declarations"
                 } else {

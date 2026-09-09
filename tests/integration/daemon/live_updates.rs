@@ -1018,6 +1018,195 @@ fn live_python_raw_paths_and_root_initializer_keep_exact_source_identity() {
     supervisor.stop();
 }
 
+fn function_source_expectations(edited: bool) -> (String, String, Vec<(String, String, String)>) {
+    let inner = if edited {
+        "return \"newé\""
+    } else {
+        "return \"é\""
+    };
+    let python_body = format!("def inner():\r\n        {inner}\r\n    return inner()");
+    let python_definition = format!("def outer(value: str = \"é\"):\r\n    {python_body}");
+    let python_other = "def other(): return 3";
+    let rust_body = format!(
+        "{{\n    // A comment with a closing brace }}\n    let text = \"{{ literal }}\";\n    if text.is_empty() {{ 0 }} else {{ {} }}\n}}",
+        if edited { 6 } else { 4 }
+    );
+    let rust_definition = format!("pub fn rust_outer() -> u32 {rust_body}");
+    let rust_other = "pub fn rust_other() -> u32 { 5 }";
+    (
+        format!("# source prefix\r\n{python_definition}\r\n\r\n{python_other}\r\n"),
+        format!("{rust_definition}\n{rust_other}\n"),
+        vec![
+            ("outer".to_owned(), python_definition, python_body),
+            (
+                "inner".to_owned(),
+                format!("def inner():\r\n        {inner}"),
+                inner.to_owned(),
+            ),
+            (
+                "other".to_owned(),
+                python_other.to_owned(),
+                "return 3".to_owned(),
+            ),
+            ("fixture::rust_outer".to_owned(), rust_definition, rust_body),
+            (
+                "fixture::rust_other".to_owned(),
+                rust_other.to_owned(),
+                "{ 5 }".to_owned(),
+            ),
+        ],
+    )
+}
+
+fn function_source_observation(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    expected: &[(String, String, String)],
+) -> Vec<SemanticObservation> {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "function declarations",
+    );
+    let entities = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-entities"),
+        request.clone(),
+    );
+    assert_eq!(entities.rows.len(), expected.len());
+    let by_name = entities
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row["name"].as_str().unwrap(),
+                row["public_entity_id"].clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        by_name.keys().copied().collect::<BTreeSet<_>>(),
+        expected.iter().map(|(name, _, _)| name.as_str()).collect()
+    );
+    let subjects = by_name
+        .values()
+        .map(|id| json!({"entity_id": id}))
+        .collect::<Vec<_>>();
+    let mut observed = Vec::new();
+    for (index, kind) in ["function definition", "function body"]
+        .into_iter()
+        .enumerate()
+    {
+        request["queries"] = json!([{
+            "request": "retrieve source and syntax context", "query_id": "source", "about": subjects,
+            "context": kind, "return": {"maximum_source_bytes": 4096, "limit": {"maximum_results": 32}}
+        }]);
+        let result = public_query(
+            fixture,
+            stack,
+            &format!("{phase}-source-{index}"),
+            request.clone(),
+        );
+        assert_eq!(
+            result.rows.len(),
+            expected.len(),
+            "{phase}: exact syntax owner for each function"
+        );
+        assert_eq!(
+            result.processing[0]["remaining_partitions"], 0,
+            "{phase}: function source scope"
+        );
+        for (name, definition, body) in expected {
+            let row = result.rows.iter().find(|row| row["name"] == *name).unwrap();
+            let text = if index == 0 { definition } else { body };
+            assert_eq!(row["public_entity_id"], by_name[name.as_str()]);
+            assert_eq!(row["context_kind"], kind);
+            assert_eq!(
+                row["source_context"]["text"], *text,
+                "{phase}: {name}: {kind}"
+            );
+            assert_eq!(row["source_context"]["returned_bytes"], text.len());
+            assert_eq!(row["source_context"]["omitted_bytes"], 0);
+            assert_eq!(row["source_context"]["complete"], true);
+            assert_eq!(row["source_context"]["start_byte"], row["start_byte"]);
+            assert_eq!(row["source_context"]["end_byte"], row["end_byte"]);
+            assert_eq!(
+                row["source_mapping"],
+                if name.starts_with("fixture::") {
+                    "exact-function-header-start"
+                } else {
+                    "exact-function-name-child"
+                }
+            );
+        }
+        observed.push(result);
+    }
+    if phase == "function-initial" {
+        request["queries"][0]["about"] = json!([{"entity_id": by_name["inner"]}]);
+        request["queries"][0]["return"]["maximum_source_bytes"] = json!(9);
+        let limited = public_query(fixture, stack, "function-body-split-unicode", request);
+        let source = &limited.rows[0]["source_context"];
+        assert!(source["text"].is_null());
+        assert_eq!(source["bytes"], "72657475726e2022c3");
+        assert_eq!(source["returned_bytes"], 9);
+        assert_eq!(source["omitted_bytes"], 2);
+        assert_eq!(source["complete"], false);
+    }
+    observed.insert(0, entities);
+    observed
+}
+
+#[test]
+fn live_mixed_function_definitions_and_bodies_equal_exact_clean_source() {
+    let (python, rust, expected) = function_source_expectations(false);
+    let fixture = ProductionFixture::with_source(python.as_bytes());
+    let root = Path::new(&fixture.workspace.root_path_display);
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(root.join("src/lib.rs"), rust).unwrap();
+    fs::write(root.join("Cargo.toml"), "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[lib]\ntest = false\ndoctest = false\n").unwrap();
+    fs::write(
+        root.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+        store.backup_to(&registration).unwrap();
+    }
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let initial = function_source_observation(&fixture, &stack, "function-initial", &expected);
+    for (phase, edited) in [("function-edited", true), ("function-restored", false)] {
+        let (python, rust, expected) = function_source_expectations(edited);
+        fs::write(root.join("sample.py"), python).unwrap();
+        fs::write(root.join("src/lib.rs"), rust).unwrap();
+        let live = function_source_observation(&fixture, &stack, phase, &expected);
+        let clean = clean_fixture(&fixture, &registration, &stack);
+        let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+        let expected =
+            function_source_observation(&clean, &stack, &format!("clean-{phase}"), &expected);
+        assert_eq!(
+            live, expected,
+            "{phase}: pinned function syntax agrees with independent clean state"
+        );
+        if !edited {
+            assert_eq!(
+                live, initial,
+                "restoring source restores definitions and identities"
+            );
+        }
+        clean_supervisor.stop();
+    }
+    supervisor.stop();
+}
+
 fn pending_semantic_candidate(fixture: &ProductionFixture) -> PathBuf {
     eprintln!(
         "waiting for semantic publication in {}",

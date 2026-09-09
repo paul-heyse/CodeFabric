@@ -59,7 +59,10 @@ impl ProcessingSelection {
             && self.languages.iter().eq(summary.languages.iter())
             && matches!(
                 self.family.as_str(),
-                "function-declarations" | "call-targets" | "lexical-references"
+                "function-declarations"
+                    | "call-targets"
+                    | "lexical-references"
+                    | "function-source-context"
             )
             && self.contexts.len() <= 4096
     }
@@ -67,6 +70,7 @@ impl ProcessingSelection {
     fn scope(&self) -> Result<EntityQueryScope, String> {
         let family = match self.family.as_str() {
             "function-declarations" => "function-declarations",
+            "function-source-context" => "function-source-context",
             "call-targets" => "call-targets",
             "lexical-references" => "lexical-references",
             _ => return Err("invalid retained processing family".to_owned()),

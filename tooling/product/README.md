@@ -63,3 +63,8 @@ It has a 600-second default harness deadline.
 display conversion, filenames with URI metacharacters and a root initializer. It checks exact
 file/entity identities, local calls and source spans through deletion/recreation and independent
 clean builds. It has a 600-second default harness deadline.
+
+`just golden --case function-source-live` compares Python/Rust function definitions and bodies
+against independently written source expectations and separate clean builds after edits/restoration.
+It includes nested Python functions, CRLF/Unicode, a byte limit splitting a character and Rust braces
+inside strings/comments. Its default harness deadline is 600 seconds.
