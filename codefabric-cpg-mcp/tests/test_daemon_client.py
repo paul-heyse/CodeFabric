@@ -27,10 +27,29 @@ from codefabric_cpg_mcp.daemon import (
     ReferenceSelector,
     StringInputAnswer,
 )
-from codefabric_cpg_mcp.daemon.client import _processing_summary
+from codefabric_cpg_mcp.daemon.client import _processing_summary, _safe_error
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2 as query_pb
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2_grpc as query_grpc
 from codefabric_cpg_mcp.settings import Settings
+
+
+@pytest.mark.parametrize(
+    ("reference", "expected"),
+    [
+        (query_pb.SAFE_DIAGNOSTIC_REFERENCE_LIFECYCLE_FAILED_CLOSED, "lifecycle.failed_closed"),
+        (query_pb.SAFE_DIAGNOSTIC_REFERENCE_QUERY_CHALLENGE_REJECTED, "query.challenge_rejected"),
+        (query_pb.SAFE_DIAGNOSTIC_REFERENCE_QUERY_TERMINAL, "query.terminal"),
+    ],
+)
+def test_released_safe_diagnostics_preserve_their_closed_public_name(
+    reference: query_pb.SafeDiagnosticReference, expected: str
+) -> None:
+    value = query_pb.SafeErrorMetadata(
+        code=query_pb.SAFE_ERROR_CODE_INTERNAL,
+        layer=query_pb.SAFE_ERROR_LAYER_QUERY,
+        diagnostic_reference=reference,
+    )
+    assert _safe_error(value).diagnostic_reference == expected
 
 
 def test_typed_processing_rejects_inconsistent_scope_and_preserves_unknown_exhaustion() -> None:

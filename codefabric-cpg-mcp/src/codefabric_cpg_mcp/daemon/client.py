@@ -672,7 +672,7 @@ def _safe_error(message: query_pb.SafeErrorMetadata) -> SafeError:
                     "LIFECYCLE_FAILED_CLOSED": "lifecycle.failed_closed",
                     "QUERY_CHALLENGE_REJECTED": "query.challenge_rejected",
                     "QUERY_TERMINAL": "query.terminal",
-                }.get(diagnostic_name),
+                }.get(diagnostic_name.upper()),
                 strict=True,
             )
         return SafeError(
