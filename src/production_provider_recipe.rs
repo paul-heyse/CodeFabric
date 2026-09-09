@@ -56,17 +56,17 @@ use crate::rustc_relation_schema::{
 use crate::rustc_service::TrustQualifiedRustcCompilation;
 use crate::schema_contract::canonical_arrow_schema_fingerprint;
 use crate::semantic_release::{
-    CompiledProviderProgram, CompiledQueryProgram,
-    CompiledTransformationProgram, ProviderFamilyProgramDefinition, ProviderLaneProgramDefinition,
-    ProviderProgramDefinition, SemanticReleaseError,
+    CompiledProviderProgram, CompiledQueryProgram, CompiledTransformationProgram,
+    ProviderFamilyProgramDefinition, ProviderLaneProgramDefinition, ProviderProgramDefinition,
+    SemanticReleaseError,
 };
 
 const RECIPE_RELEASE: &str = "codefabric-provider-admission-v2.3.0";
 
 /// Independently supplied authority for one provider lane and its requested semantic scope.
 ///
-/// `requested_units` is the application-owned request census. It is deliberately not inferred
-/// from provider-emitted rows, so provider output cannot enlarge its own authority contract.
+/// `requested_units` counts selected files or compilation units. Compiler owner expansion is
+/// supplied separately from accepted owner controls, never from the number of emitted fact rows.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ExactProviderLaneAuthority {
     source_pin: SourcePin,

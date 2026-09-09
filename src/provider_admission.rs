@@ -2571,7 +2571,10 @@ fn declared_coverage(
     if requested_units != binding.requested_units {
         return Err(coverage_error(
             relation_name,
-            "provider requested units differ from the accepted model request",
+            &format!(
+                "provider family {} requested {requested_units} units; selected scope requires {}",
+                declared.family_value, binding.requested_units
+            ),
         ));
     }
     let status = if any_unknown {

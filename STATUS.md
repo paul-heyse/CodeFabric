@@ -4,13 +4,14 @@ Updated 2026-09-09. Current work is in `/home/paul/CodeFabric` on `master`.
 
 ## Current handoff
 
-**Production implementation is active. Outcomes 1–3 are implemented for the current Linux workflow; outcome 4 is in progress and outcomes 5–8 remain open.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). The four existing golden cases pass. Pyrefly honors selected Python version/platform settings and publishes semantic facts during fresh daemon startup. Real contained Rust compilation now passes its provider-boundary test; Rust daemon publication remains next. These checks do not establish mixed-language or full-product completion.
+**Production implementation is active. Outcomes 1–3 are implemented for the current Linux workflow; outcome 4 is in progress and outcomes 5–8 remain open.** Follow the [production implementation plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md). The four existing golden cases pass. Pyrefly honors selected Python version/platform settings and publishes semantic facts during fresh daemon startup. Real contained Rust compilation and mixed-language daemon publication now pass for a dependency-free, two-file Cargo package. These checks do not establish mixed-language or full-product completion.
 
 The [detailed outcomes 4–8 plan](docs/plans/codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md)
 now expands that same backlog with the full fact-family/query scope, library API choices,
-dependency order and acceptance criteria. This 2026-09-09 update is planning only; no additional
-production behavior is claimed. Next implementation slice is 4A: production contained Rust
-context/dependency preparation and scheduling, followed by canonical normalization and public queries.
+dependency order and acceptance criteria. Implementation of that detailed plan is active.
+The first 4A slice publishes actual Rust compiler relations during daemon startup; remaining
+4A work is dependency materialization, multiple targets/contexts and reusable compiler inputs,
+followed by canonical normalization and public queries.
 
 Current production work, 2026-09-08–09:
 
@@ -69,6 +70,28 @@ golden cases pass with this behavior. RSS is sampled on Linux; other platforms r
 unavailable, not zero. Sampling cannot guarantee immunity from OOM. Provider containment,
 shared pools, work/result bounds and physical disk headroom remain in place. Full mixed-language
 provider wiring and sustained retention/performance are outcomes 4–8, still open.
+
+## Outcome 4A — contained Rust startup publication
+
+On 2026-09-09, fresh daemon startup prepares a selected captured Cargo package, runs locked/offline
+metadata inside the same Linux containment used for compilation, binds the returned metadata to
+the selected context/sysroot/source manifest, and publishes accepted compiler Arrow relations.
+Metadata output has bounded, digest-checked readback and cannot authorize compiler observations.
+The input census now supports separate Python/Rust selections without changing captured inputs.
+Compiler coverage uses accepted item-owner counts instead of a fixed single-owner placeholder.
+
+Validation: 27 affected trust/compiler tests pass, including a real contained metadata/compilation
+run. The real mixed Python/Rust daemon case persists the expected `other::target` call into the
+activated Delta snapshot; the provider-selection substitution regression passes. Root library
+Clippy completes with the existing warning backlog; strict repository-wide Clippy is not claimed
+clean. No dependency versions changed. Use `just rust-provider-test` for the real compiler and
+publication scenarios; the extractor may be installed beside the daemon or selected with
+`CODEFABRIC_RUSTC_EXTRACTOR_BIN`.
+
+This first slice supports a dependency-free root package and its selected library or binary.
+It does not close 4A: resolved dependencies, workspace members/multiple targets, generated/proc-macro
+inputs and reusable sysroot/build caches remain. Raw compiler publication is not canonical semantic
+query completion. Outcomes 4–8 remain active in the detailed plan.
 
 ## Outcome 4 — selected Pyrefly context preparation
 

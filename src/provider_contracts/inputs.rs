@@ -359,6 +359,56 @@ impl ProviderSourceInventory {
                 _ => None,
             })
     }
+
+    /// Select provider files without losing the complete captured configuration/input census.
+    ///
+    /// # Errors
+    /// Rejects a selection containing an uncaptured or unknown file identity.
+    pub fn select_files(&self, files: &BTreeSet<[u8; 16]>) -> Result<Self, ProviderContractError> {
+        let mut selected = self.clone();
+        let mut found = BTreeSet::new();
+        for member in &mut selected.members {
+            member.selected_for_provider = match member.disposition {
+                ProviderInputDisposition::Captured { file_id, .. } if files.contains(&file_id) => {
+                    found.insert(file_id);
+                    true
+                }
+                _ => false,
+            };
+        }
+        if &found != files {
+            return Err(ProviderContractError::SourceInventoryMismatch);
+        }
+        let canonical = crate::contracts::jcs::canonicalize_value(&serde_json::json!({
+            "profile": "codefabric.provider-input-selection.v1",
+            "workspace": selected.workspace_id,
+            "generation": selected.source_generation.to_string(),
+            "members": selected.members,
+            "changed": selected.changed,
+            "withdrawn": selected.withdrawn,
+        }))
+        .map_err(|_| ProviderContractError::SourceInventoryMismatch)?;
+        selected.identity = *blake3::hash(&canonical).as_bytes();
+        Ok(selected)
+    }
+
+    /// Provider-specific selections may differ, but cannot substitute any captured input.
+    #[must_use]
+    pub fn has_same_capture(&self, other: &Self) -> bool {
+        self.workspace_id == other.workspace_id
+            && self.source_generation == other.source_generation
+            && self.changed == other.changed
+            && self.withdrawn == other.withdrawn
+            && self.members.len() == other.members.len()
+            && self
+                .members
+                .iter()
+                .zip(&other.members)
+                .all(|(left, right)| {
+                    left.relative_path == right.relative_path
+                        && left.disposition == right.disposition
+                })
+    }
 }
 
 fn validate_path(path: &[u8]) -> Result<(), ProviderContractError> {

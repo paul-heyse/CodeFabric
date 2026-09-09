@@ -129,6 +129,18 @@ print(module)",
             &executable_root.join("codefabric-pyrefly-sidecar"),
         );
 
+        let extractor = std::env::var_os("CODEFABRIC_RUSTC_EXTRACTOR_BIN")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                repository.join("target/extractor/debug/codefabric-rustc-extractor")
+            });
+        if extractor.is_file() {
+            install_executable(
+                &extractor,
+                &executable_root.join("codefabric-rustc-extractor"),
+            );
+        }
+
         Self {
             _root: root,
             codefabric,
@@ -2051,6 +2063,76 @@ fn pragmatic_python_semantics_publish_real_call_targets() {
         }
     }
     assert_eq!(targets, BTreeSet::from(["sample.current".to_owned()]));
+    supervisor.stop();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn pragmatic_rust_semantics_publish_real_call_targets() {
+    let fixture = ProductionFixture::new();
+    let workspace = Path::new(&fixture.workspace.root_path_display);
+    fs::create_dir(workspace.join("src")).unwrap();
+    fs::write(
+        workspace.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.join("src/lib.rs"),
+        "mod other; pub fn caller() -> u32 { other::target(4) }\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.join("src/other.rs"),
+        "pub fn target(v: u32) -> u32 { v + 1 }\n",
+    )
+    .unwrap();
+    let supervisor = fixture.start_supervisor();
+    let rows = decoded_activation_control_rows(&fixture);
+    let (_, pin) = rows[0]
+        .table_versions()
+        .components()
+        .find(|(id, _)| *id == "provider.rustc.call.v1")
+        .expect("real daemon published the rustc call relation");
+    let root = pin.canonical_root().to_file_path().unwrap();
+    let log = fs::File::open(root.join(format!("_delta_log/{:020}.json", pin.version()))).unwrap();
+    let mut targets = BTreeSet::new();
+    for action in BufReader::new(log).lines() {
+        let action: Value = serde_json::from_str(&action.unwrap()).unwrap();
+        let Some(path) = action
+            .get("add")
+            .and_then(|add| add.get("path"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let reader =
+            ParquetRecordBatchReaderBuilder::try_new(fs::File::open(root.join(path)).unwrap())
+                .unwrap()
+                .build()
+                .unwrap();
+        for batch in reader {
+            let batch = batch.unwrap();
+            let values = batch
+                .column_by_name("declared_target")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap();
+            targets.extend(values.iter().flatten().map(ToOwned::to_owned));
+        }
+    }
+    assert!(
+        targets
+            .iter()
+            .any(|target| target.ends_with("other::target")),
+        "{targets:?}"
+    );
     supervisor.stop();
 }
 

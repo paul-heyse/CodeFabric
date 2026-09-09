@@ -2041,6 +2041,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn provider_selections_preserve_capture_and_reject_substitution() {
+        let census = ProviderSourceInventory::try_new(
+            [6; 16],
+            7,
+            [25; 32],
+            &[b"src/a.py".to_vec(), b"src/b.rs".to_vec()],
+            vec![input_member(b"src/a.py", 7), input_member(b"src/b.rs", 8)],
+            vec![b"src/a.py".to_vec()],
+            None,
+        )
+        .unwrap();
+        let python = census.select_files(&BTreeSet::from([[7; 16]])).unwrap();
+        let rust = census.select_files(&BTreeSet::from([[8; 16]])).unwrap();
+        assert!(python.has_same_capture(&rust));
+        assert!(rust.has_same_capture(&census));
+        assert_ne!(python.identity(), rust.identity());
+        assert_eq!(
+            rust.selected_files()
+                .map(|(file, _)| file)
+                .collect::<Vec<_>>(),
+            vec![[8; 16]]
+        );
+        assert_eq!(rust.members().len(), 2);
+        assert_eq!(rust.changed_paths(), census.changed_paths());
+        assert_eq!(rust.select_files(&BTreeSet::from([[8; 16]])).unwrap(), rust);
+        assert_eq!(
+            python.select_files(&BTreeSet::from([[8; 16]])).unwrap(),
+            rust
+        );
+        assert!(rust.select_files(&BTreeSet::from([[9; 16]])).is_err());
+        let changed = ProviderSourceInventory::try_new(
+            [6; 16],
+            7,
+            [25; 32],
+            &[b"src/a.py".to_vec(), b"src/b.rs".to_vec()],
+            vec![input_member(b"src/a.py", 9), input_member(b"src/b.rs", 8)],
+            vec![b"src/a.py".to_vec()],
+            None,
+        )
+        .unwrap();
+        assert!(!rust.has_same_capture(&changed));
+    }
+
     fn missing_import() -> ProviderSupportDependency {
         ProviderSupportDependency {
             key: ProviderLookupKey::Import {

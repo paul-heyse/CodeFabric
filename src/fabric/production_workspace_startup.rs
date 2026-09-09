@@ -110,6 +110,7 @@ use crate::workspace_registry::WorkspaceRecord;
 mod input_observations;
 mod inputs;
 mod pyrefly;
+mod rustc;
 
 /// Joined owner retained by the daemon after one workspace reaches queryable authority.
 pub(crate) struct ProductionWorkspaceStartup {
@@ -757,20 +758,20 @@ fn build_fresh_native_source(
     }
     let native_pin = native_source_pin(&native_runs, &sources);
     let requested_native = u64::try_from(native_runs.len()).unwrap_or(u64::MAX).max(1);
-    let external_source_pin = SourcePin(digest32(
-        b"codefabric.external-provider-source.v1\0",
-        &[&record.workspace_id, &inventory_digest],
-    ));
-    let external_context_pin = ContextPin(digest32(
-        b"codefabric.external-provider-context.v1\0",
-        &[&record.context_fingerprint],
-    ));
     let pyrefly = pyrefly::run(
         &workspace_root,
         release,
         &prepared_inputs,
         &prepared_context,
         &context_product.canonical_manifest,
+        provider_scope,
+        cancellation.clone(),
+    )?;
+    let rustc = rustc::run(
+        &workspace_root,
+        release,
+        &prepared_inputs,
+        record,
         provider_scope,
         cancellation.clone(),
     )?;
@@ -787,9 +788,13 @@ fn build_fresh_native_source(
             pyrefly.requested_units,
         )
         .map_err(|error| step("pyrefly-provider-authority", error))?,
-        ExactProviderLaneAuthority::try_new(external_source_pin, external_context_pin, 1)
-            .map_err(|error| step("rustc-provider-authority", error))?,
-        1,
+        ExactProviderLaneAuthority::try_new(
+            rustc.source_pin,
+            rustc.context_pin,
+            rustc.compilation_units(),
+        )
+        .map_err(|error| step("rustc-provider-authority", error))?,
+        rustc.owner_units(),
     )
     .map_err(|error| step("provider-authority", error))?;
     let native_lane = if native_runs.is_empty() {
@@ -801,16 +806,15 @@ fn build_fresh_native_source(
         .admit_and_compose_production_relations(
             builder,
             authority,
-            ProductionProviderRuns::new(
-                native_lane,
-                pyrefly.lane(),
-                ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
-            ),
+            ProductionProviderRuns::new(native_lane, pyrefly.lane(), rustc.lane()),
         )
         .map_err(|error| step("provider-derived-composition", error))?;
     let (derived, _) = outcome.into_parts();
     let (mut builder, _, _) = derived.into_parts();
     if let Some(admitted) = pyrefly.admitted {
+        admitted_runs.push(admitted);
+    }
+    if let Some(admitted) = rustc.admitted {
         admitted_runs.push(admitted);
     }
     input_observations::install_input_observations(

@@ -10,7 +10,9 @@ use crate::analysis_context::{
     ContextSearchUniverse, RustTargetKind, RustTargetSettings, RustToolchainSettings,
 };
 use crate::identity::{IdentityDomain, decode_public_id, encode_public_id};
-use crate::rust_compilation_trust::SelectedRustCompilationPreparation;
+use crate::rust_compilation_trust::{
+    RustCompilationTerminalState, SelectedRustCompilationPreparation,
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn contained_cargo_extracts_real_selected_rust_call() {
@@ -179,39 +181,80 @@ async fn contained_cargo_extracts_real_selected_rust_call() {
     let RustContextDiscoveryOutcome::Prepared(product) = discovered else {
         panic!("selected context missing: {discovered:?}");
     };
-    // Metadata is gathered from this test's own no-dependency source; no untrusted build runs here.
-    let metadata = std::process::Command::new("cargo")
-        .args([
-            "metadata",
-            "--offline",
-            "--no-deps",
-            "--format-version",
-            "1",
-            "--manifest-path",
-        ])
-        .arg(workspace.join("Cargo.toml"))
-        .output()
-        .unwrap();
-    assert!(
-        metadata.status.success(),
-        "{}",
-        String::from_utf8_lossy(&metadata.stderr)
-    );
-    harness.request.preparation = SelectedRustCompilationPreparation::from_discovered(&product)
-        .unwrap()
-        .with_cargo_metadata(&harness.inputs, &metadata.stdout)
-        .unwrap()
-        .with_source_file_manifest(&harness.inputs, &source_manifest_path)
-        .unwrap();
+    harness.request.preparation =
+        SelectedRustCompilationPreparation::from_discovered(&product).unwrap();
     harness.request.build_scripts_present = false;
     harness.request.procedural_macros_present = false;
     harness.request.context.workspace_id = product.context.workspace_id.clone();
     harness.request.context.analysis_context_id = product.context.analysis_context_id.clone();
     harness.request.context.context_manifest_digest = product.context.context_fingerprint.clone();
-    harness.request.context.cargo_metadata_digest = digest(&metadata.stdout);
     harness.request.context.cargo_lock_digest =
         digest(&fs::read(workspace.join("Cargo.lock")).unwrap());
     harness.request.context.cargo_config_digest = digest(b"");
+    harness.capabilities = SandboxCapabilityMatrix::probe_current_host();
+    let metadata_paths =
+        RustCompilationPrivatePaths::prepare(harness.paths.run_root.parent().unwrap(), "metadata")
+            .unwrap();
+    let metadata_profile = GeneratedSandboxProfile::generate(
+        ProviderTrustProfile::UntrustedSandboxed,
+        SandboxMechanism::LinuxBubblewrap,
+        &workspace,
+        &dependencies,
+        &metadata_paths.run_root,
+    )
+    .unwrap();
+    let metadata_plan = crate::rust_compilation_trust::compile_rust_metadata_launch_plan(
+        &harness.trust_policy,
+        &harness.capabilities,
+        &metadata_profile,
+        &harness.inputs,
+        &metadata_paths,
+        &harness.request,
+    )
+    .unwrap();
+    assert!(metadata_plan.protocol_binding().is_err());
+    let metadata_capabilities = harness.capabilities.clone();
+    let metadata = tokio::task::spawn_blocking(move || {
+        let seccomp = crate::provider_sandbox::CompiledProviderSeccomp::compile().unwrap();
+        let receipt = supervise_rust_compilation(
+            &metadata_plan,
+            &metadata_paths,
+            &ProviderSandboxLauncher::new(metadata_capabilities),
+            &metadata_profile,
+            ProviderSandboxLaunchMaterial::LinuxSeccomp(&seccomp),
+            &RustCompilationCancellationSignal::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            receipt.terminal().terminal_state,
+            RustCompilationTerminalState::Succeeded,
+            "{}",
+            fs::read_to_string(&metadata_paths.stderr_path).unwrap()
+        );
+        let metadata = metadata_plan
+            .read_metadata(&metadata_paths, &receipt)
+            .unwrap();
+        fs::write(&metadata_paths.stdout_path, b"substituted metadata").unwrap();
+        assert!(
+            metadata_plan
+                .read_metadata(&metadata_paths, &receipt)
+                .is_err()
+        );
+        metadata
+    })
+    .await
+    .unwrap();
+    let metadata_json: serde_json::Value = serde_json::from_slice(&metadata).unwrap();
+    assert_eq!(metadata_json["workspace_root"], "/workspace");
+    assert!(metadata_json["resolve"]["nodes"].is_array());
+    harness.request.context.cargo_metadata_digest = digest(&metadata);
+    harness.request.preparation = harness
+        .request
+        .preparation
+        .with_cargo_metadata(&harness.inputs, &metadata)
+        .unwrap()
+        .with_source_file_manifest(&harness.inputs, &source_manifest_path)
+        .unwrap();
     harness.admission.workspace_id = product.context.workspace_id.clone();
     harness.admission.analysis_context_id = product.context.analysis_context_id.clone();
     harness.admission.canonical_analysis_context_id = decode_public_id(

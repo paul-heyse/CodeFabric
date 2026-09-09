@@ -44,6 +44,36 @@ pub(super) struct PreparedSourceInputs {
 }
 
 impl PreparedSourceInputs {
+    pub fn inventory_for_language(
+        &self,
+        language: SourceLanguage,
+    ) -> Result<ChargedValue<ProviderSourceInventory>, ProductionWorkspaceStartupError> {
+        let bytes = self
+            .inventory
+            .memory_bytes()
+            .map_err(|error| step("provider-selection-memory", error))?;
+        let mut charge = reserve_memory(&self.budget, bytes.saturating_mul(4).saturating_add(8192))
+            .map_err(|error| step("provider-selection-memory", error))?;
+        let files = self
+            .capture()?
+            .images()
+            .iter()
+            .filter(|image| image.language == language)
+            .map(|image| image.file_id)
+            .collect();
+        let inventory = self
+            .inventory
+            .select_files(&files)
+            .map_err(|error| step("provider-input-selection", error))?;
+        shrink_to_retained(
+            &mut charge,
+            inventory
+                .memory_bytes()
+                .map_err(|error| step("provider-selection-memory", error))?,
+        )?;
+        Ok(charge.into_charged_value(inventory))
+    }
+
     pub fn budget(&self) -> &ResourceBudget {
         &self.budget
     }

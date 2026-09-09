@@ -15,13 +15,19 @@ capability gap rather than an empty result implying “none.”
 The pragmatic production plan is active. The daemon starts, serves Python function queries,
 reopens persisted snapshots and supports modern FastMCP cancellation. On Linux, fresh
 publication also runs contained Pyrefly analysis and persists real type and call-target facts.
-Rust semantic integration, the remaining query forms, live updates and sustained operation
-are still in progress; this is not yet the complete Python/Rust CPG product.
+Contained Rust compilation now also publishes raw compiler facts for a captured, dependency-free
+Cargo package. Multiple targets and dependencies, canonical semantic queries, live updates and
+sustained operation are still in progress; this is not yet the complete Python/Rust CPG product.
 
 Place the built `codefabric-pyrefly-sidecar` alongside `codefabricd`, or select its absolute
 path with `CODEFABRIC_PYREFLY_SIDECAR_BIN`. Missing providers or unsupported preparation
 remain explicit incomplete scope. `just golden` builds the sidecar and exercises the real
 daemon/installed-adapter scenarios.
+
+For Rust analysis, build with `just extractor-identity` and place `codefabric-rustc-extractor`
+alongside `codefabricd`, or set `CODEFABRIC_RUSTC_EXTRACTOR_BIN` to its absolute path.
+The selected dated-nightly sysroot must be installed through Rustup. `just rust-provider-test`
+exercises contained metadata, compilation, Arrow delivery and mixed-language daemon publication.
 
 ## Architecture
 

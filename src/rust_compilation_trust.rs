@@ -810,18 +810,9 @@ impl SelectedRustCompilationPreparation {
         request: &RustCompilationContextPins,
         inputs: &RustCompilationInputs,
     ) -> Result<(), RustCompilationTrustError> {
+        self.require_identity(request, inputs)?;
         match &self.authority {
-            RustPreparationAuthority::Unresolved(product) => {
-                if product.context.workspace_id != request.workspace_id
-                    || product.context.analysis_context_id != request.analysis_context_id
-                    || product.context.context_fingerprint != request.context_manifest_digest
-                    || product.source_generation != request.source_generation
-                    || product.settings.toolchain.release != inputs.exact_toolchain_release
-                    || crate::integrity::frame_digest(product.settings.toolchain.artifact_digest)
-                        != inputs.toolchain_digest
-                {
-                    return Err(RustCompilationTrustError::SelectedContextMismatch);
-                }
+            RustPreparationAuthority::Unresolved(_) => {
                 if !self.remainders.is_empty()
                     || self.sysroot.is_none()
                     || self.cargo_metadata_digest.is_none()
@@ -832,6 +823,30 @@ impl SelectedRustCompilationPreparation {
                 }
                 if self.cargo_metadata_digest.as_deref()
                     != Some(request.cargo_metadata_digest.as_str())
+                {
+                    return Err(RustCompilationTrustError::SelectedContextMismatch);
+                }
+                Ok(())
+            }
+            #[cfg(test)]
+            RustPreparationAuthority::ContainmentFixture => Ok(()),
+        }
+    }
+
+    fn require_identity(
+        &self,
+        request: &RustCompilationContextPins,
+        inputs: &RustCompilationInputs,
+    ) -> Result<(), RustCompilationTrustError> {
+        match &self.authority {
+            RustPreparationAuthority::Unresolved(product) => {
+                if product.context.workspace_id != request.workspace_id
+                    || product.context.analysis_context_id != request.analysis_context_id
+                    || product.context.context_fingerprint != request.context_manifest_digest
+                    || product.source_generation != request.source_generation
+                    || product.settings.toolchain.release != inputs.exact_toolchain_release
+                    || crate::integrity::frame_digest(product.settings.toolchain.artifact_digest)
+                        != inputs.toolchain_digest
                 {
                     return Err(RustCompilationTrustError::SelectedContextMismatch);
                 }
@@ -1241,9 +1256,18 @@ pub struct RustCompilationCancellationContract {
     pub termination_grace_millis: u64,
 }
 
+/// Cargo discovery uses the same containment and ownership as compilation, but cannot
+/// authorize compiler observations. In particular it runs before metadata is available.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+enum RustLaunchPurpose {
+    Compilation,
+    Metadata,
+}
+
 /// Immutable launch plan compiled from policy, platform proof, exact inputs, and run pins.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RustCompilationLaunchPlan {
+    purpose: RustLaunchPurpose,
     launcher_id: String,
     policy_version: u32,
     policy_digest: String,
@@ -1317,6 +1341,9 @@ impl RustCompilationLaunchPlan {
         &self,
     ) -> Result<RustCompilationProtocolBinding, RustCompilationTrustError> {
         self.verify_digest()?;
+        if self.purpose != RustLaunchPurpose::Compilation {
+            return Err(RustCompilationTrustError::CompilerObservationBindingMismatch);
+        }
         Ok(RustCompilationProtocolBinding {
             plan_digest: self.plan_digest.clone(),
             trust_mode: self.trust_mode,
@@ -1334,6 +1361,49 @@ impl RustCompilationLaunchPlan {
             toolchain_identity_digest: self.toolchain_digest.clone(),
             exact_toolchain_release: self.exact_toolchain_release.clone(),
         })
+    }
+
+    /// Read the bounded metadata output after the supervised process group has joined.
+    ///
+    /// # Errors
+    /// Rejects a foreign/failed operation, replaced output, symlink, or changed capture bytes.
+    pub fn read_metadata(
+        &self,
+        paths: &RustCompilationPrivatePaths,
+        receipt: &RustCompilationLauncherReceipt,
+    ) -> Result<Vec<u8>, RustCompilationTrustError> {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        self.verify_digest()?;
+        paths.revalidate()?;
+        receipt.verify_digest()?;
+        if self.purpose != RustLaunchPurpose::Metadata
+            || receipt.plan_digest != self.plan_digest
+            || paths.run_root != self.output_root
+            || !receipt.terminal.process_group_empty
+            || receipt.terminal.terminal_state != RustCompilationTerminalState::Succeeded
+        {
+            return Err(RustCompilationTrustError::IncompleteContainedTerminalEvidence);
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(
+                rustix::fs::OFlags::NOFOLLOW.bits().cast_signed()
+                    | rustix::fs::OFlags::NONBLOCK.bits().cast_signed(),
+            )
+            .open(&paths.stdout_path)?;
+        if !file.metadata()?.is_file() {
+            return Err(RustCompilationTrustError::WrongPathKind);
+        }
+        let mut bytes = Vec::new();
+        file.take(self.limits.stdout_bytes + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 != receipt.terminal.usage.stdout_bytes
+            || bytes.len() as u64 > self.limits.stdout_bytes
+            || sha256_bytes(&bytes) != receipt.terminal.stdout_digest
+        {
+            return Err(RustCompilationTrustError::InputIdentityChanged);
+        }
+        Ok(bytes)
     }
 
     /// Produce the request owned by the shared semantic-provider launcher.
@@ -1551,10 +1621,66 @@ pub fn compile_rust_compilation_launch_plan(
     request: &RustCompilationRunRequest,
     trusted_local_authorization: Option<&TrustedLocalAuthorization>,
 ) -> Result<RustCompilationLaunchPlan, RustCompilationTrustError> {
+    compile_rust_launch_plan(
+        policy,
+        capabilities,
+        sandbox_profile,
+        inputs,
+        paths,
+        request,
+        trusted_local_authorization,
+        RustLaunchPurpose::Compilation,
+    )
+}
+
+/// Prepare locked, offline Cargo metadata through the existing contained process owner.
+/// The resulting plan is not a compiler-protocol admission and has no extractor wrapper.
+///
+/// # Errors
+/// Rejects unavailable containment, changed selected context/inputs, or unsafe paths/policy.
+pub fn compile_rust_metadata_launch_plan(
+    policy: &RustCompilationTrustPolicy,
+    capabilities: &SandboxCapabilityMatrix,
+    sandbox_profile: &GeneratedSandboxProfile,
+    inputs: &RustCompilationInputs,
+    paths: &RustCompilationPrivatePaths,
+    request: &RustCompilationRunRequest,
+) -> Result<RustCompilationLaunchPlan, RustCompilationTrustError> {
+    if policy.trust_mode != RustCompilationTrustMode::UntrustedSandboxed {
+        return Err(RustCompilationTrustError::UntrustedAdmissionRequired);
+    }
+    compile_rust_launch_plan(
+        policy,
+        capabilities,
+        sandbox_profile,
+        inputs,
+        paths,
+        request,
+        None,
+        RustLaunchPurpose::Metadata,
+    )
+}
+
+#[allow(clippy::too_many_arguments)] // Shared compiler/metadata policy and ownership boundary.
+fn compile_rust_launch_plan(
+    policy: &RustCompilationTrustPolicy,
+    capabilities: &SandboxCapabilityMatrix,
+    sandbox_profile: &GeneratedSandboxProfile,
+    inputs: &RustCompilationInputs,
+    paths: &RustCompilationPrivatePaths,
+    request: &RustCompilationRunRequest,
+    trusted_local_authorization: Option<&TrustedLocalAuthorization>,
+    purpose: RustLaunchPurpose,
+) -> Result<RustCompilationLaunchPlan, RustCompilationTrustError> {
     let policy_digest = policy.digest()?;
-    request
-        .preparation
-        .require_available(&request.context, inputs)?;
+    match purpose {
+        RustLaunchPurpose::Compilation => request
+            .preparation
+            .require_available(&request.context, inputs)?,
+        RustLaunchPurpose::Metadata => request
+            .preparation
+            .require_identity(&request.context, inputs)?,
+    }
     inputs.revalidate()?;
     paths.revalidate()?;
     let manifest = request.validate(&inputs.workspace_view)?;
@@ -1617,7 +1743,11 @@ pub fn compile_rust_compilation_launch_plan(
         .map_err(|_| RustCompilationTrustError::PathEscape)?;
     let contained_manifest = layout.workspace_view.join(relative_manifest);
     let mut contained_arguments = vec![
-        "check".into(),
+        match purpose {
+            RustLaunchPurpose::Compilation => "check",
+            RustLaunchPurpose::Metadata => "metadata",
+        }
+        .into(),
         "--locked".into(),
         "--offline".into(),
         "--manifest-path".into(),
@@ -1626,11 +1756,40 @@ pub fn compile_rust_compilation_launch_plan(
             .ok_or(RustCompilationTrustError::UnrepresentableInvocationPath)?
             .to_owned(),
     ];
-    contained_arguments.extend(request.preparation.cargo_selection_arguments.clone());
-    let environment =
+    if purpose == RustLaunchPurpose::Compilation {
+        contained_arguments.extend(request.preparation.cargo_selection_arguments.clone());
+    } else {
+        contained_arguments.extend(["--format-version".into(), "1".into()]);
+        let settings = match &request.preparation.authority {
+            RustPreparationAuthority::Unresolved(product) => Some(&product.settings),
+            #[cfg(test)]
+            RustPreparationAuthority::ContainmentFixture => None,
+        };
+        if let Some(settings) = settings {
+            contained_arguments
+                .extend(["--filter-platform".into(), settings.target_triple.clone()]);
+            if !settings.default_features {
+                contained_arguments.push("--no-default-features".into());
+            }
+            if !settings.requested_features.is_empty() {
+                contained_arguments
+                    .extend(["--features".into(), settings.requested_features.join(",")]);
+            }
+        }
+    }
+    let mut environment =
         RustCompilationEnvironment::build(inputs, paths, request, sandbox_profile.mechanism)?;
+    if purpose == RustLaunchPurpose::Metadata {
+        // Metadata can probe rustc, but must neither emit nor impersonate an extraction run.
+        environment.variables.remove("RUSTC_WRAPPER");
+        environment
+            .variables
+            .retain(|key, _| !key.starts_with("CODEFABRIC_"));
+        environment.environment_digest = canonical_digest(&environment.variables)?;
+    }
     let path_contract_digest = canonical_digest(&(inputs, paths))?;
     let mut plan = RustCompilationLaunchPlan {
+        purpose,
         launcher_id: RUST_COMPILATION_TRUST_LAUNCHER_ID.into(),
         policy_version: policy.policy_version,
         policy_digest,
@@ -3661,6 +3820,72 @@ mod tests {
         let mut forged = *product;
         forged.remainders.clear();
         assert!(SelectedRustCompilationPreparation::from_discovered(&forged).is_err());
+    }
+
+    #[test]
+    fn metadata_is_contained_selected_and_cannot_authorize_compiler_output() {
+        let mut harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
+        let policy = RustCompilationTrustPolicy::untrusted_sandboxed_v1(
+            limits(),
+            RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
+        );
+        let request = selected_context_request(&harness);
+        let product = discover_selected(&request);
+        bind_selected_context(&mut harness, &product);
+        assert!(!harness.request.preparation.remainders().is_empty());
+        let plan = compile_rust_metadata_launch_plan(
+            &policy,
+            &harness.capabilities,
+            &harness.profile,
+            &harness.inputs,
+            &harness.paths,
+            &harness.request,
+        )
+        .unwrap();
+        assert_eq!(plan.contained_arguments[0], "metadata");
+        for required in [
+            "--locked",
+            "--offline",
+            "--filter-platform",
+            "--no-default-features",
+            "semantic",
+        ] {
+            assert!(
+                plan.contained_arguments
+                    .iter()
+                    .any(|argument| argument == required)
+            );
+        }
+        assert!(
+            !plan
+                .contained_arguments
+                .iter()
+                .any(|argument| argument == "--no-deps")
+        );
+        assert!(!plan.environment.variables.contains_key("RUSTC_WRAPPER"));
+        assert!(
+            !plan
+                .environment
+                .variables
+                .keys()
+                .any(|key| key.starts_with("CODEFABRIC_"))
+        );
+        assert!(matches!(
+            plan.protocol_binding(),
+            Err(RustCompilationTrustError::CompilerObservationBindingMismatch)
+        ));
+        harness.request.context.source_generation += 1;
+        assert!(matches!(
+            compile_rust_metadata_launch_plan(
+                &policy,
+                &harness.capabilities,
+                &harness.profile,
+                &harness.inputs,
+                &harness.paths,
+                &harness.request,
+            ),
+            Err(RustCompilationTrustError::SelectedContextMismatch)
+        ));
     }
 
     #[test]

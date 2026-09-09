@@ -37,7 +37,7 @@ pub(super) fn install_input_observations(
     for run in runs {
         let source = run.job().source();
         let selected = match source.selection() {
-            ProviderSourceSelection::Inventory(bound) => &**bound == inventory,
+            ProviderSourceSelection::Inventory(bound) => bound.has_same_capture(inventory),
             ProviderSourceSelection::File {
                 file_id,
                 content_digest,
