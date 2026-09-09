@@ -1317,6 +1317,7 @@ docs-check *args:
 [doc("Run the real product corpus; unavailable or empty runs fail")]
 [group('test')]
 golden *args:
+    @cargo build --locked --manifest-path pyrefly-sidecar/Cargo.toml --bin codefabric-pyrefly-sidecar
     @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python -m tooling.product.golden "$@"
 
 [doc("Measure a real corpus run; failure is never a performance pass")]

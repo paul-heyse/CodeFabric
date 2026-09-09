@@ -1,6 +1,6 @@
 # CodeFabric
 
-Current work and known failures are in [STATUS](STATUS.md). The [selected design](docs/spec_index/README.md) retains the full Python/Rust CPG target. The [production plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md) stages real semantic queries, scoped remainder, live updates and measured operation. Preparation changes do not imply the daemon currently starts successfully.
+Current work and known failures are in [STATUS](STATUS.md). The [selected design](docs/spec_index/README.md) retains the full Python/Rust CPG target. The [production plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md) stages real semantic queries, scoped remainder, live updates and measured operation.
 
 
 CodeFabric is a present-state code property graph: a fact substrate over a codebase that
@@ -12,10 +12,16 @@ capability gap rather than an empty result implying “none.”
 
 ## Implementation status
 
-Plan v5 is active against the synchronized v2.3 design suite. The four isolated build
-domains, relational data plane, daemon v2 boundary, workspace supervisor, attach-only
-launcher, and modern FastMCP 4 presentation process are present. Terminal evidence and
-physical predecessor decommission continue under the versioned plan in `docs/plans/`.
+The pragmatic production plan is active. The daemon starts, serves Python function queries,
+reopens persisted snapshots and supports modern FastMCP cancellation. On Linux, fresh
+publication also runs contained Pyrefly analysis and persists real type and call-target facts.
+Rust semantic integration, the remaining query forms, live updates and sustained operation
+are still in progress; this is not yet the complete Python/Rust CPG product.
+
+Place the built `codefabric-pyrefly-sidecar` alongside `codefabricd`, or select its absolute
+path with `CODEFABRIC_PYREFLY_SIDECAR_BIN`. Missing providers or unsupported preparation
+remain explicit incomplete scope. `just golden` builds the sidecar and exercises the real
+daemon/installed-adapter scenarios.
 
 ## Architecture
 

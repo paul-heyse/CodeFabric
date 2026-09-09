@@ -589,14 +589,26 @@ impl SupervisedPyreflyWorkspace {
             return Ok(client.clone());
         }
         validate_pyrefly_job(job)?;
-        let socket = self.socket.clone();
-        let channel = Endpoint::from_static("http://[::]:50051")
-            .connect_with_connector(service_fn(move |_| {
-                let socket = socket.clone();
-                async move { UnixStream::connect(socket).await.map(TokioIo::new) }
-            }))
-            .await
-            .map_err(|error| PyreflyServiceError::Transport(error.to_string()))?;
+        // Process ownership is established before the provider binds its socket. The caller's
+        // job deadline/cancellation bounds this readiness wait, including a failed handshake.
+        let channel = loop {
+            if !self.process.alive.load(Ordering::Acquire) || self.cleanup_tasks.is_cancelled() {
+                return Err(PyreflyServiceError::Transport(
+                    "sidecar exited before connection".into(),
+                ));
+            }
+            let socket = self.socket.clone();
+            match Endpoint::from_static("http://[::]:50051")
+                .connect_with_connector(service_fn(move |_| {
+                    let socket = socket.clone();
+                    async move { UnixStream::connect(socket).await.map(TokioIo::new) }
+                }))
+                .await
+            {
+                Ok(channel) => break channel,
+                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        };
         let mut client = WireClient::new(channel)
             .max_decoding_message_size(4 * 1024 * 1024)
             .max_encoding_message_size(4 * 1024 * 1024);

@@ -117,6 +117,17 @@ print(module)",
             Path::new(env!("CARGO_BIN_EXE_codefabricd")),
             &executable_root.join("codefabricd"),
         );
+        let sidecar = std::env::var_os("CODEFABRIC_PYREFLY_SIDECAR_BIN")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| repository.join("target/debug/codefabric-pyrefly-sidecar"));
+        assert!(
+            sidecar.is_file(),
+            "build the Pyrefly sidecar before installed production tests"
+        );
+        install_executable(
+            &sidecar,
+            &executable_root.join("codefabric-pyrefly-sidecar"),
+        );
 
         Self {
             _root: root,
@@ -987,6 +998,16 @@ fn installed_vertical_observation(
             "installed candidate omitted coverage/explicit-remainder relation {required}: {relation_ids:?}"
         );
     }
+    #[cfg(target_os = "linux")]
+    for required in [
+        "provider.pyrefly.module_context.v1",
+        "provider.pyrefly.located_type.v1",
+    ] {
+        assert!(
+            relation_ids.contains(required),
+            "installed candidate omitted Pyrefly semantics: {required}"
+        );
+    }
     let proof_root = fixture
         .fabric_workspace_root()
         .join("epochs")
@@ -996,7 +1017,11 @@ fn installed_vertical_observation(
         !proof_root.exists(),
         "ordinary activation must not produce generalized proof histories"
     );
-    assert_ne!(row.pins.proof_receipt.as_bytes(), &[0; 32], "activation retains its candidate record identity");
+    assert_ne!(
+        row.pins.proof_receipt.as_bytes(),
+        &[0; 32],
+        "activation retains its candidate record identity"
+    );
     assert_no_modern_secret_projection(&report, &fixture);
     let reference_blob = modern_step(&report, "reference_bytes")[0]["blob"]
         .as_str()
@@ -1973,6 +1998,59 @@ fn wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation() {
     assert_no_modern_secret_projection(&cancellation_report, &fixture);
     assert_no_modern_secret_projection(&first_report, &fixture);
     assert_no_modern_secret_projection(&second_report, &fixture);
+    supervisor.stop();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn pragmatic_python_semantics_publish_real_call_targets() {
+    // Python 3.14 is the effective context. Both functions exist syntactically;
+    // only the checker-selected branch supplies the call's semantic target.
+    let fixture = ProductionFixture::with_source(b"import sys\ndef legacy() -> str:\n    return 'old'\ndef current() -> int:\n    return 1\nif sys.version_info >= (3, 14):\n    selected = current\nelse:\n    selected = legacy\nanswer = selected()\n");
+    let supervisor = fixture.start_supervisor();
+    let rows = decoded_activation_control_rows(&fixture);
+    let (_, pin) = rows[0]
+        .table_versions()
+        .components()
+        .find(|(id, _)| *id == "provider.pyrefly.call_target.v1")
+        .expect("real daemon published the Pyrefly call-target relation");
+    assert_eq!(
+        pin.version(),
+        1,
+        "fresh provider relation has one data commit"
+    );
+    let root = pin.canonical_root().to_file_path().unwrap();
+    let log = fs::File::open(root.join("_delta_log/00000000000000000001.json")).unwrap();
+    let paths = BufReader::new(log)
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(&line.unwrap()).unwrap())
+        .filter_map(|action| {
+            action
+                .get("add")
+                .and_then(|add| add.get("path"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .collect::<Vec<_>>();
+    let mut targets = BTreeSet::new();
+    for path in paths {
+        let reader =
+            ParquetRecordBatchReaderBuilder::try_new(fs::File::open(root.join(path)).unwrap())
+                .unwrap()
+                .build()
+                .unwrap();
+        for batch in reader {
+            let batch = batch.unwrap();
+            let values = batch
+                .column_by_name("qualified_target")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap();
+            targets.extend(values.iter().flatten().map(ToOwned::to_owned));
+        }
+    }
+    assert_eq!(targets, BTreeSet::from(["sample.current".to_owned()]));
     supervisor.stop();
 }
 

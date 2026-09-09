@@ -29,6 +29,7 @@ use super::activation_control_delta::{
     ActivationControlDeltaProvider, DeltaActivationRuntimeAuthority,
     ExactActivationControlSelection, provision_activation_control_history,
 };
+use super::activation_transaction::PublishedCandidateValidation;
 use super::command::{
     ActorId, ApplicationReleaseRef, AuthorizationDecision, AuthorizationRef, CommandIdentity,
     CommandOwnership, CommandPins, CommandResult, DiagnosticRef, DurableCommandState, EpochId,
@@ -60,7 +61,6 @@ use super::programmatic_activation_admission::ReleaseOwnedActiveWorkspaceBuilder
 use super::programmatic_activation_command_ports::{
     ActivationCommandRequestKey, ActivationCommandRequestMaterial,
 };
-use super::activation_transaction::PublishedCandidateValidation;
 use super::programmatic_activation_command_sqlite::{
     ActivationCommandCandidateRebuilderPort, ActivationReconciliationIdentityPolicy,
     ExactDeltaActivationCommandCandidateRebuilder, SqliteProgrammaticActivationCommandStateStore,
@@ -109,6 +109,7 @@ use crate::workspace_registry::WorkspaceRecord;
 
 mod input_observations;
 mod inputs;
+mod pyrefly;
 
 /// Joined owner retained by the daemon after one workspace reaches queryable authority.
 pub(crate) struct ProductionWorkspaceStartup {
@@ -374,14 +375,13 @@ async fn open_activation_authority(
         );
     }
     let provider = Arc::new(provider);
-    Ok(Arc::new(DeltaActivationRuntimeAuthority::new(
-        workspace_id,
-        provider,
-        generations,
-    ).with_execution(
-        resources.native_execution(task_scope)
-            .map_err(|error| step("activation-executor", error))?,
-    )))
+    Ok(Arc::new(
+        DeltaActivationRuntimeAuthority::new(workspace_id, provider, generations).with_execution(
+            resources
+                .native_execution(task_scope)
+                .map_err(|error| step("activation-executor", error))?,
+        ),
+    ))
 }
 
 fn native_source_pin(
@@ -498,6 +498,7 @@ fn build_fresh_native_source(
     release: &CompiledSemanticRelease,
     workspace_resources: &ProductionWorkspaceResources,
     cancellation: crate::cancellation::Cancellation,
+    provider_scope: &StructuredCancellationScope,
 ) -> Result<FreshNativeSource, ProductionWorkspaceStartupError> {
     crate::process_memory::admit(crate::resource_budget::ResourceClass::Data)
         .map_err(|error| step("source-memory-headroom", error))?;
@@ -764,6 +765,15 @@ fn build_fresh_native_source(
         b"codefabric.external-provider-context.v1\0",
         &[&record.context_fingerprint],
     ));
+    let pyrefly = pyrefly::run(
+        &workspace_root,
+        release,
+        &prepared_inputs,
+        &prepared_context,
+        &context_product.canonical_manifest,
+        provider_scope,
+        cancellation.clone(),
+    )?;
     let authority = ProductionProviderAuthority::try_new(
         ExactProviderLaneAuthority::try_new(
             native_pin,
@@ -771,8 +781,12 @@ fn build_fresh_native_source(
             requested_native,
         )
         .map_err(|error| step("native-provider-authority", error))?,
-        ExactProviderLaneAuthority::try_new(external_source_pin, external_context_pin, 1)
-            .map_err(|error| step("pyrefly-provider-authority", error))?,
+        ExactProviderLaneAuthority::try_new(
+            pyrefly.source_pin,
+            ContextPin(semantic_environment),
+            pyrefly.requested_units,
+        )
+        .map_err(|error| step("pyrefly-provider-authority", error))?,
         ExactProviderLaneAuthority::try_new(external_source_pin, external_context_pin, 1)
             .map_err(|error| step("rustc-provider-authority", error))?,
         1,
@@ -789,13 +803,16 @@ fn build_fresh_native_source(
             authority,
             ProductionProviderRuns::new(
                 native_lane,
-                ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
+                pyrefly.lane(),
                 ExactProviderLaneRuns::Gap(ProviderLaneGap::RequiredInputAbsent),
             ),
         )
         .map_err(|error| step("provider-derived-composition", error))?;
     let (derived, _) = outcome.into_parts();
     let (mut builder, _, _) = derived.into_parts();
+    if let Some(admitted) = pyrefly.admitted {
+        admitted_runs.push(admitted);
+    }
     input_observations::install_input_observations(
         &mut builder,
         &prepared_inputs.inventory,
@@ -878,6 +895,7 @@ async fn build_fresh_candidate(
     let operation_record = record.clone();
     let operation_release = Arc::clone(release);
     let operation_resources = workspace_resources.clone();
+    let provider_scope = source_scope.clone();
     let operation = source_scope
         .spawn_blocking_owned("capture-and-providers", guard, move |cancellation| {
             build_fresh_native_source(
@@ -887,6 +905,7 @@ async fn build_fresh_candidate(
                 &operation_release,
                 &operation_resources,
                 cancellation,
+                &provider_scope,
             )
         })
         .await
@@ -934,12 +953,15 @@ async fn build_fresh_candidate(
         b"codefabric.candidate-validation-diagnostic.v1\0",
         &[publication.pins.epoch.as_bytes()],
     ));
-    let validation = Arc::new(PublishedCandidateValidation::for_published(
-        WorkspaceId::from_bytes(record.workspace_id),
-        publication.pins,
-        &candidate,
-        integrity_diagnostic,
-    ).map_err(|error| step("candidate-validation", error))?);
+    let validation = Arc::new(
+        PublishedCandidateValidation::for_published(
+            WorkspaceId::from_bytes(record.workspace_id),
+            publication.pins,
+            &candidate,
+            integrity_diagnostic,
+        )
+        .map_err(|error| step("candidate-validation", error))?,
+    );
     Ok(FreshCandidate {
         candidate,
         validation,
@@ -1055,13 +1077,20 @@ async fn publish_fresh_candidate(
     let proof_receipt = ProofReceiptRef::from_bytes(digest32(
         b"codefabric.published-candidate-record.v1\0",
         &[
-            workspace_id.as_bytes(), epoch_id.as_bytes(),
-            input_release.as_bytes(), program_release.as_bytes(),
-            application_release.as_bytes(), source_authority.as_bytes(),
-            &generation.to_be_bytes(), source_images.as_bytes(),
-            provider_release.as_bytes(), provider_set.as_bytes(),
-            table_versions.as_bytes(), overlay_segments.as_bytes(),
-            policy_set.as_bytes(), resources.as_bytes(),
+            workspace_id.as_bytes(),
+            epoch_id.as_bytes(),
+            input_release.as_bytes(),
+            program_release.as_bytes(),
+            application_release.as_bytes(),
+            source_authority.as_bytes(),
+            &generation.to_be_bytes(),
+            source_images.as_bytes(),
+            provider_release.as_bytes(),
+            provider_set.as_bytes(),
+            table_versions.as_bytes(),
+            overlay_segments.as_bytes(),
+            policy_set.as_bytes(),
+            resources.as_bytes(),
         ],
     ));
     Ok(FreshCandidatePublication {
@@ -1308,12 +1337,14 @@ async fn compose_production_workspace(
         .map_err(|error| step("activation-command-state", error))?,
     );
     let validation = fresh.as_ref().map_or_else(
-        || Arc::new(PublishedCandidateValidation::unavailable(
-            DiagnosticRef::from_bytes(digest32(
-                b"codefabric.published-candidate-required.v1\0",
-                &[workspace_id.as_bytes()],
-            )),
-        )),
+        || {
+            Arc::new(PublishedCandidateValidation::unavailable(
+                DiagnosticRef::from_bytes(digest32(
+                    b"codefabric.published-candidate-required.v1\0",
+                    &[workspace_id.as_bytes()],
+                )),
+            ))
+        },
         |fresh| Arc::clone(&fresh.validation),
     );
     let gaps = |family: &'static [u8]| {
@@ -1515,9 +1546,10 @@ async fn compose_production_workspace(
                     )
                     .await
                     .map_err(|error| {
-                        step("fresh-activation-reconciliation", format!(
-                            "{error}; preceding command state: {:?}", completed.state(),
-                        ))
+                        step(
+                            "fresh-activation-reconciliation",
+                            format!("{error}; preceding command state: {:?}", completed.state(),),
+                        )
                     })?;
                 match reconciliation.state() {
                     super::command_runtime::FabricCommandStartupRecoveryState::Ready => {

@@ -145,6 +145,32 @@ This was a build-environment interruption, not loss of source implementation. Th
 also corrected to apply application boundary rules to first-party code, excluding all vendored
 `third_party/` dependencies consistently.
 
+## Pyrefly facts in production publication
+
+Fresh Linux startup now invokes the contained Pyrefly process against a complete captured
+Python inventory and publishes its accepted Arrow relations into the same exact Delta epoch
+as syntax. Captured input identities independently constrain returned source/context pins.
+The existing daemon runtime drives UDS traffic while the source operation retains its leases;
+provider cleanup joins before normal publication. Socket readiness obeys the job deadline
+and cancellation, and descriptor-relative dialing supports long private state paths.
+
+A real daemon test independently asserts that a Python 3.14 conditional call resolves only
+to `sample.current`, although both possible functions exist in syntax. All 35 affected
+provider/admission tests and all four golden daemon/installed-adapter cases pass on 2026-09-09.
+Installed fixtures now include the actual sidecar, and the serving test requires its type/context
+relations in the activated snapshot. The dated-nightly extractor builds and its identity check
+passes; Rust compilation has not yet been wired into daemon publication.
+After separating provider failure from failed process cleanup, all five affected real daemon
+tests pass together. Governance passes; root library Clippy completes with 966 warnings,
+including the new long startup-assembly function, so no strict root lint pass is claimed.
+All 14 extractor tests pass, including its actual compiler callback and IPC round trip.
+
+This is the first production Python semantic contribution. External Python configuration and
+dependency/stub inputs, larger complete inventories, retained checker reuse across updates,
+Rust semantics, and the other first-release query forms remain work. Provider input views are
+currently retained beneath workspace state; their reclamation belongs to outcome 8. The new
+raw call-target assertion is not a claim that public call/relationship querying is complete.
+
 ## Completed preparation
 
 [Preparation plan](docs/plans/codefabric_pragmatic_delivery_nonproduction_preparation_plan_2026-09-08.md), steps 1–8:

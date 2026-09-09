@@ -1116,28 +1116,35 @@ fn validate_pyrefly_batch(
 }
 
 fn pyrefly_source_pin(run: &AcceptedPyreflyRun) -> SourcePin {
-    let mut modules = run
-        .modules
-        .iter()
-        .map(|module| {
+    pyrefly_source_pin_from_modules(
+        run.source_generation,
+        run.modules.iter().map(|module| {
             (
-                module.module_id.as_bytes(),
+                module.module_id.as_str(),
                 module.canonical_file_id,
                 *blake3::hash(&module.source_bytes).as_bytes(),
             )
-        })
-        .collect::<Vec<_>>();
+        }),
+    )
+}
+
+/// The same identity operation applies independently to captured inputs and accepted output.
+pub(crate) fn pyrefly_source_pin_from_modules<'a>(
+    generation: u64,
+    modules: impl IntoIterator<Item = (&'a str, [u8; 16], [u8; 32])>,
+) -> SourcePin {
+    let mut modules = modules.into_iter().collect::<Vec<_>>();
     modules.sort_by(|left, right| left.0.cmp(right.0).then(left.1.cmp(&right.1)));
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"codefabric.pyrefly.source-pin.v1\0");
-    hasher.update(&run.source_generation.to_be_bytes());
+    hasher.update(&generation.to_be_bytes());
     for (module_id, file_id, digest) in modules {
         hasher.update(
             &u64::try_from(module_id.len())
                 .unwrap_or(u64::MAX)
                 .to_be_bytes(),
         );
-        hasher.update(module_id);
+        hasher.update(module_id.as_bytes());
         hasher.update(&file_id);
         hasher.update(&digest);
     }

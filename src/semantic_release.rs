@@ -1170,7 +1170,7 @@ pub(crate) fn compile_current_v23_release(
             max_wall_millis: 120_000,
             max_visited_nodes: 4_000_000,
             max_traversal_depth: 512,
-            max_workers: 2,
+            max_workers: 16,
             max_retained_revisions: 1,
             cancellation_poll_work_units: 1_024,
             cancellation_ack_millis,
@@ -1562,7 +1562,6 @@ mod tests {
         assert_eq!(transformation.operator, TransformationOperator::Normalize);
         assert_eq!(transformation.inputs[0].as_str(), "tree-sitter.raw");
         assert_eq!(transformation.output.as_str(), "normalized.0");
-
     }
 
     #[cfg(feature = "data-fabric")]
@@ -1673,7 +1672,6 @@ mod tests {
                 .unwrap();
             assert_eq!(result.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
         }
-
     }
 
     #[test]

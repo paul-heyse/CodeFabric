@@ -96,8 +96,11 @@ Wire `tests/fixtures/pragmatic_cpg/workspace` and independently justified `expec
 checker answers, using a small local fix to the pinned Query handle construction. Supported
 production context preparation and bounded immutable source reads pass all 29 sidecar tests,
 strict sidecar Clippy, and 10 root service tests. The real sidecar UDS test validates a Python
-3.14-dependent call target and joined shutdown. Daemon publication, external context roots,
-Rust contributions and mixed-language public answers remain open; this does not close outcome 4. The Linux
+3.14-dependent call target and joined shutdown. Fresh daemon startup now schedules contained
+Pyrefly analysis and publishes its exact raw type/call relations alongside syntax. A real daemon
+test verifies the checker-selected call target in the activated Delta relation; 35 affected
+admission/provider tests and all four installed golden scenarios pass. External context roots,
+Rust contributions and the remaining first-release public forms remain open; this does not close outcome 4. The Linux
 launcher now has an application-compiled sealed seccomp policy and real containment probes;
 39 affected sandbox/provider tests pass, including owned descendant cleanup.
 
