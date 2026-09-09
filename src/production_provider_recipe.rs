@@ -372,6 +372,30 @@ pub(crate) fn current_v23_provider_program_definition()
                 native_lane(ProviderNativeLane::Ruff)?,
             )?,
             ProviderLaneProgramDefinition::try_new(
+                ReleaseProviderLane::TreeSitterRust,
+                ReleaseProviderIdentity::try_new(crate::provider_native_rust_syntax::PROVIDER)?,
+                ReleaseProviderProtocolIdentity::try_new("in-process-arrow@1")?,
+                ReleaseProviderBuildIdentity::try_new(crate::provider_native_rust_syntax::RELEASE)?,
+                ProviderTrustPosture::InProcessConstrained,
+                crate::provider_native_rust_syntax::RustSyntaxRelation::ALL
+                    .into_iter()
+                    .map(|relation| {
+                        ProviderFamilyProgramDefinition::try_new(
+                            ReleaseProviderFamilyIdentity::try_new(format!(
+                                "codefabric.provider-family.v2.3.{}",
+                                relation.name()
+                            ))?,
+                            ReleaseProviderRelationIdentity::try_new(relation.name())?,
+                            ReleaseProviderSchemaIdentity::try_new(format!(
+                                "codefabric.provider-schema.v2.3.{}",
+                                relation.name()
+                            ))?,
+                            relation.schema(),
+                        )
+                    })
+                    .collect::<Result<Vec<_>, SemanticReleaseError>>()?,
+            )?,
+            ProviderLaneProgramDefinition::try_new(
                 ReleaseProviderLane::Pyrefly,
                 ReleaseProviderIdentity::try_new("pyrefly-python")?,
                 ReleaseProviderProtocolIdentity::try_new("codefabric.pyrefly.provider.v1")?,
@@ -2345,9 +2369,9 @@ mod tests {
             current_v23_provider_program_definition().unwrap(),
         )
         .unwrap();
-        assert_eq!(release.observation().provider_lanes, 4);
-        assert_eq!(release.observation().provider_relations, 53);
-        assert_eq!(release.observation().transformations, 53);
+        assert_eq!(release.observation().provider_lanes, 5);
+        assert_eq!(release.observation().provider_relations, 59);
+        assert_eq!(release.observation().transformations, 59);
         assert_eq!(release.observation().query_forms, 8);
     }
 

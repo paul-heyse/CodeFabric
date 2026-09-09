@@ -442,6 +442,7 @@ impl ProductionRpcInteropControl {
                 stream::iter(vec![Ok(batch)]),
             )),
             max_rows: 3,
+            row_selection: None,
             coverage: ResultCoverage::complete(3),
             provenance: vec![ResultProvenance {
                 kind: "compatibility_oracle".to_owned(),

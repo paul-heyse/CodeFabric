@@ -1194,6 +1194,13 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     .iter()
                     .find(|clause| clause.query_id() == query_id.as_ref())
                     .map(crate::semantic_query_contract::SemanticQueryClause::maximum_results);
+                if let Some(maximum) = maximum {
+                    *output = output.clone().with_result_observation(
+                        query_id,
+                        maximum,
+                        authorization.max_output_rows(),
+                    );
+                }
                 processing_summaries.push(super::processing_status::QueryProcessing {
                     query_id: query_id.to_string(),
                     processing: summary,

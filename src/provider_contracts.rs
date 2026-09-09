@@ -403,13 +403,20 @@ fn require_nonzero_bytes(bytes: &[u8]) -> Result<(), ProviderContractError> {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ProviderLane {
     TreeSitter,
+    TreeSitterRust,
     Ruff,
     Pyrefly,
     Rustc,
 }
 
 impl ProviderLane {
-    pub const ALL: [Self; 4] = [Self::TreeSitter, Self::Ruff, Self::Pyrefly, Self::Rustc];
+    pub const ALL: [Self; 5] = [
+        Self::TreeSitter,
+        Self::TreeSitterRust,
+        Self::Ruff,
+        Self::Pyrefly,
+        Self::Rustc,
+    ];
 }
 
 /// Trust posture resolved before provider execution.

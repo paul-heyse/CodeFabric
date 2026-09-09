@@ -57,7 +57,7 @@ pub struct SyntaxProviderRunPin {
     /// Exact effective context manifest fingerprint used by lane admission.
     pub context_fingerprint: [u8; 32],
     pub semantic_environment_id: [u8; 32],
-    pub python_version: (u16, u16),
+    pub python_version: Option<(u16, u16)>,
 }
 
 /// The two exact in-process provider runs that observe one immutable source image.
@@ -88,7 +88,7 @@ pub struct ProviderNativeSourceImage {
 }
 
 impl ProviderNativeSourceImage {
-    /// Construct and validate an exact Python source image.
+    /// Construct and validate an exact source image.
     ///
     /// # Errors
     ///
@@ -117,9 +117,12 @@ impl TryFrom<&SourceImage> for ProviderNativeSourceImage {
     type Error = ProviderNativeSyntaxError;
 
     fn try_from(source: &SourceImage) -> Result<Self, Self::Error> {
-        if source.language != SourceLanguage::Python {
+        if !matches!(
+            source.language,
+            SourceLanguage::Python | SourceLanguage::Rust
+        ) {
             return Err(ProviderNativeSyntaxError::InvalidSource(
-                "language is not Python",
+                "language has no supported syntax provider",
             ));
         }
         Self::new(
@@ -279,14 +282,14 @@ impl<'a> InProcessProviderJobs<'a> {
                 analysis_context_id: context.analysis_context_id(),
                 context_fingerprint: context.context_fingerprint(),
                 semantic_environment_id: context.semantic_environment_id(),
-                python_version,
+                python_version: Some(python_version),
             },
             ruff: SyntaxProviderRunPin {
                 provider_run_id: self.ruff.run().provider_run_id(),
                 analysis_context_id: context.analysis_context_id(),
                 context_fingerprint: context.context_fingerprint(),
                 semantic_environment_id: context.semantic_environment_id(),
-                python_version,
+                python_version: Some(python_version),
             },
         })
     }
@@ -321,7 +324,7 @@ impl ProviderNativeSyntaxRun {
 /// Stable failures at the exact-provider/Arrow boundary.
 #[derive(Debug, Error)]
 pub enum ProviderNativeSyntaxError {
-    #[error("source image is not an exact valid Python source image: {0}")]
+    #[error("source image is not an exact valid source image: {0}")]
     InvalidSource(&'static str),
     #[error("module input differs from the selected effective context: {0}")]
     InvalidModule(&'static str),
@@ -444,7 +447,18 @@ fn validate_job_source(
     jobs: InProcessProviderJobs<'_>,
     source: &ProviderNativeSourceImage,
 ) -> Result<(), ProviderNativeSyntaxError> {
-    let binding = jobs.tree_sitter.source();
+    crate::provider_contracts::allocation::require_native_workspace(
+        jobs.ruff.resource_budget(),
+        jobs.tree_sitter.resource_budget(),
+    )?;
+    validate_single_job_source(jobs.tree_sitter, source)
+}
+
+pub(crate) fn validate_single_job_source(
+    job: &ProviderJob,
+    source: &ProviderNativeSourceImage,
+) -> Result<(), ProviderNativeSyntaxError> {
+    let binding = job.source();
     for budget in [
         source.bytes.reservation().owner(),
         source.provider_text.text.reservation().owner(),
@@ -453,11 +467,10 @@ fn validate_job_source(
             .original_byte_offsets
             .reservation()
             .owner(),
-        jobs.ruff.resource_budget(),
     ] {
         crate::provider_contracts::allocation::require_native_workspace(
             budget,
-            jobs.tree_sitter.resource_budget(),
+            job.resource_budget(),
         )?;
     }
     if binding.file_id() != Some(source.file_id)
@@ -517,7 +530,8 @@ fn semantic_result(
 }
 
 fn validate_run_pins(pins: PythonSyntaxRunPins) -> Result<(), ProviderNativeSyntaxError> {
-    if pins.tree_sitter.analysis_context_id != pins.ruff.analysis_context_id
+    if pins.tree_sitter.python_version.is_none()
+        || pins.tree_sitter.analysis_context_id != pins.ruff.analysis_context_id
         || pins.tree_sitter.context_fingerprint != pins.ruff.context_fingerprint
         || pins.tree_sitter.semantic_environment_id != pins.ruff.semantic_environment_id
         || pins.tree_sitter.python_version != pins.ruff.python_version
@@ -527,7 +541,7 @@ fn validate_run_pins(pins: PythonSyntaxRunPins) -> Result<(), ProviderNativeSynt
     Ok(())
 }
 
-fn validated_provider_text(
+pub(crate) fn validated_provider_text(
     source: &ProviderNativeSourceImage,
 ) -> Result<ProviderText, ProviderNativeSyntaxError> {
     if crate::integrity::digest_bytes(&source.bytes) != source.content_digest {
@@ -568,25 +582,23 @@ struct RemainderRow {
     detail: &'static str,
 }
 
-#[allow(clippy::too_many_lines)] // One closed projection makes the exact 25-relation surface auditable.
-fn project_relations(
+pub(crate) fn project_tree_relations(
     source: &ProviderNativeSourceImage,
-    pins: PythonSyntaxRunPins,
+    run: SyntaxProviderRunPin,
     tree: &TreeSitterSnapshot,
-    ruff: &RuffSnapshot,
-    semantics: Option<&PythonFrontendBatch>,
+    provider_id: &'static str,
+    provider_release: &'static str,
+    grammar_release: &'static str,
 ) -> Result<BTreeMap<NativeSyntaxRelation, RecordBatch>, ProviderNativeSyntaxError> {
-    validate_snapshots(source, tree, ruff)?;
+    if tree.provider_image_fingerprint != source.provider_text.provider_image_fingerprint() {
+        return Err(ProviderNativeSyntaxError::SnapshotMismatch(
+            "provider image fingerprint",
+        ));
+    }
     let tree_pin = RelationPin {
-        run: pins.tree_sitter,
-        provider_id: TREE_SITTER_PROVIDER_ID,
-        provider_release: TREE_SITTER_PROVIDER_RELEASE,
-        source,
-    };
-    let ruff_pin = RelationPin {
-        run: pins.ruff,
-        provider_id: RUFF_PROVIDER_ID,
-        provider_release: ruff.provider_version,
+        run,
+        provider_id,
+        provider_release,
         source,
     };
     let mut relations = BTreeMap::new();
@@ -600,7 +612,7 @@ fn project_relations(
             tree.revision,
             tree.catalog_id,
             tree.grammar_fingerprint,
-            Some(TREE_SITTER_PYTHON_GRAMMAR_RELEASE),
+            Some(grammar_release),
         )?,
     );
     let tree_coverage = [
@@ -637,6 +649,33 @@ fn project_relations(
         NativeSyntaxRelation::TreeSitterRecoveryDiagnostic,
         tree_recovery_batch(tree_pin, tree)?,
     );
+
+    Ok(relations)
+}
+
+#[allow(clippy::too_many_lines)] // One closed projection makes the exact 25-relation surface auditable.
+fn project_relations(
+    source: &ProviderNativeSourceImage,
+    pins: PythonSyntaxRunPins,
+    tree: &TreeSitterSnapshot,
+    ruff: &RuffSnapshot,
+    semantics: Option<&PythonFrontendBatch>,
+) -> Result<BTreeMap<NativeSyntaxRelation, RecordBatch>, ProviderNativeSyntaxError> {
+    validate_snapshots(source, tree, ruff)?;
+    let ruff_pin = RelationPin {
+        run: pins.ruff,
+        provider_id: RUFF_PROVIDER_ID,
+        provider_release: ruff.provider_version,
+        source,
+    };
+    let mut relations = project_tree_relations(
+        source,
+        pins.tree_sitter,
+        tree,
+        TREE_SITTER_PROVIDER_ID,
+        TREE_SITTER_PROVIDER_RELEASE,
+        TREE_SITTER_PYTHON_GRAMMAR_RELEASE,
+    )?;
 
     insert(
         &mut relations,
@@ -787,8 +826,8 @@ fn finish_run(
             .map(|(_, batch)| batch),
         65_536,
     )?;
-    let tree_sitter = provider_result(jobs.tree_sitter, &relations)?;
-    let ruff = provider_result(jobs.ruff, &relations)?;
+    let tree_sitter = provider_result(jobs.tree_sitter, &relations, true)?;
+    let ruff = provider_result(jobs.ruff, &relations, semantics.is_some())?;
     Ok(ProviderNativeSyntaxRun {
         relations,
         tree_sitter,
@@ -799,9 +838,11 @@ fn finish_run(
 fn provider_result(
     job: &ProviderJob,
     relations: &BTreeMap<NativeSyntaxRelation, RecordBatch>,
+    semantics_available: bool,
 ) -> Result<ProviderRunResult, ProviderNativeSyntaxError> {
     let mut outputs = Vec::with_capacity(job.requests().len());
     let mut coverage = Vec::with_capacity(job.requests().len());
+    let mut gaps = Vec::new();
     for request in job.requests() {
         let relation = NativeSyntaxRelation::ALL
             .into_iter()
@@ -826,22 +867,48 @@ fn provider_result(
             vec![relations[&relation].clone()],
             job.resource_budget(),
         )?);
-        coverage.push(ProviderCoverage::new(
-            request.family().clone(),
+        let state = if !semantics_available
+            && matches!(
+                relation,
+                NativeSyntaxRelation::RuffScope
+                    | NativeSyntaxRelation::RuffBinding
+                    | NativeSyntaxRelation::RuffReference
+                    | NativeSyntaxRelation::RuffUnknownSymbol
+                    | NativeSyntaxRelation::RuffSemanticEdge
+                    | NativeSyntaxRelation::RuffImport
+                    | NativeSyntaxRelation::RuffExport
+            ) {
+            let cause = crate::provider_contracts::ProviderUnknownCause::ProviderFailure;
+            gaps.push(crate::provider_contracts::ProviderGap::try_new(
+                request.family().clone(),
+                cause,
+                "Ruff local semantics unavailable because the source parse is invalid",
+            )?);
+            ProviderCoverageState::Unknown {
+                completed_units: 0,
+                cause,
+            }
+        } else {
             ProviderCoverageState::Complete {
                 completed_units: request.requested_units(),
-            },
-        ));
+            }
+        };
+        coverage.push(ProviderCoverage::new(request.family().clone(), state));
     }
+    let terminal = if gaps.is_empty() {
+        ProviderTerminalStatus::Complete
+    } else {
+        ProviderTerminalStatus::Failed
+    };
     Ok(ProviderRunResult::try_from_job(
         job,
         ProviderRunEvidenceSpec {
             relations: outputs,
             coverage,
-            gaps: Vec::new(),
+            gaps,
             diagnostics: Vec::new(),
             trust: ProviderTrustOutcome::Trusted,
-            terminal: ProviderTerminalStatus::Complete,
+            terminal,
             support: ProviderRunSupport::from_job_inputs(job, true),
         },
     )?)
@@ -2242,13 +2309,13 @@ fn common_fields() -> Vec<Field> {
         typed_field(
             "python_target_major",
             DataType::UInt16,
-            false,
+            true,
             "selected-python-major",
         ),
         typed_field(
             "python_target_minor",
             DataType::UInt16,
-            false,
+            true,
             "selected-python-minor",
         ),
         typed_field("file_id", DataType::FixedSizeBinary(16), false, "file-id"),
@@ -2281,12 +2348,12 @@ fn common_columns(pin: RelationPin<'_>, row_count: usize) -> Vec<ArrayRef> {
         fixed16_repeat(&pin.run.analysis_context_id, row_count),
         fixed32_repeat(&pin.run.context_fingerprint, row_count),
         fixed32_repeat(&pin.run.semantic_environment_id, row_count),
-        Arc::new(UInt16Array::from_iter_values(std::iter::repeat_n(
-            pin.run.python_version.0,
+        Arc::new(UInt16Array::from_iter(std::iter::repeat_n(
+            pin.run.python_version.map(|version| version.0),
             row_count,
         ))),
-        Arc::new(UInt16Array::from_iter_values(std::iter::repeat_n(
-            pin.run.python_version.1,
+        Arc::new(UInt16Array::from_iter(std::iter::repeat_n(
+            pin.run.python_version.map(|version| version.1),
             row_count,
         ))),
         fixed16_repeat(&pin.source.file_id, row_count),
@@ -2814,6 +2881,38 @@ pub(crate) mod job_tests {
     }
 
     #[test]
+    fn malformed_python_keeps_syntax_but_not_complete_semantic_coverage() {
+        let run = run_fixture("def broken(:\n    return 1\n", 1, 44);
+        assert!(
+            run.relation(NativeSyntaxRelation::TreeSitterCstNode)
+                .num_rows()
+                > 0
+        );
+        assert!(
+            run.relation(NativeSyntaxRelation::RuffParseDiagnostic)
+                .num_rows()
+                > 0
+        );
+        assert_eq!(
+            run.tree_sitter_result().terminal(),
+            ProviderTerminalStatus::Complete
+        );
+        assert_eq!(run.ruff_result().terminal(), ProviderTerminalStatus::Failed);
+        let coverage = run.ruff_result().coverage();
+        let binding = coverage
+            .iter()
+            .find(|row| row.family().as_str().ends_with("provider.ruff.binding"))
+            .unwrap();
+        assert!(matches!(
+            binding.state(),
+            ProviderCoverageState::Unknown {
+                completed_units: 0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn wp79_native_raw_arrow_clone_retains_backing_after_result_and_runner_drop() {
         let input = source("answer = 42\n", 1);
         let jobs = jobs(&input);
@@ -2920,7 +3019,7 @@ pub(crate) mod job_tests {
             analysis_context_id: [5; 16],
             context_fingerprint: [3; 32],
             semantic_environment_id: [4; 32],
-            python_version: (3, 14),
+            python_version: Some((3, 14)),
         };
         for other in [
             SyntaxProviderRunPin {

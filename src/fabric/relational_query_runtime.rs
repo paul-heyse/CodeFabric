@@ -218,6 +218,7 @@ pub struct SelectedQueryOutput {
     program: RelationalProgram,
     coverage: Option<ResultCoverage>,
     program_result_binding: Option<SupplementalProgramRelationBinding>,
+    row_selection: Option<super::streamed_result_package::StreamedRowSelection>,
 }
 
 impl SelectedQueryOutput {
@@ -232,6 +233,7 @@ impl SelectedQueryOutput {
             program,
             coverage,
             program_result_binding: None,
+            row_selection: None,
         }
     }
 
@@ -262,6 +264,32 @@ impl SelectedQueryOutput {
 
     pub(crate) fn with_processing_coverage(mut self, coverage: ResultCoverage) -> Self {
         self.coverage = Some(coverage);
+        self
+    }
+
+    /// Fetch one extra authorized row when the execution grant has room. Only the selected
+    /// rows enter the package; the extra row establishes truncation without a second scan.
+    pub(crate) fn with_result_observation(
+        mut self,
+        query_id: &str,
+        maximum_rows: usize,
+        authorized_rows: usize,
+    ) -> Self {
+        if let crate::relational_program::RelationalExpression::Limit {
+            fetch: Some(fetch), ..
+        } = &mut self.program.root
+            && *fetch == maximum_rows
+        {
+            let probe = maximum_rows < authorized_rows;
+            if probe {
+                *fetch += 1;
+            }
+            self.row_selection = Some(super::streamed_result_package::StreamedRowSelection {
+                query_id: query_id.to_owned(),
+                maximum_rows: maximum_rows as u64,
+                exhaustion_probe: probe,
+            });
+        }
         self
     }
 
@@ -967,6 +995,7 @@ impl RelationalQueryRuntime {
                         max_rows: max_output_rows,
                         coverage,
                         provenance,
+                        row_selection: output.row_selection,
                     });
                 }
                 let package = builder

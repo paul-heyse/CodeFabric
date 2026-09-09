@@ -70,6 +70,8 @@ pub mod provider_boundary;
 #[cfg(feature = "provider-contracts")]
 pub mod provider_contracts;
 #[cfg(feature = "fact-generation")]
+pub(crate) mod provider_native_rust_syntax;
+#[cfg(feature = "fact-generation")]
 pub mod provider_native_syntax;
 #[cfg(feature = "fact-generation")]
 pub mod provider_raw_kinds;

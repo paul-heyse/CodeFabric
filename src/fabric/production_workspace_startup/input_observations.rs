@@ -159,6 +159,7 @@ fn install_provider_progress(
                 strings(runs.iter().map(|run| {
                     Some(match run.job().lane() {
                         ProviderLane::TreeSitter => "tree-sitter",
+                        ProviderLane::TreeSitterRust => "tree-sitter-rust",
                         ProviderLane::Ruff => "ruff",
                         ProviderLane::Pyrefly => "pyrefly",
                         ProviderLane::Rustc => "rustc",

@@ -222,8 +222,10 @@ impl TreeSitterLimits {
 }
 
 fn validate_tree_sitter_job(job: &ProviderJob) -> Result<(), TreeSitterAdapterError> {
-    if job.lane() != ProviderLane::TreeSitter
-        || job.trust() != ProviderTrustPosture::InProcessConstrained
+    if !matches!(
+        job.lane(),
+        ProviderLane::TreeSitter | ProviderLane::TreeSitterRust
+    ) || job.trust() != ProviderTrustPosture::InProcessConstrained
         || job.protocol().as_str() != "in-process-arrow@1"
         || job.requests().is_empty()
     {

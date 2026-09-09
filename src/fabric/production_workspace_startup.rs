@@ -112,6 +112,7 @@ mod input_observations;
 mod inputs;
 mod processing;
 mod pyrefly;
+mod rust_syntax;
 mod rustc;
 
 /// Joined owner retained by the daemon after one workspace reaches queryable authority.
@@ -819,6 +820,13 @@ fn build_fresh_native_source(
     }
     input_observations::install_rust_target_progress(&mut builder, generation, &rustc.progress)?;
     admitted_runs.extend(rustc.admitted);
+    admitted_runs.extend(rust_syntax::install(
+        &mut builder,
+        &prepared_inputs,
+        record,
+        release,
+        &cancellation,
+    )?);
     processing::install(
         &mut builder,
         &prepared_inputs.inventory,

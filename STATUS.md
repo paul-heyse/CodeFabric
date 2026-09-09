@@ -11,8 +11,9 @@ now expands that same backlog with the full fact-family/query scope, library API
 dependency order and acceptance criteria. Implementation of that detailed plan is active.
 Implemented slices include contained Rust compilation, captured path dependencies, multiple
 targets/contexts, reusable immutable input blobs, canonical declarations/entities and public
-function queries. External/generated compiler inputs, Rust syntax publication, the other query
-forms and full coverage/freshness delivery remain active work.
+function queries, independent Rust syntax publication and observed result-row truncation.
+External/generated compiler inputs, the other query forms and full coverage/freshness delivery
+remain active work.
 
 The latest 4E/5A slice serves Python, Rust or combined function declarations from native
 DataFusion canonical transformations. Language/context filters apply before the row limit;
@@ -21,8 +22,9 @@ from requested Python inputs and selected Cargo targets, independently of emitte
 A failed target retains other target facts and identifies the unfinished target. Python-only
 queries remain complete when only Rust compilation failed. Missing capture, unsupported work,
 provider timeout, cancellation and resource limits retain distinct reason codes. Processing
-coverage and result-row bounds are separate; actual truncation observation, public remainder
-pagination and broader scope/freshness semantics are still pending.
+coverage and result-row bounds are separate. Result streaming now observes truncation with one
+authorized lookahead row; public remainder pagination and broader scope/freshness semantics
+remain pending.
 
 Validation on 2026-09-09: 14 focused query/scope tests pass; the installed-client mixed-language
 query and guarded-input/resource scenario both pass after the final ordering/filter changes.
@@ -46,6 +48,24 @@ pass. All 28 selected scope/package/registry/mixed-service tests pass; the new t
 reopen/corruption test and final mixed-client target-kind check also pass. Root Clippy completes
 with 958 existing warnings, so this is not a strict root lint pass. This extends 5A/5B; it does
 not close public remainder pagination, full freshness policy behavior or live processing status.
+
+Rust Tree-sitter now publishes six native source-context relations through the production
+admission and Delta path, independently of successful compilation. Loose Rust files and
+malformed Unicode/CRLF source retain CST recovery observations and exact byte locations;
+Rust schemas carry no invented Python target version. Recovered Python parsing preserves
+syntax/diagnostics while Ruff semantic families report unknown coverage and provider failure.
+Startup still waits for the semantic phase: live two-speed publication remains outcome 6.
+
+Result streaming uses a native final limit of N+1 where the existing execution grant permits
+it, seals only the first N rows, and records observed exhaustion in the typed response and
+retained manifest. Processing completeness stays separate from row truncation. At the grant
+ceiling an exact-N result retains unknown exhaustion; fewer rows establish no truncation.
+The stream is consumed once, with cancellation/error handling and existing page/resource bounds.
+Validation on 2026-09-09: all four golden scenarios pass; 40 affected syntax/release/result
+and real mixed-client tests pass, including exact-byte Rust recovery and row-limit lookahead.
+The nine provider recipe tests and isolated release-compiler architecture/check pass. Root
+library Clippy completes with its existing backlog; the new local length/doc warnings are
+addressed. Documentation navigation and `git diff --check` pass.
 
 Current production work, 2026-09-08–09:
 

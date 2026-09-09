@@ -1180,6 +1180,7 @@ pub(crate) fn compile_current_v23_release(
         PolicyProgramIdentity::try_new("codefabric.policy-program.v2.3")?,
         vec![
             LanePolicyDefinition::new(ProviderLane::TreeSitter, syntax_ceiling),
+            LanePolicyDefinition::new(ProviderLane::TreeSitterRust, syntax_ceiling),
             LanePolicyDefinition::new(ProviderLane::Ruff, syntax_ceiling),
             LanePolicyDefinition::new(ProviderLane::Pyrefly, semantic_ceiling(2_000)?),
             LanePolicyDefinition::new(ProviderLane::Rustc, semantic_ceiling(10_000)?),
@@ -1336,7 +1337,7 @@ mod tests {
             ProviderProtocolIdentity::try_new(format!("{name}.protocol.v1")).unwrap(),
             ProviderBuildIdentity::try_new(format!("{name}.build.v1")).unwrap(),
             match lane {
-                ProviderLane::TreeSitter | ProviderLane::Ruff => {
+                ProviderLane::TreeSitter | ProviderLane::TreeSitterRust | ProviderLane::Ruff => {
                     ProviderTrustPosture::InProcessConstrained
                 }
                 ProviderLane::Pyrefly => ProviderTrustPosture::LocalSidecarConstrained,
@@ -1358,6 +1359,7 @@ mod tests {
     pub(super) fn fixture_definition() -> CurrentSemanticReleaseDefinition {
         let lanes = vec![
             provider_lane(ProviderLane::TreeSitter, "tree-sitter"),
+            provider_lane(ProviderLane::TreeSitterRust, "tree-sitter-rust"),
             provider_lane(ProviderLane::Ruff, "ruff"),
             provider_lane(ProviderLane::Pyrefly, "pyrefly"),
             provider_lane(ProviderLane::Rustc, "rustc"),
@@ -1439,9 +1441,9 @@ mod tests {
     fn compiled_release_program_identity_integrity() {
         let release = compiled();
         assert_eq!(release.suite().as_str(), CURRENT_SUITE);
-        assert_eq!(release.observation().provider_lanes, 4);
-        assert_eq!(release.observation().provider_relations, 4);
-        assert_eq!(release.observation().transformations, 4);
+        assert_eq!(release.observation().provider_lanes, 5);
+        assert_eq!(release.observation().provider_relations, 5);
+        assert_eq!(release.observation().transformations, 5);
         assert_eq!(release.observation().query_forms, 8);
         assert!(!release.transformations().is_empty());
         assert!(!release.queries().is_empty());
@@ -1568,7 +1570,7 @@ mod tests {
     #[tokio::test]
     async fn compiled_release_query_program_executes_datafusion_fixture() {
         let release = compiled();
-        let relation_batches = (0_i64..4)
+        let relation_batches = (0_i64..5)
             .map(|value| {
                 let schema = schema();
                 let batch = RecordBatch::try_new(
@@ -1599,7 +1601,7 @@ mod tests {
                 .as_any()
                 .downcast_ref::<Int64Array>()
                 .unwrap();
-            assert_eq!(values.value(0), i64::try_from(ordinal % 4).unwrap());
+            assert_eq!(values.value(0), i64::try_from(ordinal % 5).unwrap());
         }
     }
 

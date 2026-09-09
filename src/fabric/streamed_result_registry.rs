@@ -1702,6 +1702,7 @@ mod tests {
                     schema,
                     stream,
                     max_rows: 4,
+                    row_selection: None,
                     coverage: ResultCoverage::complete(3),
                     provenance: vec![ResultProvenance {
                         kind: "transformation_release".to_owned(),

@@ -2095,7 +2095,11 @@ fn pragmatic_rust_target_failure_retains_other_targets() {
 
 #[cfg(target_os = "linux")]
 fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
-    let fixture = ProductionFixture::new();
+    let fixture = if with_failure {
+        ProductionFixture::with_source(b"def answer(value: int) -> int:\n    return value + 1\n\ndef zebra() -> int:\n    return 2\n")
+    } else {
+        ProductionFixture::new()
+    };
     let stack = with_failure.then(InstalledProductionStack::build);
     if let Some(stack) = &stack {
         fixture.bind_installed_adapter(stack, "policy-one", 0x11);
@@ -2148,6 +2152,7 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         fs::write(workspace.join("Cargo.lock"), "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\ndependencies = [\"helper\"]\n[[package]]\nname = \"helper\"\nversion = \"0.1.0\"\n").unwrap();
     }
     if with_failure {
+        fs::write(workspace.join("scratch.rs"), "// π\r\nfn unfinished( {").unwrap();
         fs::create_dir_all(workspace.join("src/bin")).unwrap();
         fs::write(
             workspace.join("src/bin/broken.rs"),
@@ -2225,6 +2230,7 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         );
         assert_eq!(states.get("working").map(String::as_str), Some("processed"));
         assert_eq!(states.get("fixture").map(String::as_str), Some("processed"));
+        assert_rust_syntax_survives_compilation_failure(&fixture);
         assert_mixed_public_entity_queries(&fixture, stack.as_ref().unwrap());
     }
     supervisor.stop();
@@ -2291,6 +2297,71 @@ fn pragmatic_rust_virtual_workspace_inherits_package_settings() {
             .all(|value| value == Some("processed"))
     }));
     supervisor.stop();
+}
+
+fn assert_rust_syntax_survives_compilation_failure(fixture: &ProductionFixture) {
+    use arrow::array::{BinaryArray, BooleanArray, Decimal128Array, StringArray};
+    let broken = blake3::hash(b"fn main() { missing_function(); }\n");
+    let malformed = blake3::hash("// π\r\nfn unfinished( {".as_bytes());
+    let mut located_identifier = false;
+    let mut retained_error = false;
+    for batch in fresh_activation_relation_batches(fixture, "provider.tree_sitter_rust.cst_node") {
+        assert!(batch.column_by_name("python_target_major").is_none());
+        let strings = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+        };
+        let binary = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .unwrap()
+        };
+        let numbers = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Decimal128Array>()
+                .unwrap()
+        };
+        let errors = batch
+            .column_by_name("error")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            assert_eq!(strings("provider_id").value(row), "tree-sitter-rust");
+            assert_eq!(
+                binary("analysis_context_id").value(row),
+                codefabric::identity::SOURCE_CONTEXT_ID
+            );
+            if binary("content_digest").value(row) == broken.as_bytes()
+                && strings("raw_kind").value(row) == "identifier"
+                && numbers("start_byte").value(row) == 12
+                && numbers("end_byte").value(row) == 28
+            {
+                located_identifier = true;
+            }
+            retained_error |=
+                binary("content_digest").value(row) == malformed.as_bytes() && errors.value(row);
+        }
+    }
+    assert!(
+        located_identifier,
+        "compiler-failing file retains the exact identifier occurrence"
+    );
+    assert!(
+        retained_error,
+        "malformed UTF-8/CRLF source retains syntax recovery observations"
+    );
 }
 
 fn fresh_activation_relation_batches(
@@ -2384,6 +2455,7 @@ fn assert_mixed_public_entity_queries(
     let public_rust = &modern_structured(modern_step(&report, "rust"))["processing"][0];
     assert_eq!(public_python["remaining_partitions"], 0);
     assert_eq!(public_python["maximum_rows"], 1);
+    assert_eq!(public_python["additional_rows"], true);
     assert_eq!(public_rust["remaining_partitions"], 1);
     assert_eq!(public_rust["remainder"][0]["target"], "broken");
     assert_eq!(public_rust["remainder"][0]["state"], "unavailable");
@@ -2392,7 +2464,7 @@ fn assert_mixed_public_entity_queries(
         public_rust["source_generation"],
         rust_scope["source_generation"]
     );
-    assert!(public_rust["additional_rows"].is_null());
+    assert_eq!(public_rust["additional_rows"], false);
     assert_eq!(python_scope["requested_partitions"], 1, "{python_manifest}");
     assert_eq!(python_scope["remaining_partitions"], 0, "{python_manifest}");
     assert_eq!(

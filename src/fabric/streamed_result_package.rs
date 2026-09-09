@@ -148,6 +148,16 @@ pub struct StreamedRelationInput {
     pub max_rows: u64,
     pub coverage: ResultCoverage,
     pub provenance: Vec<ResultProvenance>,
+    pub row_selection: Option<StreamedRowSelection>,
+}
+
+/// A final result selection, after all authorized filters and deterministic ordering.
+#[derive(Clone, Debug)]
+pub struct StreamedRowSelection {
+    pub query_id: String,
+    pub maximum_rows: u64,
+    /// The native plan fetched up to `maximum_rows + 1`, within its execution grant.
+    pub exhaustion_probe: bool,
 }
 
 impl fmt::Debug for StreamedRelationInput {
@@ -699,7 +709,7 @@ impl StreamedResultPackageBuilder {
         epoch_id: EpochId,
         query_execution: QueryExecutionPin,
         canonical_semantic_response: &[u8],
-        processing: Vec<super::processing_status::QueryProcessing>,
+        mut processing: Vec<super::processing_status::QueryProcessing>,
         mut relations: Vec<StreamedRelationInput>,
         lease: ResultResourceLease,
         cancellation: &Cancellation,
@@ -783,6 +793,7 @@ impl StreamedResultPackageBuilder {
                 let page_start = u64::try_from(pages.len())
                     .map_err(|_| StreamedResultPackageError::CounterOverflow)?;
                 let mut relation_rows = 0_u64;
+                let mut observed_rows = 0_u64;
                 let mut relation_pages = 0_u64;
                 let mut saw_batch = false;
                 while let Some(batch) =
@@ -805,6 +816,28 @@ impl StreamedResultPackageBuilder {
                             relation.relation_id.as_str().to_owned(),
                         ));
                     }
+                    observed_rows = observed_rows
+                        .checked_add(batch.num_rows() as u64)
+                        .ok_or(StreamedResultPackageError::CounterOverflow)?;
+                    if observed_rows > relation.max_rows {
+                        return Err(StreamedResultPackageError::RelationRowLimit {
+                            relation: relation.relation_id.as_str().to_owned(),
+                            observed: observed_rows,
+                            limit: relation.max_rows,
+                        });
+                    }
+                    let batch = if let Some(selection) = &relation.row_selection {
+                        let remaining = selection.maximum_rows.saturating_sub(relation_rows);
+                        let selected = batch
+                            .num_rows()
+                            .min(usize::try_from(remaining).unwrap_or(usize::MAX));
+                        if selected == 0 && batch.num_rows() != 0 {
+                            continue;
+                        }
+                        batch.slice(0, selected)
+                    } else {
+                        batch
+                    };
                     let slices = bounded_batch_slices(
                         &relation.schema,
                         &batch,
@@ -867,6 +900,24 @@ impl StreamedResultPackageBuilder {
                         .await?;
                         created.push(object_path);
                     }
+                }
+                if let Some(selection) = &relation.row_selection {
+                    let summary = processing
+                        .iter_mut()
+                        .find(|summary| summary.query_id == selection.query_id)
+                        .ok_or(StreamedResultPackageError::ManifestShape)?;
+                    if summary.maximum_rows != Some(selection.maximum_rows)
+                        || selection.maximum_rows == 0
+                    {
+                        return Err(StreamedResultPackageError::ManifestShape);
+                    }
+                    summary.additional_rows = if observed_rows > selection.maximum_rows {
+                        Some(true)
+                    } else if observed_rows < selection.maximum_rows || selection.exhaustion_probe {
+                        Some(false)
+                    } else {
+                        None
+                    };
                 }
                 if !saw_batch {
                     let empty = RecordBatch::new_empty(Arc::clone(&relation.schema));
@@ -1854,6 +1905,7 @@ mod tests {
             schema,
             stream,
             max_rows: 1_024,
+            row_selection: None,
             coverage: ResultCoverage::complete(values.len() as u64),
             provenance: vec![ResultProvenance {
                 kind: "transformation_release".to_owned(),
@@ -2483,6 +2535,100 @@ mod tests {
             .await,
             Err(StreamedResultPackageError::ObjectStore(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn result_selection_observes_exhaustion_without_publishing_probe_rows() {
+        use super::super::processing_status::{EntityProcessingSummary, QueryProcessing};
+        for (values, batch_rows, probe, expected) in [
+            (vec![], 1, true, Some(false)),
+            (vec![1], 1, true, Some(false)),
+            (vec![1, 2], 1, true, Some(false)),
+            (vec![1, 2, 3], 1, true, Some(true)),
+            (vec![1, 2, 3], 3, true, Some(true)),
+            (vec![1, 2], 2, false, None),
+            (vec![1], 1, false, Some(false)),
+        ] {
+            let sink = Arc::new(RecordingSink::new(None));
+            let builder =
+                StreamedResultPackageBuilder::new(sink.clone(), limits(1), test_resource_budget());
+            let (epoch, query, lease) = pins();
+            let mut input = relation(&values, batch_rows);
+            input.row_selection = Some(StreamedRowSelection {
+                query_id: "q1".to_owned(),
+                maximum_rows: 2,
+                exhaustion_probe: probe,
+            });
+            let processing = vec![QueryProcessing {
+                query_id: "q1".to_owned(),
+                maximum_rows: Some(2),
+                additional_rows: None,
+                processing: EntityProcessingSummary {
+                    source_generation: 7,
+                    requested_partitions: 1,
+                    completed_partitions: 1,
+                    remaining_partitions: 0,
+                    scope: "python_files".to_owned(),
+                    family: "function-declarations".to_owned(),
+                    languages: vec!["python".to_owned()],
+                    next_offset: None,
+                    remainder: Vec::new(),
+                },
+            }];
+            let sealed = builder
+                .seal_with_processing(
+                    epoch,
+                    query,
+                    b"{}",
+                    processing,
+                    vec![input],
+                    lease,
+                    &Cancellation::default(),
+                    Instant::now() + Duration::from_secs(5),
+                    &AcceptPublicationIntent,
+                )
+                .await
+                .unwrap();
+            assert_eq!(sealed.manifest().total_rows, values.len().min(2) as u64);
+            assert_eq!(sealed.manifest().processing[0].additional_rows, expected);
+            assert_eq!(
+                sealed.manifest().processing[0]
+                    .processing
+                    .remaining_partitions,
+                0
+            );
+            let reopened = builder
+                .reopen(sealed.manifest_path().clone(), epoch, query, lease)
+                .await
+                .unwrap();
+            assert_eq!(reopened.manifest(), sealed.manifest());
+            let mut actual = Vec::new();
+            for page in &sealed.manifest().pages {
+                let bytes = sealed
+                    .read_page(page.page_ordinal, lease.issued_at_unix_ms())
+                    .await
+                    .unwrap();
+                let reader = arrow_ipc::reader::StreamReader::try_new(
+                    std::io::Cursor::new(bytes.as_ref()),
+                    None,
+                )
+                .unwrap();
+                for batch in reader {
+                    let batch = batch.unwrap();
+                    actual.extend(
+                        batch
+                            .column(0)
+                            .as_any()
+                            .downcast_ref::<Int64Array>()
+                            .unwrap()
+                            .values()
+                            .iter()
+                            .copied(),
+                    );
+                }
+            }
+            assert_eq!(actual, values.into_iter().take(2).collect::<Vec<_>>());
+        }
     }
 
     #[tokio::test]
