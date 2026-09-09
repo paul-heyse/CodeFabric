@@ -54,6 +54,7 @@ struct WorkspaceNativeRequest<'a> {
     class: ResourceClass,
     deadline: Instant,
     mutation: bool,
+    native_receipts: bool,
 }
 
 impl WorkspaceNativeExecution {
@@ -151,6 +152,7 @@ impl WorkspaceNativeExecution {
                 class,
                 deadline,
                 mutation: false,
+                native_receipts: true,
             },
             operation,
             classify,
@@ -201,9 +203,40 @@ impl WorkspaceNativeExecution {
                 class,
                 deadline,
                 mutation: true,
+                native_receipts: true,
             },
             operation,
             classify,
+        )
+        .await
+    }
+
+    /// Production mutations retain bounded lanes, deadlines, the workspace store's
+    /// write lease and joined cleanup. Native allocation receipt estimates are not
+    /// part of the reduced resource contract.
+    pub(crate) async fn run_bounded_mutation<T, E, F, O>(
+        &self,
+        name: &str,
+        class: ResourceClass,
+        deadline: Instant,
+        operation: O,
+    ) -> Result<T, NativeLaneError>
+    where
+        T: NativeLaneOutput,
+        E: Display,
+        F: Future<Output = Result<T, E>>,
+        O: FnOnce(Cancellation, Arc<OwnedLocalStore>) -> F + Send + 'static,
+    {
+        self.run(
+            WorkspaceNativeRequest {
+                name,
+                class,
+                deadline,
+                mutation: true,
+                native_receipts: false,
+            },
+            move |cancellation, store, _| operation(cancellation, store),
+            |error| NativeLaneError::operation(&error),
         )
         .await
     }
@@ -258,7 +291,10 @@ impl WorkspaceNativeExecution {
             requested: error.requested,
             limit: error.limit,
         })?;
-        let resource_policy = NativeOperationResourcePolicy::try_new(resource_owner.clone())?;
+        let resource_policy = request
+            .native_receipts
+            .then(|| NativeOperationResourcePolicy::try_new(resource_owner.clone()))
+            .transpose()?;
         let lease = Arc::new(Mutex::new(None::<OwnedLocalMutation>));
         let begin_lease = Arc::clone(&lease);
         let cleanup_lease = Arc::clone(&lease);
@@ -272,7 +308,9 @@ impl WorkspaceNativeExecution {
                 class: request.class,
                 deadline: request.deadline,
             },
-            Some(resource_policy),
+            resource_policy.map(|policy| {
+                policy as Arc<dyn super::native_execution_lane::NativeLaneResourcePolicy>
+            }),
             move |cancellation| async move {
                 if request.mutation {
                     let mutation = operation_store
@@ -592,6 +630,68 @@ mod tests {
         assert_eq!(owners.len(), 2);
         assert!(!std::sync::Weak::ptr_eq(&owners[0], &owners[1]));
         assert!(owners.iter().all(|owner| owner.upgrade().is_none()));
+        assert_eq!(fixture.budget.observation().used.running_jobs, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn bounded_mutation_reconciles_failed_write_and_releases_lease() {
+        let fixture = Fixture::new(4);
+        let target = fixture.location("bounded");
+        let failed = fixture
+            .executor
+            .run_bounded_mutation(
+                "failed-write",
+                ResourceClass::Data,
+                deadline(),
+                move |_, store| async move {
+                    assert!(buoyant_kernel::resource::current_resource_scope().is_none());
+                    store
+                        .put_opts(&target, b"durable".to_vec().into(), PutOptions::default())
+                        .await?;
+                    Err::<(), object_store::Error>(object_store::Error::Generic {
+                        store: "test",
+                        source: "failure after durable write".into(),
+                    })
+                },
+            )
+            .await;
+        assert!(failed.is_err());
+        assert_eq!(
+            std::fs::read(fixture.data.join("bounded")).unwrap(),
+            b"durable"
+        );
+        assert_eq!(fixture.budget.observation().used.running_jobs, 0);
+        let target = fixture.location("bounded");
+        assert!(
+            fixture
+                .store
+                .put_opts(&target, b"unowned".to_vec().into(), PutOptions::default())
+                .await
+                .is_err()
+        );
+        fixture
+            .executor
+            .run_bounded_mutation(
+                "retry-write",
+                ResourceClass::Data,
+                deadline(),
+                move |_, store| async move {
+                    store
+                        .put_opts(
+                            &target,
+                            b"reconciled".to_vec().into(),
+                            PutOptions::default(),
+                        )
+                        .await?;
+                    Ok::<(), object_store::Error>(())
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read(fixture.data.join("bounded")).unwrap(),
+            b"reconciled"
+        );
         assert_eq!(fixture.budget.observation().used.running_jobs, 0);
     }
 
