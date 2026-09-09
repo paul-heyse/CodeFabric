@@ -11,6 +11,12 @@ valid:
               let _bytes = std::fs::read(path);
           }
       }
+  - |
+      fn host_c_compiler_inputs(entries: &mut Vec<DependencyInput>) -> Result<Vec<ContextArtifactInput>, ProductionWorkspaceStartupError> {
+          let compiler = std::fs::canonicalize("/usr/bin/cc")?;
+          let file = std::fs::File::open(&compiler)?;
+          Ok(Vec::new())
+      }
 invalid:
   - |
       fn read_source(path: &Path) {

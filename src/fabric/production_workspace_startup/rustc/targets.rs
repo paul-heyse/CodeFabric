@@ -162,6 +162,52 @@ pub(super) fn discover(
     Ok(targets.into_values().collect())
 }
 
+pub(super) fn build_inputs(
+    files: &[ContextFileInput],
+) -> Result<Vec<crate::analysis_context::ContextArtifactInput>, ProductionWorkspaceStartupError> {
+    let mut inputs = BTreeMap::new();
+    for manifest in files.iter().filter(|file| {
+        file.relative_path == b"Cargo.toml" || file.relative_path.ends_with(b"/Cargo.toml")
+    }) {
+        let document: toml::Value = toml::from_str(
+            std::str::from_utf8(&manifest.contents)
+                .map_err(|error| step("rust-build-manifest", error))?,
+        )
+        .map_err(|error| step("rust-build-manifest", error))?;
+        let Some(package) = document.get("package") else {
+            continue;
+        };
+        let relative = match package.get("build") {
+            Some(toml::Value::Boolean(false)) => continue,
+            None | Some(toml::Value::Boolean(true)) => "build.rs",
+            Some(toml::Value::String(path)) => path,
+            _ => return Err(step("rust-build-manifest", "invalid package build setting")),
+        };
+        let path = join(
+            manifest
+                .relative_path
+                .strip_suffix(b"Cargo.toml")
+                .expect("manifest suffix"),
+            relative,
+        )?;
+        if let Some(source) = files.iter().find(|file| file.relative_path == path) {
+            inputs.insert(
+                source.file_id.clone(),
+                crate::analysis_context::ContextArtifactInput {
+                    file_id: source.file_id.clone(),
+                    digest: source.digest,
+                },
+            );
+        } else if package.get("build").is_some() {
+            return Err(step(
+                "rust-build-input",
+                "explicit build script is not captured",
+            ));
+        }
+    }
+    Ok(inputs.into_values().collect())
+}
+
 fn join(parent: &[u8], relative: &str) -> Result<Vec<u8>, ProductionWorkspaceStartupError> {
     if relative.starts_with('/') || relative.as_bytes().contains(&0) {
         return Err(step(
@@ -241,5 +287,59 @@ mod tests {
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].manifest, b"member/Cargo.toml");
         assert_eq!(targets[0].target.crate_root, b"member/src/lib.rs");
+    }
+    #[test]
+    fn captured_build_inputs_follow_custom_default_and_disabled_manifest_settings() {
+        let inputs = vec![
+            file(
+                "Cargo.toml",
+                "[workspace]\nmembers = ['custom', 'default', 'disabled']\n",
+            ),
+            file(
+                "custom/Cargo.toml",
+                "[package]\nname = 'custom'\nbuild = '../shared/configure.rs'\n",
+            ),
+            file("shared/configure.rs", "fn main() {}"),
+            file("custom/build.rs", "not selected"),
+            file("default/Cargo.toml", "[package]\nname = 'default'\n"),
+            file("default/build.rs", "fn main() {}"),
+            file(
+                "disabled/Cargo.toml",
+                "[package]\nname = 'disabled'\nbuild = false\n",
+            ),
+            file("disabled/build.rs", "not selected"),
+        ];
+        let captured = build_inputs(&inputs).unwrap();
+        assert_eq!(
+            captured
+                .iter()
+                .map(|input| input.file_id.as_str())
+                .collect::<Vec<_>>(),
+            ["default/build.rs", "shared/configure.rs"]
+        );
+        assert_eq!(
+            captured[0].digest,
+            crate::integrity::digest_bytes(b"fn main() {}")
+        );
+        assert_eq!(captured[1].digest, captured[0].digest);
+    }
+
+    #[test]
+    fn captured_build_inputs_reject_missing_explicit_or_escaping_scripts() {
+        for setting in [
+            "true",
+            "'missing.rs'",
+            "'../outside.rs'",
+            "'/outside.rs'",
+            "3",
+        ] {
+            let manifest = file(
+                "Cargo.toml",
+                &format!("[package]\nname = 'fixture'\nbuild = {setting}\n"),
+            );
+            assert!(build_inputs(&[manifest]).is_err(), "{setting}");
+        }
+        let manifest = file("Cargo.toml", "[package]\nname = 'fixture'\n");
+        assert!(build_inputs(&[manifest]).unwrap().is_empty());
     }
 }

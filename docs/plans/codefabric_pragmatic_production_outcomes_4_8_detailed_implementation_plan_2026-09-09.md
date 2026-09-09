@@ -1,6 +1,6 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `33b2c2a5` (`Serve explicit source line windows and preserve hard-limit failures`) and the raw compiler path change described in STATUS.
+Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `fcd62fd9` (`Preserve raw compiler source paths independently of display names`) and the custom Cargo build-input change described in STATUS.
 
 This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Implementation is underway. The status notes distinguish demonstrated committed behavior, uncommitted work and remaining acceptance; writing or updating this plan is not implementation evidence.
 
@@ -189,7 +189,7 @@ Shared runtime interfaces should stay small:
 
 ### 4A. Production Rust contexts, dependencies and scheduling
 
-**Current status — partial, committed.** Startup now performs contained metadata/compiler work for captured packages/path dependencies and multiple target contexts, with reusable immutable sysroot/dependency blobs and retained target/family failure scope (`eba6f19a`–`b6a7d777`). This implements the startup portions of items 1–2 and 5–7, plus captured dependencies and multi-target selection in items 3–4. Remaining: registry/git, generated/build-script/proc-macro input closure, full configuration/features/targets, retained build caches, parallel scheduling, structured diagnostics, byte-safe paths and update-time cases. The full acceptance below has not passed.
+**Current status — partial, committed.** Startup now performs contained metadata/compiler work for captured packages/path dependencies and multiple target contexts, with reusable immutable sysroot/dependency blobs and retained target/family failure scope (`eba6f19a`–`b6a7d777`). This implements the startup portions of items 1–2 and 5–7, plus captured dependencies and multi-target selection in items 3–4. Captured custom/default/disabled build scripts now enter context identity, and the selected host C compiler runs from an owned dependency view without widening containment. The installed cfg-change/direct-call/source comparison against an independent clean daemon passes (124.86 s); `cargo-build-live` selects it. Standard-library build-script calls retain their unresolved scope under the current broad target partition. Remaining: registry/git, generated/build-script/proc-macro input closure, full configuration/features/targets, retained build caches, parallel scheduling, structured diagnostics, byte-safe paths and update-time cases. The full acceptance below has not passed.
 
 **Surfaces:** `src/analysis_context/rust_context.rs`, `src/rust_compilation_trust.rs`, `src/rustc_source_files.rs`, `src/rustc_service.rs`, `src/fabric/production_workspace_startup.rs`, startup `inputs.rs`, `rustc-extractor/src/`, existing provider contracts and containment owners.
 

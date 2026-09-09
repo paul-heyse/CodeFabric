@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `33b2c2a5` (`Serve explicit source line windows and preserve hard-limit failures`);
-raw compiler source paths are the current implementation slice.
+Last production commit: `fcd62fd9` (`Preserve raw compiler source paths independently of display names`);
+contained custom Cargo build inputs are the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -236,6 +236,29 @@ tooling tests pass. Changed-file formatting and docs navigation pass. Five newly
 match-arm findings were merged; final library/integration Clippy adds no diagnostics over the
 955-library/36-integration baseline, and the provider schema census passes again. This does not remove rustc's
 UTF-8 invocation-argument constraint or add dependency/generated source ownership.
+
+## Contained custom Cargo build inputs
+
+The selected C compiler is captured into the owned dependency view, with its selected read-only
+`/usr` library prefix supplied through a wrapper. This resolves Debian's `cc` alias through
+`/etc/alternatives` and GCC's library search after relocation without widening sandbox mounts.
+Compiler bytes and the search selection enter context dependency identity. Default, custom and
+disabled `package.build` settings are resolved from captured manifests; explicit missing or escaping
+scripts fail preparation. Build-script declarations remain observable alongside target declarations.
+
+On 2026-09-09 `cargo-build-live` passes in 124.86 s through installed clients: changing a custom
+script's cfg output changes the effective context, selected declaration, direct call target and
+exact function body, matching an independent clean daemon. Two focused build-input tests and all
+210 tooling tests pass; tooling lint, changed-file formatting and docs navigation pass.
+Default/featureless root checks pass. Library/integration Clippy retains its 955/36-warning baseline
+with no new code/file diagnostics. The compiler-capture governance exception includes only the
+new host compiler helper, with a positive rule fixture; full governance passes and workspace
+source rules remain enforced.
+Earlier native attempts exposed the linker alias/library
+search failures and the existing target-wide call scope. Calls to uncaptured standard-library
+functions in the build script correctly retain an unresolved target remainder for that broad scope.
+Per-caller outgoing processing, distinct host/target contexts, generated/proc-macro input closure,
+the full host C SDK closure and Cargo cache/configuration coverage remain open.
 
 ## Live source reconciliation and current query selection
 

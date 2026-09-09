@@ -246,7 +246,11 @@ fn prepare_and_run(
     // Toolchain bytes are transient, bounded, and shared by the published immutable view.
     let bundle_memory = crate::inventory::reserve_memory(inputs.budget(), MAX_TOOLCHAIN_BYTES * 2)
         .map_err(|error| step("rust-toolchain-memory", error))?;
-    let (mut dependencies, host) = toolchain_inputs(&cancellation)?;
+    let ToolchainInputs {
+        mut dependencies,
+        host,
+        runtime_artifacts,
+    } = toolchain_inputs(&cancellation)?;
     let workspace_id = public_id(IdentityDomain::Workspace, record.workspace_id)?;
     let files = captured_files(inputs)?;
     let source_manifest = RustSourceFileManifest {
@@ -273,7 +277,7 @@ fn prepare_and_run(
     ));
     let dependencies = DependencyInputBundle::pin(dependencies)
         .map_err(|error| step("rust-dependency-bundle", error))?;
-    let selection = initial_selection(&files, &host, target)?;
+    let selection = initial_selection(&files, &host, target, &runtime_artifacts)?;
     let product = discover_rust_context(&RustContextDiscoveryRequest {
         workspace_id: workspace_id.clone(),
         source_generation: inventory.source_generation(),
@@ -604,9 +608,15 @@ fn dependency(path: &str, bytes: Vec<u8>, executable: bool) -> DependencyInput {
     }
 }
 
+struct ToolchainInputs {
+    dependencies: Vec<DependencyInput>,
+    host: String,
+    runtime_artifacts: Vec<ContextArtifactInput>,
+}
+
 fn toolchain_inputs(
     cancellation: &Cancellation,
-) -> Result<(Vec<DependencyInput>, String), ProductionWorkspaceStartupError> {
+) -> Result<ToolchainInputs, ProductionWorkspaceStartupError> {
     let selected = std::process::Command::new("rustup")
         .args(["which", "--toolchain", RUSTC_TOOLCHAIN, "rustc"])
         .output()
@@ -691,7 +701,85 @@ fn toolchain_inputs(
         true,
     ));
     entries.push(dependency("toolchain/bin/codefabric-rustc-extractor", b"#!/bin/sh\nexport LD_LIBRARY_PATH=/dependencies/toolchain/lib\nexec /dependencies/extractor/codefabric-rustc-extractor \"$@\"\n".to_vec(), true));
-    Ok((entries, host))
+    let runtime_artifacts = host_c_compiler_inputs(&mut entries)?;
+    Ok(ToolchainInputs {
+        dependencies: entries,
+        host,
+        runtime_artifacts,
+    })
+}
+
+fn host_c_compiler_inputs(
+    entries: &mut Vec<DependencyInput>,
+) -> Result<Vec<ContextArtifactInput>, ProductionWorkspaceStartupError> {
+    let mut artifacts = Vec::new();
+    // /usr is the selected read-only runtime image, but Debian's cc alias crosses
+    // /etc/alternatives. Capture the selected executable, without exposing /etc.
+    if let Ok(compiler) = std::fs::canonicalize("/usr/bin/cc") {
+        if !compiler.starts_with("/usr") {
+            return Err(step(
+                "rust-host-linker",
+                "system compiler escapes the selected runtime image",
+            ));
+        }
+        let mut captured = Vec::new();
+        std::fs::File::open(&compiler)
+            .map_err(|error| step("rust-host-linker", error))?
+            .take(32 * 1024 * 1024 + 1)
+            .read_to_end(&mut captured)
+            .map_err(|error| step("rust-host-linker", error))?;
+        if captured.len() > 32 * 1024 * 1024 {
+            return Err(step(
+                "rust-host-linker",
+                "system compiler exceeds its input bound",
+            ));
+        }
+        artifacts.push(ContextArtifactInput {
+            file_id: "toolchain:host-c-compiler".to_owned(),
+            digest: digest_bytes(&captured),
+        });
+        let libraries = std::process::Command::new(&compiler)
+            .env_clear()
+            .arg("-print-libgcc-file-name")
+            .output()
+            .map_err(|error| step("rust-host-linker-search", error))?;
+        if !libraries.status.success() {
+            return Err(step(
+                "rust-host-linker-search",
+                "system compiler did not identify its runtime libraries",
+            ));
+        }
+        let library = String::from_utf8(libraries.stdout)
+            .map_err(|error| step("rust-host-linker-search", error))?;
+        let library = Path::new(library.trim());
+        let prefix = library.parent().and_then(Path::to_str).ok_or_else(|| {
+            step(
+                "rust-host-linker-search",
+                "system compiler returned no library prefix",
+            )
+        })?;
+        if !library.is_file()
+            || !library.starts_with("/usr")
+            || !prefix
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"/._-".contains(&byte))
+        {
+            return Err(step(
+                "rust-host-linker-search",
+                "compiler runtime libraries escape the selected image or have an unsupported path",
+            ));
+        }
+        let wrapper =
+            format!("#!/bin/sh\nexec /dependencies/toolchain/bin/cc-driver -B{prefix}/ \"$@\"\n")
+                .into_bytes();
+        artifacts.push(ContextArtifactInput {
+            file_id: "toolchain:host-c-compiler-search".to_owned(),
+            digest: digest_bytes(&wrapper),
+        });
+        entries.push(dependency("toolchain/bin/cc-driver", captured, true));
+        entries.push(dependency("toolchain/bin/cc", wrapper, true));
+    }
+    Ok(artifacts)
 }
 
 fn collect_toolchain(
@@ -783,6 +871,7 @@ fn initial_selection(
     files: &[ContextFileInput],
     host: &str,
     selected: &targets::CargoTarget,
+    runtime_artifacts: &[ContextArtifactInput],
 ) -> Result<RustContextSelection, ProductionWorkspaceStartupError> {
     let identity: serde_json::Value = serde_json::from_slice(TOOLCHAIN_IDENTITY)
         .map_err(|error| step("rust-toolchain-identity", error))?;
@@ -793,7 +882,7 @@ fn initial_selection(
         .filter(|file| file.relative_path != selected.manifest)
         .filter_map(|file| file.relative_path.strip_suffix(b"/Cargo.toml"))
         .collect::<Vec<_>>();
-    let dependency_inputs = files
+    let mut dependency_inputs: Vec<_> = files
         .iter()
         .filter(|file| {
             dependency_roots.iter().any(|root| {
@@ -807,14 +896,8 @@ fn initial_selection(
             digest: file.digest,
         })
         .collect();
-    let build_inputs = files
-        .iter()
-        .filter(|file| file.relative_path.ends_with(b"build.rs"))
-        .map(|file| ContextArtifactInput {
-            file_id: file.file_id.clone(),
-            digest: file.digest,
-        })
-        .collect();
+    dependency_inputs.extend_from_slice(runtime_artifacts);
+    let build_inputs = targets::build_inputs(files)?;
     Ok(RustContextSelection {
         manifest_path: Some(selected.manifest.clone()),
         package_name: Some(selected.package.clone()),

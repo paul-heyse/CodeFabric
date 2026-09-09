@@ -1472,6 +1472,152 @@ fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
     supervisor.stop();
 }
 
+fn cargo_build_script_observation(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    leaf: &str,
+) -> Vec<SemanticObservation> {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "Rust function declarations",
+    );
+    request["scope"]["languages"] = json!(["rust"]);
+    let entities = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-entities"),
+        request.clone(),
+    );
+    if entities.rows.is_empty()
+        && let Ok(outputs) = fs::read_dir(fixture.fabric_workspace_root().join("provider-output"))
+    {
+        for output in outputs.flatten() {
+            for stage in ["rust-compilation-metadata", "rust-compilation-compiler"] {
+                let path = output.path().join(stage).join("stderr.capture");
+                if let Ok(file) = fs::File::open(&path) {
+                    use std::io::Read as _;
+                    let mut text = String::new();
+                    file.take(16 * 1024).read_to_string(&mut text).unwrap();
+                    eprintln!("{stage}: {text}");
+                }
+            }
+        }
+    }
+    assert_eq!(
+        entities
+            .rows
+            .iter()
+            .map(|row| row["name"].as_str().unwrap())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["build_script_configure::main", "fixture::caller", leaf]),
+        "processing: {}",
+        entities.processing
+    );
+    assert_eq!(entities.processing[0]["remaining_partitions"], 0);
+    let by_name = entities
+        .rows
+        .iter()
+        .map(|row| (row["name"].as_str().unwrap(), &row["public_entity_id"]))
+        .collect::<BTreeMap<_, _>>();
+    request["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "calls",
+        "starting_from": [{"entity_id": by_name["fixture::caller"]}],
+        "relationship": "calls", "direction": "outgoing", "distance": "one relationship step",
+        "return": {"limit": {"maximum_results": 32}}
+    }]);
+    let calls = public_query(fixture, stack, &format!("{phase}-calls"), request.clone());
+    assert_eq!(calls.rows.len(), 1);
+    assert_eq!(calls.rows[0]["public_target_entity_id"], *by_name[leaf]);
+    // Current Rust processing partitions cover the selected Cargo target, including
+    // build-script calls to external std functions. Keep that unresolved scope visible.
+    assert_eq!(calls.processing[0]["remaining_partitions"], 1);
+    assert!(
+        calls.processing[0]["remainder"][0]["reason_code"]
+            .as_str()
+            .unwrap()
+            .contains("unresolved_targets")
+    );
+    request["queries"] = json!([{
+        "request": "retrieve source and syntax context", "query_id": "source",
+        "about": [{"entity_id": by_name[leaf]}], "context": "function body"
+    }]);
+    let source = public_query(fixture, stack, &format!("{phase}-source"), request);
+    assert_eq!(source.rows.len(), 1);
+    assert_eq!(
+        source.rows[0]["source_context"]["text"],
+        if leaf == "fixture::selected" {
+            "{ 1 }"
+        } else {
+            "{ 2 }"
+        }
+    );
+    vec![entities, calls, source]
+}
+
+#[test]
+fn custom_cargo_build_input_changes_context_and_matches_clean_public_results() {
+    let fixture = ProductionFixture::with_source(b"marker = 1\n");
+    let root = Path::new(&fixture.workspace.root_path_display);
+    fs::create_dir(root.join("src")).unwrap();
+    fs::create_dir(root.join("custom")).unwrap();
+    fs::write(root.join("Cargo.toml"), "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\nbuild = \"custom/configure.rs\"\n[lib]\ntest = false\ndoctest = false\n").unwrap();
+    fs::write(
+        root.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/lib.rs"), b"#[cfg(selected)]\npub fn selected() -> u32 { 1 }\n#[cfg(not(selected))]\npub fn alternate() -> u32 { 2 }\npub fn caller() -> u32 {\n    #[cfg(selected)] { selected() }\n    #[cfg(not(selected))] { alternate() }\n}\n").unwrap();
+    let build_script = |selected: bool| {
+        format!(
+            "fn main() {{ println!(\"cargo::rustc-check-cfg=cfg(selected)\"); {} }}\n",
+            if selected {
+                "println!(\"cargo::rustc-cfg=selected\");"
+            } else {
+                ""
+            }
+        )
+    };
+    fs::write(root.join("custom/configure.rs"), build_script(true)).unwrap();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+        store.backup_to(&registration).unwrap();
+    }
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let initial = cargo_build_script_observation(
+        &fixture,
+        &stack,
+        "cargo-build-initial",
+        "fixture::selected",
+    );
+    fs::write(root.join("custom/configure.rs"), build_script(false)).unwrap();
+    let live = cargo_build_script_observation(
+        &fixture,
+        &stack,
+        "cargo-build-edited",
+        "fixture::alternate",
+    );
+    assert_ne!(
+        initial[0].rows[0]["context_id"], live[0].rows[0]["context_id"],
+        "the changed captured build input selects another effective context"
+    );
+    let clean = clean_fixture(&fixture, &registration, &stack);
+    let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        live,
+        cargo_build_script_observation(&clean, &stack, "cargo-build-clean", "fixture::alternate")
+    );
+    clean_supervisor.stop();
+    supervisor.stop();
+}
+
 fn encoded_sources(utf8: bool) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let python = if utf8 {
         "# coding: utf-8\r\n# é\r\nfrom helper import café\r\ndef caller():\r\n    return café()\r\n".as_bytes()
