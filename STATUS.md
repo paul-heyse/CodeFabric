@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `734821db` (`Publish canonical Python call occurrences and checker-resolved edges`).
-The current call-query slice and its validation are recorded below.
+Last production commit: `80bc6d18` (`Serve canonical calls with scoped coverage through the modern client`).
+The current declaration-selection continuation and its validation are recorded below.
 
 ## Current handoff
 
@@ -56,6 +56,25 @@ This login shell lacks delegated provider cgroups. Runtime checks pass inside
 `systemd-run --user --scope --quiet --property=Delegate=yes env` with the two provider binary
 variables below. The initial direct contained-provider run fails `SandboxUnavailable`; no production
 containment bypass or host configuration change was introduced.
+
+## Declaration selection and reusable public subjects
+
+FindEntities now exposes the canonical declaration kinds actually produced today: Python functions,
+classes, parameters, bindings, imports, type aliases and type parameters; Rust functions, constants,
+statics and constructor kinds. New entity results include a reusable public entity ID. Exact older
+epochs without that optional field remain readable. Guarded selections present readable labels while
+submitting the same opaque choice IDs; the installed driver selects by a unique live label.
+
+Real installed-client Python class/parameter/binding/import/type-parameter/type-alias and Rust
+constant/static scenarios verify independent expected names/kinds, scoped processing and public
+FindEntities-to-RetrieveFacts subjects. The mixed failed-target case retains its unavailable Rust
+partition. Final installed checks pass: Python kinds/fact subjects 12.95 s, readable guard 11.04 s,
+and Rust kinds/facts/failed-target calls 63.91 s. Exact-reopen regression passes (17.94 s).
+`just root-check-fast` and 15 focused processing/recipe/ingress tests pass.
+The adapter fast checks pass (95 tests plus lint/types), and the label-selection harness test passes.
+Library Clippy completes with the existing warning backlog; strict lint remains open as recorded above.
+Changed-file formatting, Python Ruff, docs navigation and `git diff --check` pass.
+Canonical coverage for additional kinds does not establish complete Python/Rust type/member semantics.
 
 ## Outcome 4: real inputs, canonical facts and the first four forms
 
@@ -128,7 +147,7 @@ The committed canonical catalog includes:
 |---|---|
 | `source.code_file` | Captured input identity, raw path bytes, content/generation and capture disposition |
 | `fact.code_entity`, `fact.code_declaration` | Python bindings and Rust stable compiler keys mapped through application identity recipes; declarations retain separate occurrence identity, exact source range, context and provenance |
-| `fact.code_entity_selector` | Canonical function selectors for Python, Rust or both |
+| `fact.code_entity_selector` | Canonical declaration-kind selectors and reusable public entity IDs for Python/Rust |
 | `fact.code_reference` | Python lexical read/write occurrences joined to bindings/declarations through exact source/context/run pins; unresolved targets retained; project-aware semantic and Rust references remain open |
 | `fact.code_call_site` | Python and Rust call occurrences, caller/target identity when established, resolution/dispatch, exact or explicitly unavailable source mapping, raw provider provenance |
 
@@ -154,7 +173,7 @@ Raw provider coverage is not complete canonical-family coverage.
 
 | Form | Demonstrated current behavior | Remaining |
 |---|---|---|
-| FindEntities | Installed client returns canonical Python/Rust functions; language/context filters precede limits; stable name/entity ordering | Other kinds/representations, source boundaries, semantic name/ambiguity resolution and full directives |
+| FindEntities | Installed client returns canonical functions and selected additional Python/Rust declaration kinds with reusable public IDs; language/context filters precede limits; stable name/entity ordering | Remaining kinds/representations, source boundaries, semantic name/ambiguity resolution and full directives |
 | RetrieveFacts | Explicit canonical entity IDs; `declarations` or `declaration locations and provenance`; native semi join prevents repeated subjects duplicating occurrences; partial and empty cases tested | Types, members, call/derived families, point filters, broad family expansion and phrase/fact/prior-result resolution |
 | FollowRelationships | Installed Python/Rust one-step incoming/outgoing calls, repeated sites, unknown targets, limits and exact Python reopen | references/imports, candidates, full direction/distance/stop/filter behavior and composition |
 | RetrieveSourceContext | Existing source storage/lease infrastructure only | Canonical production form, exact selected bytes after disk changes, separate disclosure authorization, coordinate and truncation delivery |
@@ -221,7 +240,7 @@ not evidence that all continuity requirements hold.
 | 7D Rust source/types/MIR | Real typed compiler publication, stable declaration keys and selected canonical calls | Full types/generics/traits/instances/MIR payloads, macro/hygiene/generated spans, coroutine/CTFE/FFI facts, structured diagnostics and canonical/public coverage |
 | 7E Rust derived/private borrow | Existing MIR analysis modules and contained compiler seam | Real typed inputs, finite dataflow/state/ownership analyses, exact private loans/regions, drop/unwind/coroutine and changed-body replacement |
 | 7F Common graphs/summaries | Existing petgraph/analysis integration and canonical calls | Demand-rooted projections, correct dominance/SCC/reachability, structural facts and bounded interprocedural fixpoints with precision/frontier scope |
-| 7G Complete forms/composition | Eight-form request/ingress infrastructure; two limited public forms, third in progress | FindPaths, MatchPattern, Compare and Summarize; finish first four; real typed multi-block DAGs, fan-out/fan-in, repeated forms, references, authorization, negatives, ordering/limits and cancellation |
+| 7G Complete forms/composition | Eight-form request/ingress infrastructure; three limited public forms | FindPaths, MatchPattern, Compare and Summarize; finish first four; real typed multi-block DAGs, fan-out/fan-in, repeated forms, references, authorization, negatives, ordering/limits and cancellation |
 | 7H Modern presentation | Installed FastMCP transport/resources, guarded-input scenarios, typed processing and diagnostic correction | All-form presentation, full paging/cursors and source permissions; replay/expiry/reconnect/slow-reader/TTL integration for new workflows; one consistent daemon-authored response |
 
 Substantial existing algorithms and fixtures are reusable, but fixture-fed or schema-only families are

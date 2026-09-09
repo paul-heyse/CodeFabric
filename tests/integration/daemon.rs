@@ -1682,7 +1682,7 @@ fn wp47_beh_real_installed_wheel_guard_query_resource_and_completion() {
         json!([{
             "message": "input.selection-resolution.description",
             "action": "accept",
-            "content": {"value": {"$requested_schema_enum": 0}},
+            "content": {"value": {"$requested_schema_presentation": "Python function declarations"}},
         }]),
         json!([
             {"id": "discovery", "operation": "discover"},
@@ -1777,12 +1777,22 @@ fn wp47_beh_real_installed_wheel_guard_query_resource_and_completion() {
     let guard = &report["guard_observations"][0];
     assert_eq!(guard["matched"], true);
     assert_eq!(guard["action"], "accept");
-    assert_eq!(
-        guard["requested_schema"]["properties"]["value"]["enum"]
-            .as_array()
-            .map(Vec::len),
-        Some(4)
-    );
+    let choices = &guard["requested_schema"]["properties"]["value"];
+    let labels = choices["x-codefabric-choice-presentations"]
+        .as_object()
+        .unwrap();
+    for expected in [
+        "Python function declarations",
+        "Python class declarations",
+        "Rust static declarations",
+    ] {
+        let id = labels
+            .iter()
+            .find(|(_, label)| label.as_str() == Some(expected))
+            .unwrap()
+            .0;
+        assert!(choices["enum"].as_array().unwrap().contains(&json!(id)));
+    }
     assert_no_modern_secret_projection(&report, &fixture);
     supervisor.stop();
 }
@@ -2192,6 +2202,39 @@ fn assert_canonical_python_calls(fixture: &ProductionFixture) {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn pragmatic_python_public_declaration_kinds() {
+    let fixture = ProductionFixture::with_source(
+        b"import sys\ntype Alias[T] = list[T]\nmarker = 1\nclass Box:\n    def read(self, value: int) -> int:\n        return value\n",
+    );
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    assert_public_declaration_kinds(
+        &fixture,
+        &stack,
+        "python",
+        &[
+            ("Python class declarations", "class", &["Box"]),
+            (
+                "Python parameter declarations",
+                "parameter",
+                &["self", "value"],
+            ),
+            ("Python binding declarations", "binding", &["marker"]),
+            ("Python import declarations", "import", &["sys"]),
+            ("Python type-alias declarations", "type-alias", &["Alias"]),
+            (
+                "Python type-parameter declarations",
+                "type-parameter",
+                &["T"],
+            ),
+        ],
+    );
+    supervisor.stop();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn pragmatic_python_implicit_calls_qualify_call_coverage() {
     let fixture = ProductionFixture::with_source(
         b"class Box:\n    @property\n    def value(self) -> int:\n        return 1\ndef read(box: Box) -> int:\n    return box.value\n",
@@ -2462,6 +2505,12 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         fs::write(workspace.join("Cargo.lock"), "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\ndependencies = [\"helper\"]\n[[package]]\nname = \"helper\"\nversion = \"0.1.0\"\n").unwrap();
     }
     if with_failure {
+        fs::OpenOptions::new()
+            .append(true)
+            .open(workspace.join("src/other.rs"))
+            .unwrap()
+            .write_all(b"pub const ANSWER: u32 = 42;\npub static TOTAL: u32 = 7;\n")
+            .unwrap();
         fs::write(workspace.join("scratch.rs"), "// π\r\nfn unfinished( {").unwrap();
         fs::create_dir_all(workspace.join("src/bin")).unwrap();
         fs::write(
@@ -2544,6 +2593,15 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         assert_eq!(states.get("fixture").map(String::as_str), Some("processed"));
         assert_rust_syntax_survives_compilation_failure(&fixture);
         assert_mixed_public_entity_queries(&fixture, stack.as_ref().unwrap());
+        assert_public_declaration_kinds(
+            &fixture,
+            stack.as_ref().unwrap(),
+            "rust",
+            &[
+                ("Rust constant declarations", "constant", &["ANSWER"]),
+                ("Rust static declarations", "static", &["TOTAL"]),
+            ],
+        );
         assert_public_call_queries(
             &fixture,
             stack.as_ref().unwrap(),
@@ -2839,6 +2897,137 @@ fn assert_mixed_public_entity_queries(
             .any(|name| name.ends_with("caller"))
     );
     assert_mixed_public_declaration_facts(fixture, stack);
+}
+
+fn assert_public_declaration_kinds(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    language: &str,
+    cases: &[(&str, &str, &[&str])],
+) {
+    use arrow::array::StringArray;
+    let mut steps = Vec::new();
+    for (ordinal, (phrase, _, _)) in cases.iter().enumerate() {
+        let request = semantic_request(
+            &fixture.workspace.public_id(),
+            &format!("request:declaration-kind-{ordinal}"),
+            phrase,
+        );
+        steps.push(json!({"id": format!("kind{ordinal}"), "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": request, "delivery": "resource"}}));
+        steps.push(json!({"id": format!("page{ordinal}"), "operation": "read_resource", "uri": {"$ref": format!("kind{ordinal}.structured_content.pages.0.uri")}}));
+    }
+    let scenario = modern_client_scenario(fixture, stack, "policy-one", json!([]), json!(steps));
+    let path = write_modern_client_scenario(fixture, "canonical-declaration-kinds", &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let mut subjects = BTreeSet::new();
+    for (ordinal, (_, kind, expected)) in cases.iter().enumerate() {
+        let response = modern_structured(modern_step(&report, &format!("kind{ordinal}")));
+        assert_eq!(response["execution_state"], "SUCCEEDED", "{response}");
+        assert_eq!(response["processing"][0]["family"], "declarations");
+        assert_eq!(response["processing"][0]["languages"], json!([language]));
+        assert_eq!(response["processing"][0]["additional_rows"], false);
+        assert_eq!(
+            response["processing"][0]["remaining_partitions"],
+            if language == "python" { 0 } else { 1 }
+        );
+        let bytes = STANDARD
+            .decode(
+                modern_step(&report, &format!("page{ordinal}"))[0]["blob"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+        let reader =
+            arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None).unwrap();
+        let mut names = BTreeSet::new();
+        for batch in reader {
+            let batch = batch.unwrap();
+            let text = |name| {
+                batch
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+            };
+            for row in 0..batch.num_rows() {
+                assert_eq!(text("entity_kind").value(row), *kind);
+                assert_eq!(text("language").value(row), language);
+                let public_id = text("public_entity_id").value(row);
+                subjects.insert(public_id.to_owned());
+                assert!(
+                    codefabric::identity::decode_public_id(
+                        codefabric::identity::IdentityDomain::Entity,
+                        Some(kind),
+                        public_id,
+                    )
+                    .is_ok(),
+                    "invalid reusable public entity ID: {public_id}"
+                );
+                names.insert(
+                    text("name")
+                        .value(row)
+                        .rsplit("::")
+                        .next()
+                        .unwrap()
+                        .to_owned(),
+                );
+            }
+        }
+        assert_eq!(
+            names,
+            expected.iter().map(|name| (*name).to_owned()).collect(),
+            "{kind}"
+        );
+    }
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "request:found-declaration-facts",
+        "unused",
+    );
+    request["queries"] = json!([{
+        "request": "retrieve facts about code", "query_id": "facts",
+        "about": subjects.iter().map(|id| json!({"entity_id": id})).collect::<Vec<_>>(),
+        "facts": ["declaration locations and provenance"],
+        "return": {"limit": {"maximum_results": 64}}
+    }]);
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "facts", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": request, "delivery": "resource"}},
+            {"id": "page", "operation": "read_resource", "uri": {"$ref": "facts.structured_content.pages.0.uri"}}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, "found-declaration-facts", &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    assert_eq!(
+        modern_structured(modern_step(&report, "facts"))["execution_state"],
+        "SUCCEEDED",
+        "{report}"
+    );
+    let bytes = STANDARD
+        .decode(modern_step(&report, "page")[0]["blob"].as_str().unwrap())
+        .unwrap();
+    let mut found = BTreeSet::new();
+    for batch in
+        arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None).unwrap()
+    {
+        let batch = batch.unwrap();
+        let ids = batch
+            .column_by_name("public_entity_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        found.extend(ids.iter().flatten().map(ToOwned::to_owned));
+    }
+    assert_eq!(
+        found, subjects,
+        "public find results must be reusable as fact subjects"
+    );
 }
 
 fn assert_mixed_public_declaration_facts(

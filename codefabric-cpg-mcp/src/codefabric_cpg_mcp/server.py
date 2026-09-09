@@ -532,6 +532,14 @@ def _tool_result(output: StrictWireModel, meta: PublicToolMeta, summary: str) ->
     )
 
 
+def _selection_presentation(key: str) -> str:
+    """Format the daemon's closed selection labels; choice IDs remain the submitted values."""
+    if not key.startswith("selection."):
+        return key
+    label = key.removeprefix("selection.").replace("-", " ")
+    return label[:1].upper() + label[1:]
+
+
 def _request_schema(requirement: InputRequirement) -> dict[str, Any]:
     constraints = (
         requirement.constraints.model_dump(mode="python") if requirement.constraints else {}
@@ -571,7 +579,8 @@ def _request_schema(requirement: InputRequirement) -> dict[str, Any]:
     if kind in {"enum", "enum_collection"}:
         choice_ids = [choice.choice_id for choice in requirement.authorized_choices]
         presentations = {
-            choice.choice_id: choice.presentation_key for choice in requirement.authorized_choices
+            choice.choice_id: _selection_presentation(choice.presentation_key)
+            for choice in requirement.authorized_choices
         }
         if kind == "enum":
             property_schema["enum"] = choice_ids

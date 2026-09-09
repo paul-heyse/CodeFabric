@@ -555,6 +555,25 @@ def _materialize_guard_content(content: Any, requested_schema: Any) -> Any:
     """Resolve a bounded scenario marker from the live daemon-authored input schema."""
 
     if isinstance(content, dict):
+        if set(content) == {"$requested_schema_presentation"}:
+            label = _string(
+                content["$requested_schema_presentation"],
+                256,
+                "SCENARIO_GUARD_LABEL_INVALID",
+            )
+            try:
+                field = requested_schema["properties"]["value"]
+                presentations = field["x-codefabric-choice-presentations"]
+                candidates = [
+                    value
+                    for value in field["enum"]
+                    if presentations.get(value) == label
+                ]
+            except (KeyError, TypeError, AttributeError):
+                _fail("GUARD_ENUM_SCHEMA_MISSING")
+            if len(candidates) != 1:
+                _fail("GUARD_ENUM_PRESENTATION_AMBIGUOUS_OR_MISSING")
+            return candidates[0]
         if set(content) == {"$requested_schema_enum"}:
             index = _integer(
                 content["$requested_schema_enum"],

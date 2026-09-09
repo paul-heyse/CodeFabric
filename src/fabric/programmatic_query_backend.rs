@@ -1209,7 +1209,10 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     Err(error) => return failed(&artifacts, "processing_scope", error),
                 };
                 let mut summary = processing.summarize(&scope, 0);
-                if declarations {
+                if declarations
+                    || (!calls
+                        && !matches!(selector, "function" | "python:function" | "rust:function"))
+                {
                     // The same admitted Ruff Binding / rustc PublicItem partitions own all
                     // declarations. Keep this conservative context scope for unknown subjects.
                     "declarations".clone_into(&mut summary.family);

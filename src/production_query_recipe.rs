@@ -53,6 +53,27 @@ const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
 const RELEASE_FACTUAL_SEMANTIC_CLASS_ID: &str = "semantic.fact.v2";
 const RELEASE_SELECTION_MAXIMUM_VALUES: usize = 64;
 
+// Only kinds with an actual canonical producer are offered as controlled meanings.
+pub(crate) const CANONICAL_ENTITY_SELECTORS: &[(&str, &str)] = &[
+    ("Python function declarations", "python:function"),
+    ("Rust function declarations", "rust:function"),
+    ("function declarations", "function"),
+    ("function", "function"),
+    ("Python class declarations", "python:class"),
+    ("Python parameter declarations", "python:parameter"),
+    ("Python binding declarations", "python:binding"),
+    ("Python import declarations", "python:import"),
+    ("Python type-alias declarations", "python:type-alias"),
+    (
+        "Python type-parameter declarations",
+        "python:type-parameter",
+    ),
+    ("Rust constant declarations", "rust:constant"),
+    ("Rust static declarations", "rust:static"),
+    ("Rust constructor functions", "rust:constructor-function"),
+    ("Rust constructor constants", "rust:constructor-constant"),
+];
+
 /// Whether a relation is owned by the sealed epoch or exists only inside one compiled request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProductionRelationAuthority {
@@ -695,20 +716,14 @@ fn epoch_semantic_relation(
             })?,
             canonical: semantic_role == "canonical.entity-selector",
             scope_fields: if semantic_role == "canonical.entity-selector" {
-                vec![
-                    (
-                        semantic_field("semantic.entity.language")?,
-                        "entity-language",
-                    ),
-                    (
-                        semantic_field("semantic.provenance.analysis-context")?,
-                        "analysis-context-id",
-                    ),
-                    (
-                        semantic_field("semantic.provenance.source-file")?,
-                        "source-file-id",
-                    ),
-                ]
+                canonical_entity_scope_fields(
+                    &semantic_field,
+                    sealed
+                        .contract
+                        .logical_schema()
+                        .index_of("public_entity_id")
+                        .is_ok(),
+                )?
             } else {
                 Vec::new()
             },
@@ -721,6 +736,31 @@ fn epoch_semantic_relation(
             detail: format!("semantic relation role {semantic_role:?} is ambiguous"),
         }),
     }
+}
+
+fn canonical_entity_scope_fields(
+    semantic_field: &impl Fn(&str) -> Result<FieldId, ProductionQueryRecipeError>,
+    has_public_id: bool,
+) -> Result<Vec<(FieldId, &'static str)>, ProductionQueryRecipeError> {
+    let mut fields = [
+        ("semantic.entity.language", "entity-language"),
+        (
+            "semantic.provenance.analysis-context",
+            "analysis-context-id",
+        ),
+        ("semantic.provenance.source-file", "source-file-id"),
+    ]
+    .into_iter()
+    .map(|(role, output)| Ok((semantic_field(role)?, output)))
+    .collect::<Result<Vec<_>, ProductionQueryRecipeError>>()?;
+    // Older retained epochs have only the binary ID/kind pair.
+    if has_public_id {
+        fields.push((
+            semantic_field("semantic.entity.public-identity")?,
+            "public-entity-id",
+        ));
+    }
+    Ok(fields)
 }
 
 fn compiled_find_entities_program(
@@ -827,12 +867,7 @@ fn compiled_find_entities_program(
             scalar_operator: ScalarOperator::Equal,
             fold: EpochBoundSelectionFold::Any,
             resolutions: if canonical {
-                vec![
-                    ("Python function declarations", "python:function"),
-                    ("Rust function declarations", "rust:function"),
-                    ("function declarations", "function"),
-                    ("function", "function"),
-                ]
+                CANONICAL_ENTITY_SELECTORS.to_vec()
             } else {
                 vec![
                     ("Python function declarations", "function"),

@@ -176,6 +176,7 @@ impl Canonical {
             Kind::EntitySelector => {
                 let mut fields = entity_fields();
                 fields.push(("selector", DataType::Utf8, false));
+                fields.push(("public_entity_id", DataType::Utf8, true));
                 (SELECTOR, fields, vec![ENTITY])
             }
         };
@@ -505,7 +506,12 @@ impl ProgrammaticTransformation for Canonical {
                             entity_fields()
                                 .iter()
                                 .map(|(name, _, _)| col(*name))
-                                .chain([selector.alias("selector")]),
+                                .chain([
+                                    selector.alias("selector"),
+                                    public_entity_id()
+                                        .call(vec![col("entity_id"), col("entity_kind")])
+                                        .alias("public_entity_id"),
+                                ]),
                         )?
                         .build()?)
                 };
@@ -576,6 +582,7 @@ fn canonical_field_identity(id: &str, name: &str) -> TransformationFieldIdentity
     let field = TransformationFieldIdentity::new(ProgrammaticFieldId::new(format!("{id}.{name}")));
     match name {
         "entity_id" => field.with_semantic_role("semantic.entity.identity"),
+        "public_entity_id" => field.with_semantic_role("semantic.entity.public-identity"),
         "entity_kind" => field.with_semantic_role("semantic.entity.kind"),
         "name" => field.with_semantic_role("semantic.entity.name"),
         "language" => field.with_semantic_role("semantic.entity.language"),

@@ -131,13 +131,18 @@ impl EntityQueryScope {
             return Err("unsupported entity language".to_owned());
         }
         match selector {
-            "python:function" => languages.retain(|language| language == "python"),
-            "rust:function" => languages.retain(|language| language == "rust"),
             "function" | "declarations" | "calls" => {}
+            selected
+                if crate::production_query_recipe::CANONICAL_ENTITY_SELECTORS
+                    .iter()
+                    .any(|(_, value)| *value == selected) =>
+            {
+                let (selected_language, _) =
+                    selected.split_once(':').expect("closed language selector");
+                languages.retain(|language| language == selected_language);
+            }
             _ => {
-                return Err(
-                    "entity selector is not a compiled function declaration meaning".to_owned(),
-                );
+                return Err("entity selector is not a compiled declaration meaning".to_owned());
             }
         }
         let contexts = request

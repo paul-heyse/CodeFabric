@@ -11,6 +11,31 @@ from tooling.product.golden import select
 from tooling.product.process import run
 
 
+def test_guard_choice_uses_live_label_and_rejects_missing_or_ambiguous_choices():
+    from tooling.fastmcp4_modern_client_driver import (
+        DriverError,
+        _materialize_guard_content,
+    )
+
+    marker = {
+        "value": {"$requested_schema_presentation": "Python function declarations"}
+    }
+    choices = {
+        "choice:other": "Rust constants",
+        "choice:function": "Python function declarations",
+    }
+    field = {"enum": list(choices), "x-codefabric-choice-presentations": choices}
+    schema = {"properties": {"value": field}}
+    assert _materialize_guard_content(marker, schema) == {"value": "choice:function"}
+    field["enum"].reverse()
+    assert _materialize_guard_content(marker, schema) == {"value": "choice:function"}
+    choices["choice:other"] = choices["choice:function"]
+    with pytest.raises(DriverError, match="AMBIGUOUS_OR_MISSING"):
+        _materialize_guard_content(marker, schema)
+    with pytest.raises(DriverError, match="SCHEMA_MISSING"):
+        _materialize_guard_content(marker, {})
+
+
 def test_failure_timeout_and_bounded_output(tmp_path):
     failed = run(
         [sys.executable, "-c", 'import sys; print("failure"); sys.exit(7)'],

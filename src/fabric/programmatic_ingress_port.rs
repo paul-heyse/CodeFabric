@@ -1696,7 +1696,7 @@ impl IngressProjection {
                         Ok((
                             SemanticAuthorizedChoice {
                                 choice_id: choice_id.clone(),
-                                presentation_key: choice_id,
+                                presentation_key: selection_presentation(request_value, choice_id),
                                 value: semantic_input_value(request_value)?,
                             },
                             execution_value.clone(),
@@ -2483,6 +2483,19 @@ fn return_spec(clause: &SemanticQueryClause) -> Option<&ReturnSpec> {
         | SemanticQueryClause::CombineResults { return_spec, .. }
         | SemanticQueryClause::SummarizeFacts { return_spec, .. }
         | SemanticQueryClause::RetrieveSourceContext { return_spec, .. } => return_spec.as_ref(),
+    }
+}
+
+fn selection_presentation(value: &SemanticClauseValue, fallback: String) -> String {
+    match value {
+        SemanticClauseValue::Text(text)
+            if crate::production_query_recipe::CANONICAL_ENTITY_SELECTORS
+                .iter()
+                .any(|(phrase, _)| *phrase == text.as_ref()) =>
+        {
+            format!("selection.{}", text.to_ascii_lowercase().replace(' ', "-"))
+        }
+        _ => fallback,
     }
 }
 
