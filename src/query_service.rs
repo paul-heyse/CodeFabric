@@ -4153,6 +4153,7 @@ fn processing_page_summary(
                 target: row.target,
                 target_kind: row.target_kind,
                 analysis_context_id: row.analysis_context_id,
+                entity_id: row.entity_id,
                 state: state as i32,
                 reason_code: row.reason,
             })

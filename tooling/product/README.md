@@ -89,4 +89,6 @@ Its default harness deadline is 600 seconds.
 `just golden --case cargo-build-live` runs a custom Cargo build script inside the selected
 containment, then changes its cfg output. Installed declaration, call and source queries must
 reflect the changed context and match an independent clean daemon. Build-script declarations
-remain observable. Its default harness deadline is 600 seconds.
+remain observable. Outgoing direct and known-empty callers use their admitted MIR owner scope;
+incomplete build-script explanations carry the caller ID. Incoming queries retain broader scope,
+and exact reopen preserves the selected results. Its default harness deadline is 600 seconds.

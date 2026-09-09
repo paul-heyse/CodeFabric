@@ -1039,6 +1039,7 @@ def _processing_summary(value: query_pb.QueryProcessingSummary) -> QueryProcessi
                     analysis_context_id=row.analysis_context_id
                     if row.HasField("analysis_context_id")
                     else None,
+                    entity_id=row.entity_id if row.HasField("entity_id") else None,
                     state=states[row.state],
                     reason_code=row.reason_code,
                 )

@@ -4144,12 +4144,24 @@ fn assert_public_call_queries(
         true
     );
     let coverage = modern_structured(modern_step(&report, "outgoing"));
-    assert!(
-        coverage["processing"][0]["remaining_partitions"]
-            .as_u64()
-            .unwrap()
-            > 0
-    );
+    if language == "rust" {
+        assert_eq!(coverage["processing"][0]["requested_partitions"], 1);
+        assert_eq!(coverage["processing"][0]["remaining_partitions"], 0);
+        let dynamic = modern_structured(modern_step(&report, "dynamic"));
+        assert_eq!(dynamic["processing"][0]["remaining_partitions"], 1);
+        assert_eq!(
+            dynamic["processing"][0]["remainder"][0]["entity_id"],
+            *indirect
+        );
+        assert!(modern_structured(modern_step(&report, "incoming"))["processing"][0]["remaining_partitions"].as_u64().unwrap() > 0);
+    } else {
+        assert!(
+            coverage["processing"][0]["remaining_partitions"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+    }
     assert_eq!(coverage["processing"][0]["additional_rows"], false);
     assert_ne!(
         modern_structured(modern_step(&report, "unsupported"))["execution_state"],

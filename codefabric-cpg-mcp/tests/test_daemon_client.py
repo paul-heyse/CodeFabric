@@ -94,6 +94,11 @@ def test_typed_processing_rejects_inconsistent_scope_and_preserves_unknown_exhau
             )
         ],
     )
+    assert _processing_summary(message).remainder[0].entity_id is None
+    message.remainder[0].entity_id = "entity:function:caller"
+    assert _processing_summary(message).remainder[0].entity_id == "entity:function:caller"
+    message.remainder[0].ClearField("entity_id")
+    assert _processing_summary(message).remainder[0].entity_id is None
     assert _processing_summary(message).additional_rows is None
     message.additional_rows = False
     assert _processing_summary(message).additional_rows is False

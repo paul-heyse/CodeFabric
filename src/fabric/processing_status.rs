@@ -99,6 +99,15 @@ impl QueryProcessing {
                 value.languages.contains(&row.language)
                     && !row.scope_kind.is_empty()
                     && !row.reason.is_empty()
+                    && row.entity_id.as_ref().is_none_or(|id| {
+                        row.scope_kind == "call_owner"
+                            && crate::identity::decode_public_id(
+                                crate::identity::IdentityDomain::Entity,
+                                Some("function"),
+                                id,
+                            )
+                            .is_ok()
+                    })
                     && row.path.as_deref() == std::str::from_utf8(&row.path_bytes).ok()
                     && matches!(
                         row.state.as_str(),
@@ -121,9 +130,18 @@ pub(crate) struct EntityQueryScope {
     family: &'static str,
     languages: BTreeSet<String>,
     contexts: BTreeSet<[u8; 16]>,
+    owners: Option<BTreeSet<[u8; 16]>>,
 }
 
 impl EntityQueryScope {
+    fn selects_owner(&self, owner: Option<&[u8]>) -> bool {
+        match (&self.owners, owner) {
+            (Some(selected), Some(owner)) => selected.iter().any(|id| id == owner),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+
     pub(crate) fn from_request(
         request: &crate::semantic_query_contract::SemanticQueryRequest,
         selector: &str,
@@ -195,6 +213,7 @@ impl EntityQueryScope {
             },
             languages,
             contexts,
+            owners: None,
         })
     }
 
@@ -266,6 +285,8 @@ pub struct ProcessingRemainder {
     pub target_kind: Option<String>,
     #[serde(default)]
     pub analysis_context_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity_id: Option<String>,
     pub state: String,
     pub reason: String,
 }
@@ -323,6 +344,84 @@ impl EntityProcessingSnapshot {
         self.workspace == workspace && self.epoch == epoch && self.generation == generation
     }
 
+    /// Narrow only explicit outgoing subjects with an exact retained owner partition.
+    /// Unknown subjects and older epochs retain the broader requested input scope.
+    pub(crate) fn select_outgoing_owners(
+        &self,
+        scope: &mut EntityQueryScope,
+        clause: &crate::semantic_query_contract::SemanticQueryClause,
+    ) -> Result<(), String> {
+        use crate::semantic_query_contract::{SemanticQueryClause, SemanticReference};
+        let SemanticQueryClause::FollowRelationships {
+            starting_from,
+            direction,
+            ..
+        } = clause
+        else {
+            return Ok(());
+        };
+        if scope.family != "call-targets"
+            || direction.as_deref().unwrap_or("outgoing") != "outgoing"
+            || starting_from.is_empty()
+            || starting_from.len() > 4096
+        {
+            return Ok(());
+        }
+        let mut selected = BTreeSet::new();
+        for subject in starting_from {
+            let SemanticReference::Entity { entity_id } = subject else {
+                return Ok(());
+            };
+            let slug = entity_id
+                .split(':')
+                .nth(1)
+                .ok_or("invalid owner entity ID")?;
+            selected.insert(
+                crate::identity::decode_public_id(
+                    crate::identity::IdentityDomain::Entity,
+                    Some(slug),
+                    entity_id,
+                )
+                .map_err(|error| error.to_string())?,
+            );
+        }
+        let mut found = BTreeSet::new();
+        for batch in &self.batches {
+            let Some(owners) = batch
+                .column_by_name("owner_entity_id")
+                .and_then(|a| a.as_any().downcast_ref::<FixedSizeBinaryArray>())
+            else {
+                continue;
+            };
+            let languages = strings(batch, "language")?;
+            let contexts = batch
+                .column_by_name("context_id")
+                .and_then(|a| a.as_any().downcast_ref::<FixedSizeBinaryArray>())
+                .ok_or("invalid owner context")?;
+            for row in 0..batch.num_rows() {
+                if owners.is_null(row)
+                    || !scope.languages.contains(languages.value(row))
+                    || (!scope.contexts.is_empty()
+                        && !contexts.is_null(row)
+                        && !scope.contexts.iter().any(|id| contexts.value(row) == id))
+                {
+                    continue;
+                }
+                let id: [u8; 16] = owners
+                    .value(row)
+                    .try_into()
+                    .map_err(|_| "invalid owner width")?;
+                if selected.contains(&id) {
+                    found.insert(id);
+                }
+            }
+        }
+        if found == selected {
+            scope.owners = Some(selected);
+        }
+        Ok(())
+    }
+
     /// Current query profile counts source-file and selected-Cargo-target work partitions.
     /// Pagination limits explanation size; it never changes the reported remainder count.
     pub(crate) fn summarize(
@@ -335,7 +434,12 @@ impl EntityProcessingSnapshot {
             requested_partitions: 0,
             completed_partitions: 0,
             remaining_partitions: 0,
-            scope: "requested_python_sources_and_selected_cargo_targets".to_owned(),
+            scope: if scope.owners.is_some() {
+                "selected_rust_call_owners"
+            } else {
+                "requested_python_sources_and_selected_cargo_targets"
+            }
+            .to_owned(),
             family: scope.family.to_owned(),
             remainder: Vec::new(),
             next_offset: None,
@@ -356,7 +460,16 @@ impl EntityProcessingSnapshot {
                 .column_by_name("context_id")
                 .and_then(|a| a.as_any().downcast_ref::<FixedSizeBinaryArray>())
                 .expect("validated context ID");
+            let owners = batch
+                .column_by_name("owner_entity_id")
+                .and_then(|a| a.as_any().downcast_ref::<FixedSizeBinaryArray>());
             for row in 0..batch.num_rows() {
+                let owner = owners
+                    .filter(|array| !array.is_null(row))
+                    .map(|array| array.value(row));
+                if !scope.selects_owner(owner) {
+                    continue;
+                }
                 if families.value(row) != scope.family
                     || !scope.languages.contains(languages.value(row))
                 {
@@ -392,15 +505,18 @@ impl EntityProcessingSnapshot {
                         .filter(|array| !array.is_null(row))
                         .map(|array| array.value(row).to_owned()),
                     analysis_context_id: (!contexts.is_null(row)).then(|| {
-                        crate::identity::encode_public_id(
+                        public_processing_id(
                             crate::identity::IdentityDomain::AnalysisContext,
                             None,
-                            contexts
-                                .value(row)
-                                .try_into()
-                                .expect("validated context width"),
+                            contexts.value(row),
                         )
-                        .expect("context identities have no kind slug")
+                    }),
+                    entity_id: owner.map(|id| {
+                        public_processing_id(
+                            crate::identity::IdentityDomain::Entity,
+                            Some("function"),
+                            id,
+                        )
                     }),
                     state: states.value(row).to_owned(),
                     reason: reasons.value(row).to_owned(),
@@ -414,6 +530,21 @@ impl EntityProcessingSnapshot {
         .then_some(next);
         summary
     }
+}
+
+fn public_processing_id(
+    domain: crate::identity::IdentityDomain,
+    kind: Option<&str>,
+    bytes: &[u8],
+) -> String {
+    crate::identity::encode_public_id(
+        domain,
+        kind,
+        bytes
+            .try_into()
+            .expect("validated processing identity width"),
+    )
+    .expect("closed processing identity domain and kind")
 }
 
 impl EntityProcessingSummary {
@@ -484,8 +615,23 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
             return Err("null required processing value".to_owned());
         }
     }
+    let owners = if let Some(array) = batch.column_by_name("owner_entity_id") {
+        let array = array
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .ok_or("invalid processing owner")?;
+        if array.value_length() != 16 {
+            return Err("invalid processing owner width".to_owned());
+        }
+        Some(array)
+    } else {
+        None
+    };
     for row in 0..batch.num_rows() {
-        if workspace_ids.is_null(row)
+        if owners.is_some_and(|owners| owners.is_null(row) == (kinds.value(row) == "call_owner"))
+            || (kinds.value(row) == "call_owner"
+                && (family.value(row) != "call-targets" || language.value(row) != "rust"))
+            || workspace_ids.is_null(row)
             || workspace_ids.value(row) != workspace
             || generations.is_null(row)
             || generations.value(row) != generation
@@ -611,6 +757,7 @@ mod tests {
             family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned()]),
             contexts: BTreeSet::new(),
+            owners: None,
         };
         let summary = processing.summarize(&python, 0);
         assert_eq!(
@@ -629,6 +776,7 @@ mod tests {
             family: "function-declarations",
             languages: BTreeSet::from(["rust".to_owned()]),
             contexts: BTreeSet::new(),
+            owners: None,
         };
         let first = processing.summarize(&rust, 0);
         let second = processing.summarize(&rust, first.next_offset.unwrap());
@@ -675,6 +823,7 @@ mod tests {
                     family: "function-declarations",
                     languages: BTreeSet::from(["python".to_owned()]),
                     contexts: BTreeSet::new(),
+                    owners: None,
                 },
                 0,
             );
@@ -702,6 +851,7 @@ mod tests {
             family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned()]),
             contexts: BTreeSet::new(),
+            owners: None,
         };
         let declarations = processing.summarize(&scope, 0);
         assert_eq!(
@@ -734,6 +884,7 @@ mod tests {
             family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned(), "rust".to_owned()]),
             contexts: BTreeSet::from([[8; 16]]),
+            owners: None,
         };
         let summary = processing.summarize(&scope, 0);
         assert_eq!(
@@ -744,10 +895,97 @@ mod tests {
             family: "function-declarations",
             languages: BTreeSet::new(),
             contexts: BTreeSet::new(),
+            owners: None,
         };
         assert_eq!(
             processing.summarize(&empty, 0).coverage().unwrap(),
             ResultCoverage::complete(0)
         );
+    }
+    #[test]
+    fn processing_outgoing_owner_selection_preserves_unknown_and_incoming_scope() {
+        let mut processing = fixture();
+        let original = processing.batches[0].slice(0, 1);
+        let mut fields = original.schema().fields().to_vec();
+        fields.push(Arc::new(Field::new(
+            "owner_entity_id",
+            arrow_schema::DataType::FixedSizeBinary(16),
+            true,
+        )));
+        let schema = Arc::new(Schema::new(fields));
+        let row = |owner: Option<&[u8; 16]>, state: &str, reason: &str| {
+            let mut columns = original.columns().to_vec();
+            for (name, value) in [
+                ("family", "call-targets"),
+                ("language", "rust"),
+                (
+                    "scope_kind",
+                    if owner.is_some() {
+                        "call_owner"
+                    } else {
+                        "cargo_target"
+                    },
+                ),
+                ("processing_state", state),
+                ("reason", reason),
+            ] {
+                columns[original.schema().index_of(name).unwrap()] =
+                    Arc::new(StringArray::from(vec![value]));
+            }
+            columns.push(super::super::id16_array([owner]));
+            let batch = RecordBatch::try_new(schema.clone(), columns).unwrap();
+            validate(&batch, [1; 16], 3).unwrap();
+            ChargedValue::for_test(batch)
+        };
+        processing.batches = vec![
+            row(None, "partial", "unresolved_targets"),
+            row(Some(&[10; 16]), "complete", ""),
+            row(Some(&[11; 16]), "partial", "unresolved_targets"),
+        ];
+        let scope = || EntityQueryScope {
+            family: "call-targets",
+            languages: BTreeSet::from(["rust".into()]),
+            contexts: BTreeSet::new(),
+            owners: None,
+        };
+        let clause = |ids: &[u8], direction: &str| {
+            serde_json::from_value::<crate::semantic_query_contract::SemanticQueryClause>(serde_json::json!({
+                "request": "follow code relationships", "query_id": "q", "relationship": "calls", "direction": direction,
+                "starting_from": ids.iter().map(|id| serde_json::json!({"entity_id": crate::identity::encode_public_id(
+                    crate::identity::IdentityDomain::Entity, Some("function"), [*id; 16]).unwrap()})).collect::<Vec<_>>()
+            })).unwrap()
+        };
+        let broad = processing.summarize(&scope(), 0);
+        assert_eq!(
+            (broad.requested_partitions, broad.remaining_partitions),
+            (1, 1)
+        );
+        let mut selected = scope();
+        processing
+            .select_outgoing_owners(&mut selected, &clause(&[10, 10], "outgoing"))
+            .unwrap();
+        let exact = processing.summarize(&selected, 0);
+        assert_eq!(
+            (exact.requested_partitions, exact.remaining_partitions),
+            (1, 0)
+        );
+        assert_eq!(exact.scope, "selected_rust_call_owners");
+        let mut both = scope();
+        processing
+            .select_outgoing_owners(&mut both, &clause(&[10, 11], "outgoing"))
+            .unwrap();
+        let both = processing.summarize(&both, 0);
+        assert_eq!(
+            (both.requested_partitions, both.remaining_partitions),
+            (2, 1)
+        );
+        for query in [clause(&[10, 12], "outgoing"), clause(&[10], "incoming")] {
+            let mut fallback = scope();
+            processing
+                .select_outgoing_owners(&mut fallback, &query)
+                .unwrap();
+            assert!(fallback.owners.is_none());
+            assert_eq!(processing.summarize(&fallback, 0), broad);
+        }
     }
 }

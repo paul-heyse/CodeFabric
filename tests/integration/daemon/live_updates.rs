@@ -1472,6 +1472,22 @@ fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
     supervisor.stop();
 }
 
+fn print_cargo_failure(fixture: &ProductionFixture) {
+    if let Ok(outputs) = fs::read_dir(fixture.fabric_workspace_root().join("provider-output")) {
+        for output in outputs.flatten() {
+            for stage in ["rust-compilation-metadata", "rust-compilation-compiler"] {
+                let path = output.path().join(stage).join("stderr.capture");
+                if let Ok(file) = fs::File::open(&path) {
+                    use std::io::Read as _;
+                    let mut text = String::new();
+                    file.take(16 * 1024).read_to_string(&mut text).unwrap();
+                    eprintln!("{stage}: {text}");
+                }
+            }
+        }
+    }
+}
+
 fn cargo_build_script_observation(
     fixture: &ProductionFixture,
     stack: &InstalledProductionStack,
@@ -1490,20 +1506,8 @@ fn cargo_build_script_observation(
         &format!("{phase}-entities"),
         request.clone(),
     );
-    if entities.rows.is_empty()
-        && let Ok(outputs) = fs::read_dir(fixture.fabric_workspace_root().join("provider-output"))
-    {
-        for output in outputs.flatten() {
-            for stage in ["rust-compilation-metadata", "rust-compilation-compiler"] {
-                let path = output.path().join(stage).join("stderr.capture");
-                if let Ok(file) = fs::File::open(&path) {
-                    use std::io::Read as _;
-                    let mut text = String::new();
-                    file.take(16 * 1024).read_to_string(&mut text).unwrap();
-                    eprintln!("{stage}: {text}");
-                }
-            }
-        }
+    if entities.rows.is_empty() {
+        print_cargo_failure(fixture);
     }
     assert_eq!(
         entities
@@ -1530,11 +1534,45 @@ fn cargo_build_script_observation(
     let calls = public_query(fixture, stack, &format!("{phase}-calls"), request.clone());
     assert_eq!(calls.rows.len(), 1);
     assert_eq!(calls.rows[0]["public_target_entity_id"], *by_name[leaf]);
-    // Current Rust processing partitions cover the selected Cargo target, including
-    // build-script calls to external std functions. Keep that unresolved scope visible.
-    assert_eq!(calls.processing[0]["remaining_partitions"], 1);
+    assert_eq!(calls.processing[0]["requested_partitions"], 1);
+    assert_eq!(calls.processing[0]["remaining_partitions"], 0);
+    assert_eq!(calls.processing[0]["scope"], "selected_rust_call_owners");
+    request["queries"][0]["starting_from"] = json!([{"entity_id": by_name[leaf]}]);
+    let empty = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-empty-calls"),
+        request.clone(),
+    );
+    assert!(empty.rows.is_empty());
+    assert_eq!(empty.processing[0]["requested_partitions"], 1);
+    assert_eq!(empty.processing[0]["remaining_partitions"], 0);
+    request["queries"][0]["starting_from"] =
+        json!([{"entity_id": by_name["build_script_configure::main"]}]);
+    let build_calls = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-build-calls"),
+        request.clone(),
+    );
+    assert!(!build_calls.rows.is_empty());
+    assert_eq!(build_calls.processing[0]["remaining_partitions"], 1);
+    assert_eq!(
+        build_calls.processing[0]["remainder"][0]["entity_id"],
+        *by_name["build_script_configure::main"]
+    );
+    request["queries"][0]["starting_from"] = json!([{"entity_id": by_name[leaf]}]);
+    request["queries"][0]["direction"] = json!("incoming");
+    let incoming = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-incoming-calls"),
+        request.clone(),
+    );
+    assert_eq!(incoming.rows.len(), 1);
+    assert_eq!(incoming.processing[0]["remaining_partitions"], 1);
     assert!(
-        calls.processing[0]["remainder"][0]["reason_code"]
+        incoming.processing[0]["remainder"][0]["reason_code"]
             .as_str()
             .unwrap()
             .contains("unresolved_targets")
@@ -1553,7 +1591,7 @@ fn cargo_build_script_observation(
             "{ 2 }"
         }
     );
-    vec![entities, calls, source]
+    vec![entities, calls, source, empty, incoming, build_calls]
 }
 
 #[test]
@@ -1615,6 +1653,17 @@ fn custom_cargo_build_input_changes_context_and_matches_clean_public_results() {
         cargo_build_script_observation(&clean, &stack, "cargo-build-clean", "fixture::alternate")
     );
     clean_supervisor.stop();
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        live,
+        cargo_build_script_observation(
+            &fixture,
+            &stack,
+            "cargo-build-reopened",
+            "fixture::alternate"
+        )
+    );
     supervisor.stop();
 }
 

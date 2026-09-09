@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:9012381600dcae6ba4e347a9b376ff36c16c00dc17d78ac2350c884cd24dd7be
+// canonical_digest: b3:f60cb27782bc0d83cb4828b08f627947b220232fe2f1e9060fe8c03fe14aaf04
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
@@ -601,6 +601,8 @@ message ProcessingRemainder {
   string reason_code = 7;
   optional string target_kind = 8;
   optional string analysis_context_id = 9;
+  // Present when the processing scope names one canonical code owner.
+  optional string entity_id = 10;
 }
 
 message QueryProcessingSummary {

@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `fcd62fd9` (`Preserve raw compiler source paths independently of display names`);
-contained custom Cargo build inputs are the current implementation slice.
+Last production commit: `41438e2e` (`Run captured custom Cargo build scripts inside the selected containment`);
+Rust outgoing-call owner scope is the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -257,8 +257,31 @@ source rules remain enforced.
 Earlier native attempts exposed the linker alias/library
 search failures and the existing target-wide call scope. Calls to uncaptured standard-library
 functions in the build script correctly retain an unresolved target remainder for that broad scope.
-Per-caller outgoing processing, distinct host/target contexts, generated/proc-macro input closure,
-the full host C SDK closure and Cargo cache/configuration coverage remain open.
+The following slice adds per-caller outgoing processing. Distinct host/target contexts, generated/
+proc-macro input closure, the full host C SDK closure and Cargo cache/configuration coverage remain open.
+
+## Rust outgoing-call owner scope
+
+The additive processing projection now joins explicit Rust declaration owners to admitted MIR
+bodies and exact source revisions. Caller-local unresolved targets and source locations remain
+partial; an unowned call qualifies its whole context. Missing/stale MIR bodies and unfinished
+provider work cannot establish an empty call set. Queries can narrow explicit outgoing subjects
+only when every selected owner has a retained partition. Unknown subjects, incoming queries,
+Python and older persisted schemas keep the existing conservative scope. Private continuation
+selection retains owner IDs and avoids counting owner and context partitions together.
+On 2026-09-09 six focused recipe/selection/processing/continuation cases pass, including stale MIR,
+unowned calls, repeated subjects, unknown subjects and exclusion of overlapping context rows.
+The installed `cargo-build-live` case passes with typed caller IDs and exact reopen (152.97 s):
+direct and known-empty outgoing callers are complete, while build-script and incoming queries keep
+their relevant remainders. Live results equal an independent clean daemon. The mixed failed-Rust-target
+public queries pass (67.73 s), preserving unrelated failures for incoming calls while narrowing
+known outgoing callers. Retained 130-partition processing pages pass across repair/restart (56.71 s).
+
+All 109 adapter tests, default/featureless root checks, all 210 tooling tests, tooling lint and full
+governance pass. Final affected Clippy retains the 955 library/36 integration warning baseline with
+no new code/file diagnostics; the final pure owner-selection refactor passes the six focused tests
+again. Changed-file formatting and docs navigation pass. Python owner scope, incoming dependency/
+frontier precision, other families, efficient status indexing and distinct host/target contexts remain open.
 
 ## Live source reconciliation and current query selection
 

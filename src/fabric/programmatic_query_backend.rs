@@ -1380,11 +1380,21 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                         }
                     }
                 };
-                let scope =
+                let mut scope =
                     match EntityQueryScope::from_request(&request.parsed().request, selector) {
                         Ok(scope) => scope,
                         Err(error) => return failed(&artifacts, "processing_scope", error),
                     };
+                if let Some(clause) = request
+                    .parsed()
+                    .request
+                    .queries
+                    .iter()
+                    .find(|clause| clause.query_id() == query_id.as_ref())
+                    && let Err(error) = processing.select_outgoing_owners(&mut scope, clause)
+                {
+                    return failed(&artifacts, "processing_scope", error);
+                }
                 let predicate = match if declarations || calls {
                     scope.predicate_for(output.relation_id().as_str(), "language", "context_id")
                 } else {

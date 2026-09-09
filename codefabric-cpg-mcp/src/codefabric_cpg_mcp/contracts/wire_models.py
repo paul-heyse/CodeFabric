@@ -188,6 +188,7 @@ class ProcessingRemainder(StrictWireModel):
     target: str | None = None
     target_kind: str | None = None
     analysis_context_id: str | None = None
+    entity_id: NonEmptyString | None = None
     state: ProcessingState
     reason_code: NonEmptyString
 

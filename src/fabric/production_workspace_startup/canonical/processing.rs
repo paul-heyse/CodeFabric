@@ -7,6 +7,8 @@ use super::{
 use datafusion::functions::core::expr_fn::coalesce;
 use datafusion::functions_aggregate::count::count;
 
+mod call_owners;
+
 pub(super) const INPUT: &str = "system.requested_processing_scope";
 pub(super) const OUTPUT: &str = "system.entity_processing_scope";
 
@@ -28,7 +30,13 @@ pub(super) fn fields() -> Vec<FieldSpec> {
     ]
 }
 
-pub(super) fn dependencies(pyrefly: bool) -> Vec<&'static str> {
+pub(super) fn output_fields() -> Vec<FieldSpec> {
+    let mut fields = fields();
+    fields.push(("owner_entity_id", DataType::FixedSizeBinary(16), true));
+    fields
+}
+
+pub(super) fn dependencies(pyrefly: bool, rust: bool) -> Vec<&'static str> {
     let mut result = vec![
         INPUT,
         super::calls::RELATION,
@@ -36,6 +44,14 @@ pub(super) fn dependencies(pyrefly: bool) -> Vec<&'static str> {
         super::DECLARATION,
         super::source_context::RELATION,
     ];
+    if rust {
+        result.extend([
+            super::SOURCE,
+            RUN,
+            super::RustcRelation::MirBody.relation_id(),
+            super::RustcRelation::PublicItem.relation_id(),
+        ]);
+    }
     if pyrefly {
         result.extend([
             RUN,
@@ -43,6 +59,8 @@ pub(super) fn dependencies(pyrefly: bool) -> Vec<&'static str> {
             NativeSyntaxRelation::RuffCallableSyntax.as_str(),
         ]);
     }
+    result.sort_unstable();
+    result.dedup();
     result
 }
 
@@ -65,6 +83,8 @@ fn count_when(condition: Expr) -> Result<Expr, datafusion::common::DataFusionErr
 pub(super) fn build(
     inputs: &TransformationInputs,
     pyrefly: bool,
+    rust: bool,
+    workspace: [u8; 16],
 ) -> Result<LogicalPlan, TransformationPlanError> {
     let calls = plan(inputs, super::calls::RELATION)?;
     let observations = LogicalPlanBuilder::from(calls)
@@ -165,7 +185,7 @@ pub(super) fn build(
         fragments.push(datafusion::logical_expr::when(condition, lit(reason)).otherwise(lit(""))?);
     }
     let reason = datafusion::functions::string::expr_fn::concat(fragments);
-    Ok(joined
+    let broad = joined
         .project(
             fields
                 .iter()
@@ -184,7 +204,20 @@ pub(super) fn build(
                 })
                 .collect::<Result<Vec<_>, datafusion::common::DataFusionError>>()?,
         )?
-        .build()?)
+        .build()?;
+    let broad = LogicalPlanBuilder::from(broad).project(
+        fields
+            .iter()
+            .map(|(name, _, _)| col(*name))
+            .chain([lit(ScalarValue::FixedSizeBinary(16, None)).alias("owner_entity_id")]),
+    )?;
+    Ok(if rust {
+        broad
+            .union(call_owners::build(inputs, workspace)?)?
+            .build()?
+    } else {
+        broad.build()?
+    })
 }
 
 fn qualify_lexical_references(

@@ -43,10 +43,11 @@ pub(super) fn install_processing(
     builder: &mut ProgrammaticFabricEpochBuilder,
     inventory: &ProviderSourceInventory,
     pyrefly: bool,
+    rust: bool,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     builder
         .add_transformation(Arc::new(Canonical::new(
-            Kind::Processing { pyrefly },
+            Kind::Processing { pyrefly, rust },
             inventory,
         )))
         .map_err(|error| step("canonical-processing-install", error))
@@ -93,6 +94,7 @@ pub(super) fn install(
 enum Kind {
     Processing {
         pyrefly: bool,
+        rust: bool,
     },
     Source,
     Declaration {
@@ -133,10 +135,10 @@ impl Canonical {
     )]
     fn new(kind: Kind, inventory: &ProviderSourceInventory) -> Self {
         let (id, names, mut dependencies) = match kind {
-            Kind::Processing { pyrefly } => (
+            Kind::Processing { pyrefly, rust } => (
                 processing::OUTPUT,
-                processing::fields(),
-                processing::dependencies(pyrefly),
+                processing::output_fields(),
+                processing::dependencies(pyrefly, rust),
             ),
             Kind::Source => (SOURCE, source_fields(), vec![INPUT]),
             Kind::Declaration { python, rust } => (
@@ -499,9 +501,15 @@ impl ProgrammaticTransformation for Canonical {
     fn dependencies(&self) -> &[ProgrammaticRelationId] {
         &self.dependencies
     }
+    #[allow(
+        clippy::too_many_lines,
+        reason = "canonical dispatch keeps one branch per output family"
+    )]
     fn build(&self, inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
         match self.kind {
-            Kind::Processing { pyrefly } => processing::build(inputs, pyrefly),
+            Kind::Processing { pyrefly, rust } => {
+                processing::build(inputs, pyrefly, rust, self.workspace)
+            }
             Kind::CallSelector => call_selector::build(inputs),
             Kind::RelationshipSelector => relationship_selector::build(inputs),
             Kind::SourceContext { python, rust } => source_context::build(inputs, python, rust),

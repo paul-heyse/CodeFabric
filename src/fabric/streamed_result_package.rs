@@ -2728,6 +2728,7 @@ mod tests {
                     target: Some("broken".to_owned()),
                     target_kind: Some("binary".to_owned()),
                     analysis_context_id: None,
+                    entity_id: None,
                     state: "unavailable".to_owned(),
                     reason: "compiler_target_unavailable".to_owned(),
                 }],
