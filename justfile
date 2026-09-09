@@ -973,7 +973,7 @@ native-assurance-test *args:
 governance-scan:
     ast-grep test
     ast-grep scan \
-      --globs '!third_party/native/**' \
+      --globs '!third_party/**' \
       --globs '!contracts/generated/**' \
       --globs '!src/generated/**' \
       --globs '!codefabric-cpg-mcp/src/codefabric_cpg_mcp/daemon/generated/**' \

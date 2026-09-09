@@ -42,7 +42,7 @@ const MAX_ARROW_IPC_BYTES: usize = 64 * 1024 * 1024;
 const MAX_OUTSTANDING_FRAMES: u32 = 4;
 const MAX_UNACKNOWLEDGED_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CONTEXTS: usize = 4;
-const MAX_MEMORY_MIB: u64 = 4096;
+const MAX_MEMORY_MIB: u64 = 16_384;
 const MAX_MODULES_PER_RUN: usize = 64;
 const MAX_SOURCE_BYTES_PER_MODULE: u64 = 8 * 1024 * 1024;
 const MAX_SOURCE_BYTES_PER_RUN: u64 = 64 * 1024 * 1024;
@@ -1229,7 +1229,11 @@ pub(crate) fn serve(socket: &Path, sandbox_profile_digest: &str) -> Result<(), S
     if socket.exists() {
         return Err("Pyrefly sidecar socket already exists".to_owned());
     }
+    // The sidecar must fit its process/thread envelope even when the host exposes
+    // many CPUs or its delegated cgroup is not visible inside the mount namespace.
     let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(16)
         .enable_all()
         .build()
         .map_err(|error| format!("build Pyrefly sidecar runtime: {error}"))?;

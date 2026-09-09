@@ -23,7 +23,21 @@ The pragmatic target preserves the full Python/Rust CPG. Preparation is not prod
   semantics from current results; identify historical results and pending scope honestly.
 - The revised resource target uses shared budgets, bounded application work/state,
   owned lifetimes, containment, headroom, backpressure, and recovery. It does not promise
-  every native allocation is pre-admitted or that OOM is impossible. Implementation is pending.
+  every native allocation is pre-admitted or that OOM is impossible. See STATUS for the
+  implemented Linux resource controls and remaining deployment/provider work.
+
+## Workstation resource policy
+
+The primary development workstation has 16 physical cores, 32 threads and 192 GB RAM.
+Allow substantial resource use when it serves full Python/Rust CPG construction and querying.
+Large consumption alone is not a defect. Measure actual workload cost before reducing
+capability or adding machinery solely to fit an unnecessarily small budget.
+
+Use broad shared operating budgets, useful CPU parallelism, actual system headroom and owned
+cleanup. Distinguish physical memory from virtual mappings and reserved thread stacks. Keep
+protocol/frame limits, cancellation and finite retention where they address a concrete failure;
+scaling a complete source inventory may require batching or scheduling design rather than
+merely raising every message bound. Memory capacity does not imply free disk space.
 
 ## Working loop
 

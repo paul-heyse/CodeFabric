@@ -565,7 +565,9 @@ fn query_for_root(root: &Path, preparation: &SelectedPyreflyPreparation) -> Resu
     let config = preparation.config_for_root(root)?;
     Ok(Query::new(
         ConfigFinder::new_constant(ArcId::new(config)),
-        ThreadCount::Inline,
+        ThreadCount::NumThreads(
+            std::num::NonZeroUsize::new(16).expect("workstation checker threads"),
+        ),
     ))
 }
 

@@ -101,15 +101,13 @@ impl ProductionActiveWorkspaceConfig {
         let ingress_limits =
             EpochBoundSemanticIngressLimits::try_new(compiler, 256, 256, 256, 256, 64)
                 .map_err(|error| error.to_string())?;
-        let child = ChildResourceLimits::try_new(
-            256 * 1024 * 1024,
-            2 * 1024 * 1024 * 1024,
-            32,
-            16,
-            8_192,
-            4,
-        )
-        .map_err(|error| error.to_string())?;
+        // Shared by current/candidate/leased epochs; never a fresh pool per query.
+        let memory_bytes = 32 * 1024 * 1024 * 1024;
+        let spill_bytes = 64 * 1024 * 1024 * 1024;
+        let partitions = 16;
+        let child =
+            ChildResourceLimits::try_new(memory_bytes, spill_bytes, 32, 128, 8_192, partitions)
+                .map_err(|error| error.to_string())?;
         let classes = [
             EpochWorkClass::SecurityRecovery,
             EpochWorkClass::SourceReconciliation,
@@ -178,7 +176,16 @@ impl ProductionActiveWorkspaceConfig {
         )
         .map_err(|error| error.to_string())?;
         Ok(Self::new(
-            FabricEpochRuntimeConfig::default(),
+            FabricEpochRuntimeConfig::try_new(
+                memory_bytes,
+                spill_bytes,
+                32,
+                128,
+                8_192,
+                partitions,
+                true,
+            )
+            .map_err(|error| error.to_string())?,
             producer_bounds,
             ingress_limits,
             resource_policy,

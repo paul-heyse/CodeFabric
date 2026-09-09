@@ -12,6 +12,14 @@ The full product additionally includes `FindPaths`, `MatchPattern`, `CombineResu
 
 Preserve Rust semantic ownership, the four build domains, Arrow/DataFusion/Delta, application-owned identities, raw/normalized facts, source authority, explicit unknown/conflict handling, exact snapshots, publication ownership, authorization and modern presentation. Native Delta owns transaction/log/checkpoint/maintenance behavior.
 
+**Resource direction, user clarification 2026-09-09:** the target workstation has 16 physical
+cores, 32 threads and 192 GB RAM. Give legitimate full-CPG workloads broad resource latitude.
+Do not optimize toward small-machine limits or treat large allocations as a defect without
+workload evidence. Use shared budgets, useful parallelism, available-system-memory/disk
+headroom and joined lifetimes. Measure before imposing tighter ceilings. Virtual address
+reservations are distinct from physical memory. Protocol batching, retained-state design and
+provider scheduling remain real scaling work, not reasons to silently truncate graph scope.
+
 ## 2. Outcome 1 — Restore startup, real query/status and reopen
 
 **First implementation slice.** Investigate and fix activation-control provisioning under the real production resource owner. The retained closeout reports `activation-control-provision: ... local store mutation requires its admitted native runtime`; the old August cached failure is not the current diagnosis. Preparation re-exercises the public startup test and records its actual result in STATUS.
@@ -61,8 +69,12 @@ After callers stop depending on generalized native receipt APIs, classify the lo
 fork selections are removed. The same upstream versions compile, the exact graph and
 source-read governance checks pass, and all four golden daemon cases pass. Actual owned
 lane/store/pool/maintenance tests remain; the obsolete allocator harnesses are retired.
-Bounded pinned-blob reads fix both source-read findings. RSS backpressure now pauses data
-admission/checkpoints at 3 GiB and resumes below 2.5 GiB while retaining control capacity.
+Bounded pinned-blob reads fix both source-read findings. Following the workstation capacity
+clarification, RSS backpressure pauses data admission/checkpoints at 112 GiB and resumes
+below 96 GiB, with additional system-headroom checks and reserved control capacity. The
+workspace managed ceiling is 64 GiB, the shared DataFusion pool is 32 GiB, and data execution
+uses 16 workers/partitions. Provider cgroups permit parallel CPU use and account physical
+memory rather than virtual-address reservations.
 Observations distinguish RSS from managed reservations; unavailable platform probes remain
 explicit. Nineteen affected RSS/scheduler/owner tests, the isolated data-fabric check, four
 compatibility tests and all four golden cases pass. Sustained retention/measurement and

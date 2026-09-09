@@ -230,7 +230,7 @@ mod tests {
                         limits: ProviderProcessLimits {
                             cpu_seconds: 5,
                             open_files: 64,
-                            address_space_bytes: 512 * 1024 * 1024,
+                            resident_memory_bytes: 512 * 1024 * 1024,
                             output_file_bytes: 1024 * 1024,
                             process_count: 16,
                         },

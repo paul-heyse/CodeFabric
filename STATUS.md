@@ -104,6 +104,47 @@ The root library Clippy command completes with the existing broad warning backlo
 new missing-error-section warnings were corrected. This is containment infrastructure for
 provider integration, not completed daemon semantics.
 
+## Workstation capacity and contained Pyrefly follow-up
+
+User direction on 2026-09-09: exploit the 16-core/32-thread, 192 GB workstation. Legitimate
+large CPG workloads are not defects merely because they need substantial resources. The
+new production settings allow 64 GiB of managed workspace memory, a shared 32 GiB DataFusion
+pool, 16 execution partitions/workers, and RSS pause/resume at 112/96 GiB. The shared disk
+ceiling is 128 GiB, including a 64 GiB spill allowance and room for source/durable/control
+storage; actual free-space checks still apply. A system-memory
+check reserves up to 16 GiB available for other processes and resumes after recovery; its
+floor scales down on smaller hosts. Managed caps are ceilings, not eager allocations.
+
+Provider cgroups no longer impose a one-core CPU quota. Their memory limit measures physical
+pages across the process tree; the virtual-address-space limit is removed. Pyrefly uses 16
+checker threads, two transport workers and up to 16 blocking workers, with a 16 GiB negotiated
+memory profile. This avoids both an unnecessarily serial checker and host-sized implicit
+thread-pool creation. Source/frame limits still require deliberate batching/scaling work;
+these settings do not close the remaining full-product scope.
+
+The contained Pyrefly path now maps each verified host blob to its provider-visible path.
+The same real Python 3.14 call target passes both direct and sandboxed UDS/Arrow sessions.
+An initial confined run reached its 32-process allowance because Tokio selected a host-sized
+pool; the explicit pool fix passed all 11 root Pyrefly tests before the broader workstation
+settings were applied. Handshake/context-close work now observes cancellation and deadlines.
+All 29 sidecar tests plus formatting/strict Clippy pass with the updated checker parallelism
+and memory negotiation. All 67 affected root tests pass with the broader resource profile,
+including system-headroom hysteresis, shared owners, containment, real Pyrefly semantics and
+Rust compiler process ownership. The initial golden startup check exposed a shared disk
+budget mismatch: the spill reservation consumed the entire disk allowance before control
+headroom. After correcting the aggregate disk ceiling, all four `just golden --timeout 240`
+cases pass: startup, Python serving, exact persisted reopen and cancellation. These settings
+are broad starting allowances, not measured optimal tuning or completed mixed-language scope.
+The root library Clippy command completes with 1,013 warnings in the existing backlog;
+this is not a strict root lint pass. Governance and whitespace checks pass.
+
+During validation the generated `target/` directory disappeared outside this task's commands.
+Source edits and commits remain intact; the build directory and sidecar executable have been
+restored and root tests have completed. Free disk initially rose from about 81 GiB to 243 GiB.
+This was a build-environment interruption, not loss of source implementation. The governance recipe is
+also corrected to apply application boundary rules to first-party code, excluding all vendored
+`third_party/` dependencies consistently.
+
 ## Completed preparation
 
 [Preparation plan](docs/plans/codefabric_pragmatic_delivery_nonproduction_preparation_plan_2026-09-08.md), steps 1–8:

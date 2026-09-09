@@ -71,6 +71,8 @@ pub struct PyreflyModuleInput {
     pub module_name: String,
     pub file_id: String,
     pub source_blob_path: PathBuf,
+    /// Absolute location of the same digest-checked blob inside the provider's mount view.
+    pub provider_source_blob_path: PathBuf,
     pub content_digest: String,
 }
 
@@ -836,6 +838,20 @@ async fn wait_for_pyrefly_stop(job: &ProviderJob) -> PyreflyStopCause {
     }
 }
 
+async fn until_job_stop<T>(
+    job: &ProviderJob,
+    work: impl std::future::Future<Output = Result<T, PyreflyServiceError>>,
+) -> Result<T, PyreflyServiceError> {
+    tokio::select! {
+        biased;
+        cause = wait_for_pyrefly_stop(job) => Err(match cause {
+            PyreflyStopCause::Cancelled => PyreflyServiceError::Cancelled,
+            PyreflyStopCause::TimedOut => PyreflyServiceError::TimedOut,
+        }),
+        result = work => result,
+    }
+}
+
 fn b3(bytes: &[u8]) -> String {
     format!("b3:{}", blake3::hash(bytes).to_hex())
 }
@@ -1225,6 +1241,17 @@ fn read_immutable_blob(
     input: &PyreflyModuleInput,
     allocation: &mut crate::provider_contracts::allocation::ProviderAllocation,
 ) -> Result<AdmittedImmutableBlob, PyreflyServiceError> {
+    if !input.provider_source_blob_path.is_absolute()
+        || input.provider_source_blob_path.as_os_str().len() > 4096
+        || input
+            .provider_source_blob_path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err(PyreflyServiceError::Invalid(
+            "provider blob path must be a bounded absolute path".into(),
+        ));
+    }
     let bytes =
         crate::secure_path::read_pinned_blob(&input.source_blob_path, MAX_SOURCE_BYTES_PER_MODULE)
             .map_err(|error| {
@@ -1240,7 +1267,7 @@ fn read_immutable_blob(
             blob_id: format!("blob:{}", &b3(&bytes)[3..35]),
             content_digest: b3(&bytes),
             byte_length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-            read_only_uri: format!("file://{}", input.source_blob_path.display()),
+            read_only_uri: format!("file://{}", input.provider_source_blob_path.display()),
         },
         bytes: allocation.retain_measured_vec(bytes, |_| 0)?,
     })
@@ -1284,7 +1311,7 @@ pub(crate) async fn analyze_pyrefly_uds(
         );
     }
 
-    let mut client = match process.connect_and_validate(job).await {
+    let mut client = match until_job_stop(job, process.connect_and_validate(job)).await {
         Ok(client) => client,
         Err(PyreflyServiceError::Protocol(_)) => {
             process.invalidate_and_join().await?;
@@ -1302,12 +1329,27 @@ pub(crate) async fn analyze_pyrefly_uds(
                 "Pyrefly workspace sidecar transport was unavailable",
             );
         }
+        Err(error @ (PyreflyServiceError::Cancelled | PyreflyServiceError::TimedOut)) => {
+            process.invalidate_and_join().await?;
+            let cause = if matches!(error, PyreflyServiceError::Cancelled) {
+                ProviderUnknownCause::Cancelled
+            } else {
+                ProviderUnknownCause::Timeout
+            };
+            return PyreflyProviderRunResult::gap(
+                job,
+                cause,
+                "Pyrefly handshake stopped before dispatch",
+            );
+        }
         Err(error) => return Err(error),
     };
     let compatibility = context_compatibility(job, &request);
-    if let Err(error) = process
-        .close_incompatible_context(&mut client, &compatibility)
-        .await
+    if let Err(error) = until_job_stop(
+        job,
+        process.close_incompatible_context(&mut client, &compatibility),
+    )
+    .await
     {
         process.invalidate_and_join().await?;
         return match error {
@@ -1315,6 +1357,16 @@ pub(crate) async fn analyze_pyrefly_uds(
                 job,
                 ProviderUnknownCause::Corruption,
                 "Pyrefly sidecar did not close an incompatible native context",
+            ),
+            PyreflyServiceError::Cancelled => PyreflyProviderRunResult::gap(
+                job,
+                ProviderUnknownCause::Cancelled,
+                "Pyrefly context close was cancelled",
+            ),
+            PyreflyServiceError::TimedOut => PyreflyProviderRunResult::gap(
+                job,
+                ProviderUnknownCause::Timeout,
+                "Pyrefly context close exceeded the job deadline",
             ),
             other => Err(other),
         };
@@ -1565,7 +1617,7 @@ async fn analyze_pyrefly_uds_inner(
             source_snapshot_lease: Some(lease),
             resource_profile_id: RESOURCE_PROFILE_ID.to_owned(),
             maximum_contexts: 4,
-            maximum_memory_mib: 4096,
+            maximum_memory_mib: 16_384,
             sandbox_profile_digest: request.sandbox_profile_digest.clone(),
         })
         .await
@@ -2514,6 +2566,7 @@ mod tests {
                 )
                 .unwrap(),
                 source_blob_path: source.clone(),
+                provider_source_blob_path: source.clone(),
                 content_digest: b3(&std::fs::read(source).unwrap()),
             }],
         }
@@ -2533,13 +2586,35 @@ mod tests {
             .max_encoding_message_size(4 * 1024 * 1024)
     }
 
-    struct TestChild(Option<Child>);
-
+    enum TestSidecarProcess {
+        Direct(Child),
+        #[cfg(target_os = "linux")]
+        Contained(ProviderProcessGroupChild),
+    }
+    impl TestSidecarProcess {
+        fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+            match self {
+                Self::Direct(child) => child.try_wait(),
+                #[cfg(target_os = "linux")]
+                Self::Contained(child) => child.try_wait(),
+            }
+        }
+    }
+    struct TestChild(Option<TestSidecarProcess>);
     impl Drop for TestChild {
         fn drop(&mut self) {
-            if let Some(child) = &mut self.0 {
-                let _ = child.kill();
-                let _ = child.wait();
+            match &mut self.0 {
+                Some(TestSidecarProcess::Direct(child)) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                #[cfg(target_os = "linux")]
+                Some(TestSidecarProcess::Contained(child)) => {
+                    let _ = child.kill_group();
+                    let _ = child.wait_group_empty(Duration::from_secs(3));
+                    let _ = child.wait();
+                }
+                None => {}
             }
         }
     }
@@ -2789,6 +2864,7 @@ mod tests {
                 )
                 .unwrap(),
                 source_blob_path: source.clone(),
+                provider_source_blob_path: source.clone(),
                 content_digest: b3(&std::fs::read(source).unwrap()),
             }],
             requested_capability_codes: vec![90],
@@ -2853,20 +2929,81 @@ mod tests {
 
     #[tokio::test]
     async fn wp34_ops_real_pyrefly_shutdown_joins_serving_process() {
+        real_pyrefly_session(false).await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn contained_pyrefly_reads_mapped_blobs_and_returns_real_semantics() {
+        real_pyrefly_session(true).await;
+    }
+
+    async fn real_pyrefly_session(contained: bool) {
         let executable = std::env::var_os("CODEFABRIC_PYREFLY_SIDECAR_BIN")
             .expect("relation-IPC operations gate must supply the built sidecar binary");
+        let executable = std::fs::canonicalize(executable).unwrap();
         let directory = tempfile::tempdir().unwrap();
-        let socket = directory.path().join("pyrefly.sock");
-        let sandbox_profile_digest = format!("sha256:{}", "11".repeat(32));
-        let child = ProcessCommand::new(executable)
-            .arg("--serve")
-            .arg(format!("unix://{}", socket.display()))
-            .env("CODEFABRIC_SANDBOX_PROFILE_DIGEST", &sandbox_profile_digest)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
+        let input_root = directory.path().join("view");
+        let output_root = directory.path().join("output");
+        std::fs::create_dir(&input_root).unwrap();
+        std::fs::create_dir(&output_root).unwrap();
+        let socket = output_root.join("pyrefly.sock");
+        let mut sandbox_profile_digest = format!("sha256:{}", "11".repeat(32));
+        let child = if contained {
+            #[cfg(target_os = "linux")]
+            {
+                let profile = GeneratedSandboxProfile::generate(
+                    ProviderTrustProfile::UntrustedSandboxed,
+                    SandboxMechanism::LinuxBubblewrap,
+                    &input_root,
+                    executable.parent().unwrap(),
+                    &output_root,
+                )
+                .unwrap();
+                sandbox_profile_digest = profile.sha256_digest.clone();
+                let policy = crate::provider_sandbox::CompiledProviderSeccomp::compile().unwrap();
+                let request = ProviderLaunchRequest {
+                    host_executable: executable.clone(),
+                    contained_executable: Path::new("/dependencies")
+                        .join(executable.file_name().unwrap()),
+                    arguments: vec!["--serve".into(), "unix:///output/pyrefly.sock".into()],
+                    environment: BTreeMap::from([("PATH".into(), "/usr/bin:/bin".into())]),
+                    output_root: output_root.clone(),
+                    limits: ProviderProcessLimits {
+                        cpu_seconds: 30,
+                        open_files: 256,
+                        resident_memory_bytes: 16 * 1024 * 1024 * 1024,
+                        output_file_bytes: 256 * 1024 * 1024,
+                        process_count: 256,
+                    },
+                };
+                TestSidecarProcess::Contained(
+                    ProviderSandboxLauncher::new(SandboxCapabilityMatrix::probe_current_host())
+                        .launch(
+                            &request,
+                            &profile,
+                            ProviderSandboxLaunchMaterial::LinuxSeccomp(&policy),
+                        )
+                        .unwrap(),
+                )
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                panic!("this contained process fixture requires Linux");
+            }
+        } else {
+            TestSidecarProcess::Direct(
+                ProcessCommand::new(executable)
+                    .arg("--serve")
+                    .arg(format!("unix://{}", socket.display()))
+                    .env("CODEFABRIC_SANDBOX_PROFILE_DIGEST", &sandbox_profile_digest)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap(),
+            )
+        };
         let mut child = TestChild(Some(child));
         tokio::time::timeout(Duration::from_secs(5), async {
             while !socket.exists() {
@@ -2883,7 +3020,10 @@ mod tests {
         // Cross the real deployed context and Arrow protocol boundaries; process startup
         // alone cannot detect a checker which ignores the configured Python version.
         let source = b"import sys\ndef previous() -> int:\n    return 1\ndef current() -> str:\n    return 'current'\nif sys.version_info < (3, 14):\n    selected = previous\nelse:\n    selected = current\nvalue = selected()\n";
-        let mut input = test_workspace_input(directory.path(), b"{}");
+        let mut input = test_workspace_input(&input_root, b"{}");
+        if contained {
+            input.modules[0].provider_source_blob_path = "/workspace/module.py".into();
+        }
         std::fs::write(&input.modules[0].source_blob_path, source).unwrap();
         input.modules[0].content_digest = b3(source);
         let manifest = serde_json::to_vec(&serde_json::json!({
@@ -2902,20 +3042,55 @@ mod tests {
         })).unwrap();
         input.context_manifest = manifest.clone();
         let inventory = crate::provider_contracts::ProviderSourceInventory::try_new(
-            [1; 16], 1, [2; 32], &[b"module.py".to_vec()],
+            [1; 16],
+            1,
+            [2; 32],
+            &[b"module.py".to_vec()],
             vec![crate::provider_contracts::ProviderInventoryMember {
                 relative_path: b"module.py".to_vec(),
                 disposition: crate::provider_contracts::ProviderInputDisposition::Captured {
-                    file_id: [4; 16], digest: *blake3::hash(source).as_bytes(), byte_length: source.len() as u64,
-                }, selected_for_provider: true,
-            }], vec![b"module.py".to_vec()], None,
-        ).unwrap();
+                    file_id: [4; 16],
+                    digest: *blake3::hash(source).as_bytes(),
+                    byte_length: source.len() as u64,
+                },
+                selected_for_provider: true,
+            }],
+            vec![b"module.py".to_vec()],
+            None,
+        )
+        .unwrap();
         let (job, _cancel) = test_inventory_job(&manifest, 1, inventory);
-        let request = request_from_job(&job, &input, &sandbox_profile_digest, Duration::from_secs(30)).unwrap();
-        let accepted = analyze_pyrefly_uds_inner(client.clone(), &request, Arc::new(AtomicBool::new(false)), None).await.unwrap();
+        let request = request_from_job(
+            &job,
+            &input,
+            &sandbox_profile_digest,
+            Duration::from_secs(30),
+        )
+        .unwrap();
+        let accepted = until_job_stop(
+            &job,
+            analyze_pyrefly_uds_inner(
+                client.clone(),
+                &request,
+                Arc::new(AtomicBool::new(false)),
+                None,
+            ),
+        )
+        .await
+        .unwrap();
         assert_eq!(accepted.modules.len(), 1);
-        let targets = accepted.modules[0].relations.iter().find(|r| r.relation == PyreflyRelation::CallTarget).unwrap();
-        let targets = targets.batch.column_by_name("qualified_target").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
+        let targets = accepted.modules[0]
+            .relations
+            .iter()
+            .find(|r| r.relation == PyreflyRelation::CallTarget)
+            .unwrap();
+        let targets = targets
+            .batch
+            .column_by_name("qualified_target")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
         assert_eq!(targets.iter().collect::<Vec<_>>(), [Some("module.current")]);
         PyreflyProviderRunResult::try_new(&job, accepted).unwrap();
         assert!(
@@ -3214,7 +3389,7 @@ mod tests {
                         limits: ProviderProcessLimits {
                             cpu_seconds: 30,
                             open_files: 16,
-                            address_space_bytes: 64 * 1024 * 1024,
+                            resident_memory_bytes: 64 * 1024 * 1024,
                             output_file_bytes: 1024,
                             process_count: 4,
                         },

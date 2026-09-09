@@ -754,7 +754,7 @@ fn probe_linux_run_cgroup_backend() -> (bool, bool) {
     let limits = ProviderProcessLimits {
         cpu_seconds: 1,
         open_files: 16,
-        address_space_bytes: 64 * 1024 * 1024,
+        resident_memory_bytes: 64 * 1024 * 1024,
         output_file_bytes: 1024 * 1024,
         process_count: 4,
     };
@@ -889,7 +889,8 @@ impl GeneratedSandboxProfile {
 pub struct ProviderProcessLimits {
     pub cpu_seconds: u64,
     pub open_files: u64,
-    pub address_space_bytes: u64,
+    /// Aggregate physical memory ceiling for the Linux provider cgroup, not virtual address space.
+    pub resident_memory_bytes: u64,
     pub output_file_bytes: u64,
     pub process_count: u32,
 }
@@ -946,8 +947,8 @@ impl LinuxRunCgroup {
 
     fn configure(&self, limits: ProviderProcessLimits) -> std::io::Result<()> {
         let settings = [
-            ("cpu.max", "100000 100000".to_owned()),
-            ("memory.max", limits.address_space_bytes.to_string()),
+            ("cpu.max", "max 100000".to_owned()),
+            ("memory.max", limits.resident_memory_bytes.to_string()),
             ("memory.oom.group", "1".to_owned()),
             ("pids.max", limits.process_count.to_string()),
         ];
@@ -1501,28 +1502,12 @@ impl ProviderSandboxLauncher {
             })
             .stderr(Stdio::piped());
         command.process_group(0);
-        // Address-space limits are applied after spawn on Linux by the safe rustix API. Darwin's
-        // shell does not expose a portable byte-granularity limit, so Seatbelt plus CPU/FD/file
-        // limits is the advertised Darwin contract.
+        // Cgroup memory.max accounts resident pages for the whole process tree.
+        // Virtual mappings and reserved thread stacks are not charged as physical RAM.
         let child = command.spawn()?;
         drop(inherited_seccomp);
         #[cfg(target_os = "linux")]
         {
-            use rustix::process::{Pid, Resource, Rlimit, prlimit};
-            let mut child = child;
-            let pid = i32::try_from(child.id())
-                .ok()
-                .and_then(Pid::from_raw)
-                .ok_or(SandboxError::InvalidLaunch)?;
-            let limit = Rlimit {
-                current: Some(request.limits.address_space_bytes),
-                maximum: Some(request.limits.address_space_bytes),
-            };
-            if prlimit(Some(pid), Resource::As, limit).is_err() {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(SandboxError::ResourceLimit);
-            }
             ProviderProcessGroupChild::new(
                 child,
                 run_cgroup,
@@ -1809,7 +1794,7 @@ mod tests {
                     limits: ProviderProcessLimits {
                         cpu_seconds: 1,
                         open_files: 16,
-                        address_space_bytes: 64 * 1024 * 1024,
+                        resident_memory_bytes: 64 * 1024 * 1024,
                         output_file_bytes: 1024,
                         process_count: 4,
                     },
@@ -1892,7 +1877,7 @@ mod tests {
                     limits: ProviderProcessLimits {
                         cpu_seconds: 10,
                         open_files: 32,
-                        address_space_bytes: 128 * 1024 * 1024,
+                        resident_memory_bytes: 128 * 1024 * 1024,
                         output_file_bytes: 1024,
                         process_count: 8,
                     },
@@ -2057,7 +2042,7 @@ mod tests {
                     limits: ProviderProcessLimits {
                         cpu_seconds: 1,
                         open_files: 16,
-                        address_space_bytes: 64 * 1024 * 1024,
+                        resident_memory_bytes: 64 * 1024 * 1024,
                         output_file_bytes: 1024,
                         process_count: 4,
                     },
@@ -2082,7 +2067,7 @@ mod tests {
         let limits = ProviderProcessLimits {
             cpu_seconds: 2,
             open_files: 32,
-            address_space_bytes: 64 * 1024 * 1024,
+            resident_memory_bytes: 64 * 1024 * 1024,
             output_file_bytes: 1024 * 1024,
             process_count: 8,
         };
@@ -2092,13 +2077,13 @@ mod tests {
             fs::read_to_string(cgroup_path.join("cpu.max"))
                 .unwrap()
                 .trim(),
-            "100000 100000"
+            "max 100000"
         );
         assert_eq!(
             fs::read_to_string(cgroup_path.join("memory.max"))
                 .unwrap()
                 .trim(),
-            limits.address_space_bytes.to_string()
+            limits.resident_memory_bytes.to_string()
         );
         assert_eq!(
             fs::read_to_string(cgroup_path.join("pids.max"))

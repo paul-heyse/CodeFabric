@@ -223,24 +223,27 @@ impl ProductionWorkspaceResources {
     }
 }
 
-/// Explicit conservative starting envelope. Retained bytes and disk are independent of live
+/// Selected large-workstation envelope. These are ceilings, not eager allocations.
+/// Retained bytes and disk are independent of live
 /// memory, while every in-memory retained object must also carry a memory reservation.
 pub(crate) const fn local_resource_policy() -> ResourceBudgetPolicy {
     ResourceBudgetPolicy {
         limits: ResourceAmounts {
-            memory_bytes: 2 * 1024 * 1024 * 1024,
-            disk_bytes: 8 * 1024 * 1024 * 1024,
+            memory_bytes: 64 * 1024 * 1024 * 1024,
+            // The shared 64 GiB spill reservation must leave room for source,
+            // durable tables, and control records under this same owner.
+            disk_bytes: 128 * 1024 * 1024 * 1024,
             running_jobs: 32,
             queued_jobs: 512,
             // Includes epoch generations, parser owners/revisions and native process owners.
             // A serial TS/Ruff runner can peak at six; this is not an epoch-count-only limit.
-            retained_generations: 16,
-            retained_bytes: 4 * 1024 * 1024 * 1024,
-            rows: 20_000_000,
-            pages: 65_536,
+            retained_generations: 128,
+            retained_bytes: 48 * 1024 * 1024 * 1024,
+            rows: 200_000_000,
+            pages: 1_048_576,
         },
         control_reserve: ResourceAmounts {
-            memory_bytes: 32 * 1024 * 1024,
+            memory_bytes: 256 * 1024 * 1024,
             disk_bytes: 64 * 1024 * 1024,
             running_jobs: 4,
             queued_jobs: 16,
@@ -272,7 +275,7 @@ pub(crate) const fn local_store_limits() -> OwnedLocalStoreLimits {
 /// Control uses an independent runtime so data pressure cannot consume its reserve.
 pub(crate) fn local_native_profile(class: ResourceClass) -> WorkspaceNativeProfile {
     let (workers, tasks) = match class {
-        ResourceClass::Data => (4, 4096),
+        ResourceClass::Data => (16, 4096),
         ResourceClass::Control => (1, 128),
     };
     WorkspaceNativeProfile {

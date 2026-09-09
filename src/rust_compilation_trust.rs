@@ -133,7 +133,7 @@ impl RustCompilationResourceLimits {
         ProviderProcessLimits {
             cpu_seconds: self.cpu_seconds,
             open_files: self.open_files,
-            address_space_bytes: self.memory_bytes,
+            resident_memory_bytes: self.memory_bytes,
             output_file_bytes: self.single_file_bytes,
             process_count: self.process_count,
         }

@@ -135,9 +135,7 @@ impl SelectedPyreflyPreparation {
             .manifest
             .typeshed_bundle_digest
             .as_ref()
-            .is_some_and(|expected| {
-                bundled_typeshed_digest() != Ok(expected)
-            })
+            .is_some_and(|expected| bundled_typeshed_digest() != Ok(expected))
         {
             remainders.push(PreparationRemainder::TypeshedBundleAuthorityUnavailable);
         }
