@@ -1281,6 +1281,68 @@ fn expected_module_digest(
     b3(&bytes)
 }
 
+fn validate_call_definition_pins(
+    batch: &RecordBatch,
+    sources: &BTreeMap<&str, ([u8; 32], &[u8])>,
+) -> Result<(), PyreflyServiceError> {
+    let invalid =
+        || PyreflyServiceError::Arrow("call definition differs from captured input".to_owned());
+    let files = batch
+        .column_by_name("target_file_id")
+        .and_then(|array| array.as_any().downcast_ref::<StringArray>())
+        .ok_or_else(invalid)?;
+    let digests = batch
+        .column_by_name("target_content_digest")
+        .and_then(|array| array.as_any().downcast_ref::<FixedSizeBinaryArray>())
+        .ok_or_else(invalid)?;
+    let starts = batch
+        .column_by_name("target_start_byte")
+        .and_then(|array| array.as_any().downcast_ref::<UInt64Array>())
+        .ok_or_else(invalid)?;
+    let ends = batch
+        .column_by_name("target_end_byte")
+        .and_then(|array| array.as_any().downcast_ref::<UInt64Array>())
+        .ok_or_else(invalid)?;
+    let mappings = batch
+        .column_by_name("target_source_mapping")
+        .and_then(|array| array.as_any().downcast_ref::<StringArray>())
+        .ok_or_else(invalid)?;
+    for row in 0..batch.num_rows() {
+        if files.is_null(row) {
+            if !digests.is_null(row)
+                || !starts.is_null(row)
+                || !ends.is_null(row)
+                || !matches!(
+                    mappings.value(row),
+                    "definition_unavailable" | "definition_outside_inventory"
+                )
+            {
+                return Err(invalid());
+            }
+            continue;
+        }
+        let (digest, bytes) = sources.get(files.value(row)).ok_or_else(invalid)?;
+        let start = usize::try_from(starts.value(row)).map_err(|_| invalid())?;
+        let end = usize::try_from(ends.value(row)).map_err(|_| invalid())?;
+        let boundary = |position: usize| {
+            position == bytes.len() || bytes.get(position).is_some_and(|byte| byte & 0xc0 != 0x80)
+        };
+        if digests.is_null(row)
+            || starts.is_null(row)
+            || ends.is_null(row)
+            || digests.value(row) != digest
+            || start >= end
+            || end > bytes.len()
+            || !boundary(start)
+            || !boundary(end)
+            || mappings.value(row) != "exact_checker_definition"
+        {
+            return Err(invalid());
+        }
+    }
+    Ok(())
+}
+
 fn header_matches(header: &AnalyzeEventHeader, request: &PyreflyRunRequest, sequence: u64) -> bool {
     header.provider_run_id == request.provider_run_id
         && header.workspace_id == request.workspace_id
@@ -1662,6 +1724,17 @@ async fn analyze_pyrefly_uds_inner(
         .zip(&admitted_blobs)
         .map(|(module, blob)| (module.module_id.clone(), blob.bytes.clone()))
         .collect::<BTreeMap<_, _>>();
+    let definition_sources = request
+        .modules
+        .iter()
+        .zip(&admitted_blobs)
+        .map(|(module, blob)| {
+            Ok((
+                module.file_id.as_str(),
+                (parse_digest(&module.content_digest)?, blob.bytes.as_ref()),
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>, PyreflyServiceError>>()?;
     let context_digest = b3(&request.context_manifest);
     let lease = SourceSnapshotLease {
         lease_id: request.source_snapshot_lease_id.clone(),
@@ -2050,6 +2123,9 @@ async fn analyze_pyrefly_uds_inner(
                             )
                         })?;
                     validate_relation_pins(&batch, request, requested_module)?;
+                    if relation == PyreflyRelation::CallTarget {
+                        validate_call_definition_pins(&batch, &definition_sources)?;
+                    }
                     let row_count = u64::try_from(batch.num_rows()).unwrap_or(u64::MAX);
                     let arrow_ipc = allocation.retain_measured_vec(assembled.ipc_bytes, |_| 0)?;
                     let accepted = AcceptedPyreflyRelation {
@@ -2447,6 +2523,90 @@ mod tests {
                 context_open_error(status),
                 PyreflyServiceError::Protocol(_)
             ));
+        }
+    }
+
+    #[test]
+    fn call_definition_admission_rejects_wrong_sources_and_partial_coordinates() {
+        use arrow_schema::{Field, Schema};
+        let bytes = b"def chosen(): pass\n";
+        let digest = *blake3::hash(bytes).as_bytes();
+        let sources = BTreeMap::from([("file:one", (digest, bytes.as_slice()))]);
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("target_file_id", arrow_schema::DataType::Utf8, true),
+            Field::new(
+                "target_content_digest",
+                arrow_schema::DataType::FixedSizeBinary(32),
+                true,
+            ),
+            Field::new("target_start_byte", arrow_schema::DataType::UInt64, true),
+            Field::new("target_end_byte", arrow_schema::DataType::UInt64, true),
+            Field::new("target_source_mapping", arrow_schema::DataType::Utf8, false),
+        ]));
+        for (file, hash, start, end, mapping, valid) in [
+            (
+                Some("file:one"),
+                Some(digest),
+                Some(4),
+                Some(10),
+                "exact_checker_definition",
+                true,
+            ),
+            (
+                Some("file:other"),
+                Some(digest),
+                Some(4),
+                Some(10),
+                "exact_checker_definition",
+                false,
+            ),
+            (
+                Some("file:one"),
+                Some([9; 32]),
+                Some(4),
+                Some(10),
+                "exact_checker_definition",
+                false,
+            ),
+            (
+                Some("file:one"),
+                Some(digest),
+                Some(4),
+                Some(999),
+                "exact_checker_definition",
+                false,
+            ),
+            (
+                Some("file:one"),
+                None,
+                Some(4),
+                Some(10),
+                "exact_checker_definition",
+                false,
+            ),
+            (None, None, None, None, "definition_outside_inventory", true),
+            (None, None, Some(4), None, "definition_unavailable", false),
+        ] {
+            let mut hashes = arrow_array::builder::FixedSizeBinaryBuilder::new(32);
+            match hash {
+                Some(hash) => hashes.append_value(hash).unwrap(),
+                None => hashes.append_null(),
+            }
+            let batch = RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::new(StringArray::from(vec![file])),
+                    Arc::new(hashes.finish()),
+                    Arc::new(UInt64Array::from(vec![start])),
+                    Arc::new(UInt64Array::from(vec![end])),
+                    Arc::new(StringArray::from(vec![mapping])),
+                ],
+            )
+            .unwrap();
+            assert_eq!(
+                validate_call_definition_pins(&batch, &sources).is_ok(),
+                valid
+            );
         }
     }
     use crate::provider_contracts::{

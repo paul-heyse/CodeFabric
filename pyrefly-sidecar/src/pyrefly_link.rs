@@ -199,6 +199,7 @@ struct LoadedModuleAnalysisInput<'a> {
     provider_path: &'a Path,
     name: ModuleName,
     path: ModulePath,
+    definition_sources: &'a BTreeMap<PathBuf, (&'a ModuleInput, &'a [u8])>,
 }
 
 struct CallTargetRow {
@@ -209,6 +210,15 @@ struct CallTargetRow {
     kind: String,
     target: String,
     class_name: Option<String>,
+    definition: Option<CallDefinitionRow>,
+    definition_mapping: &'static str,
+}
+
+struct CallDefinitionRow {
+    file_id: String,
+    content_digest: [u8; 32],
+    start_byte: u64,
+    end_byte: u64,
 }
 
 struct MemberRow {
@@ -524,6 +534,11 @@ impl SemanticContext {
             self.query.change_files(&events);
         }
         let diagnostics = self.query.add_files(resolved.clone());
+        let definition_sources = provider_paths
+            .iter()
+            .cloned()
+            .zip(modules.iter().zip(source_bytes.iter().map(Vec::as_slice)))
+            .collect::<BTreeMap<_, _>>();
         let analyses = modules
             .iter()
             .zip(resolved)
@@ -539,6 +554,7 @@ impl SemanticContext {
                     provider_path: &provider_path,
                     name,
                     path,
+                    definition_sources: &definition_sources,
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -584,6 +600,7 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
         provider_path,
         name,
         path,
+        definition_sources,
     } = input;
     let common = CommonIdentity {
         run,
@@ -596,7 +613,7 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
 
     let (shape_rows, component_rows, trait_rows, located_rows) =
         project_type_table(type_table.as_ref(), source)?;
-    let call_rows = project_callees(callees.as_deref(), source)?;
+    let call_rows = project_callees(callees.as_deref(), source, definition_sources)?;
     let member_rows = project_members(query, name, &path, type_table.as_ref());
     let source_path_text = provider_path.to_string_lossy();
     let module_diagnostics = diagnostics
@@ -777,6 +794,7 @@ fn push_components(
 fn project_callees(
     callees: Option<&[(PythonASTRange, pyrefly::query::Callee)]>,
     source: &[u8],
+    definition_sources: &BTreeMap<PathBuf, (&ModuleInput, &[u8])>,
 ) -> Result<Vec<CallTargetRow>, String> {
     let Some(callees) = callees else {
         return Ok(Vec::new());
@@ -790,6 +808,33 @@ fn project_callees(
             .map_err(|_| "callee occurrence count exceeds u64")?;
         let occurrence = *occurrence_ordinals.entry(key).or_insert(next_occurrence);
         let ordinal = target_ordinals.entry(key).or_insert(0);
+        let (definition, definition_mapping) = match &callee.definition {
+            None => (None, "definition_unavailable"),
+            Some(definition) => match definition_sources.get(&definition.path) {
+                None => (None, "definition_outside_inventory"),
+                Some((module, bytes)) => {
+                    let start = definition.start_byte as usize;
+                    let end = definition.end_byte as usize;
+                    let text =
+                        std::str::from_utf8(bytes).map_err(|_| "definition source is not UTF-8")?;
+                    if start >= end || !text.is_char_boundary(start) || !text.is_char_boundary(end)
+                    {
+                        return Err(
+                            "checker definition range differs from captured source".to_owned()
+                        );
+                    }
+                    (
+                        Some(CallDefinitionRow {
+                            file_id: module.file_id.clone(),
+                            content_digest: parse_digest(&module.source_digest)?,
+                            start_byte: u64::from(definition.start_byte),
+                            end_byte: u64::from(definition.end_byte),
+                        }),
+                        "exact_checker_definition",
+                    )
+                }
+            },
+        };
         rows.push(CallTargetRow {
             occurrence,
             start_byte: key.0,
@@ -798,6 +843,8 @@ fn project_callees(
             kind: callee.kind.clone(),
             target: callee.target.clone(),
             class_name: callee.class_name.clone(),
+            definition,
+            definition_mapping,
         });
         *ordinal = ordinal
             .checked_add(1)
@@ -1194,6 +1241,16 @@ fn call_target_batch(
     common: &CommonIdentity<'_>,
     rows: &[CallTargetRow],
 ) -> Result<RecordBatch, String> {
+    let mut digests = FixedSizeBinaryBuilder::with_capacity(rows.len(), 32);
+    for row in rows {
+        if let Some(definition) = &row.definition {
+            digests
+                .append_value(definition.content_digest)
+                .map_err(|error| error.to_string())?;
+        } else {
+            digests.append_null();
+        }
+    }
     record_batch(
         common,
         PyreflyRelation::CallTarget,
@@ -1224,6 +1281,25 @@ fn call_target_batch(
                 "resolved",
                 rows.len(),
             ))),
+            Arc::new(StringArray::from_iter(rows.iter().map(|row| {
+                row.definition
+                    .as_ref()
+                    .map(|definition| definition.file_id.as_str())
+            }))),
+            Arc::new(digests.finish()),
+            Arc::new(UInt64Array::from_iter(rows.iter().map(|row| {
+                row.definition
+                    .as_ref()
+                    .map(|definition| definition.start_byte)
+            }))),
+            Arc::new(UInt64Array::from_iter(rows.iter().map(|row| {
+                row.definition
+                    .as_ref()
+                    .map(|definition| definition.end_byte)
+            }))),
+            Arc::new(StringArray::from_iter_values(
+                rows.iter().map(|row| row.definition_mapping),
+            )),
         ],
     )
 }
@@ -1503,6 +1579,89 @@ mod tests {
                     .collect::<Vec<_>>()
             })
             .collect()
+    }
+
+    #[test]
+    fn checker_call_definitions_follow_imports_and_methods_to_exact_source() {
+        use arrow_array::{Array as _, FixedSizeBinaryArray};
+        let root = claim_001_temp_root("call-definitions");
+        std::fs::create_dir_all(&root).unwrap();
+        let a = b"from b import chosen as alias, Service\ndef chosen() -> str:\n    return 'local'\nvalue = alias()\nservice = Service()\nother = service.method()\n";
+        let b = b"def chosen() -> int:\n    return 7\nclass Service:\n    def method(self) -> int:\n        return chosen()\n";
+        let mut context = SemanticContext::test_only_fixture(&root, "call-definitions").unwrap();
+        let result = context
+            .analyze_modules(
+                &inventory_run(1),
+                &complete([
+                    inventory_module(&root, "a", a),
+                    inventory_module(&root, "b", b),
+                ]),
+            )
+            .unwrap();
+        let relation = result
+            .modules
+            .iter()
+            .find(|module| module.module_id == "module:a")
+            .unwrap()
+            .relations
+            .iter()
+            .find(|relation| relation.relation == PyreflyRelation::CallTarget)
+            .unwrap();
+        let mut checked = BTreeSet::new();
+        for batch in StreamReader::try_new(Cursor::new(&relation.arrow_ipc), None).unwrap() {
+            let batch = batch.unwrap();
+            let text = |name| {
+                batch
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+            };
+            let numbers = |name| {
+                batch
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<UInt64Array>()
+                    .unwrap()
+            };
+            let digests = batch
+                .column_by_name("target_content_digest")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap();
+            for row in 0..batch.num_rows() {
+                let target = text("qualified_target").value(row);
+                let expected = match target {
+                    "b.chosen" => (4, 10),
+                    "b.Service.method" => (57, 63),
+                    _ => continue,
+                };
+                assert_eq!(
+                    text("target_source_mapping").value(row),
+                    "exact_checker_definition"
+                );
+                assert!(!text("target_file_id").is_null(row));
+                assert_eq!(text("target_file_id").value(row), "file:b");
+                assert_eq!(digests.value(row), blake3::hash(b).as_bytes());
+                assert_eq!(
+                    (
+                        numbers("target_start_byte").value(row),
+                        numbers("target_end_byte").value(row)
+                    ),
+                    expected
+                );
+                checked.insert(target.to_owned());
+            }
+        }
+        assert_eq!(
+            checked,
+            BTreeSet::from(["b.chosen".to_owned(), "b.Service.method".to_owned()])
+        );
+        drop(context);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn selected_fixture_manifest(version: &str, platform: &str) -> serde_json::Value {
@@ -1909,7 +2068,9 @@ mod tests {
             PyreflyRelation::CallTarget.relation_id()
         );
         assert_eq!(expected[1], claim_001_text(&batch, "provider_run_id"));
-        assert_eq!(expected[3], PyreflyRelation::CallTarget.schema_digest());
+        // Historical expected values still exercise the semantic observation; the current
+        // schema additionally carries exact target-definition coordinates.
+        assert_eq!(batch.schema(), PyreflyRelation::CallTarget.schema());
         assert_eq!(expected[5], claim_001_content_digest(&batch));
         assert_eq!(expected[6], claim_001_call_target(&batch));
         assert_eq!(source["file_id"], claim_001_text(&batch, "file_id"));

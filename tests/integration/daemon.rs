@@ -2078,7 +2078,7 @@ fn pragmatic_python_semantics_publish_real_call_targets() {
 #[test]
 #[cfg(target_os = "linux")]
 fn pragmatic_python_chunked_inventory_publishes_cross_module_semantics() {
-    use arrow::array::{BinaryArray, StringArray};
+    use arrow::array::{BinaryArray, Decimal128Array, StringArray};
 
     let fixture =
         ProductionFixture::with_source(b"from extra_69 import chosen\nanswer = chosen()\n");
@@ -2091,6 +2091,32 @@ fn pragmatic_python_chunked_inventory_publishes_cross_module_semantics() {
         .unwrap();
     }
     let supervisor = fixture.start_supervisor();
+    let target_file = fresh_activation_relation_batches(&fixture, "source.code_file")
+        .iter()
+        .find_map(|batch| {
+            let paths = batch
+                .column_by_name("relative_path")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .unwrap();
+            let files = batch
+                .column_by_name("file_id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .unwrap();
+            (0..batch.num_rows())
+                .find(|row| paths.value(*row) == b"extra_69.py")
+                .map(|row| files.value(row).to_vec())
+        })
+        .unwrap();
+    let target_file = codefabric::identity::encode_public_id(
+        codefabric::identity::IdentityDomain::SourceFile,
+        None,
+        target_file.try_into().unwrap(),
+    )
+    .unwrap();
     let mut targets = BTreeSet::new();
     for batch in fresh_activation_relation_batches(&fixture, "provider.pyrefly.call_target.v1") {
         let values = batch
@@ -2100,6 +2126,28 @@ fn pragmatic_python_chunked_inventory_publishes_cross_module_semantics() {
             .downcast_ref::<StringArray>()
             .unwrap();
         targets.extend(values.iter().flatten().map(ToOwned::to_owned));
+        let files = batch
+            .column_by_name("target_file_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let starts = batch
+            .column_by_name("target_start_byte")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        let ends = batch
+            .column_by_name("target_end_byte")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            assert_eq!(files.value(row), target_file);
+            assert_eq!((starts.value(row), ends.value(row)), (4, 10));
+        }
     }
     assert_eq!(targets, BTreeSet::from(["extra_69.chosen".to_owned()]));
     let mut declarations = BTreeSet::new();

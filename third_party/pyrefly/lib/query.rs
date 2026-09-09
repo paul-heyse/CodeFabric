@@ -82,6 +82,7 @@ use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassSynthesizedFields;
 use crate::binding::binding::KeyDecoratedFunction;
 use crate::binding::binding::KeyTParams;
+use crate::binding::binding::KeyUndecoratedFunctionRange;
 use crate::binding::bindings::Bindings;
 use crate::config::finder::ConfigFinder;
 use crate::error::error::ErrorRenderer;
@@ -176,6 +177,16 @@ pub struct Callee {
     pub target: String,
     /// If this is a method, what class is it defined on?
     pub class_name: Option<String>,
+    /// Checker-selected source definition; absent for synthesized or unresolved targets.
+    pub definition: Option<CalleeDefinition>,
+}
+
+/// Owned source coordinates, never the checker's transient function index.
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub struct CalleeDefinition {
+    pub path: PathBuf,
+    pub start_byte: u32,
+    pub end_byte: u32,
 }
 
 pub struct Attribute {
@@ -471,6 +482,7 @@ impl<'a> CalleesWithLocation<'a> {
                     kind: String::from(CALLEE_KIND_FUNCTION),
                     target: String::from("util.prod_assert"),
                     class_name: None,
+                    definition: None,
                 }];
                 (callees, name.range())
             }
@@ -658,6 +670,32 @@ impl<'a> CalleesWithLocation<'a> {
     ) -> Callee {
         self.callee_from_function_metadata(&f.metadata, call_target, call_arguments)
     }
+    fn definition_from_kind(&self, kind: &FunctionKind) -> Option<CalleeDefinition> {
+        let definition = kind.definition_id()?;
+        let index = definition.def_index?;
+        let handle = self
+            .query
+            .make_handle(definition.module.name(), definition.module.path().clone());
+        let bindings = self.transaction.get_bindings(&handle)?;
+        let key =
+            bindings.key_to_idx_hashed_opt(Hashed::new(&KeyUndecoratedFunctionRange(index)))?;
+        let range = bindings.get(key).0.range();
+        Some(CalleeDefinition {
+            path: definition.module.path().as_path().to_path_buf(),
+            start_byte: range.start().to_u32(),
+            end_byte: range.end().to_u32(),
+        })
+    }
+
+    fn definition_from_bound_method(&self, method: &BoundMethodType) -> Option<CalleeDefinition> {
+        let kind = match method {
+            BoundMethodType::Function(f) => &f.metadata.kind,
+            BoundMethodType::Forall(f) => &f.body.metadata.kind,
+            BoundMethodType::Overload(f) => &f.metadata.kind,
+        };
+        self.definition_from_kind(kind)
+    }
+
     fn callee_from_function_metadata(
         &self,
         metadata: &FuncMetadata,
@@ -669,6 +707,7 @@ impl<'a> CalleesWithLocation<'a> {
                 kind: String::from(CALLEE_KIND_STATICMETHOD),
                 target: Self::target_from_def_kind(&metadata.kind, None),
                 class_name: Some(Self::class_name_from_def_kind(&metadata.kind)),
+                definition: self.definition_from_kind(&metadata.kind),
             }
         } else if metadata.flags.is_classmethod {
             Callee {
@@ -676,6 +715,7 @@ impl<'a> CalleesWithLocation<'a> {
                 target: Self::target_from_def_kind(&metadata.kind, None),
                 // TODO: use type of receiver
                 class_name: Some(Self::class_name_from_def_kind(&metadata.kind)),
+                definition: self.definition_from_kind(&metadata.kind),
             }
         } else {
             // Check if this is a builtins function that needs special casing.
@@ -699,6 +739,7 @@ impl<'a> CalleesWithLocation<'a> {
                 kind,
                 target: Self::target_from_def_kind(&metadata.kind, None),
                 class_name,
+                definition: self.definition_from_kind(&metadata.kind),
             }
         }
     }
@@ -814,6 +855,7 @@ impl<'a> CalleesWithLocation<'a> {
             kind: String::from(CALLEE_KIND_METHOD),
             target,
             class_name: Some(class_name),
+            definition: None,
         }]
     }
     fn for_callable(&self, callee_range: TextRange) -> Vec<Callee> {
@@ -848,6 +890,7 @@ impl<'a> CalleesWithLocation<'a> {
                             kind: String::from(CALLEE_KIND_FUNCTION),
                             target: format!("$parameter${name}"),
                             class_name: None,
+                            definition: None,
                         }]
                     }
                     x => panic!("callable ty - unexpected metadata kind, {x:?}"),
@@ -965,6 +1008,7 @@ impl<'a> CalleesWithLocation<'a> {
                     kind: Self::callee_method_kind_from_bound_method_type(&m.func),
                     target: Self::target_from_bound_method_type(&m.func, class_is_typed_dict),
                     class_name: Some(class_name),
+                    definition: self.definition_from_bound_method(&m.func),
                 })
                 .unique()
                 // return sorted by target
@@ -987,6 +1031,7 @@ impl<'a> CalleesWithLocation<'a> {
                     kind,
                     target: Self::target_from_def_kind(&f.metadata.kind, None),
                     class_name,
+                    definition: self.definition_from_kind(&f.metadata.kind),
                 }]
             }
             Type::Callable(..) => self.for_callable(callee_range),

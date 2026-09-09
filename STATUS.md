@@ -32,6 +32,21 @@ and 95 adapter tests plus lint/types pass. These bounds are configured ceilings,
 optimal capacities; the scenario does not close effective external contexts or full Python
 normalization. The root library Clippy command completes with the existing warning backlog.
 
+Pyrefly call targets now carry optional checker-selected definition coordinates. The narrow
+pinned `Query` seam follows function metadata through its definition index to the actual
+source declaration, including imported aliases and bound methods. The sidecar maps that
+location to captured file/digest/range; the daemon independently validates those target pins.
+Synthesized targets and definitions outside the inventory retain explicit mapping gaps.
+This supplies canonical call normalization with exact inputs; it does not yet expose Python
+call edges through the public query forms. No library versions changed.
+
+All 30 sidecar tests and strict sidecar check/Clippy pass on 2026-09-09. All 26 selected root
+provider/recipe/daemon tests pass, including a real cross-module alias and method definition,
+wrong-source/digest/range rejection, contained imports and exact target-file/range readback
+from the 70-module Delta fixture. Root library Clippy completes with its existing backlog;
+new duplicate match-arm warnings were corrected. Historical semantic expectations remain;
+their old schema digest no longer incorrectly requires the current relation to omit new fields.
+
 Declaration-fact retrieval now accepts exact public entity IDs and the meanings `declarations`
 or `declaration locations and provenance`. A native DataFusion semi join consumes the typed
 request relation, preserves each declaration occurrence and prevents repeated subjects from

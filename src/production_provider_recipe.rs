@@ -1954,15 +1954,16 @@ fn compiled_provider_field_role(
             | "semantic_environment_id"
             | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "module_id" => Some(CANONICAL_KEY_ROLE),
-            "file_id" => Some(FILE_IDENTITY_ROLE),
-            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "file_id" | "target_file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" | "target_content_digest" => Some(CONTENT_DIGEST_ROLE),
             "call_occurrence_ordinal"
             | "target_ordinal"
             | "qualified_target"
             | "class_name"
-            | "resolution_state" => Some(PROVIDER_FACT_ROLE),
-            "start_byte" => Some(BYTE_START_ROLE),
-            "end_byte" => Some(BYTE_END_ROLE),
+            | "resolution_state"
+            | "target_source_mapping" => Some(PROVIDER_FACT_ROLE),
+            "start_byte" | "target_start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" | "target_end_byte" => Some(BYTE_END_ROLE),
             "callee_kind" => Some(PROVIDER_KIND_ROLE),
             _ => None,
         },

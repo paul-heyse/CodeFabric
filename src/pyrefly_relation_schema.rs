@@ -212,6 +212,11 @@ impl PyreflyRelation {
                 utf8("qualified_target", false),
                 utf8("class_name", true),
                 utf8("resolution_state", false),
+                utf8("target_file_id", true),
+                fixed_binary("target_content_digest", 32, true),
+                u64_field("target_start_byte", true),
+                u64_field("target_end_byte", true),
+                utf8("target_source_mapping", false),
             ],
             Self::Member => vec![
                 utf8("class_name", false),
