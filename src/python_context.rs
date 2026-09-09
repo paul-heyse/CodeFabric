@@ -31,7 +31,8 @@ const KNOWN_LOCK_FILES: [&str; 4] = ["uv.lock", "poetry.lock", "pdm.lock", "Pipf
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PythonDiscoveryFile {
     pub file_id: String,
-    pub relative_path: String,
+    /// Authoritative workspace-relative bytes; display text never selects a file.
+    pub relative_path: Vec<u8>,
     /// Non-authoritative label deliberately excluded from context identity.
     pub display_path: String,
     pub digest: [u8; 32],
@@ -133,7 +134,7 @@ impl PythonContextDiscoveryAdapter {
             .template
             .files
             .iter()
-            .any(|file| !visible.contains(file.relative_path.as_bytes()))
+            .any(|file| !visible.contains(file.relative_path.as_slice()))
         {
             return Err(PythonContextDiscoveryError::terminal(
                 "CONTEXT_DISCOVERY_VIEW_INCOMPLETE",
@@ -691,7 +692,7 @@ fn validate_request(
 ) -> Result<(), PythonContextDiscoveryError> {
     request.search_scope.validate()?;
     if request.files.iter().any(|file| {
-        let path = file.relative_path.as_bytes();
+        let path = file.relative_path.as_slice();
         let namespace = request.search_scope.namespace.as_slice();
         namespace != b"."
             && path != namespace
@@ -733,17 +734,17 @@ fn validate_request(
 
 fn validate_files(
     inputs: &[PythonDiscoveryFile],
-) -> Result<BTreeMap<String, &PythonDiscoveryFile>, PythonContextDiscoveryError> {
+) -> Result<BTreeMap<Vec<u8>, &PythonDiscoveryFile>, PythonContextDiscoveryError> {
     let mut files = BTreeMap::new();
     let mut file_ids = BTreeSet::new();
     for file in inputs {
         if file.file_id.is_empty()
-            || !valid_relative_path(&file.relative_path)
+            || !valid_source_path(&file.relative_path)
             || crate::integrity::digest_bytes(&file.contents) != file.digest
         {
             return Err(PythonContextDiscoveryError::terminal(
                 "CONTEXT_INPUT_INVALID",
-                format!("invalid immutable discovery input {}", file.relative_path),
+                format!("invalid immutable discovery input {}", file.file_id),
             ));
         }
         if files.insert(file.relative_path.clone(), file).is_some()
@@ -772,18 +773,18 @@ const CONFIGURATION_LOOKUPS: [(&str, ContextLookupKind); 6] = [
 
 fn first_configuration<'a>(
     request: &PythonContextDiscoveryRequest,
-    files: &BTreeMap<String, &'a PythonDiscoveryFile>,
+    files: &BTreeMap<Vec<u8>, &'a PythonDiscoveryFile>,
     name: &str,
 ) -> Option<&'a PythonDiscoveryFile> {
     request.search_scope.ordered_roots.iter().find_map(|root| {
         let path = std::str::from_utf8(&root.relative_path).ok()?;
-        files.get(&project_path(path, name)).copied()
+        files.get(project_path(path, name).as_bytes()).copied()
     })
 }
 
 fn configuration_lookups(
     request: &PythonContextDiscoveryRequest,
-    files: &BTreeMap<String, &PythonDiscoveryFile>,
+    files: &BTreeMap<Vec<u8>, &PythonDiscoveryFile>,
 ) -> Result<Vec<ContextLookupEvidence>, PythonContextDiscoveryError> {
     let mut result = Vec::new();
     for root in &request.search_scope.ordered_roots {
@@ -799,7 +800,7 @@ fn configuration_lookups(
                 request,
                 relative_path.as_bytes(),
                 kind,
-                files.get(&relative_path).copied(),
+                files.get(relative_path.as_bytes()).copied(),
             ));
         }
     }
@@ -815,7 +816,7 @@ fn configuration_lookups(
             })?;
         result.push(lookup_evidence(
             request,
-            file.relative_path.as_bytes(),
+            file.relative_path.as_slice(),
             ContextLookupKind::FrozenRequirements,
             Some(file),
         ));
@@ -1025,34 +1026,31 @@ fn discover_module_map(
         })?;
         for file in &files {
             let relative = if matches!(path, "." | "") {
-                Some(file.relative_path.as_str())
+                Some(file.relative_path.as_slice())
             } else {
                 file.relative_path
-                    .strip_prefix(path)
-                    .and_then(|value| value.strip_prefix('/'))
+                    .strip_prefix(path.as_bytes())
+                    .and_then(|value| value.strip_prefix(b"/"))
             };
             let Some(relative) = relative else { continue };
             let Some((stem, is_stub)) = relative
-                .strip_suffix(".pyi")
+                .strip_suffix(b".pyi")
                 .map(|stem| (stem, true))
-                .or_else(|| relative.strip_suffix(".py").map(|stem| (stem, false)))
+                .or_else(|| relative.strip_suffix(b".py").map(|stem| (stem, false)))
             else {
                 continue;
             };
-            let is_package = stem == "__init__" || stem.ends_with("/__init__");
-            let stem = stem.strip_suffix("/__init__").unwrap_or(stem);
-            if stem == "__init__" {
-                continue;
-            }
+            let is_package = stem == b"__init__" || stem.ends_with(b"/__init__");
+            let stem = stem.strip_suffix(b"/__init__").unwrap_or(stem);
             // Root order is semantic precedence, not permission to duplicate one file binding.
             // Registered build maps are validated against every applicable authorized root below.
             if !registered && !bound_files.insert(file.file_id.as_str()) {
                 continue;
             }
             result.push(PythonModuleBinding {
-                module_name: stem.replace('/', "."),
+                module_name: source_module_label(stem),
                 file_id: file.file_id.clone(),
-                relative_path: file.relative_path.as_bytes().to_vec(),
+                relative_path: file.relative_path.clone(),
                 root_id: id.clone(),
                 is_stub,
                 is_package,
@@ -1240,7 +1238,7 @@ fn pyrefly_version(document: &toml::Value) -> Result<Option<String>, PythonConte
 
 fn resolve_lock_artifacts(
     request: &PythonContextDiscoveryRequest,
-    files: &BTreeMap<String, &PythonDiscoveryFile>,
+    files: &BTreeMap<Vec<u8>, &PythonDiscoveryFile>,
 ) -> Result<
     (
         Vec<PythonContextArtifact>,
@@ -1436,7 +1434,8 @@ fn checker_settings_remainder(
 
 fn configuration_origin(file: Option<&PythonDiscoveryFile>) -> &str {
     file.and_then(|file| {
-        file.relative_path
+        std::str::from_utf8(&file.relative_path)
+            .ok()?
             .rsplit_once('/')
             .map(|(parent, _)| parent)
     })
@@ -1789,6 +1788,34 @@ fn project_path(root: &str, name: &str) -> String {
     }
 }
 
+// A non-Unicode source path still needs a direct checker input. This reversible label
+// is not an import-resolution claim: the provider's path and application file ID remain
+// authoritative. Ordinary Unicode import names retain their established spelling.
+fn source_module_label(stem: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    if let Ok(name) = std::str::from_utf8(stem) {
+        return name.replace('/', ".");
+    }
+    let mut name = String::with_capacity(stem.len() * 3);
+    for byte in stem {
+        if *byte == b'/' {
+            name.push('.');
+        } else {
+            write!(name, "%{byte:02X}").expect("writing to String is infallible");
+        }
+    }
+    name
+}
+
+fn valid_source_path(path: &[u8]) -> bool {
+    !path.is_empty()
+        && !path.contains(&0)
+        && path
+            .split(|byte| *byte == b'/')
+            .all(|part| !part.is_empty() && part != b"." && part != b"..")
+}
+
 fn valid_relative_path(path: &str) -> bool {
     path == "."
         || (!path.is_empty()
@@ -1830,7 +1857,7 @@ mod tests {
     fn file(path: &str, file_id: &str, contents: &str) -> PythonDiscoveryFile {
         PythonDiscoveryFile {
             file_id: file_id.to_owned(),
-            relative_path: path.to_owned(),
+            relative_path: path.as_bytes().to_vec(),
             display_path: format!("display/{path}"),
             digest: crate::integrity::digest_bytes(contents.as_bytes()),
             contents: contents.as_bytes().to_vec(),
@@ -1952,6 +1979,59 @@ mod tests {
     }
 
     #[test]
+    fn raw_source_paths_and_root_initializers_keep_distinct_input_bindings() {
+        let mut request = base_request();
+        let mut raw = file("placeholder.py", "file:raw", "def leaf(): pass\n");
+        raw.relative_path = b"dir-\xff/module%?# \\.py".to_vec();
+        raw.display_path = "same display".to_owned();
+        let mut unicode = file(
+            "dir-�/module%?# \\.py",
+            "file:unicode",
+            "def leaf(): pass\n",
+        );
+        unicode.display_path.clone_from(&raw.display_path);
+        request.files.extend([
+            raw,
+            unicode,
+            file("__init__.py", "file:init", "def root(): pass\n"),
+        ]);
+        let initial = discover_python_context(&request).unwrap();
+        for file in request
+            .files
+            .iter()
+            .filter(|file| file.relative_path.ends_with(b".py"))
+        {
+            let binding = initial
+                .manifest
+                .module_map
+                .iter()
+                .find(|m| m.file_id == file.file_id)
+                .unwrap();
+            assert_eq!(binding.relative_path, file.relative_path);
+        }
+        let root = initial
+            .manifest
+            .module_map
+            .iter()
+            .find(|m| m.file_id == "file:init")
+            .unwrap();
+        assert_eq!(root.module_name, "__init__");
+        assert!(root.is_package);
+        for file in &mut request.files {
+            file.display_path = "different display".to_owned();
+        }
+        assert_eq!(
+            initial.manifest,
+            discover_python_context(&request).unwrap().manifest
+        );
+        request.files.last_mut().unwrap().relative_path = b"../outside.py".to_vec();
+        assert_eq!(
+            discover_python_context(&request).unwrap_err().code(),
+            "CONTEXT_INPUT_INVALID"
+        );
+    }
+
+    #[test]
     fn py_context_discovery_conformance() {
         assert!(version_satisfies(PythonMinor(3, 13), ">=3.12,<4").unwrap());
         assert!(!version_satisfies(PythonMinor(3, 13), "==3.12.*").unwrap());
@@ -1971,7 +2051,7 @@ mod tests {
             source_paths: base
                 .files
                 .iter()
-                .map(|file| file.relative_path.as_bytes().to_vec())
+                .map(|file| file.relative_path.clone())
                 .collect(),
         };
         let candidates = PythonContextDiscoveryAdapter::new(base)

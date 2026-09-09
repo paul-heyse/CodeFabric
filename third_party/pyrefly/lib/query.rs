@@ -1118,6 +1118,18 @@ impl Query {
 
     /// Load the given files and return any errors associated with them
     pub fn add_files(&self, files: Vec<(ModuleName, ModulePath)>) -> Vec<String> {
+        self.add_files_with_diagnostic_paths(files)
+            .into_iter()
+            .map(|(_, message)| message)
+            .collect()
+    }
+
+    /// Load files with exact diagnostic owners. Rendered display paths cannot distinguish
+    /// every filesystem path and must not be used to reconstruct diagnostic ownership.
+    pub fn add_files_with_diagnostic_paths(
+        &self,
+        files: Vec<(ModuleName, ModulePath)>,
+    ) -> Vec<(ModulePath, String)> {
         self.files.lock().extend(files.iter().cloned());
         let mut transaction = self
             .state
@@ -1140,7 +1152,7 @@ impl Query {
                 let mut renderer = ErrorRenderer::plain(&mut s);
                 renderer.write(e, project_root.as_path(), false).unwrap();
             }
-            String::from_utf8_lossy(&s).into_owned()
+            (e.path().dupe(), String::from_utf8_lossy(&s).into_owned())
         })
     }
 

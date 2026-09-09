@@ -515,10 +515,16 @@ fn header(
 }
 
 fn source_path(uri: &str) -> Result<PathBuf, Status> {
-    let raw = uri
-        .strip_prefix("file://")
-        .ok_or_else(|| Status::invalid_argument("Pyrefly source blob URI must use file://"))?;
-    let path = PathBuf::from(raw);
+    let url = url::Url::parse(uri)
+        .map_err(|_| Status::invalid_argument("invalid Pyrefly source blob URI"))?;
+    if url.scheme() != "file" || url.query().is_some() || url.fragment().is_some() {
+        return Err(Status::invalid_argument(
+            "Pyrefly source blob requires a local file URI",
+        ));
+    }
+    let path = url
+        .to_file_path()
+        .map_err(|()| Status::invalid_argument("Pyrefly source blob requires a local file URI"))?;
     if !path.is_absolute() || !path.is_file() {
         return Err(Status::failed_precondition(
             "Pyrefly source blob is not an existing absolute file",
@@ -1274,6 +1280,25 @@ pub(crate) fn serve(socket: &Path, sandbox_profile_digest: &str) -> Result<(), S
 mod tests {
     use super::*;
     use prost::Message as _;
+
+    #[test]
+    fn source_file_uris_preserve_raw_bytes_and_reject_remote_or_fragmented_names() {
+        use std::os::unix::ffi::OsStringExt as _;
+        let root = std::env::temp_dir().join(format!("codefabric-uri-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        for name in [b"raw-\xff%?# \\.py".as_slice(), b"raw-%FF%?# \\.py"] {
+            let path = root.join(std::ffi::OsString::from_vec(name.to_vec()));
+            std::fs::write(&path, b"pass\n").unwrap();
+            let uri = url::Url::from_file_path(&path).unwrap();
+            assert_eq!(super::source_path(uri.as_str()).unwrap(), path);
+            for suffix in ["?query", "#fragment"] {
+                assert!(super::source_path(&format!("{uri}{suffix}")).is_err());
+            }
+        }
+        assert!(super::source_path("file://remote.invalid/source.py").is_err());
+        assert!(super::source_path("https://remote.invalid/source.py").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     const TEST_SANDBOX_PROFILE_DIGEST: &str =
         "sha256:1111111111111111111111111111111111111111111111111111111111111111";

@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `6e339a3e` (`Preserve Python source and stub identities in one checker context`);
-complete local source inventory with configured import roots is the current implementation slice.
+Last production commit: `38629d50` (`Preserve all Python source inputs with configured import roots`);
+raw Python source paths and exact diagnostic ownership are the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -331,6 +331,26 @@ families report unknown coverage. `734821db` adds owned Ruff callable, call-site
 observations: native syntax has 28 relations total, including 22 Ruff relations. Provider-local
 syntax/binding IDs remain observations within their admitted source/context/run.
 
+Python context discovery now keeps raw relative path bytes through input binding, the contained
+provider view and file-URI transport. Root-level `__init__.py` files retain a direct input binding.
+Non-Unicode inputs use reversible checker labels while exact paths and application file IDs remain
+authoritative; this does not establish surrogate-containing import-name resolution. Local modules
+with URL metacharacters, spaces and backslashes are retained. The sidecar consumes escaped local
+file URIs and rejects remote/query/fragment forms. Its selected Query seam now returns exact
+diagnostic module paths beside rendered text, preventing display-path collisions from assigning
+one file's error to another.
+
+Installed live/clean path acceptance passes after the diagnostic-owner refinement (81.85 s on
+2026-09-09):
+raw and replacement-character paths have distinct canonical owners despite colliding lossy display
+strings, with exact local call targets and source spans across deletion/recreation. Root initializer
+functions also remain queryable. Thirteen context tests, all 34 sidecar tests (including a real type
+error under colliding display paths), strict sidecar checking/lint and all 200 tooling tests pass.
+Default/featureless root checks, tooling lint, governance, docs navigation and changed-file formatting
+pass. Root library Clippy retains the same 955 warning baseline. The installed scenario is selected by
+`just golden --case python-paths-live`. Byte-safe Rust compiler inputs and full decoded
+source mappings remain open.
+
 Remaining: full source/lexical/CST feature census; retained parsers/query packs and incremental trees;
 complete trivia/index/coordinate handling; non-identity decoded source mappings (for example BOM or
 non-UTF-8 Python encodings); reversible compiler paths and source presentation; rename/case-collision
@@ -489,7 +509,7 @@ artifacts or a new certification mechanism. Git and named behavioral tests retai
 
 The existing four golden scenarios have passed during earlier slices (startup, installed Python
 serving, exact reopen and cancellation). Exact reopen was rerun on the call-query slice (16.65 s);
-these scenarios do not exercise full outcomes 4–8. Root Clippy retains a large warning backlog (958 warnings in the latest affected library run). The last older aggregate root result at `0cc7242`
+these scenarios do not exercise full outcomes 4–8. Root Clippy retains a large warning backlog (955 warnings in the latest affected library run). The last older aggregate root result at `0cc7242`
 reported 1,038 passed, 13 failed and two skipped; it is historical, not a current verdict. No new
 four-domain aggregate, full-root green result or universal product completion is claimed here.
 

@@ -24,6 +24,7 @@ CASES = {
     "python-context-live": "live_updates::live_python_context_and_negative_imports_equal_independent_clean_queries",
     "python-stubs-live": "live_updates::live_python_namespace_stub_precedence_equals_independent_clean_queries",
     "python-roots-live": "live_updates::live_python_search_paths_preserve_all_sources_and_equal_independent_clean_queries",
+    "python-paths-live": "live_updates::live_python_raw_paths_and_root_initializer_keep_exact_source_identity",
     "processing-pages": "live_updates::processing_remainder_pages_keep_exact_scope_across_reopen_and_updates",
 }
 
@@ -108,6 +109,7 @@ def main(argv=None) -> int:
                         "python-context-live",
                         "python-stubs-live",
                         "python-roots-live",
+                        "python-paths-live",
                         "staged-live",
                         "processing-pages",
                     }

@@ -855,6 +855,169 @@ fn live_python_search_paths_preserve_all_sources_and_equal_independent_clean_que
     supervisor.stop();
 }
 
+fn python_path_observation(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    paths: &[&[u8]],
+) -> Vec<SemanticObservation> {
+    use std::fmt::Write as _;
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "function declarations",
+    );
+    let entities = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-entities"),
+        request.clone(),
+    );
+    assert_eq!(
+        entities.rows.len(),
+        paths.len() * 2,
+        "{phase}: every captured function"
+    );
+    assert_eq!(entities.processing[0]["remaining_partitions"], 0);
+    let source_root = codefabric::secure_path::SecureRoot::authorize(
+        codefabric::secure_path::RootAuthorizationRecord::try_from(&fixture.workspace).unwrap(),
+    )
+    .unwrap();
+    let mut expected_calls = BTreeSet::new();
+    for path in paths {
+        let selected = codefabric::secure_path::PlatformPath::from_raw_relative_bytes(
+            codefabric::identity::PlatformCode::Unix,
+            path.to_vec(),
+        )
+        .unwrap();
+        let file_id = codefabric::identity::source_file_identity(
+            &source_root.workspace_path(&selected).unwrap(),
+        )
+        .unwrap()
+        .id
+        .iter()
+        .fold(String::with_capacity(32), |mut text, byte| {
+            write!(text, "{byte:02x}").unwrap();
+            text
+        });
+        let functions = entities
+            .rows
+            .iter()
+            .filter(|row| row["file_id"] == file_id)
+            .map(|row| {
+                (
+                    row["name"].as_str().unwrap(),
+                    row["public_entity_id"].as_str().unwrap(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            functions.keys().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from(["caller", "leaf"])
+        );
+        expected_calls.insert((functions["caller"], functions["leaf"]));
+    }
+    let subjects = entities
+        .rows
+        .iter()
+        .map(|row| json!({"entity_id": row["public_entity_id"]}))
+        .collect::<Vec<_>>();
+    request["queries"] = json!([{
+        "request": "follow code relationships", "query_id": "calls", "starting_from": subjects,
+        "relationship": "calls", "direction": "outgoing", "distance": "one relationship step",
+        "return": {"limit": {"maximum_results": 32}}
+    }]);
+    let calls = public_query(fixture, stack, &format!("{phase}-calls"), request.clone());
+    let actual_calls = calls
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row["public_source_entity_id"].as_str().unwrap(),
+                row["public_target_entity_id"].as_str().unwrap(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        actual_calls, expected_calls,
+        "{phase}: same-name functions resolve in their exact source owner"
+    );
+    assert_eq!(calls.rows.len(), paths.len());
+    assert_eq!(calls.processing[0]["remaining_partitions"], 0);
+    request["queries"] = json!([{
+        "request": "retrieve source and syntax context", "query_id": "source", "about": subjects,
+        "context": "exact source span", "return": {"maximum_source_bytes": 1024, "limit": {"maximum_results": 32}}
+    }]);
+    let source = public_query(fixture, stack, &format!("{phase}-source"), request);
+    assert_eq!(source.rows.len(), paths.len() * 2);
+    for row in &source.rows {
+        assert_eq!(row["source_context"]["text"], row["name"]);
+        assert_eq!(row["source_context"]["complete"], true);
+    }
+    vec![entities, calls, source]
+}
+
+#[test]
+fn live_python_raw_paths_and_root_initializer_keep_exact_source_identity() {
+    use std::os::unix::ffi::OsStrExt as _;
+    const SOURCE: &[u8] = b"def leaf():\n    return 1\ndef caller():\n    return leaf()\n";
+    let paths: [&[u8]; 4] = [
+        b"sample.py",
+        b"dir-\xff/module%?# \\.py",
+        "dir-�/module%?# \\.py".as_bytes(),
+        b"__init__.py",
+    ];
+    let fixture = ProductionFixture::with_source(SOURCE);
+    let root = Path::new(&fixture.workspace.root_path_display);
+    for path in &paths[1..] {
+        let path = root.join(std::ffi::OsStr::from_bytes(path));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, SOURCE).unwrap();
+    }
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+        store.backup_to(&registration).unwrap();
+    }
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let initial = python_path_observation(&fixture, &stack, "paths-initial", &paths);
+    for (phase, present) in [("paths-removed", false), ("paths-restored", true)] {
+        let path = root.join(std::ffi::OsStr::from_bytes(paths[1]));
+        if present {
+            fs::write(path, SOURCE).unwrap();
+        } else {
+            fs::remove_file(path).unwrap();
+        }
+        let selected = paths
+            .iter()
+            .enumerate()
+            .filter_map(|(index, path)| (present || index != 1).then_some(*path))
+            .collect::<Vec<_>>();
+        let live = python_path_observation(&fixture, &stack, phase, &selected);
+        let clean = clean_fixture(&fixture, &registration, &stack);
+        let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+        let expected =
+            python_path_observation(&clean, &stack, &format!("clean-{phase}"), &selected);
+        assert_eq!(
+            live, expected,
+            "{phase}: exact raw-path clean/live equality"
+        );
+        if present {
+            assert_eq!(
+                live, initial,
+                "restoring raw path restores canonical identities"
+            );
+        }
+        clean_supervisor.stop();
+    }
+    supervisor.stop();
+}
+
 fn pending_semantic_candidate(fixture: &ProductionFixture) -> PathBuf {
     eprintln!(
         "waiting for semantic publication in {}",

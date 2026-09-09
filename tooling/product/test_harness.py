@@ -164,6 +164,7 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         "python-context-live",
         "python-stubs-live",
         "python-roots-live",
+        "python-paths-live",
         "processing-pages",
     ]
 
@@ -175,6 +176,7 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         "python-context-live",
         "python-stubs-live",
         "python-roots-live",
+        "python-paths-live",
         "staged-live",
         "processing-pages",
     ],

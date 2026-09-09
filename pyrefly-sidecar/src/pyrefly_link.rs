@@ -204,7 +204,7 @@ type ProjectedTypeRows = (
 struct LoadedModuleAnalysisInput<'a> {
     query: &'a Query,
     run: &'a AnalysisRunIdentity,
-    diagnostics: &'a [String],
+    diagnostics: &'a [(ModulePath, String)],
     module: &'a ModuleInput,
     source: &'a [u8],
     provider_path: &'a Path,
@@ -548,7 +548,7 @@ impl SemanticContext {
         if !events.is_empty() {
             self.query.change_files(&events);
         }
-        let diagnostics = self.query.add_files(resolved.clone());
+        let diagnostics = self.query.add_files_with_diagnostic_paths(resolved.clone());
         let definition_sources = provider_paths
             .iter()
             .cloned()
@@ -630,11 +630,10 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
         project_type_table(type_table.as_ref(), source)?;
     let call_rows = project_callees(callees.as_deref(), source, definition_sources)?;
     let member_rows = project_members(query, name, &path, type_table.as_ref());
-    let source_path_text = provider_path.to_string_lossy();
     let module_diagnostics = diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.contains(source_path_text.as_ref()))
-        .map(|diagnostic| normalize_diagnostic(diagnostic, provider_path, &module.module_id))
+        .filter(|(owner, _)| owner == &path)
+        .map(|(_, diagnostic)| normalize_diagnostic(diagnostic, provider_path, &module.module_id))
         .collect::<Vec<_>>();
     let coverage_rows = coverage_rows(
         type_table.is_some(),
@@ -1016,7 +1015,7 @@ fn coverage_rows(
         },
         CoverageRow {
             family: "diagnostics",
-            surface: "Query::add_files rendered diagnostics",
+            surface: "Query::add_files_with_diagnostic_paths",
             requested: 1,
             completed: 1,
             emitted: as_u64(diagnostics),
@@ -1738,6 +1737,66 @@ mod tests {
             drop(context);
             std::fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn diagnostic_owners_are_exact_when_raw_paths_have_the_same_display() {
+        use std::os::unix::ffi::OsStringExt as _;
+        let root = claim_001_temp_root("raw-diagnostic-owners");
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = [b"raw-\xff.py".to_vec(), "raw-�.py".as_bytes().to_vec()];
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&preparation::test_manifest("3.14", "linux")).unwrap();
+        manifest["module_map"] = serde_json::json!([
+            {"module_name": "raw", "file_id": "file:raw", "relative_path": paths[0], "root_id": "workspace", "is_stub": false, "is_package": false},
+            {"module_name": "unicode", "file_id": "file:unicode", "relative_path": paths[1], "root_id": "workspace", "is_stub": false, "is_package": false}
+        ]);
+        let preparation =
+            SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                .unwrap();
+        let mut context = SemanticContext::new(&root, "raw-diagnostics", preparation).unwrap();
+        let modules = [
+            inventory_module(&root, "raw", b"value: int = 'wrong'\n"),
+            inventory_module(&root, "unicode", b"value: int = 1\n"),
+        ];
+        let first = context
+            .view
+            .root
+            .join(std::ffi::OsString::from_vec(paths[0].clone()));
+        let second = context
+            .view
+            .root
+            .join(std::ffi::OsString::from_vec(paths[1].clone()));
+        assert_ne!(first, second);
+        assert_eq!(first.to_string_lossy(), second.to_string_lossy());
+        let result = context
+            .analyze_modules(&inventory_run(1), &complete(modules))
+            .unwrap();
+        let counts = result
+            .modules
+            .iter()
+            .map(|module| {
+                let diagnostics = module
+                    .relations
+                    .iter()
+                    .find(|r| r.relation == PyreflyRelation::Diagnostic)
+                    .unwrap();
+                StreamReader::try_new(Cursor::new(&diagnostics.arrow_ipc), None)
+                    .unwrap()
+                    .map(|batch| batch.unwrap().num_rows())
+                    .sum::<usize>()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            counts[0] > 0,
+            "the actual type error must remain attached to its raw source"
+        );
+        assert_eq!(
+            counts[1], 0,
+            "a colliding display path must not acquire another input's diagnostic"
+        );
+        drop(context);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

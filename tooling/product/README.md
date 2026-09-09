@@ -58,3 +58,8 @@ source-file identities and separate clean builds. It has a 600-second default ha
 all captured Python files. It checks that root-level scripts remain queryable and a root-level
 module cannot shadow the configured roots, with independent expected targets and clean comparisons.
 It has a 600-second default harness deadline.
+
+`just golden --case python-paths-live` preserves raw and Unicode paths that collide under lossy
+display conversion, filenames with URI metacharacters and a root initializer. It checks exact
+file/entity identities, local calls and source spans through deletion/recreation and independent
+clean builds. It has a 600-second default harness deadline.

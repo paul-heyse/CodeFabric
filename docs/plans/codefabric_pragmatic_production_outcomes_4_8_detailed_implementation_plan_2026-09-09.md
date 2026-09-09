@@ -1,6 +1,6 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `6e339a3e` (`Preserve Python source and stub identities in one checker context`) and the configured import-root source-inventory change described below.
+Created 2026-09-09 against `126cf71f`; progress reconciled 2026-09-09 against the canonical `master` tree through production commit `38629d50` (`Preserve all Python source inputs with configured import roots`) and the raw Python source-path change described below.
 
 This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Implementation is underway. The status notes distinguish demonstrated committed behavior, uncommitted work and remaining acceptance; writing or updating this plan is not implementation evidence.
 
@@ -223,7 +223,7 @@ Shared runtime interfaces should stay small:
 
 ### 4C. Complete owned source and syntax inputs for both languages
 
-**Current status — partial, committed.** The real Rust Tree-sitter lane and malformed-source retention in item 1 exist (`11a61909`); Python parse failures retain syntax/diagnostics and qualify semantic coverage. Ruff callable/call-site/callable-syntax output is now published (`734821db`). Remaining work covers the full lexical/CST census, parser/query reuse, coordinate/encoding completeness, reversible compiler paths and live incomplete-edit behavior. Startup still waits for semantics before activation.
+**Current status — partial, committed.** The real Rust Tree-sitter lane and malformed-source retention in item 1 exist (`11a61909`); Python parse failures retain syntax/diagnostics and qualify semantic coverage. Ruff callable/call-site/callable-syntax output is now published (`734821db`). Raw Python source paths, escaped file-URI transport and root initializer inputs now survive installed source/call queries and clean/live deletion/recreation (81.85 s after the final diagnostic-owner refinement). Exact checker diagnostic paths prevent lossy display collisions; all 34 sidecar tests and strict sidecar checking/lint pass. `python-paths-live` selects the installed case; default/featureless root checks pass, with the same 955-warning library Clippy baseline. Remaining work covers the full lexical/CST census, parser/query reuse, coordinate/encoding completeness, reversible compiler paths and live incomplete-edit behavior. Startup still waits for semantics before activation.
 
 **Surfaces:** `src/source_image/`, `src/provider_native_syntax.rs`, `src/production_provider_recipe.rs`, provider relation schemas and normalization consumers.
 

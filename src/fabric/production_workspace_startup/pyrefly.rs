@@ -1,5 +1,6 @@
 //! Captured Python inputs to a contained provider and the production catalog boundary.
 
+use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -144,10 +145,7 @@ pub(super) fn run(
             let binding = context
                 .module_for_file(image.file_id)
                 .ok_or_else(|| step("pyrefly-module", "captured file lacks a context module"))?;
-            let relative = Path::new(
-                std::str::from_utf8(&binding.relative_path)
-                    .map_err(|error| step("pyrefly-module-path", error))?,
-            );
+            let relative = Path::new(std::ffi::OsStr::from_bytes(&binding.relative_path));
             Ok(PyreflyModuleInput {
                 module_id: id.clone(),
                 file_id: id.clone(),

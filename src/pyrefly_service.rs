@@ -1389,7 +1389,9 @@ fn read_immutable_blob(
             blob_id: format!("blob:{}", &b3(&bytes)[3..35]),
             content_digest: b3(&bytes),
             byte_length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-            read_only_uri: format!("file://{}", input.provider_source_blob_path.display()),
+            read_only_uri: url::Url::from_file_path(&input.provider_source_blob_path)
+                .map_err(|()| PyreflyServiceError::Invalid("provider blob file URI".into()))?
+                .into(),
         },
         bytes: allocation.retain_measured_vec(bytes, |_| 0)?,
     })

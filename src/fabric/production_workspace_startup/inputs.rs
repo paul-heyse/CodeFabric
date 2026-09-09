@@ -370,21 +370,22 @@ pub(super) fn discover_python_inputs(
     let mut files = Vec::with_capacity(capture.images().len());
     let mut roots = BTreeSet::from([".".to_owned()]);
     for image in capture.images() {
-        let Ok(path) = std::str::from_utf8(&image.path.raw_relative_path_bytes) else {
-            continue;
-        };
-        let mut parent = Path::new(path).parent();
-        while let Some(path) = parent {
-            if !path.as_os_str().is_empty() {
-                roots.insert(path.to_string_lossy().into_owned());
+        // Configured roots are Unicode TOML strings; source identity remains byte-native.
+        // Files below non-Unicode components retain their project-root input binding.
+        if let Ok(path) = std::str::from_utf8(&image.path.raw_relative_path_bytes) {
+            let mut parent = Path::new(path).parent();
+            while let Some(path) = parent {
+                if !path.as_os_str().is_empty() {
+                    roots.insert(path.to_str().expect("parent of a Unicode path").to_owned());
+                }
+                parent = path.parent();
             }
-            parent = path.parent();
         }
         files.push(PythonDiscoveryFile {
             file_id: encode_public_id(IdentityDomain::SourceFile, None, image.file_id)
                 .map_err(|error| step("context-file-id", error))?,
-            relative_path: path.to_owned(),
-            display_path: path.to_owned(),
+            relative_path: image.path.raw_relative_path_bytes.clone(),
+            display_path: image.path.display_string.clone(),
             digest: image.digest,
             contents: image.bytes.to_vec(),
         });
