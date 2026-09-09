@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "extractor": "codefabric-rustc-extractor 0.1.0",
+  "source_identity_profile": "captured-files-v1",
   "toolchain": "nightly-2026-08-18",
   "rustc_release": "1.100.0-nightly",
   "rustc_commit_hash": "8fa1c96cfd489e4c27654c144ae871ce2c4db6c6",

@@ -130,6 +130,8 @@ pub mod ruff_adapter;
 #[cfg(feature = "daemon")]
 pub mod rust_compilation_trust;
 #[cfg(feature = "daemon")]
+pub mod rustc_source_files;
+#[cfg(feature = "daemon")]
 pub mod rust_mir_derived_analysis;
 #[cfg(feature = "daemon")]
 pub(crate) mod rustc_relation_schema;

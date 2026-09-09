@@ -112,6 +112,13 @@ All 53 affected root tests, 14 extractor tests and strict extractor check/Clippy
 2026-09-09. Rust daemon publication, application source identities, dependency preparation and
 all first-release query forms remain work; successful provider execution is not outcome 4 closure.
 
+The follow-up compiler source mapping now retains supplied application file IDs and actual
+owner ranges across multiple source files. Selected preparation requires a matching captured
+manifest; changed/unlisted inputs are rejected. The two-file real contained run, 25 preparation
+tests, 14 extractor tests, strict extractor Clippy and governance pass. Compiler handshake
+identity distinguishes this profile from older binaries. Production Rust scheduling/publication,
+context/dependency preparation and common semantic normalization remain open.
+
 ## 6. Outcome 5 — Query-relevant progress and unfinished scope
 
 Build with outcome 4. Reuse actual processing/coverage/publication state in provider admission/input observations, query/status paths, lifecycle and adapter projections. Do not create an independent status authority.

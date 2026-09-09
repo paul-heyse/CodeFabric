@@ -1,8 +1,9 @@
 //! Short-lived `RUSTC_WORKSPACE_WRAPPER` client for one Cargo compilation unit.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::io::Read as _;
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -89,6 +90,9 @@ struct WrapperEnvironment {
     cargo_metadata_digest: String,
     cargo_lock_digest: String,
     cargo_config_digest: String,
+    source_file_manifest: PathBuf,
+    source_file_manifest_digest: String,
+    source_workspace_root: PathBuf,
 }
 
 #[derive(Debug)]
@@ -163,6 +167,11 @@ impl WrapperEnvironment {
             cargo_metadata_digest: environment_value("CODEFABRIC_CARGO_METADATA_DIGEST")?,
             cargo_lock_digest: environment_value("CODEFABRIC_CARGO_LOCK_DIGEST")?,
             cargo_config_digest: environment_value("CODEFABRIC_CARGO_CONFIG_DIGEST")?,
+            source_file_manifest: environment_value("CODEFABRIC_SOURCE_FILE_MANIFEST")?.into(),
+            source_file_manifest_digest: environment_value(
+                "CODEFABRIC_SOURCE_FILE_MANIFEST_DIGEST",
+            )?,
+            source_workspace_root: environment_value("CODEFABRIC_SOURCE_WORKSPACE_ROOT")?.into(),
         };
         for digest in [
             &resolved.context_manifest_digest,
@@ -170,6 +179,7 @@ impl WrapperEnvironment {
             &resolved.cargo_metadata_digest,
             &resolved.cargo_lock_digest,
             &resolved.cargo_config_digest,
+            &resolved.source_file_manifest_digest,
         ] {
             if !valid_digest(digest) {
                 return Err("wrapper environment contains a malformed digest".to_owned());
@@ -578,6 +588,99 @@ fn send_event(
     Ok(())
 }
 
+struct CapturedCompilerSources {
+    root: PathBuf,
+    manifest: crate::rustc_source_files::RustSourceFileManifest,
+    verified: BTreeMap<PathBuf, (String, [u8; 32], u64)>,
+}
+
+impl CapturedCompilerSources {
+    fn open(environment: &WrapperEnvironment) -> Result<Self, String> {
+        use crate::rustc_source_files::{MAX_MANIFEST_BYTES, RustSourceFileManifest};
+        let mut bytes = Vec::new();
+        std::fs::File::open(&environment.source_file_manifest)
+            .and_then(|file| {
+                file.take((MAX_MANIFEST_BYTES + 1) as u64)
+                    .read_to_end(&mut bytes)
+            })
+            .map_err(|error| format!("cannot read captured compiler source manifest: {error}"))?;
+        if b3(&bytes) != environment.source_file_manifest_digest {
+            return Err("captured compiler source manifest changed".into());
+        }
+        let manifest = RustSourceFileManifest::decode(&bytes)?;
+        if manifest.workspace_id != environment.workspace_id
+            || manifest.source_generation != environment.source_generation
+        {
+            return Err("captured compiler sources belong to a different run".into());
+        }
+        let root = std::fs::canonicalize(&environment.source_workspace_root)
+            .map_err(|error| format!("cannot resolve captured source root: {error}"))?;
+        Ok(Self {
+            root,
+            manifest,
+            verified: BTreeMap::new(),
+        })
+    }
+
+    fn resolve(&mut self, path: &Path) -> Result<(String, [u8; 32], u64), String> {
+        let path = if path.is_absolute() {
+            path.to_owned()
+        } else {
+            std::env::current_dir()
+                .map_err(|error| error.to_string())?
+                .join(path)
+        };
+        if let Some(binding) = self.verified.get(&path) {
+            return Ok(binding.clone());
+        }
+        let relative = path
+            .strip_prefix(&self.root)
+            .ok()
+            .and_then(|path| path.to_str())
+            .ok_or_else(|| "compiler source location is outside captured inputs".to_owned())?;
+        let file = self
+            .manifest
+            .files
+            .get(relative)
+            .ok_or_else(|| format!("compiler source location is not captured: {relative}"))?;
+        if std::fs::canonicalize(&path).map_err(|error| error.to_string())? != path {
+            return Err("compiler source location is aliased".into());
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path)
+            .and_then(|file| file.take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes))
+            .map_err(|error| error.to_string())?;
+        if bytes.len() > 64 * 1024 * 1024 || *blake3::hash(&bytes).as_bytes() != file.content_digest
+        {
+            return Err("compiler source bytes differ from the captured input".into());
+        }
+        let binding = (
+            file.file_id.clone(),
+            file.content_digest,
+            bytes.len() as u64,
+        );
+        self.verified.insert(path, binding.clone());
+        Ok(binding)
+    }
+}
+
+fn owner_source_span(owner: &OwnedRustcOwner) -> Option<(&Path, u64, u64)> {
+    let row = owner
+        .relations
+        .iter()
+        .find(|relation| relation.relation == RustcRelation::PublicItem)?
+        .rows
+        .first()?;
+    let (OwnedCell::Utf8(path), OwnedCell::UInt64(start), OwnedCell::UInt64(end)) = (
+        row.0.get("span_file")?,
+        row.0.get("span_start_byte")?,
+        row.0.get("span_end_byte")?,
+    ) else {
+        return None;
+    };
+    Some((Path::new(path), *start, *end))
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_protocol(
     runtime: &Runtime,
@@ -599,8 +702,18 @@ fn run_protocol(
         .collect::<Result<Vec<_>, _>>()?;
     let source = source_path(&argument_strings)
         .ok_or_else(|| "analysis invocation has no Rust source input".to_owned())?;
-    let source_bytes = std::fs::read(&source)
+    let mut source_bytes = Vec::new();
+    std::fs::File::open(&source)
+        .and_then(|file| {
+            file.take(64 * 1024 * 1024 + 1)
+                .read_to_end(&mut source_bytes)
+        })
         .map_err(|error| format!("failed to read compiler source input: {error}"))?;
+    if source_bytes.len() > 64 * 1024 * 1024 {
+        return Err("compiler source exceeds the captured-file byte limit".into());
+    }
+    let mut captured_sources = CapturedCompilerSources::open(&environment)?;
+    let root_binding = captured_sources.resolve(&source)?;
     let invocation_digest =
         normalized_invocation_digest(real_rustc, arguments, &source, &source_bytes);
     let rust_mir_capability_code = RUST_MIR_CAPABILITY_CODE;
@@ -751,10 +864,18 @@ fn run_protocol(
     let owners = extracted.map_or_else(|_| Vec::new(), |extraction| extraction.owners);
     let mut sequence = 1_u64;
     let mut closed_owners = Vec::new();
-    let source_file_id = format!("file:{}", &b3(&source_bytes)[3..35]);
-    let source_content_digest = *blake3::hash(&source_bytes).as_bytes();
     if !cancelled.load(Ordering::Acquire) && compiler_exit_status == 0 {
         for owner in &owners {
+            let (source_path, source_start, source_end) = match owner_source_span(owner) {
+                Some(span) => span,
+                None if owner.owner_kind == "COMPILATION" => (source.as_path(), 0, root_binding.2),
+                None => return Err("compiler item owner has no attributable source span".into()),
+            };
+            let (source_file_id, source_content_digest, source_len) =
+                captured_sources.resolve(source_path)?;
+            if source_start > source_end || source_end > source_len {
+                return Err("compiler owner range is outside its captured source".into());
+            }
             let stable_identity = owner.compiler_key.map_or_else(
                 || owner.qualified_name.clone(),
                 |key| {
@@ -785,8 +906,10 @@ fn run_protocol(
                     owner_id: owner_id.clone(),
                     owner_kind: owner.owner_kind.clone(),
                     file_id: source_file_id.clone(),
-                    source_start: 0,
-                    source_end: u32::try_from(source_bytes.len()).unwrap_or(u32::MAX),
+                    source_start: u32::try_from(source_start)
+                        .map_err(|_| "compiler source range exceeds protocol")?,
+                    source_end: u32::try_from(source_end)
+                        .map_err(|_| "compiler source range exceeds protocol")?,
                 }),
                 expected_observation_family_codes,
             };
@@ -1466,10 +1589,30 @@ mod tests {
             OsString::from(format!("--out-dir={}", output.display())),
             OsString::from(format!("--sysroot={}", sysroot.trim())),
         ];
+        let source_manifest = crate::rustc_source_files::RustSourceFileManifest {
+            workspace_id: format!("workspace:{}", "01".repeat(16)),
+            source_generation: 1,
+            files: BTreeMap::from([(
+                "wrapper-probe.rs".into(),
+                crate::rustc_source_files::CapturedRustSourceFile {
+                    file_id: format!("file:{}", "02".repeat(16)),
+                    content_digest: *blake3::hash(
+                        &std::fs::read(temporary.path().join("wrapper-probe.rs")).unwrap(),
+                    )
+                    .as_bytes(),
+                },
+            )]),
+        };
+        let source_file_manifest = temporary.path().join("source-files.json");
+        let source_manifest_bytes = serde_json::to_vec(&source_manifest).unwrap();
+        std::fs::write(&source_file_manifest, &source_manifest_bytes).unwrap();
         let environment = WrapperEnvironment {
+            source_file_manifest,
+            source_file_manifest_digest: b3(&source_manifest_bytes),
+            source_workspace_root: temporary.path().to_owned(),
             endpoint: socket,
             provider_run_id: "run:wrapper-probe".to_owned(),
-            workspace_id: "workspace:golden".to_owned(),
+            workspace_id: source_manifest.workspace_id.clone(),
             analysis_context_id: "context:rust".to_owned(),
             source_generation: 1,
             context_manifest_digest: b3(b"context"),
@@ -1491,13 +1634,31 @@ mod tests {
         assert_eq!(exit, 0);
         let replay_exit = run_protocol(
             &runtime,
-            environment,
+            environment.clone(),
             OsStr::new("rustc"),
             &arguments,
             include_bytes!("../toolchain-identity.json"),
         )
         .unwrap();
         assert_eq!(replay_exit, 0);
+        let probe_source = temporary.path().join("wrapper-probe.rs");
+        let mut captured = CapturedCompilerSources::open(&environment).unwrap();
+        assert_eq!(
+            captured.resolve(&probe_source).unwrap().0,
+            format!("file:{}", "02".repeat(16))
+        );
+        let unlisted = temporary.path().join("unlisted.rs");
+        std::fs::write(&unlisted, "pub fn unlisted() {}\n").unwrap();
+        assert!(captured.resolve(&unlisted).is_err());
+        std::fs::write(&probe_source, "pub fn changed() {}\n").unwrap();
+        assert!(
+            CapturedCompilerSources::open(&environment)
+                .unwrap()
+                .resolve(&probe_source)
+                .is_err()
+        );
+        std::fs::write(&environment.source_file_manifest, b"{}").unwrap();
+        assert!(CapturedCompilerSources::open(&environment).is_err());
 
         for _ in 0..100 {
             if events

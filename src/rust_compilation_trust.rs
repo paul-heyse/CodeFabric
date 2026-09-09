@@ -509,6 +509,7 @@ impl RustCompilationContextPins {
 pub enum RustCompilationPreparationRemainder {
     Context(RustContextRemainder),
     SysrootMappingRequired,
+    SourceFileManifestRequired,
     UnsupportedBuildEnvironment,
 }
 
@@ -533,6 +534,7 @@ pub struct SelectedRustCompilationPreparation {
     authority: RustPreparationAuthority,
     cargo_metadata_digest: Option<String>,
     sysroot: Option<PathBuf>,
+    source_file_manifest: Option<(PathBuf, String)>,
 }
 
 impl SelectedRustCompilationPreparation {
@@ -603,6 +605,7 @@ impl SelectedRustCompilationPreparation {
         }
         // Discovery pins a sysroot artifact, but does not map its authorized contained path.
         remainders.push(RustCompilationPreparationRemainder::SysrootMappingRequired);
+        remainders.push(RustCompilationPreparationRemainder::SourceFileManifestRequired);
         if settings
             .environment
             .iter()
@@ -624,6 +627,7 @@ impl SelectedRustCompilationPreparation {
             authority: RustPreparationAuthority::Unresolved(Box::new(product.clone())),
             cargo_metadata_digest: None,
             sysroot: None,
+            source_file_manifest: None,
         })
     }
 
@@ -757,6 +761,50 @@ impl SelectedRustCompilationPreparation {
         Ok(self)
     }
 
+    /// Bind a daemon-written captured source manifest in the immutable dependency view.
+    ///
+    /// # Errors
+    /// Rejects paths outside that view and manifests for a different workspace/generation.
+    pub fn with_source_file_manifest(
+        mut self,
+        inputs: &RustCompilationInputs,
+        path: &Path,
+    ) -> Result<Self, RustCompilationTrustError> {
+        use crate::rustc_source_files::{MAX_MANIFEST_BYTES, RustSourceFileManifest};
+        let path = canonical_unaliased_file(path)?;
+        if !path.starts_with(&inputs.dependency_view) {
+            return Err(RustCompilationTrustError::PathEscape);
+        }
+        let mut bytes = Vec::new();
+        File::open(&path)?
+            .take((MAX_MANIFEST_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)?;
+        let manifest = RustSourceFileManifest::decode(&bytes)
+            .map_err(|_| RustCompilationTrustError::SelectedContextMismatch)?;
+        match &self.authority {
+            RustPreparationAuthority::Unresolved(product)
+                if product.context.workspace_id == manifest.workspace_id
+                    && product.source_generation == manifest.source_generation
+                    && std::str::from_utf8(&product.settings.target.crate_root)
+                        .is_ok_and(|path| manifest.files.contains_key(path)) => {}
+            RustPreparationAuthority::Unresolved(_) => {
+                return Err(RustCompilationTrustError::SelectedContextMismatch);
+            }
+            #[cfg(test)]
+            RustPreparationAuthority::ContainmentFixture => {
+                return Err(RustCompilationTrustError::SelectedContextMismatch);
+            }
+        }
+        self.source_file_manifest = Some((
+            path,
+            crate::integrity::frame_digest(crate::integrity::digest_bytes(&bytes)),
+        ));
+        self.remainders.retain(|reason| {
+            *reason != RustCompilationPreparationRemainder::SourceFileManifestRequired
+        });
+        Ok(self)
+    }
+
     fn require_available(
         &self,
         request: &RustCompilationContextPins,
@@ -816,6 +864,7 @@ impl SelectedRustCompilationPreparation {
             authority: RustPreparationAuthority::ContainmentFixture,
             cargo_metadata_digest: None,
             sysroot: None,
+            source_file_manifest: None,
         }
     }
 }
@@ -1050,6 +1099,28 @@ impl RustCompilationEnvironment {
         // modules, proxies, credential stores, or agent sockets.
         variables.insert("LC_ALL".into(), "C".into());
         variables.extend(request.preparation.selected_environment.clone());
+        if let Some((path, digest)) = &request.preparation.source_file_manifest {
+            let path = if mechanism == SandboxMechanism::LinuxBubblewrap {
+                Path::new("/dependencies").join(
+                    path.strip_prefix(&inputs.dependency_view)
+                        .map_err(|_| RustCompilationTrustError::PathEscape)?,
+                )
+            } else {
+                path.clone()
+            };
+            variables.insert(
+                "CODEFABRIC_SOURCE_FILE_MANIFEST".into(),
+                path.to_string_lossy().into_owned(),
+            );
+            variables.insert(
+                "CODEFABRIC_SOURCE_FILE_MANIFEST_DIGEST".into(),
+                digest.clone(),
+            );
+            variables.insert(
+                "CODEFABRIC_SOURCE_WORKSPACE_ROOT".into(),
+                layout.workspace_view.to_string_lossy().into_owned(),
+            );
+        }
         if let Some(sysroot) = &request.preparation.sysroot {
             let sysroot = if mechanism == SandboxMechanism::LinuxBubblewrap {
                 Path::new("/dependencies").join(
@@ -3214,7 +3285,10 @@ fn validate_digest(value: &str) -> Result<(), RustCompilationTrustError> {
 fn validate_environment_variables(
     variables: &BTreeMap<String, String>,
 ) -> Result<(), RustCompilationTrustError> {
-    const ALLOWED: [&str; 25] = [
+    const ALLOWED: [&str; 28] = [
+        "CODEFABRIC_SOURCE_WORKSPACE_ROOT",
+        "CODEFABRIC_SOURCE_FILE_MANIFEST",
+        "CODEFABRIC_SOURCE_FILE_MANIFEST_DIGEST",
         "CARGO_ENCODED_RUSTFLAGS",
         "PATH",
         "HOME",
@@ -3631,6 +3705,36 @@ mod tests {
             .preparation
             .clone()
             .with_cargo_metadata(&harness.inputs, &metadata.stdout)
+            .unwrap();
+        let source_manifest_path = harness.inputs.dependency_view.join("source-files.json");
+        let source_manifest = crate::rustc_source_files::RustSourceFileManifest {
+            workspace_id: product.context.workspace_id.clone(),
+            source_generation: product.source_generation,
+            files: BTreeMap::from([(
+                "src/lib.rs".into(),
+                crate::rustc_source_files::CapturedRustSourceFile {
+                    file_id: crate::identity::encode_public_id(
+                        crate::identity::IdentityDomain::SourceFile,
+                        None,
+                        [1; 16],
+                    )
+                    .unwrap(),
+                    content_digest: crate::integrity::digest_bytes(
+                        &fs::read(harness.inputs.workspace_view.join("src/lib.rs")).unwrap(),
+                    ),
+                },
+            )]),
+        };
+        fs::write(
+            &source_manifest_path,
+            serde_json::to_vec(&source_manifest).unwrap(),
+        )
+        .unwrap();
+        harness.request.preparation = harness
+            .request
+            .preparation
+            .clone()
+            .with_source_file_manifest(&harness.inputs, &source_manifest_path)
             .unwrap();
         assert!(harness.request.preparation.remainders().is_empty());
         let plan = compile_untrusted(&harness);

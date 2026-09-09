@@ -190,10 +190,29 @@ root Rust test recipe also builds its required extractor.
 Validation on 2026-09-09: all 53 affected launcher/preparation/protocol tests pass, including
 the real contained call in about 4.6 seconds. All 14 extractor tests and its strict Clippy/check
 pass. Root library Clippy completes with the existing warning backlog; it is not a strict pass.
-This is provider execution, not Rust daemon publication. Captured source-file identity mapping,
-production dependency/context preparation and compiler scheduling remain next. The real fixture
+This is provider execution, not Rust daemon publication. Production dependency/context preparation
+and compiler scheduling remain next; the source identity follow-up below is now implemented. The real fixture
 uses its own no-dependency sources and a private copy of the installed nightly sysroot; it does
 not demonstrate arbitrary Cargo workspaces or complete Rust fact families.
+
+## Captured Rust source identities
+
+The compiler subprocess now consumes a bounded source manifest supplied by source capture,
+bound to the selected workspace/generation and launch environment. Preparation requires the
+selected crate root in that manifest. The extractor checks each used file's path and content
+digest, then assigns item owners their actual compiler source span and captured application
+file ID. It no longer labels every owner with a crate-root content hash. Each file is checked
+once per invocation; out-of-inventory locations fail instead of borrowing a crate-root identity.
+The extractor identity includes `captured-files-v1` so its handshake distinguishes older binaries.
+
+The real contained fixture now spans `src/lib.rs` and `src/other.rs`. It asserts the nested
+module's direct call and its distinct supplied file identity. That run passes in about 4.6
+seconds. All 25 preparation tests and 14 extractor tests pass, including changed/unlisted
+source and changed-manifest rejection. Extractor strict Clippy and governance pass. Root
+library Clippy completes with 969 warnings; no strict root lint pass is claimed.
+Rust daemon publication and production context/dependency preparation remain work. This
+fix supplies a necessary identity boundary; it does not complete normalization, arbitrary
+generated/macro source support or the remaining product outcomes.
 
 ## Completed preparation
 

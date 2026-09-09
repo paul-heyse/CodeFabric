@@ -16,6 +16,8 @@ mod relation_ipc_proto;
 mod rustc_link;
 #[path = "../../src/rustc_relation_schema.rs"]
 mod rustc_relation_schema;
+#[path = "../../src/rustc_source_files.rs"]
+mod rustc_source_files;
 mod wrapper;
 
 use std::ffi::OsString;

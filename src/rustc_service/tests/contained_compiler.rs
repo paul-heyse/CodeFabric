@@ -25,12 +25,18 @@ async fn contained_cargo_extracts_real_selected_rust_call() {
     .unwrap();
     fs::write(
         workspace.join("src/lib.rs"),
-        "pub fn target(v: u32) -> u32 { v + 1 }\npub fn caller() -> u32 { target(4) }\n",
+        "pub mod other;\npub fn caller() -> u32 { other::caller() }\n",
     )
     .unwrap();
     fs::write(
         workspace.join("Cargo.lock"),
         "version = 4\n[[package]]\nname = 'fixture'\nversion = '0.0.0'\n",
+    )
+    .unwrap();
+
+    fs::write(
+        workspace.join("src/other.rs"),
+        "pub fn target(v: u32) -> u32 { v + 1 }\npub fn caller() -> u32 { target(4) }\n",
     )
     .unwrap();
 
@@ -89,18 +95,47 @@ async fn contained_cargo_extracts_real_selected_rust_call() {
         "rustc-1.100.0-nightly-2026-08-18",
     )
     .unwrap();
-    let files = ["Cargo.toml", "Cargo.lock", "src/lib.rs"]
+    let files: Vec<_> = ["Cargo.toml", "Cargo.lock", "src/lib.rs", "src/other.rs"]
         .into_iter()
         .map(|path| {
             let contents = fs::read(workspace.join(path)).unwrap();
             ContextFileInput {
-                file_id: format!("file:{path}"),
+                file_id: encode_public_id(
+                    IdentityDomain::SourceFile,
+                    None,
+                    crate::integrity::digest_bytes(path.as_bytes())[..16]
+                        .try_into()
+                        .unwrap(),
+                )
+                .unwrap(),
                 relative_path: path.as_bytes().to_vec(),
                 digest: crate::integrity::digest_bytes(&contents),
                 contents,
             }
         })
         .collect();
+    let source_manifest = crate::rustc_source_files::RustSourceFileManifest {
+        workspace_id: encode_public_id(IdentityDomain::Workspace, None, [1; 16]).unwrap(),
+        source_generation: 7,
+        files: files
+            .iter()
+            .map(|file| {
+                (
+                    String::from_utf8(file.relative_path.clone()).unwrap(),
+                    crate::rustc_source_files::CapturedRustSourceFile {
+                        file_id: file.file_id.clone(),
+                        content_digest: file.digest,
+                    },
+                )
+            })
+            .collect(),
+    };
+    let source_manifest_path = dependencies.join("source-files.json");
+    fs::write(
+        &source_manifest_path,
+        serde_json::to_vec(&source_manifest).unwrap(),
+    )
+    .unwrap();
     let discovered = discover_rust_context(&RustContextDiscoveryRequest {
         workspace_id: encode_public_id(IdentityDomain::Workspace, None, [1; 16]).unwrap(),
         source_generation: 7,
@@ -165,6 +200,8 @@ async fn contained_cargo_extracts_real_selected_rust_call() {
     harness.request.preparation = SelectedRustCompilationPreparation::from_discovered(&product)
         .unwrap()
         .with_cargo_metadata(&harness.inputs, &metadata.stdout)
+        .unwrap()
+        .with_source_file_manifest(&harness.inputs, &source_manifest_path)
         .unwrap();
     harness.request.build_scripts_present = false;
     harness.request.procedural_macros_present = false;
@@ -279,8 +316,43 @@ async fn contained_cargo_extracts_real_selected_rust_call() {
     assert!(
         targets
             .iter()
-            .any(|target| target == "target" || target == "fixture::target"),
+            .any(|target| target == "other::target" || target == "fixture::other::target"),
         "{targets:?}"
+    );
+    let mut saw_other_owner = false;
+    for compilation in result.compilations() {
+        for owner in &compilation.accepted().owners {
+            for relation in &owner.relations {
+                if relation.relation != RustcRelation::PublicItem {
+                    continue;
+                }
+                let strings = |name| {
+                    relation
+                        .batch
+                        .column_by_name(name)
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<arrow_array::StringArray>()
+                        .unwrap()
+                };
+                for row in 0..relation.batch.num_rows() {
+                    if strings("qualified_name")
+                        .value(row)
+                        .ends_with("other::target")
+                    {
+                        assert_eq!(
+                            strings("source_file_id").value(row),
+                            source_manifest.files["src/other.rs"].file_id
+                        );
+                        saw_other_owner = true;
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        saw_other_owner,
+        "nested module owner must retain its captured file identity"
     );
     assert!(!harness.paths.extractor_socket_path.exists());
 }
