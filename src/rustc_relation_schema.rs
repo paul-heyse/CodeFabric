@@ -104,17 +104,22 @@ impl RustcRelation {
             .into_iter()
             .enumerate()
             .map(|(ordinal, spec)| {
-                Field::new(spec.name, spec.data_type, spec.nullable).with_metadata(
-                    [
-                        (
-                            "codefabric.field_id".to_owned(),
-                            format!("{}.{}", self.relation_id(), spec.name),
-                        ),
-                        ("codefabric.field_ordinal".to_owned(), ordinal.to_string()),
-                    ]
-                    .into_iter()
-                    .collect(),
-                )
+                let mut metadata: HashMap<_, _> = [
+                    (
+                        "codefabric.field_id".to_owned(),
+                        format!("{}.{}", self.relation_id(), spec.name),
+                    ),
+                    ("codefabric.field_ordinal".to_owned(), ordinal.to_string()),
+                ]
+                .into_iter()
+                .collect();
+                if spec.name == "span_file_bytes" {
+                    metadata.insert(
+                        "codefabric.logical_type".to_owned(),
+                        "compiler-local-source-path.unix".to_owned(),
+                    );
+                }
+                Field::new(spec.name, spec.data_type, spec.nullable).with_metadata(metadata)
             })
             .collect::<Vec<_>>();
         let metadata = [
@@ -204,6 +209,11 @@ impl RustcRelation {
                 bool_field("requires_monomorphization", false),
                 fixed_binary("type_key", 32, false),
                 span_file(),
+                FieldSpec {
+                    name: "span_file_bytes",
+                    data_type: DataType::Binary,
+                    nullable: true,
+                },
                 span_start(),
                 span_end(),
                 span_start_line(),
@@ -245,6 +255,11 @@ impl RustcRelation {
                 u64_field("debug_variable_count", false),
                 u64_field("spread_argument_local", true),
                 span_file(),
+                FieldSpec {
+                    name: "span_file_bytes",
+                    data_type: DataType::Binary,
+                    nullable: true,
+                },
                 span_start(),
                 span_end(),
                 span_start_line(),
@@ -265,6 +280,11 @@ impl RustcRelation {
                 fixed_binary("type_key", 32, false),
                 utf8("mutability", false),
                 span_file(),
+                FieldSpec {
+                    name: "span_file_bytes",
+                    data_type: DataType::Binary,
+                    nullable: true,
+                },
                 span_start(),
                 span_end(),
                 span_start_line(),
@@ -323,6 +343,11 @@ impl RustcRelation {
                 utf8("normalized_effect", false),
                 u64_field("source_scope", false),
                 span_file(),
+                FieldSpec {
+                    name: "span_file_bytes",
+                    data_type: DataType::Binary,
+                    nullable: true,
+                },
                 span_start(),
                 span_end(),
                 span_start_line(),
@@ -340,6 +365,11 @@ impl RustcRelation {
                 utf8("assert_message_kind", true),
                 fixed_binary("destination_place_id", 32, true),
                 span_file(),
+                FieldSpec {
+                    name: "span_file_bytes",
+                    data_type: DataType::Binary,
+                    nullable: true,
+                },
                 span_start(),
                 span_end(),
                 span_start_line(),
@@ -503,6 +533,7 @@ const fn span_end_column() -> FieldSpec {
 
 fn data_type_name(data_type: &DataType) -> &'static str {
     match data_type {
+        DataType::Binary => "binary",
         DataType::Utf8 => "utf8",
         DataType::UInt64 => "uint64",
         DataType::Boolean => "boolean",
@@ -540,9 +571,21 @@ mod tests {
                 schema.metadata().get("codefabric.arrow_type_universe"),
                 Some(&ARROW_TYPE_UNIVERSE.to_owned())
             );
-            assert!(schema.fields().iter().all(|field| {
-                !matches!(field.data_type(), DataType::Binary | DataType::LargeBinary)
-            }));
+            for field in schema.fields() {
+                if field.data_type() == &DataType::Binary {
+                    assert_eq!(field.name(), "span_file_bytes");
+                    assert_eq!(
+                        field.metadata()["codefabric.logical_type"],
+                        "compiler-local-source-path.unix"
+                    );
+                    assert!(field.is_nullable());
+                } else {
+                    assert!(!matches!(
+                        field.data_type(),
+                        DataType::LargeBinary | DataType::BinaryView
+                    ));
+                }
+            }
         }
         assert!(schema_bundle_digest().starts_with("b3:"));
         assert_eq!(schema_bundle_digest().len(), 67);

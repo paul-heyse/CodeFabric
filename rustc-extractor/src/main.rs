@@ -6,6 +6,7 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;
 extern crate rustc_public_bridge;
+extern crate rustc_span;
 
 mod protocol;
 #[path = "../../src/relation_ipc_contract.rs"]

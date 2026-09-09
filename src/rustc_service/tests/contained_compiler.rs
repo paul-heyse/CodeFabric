@@ -123,7 +123,7 @@ async fn contained_cargo_extracts_real_selected_rust_call() {
             .iter()
             .map(|file| {
                 (
-                    String::from_utf8(file.relative_path.clone()).unwrap(),
+                    file.relative_path.clone(),
                     crate::rustc_source_files::CapturedRustSourceFile {
                         file_id: file.file_id.clone(),
                         content_digest: file.digest,
@@ -385,7 +385,7 @@ async fn contained_cargo_extracts_real_selected_rust_call() {
                     {
                         assert_eq!(
                             strings("source_file_id").value(row),
-                            source_manifest.files["src/other.rs"].file_id
+                            source_manifest.files[b"src/other.rs".as_slice()].file_id
                         );
                         saw_other_owner = true;
                     }

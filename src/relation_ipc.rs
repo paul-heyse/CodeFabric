@@ -1130,7 +1130,21 @@ fn validate_typed_field(field: &Field) -> Result<(), RelationIpcErrorKind> {
             ));
         }
     }
+    if is_compiler_source_path_field(field) {
+        return Ok(());
+    }
     validate_typed_data_type(field.data_type(), field.name())
+}
+
+/// A released coordinate has byte-path semantics, independently of its display label.
+/// Exact registered schema equality still applies; arbitrary semantic binary remains rejected.
+pub(crate) fn is_compiler_source_path_field(field: &Field) -> bool {
+    field.name() == "span_file_bytes"
+        && field.data_type() == &DataType::Binary
+        && field
+            .metadata()
+            .get("codefabric.logical_type")
+            .is_some_and(|value| value == "compiler-local-source-path.unix")
 }
 
 fn validate_typed_data_type(
@@ -2365,6 +2379,16 @@ mod tests {
         for (marker, field) in [
             (152, Field::new("semantic_payload", DataType::Utf8, false)),
             (153, Field::new("semantic_bytes", DataType::Binary, false)),
+            (154, Field::new("span_file_bytes", DataType::Binary, true)),
+            (
+                155,
+                Field::new("semantic_bytes", DataType::Binary, true).with_metadata(
+                    std::collections::HashMap::from([(
+                        "codefabric.logical_type".to_owned(),
+                        "compiler-local-source-path.unix".to_owned(),
+                    )]),
+                ),
+            ),
         ] {
             let schema = typed_schema(marker, vec![field]);
             let contract = contract_for_schema(marker, 1, schema);

@@ -12,7 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use arrow_array::builder::{BooleanBuilder, FixedSizeBinaryBuilder, StringBuilder, UInt64Builder};
+use arrow_array::builder::{
+    BinaryBuilder, BooleanBuilder, FixedSizeBinaryBuilder, StringBuilder, UInt64Builder,
+};
 use arrow_array::{ArrayRef, RecordBatch};
 use arrow_ipc::MetadataVersion;
 use arrow_ipc::writer::{IpcWriteOptions, StreamWriter};
@@ -353,6 +355,23 @@ fn encode_relation(
             .map(|row| relation_cell(row, owner, context, field.name()))
             .collect::<Vec<_>>();
         let array: ArrayRef = match field.data_type() {
+            DataType::Binary => {
+                let mut builder = BinaryBuilder::with_capacity(values.len(), values.len() * 16);
+                for value in values {
+                    match value {
+                        Some(OwnedCell::Binary(value)) => builder.append_value(value),
+                        None if field.is_nullable() => builder.append_null(),
+                        _ => {
+                            return Err(format!(
+                                "{} field {} differs from binary/nullability contract",
+                                relation.relation.relation_id(),
+                                field.name()
+                            ));
+                        }
+                    }
+                }
+                Arc::new(builder.finish())
+            }
             DataType::Utf8 => {
                 let mut builder = StringBuilder::with_capacity(values.len(), values.len() * 16);
                 for value in values {
@@ -635,14 +654,12 @@ impl CapturedCompilerSources {
         }
         let relative = path
             .strip_prefix(&self.root)
-            .ok()
-            .and_then(|path| path.to_str())
-            .ok_or_else(|| "compiler source location is outside captured inputs".to_owned())?;
+            .map_err(|_| "compiler source location is outside captured inputs".to_owned())?;
         let file = self
             .manifest
             .files
-            .get(relative)
-            .ok_or_else(|| format!("compiler source location is not captured: {relative}"))?;
+            .get(relative.as_os_str().as_encoded_bytes())
+            .ok_or_else(|| "compiler source location is not captured".to_owned())?;
         if std::fs::canonicalize(&path).map_err(|error| error.to_string())? != path {
             return Err("compiler source location is aliased".into());
         }
@@ -665,20 +682,21 @@ impl CapturedCompilerSources {
 }
 
 fn owner_source_span(owner: &OwnedRustcOwner) -> Option<(&Path, u64, u64)> {
+    use std::os::unix::ffi::OsStrExt as _;
     let row = owner
         .relations
         .iter()
         .find(|relation| relation.relation == RustcRelation::PublicItem)?
         .rows
         .first()?;
-    let (OwnedCell::Utf8(path), OwnedCell::UInt64(start), OwnedCell::UInt64(end)) = (
-        row.0.get("span_file")?,
+    let (OwnedCell::Binary(path), OwnedCell::UInt64(start), OwnedCell::UInt64(end)) = (
+        row.0.get("span_file_bytes")?,
         row.0.get("span_start_byte")?,
         row.0.get("span_end_byte")?,
     ) else {
         return None;
     };
-    Some((Path::new(path), *start, *end))
+    Some((Path::new(OsStr::from_bytes(path)), *start, *end))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1588,12 +1606,16 @@ mod tests {
             OsString::from("--emit=metadata"),
             OsString::from(format!("--out-dir={}", output.display())),
             OsString::from(format!("--sysroot={}", sysroot.trim())),
+            OsString::from(format!(
+                "--remap-path-prefix={}=remapped",
+                temporary.path().display()
+            )),
         ];
         let source_manifest = crate::rustc_source_files::RustSourceFileManifest {
             workspace_id: format!("workspace:{}", "01".repeat(16)),
             source_generation: 1,
             files: BTreeMap::from([(
-                "wrapper-probe.rs".into(),
+                b"wrapper-probe.rs".to_vec(),
                 crate::rustc_source_files::CapturedRustSourceFile {
                     file_id: format!("file:{}", "02".repeat(16)),
                     content_digest: *blake3::hash(
@@ -1726,6 +1748,31 @@ mod tests {
             assert_eq!(reader.schema(), relation.schema());
             let batch = reader.next().unwrap().unwrap();
             assert_eq!(batch.num_rows() as u64, first.row_count);
+            if relation == RustcRelation::PublicItem {
+                let paths = batch
+                    .column_by_name("span_file_bytes")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<arrow_array::BinaryArray>()
+                    .unwrap();
+                let displays = batch
+                    .column_by_name("span_file")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<arrow_array::StringArray>()
+                    .unwrap();
+                for row in 0..batch.num_rows() {
+                    assert_eq!(
+                        paths.value(row),
+                        temporary
+                            .path()
+                            .join("wrapper-probe.rs")
+                            .as_os_str()
+                            .as_encoded_bytes()
+                    );
+                    assert_eq!(displays.value(row), "remapped/wrapper-probe.rs");
+                }
+            }
             assert!(reader.next().is_none());
         }
         let families = first_run

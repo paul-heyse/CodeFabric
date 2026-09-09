@@ -275,7 +275,7 @@ fn project(
     ]);
     let mapped = col("k.start_byte")
         .is_not_null()
-        .and(col("m.span_file").eq(col("o.span_file")))
+        .and(col("m.span_file_bytes").eq(col("o.span_file_bytes")))
         .and(col("m.expansion_kind").eq(lit("source-authored")))
         .and(col("m.span_end_byte").lt_eq(col("s.byte_length")));
     let located = |value: Expr, kind| -> Result<Expr, DataFusionError> {

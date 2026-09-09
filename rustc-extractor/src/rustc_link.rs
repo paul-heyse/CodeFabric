@@ -26,6 +26,7 @@ use crate::rustc_relation_schema::{RUSTC_PUBLIC_RELEASE, RUSTC_TOOLCHAIN, RustcR
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum OwnedCell {
     Utf8(String),
+    Binary(Vec<u8>),
     UInt64(u64),
     Boolean(bool),
     Fixed16([u8; 16]),
@@ -87,8 +88,12 @@ impl OwnedRow {
     }
 
     fn span(self, span: &OwnedSpan) -> Self {
-        self.utf8("span_file", &span.file)
-            .u64("span_start_byte", span.start_byte)
+        let mut row = self.utf8("span_file", &span.file);
+        if let Some(path) = &span.local_path_bytes {
+            row.0
+                .insert("span_file_bytes", OwnedCell::Binary(path.clone()));
+        }
+        row.u64("span_start_byte", span.start_byte)
             .u64("span_end_byte", span.end_byte)
             .u64("span_start_line", span.start_line)
             .u64("span_end_line", span.end_line)
@@ -130,6 +135,7 @@ pub(crate) struct OwnedRustcExtraction {
 #[derive(Clone, Debug)]
 struct OwnedSpan {
     file: String,
+    local_path_bytes: Option<Vec<u8>>,
     start_byte: u64,
     end_byte: u64,
     start_line: u64,
@@ -337,6 +343,12 @@ fn owned_span(tcx: TyCtxt<'_>, span: rustc_public::ty::Span) -> OwnedSpan {
     let lines = span.get_lines();
     OwnedSpan {
         file: start.sf.name.prefer_remapped_unconditionally().to_string(),
+        local_path_bytes: match &start.sf.name {
+            rustc_span::FileName::Real(file) => file
+                .local_path()
+                .map(|path| path.as_os_str().as_encoded_bytes().to_vec()),
+            _ => None,
+        },
         // rustc strips BOMs and normalizes CRLF internally. Use its recorded
         // normalization map for every public item, MIR and local source span.
         start_byte: u64::from(start.sf.original_relative_byte_pos(internal.lo()).0),

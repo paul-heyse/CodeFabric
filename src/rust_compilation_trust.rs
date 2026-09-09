@@ -785,8 +785,9 @@ impl SelectedRustCompilationPreparation {
             RustPreparationAuthority::Unresolved(product)
                 if product.context.workspace_id == manifest.workspace_id
                     && product.source_generation == manifest.source_generation
-                    && std::str::from_utf8(&product.settings.target.crate_root)
-                        .is_ok_and(|path| manifest.files.contains_key(path)) => {}
+                    && manifest
+                        .files
+                        .contains_key(&product.settings.target.crate_root) => {}
             RustPreparationAuthority::Unresolved(_) => {
                 return Err(RustCompilationTrustError::SelectedContextMismatch);
             }
@@ -3936,7 +3937,7 @@ mod tests {
             workspace_id: product.context.workspace_id.clone(),
             source_generation: product.source_generation,
             files: BTreeMap::from([(
-                "src/lib.rs".into(),
+                b"src/lib.rs".to_vec(),
                 crate::rustc_source_files::CapturedRustSourceFile {
                     file_id: crate::identity::encode_public_id(
                         crate::identity::IdentityDomain::SourceFile,

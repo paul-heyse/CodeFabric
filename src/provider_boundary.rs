@@ -1072,6 +1072,9 @@ fn arrow_field_contains_opaque_carrier(field: &Field) -> bool {
     if has_forbidden_opaque_metadata(field.metadata()) {
         return true;
     }
+    if crate::relation_ipc::is_compiler_source_path_field(field) {
+        return false;
+    }
     let data_type = field.data_type();
     if matches!(
         data_type,

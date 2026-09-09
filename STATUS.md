@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `d07d81e4` (`Expose checked UTF-8 and UTF-16 source-context columns`);
-surrounding-line context and typed source hard limits are validated in the current slice.
+Last production commit: `33b2c2a5` (`Serve explicit source line windows and preserve hard-limit failures`);
+raw compiler source paths are the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -216,6 +216,26 @@ checks pass. Default/featureless root checks, full governance, all 109 adapter t
 its 955-warning baseline; an added test-only ownership warning was corrected. Full root strict lint
 and global formatting retain the previously recorded unrelated failures. Broader source subjects and
 syntax outlines remain open.
+
+## Raw compiler source paths
+
+Compiler manifests now retain exact relative path bytes and read the prior UTF-8 map format.
+Both formats reject duplicate paths; paths with traversal, aliases or duplicate file identities
+remain invalid. An unrelated captured non-UTF-8 Python pathname no longer fails Rust manifest
+construction. The compiler's pinned `RealFileName::local_path` supplies an optional binary
+`span_file_bytes` coordinate alongside the display-only `span_file`. Owner verification and Rust
+call-source matching consume exact paths. Non-file/compiler-virtual locations remain unmapped.
+Only the released path field and its logical type are admitted as binary at the provider boundary.
+
+On 2026-09-09 the installed `rust-paths-live` scenario passes in 138.00 s: a Unicode Rust crate-root
+path with non-UTF-8 and display-colliding Python siblings retains declarations, calls and exact source
+through an edit, independent clean comparison and exact reopen. The 16 extractor tests and strict
+extractor checks pass, including a real remapped-path compiler round trip. Six affected root
+manifest/schema/provider-boundary tests, default/featureless root checks, full governance and 208
+tooling tests pass. Changed-file formatting and docs navigation pass. Five newly exposed Clippy
+match-arm findings were merged; final library/integration Clippy adds no diagnostics over the
+955-library/36-integration baseline, and the provider schema census passes again. This does not remove rustc's
+UTF-8 invocation-argument constraint or add dependency/generated source ownership.
 
 ## Live source reconciliation and current query selection
 

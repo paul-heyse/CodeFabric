@@ -1,6 +1,5 @@
 //! Captured Rust workspace preparation, contained Cargo, and accepted Arrow publication.
 
-use std::collections::BTreeMap;
 use std::io::Read as _;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
@@ -256,16 +255,15 @@ fn prepare_and_run(
         files: files
             .iter()
             .map(|file| {
-                Ok((
-                    String::from_utf8(file.relative_path.clone())
-                        .map_err(|error| step("rust-source-path", error))?,
+                (
+                    file.relative_path.clone(),
                     CapturedRustSourceFile {
                         file_id: file.file_id.clone(),
                         content_digest: file.digest,
                     },
-                ))
+                )
             })
-            .collect::<Result<BTreeMap<_, _>, ProductionWorkspaceStartupError>>()?,
+            .collect(),
     };
     dependencies.push(dependency(
         "source-files.json",

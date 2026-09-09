@@ -80,3 +80,8 @@ inside strings/comments. Its default harness deadline is 600 seconds.
 Unicode and a missing final newline through installed clients and exact reopen. It distinguishes
 an explicit byte prefix from non-retryable service hard-limit failure (33.70 seconds on 2026-09-09).
 Its default harness deadline is 600 seconds.
+
+`just golden --case rust-paths-live` exercises a Unicode Rust crate-root path alongside
+non-UTF-8 and display-colliding Python paths. Declarations, calls and exact source pass through
+the installed client after an edit, against an independent clean build and after exact reopen.
+Its default harness deadline is 600 seconds.

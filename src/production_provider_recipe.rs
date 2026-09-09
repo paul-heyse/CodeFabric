@@ -847,7 +847,10 @@ fn build_plan(
     })
 }
 
-#[allow(clippy::too_many_lines, reason = "closed native family-to-coverage map")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "closed native family-to-coverage map"
+)]
 fn native_coverage(
     relation: NativeSyntaxRelation,
 ) -> Result<(ProviderRelationPurpose, ProviderCoverageSource), ProductionProviderRecipeError> {
@@ -2112,8 +2115,8 @@ fn compiled_provider_field_role(
                 Some(PROVIDER_FACT_ROLE)
             }
             "item_kind" => Some(PROVIDER_KIND_ROLE),
-            "span_file" | "span_start_byte" | "span_end_byte" => Some(PROVIDER_COORDINATE_ROLE),
-            "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+            "span_file" | "span_file_bytes" | "span_start_byte" | "span_end_byte"
+            | "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
                 Some(PROVIDER_COORDINATE_ROLE)
             }
             "expansion_kind" | "in_external_macro" => Some(HYGIENE_ROLE),
@@ -2166,8 +2169,8 @@ fn compiled_provider_field_role(
             | "argument_count"
             | "debug_variable_count"
             | "spread_argument_local" => Some(PROVIDER_FACT_ROLE),
-            "span_file" | "span_start_byte" | "span_end_byte" => Some(PROVIDER_COORDINATE_ROLE),
-            "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+            "span_file" | "span_file_bytes" | "span_start_byte" | "span_end_byte"
+            | "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
                 Some(PROVIDER_COORDINATE_ROLE)
             }
             "expansion_kind" => Some(HYGIENE_ROLE),
@@ -2193,8 +2196,8 @@ fn compiled_provider_field_role(
             "local_index" => Some(COMPILER_LOCAL_INDEX_ROLE),
             "local_role" => Some(PROVIDER_KIND_ROLE),
             "mutability" => Some(PROVIDER_FACT_ROLE),
-            "span_file" | "span_start_byte" | "span_end_byte" => Some(PROVIDER_COORDINATE_ROLE),
-            "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+            "span_file" | "span_file_bytes" | "span_start_byte" | "span_end_byte"
+            | "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
                 Some(PROVIDER_COORDINATE_ROLE)
             }
             "expansion_kind" => Some(HYGIENE_ROLE),
@@ -2254,8 +2257,8 @@ fn compiled_provider_field_role(
             "block_index" | "statement_index" | "source_scope" => Some(COMPILER_LOCAL_INDEX_ROLE),
             "raw_statement_kind" => Some(PROVIDER_KIND_ROLE),
             "normalized_effect" => Some(PROVIDER_FACT_ROLE),
-            "span_file" | "span_start_byte" | "span_end_byte" => Some(PROVIDER_COORDINATE_ROLE),
-            "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+            "span_file" | "span_file_bytes" | "span_start_byte" | "span_end_byte"
+            | "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
                 Some(PROVIDER_COORDINATE_ROLE)
             }
             "expansion_kind" => Some(HYGIENE_ROLE),
@@ -2272,8 +2275,8 @@ fn compiled_provider_field_role(
                 Some(PROVIDER_KIND_ROLE)
             }
             "normal_target_count" => Some(PROVIDER_FACT_ROLE),
-            "span_file" | "span_start_byte" | "span_end_byte" => Some(PROVIDER_COORDINATE_ROLE),
-            "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+            "span_file" | "span_file_bytes" | "span_start_byte" | "span_end_byte"
+            | "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
                 Some(PROVIDER_COORDINATE_ROLE)
             }
             "expansion_kind" => Some(HYGIENE_ROLE),
@@ -2671,7 +2674,7 @@ mod tests {
             .filter(|field| {
                 matches!(
                     field.field.name().as_str(),
-                    "span_file" | "span_start_byte" | "span_end_byte"
+                    "span_file" | "span_file_bytes" | "span_start_byte" | "span_end_byte"
                 )
             })
             .collect::<Vec<_>>();

@@ -1400,6 +1400,78 @@ fn source_line_windows_and_hard_limits_survive_public_delivery_and_reopen() {
     supervisor.stop();
 }
 
+#[test]
+fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let fixture = ProductionFixture::with_source(
+        b"def py_leaf():\n    return 1\ndef py_caller():\n    return py_leaf()\n",
+    );
+    let root = Path::new(&fixture.workspace.root_path_display);
+    for raw in [
+        b"dir-\xff/marker.py".as_slice(),
+        "dir-�/marker.py".as_bytes(),
+    ] {
+        let path = root.join(std::ffi::OsStr::from_bytes(raw));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"marker = 1\n").unwrap();
+    }
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/café.rs"),
+        b"pub fn rust_leaf() -> u32 { 1 }\npub fn rust_caller() -> u32 { rust_leaf() }\n",
+    )
+    .unwrap();
+    fs::write(root.join("Cargo.toml"), "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[lib]\npath = \"src/café.rs\"\ntest = false\ndoctest = false\n").unwrap();
+    fs::write(
+        root.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+        store.backup_to(&registration).unwrap();
+    }
+    let expected = [
+        "py_leaf",
+        "py_caller",
+        "fixture::rust_leaf",
+        "fixture::rust_caller",
+    ];
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    four_forms(&fixture, &stack, "rust-raw-initial", &expected);
+    fs::write(
+        root.join(std::ffi::OsStr::from_bytes(b"dir-\xff/marker.py")),
+        b"marker = 2\n",
+    )
+    .unwrap();
+    let live = four_forms(&fixture, &stack, "rust-raw-edited", &expected);
+    for row in &live[3].rows {
+        if row["language"] == "rust" {
+            assert_eq!(row["relative_path"], "7372632f636166c3a92e7273");
+        }
+    }
+    let clean = clean_fixture(&fixture, &registration, &stack);
+    let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        live,
+        four_forms(&clean, &stack, "rust-raw-clean", &expected)
+    );
+    clean_supervisor.stop();
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        live,
+        four_forms(&fixture, &stack, "rust-raw-reopened", &expected)
+    );
+    supervisor.stop();
+}
+
 fn encoded_sources(utf8: bool) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let python = if utf8 {
         "# coding: utf-8\r\n# é\r\nfrom helper import café\r\ndef caller():\r\n    return café()\r\n".as_bytes()
