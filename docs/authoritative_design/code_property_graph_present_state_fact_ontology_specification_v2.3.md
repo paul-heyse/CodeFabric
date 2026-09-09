@@ -11,6 +11,8 @@ predecessor_path: docs/authoritative_design/code_property_graph_present_state_fa
 
 # Code Property Graph present-state fact ontology specification v2.3
 
+> Target revised 2026-09-08 under the consolidated pragmatic delivery review. These are target contracts, not a claim of implemented behavior; see [current status](../../STATUS.md). Historical predecessors are unchanged.
+
 ## 0. Governing contract and transition status
 
 The stable artifact identity is `CF-ONT-2.3.0`. Together with the other current
@@ -47,37 +49,11 @@ page or derived documentation.
 
 ### 0.2 Relational authority
 
-At minimum the programmatic assembly exposes typed relations equivalent to:
-
-```text
-input.fact_family
-input.entity_kind
-input.property_kind
-input.relationship_kind
-input.type_algebra_variant
-input.identity_recipe
-program.authority_rule
-program.derivation
-input.provider_boundary
-input.query_requirement
-program.unknown_rule
-system.programmatic_schema_observation
-input.proof_obligation
-```
-
-Names above identify semantic roles, not a frozen physical table-name API. Their stable semantic
-IDs, keys, dependencies, and `SchemaContract` links are constructed from admitted schemas,
-explicit inputs, and typed transformations. A generated file,
-Rust enum, YAML document, static census, or digest MAY materialize or diagnose these rows but
-MUST NOT answer a semantic question independently of them.
+Typed Rust definitions and Arrow schemas express the fact families, identities, properties, relationships, authority rules and derivations below. Actual provider observations and scoped processing coverage determine workspace answers. Installed catalog introspection is useful navigation; a mandatory metamodel relation or proof-obligation registry is not required.
 
 ### 0.3 Staticness boundary
 
-Static declarations are limited to exact build/toolchain inputs, released wire and identity
-contracts, explicit non-derivable policy/compatibility inputs, independently accepted expectations,
-and historical records. Current schemas, provider surfaces, dependencies, capabilities,
-traceability, validation status, and coverage are derived by assembling and inspecting the
-candidate session. No bootstrap metamodel, migration log, or replayed schema registry is authority.
+Ordinary Rust enums, match expressions, typed builders, schema definitions and installed-support declarations are permitted. Keep one owner and test meaningful behavior. Derive mutable workspace coverage and facts from execution; a static support declaration must never imply complete workspace processing. Avoid duplicate registries, but do not replace understandable code with a generalized compiler merely to avoid declarations.
 
 ### 0.4 Released compatibility
 
@@ -134,7 +110,7 @@ The ontology obeys these invariants:
 4. a byte range is meaningful only with its file and content digest;
 5. absence requires coverage proof or becomes explicit unknown;
 6. authority resolves conflicts without deleting evidence;
-7. derivations name algorithm, precision, inputs, completeness, and proof;
+7. derivations name algorithm, precision, inputs and completeness;
 8. every fact has one replacement owner and one epoch;
 9. queryability never depends on opaque JSON semantic payloads; and
 10. facts never encode agent judgment.
@@ -742,11 +718,7 @@ declared comparison bytes, not locale-dependent display text.
 
 ## AC-G-70 — Executed ontology model
 
-The former machine-registry and replay contract is superseded. The current ontology is the exact
-provider batches, explicit typed inputs, typed transformations, and observations derived from the
-candidate catalog. Conformance joins those observations to provider, producer, query, and proof
-relations and MUST fail on missing, duplicate, dangling, inert, or uncovered rows. No bootstrap,
-migration replay, static registry, or suite census may replace this contract.
+Application-owned types and Arrow schemas implement the fact vocabulary. Exact provider observations, typed transformations and actual coverage establish answers. Check invalid schemas, duplicate owners and missing inputs at real boundaries; do not require a generalized model compiler or conformance relation for every declaration.
 
 ## AC-G-71 — Property schema, value types, cardinality, null, and storage mapping
 
@@ -755,11 +727,9 @@ schema, qualified `DFSchema`, storage schema, logical/physical casts, null/cardi
 projection/filter/statistics remapping, output restoration, and validation at plan, stream,
 batch, and sink boundaries. Delta `BINARY` cannot silently alter a logical fixed-width ID.
 
-## AC-G-72 — Mandatory conformance profiles
+## AC-G-72 — Capability profiles
 
-Profiles are typed program selections with dependency closure, not hand-maintained lists. Core,
-Python, Rust, advanced-derived, public-query, and wire-compatibility profiles resolve every
-required fact family to one producer or explicit remainder and one named executable proof.
+Core, Python, Rust, advanced-derived, public-query and wire-compatibility profiles describe target scope. Ordinary typed support declarations are permitted. Every requested family resolves to actual processing coverage or explicit remainder; no named executable proof is required for every family at runtime.
 
 ## AC-G-73 — Unknown entities, unknown remainder, and explicit negative facts
 
@@ -778,8 +748,8 @@ returned.
 ## AC-G-75 — Interprocedural summary semantics
 
 Each summary family names input/output relations, lattice/order, transfer, join, convergence and
-resource bounds, unknown propagation, invalidation closure, algorithm release, and proof. A
-non-converged or resource-exhausted summary remains explicit unknown and blocks dependent proof.
+resource bounds, unknown propagation, invalidation closure, algorithm release and precision. A
+non-converged or resource-exhausted summary remains explicit unknown and qualifies dependent results.
 
 ## AC-G-76 — Static concurrency and happens-before semantics
 
@@ -797,7 +767,7 @@ is emitted.
 ## Cross-layer integration obligations
 
 The generation layer emits typed provider-native and derived relations conforming to this
-ontology. The fabric registers them in one epoch and executes typed normalization/authority/proof
+ontology. The fabric registers them in one epoch and executes typed normalization/authority
 transformations over exact provider batches and explicit inputs. The query layer exposes only
 authorized semantic projections while preserving provenance,
 unknowns, bounds, deterministic ordering, and epoch pins. Lifecycle replacement is atomic by
@@ -805,21 +775,8 @@ owner and never mixes generations.
 
 ## Release conformance obligations
 
-Before activation, executable checks SHALL prove:
+At publication, enforce relevant schema, generation/context, owner identity and snapshot consistency. Incomplete processing remains explicit coverage/remainder. Validate full semantic behavior with independently justified corpus answers, targeted algorithm tests and clean/incremental comparisons; a generalized proof engine is not an activation prerequisite.
 
-1. isolated programmatic schema/transformation assembly and candidate-catalog fixed-point closure;
-2. complete relation/field/key/reference/`SchemaContract` closure;
-3. released ID and wire compatibility for supported `codefabric.cpgd.v2` clients, with no v1
-   interoperability claim;
-4. exactly one provider or application authority per fact family;
-5. requested/completed/remainder/unknown coverage closure;
-6. raw/canonical/derived provenance separation and conflict retention;
-7. independent Python/Rust semantic expectations and causal mutants;
-8. clean versus incremental equivalence under additions, changes, and deletions;
-9. one-epoch query/public result equivalence; and
-10. zero active reads of predecessor registries, bundles, censuses, or fingerprints.
-
-Zero violations without proved input coverage is `unknown`, not pass.
 
 ## Relational ontology projection
 

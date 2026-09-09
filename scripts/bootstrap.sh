@@ -215,7 +215,7 @@ cf_check() {
       [ "$uds_decision" = allow ] || uds_rules_ok=0
     done
     if [ "$uds_rules_ok" = 1 ]; then
-      _cf_pass "Codex UDS rules allow only: adapter-test, root-test, ci-fast, environment-regression (bind only under a confining sandbox_mode)"
+      _cf_pass "Codex configured UDS rule examples: adapter-test, root-test, ci-fast, environment-regression (rules are inert under the current danger-full-access config)"
     else
       _cf_fail "Codex UDS test rules are missing or do not resolve to allow"
     fi
@@ -288,13 +288,13 @@ _cf_ctx_repo() {
   if [ "$mod" = 0 ] && [ "$uns" = 0 ] && [ "$del" = 0 ]; then
     state="clean"
   else
-    state="${mod} modified, ${uns} untracked, ${del} deleted -- PRE-EXISTING, not yours"
+    state="${mod} modified, ${uns} untracked, ${del} deleted -- inspect and preserve changes; attribution depends on session history"
   fi
 
   printf 'REPO  %s at %s (%s commits)\n  tree  %s\n' \
     "${branch:-?}" "${head:-?}" "${count:-?}" "$state"
 
-  # Section 59.1 wants a gate baseline with pre-existing failures recorded separately.
+  # Cached results are historical observations, not a pre-edit gate.
   # Report the cached verdict rather than making every session pay for the gate.
   if [ -f "$CF_BASELINE_FILE" ]; then
     local v when at now age
@@ -320,7 +320,7 @@ _cf_ctx_repo() {
       printf '  base  %s (%s)\n' "${v:-?}" "$age"
     fi
   else
-    printf '  base  not run -- ./scripts/bootstrap.sh --baseline\n'
+    printf '  base  no cached aggregate; use relevant checks for current scope\n'
   fi
 }
 
@@ -351,15 +351,7 @@ EOF
 }
 
 _cf_terminal_design_paths() {
-  local candidate predecessors relative
-  predecessors="$(awk -F': ' '/^predecessor_path: / { print $2 }' \
-    "${CF_ROOT}"/docs/authoritative_design/*.md 2>/dev/null)"
-  for candidate in "${CF_ROOT}"/docs/authoritative_design/*.md; do
-    relative="${candidate#"${CF_ROOT}/"}"
-    if ! printf '%s\n' "$predecessors" | grep -Fqx "$relative"; then
-      printf '%s\n' "$candidate"
-    fi
-  done
+  python3 "$CF_ROOT/tooling/ci/authoritative_design_conformance.py" --paths
 }
 
 _cf_ctx_corpus() {
@@ -376,7 +368,7 @@ _cf_ctx_corpus() {
   skills="$(find "${CF_ROOT}/.claude/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')"
 
   printf 'CORPUS  do not read these whole -- navigate them\n'
-  printf '  docs/authoritative_design/  %s terminal + %s historical masters, %s `# Part`/`# Appendix` headings that\n' "$current" "$historical" "$parts"
+  printf '  docs/authoritative_design/  %s selected + %s historical masters, %s `# Part`/`# Appendix` headings that\n' "$current" "$historical" "$parts"
   printf '        spec-outline structurally cannot emit (docs/spec_index/README.md §3.1)\n'
   printf '  docs/library_ref/  %s refs   docs/spec_index/  %s   docs/plans/  %s   skills  %s\n' \
     "$refs" "$idx" "$plans" "$skills"
@@ -433,7 +425,7 @@ EOF
     printf 'PINS  read them from the data-fabric spec §2.1 (extraction failed here)\n'
     return 0
   fi
-  printf 'PINS  from the data-fabric spec §2.1 -- authoritative; never trust a quoted copy\n'
+  printf 'TARGET API BASELINE  from the data-fabric spec §2.1; resolved sources may be local patches\n'
   printf '  arrow/parquet =%s · datafusion =%s · object_store =%s\n' "$arrow" "$datafusion" "$object_store"
   printf '  deltalake git %.8s (pre-release pin) · rust %s · edition %s · resolver 3\n' "$delta" "$rust" "$edition"
 }
@@ -446,14 +438,23 @@ cf_context_extras() {
   _cf_ctx_traps
   _cf_ctx_corpus
   _cf_ctx_pins
+  python3 - "$CF_ROOT/Cargo.toml" <<'PYCODE'
+import sys, tomllib
+from pathlib import Path
+p=Path(sys.argv[1]); data=tomllib.loads(p.read_text())
+patches=[(name, value['path']) for table in data.get('patch', {}).values() for name,value in table.items() if 'path' in value]
+print('RESOLVED SOURCE SELECTION  configured Cargo patches:')
+for name,path in patches: print(f'  {name}: {path}')
+print('  Cargo.lock and patch declarations select installed sources; target pins are upstream origins.')
+PYCODE
   cat <<'EOF'
-NEXT  repo-spec §59's session-bootstrap list is answered above. Classify the change
-  against its §60 risk table before reaching for an expensive tool.
+NEXT  Read STATUS.md for current scope and next action. Use relevant attributable
+  evidence and affected checks; session startup does not run gates or activate plans.
 EOF
 }
 
 # Run the routine gate once and cache the verdict, so every later session can read
-# section 59.1's "pre-existing failures" without paying for the gate again.
+# historical results without rerunning an aggregate.
 cf_baseline() {
   command -v just >/dev/null 2>&1 || { printf 'just is not on PATH\n' >&2; return 1; }
   printf 'Running `just ci-fast` against the current stable-root tree.\n\n'

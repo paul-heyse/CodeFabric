@@ -12,7 +12,7 @@ import fnmatch
 import json
 import subprocess
 import sys
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -272,8 +272,6 @@ STRUCTURAL_QUERIES = (
     ("rust", "run_rustc($$$A)"),
 )
 
-COMPOSED_ZERO_STATE_COMMANDS = (("bash", "scripts/model_zero_state_check.sh"),)
-
 
 class RemainingLegacyError(ValueError):
     """The live tree still contains predecessor authority or coverage is incomplete."""
@@ -514,30 +512,7 @@ def python_package_issues(
     return issues, len(package_paths)
 
 
-def run_composed_zero_state(
-    root: Path,
-    *,
-    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-) -> None:
-    """Delegate the remaining model-authority class to its permanent specialist guard."""
-    for command in COMPOSED_ZERO_STATE_COMMANDS:
-        completed = runner(
-            command,
-            cwd=root,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if completed.returncode != 0:
-            raise RemainingLegacyError(
-                f"composed zero-state check failed ({' '.join(command)}):\n"
-                f"{completed.stdout}{completed.stderr}"
-            )
-
-
-def validate_remaining_legacy(
-    root: Path = ROOT, *, run_composed: bool = True
-) -> dict[str, object]:
+def validate_remaining_legacy(root: Path = ROOT) -> dict[str, object]:
     """Validate current live surfaces without a frozen predecessor census."""
     files = current_files(root)
     live, retained, issues = classify_paths(files)
@@ -555,8 +530,6 @@ def validate_remaining_legacy(
 
     if issues:
         raise RemainingLegacyError("\n".join(issues))
-    if run_composed:
-        run_composed_zero_state(root)
     return {
         "live_file_count": len(live),
         "retained_history_or_release_evidence_file_count": len(retained),
@@ -565,9 +538,6 @@ def validate_remaining_legacy(
         "python_package_file_count": python_package_file_count,
         "recipe_count": recipe_count,
         "structural_probes": len(structural_coverage),
-        "composed_zero_state_checks": len(COMPOSED_ZERO_STATE_COMMANDS)
-        if run_composed
-        else 0,
     }
 
 

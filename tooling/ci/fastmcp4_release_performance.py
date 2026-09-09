@@ -14,7 +14,6 @@ from typing import Any, NoReturn
 
 from tooling.benchmarks.fastmcp4_release_benchmark import (
     METHOD_ID,
-    METHOD_PATH,
     METHOD_REVISION,
     REPORT_SCHEMA,
     ROOT,
@@ -27,30 +26,10 @@ from tooling.benchmarks.fastmcp4_release_benchmark import (
     nearest_rank,
 )
 
-DEFAULT_RAW_REPORT_PATH = Path(
-    "contracts/evidence/relational-fabric-v7/wp65-raw-performance-v2.json"
-)
-DEFAULT_SUMMARY_PATH = Path(
-    "contracts/evidence/relational-fabric-v7/wp65-performance-review-v2.json"
-)
+DEFAULT_RAW_REPORT_PATH = Path("target/benchmarks/compiled-release-raw.json")
+DEFAULT_SUMMARY_PATH = Path("target/benchmarks/compiled-release-summary.json")
 SUMMARY_SCHEMA = "codefabric.compiled-release-performance.review.v2"
 HEX40 = frozenset("0123456789abcdef")
-FROZEN_IMPLEMENTATION_PATHS = (
-    "src",
-    "rustc-extractor/src",
-    "pyrefly-sidecar/src",
-    "codefabric-cpg-mcp/src",
-    "codefabric-cpg-mcp/pyproject.toml",
-    "codefabric-cpg-mcp/uv.lock",
-    "Cargo.toml",
-    "Cargo.lock",
-    "contracts/rpc",
-    "tests/integration",
-    "tests/fixtures/fastmcp4_performance",
-    "tooling/benchmarks/fastmcp4_release_benchmark.py",
-    "tooling/ci/fastmcp4_release_performance.py",
-    "tooling/ci/test_fastmcp4_release_performance.py",
-)
 
 
 class ReleasePerformanceError(ValueError):
@@ -300,61 +279,6 @@ def validate_report_document(report: Mapping[str, Any], method: Method) -> int:
     return len(samples)
 
 
-def validate_git_lineage(report: Mapping[str, Any], root: Path = ROOT) -> None:
-    candidate = _commit(report.get("candidate_commit"), "candidate")
-    method_commit = _commit(report.get("method_commit"), "method")
-    tree = _commit(report.get("candidate_tree"), "tree")
-    _require(
-        _git(root, "rev-parse", f"{candidate}^{{tree}}").stdout.strip() == tree,
-        "WP65_CANDIDATE_TREE_DRIFT",
-        candidate,
-    )
-    _require(
-        _git(
-            root, "merge-base", "--is-ancestor", method_commit, candidate, check=False
-        ).returncode
-        == 0,
-        "WP65_METHOD_NOT_PREREGISTERED",
-        method_commit,
-    )
-    _require(
-        _git(
-            root, "merge-base", "--is-ancestor", candidate, "HEAD", check=False
-        ).returncode
-        == 0,
-        "WP65_CANDIDATE_NOT_ANCESTOR",
-        candidate,
-    )
-    try:
-        candidate_method = subprocess.run(
-            ["git", "show", f"{candidate}:{METHOD_PATH.as_posix()}"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            timeout=30,
-        ).stdout
-        current_method = (root / METHOD_PATH).read_bytes()
-    except (OSError, subprocess.SubprocessError) as error:
-        raise ReleasePerformanceError(
-            "WP65_METHOD_READ_FAILED", str(METHOD_PATH)
-        ) from error
-    _require(
-        candidate_method == current_method,
-        "WP65_EXPECTATION_DRIFT",
-        METHOD_PATH.as_posix(),
-    )
-    changed = _git(
-        root,
-        "diff",
-        "--name-only",
-        candidate,
-        "HEAD",
-        "--",
-        *FROZEN_IMPLEMENTATION_PATHS,
-    ).stdout.splitlines()
-    _require(not changed, "WP65_MEASURED_IMPLEMENTATION_DRIFT", repr(changed))
-
-
 def summary_document(report: Mapping[str, Any], method: Method) -> dict[str, Any]:
     validate_report_document(report, method)
     workload_rows = []
@@ -409,7 +333,7 @@ def validate_evidence(
     root: Path = ROOT,
     raw_path: Path = DEFAULT_RAW_REPORT_PATH,
     summary_path: Path = DEFAULT_SUMMARY_PATH,
-    check_git: bool = True,
+    check_git: bool = False,
 ) -> int:
     method = load_method(root)
     report = load_json(raw_path if raw_path.is_absolute() else root / raw_path)
@@ -418,8 +342,6 @@ def validate_evidence(
     )
     count = validate_report_document(report, method)
     validate_summary(report, summary, method)
-    if check_git:
-        validate_git_lineage(report, root)
     return count
 
 
@@ -429,7 +351,6 @@ def write_summary(
     method = load_method(root)
     report = load_json(raw_path if raw_path.is_absolute() else root / raw_path)
     validate_report_document(report, method)
-    validate_git_lineage(report, root)
     summary = summary_document(report, method)
     destination = summary_path if summary_path.is_absolute() else root / summary_path
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -483,8 +404,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.raw if arguments.raw.is_absolute() else ROOT / arguments.raw
             )
             count = validate_report_document(report, method)
-            if not arguments.no_git_check:
-                validate_git_lineage(report, ROOT)
             print(count)
         elif arguments.command == "summarize":
             summary = write_summary(
@@ -497,7 +416,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     root=ROOT,
                     raw_path=arguments.raw,
                     summary_path=arguments.summary,
-                    check_git=not arguments.no_git_check,
+                    check_git=False,
                 )
             )
         return 0

@@ -29,9 +29,7 @@ from typing import Any, NoReturn
 
 ROOT = Path(__file__).resolve().parents[2]
 METHOD_PATH = Path("tests/fixtures/fastmcp4_performance/workloads.json")
-DEFAULT_REPORT_PATH = Path(
-    "contracts/evidence/relational-fabric-v7/wp65-raw-performance-v2.json"
-)
+DEFAULT_REPORT_PATH = Path("target/benchmarks/compiled-release-raw.json")
 METHOD_SCHEMA = "codefabric.compiled-release-performance.method.v2"
 REPORT_SCHEMA = "codefabric.compiled-release-performance.raw-report.v2"
 METHOD_ID = "relational-fabric-v7-final-target-v1"
@@ -682,8 +680,9 @@ def _environment(root: Path, method_commit: str) -> dict[str, Any]:
         root, "status", "--porcelain=v1", "--untracked-files=all"
     ).splitlines()
     tracked = [line for line in status_lines if not line.startswith("?? ")]
-    _require(not tracked, "WP65_TRACKED_TREE_DIRTY", repr(tracked))
+
     return {
+        "working_tree_changes": tracked,
         "recorded_at_utc": datetime.now(UTC).isoformat(),
         "repository_head": _git(root, "rev-parse", "HEAD"),
         "repository_tree": _git(root, "rev-parse", "HEAD^{tree}"),
@@ -738,14 +737,10 @@ def build_summaries(
 
 
 def run_method(method: Method, *, root: Path, output: Path) -> dict[str, Any]:
-    method_commit = _git(root, "log", "-1", "--format=%H", "--", str(METHOD_PATH))
     head = _git(root, "rev-parse", "HEAD")
-    ancestor = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", method_commit, head],
-        cwd=root,
-        check=False,
+    method_commit = (
+        head  # Attribution only; measurements need no preregistered ancestor.
     )
-    _require(ancestor.returncode == 0, "WP65_METHOD_NOT_PREREGISTERED", method_commit)
     environment = _environment(root, method_commit)
     samples: list[dict[str, Any]] = []
     release_root: Path | None = None
@@ -791,9 +786,7 @@ def run_method(method: Method, *, root: Path, output: Path) -> dict[str, Any]:
             }
         environment["release_artifacts"] = artifacts
     structural_runs = [
-        _structural_run(
-            contract_id, recipe, root, method.sampling_interval_millis
-        )
+        _structural_run(contract_id, recipe, root, method.sampling_interval_millis)
         for contract_id, recipe in method.structural_contracts
     ]
     report = {

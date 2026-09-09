@@ -1,0 +1,22 @@
+{
+  "basis": "Independently derived from the fixture source; these are semantic expectations, not a new runtime schema.",
+  "python": {
+    "declarations": ["sample.increment", "sample.pipeline", "sample.dynamic_call", "helpers.twice"],
+    "imports": [{"from": "sample", "module": "helpers", "symbol": "twice"}],
+    "resolved_calls": [{"caller": "sample.pipeline", "callee": "sample.increment"}, {"caller": "sample.pipeline", "callee": "helpers.twice"}],
+    "types": [{"entity": "sample.increment", "parameter": "value", "type": "int", "return": "int"}],
+    "unresolved": [{"caller": "sample.dynamic_call", "reason": "callback target is not determined by this fixture"}],
+    "source": [{"path": "sample.py", "name": "increment", "line_1_based": 4}, {"path": "helpers.py", "name": "twice", "line_1_based": 1}]
+  },
+  "rust": {
+    "declarations": ["increment", "pipeline", "invoke"],
+    "resolved_calls": [{"caller": "pipeline", "callee": "increment"}],
+    "types": [{"entity": "increment", "parameter": "value", "type": "i32", "return": "i32"}],
+    "unresolved": [{"caller": "invoke", "reason": "function pointer target is not determined by this fixture"}],
+    "source": [{"path": "src/lib.rs", "name": "increment", "line_1_based": 1}]
+  },
+  "status": {
+    "dimensions": ["snapshot", "source_context_revision", "processing", "coverage", "freshness", "precision", "remainder_reason"],
+    "negative_rules": ["Missing output cannot imply complete absence", "Invalidated compiler facts cannot remain current", "Installed support cannot imply processed workspace coverage"]
+  }
+}

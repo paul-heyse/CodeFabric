@@ -766,7 +766,7 @@ statement with citations.
 | `ast-grep run` | matched | **no match** | — (`ast-grep §3.14`) |
 | `ast-grep scan` | no error-severity finding | an **error-severity** rule fired | — (`ast-grep §4.8`) |
 | `ast-grep outline` | completed, **including an empty outline** | — | fatal read/parse/config error (`ast-grep §5.16`) |
-| `ast-grep test` | every selected case passed | — **never returns 1** | `3` filter selected nothing · `4` assertion or snapshot failure · `6` missing `testDir` · `8` unparseable rule/config (`ast-grep §15.11`) |
+| `ast-grep test` | every selected case passed | — **never returns 1** | `3` filter selected nothing · `4` assertion or snapshot failure · `6` missing `testDir` · `8` unparsable rule/config (`ast-grep §15.11`) |
 | `rg` | matched | no match | error (`ripgrep §10.3`) |
 
 Two consequences that scripts get wrong. A clean zero from `ast-grep run` is
@@ -1015,15 +1015,12 @@ REFERENCE §1 of this file was generated from it.
   you will ever search for. Exclude it with `-g '!docs/library_ref/**'` unless
   the question is about the references.
 
-### Where the doctrine lives
+### Choosing search evidence
 
-`.claude/skills/_shared/code-intelligence.md` owns the three-tier instrument
-ladder, the mandatory tripwires, coverage-as-a-declared-artifact, and the
-design/execution/review phase guidance. This file owns the capability surface.
-Neither restates the other; when they touch the same fact — exit codes, the
-repository traps — this file carries the citation and that file carries the
-rule.
+Use `.claude/skills/_shared/code-intelligence.md` for concise search guidance. Check exact definitions and consumers when a search result affects a change. Search absence only describes the searched scope; no coverage artifact or compulsory tool ladder is required.
 
-**Do not use a tool to certify its own modification.** When changing search or
-analysis tooling — including these extractors and the governance rules — verify
-with independent source reads, compiler output, and tests.
+## Current use
+
+API indexes above are navigation, not a development workflow. Consult the current suite and
+`STATUS.md` for product target and implementation status. Historical section/line references
+may require re-navigation; no conformance score, audit cycle, or source-edit artifacts are required.

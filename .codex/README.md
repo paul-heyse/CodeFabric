@@ -140,3 +140,7 @@ Model and reasoning choices remain user preferences; approval policy and sandbox
 not — `config.toml` sets both for this project. No external MCP server is registered here:
 the repository contains the adapter implementation, while host registration and the
 production serving surface remain owned by their serving waves.
+
+## Current delivery workflow
+
+Start at root STATUS.md. `product-delivery` replaces the old plan/execute/status skills. Review/design/library investigation are optional, scoped tasks. The shared skill symlinks remain unchanged. `just tooling-test`, `just tooling-lint`, `just docs-check`, and `just golden` are the current preparation/product command boundary. Hooks report environment and dated results without running gates or activating plans.

@@ -11,6 +11,8 @@ predecessor_path: docs/authoritative_design/present_state_cpg_fastmcp_serving_sp
 
 # Present-State CPG FastMCP Serving Specification v2.3
 
+> Target revised 2026-09-08 under the consolidated pragmatic delivery review. These are target contracts, not a claim of implemented behavior; see [current status](../../STATUS.md). Historical predecessors are unchanged.
+
 ## 0. Authority, identity, and compatibility
 
 The stable artifact ID is `codefabric-present-state-cpg-fastmcp-serving` (`SRV`). This document
@@ -446,8 +448,10 @@ retained package.
 
 Public outputs retain QRY's execution, availability, completeness, freshness, limit, and
 dependency dimensions. The v2 public snapshot record carries the epoch,
-programmatic-assembly/release/proof fields selected by its current profile. Status is a projection of the
+source/context/provider identity and scoped processing fields selected by its current profile. Status is a projection of the
 current admitted epoch and LIFE state, never an adapter cache or packaged census.
+
+The target reports installed support, snapshot processing coverage and test confidence separately. Requested/completed/pending/failed/unsupported scope, reasons, freshness and precision are daemon-authored. Released wire assets remain unchanged during preparation; the production plan owns any wire migration.
 
 Basic status may expose safe workspace display identity, lifecycle/readiness, public epoch,
 source/event/Git summaries, public context labels, capability aggregates, queue counts/effective
@@ -629,42 +633,4 @@ request source content or unrestricted semantic payloads by default.
 
 ## 15. Executable acceptance obligations
 
-| Contract | Required executable oracle |
-|---|---|
-| released Protobuf and cross-language wire | `just proto-contract-check`; `just provider-protocol-check` |
-| supervisor, policy, singleton, and descriptor lifecycle | `just supervisor-launch-contract-check`; `just supervisor-launch-platform-check` |
-| strict adapter boundary and package contents | `just adapter-domain-boundary-check`; `just adapter-package-authority-zero-state-check` |
-| all four tools and eight semantic forms | `just semantic-delivery-vertical-check`; `just semantic-query-conformance-check` |
-| dynamic status/reference from epoch | `just dynamic-reference-delivery-check` |
-| public schema/error/result compatibility | `just adapter-test`; `just package-interop-check` |
-| inline/resource semantic equivalence | `just semantic-delivery-vertical-check`; result-resource contract tests |
-| accepted handle, watch resume, cancellation, and relative budget | `just adapter-test`; `just resource-governance-check` |
-| ACL, bound catalog, and noninterference | `just access-catalog-isolation-check`; `just public-leakage-negative-check` |
-| no Python semantic/data-plane authority | `just adapter-domain-boundary-check`; `just daemon-static-bundle-target-zero-state-check` |
-| real STDIO protocol purity | `just adapter-stdio-test`; `just adapter-ci-fast` |
-| exact FastMCP/MCP/Pydantic stack and bridge-off imports | `just fastmcp4-dependency-contract-check` |
-| modern-only protocol and bounded framework UI advertisement | `just fastmcp4-modern-protocol-check` |
-| closed atomic start and pure validation | `just fastmcp4-atomic-start-check` |
-| guarded-input re-entry, binding, expiry, tamper, and replay | `just fastmcp4-guard-roundtrip-check` |
-| daemon public handles and per-read/release authorization | `just fastmcp4-resource-authority-check` |
-| authorized capped reference completion | `just fastmcp4-completion-authorization-check` |
-| explicit cancel, reconnect, and no start resubmission | `just fastmcp4-cancellation-recovery-check` |
-| exact catalog and application authority zero state | `just fastmcp4-public-surface-check`; `just fastmcp4-adapter-authority-zero-state-check` |
-| installed supervisor-to-modern-host vertical | `just fastmcp4-stdio-vertical-check` |
-
-Tests include in-memory FastMCP, fake-daemon contract, real generated stubs, real STDIO,
-daemon integration, cancellation at every lifecycle stage, reconnect/resume, slow consumer,
-large resource/range reads, expiry/release, cross-agent/workspace/credential denial, package
-installation, additive daemon fields, hostile error payloads, and public four-layer decoded
-semantic equivalence. A static package fingerprint, tool count, self-generated expected output,
-or execution capture alone is not acceptance.
-
-Supervisor/launcher tests additionally reject wrong policy-file owner, mode,
-type, device, inode, symlink or substituted path; unsafe pre-existing runtime or
-socket objects; wrong peer UID, supported PID/start identity, policy, workspace,
-operation, generation, expiry, revocation, replay, or capacity; descriptor
-leakage; control/rendezvous loss; and partial spawn. They prove one live
-supervisor/daemon with multiple authorized adapters, bounded stderr and direct
-STDIO backpressure, joined/reaped children, accepted-work survival, and, if
-selected, a `0600` fallback that cannot be read twice or reached through a
-substituted path.
+Exercise the actual daemon/installed-adapter boundary for supported query, reference, status, guarded input, resource authorization and cancellation behavior. Preserve released protocol compatibility and secret redaction. Add failure/recovery tests where the changed boundary warrants them. All required serving behavior remains target scope, but named historical certification recipes and a mandatory oracle matrix are retired.

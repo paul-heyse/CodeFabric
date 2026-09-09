@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
-import pytest
-
 from tooling.ci.remaining_legacy_zero_state import (
-    COMPOSED_ZERO_STATE_COMMANDS,
     ROOT,
-    RemainingLegacyError,
     cargo_payload_issues,
     classify_paths,
-    run_composed_zero_state,
     structural_probe,
     text_probe,
     validate_remaining_legacy,
@@ -23,13 +17,12 @@ from tooling.ci.remaining_legacy_zero_state import (
 def test_live_remaining_legacy_inventory_is_zero_without_replaying_specialists() -> (
     None
 ):
-    report = validate_remaining_legacy(ROOT, run_composed=False)
+    report = validate_remaining_legacy(ROOT)
     assert report["live_file_count"] > 0
     assert report["retained_history_or_release_evidence_file_count"] > 0
     assert report["cargo_package_count"] > 0
     assert report["python_package_file_count"] > 0
     assert report["structural_probes"] > 0
-    assert report["composed_zero_state_checks"] == 0
 
 
 def test_history_exclusion_is_explicit_and_does_not_hide_live_residue() -> None:
@@ -131,26 +124,3 @@ def test_cargo_inventory_rejects_predecessor_feature_and_target() -> None:
         "forbidden Cargo feature codefabric#model-compiler",
         "forbidden Cargo target codefabric#codefabric-model",
     ]
-
-
-def test_composition_invokes_only_permanent_specialist_guards() -> None:
-    observed: list[tuple[str, ...]] = []
-
-    def runner(
-        command: tuple[str, ...], **_: object
-    ) -> subprocess.CompletedProcess[str]:
-        observed.append(command)
-        return subprocess.CompletedProcess(command, 0, "", "")
-
-    run_composed_zero_state(ROOT, runner=runner)
-    assert observed == list(COMPOSED_ZERO_STATE_COMMANDS)
-
-
-def test_composed_guard_failure_is_not_suppressed() -> None:
-    def runner(
-        command: tuple[str, ...], **_: object
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(command, 1, "", "causal failure")
-
-    with pytest.raises(RemainingLegacyError, match="causal failure"):
-        run_composed_zero_state(ROOT, runner=runner)

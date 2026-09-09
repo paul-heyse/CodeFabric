@@ -1,0 +1,9 @@
+[
+  {"operation": "write", "path": "helpers.py", "text": "def twice(value: int) -> int:\n    return value * 3\n"},
+  {"operation": "rename", "path": "helpers.py", "to": "renamed_helpers.py"},
+  {"operation": "write", "path": "sample.py", "text": "from renamed_helpers import twice\n\ndef pipeline(value: int) -> int:\n    return twice(value)\n"},
+  {"operation": "delete", "path": "renamed_helpers.py"},
+  {"operation": "write", "path": "src/lib.rs", "text": "pub fn broken() -> i32 { missing_name }\n"},
+  {"operation": "write", "path": "src/lib.rs", "text": "pub fn repaired() -> i32 { 42 }\n"},
+  {"operation": "write", "path": "Cargo.toml", "text": "[package]\nname = \"pragmatic-cpg-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n[features]\nanalysis_context = []\n"}
+]

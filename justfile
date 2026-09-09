@@ -751,12 +751,6 @@ compiled_release_resource_performance_envelope:
 [group('gate')]
 compiled-release-resource-performance-check: fastmcp4-expectation-drift-check compiled_release_resource_performance_envelope
 
-[doc("Derive and execute every v7 packet oracle, retained outcome, and terminal gate at one HEAD")]
-[group('gate')]
-relational-fabric-v7-certification:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_v7_certification.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/v7_certification.py run
-
 [doc("Execute application-owned provider job, result, coverage, gap, resource, and admission contracts")]
 [group('test')]
 provider-job-contract-check:
@@ -932,10 +926,6 @@ wave7-integration-check: git-parity-check source-capture-race-check
 wave8-integration-check:
     cargo nextest run --locked --lib --no-fail-fast -E 'test(/(py_context_(discovery_conformance|manifest_identity_parity|guess_rejection_falsification|invalidation_operational_gate)|py_scope_binding_fixture_conformance|ruff_semantic_isolation_parity|py_unresolved_reference_unknown_falsification|py_scope_binding_owner_replacement_gate|py_import_export_fixture_conformance|py_import_syntax_semantic_distinction_parity|py_dynamic_export_unknown_falsification|py_module_fact_replacement_gate|py_callable_call_site_fixture_conformance|py_call_site_first_class_parity|py_dynamic_splat_unknown_argument_falsification|py_callable_contract_replacement_gate|py_cfg_fixture_conformance|py_cfg_wellformedness_parity|py_cfg_exceptional_edge_falsification|py_cfg_owner_invalidation_gate|py_defuse_fixture_conformance|py_semantic_profile_partial_parity|py_parse_error_capability_gap_falsification|wave8_integration_operational_gate)$/)' --no-tests=fail
 
-[doc("Run every retained Wave-2 and Wave-4 through Wave-7 integration gate")]
-[group('test')]
-wave-acceptance-check: wave2-integration-check wave4-integration-check wave5-integration-check wave6-integration-check wave7-integration-check
-
 [doc("Validate that a vacuum dry-run cannot include retained snapshot files")]
 [group('test')]
 vacuum-dry-run-check:
@@ -985,12 +975,6 @@ native-assurance-test harness *args:
     shift
     cargo test --locked --manifest-path "tooling/native-dependencies/tests/$native_harness/Cargo.toml" \
       --target-dir target/native-assurance "$@"
-
-[doc("Verify installed native dependency bytes, provenance, and amendment replay")]
-[group('gate')]
-native-dependency-artifacts-check: governance-tooling-lint
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_native_dependency_artifacts.py
-    python3 tooling/ci/native_dependency_artifacts.py verify --replay
 
 [doc("Run repository structural governance rules")]
 [group('gate')]
@@ -1101,75 +1085,16 @@ adapter-ci-fast: adapter-lint adapter-type adapter-test
 
 # ------------------------------------------------------ assurance governance
 
-[doc("Check formatting and lint for plan-governance helpers")]
+[doc("Check formatting and lint for development tooling")]
 [group('gate')]
-governance-tooling-lint:
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff format --check tooling/ci
-    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff check tooling/ci
-
-[doc("Validate active plan, review, and schema-2 execution-state contracts")]
-[group('gate')]
-artifacts-check: governance-tooling-lint
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_artifact_contracts.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/artifact_contracts.py artifacts-check
+tooling-lint:
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff format --check tooling/ci tooling/product tooling/benchmarks
+    uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" ruff check tooling/ci tooling/product tooling/benchmarks
 
 [doc("Run reproducible non-normative semantic substrate warm/cold workloads")]
 [group('perf')]
 semantic-profile-bench:
     uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/benchmarks/semantic_profile_bench.py
-
-[doc("Validate governed oracle criteria, substantive definitions, and zero-match-safe selectors")]
-[group('gate')]
-oracle-substance-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest tooling/ci/test_plan_assurance.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py oracle-substance-check
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py current-packet-oracle-check
-
-[doc("Validate the active packet DAG and disposition every unordered known-touch overlap")]
-[group('gate')]
-plan-dependency-check *args:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py dependency-check "$@"
-
-[doc("Validate committed name-coupled nextest selectors and zero-selection failure semantics")]
-[group('gate')]
-gate-filter-census:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci/test_gate_filter_census.py
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python scripts/gate_filter_census.py check
-
-[doc("Execute exactly four substantive acceptance oracles for one implementation packet")]
-[group('test')]
-packet-oracle-check packet:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/plan_assurance.py packet-oracle-check "{{packet}}"
-
-[doc("Execute the selected real-time CPG packet's four real oracles and local gates")]
-[group('test')]
-real-time-cpg-packet-check packet *args:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/real_time_cpg_assurance.py packet "$@"
-
-[doc("Derive and execute real-time CPG milestone members and integration gates")]
-[group('gate')]
-real-time-cpg-milestone-check milestone *args:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/real_time_cpg_assurance.py milestone "$@"
-
-[doc("Derive and execute real-time CPG decommission prerequisites and exit gates")]
-[group('gate')]
-real-time-cpg-decommission-check batch *args:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/real_time_cpg_assurance.py decommission "$@"
-
-[doc("Nonmutatingly certify the current real-time CPG candidate and retained real proof")]
-[group('gate')]
-real-time-cpg-certification *args:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/real_time_cpg_assurance.py certification "$@"
-
-[doc("Derive active-plan input freshness and proving-commit trust")]
-[group('gate')]
-plan-status:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/artifact_contracts.py plan-status
-
-[doc("Reject Cargo target outputs in the index or reachable HEAD history")]
-[group('gate')]
-tracked-target-zero-state-check:
-    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/artifact_contracts.py tracked-target-zero-state-check
 
 [doc("Prove family duplicate policy and its expected-failure fixture")]
 [group('gate')]
@@ -1181,14 +1106,9 @@ duplicate-family-check:
 seed-zero-state-check:
     ./scripts/seed_zero_state_check.sh
 
-[doc("Prove superseded catalog, writer, proof-manifest, and packet-mutation surfaces stay absent")]
+[doc("Run focused structural, compatibility and navigation checks")]
 [group('gate')]
-model-zero-state-check:
-    ./scripts/model_zero_state_check.sh
-
-[doc("Run structural, artifact, provenance, compatibility, and zero-state governance")]
-[group('gate')]
-governance: tool-version-contract-check governance-scan authoritative-design-conformance-check proto-check model-zero-state-check remaining-legacy-zero-state-check artifacts-check plan-status tracked-target-zero-state-check duplicate-family-check seed-zero-state-check oracle-substance-check plan-dependency-check
+governance: tool-version-contract-check governance-scan authoritative-design-conformance-check proto-check duplicate-family-check seed-zero-state-check docs-check
 
 [doc("Run the routine gate across all four build domains")]
 [group('gate')]
@@ -1200,7 +1120,7 @@ environment-regression: environment-contract-check sccache-canary doctor extract
 
 [doc("ci-fast plus policy, the ci nextest profile, and snapshot review state")]
 [group('gate')]
-ci-pr: ci-fast policy sidecar-policy wave-acceptance-check
+ci-pr: ci-fast policy sidecar-policy
     cargo nextest run --locked -P ci
     cargo test --locked --doc
     cargo insta pending-snapshots
@@ -1357,12 +1277,6 @@ compiled-release-resource-performance-capture:
     PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/benchmarks/fastmcp4_release_benchmark.py run
     PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/fastmcp4_release_performance.py summarize
 
-[confirm("Create schema-2 state and activate the approved plan atomically. Continue?")]
-[doc("MUTATES: create validated execution state before switching the active-plan pointer")]
-[group('mutating')]
-plan-activate plan:
-    PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python tooling/ci/artifact_contracts.py activate-plan --plan "{{plan}}"
-
 [doc("MUTATES: rewrite Rust formatting in place")]
 [group('mutating')]
 root-fmt-write:
@@ -1396,3 +1310,24 @@ deps-fix:
 [group('mutating')]
 tool-updates-check:
     cargo install-update --list
+
+
+[doc("Test development tooling and product harness behavior; optional pytest selectors")]
+[group('test')]
+tooling-test *args:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" pytest -q tooling/ci tooling/product tooling/benchmarks "$@"
+
+[doc("Check current local links, selected design navigation and tracked-output hygiene")]
+[group('static')]
+docs-check *args:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python -m tooling.ci.repository_checks "$@"
+
+[doc("Run the real product corpus; unavailable or empty runs fail")]
+[group('test')]
+golden *args:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python -m tooling.product.golden "$@"
+
+[doc("Measure a real corpus run; failure is never a performance pass")]
+[group('perf')]
+product-bench *args:
+    @PYTHONPATH=. uv run --frozen --project "$CF_ROOT/codefabric-cpg-mcp" python -m tooling.product.benchmark "$@"

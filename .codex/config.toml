@@ -69,7 +69,7 @@ ignore_default_excludes = false
 # ---------------------------------------------------------------------------
 # Skills
 # ---------------------------------------------------------------------------
-# The 18 project skills are NOT listed here — they are auto-discovered from
+# Project skills are NOT listed here — they are auto-discovered from
 # .codex/skills and .agents/skills, both of which symlink to .claude/skills so
 # Claude Code and Codex read one copy. Verified: `codex debug prompt-input`
 # lists all 18, from either symlink alone, with no duplication when both exist.

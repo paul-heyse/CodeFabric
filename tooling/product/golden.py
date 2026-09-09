@@ -1,0 +1,128 @@
+"""Run selected real daemon/MCP scenarios. This command never certifies all CPG scope."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from dataclasses import asdict
+from pathlib import Path
+
+from tooling.product.corpus import compare
+from tooling.product.process import run
+
+ROOT = Path(__file__).resolve().parents[2]
+CASES = {
+    "startup": "wp44_beh_real_supervisor_ready_requires_durable_fresh_activation",
+    "python-serving": "wp63_beh_real_source_to_installed_fastmcp_is_causal_and_epoch_coherent",
+    "reopen": "wp63_ops_installed_restart_reconstructs_only_exact_activation_authority",
+    "cancellation": "wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation",
+}
+
+
+def select(names: list[str] | None) -> list[str]:
+    result = list(CASES) if names is None else names
+    if not result or any(name not in CASES for name in result):
+        raise ValueError("select at least one known product case")
+    return list(dict.fromkeys(result))
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--case", action="append", choices=CASES)
+    parser.add_argument("--list", action="store_true")
+    parser.add_argument("--timeout", type=float, default=240)
+    parser.add_argument(
+        "--output", type=Path, default=ROOT / "target/product/golden.json"
+    )
+    parser.add_argument(
+        "--scenario",
+        type=Path,
+        help="existing modern client driver scenario against a configured real supervisor",
+    )
+    parser.add_argument(
+        "--expect",
+        type=Path,
+        help="independently authored expected driver-report fragments, required with --scenario",
+    )
+    args = parser.parse_args(argv)
+    if args.list:
+        print("\n".join(CASES))
+        return 0
+    if bool(args.scenario) != bool(args.expect):
+        parser.error("--scenario and --expect must be supplied together")
+    observations = []
+    success = True
+    if args.scenario:
+        commands = [
+            (
+                "public-scenario",
+                [
+                    sys.executable,
+                    str(ROOT / "tooling/fastmcp4_modern_client_driver.py"),
+                    str(args.scenario.resolve()),
+                ],
+            )
+        ]
+    else:
+        commands = [
+            (
+                name,
+                [
+                    "cargo",
+                    "nextest",
+                    "run",
+                    "--locked",
+                    "--test",
+                    "integration",
+                    "-E",
+                    f"test(=integration::daemon::{CASES[name]})",
+                    "--no-tests=fail",
+                ],
+            )
+            for name in select(args.case)
+        ]
+    for name, command in commands:
+        print(f"product case: {name}", flush=True)
+        try:
+            outcome = run(command, cwd=ROOT, timeout=args.timeout)
+            observation = {"case": name, **asdict(outcome)}
+            success = outcome.returncode == 0
+            if success and args.expect:
+                expected = json.loads(args.expect.read_text())
+                if not expected:
+                    raise ValueError("expected fragments cannot be empty")
+                compare(json.loads(outcome.stdout), expected)
+        except (OSError, ValueError, AssertionError, RuntimeError) as error:
+            observation = {"case": name, "error": str(error), "returncode": 1}
+            success = False
+        observations.append(observation)
+        print(f"{name}: {'passed' if success else 'failed'}", flush=True)
+        if not success:
+            print(
+                str(observation.get("stderr", observation.get("error", "")))[-6000:],
+                file=sys.stderr,
+            )
+            break
+    report = {
+        "kind": "real-product-scenarios",
+        "revision": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
+        "working_tree": subprocess.check_output(
+            ["git", "status", "--short"], cwd=ROOT, text=True
+        ),
+        "passed": success and len(observations) == len(commands),
+        "selected": [name for name, _ in commands],
+        "not_run": [name for name, _ in commands[len(observations) :]],
+        "observations": observations,
+        "remaining_target": "Mixed-language semantic coverage, fine-grained remainder and differential runtime adapters remain production work; passing these selected cases does not claim that scope.",
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, indent=2) + "\n")
+    return 0 if report["passed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

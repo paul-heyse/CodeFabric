@@ -11,6 +11,8 @@ predecessor_path: docs/authoritative_design/present_state_cpg_fact_generation_sp
 
 # Present-state CPG fact generation specification for Python and Rust v2.3
 
+> Target revised 2026-09-08 under the consolidated pragmatic delivery review. These are target contracts, not a claim of implemented behavior; see [current status](../../STATUS.md). Historical predecessors are unchanged.
+
 ## 0. Governing contract and transition status
 
 The stable artifact identity is `CF-GEN-2.3.0`. This artifact is the current generation
@@ -21,8 +23,8 @@ payloads, and fingerprints are not coequal semantic authority.
 This successor preserves the high-level Python/Rust product facts, public identities, explicit
 unknowns, incremental behavior, and semantic query capabilities. It
 replaces the realization with exact provider-native Arrow relations, explicit application-owned
-analysis producers, typed programmatic normalization/authority/proof, relation-scoped Arrow IPC,
-and one immutable proved `FabricEpoch`. Until target cutover, the deployed runtime may remain
+analysis producers, typed programmatic normalization/authority, relation-scoped Arrow IPC,
+and one immutable `FabricEpoch`. Until target cutover, the deployed runtime may remain
 legacy; this document does not certify implementation state.
 
 Historical v1 wire artifacts are allocation evidence only. Provider and analysis
@@ -33,21 +35,14 @@ continues to emit only provider-native and application-analysis relations.
 
 ### 0.1 Execution is authority
 
-Exact provider batches plus explicit non-derivable typed inputs and typed
-`ProgrammaticTransformation` values produce the provider boundary, authority, normalization,
-derivation, query-requirement, coverage, unknown, and proof relations that execution reads.
-Candidate-catalog relation/field/schema/dependency/provenance observations are derived from the
-installed session to fixed point. Generated catalogs, YAML registries, censuses,
-fingerprints, bundle manifests, and cached capability lists MAY diagnose or render the current
-programmatic catalog but
-MUST NOT provide a second semantic answer.
+Application-owned typed Rust builders and Arrow schemas define provider boundaries and normalization/authority rules. Exact provider runs and scoped coverage establish workspace facts. Installed support can be declared in code; actual completion cannot. Observe installed plans/catalogs when useful, without a fixed-point self-description engine or proof relation for every transformation.
 
 ### 0.2 Exact-current-API rule
 
 Adapters bind to the pinned APIs named in §2 without a defensive facade for hypothetical future
 versions. Application-owned Arrow schemas and DTO ownership boundaries are required isolation,
 not claims that different provider APIs are interchangeable. A provider/API change requires an
-explicit migration, compile probes, fixture reacceptance, schema migration, and proof.
+explicit migration, compile probes, fixture reacceptance, schema migration, and relevant compatibility checks.
 
 ### 0.3 Released compatibility
 
@@ -147,7 +142,7 @@ immutable source images + analysis context + exact programmatic assembly inputs
   -> provider-native relations + coverage/remainder/diagnostic relations
   -> typed identity, normalization, authority, conflict and unknown transformations
   -> separately versioned application-derived analyses
-  -> proof-bearing candidate FabricEpoch
+  -> coverage-bearing candidate FabricEpoch
 ```
 
 Every stage consumes and emits immutable, keyed relations. No semantic payload crosses as
@@ -333,7 +328,7 @@ declared resolution/completeness tier.
 Python CFG, evaluation order, branches, loops, exceptional edges, cleanup, and async suspension
 are CodeFabric-derived from accepted Ruff structure and semantic evidence. They MUST NOT carry
 `raw_ruff` or `raw_pyrefly` authority. Outputs name the Python CFG algorithm release, owner,
-input rows, context, precision, remainder, and clean/incremental proof.
+input rows, context, precision, remainder, and clean/incremental validation.
 
 ## 25. Python value and dataflow generation
 
@@ -463,7 +458,7 @@ compiler provenance.
 
 CodeFabric derives def-use, reaching definitions, kills, liveness, and value-flow over raw MIR
 CFG/access facts. MIR is not assumed SSA. Results name algorithm release, owner/body, precision,
-input provenance, and clean/incremental proof.
+input provenance, and clean/incremental validation.
 
 ## 46. Rust alias and points-to generation
 
@@ -580,7 +575,7 @@ descriptive measurements, never evaluative labels.
 Summaries use monotone, deterministic fixed points with explicit convergence/resource bounds,
 unknown-callee propagation, recursion/dynamic-dispatch behavior, algorithm/precision release,
 dependency/invalidation closure, and provenance. Non-convergence or exhaustion yields unknown
-and blocks dependent capability proof.
+and blocks dependent capability claims.
 
 ## 67. Structural relationship generation
 
@@ -686,7 +681,7 @@ emitted only from exact evidence or a named versioned derivation.
 ## 79. Derived graph relationship generation
 
 All common graph and summary rows carry `application_derived` authority, algorithm/precision,
-input/program/source/provider closure, completeness, and proof identity.
+input/program/source/provider closure, completeness, and operation identity.
 
 ## 80. Range reconciliation algorithm
 
@@ -723,11 +718,7 @@ unavailable.
 
 ## 85. Capability reporting
 
-Capabilities begin unknown. Advertised support is a query over accepted boundary demands,
-requested/completed/remainder/unknown coverage, exact provider/toolchain/schema identity,
-derived-producer closure, trust posture, and passing proof in the current epoch. Boolean or
-hard-coded capability lists are non-authoritative. `TRUSTED_LOCAL` is visibly degraded and never
-indistinguishable from contained untrusted compilation.
+Report installed provider/family support separately from per-workspace requested, completed, pending, failed, unsupported and unknown coverage. Include source generation, analysis context and provider version, and whether facts are current or explicitly historical. Release-test confidence is a separate development observation, not a runtime semantic authority. `TRUSTED_LOCAL` remains distinguishable from contained compilation. Static installed support is permissible; it cannot imply completed processing.
 
 ## 86. Generation output boundary
 
@@ -744,10 +735,7 @@ their own independent acceptance expectations.
 
 ## 88. Activation boundary
 
-Provider success does not activate facts. The epoch builder validates schema, coverage,
-authority, provenance, unknown, derivation, policy, resource, and independent semantic proof for
-the exact candidate. Activation selects the whole proved epoch atomically; queries never mix
-syntax generation N+1 with semantic generation N.
+Provider completion alone cannot publish. The coordinator checks generation/context, required schemas and identity references, owner replacement, coverage and exact snapshot pins. Publish a coherent snapshot atomically. Missing families can remain explicit remainder; unrelated syntax can publish without waiting for semantic convergence. Never label older semantic facts as current. Generalized independent semantic proof is not a per-candidate prerequisite.
 
 ## 89. Recommended crates and mechanism selection
 
@@ -779,36 +767,25 @@ transported for diagnostics or review but cannot be loaded as parallel semantic 
 
 ## 93. Provider fixture requirements
 
-Independently authored fixtures cover each accepted API family with valid, empty-complete,
-partial, damaged syntax, type/compile failure, ambiguity, cancellation, limit, oversize,
-unsupported context/platform, stale digest/context, corruption, and trust failure cases.
-Provider implementers may supply observations but cannot author the sole expected semantics.
+Maintain a compact independently justified corpus for supported Python/Rust facts and answer fragments. Extend it for a changed provider or a discovered defect. Include ambiguity, empty-complete versus unavailable, compile failure/repair and source positions. Expected semantics must not be copied from the implementation's observed output; authorship need not belong to a different person or agent.
 
 ## 94. Differential validation
 
-For supported overlap, compare providers without erasing authority: Tree-sitter/Ruff structure,
-Ruff/Pyrefly declarations and ranges, syntax/semantic call sites, Tree-sitter/rustc source
-correspondence, public/private compiler seams, and incremental/clean output. Differences become
-diagnostics/conflict/unknown rows, not automatic test failure or silent overwrite.
+Use one reusable clean/incremental comparator with edit/delete/rename/context changes. Compare semantic identities, positions, coverage and meaningful ordering, normalizing only incidental values. Provider-overlap comparisons are targeted diagnostics; do not erase per-family authority or require every provider pairing before useful delivery.
 
 ## 95. Algorithm validation
 
-Every derived family has independently authored examples, property tests, row-order permutation,
-addition/deletion/change cases, exceptional/dynamic/partial inputs, clean versus incremental
-equivalence, causal input mutations, convergence/resource tests, and exact provenance checks.
+State the algorithm's invariants and precision, then test representative examples and failure modes. Add property, mutation, differential or resource tests where they address actual algorithmic risk. Do not require every test technique for every family or independently rerun the algorithm on every production update.
 
 ## 96. Canonical invariants
 
-Executable invariant plans prove unique keys, valid foreign references, source/context/epoch
-pins, range bounds, identity recipes, authority uniqueness, schema closure, requested coverage,
-provenance closure, derived producer uniqueness, explicit unknowns, and absence of judgment
-facts. Zero violations with uncovered inputs is unknown, not pass.
+Check relevant schema, keys, endpoints, source/context generation, range bounds and owner replacement at authoritative boundaries. Coverage and explicit unknowns qualify empty answers. Validate complex semantic behavior in release tests, rather than a generalized runtime proof relation for every invariant.
 
 ## 97. Capability gaps and required treatment
 
 A gap is current typed data. It names family/scope, provider or algorithm, exact version/context,
 cause, evidence/diagnostic, trust/resource state, retryability, last-known-good history if any,
-and dependent capabilities/proofs. Gaps block claims that require them; they do not delete
+and dependent capabilities. Gaps block claims that require them; they do not delete
 unrelated syntax facts.
 
 ## 98. Phase 1 — Source and syntax completeness
@@ -969,7 +946,7 @@ without parsing into an accepted typed input and completing the proof transactio
 
 Each derived producer row names algorithm release, semantic family, inputs, owner scope,
 direction/lattice/transfer where applicable, graph projection, path/field/context sensitivity,
-soundness/precision tier, bounds, invalidation, materialization, unknown propagation, and proof.
+soundness/precision tier, bounds, invalidation, materialization, unknown propagation, and relevant compatibility checks.
 Exactly one producer or explicit unsupported remainder is required per accepted family.
 
 ## AC-G-40 — Generated, expanded, stub, shim, and lowered source capture
@@ -982,53 +959,22 @@ entities remain distinct even when a normalized projection links them.
 
 File admission policy is explicit typed input and produces one of accepted, excluded-not-applicable,
 unsupported, oversized, binary, generated-policy, vendored-policy, unreadable, or unknown.
-Excluded scope is visible in capability and proof. A skipped/unreadable file cannot establish a
+Excluded scope is visible in capability and relevant compatibility checks. A skipped/unreadable file cannot establish a
 negative fact or a complete workspace result.
 
 ## Cross-layer integration obligations
 
 The ontology supplies fact families, identity recipes, authority classes, and `SchemaContract`
 links. The fabric registers provider-native/canonical/derived relations in one epoch and builds
-normalization, proof, and semantic query plans from typed transformations over exact batches and
+normalization and semantic query plans from typed transformations over exact batches and
 explicit inputs. Lifecycle owns immutable input,
 invalidation, replacement, cancellation, and atomic activation. FastMCP presents daemon results
 only and never reconstructs provider or analysis logic.
 
 ## Release conformance obligations
 
-The implementation SHALL expose and pass intent-level checks equivalent to:
-
-```text
-syntax-provider-native-check
-syntax-provider-exact-api-check
-pyrefly-provider-native-check
-pyrefly-exact-surface-matrix-check
-pyrefly-semantic-environment-invalidation-check
-rustc-provider-native-check
-rustc-public-private-authority-check
-rustc-untrusted-compilation-sandbox-check
-provider-native-arrow-conformance-check
-provider-protocol-check
-provider-normalization-authority-check
-provider-capability-proof-check
-python-derived-analysis-conformance-check
-rust-mir-derived-analysis-conformance-check
-derived-analysis-authority-coverage-check
-clean-incremental-equivalence checks
-provider-legacy-json-zero-state-check
-provider-static-registry-target-zero-state-check
-```
-
-Each check executes against the exact current adapter, programmatic relation observations, typed
-inputs/transformations, and production path;
-expectations are independently owned. Compile success alone does not prove semantics, a digest
-does not prove row equality, and zero violations without input coverage is unknown.
+Release checks exercise supported provider boundaries, semantic answers, changed algorithms and incremental/recovery behavior. Use current commands from `just --list` and the production plan. Historical named check lists are not compulsory gates for every change. Compilation alone does not establish semantic correctness; incomplete processing is never reported as complete.
 
 ## Provider boundary for executed programmatic transformations
 
-Every active provider family resolves relationally from accepted demand to one exact handler,
-provider-native relation/schema, authority rule, normalization plan, coverage/unknown contract,
-and proof obligation. Every active derived family resolves to one algorithm producer or explicit
-unsupported remainder. The resulting `SchemaContract` is used across Arrow IPC, DataFusion
-logical/physical planning, batches, storage, and output restoration. A missing, duplicate,
-dangling, inert, wrongly authoritative, or unproved link blocks epoch activation.
+Provider adapters select application-owned handlers and schemas. Typed Rust builders produce DataFusion plans from exact batches and explicit inputs. Report each family as supported/completed or precise remainder. Detect incompatible schemas and duplicate owners at their real boundaries; no universal proof registry or fixed-point catalog history is required.

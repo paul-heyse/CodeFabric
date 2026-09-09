@@ -11,6 +11,8 @@ predecessor_path: docs/authoritative_design/codefabric_continuous_cpg_update_lif
 
 # CodeFabric Continuous CPG Update and Lifecycle Specification v2.3
 
+> Target revised 2026-09-08 under the consolidated pragmatic delivery review. These are target contracts, not a claim of implemented behavior; see [current status](../../STATUS.md). Historical predecessors are unchanged.
+
 ## 0. Authority, identity, and compatibility
 
 The stable artifact ID is `codefabric-continuous-cpg-lifecycle` (`LIFE`). This document is the
@@ -229,7 +231,7 @@ mode changes, and symlinks remain explicit; they are not silently flattened.
 
 Each accepted update wave captures immutable source images only after a stability check. Reads
 that change during capture retry or broaden. Source image identity and source generation fence
-every provider, derivation, publication, and proof job.
+every provider, derivation and publication job.
 
 Change classification computes differences; no static change census is current authority. The
 invalidation planner joins changed source facts with programmatic relation ownership, semantic
@@ -239,7 +241,7 @@ dependencies. It determines the smallest sound set of owners/relations to replac
 Rules:
 
 - invalidated semantic facts are hidden before current syntax is activated;
-- unaffected owners remain current only when dependency validity is proved;
+- unaffected owners remain current only when the conservative invalidation scope excludes them;
 - owner deletion emits owner/relation tombstones even when replacement is empty;
 - environment, manifest, import, macro, build, policy, explicit-input, program, or application-release changes may
   broaden beyond textually changed files;
@@ -259,7 +261,7 @@ events -> dirty registry -> source images -> classified change/invalidation
   -> exact Python/Rust semantic provider relations
   -> owner-local derived relations
   -> affected interprocedural/common graph relations
-  -> schema/integrity/provenance/capability proof
+  -> schema/identity/generation checks and scoped coverage
   -> FabricCommand publication
   -> sealed FabricEpoch activation
 ```
@@ -268,7 +270,7 @@ events -> dirty registry -> source images -> classified change/invalidation
 
 Tree-sitter and Ruff syntax/token/trivia/current source relations may produce a syntax-current
 epoch before semantic work completes. That epoch removes invalidated semantic rows, retains only
-proved unaffected owners, and exposes pending/unavailable capabilities. It never serves stale
+unaffected owners whose dependency scope remains valid, and exposes pending/unavailable capabilities. It never serves stale
 invalidated semantics as current.
 
 ### 6.2 Python semantic lane
@@ -303,40 +305,15 @@ produces an explicit gap. Clean recomputation is the correctness oracle.
 
 ## 7. Validation and candidate construction
 
-Before an epoch may activate, validation proves:
+Before publication, check source/context generation, compatible provider schema, owner identity/endpoints, replacement/tombstones, exact table versions, writer ownership and scoped coverage. Reject obsolete completions. Incomplete semantic processing may coexist with completed syntax in a coherent snapshot whose response reports exactly what remains. Older semantic facts are historical, not current.
 
-- source image/generation and Git fences;
-- provider protocol, schema, coverage, and exact version;
-- `FAB` `SchemaContract` at ingress, logical/physical plan, stream, every batch, and sink;
-- owner keys, endpoints, required unknowns, and authoritative replacement/tombstones;
-- normalization/authority/conflict and derived producer closure;
-- cross-owner/interprocedural affected closure;
-- exact Delta root/version and immutable segment identity;
-- policy/authorization and bound-plan closure;
-- independent expectation, provenance, capability, resource, and causal proof; and
-- complete activation pins under one exact application/provider release vector.
-
-Validation produces violation/coverage/proof relations. It does not persist a free-standing green
-flag or approve its own expected rows. An uncovered or unavailable required input is `unknown`
-and blocks activation.
+The coordinator owns validation and atomic publication. Do not rerun providers or semantic algorithms to independently prove every candidate. Targeted runtime integrity checks, compact publication records, release corpus tests and reusable clean/incremental comparisons serve distinct purposes.
 
 ## 8. One mutation path and durable publication
 
-Every update becomes a typed `FabricCommand` carrying operation ID, expected predecessor,
-workspace, authorization, writer generation, input/program/application/source/provider pins, resource
-envelope, and intended relation changes. One actor owns staging, deduplication, cancellation
-boundaries, zero-retry Delta writes, unknown-outcome reconciliation, proof, and activation.
+One owned workspace coordinator serializes durable publication with operation identity, expected predecessor, writer generation and source/context/table pins. Duplicate operations reconcile against their recorded outcome. SQLite may track temporal queues/leases; it does not independently select semantic current.
 
-An OS-backed workspace lease and strictly monotonic durable writer generation are acquired before
-domain writes. Every durable boundary rejects stale generation. SQLite records queues, retry
-schedules, leases, cancellation acknowledgements, and command stage only; deleting it and
-reconstructing from Delta/source must not alter semantic current.
-
-Delta commits exact component versions first. Activation appends one predecessor-linked event
-naming the complete input/program/application/source/provider/table/policy/proof set. Current is the unique
-valid activation-chain head, never a mutable SQLite/Delta row or highest timestamp. Component
-versions not selected by a valid event remain unreachable candidates until retention-safe
-collection.
+Commit component Delta versions, append one compact snapshot/publication selection, read back an uncertain result, and atomically install the selected snapshot. A stale writer cannot publish. Orphaned versions remain unreachable until retention-safe collection. Reopen loads exact selected versions; routine startup does not rebuild every provider or prove every historical action.
 
 ## 9. Admission, freshness, and epoch pinning
 
@@ -347,7 +324,7 @@ Request admission proceeds:
 3. apply the selected freshness barrier and required capability scope;
 4. reject or wait under the deadline without substituting a prior epoch;
 5. derive authorization and clone one `Arc<FabricEpoch>`;
-6. acquire query/result/table/segment/compiler/expectation leases;
+6. acquire query/result/table/segment/schema/provider leases;
 7. execute and deliver entirely under that epoch; and
 8. release leases only after terminal response/resource policy.
 
@@ -357,29 +334,13 @@ coverage, capability, freshness, and limit state; an empty list alone is never s
 Activation closes new admission before durable selection, revalidates predecessor/fence, appends
 and reads back selection, swaps the epoch, reconciles temporal cache, and only then reopens.
 Queries admitted earlier continue on their predecessor lease. A query cannot mix generations,
-contexts, providers, functions, policies, table versions, overlays, proof, or source bytes.
+contexts, providers, functions, policies, table versions, overlays or source bytes.
 
 ## 10. Resource governance, fairness, and cancellation
 
-Each epoch has one governed DataFusion runtime with bounded memory pool, private spill, object
-stores, batch sizing, and target partitions. The coordinator admits update, provider, query,
-graph, result, and maintenance work under process-wide CPU, memory, spill, process, row, byte,
-time, and queue budgets. External provider/compiler processes count against admission.
+Use a shared DataFusion memory pool/spill manager across live workspace state, bounded job queues/concurrency/batches/results and finite retained state. Contain provider subprocesses. Preserve interactive/control headroom with measured RSS/disk thresholds, backpressure and deadlines. This is a bounded engineering resource contract, not universal native allocation pre-admission or an OOM-immunity guarantee.
 
-Priority preserves security/recovery and source reconciliation, targeted strict-current updates,
-ordinary source updates, interactive queries, semantic/derived work, durable flush/artifact work,
-and maintenance in that order, with bounded aging and reserved update headroom. Scheduling is
-fair by agent; one agent or query cannot monopolize workers, memory, spill, or result storage.
-
-Cancellation and supersession are cooperative but reach actual work: debounce/wait, source
-capture, gix jobs, provider process groups, DataFusion tasks/streams, graph loops, Delta staging,
-artifact writes, and leases. A command is not interrupted inside an atomic durable critical
-section; its outcome is reconciled before acknowledgement. Cancelled/superseded output cannot
-commit.
-
-Backpressure propagates from result consumer to Arrow stream/provider and never becomes an
-unbounded Python/Rust queue. Resource exhaustion yields a typed terminal outcome and releases
-reservations/spill/incomplete artifacts.
+Own and join tasks; propagate cancellation to providers, streams and workers. Reconcile atomic/uncertain writes before acknowledging cancellation. Obsolete output cannot publish. Slow consumers must not create unbounded queues. Release state after the final owner; measure aggregate headroom instead of building a universal retained-allocation receipt system.
 
 ## 11. Failure and recovery semantics
 
@@ -502,22 +463,4 @@ new identity and transport design.
 
 ## 15. Executable acceptance obligations
 
-| Contract | Required executable oracle |
-|---|---|
-| event loss, rename, bulk, and reconcile | `just lifecycle-invalidation-conformance-check` |
-| source/gix authority boundary | `just source-authority-boundary-check` |
-| exact provider update and withdrawal | `just exact-provider-fabric-check`; `just stale-provider-current-zero-state-check` |
-| one mutation path and temporal isolation | `just fabric-single-mutation-path-check`; `just temporal-store-boundary-check` |
-| writer lease/generation | `just single-writer-fence-check` |
-| activation order, pinning, and faults | `just fabric-activation-recovery-check`; `just activation-fault-matrix-check`; `just fabric-epoch-pinning-check` |
-| resource, cancellation, and fairness | `just resource-governance-check` |
-| cold/incremental equivalence | `just durable-epoch-reconstruction-check`; `just clean-rebuild-legacy-input-zero-state-check` |
-| fresh genesis, singleton ownership, and forward repair | `just fresh-successor-activation-check`; `just supervisor-launch-contract-check` |
-| platform descriptor/socket lifecycle | `just supervisor-launch-platform-check`; `just session-uds-presentation-boundary-rejection-check` |
-| public lifecycle behavior | `just semantic-delivery-vertical-check`; `just provider-protocol-check` |
-
-Checks assert final authoritative state, not platform-specific watcher event sequences or fragile
-physical plan text. Crash injection covers every durable write, barrier, selection, readback,
-swap, cache, reopen, acknowledgement, lease, journal, and process side-effect boundary. A v2.3
-lifecycle is nonconforming while a bypass writer, mutable semantic pointer, runtime fallback,
-stale-current provider row, or unreconciled unknown outcome exists.
+Use real startup/reopen, edit/delete/rename/context changes, compilation failure/repair, obsolete completion, cancellation and targeted crash/recovery scenarios. Compare converged incremental facts/coverage with clean reconstruction using the shared harness. Add fault cases where a changed lifecycle boundary requires them. A failing runtime scenario stays visible; a process-policy check is not product success.

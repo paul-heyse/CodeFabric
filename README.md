@@ -1,5 +1,8 @@
 # CodeFabric
 
+Current work and known failures are in [STATUS](STATUS.md). The [selected design](docs/spec_index/README.md) retains the full Python/Rust CPG target. The [production plan](docs/plans/codefabric_pragmatic_production_implementation_plan.md) stages real semantic queries, scoped remainder, live updates and measured operation. Preparation changes do not imply the daemon currently starts successfully.
+
+
 CodeFabric is a present-state code property graph: a fact substrate over a codebase that
 answers semantic questions about what the code is right now.
 
@@ -57,7 +60,9 @@ dependency isolation are build-domain requirements, not semantic source organiza
 just doctor      # toolchains, domain presence, required tools, and direnv state
 just setup       # exact tools + locked adapter environment + supervised sccache service
 just --list      # the operational API
-just ci-fast     # current routine gate
+just docs-check  # current documentation navigation
+just tooling-test # tooling/harness tests
+# just ci-fast   # integrated product checks when the change warrants them
 ```
 
 The exact CLI identities live in `tooling/rust-tool-versions.env`; `just tools-doctor`
@@ -150,3 +155,7 @@ v2.2, v2.1, v2.0, and v1.3 suites remain historical transition evidence, not coe
 The older `docs/rust_core_python_interface_repository_specification_2026-08-20.md` remains the
 infrastructure source for compatible decisions unless the current suite explicitly supersedes
 one of its semantic realization premises.
+
+## Product checks and measurement
+
+Use `just golden --list` to inspect real daemon/MCP scenarios and `just golden --case startup` for a focused run. Failures remain failures. [Product harness notes](tooling/product/README.md) explain the mixed-language corpus, differential adapter and measurement limits. `just product-bench` records real scenario timings; it does not invent missing telemetry or enforce speculative latency targets.

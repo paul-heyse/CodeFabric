@@ -11,6 +11,8 @@ predecessor_path: docs/authoritative_design/present_state_cpg_data_fabric_specif
 
 # Present-State CPG Data Fabric Specification v2.3
 
+> Target revised 2026-09-08 under the consolidated pragmatic delivery review. These are target contracts, not a claim of implemented behavior; see [current status](../../STATUS.md). Historical predecessors are unchanged.
+
 ## 0. Authority, identity, and compatibility
 
 The stable artifact ID is `codefabric-present-state-cpg-data-fabric` (`FAB`). This document is
@@ -24,7 +26,7 @@ present-state facts, canonical application-owned IDs, raw and normalized evidenc
 unknowns, owner-scoped replacement, exact query pinning, durable retention, and bounded query
 execution. It replaces static registries, generated schema/catalog bundles, mutable current
 pointers, bespoke overlay providers, replay/bootstrap authority, and stored green status with
-programmatic session authority and executed proof.
+typed Rust/DataFusion execution and scoped processing coverage.
 
 V2.3 does not add a FastMCP-aware catalog, provider, table, lease, or result format. FAB continues
 to own the sealed internal result package and resource lease; SRV may project a daemon-minted
@@ -33,7 +35,7 @@ through the daemon. Guard continuations and reference completion are QRY/SRV con
 not durable fabric relations or alternate epoch authority.
 
 Normative words `MUST`, `MUST NOT`, `SHALL`, `SHOULD`, and `MAY` have their usual requirements
-meaning. The synchronized v2.3 suite owns cross-domain meaning as follows:
+meaning. The selected working suite owns cross-domain meaning as follows:
 
 | Concern | Owner |
 |---|---|
@@ -47,13 +49,13 @@ meaning. The synchronized v2.3 suite owns cross-domain meaning as follows:
 Released public IDs, semantic result meanings, and historical wire allocations are
 immutable contracts. The sole production transport is `codefabric.cpgd.v2`; historical v1
 runtime bindings and profiles are not compatibility authorities. Current schemas, capabilities,
-functions, relations, and proof status
+functions, relations, and processing status
 are derived from the admitted epoch; no checked-in census, bundle index, digest ledger, or
 generated copy is current authority.
 
 ## 1. Purpose and invariant architecture
 
-CodeFabric is a relationally self-describing present-state data fabric:
+CodeFabric is a present-state Arrow/DataFusion/Delta data fabric:
 
 ```text
 exact provider Arrow batches + explicit typed inputs
@@ -61,7 +63,7 @@ exact provider Arrow batches + explicit typed inputs
   -> candidate DataFusion session + derived catalog observations
   -> normalization / authority / derived relations
   -> one immutable DataFusion catalog and SessionState
-exact Delta versions + immutable Arrow segments + proof
+exact Delta versions + optional immutable Arrow segments + coverage
   -> sealed FabricEpoch
   -> authorized semantic plans
   -> bounded Arrow results
@@ -79,13 +81,9 @@ The following invariants are mandatory:
 7. Every durable mutation enters through one idempotent `FabricCommand` actor.
 8. One fenced writer may mutate one workspace; concurrent multi-host writers are unsupported.
 9. Delta activation events, not SQLite or an in-memory pointer, determine current epoch.
-10. Proof, capability, provenance, and governance are query results over exact epoch inputs.
-11. One immutable `CompiledSemanticRelease` with one `SuiteIdentity` privately
-    and exhaustively constructs every production provider, field, transformation,
-    query form, policy, proof, and child-session recipe.
-12. Callers supply operational workspace inputs only; they cannot inject a
-    catalog, transformation set, query program, proof closure, release vector,
-    or alternative production constructor.
+10. Query-relevant processing coverage and compact provenance describe actual work for the snapshot.
+11. Typed Rust builders own provider, schema and query construction. No generalized semantic release compiler is required.
+12. Public callers provide bounded semantic requests and authorized workspace inputs, never arbitrary physical catalogs or plans.
 
 Arrow/DataFusion/Delta are the data plane. SQLite owns reconstructible temporal queues, retry
 state, leases, and command progress only. Python never owns Arrow transformations, DataFusion
@@ -118,7 +116,7 @@ not include an S3 implementation; the explicit `s3-storage` feature is required 
 - delta-rs owns Delta transaction-log interpretation, snapshots, protocol/features, file
   adaptation, table commits, and its DataFusion scan path.
 - CodeFabric owns domain identity, schema meaning, authority resolution, exact epoch selection,
-  multi-table visibility, writer fencing, retry policy, proof, authorization, and public meaning.
+  multi-table visibility, writer fencing, retry policy, authorization, and public meaning.
 
 Raw Parquet listings are never Delta table state. A DataFusion plan or `EXPLAIN` string is never
 semantic identity. Arrow field metadata is annotation unless a named consumer and fault prove
@@ -131,20 +129,17 @@ Every epoch contains role-separated schemas in one catalog graph:
 | Namespace | Contents |
 |---|---|
 | `input` | explicit non-derivable identity, compatibility, policy, algorithm, query, and oracle inputs |
-| `program` | typed normalization, authority, derivation, query, policy, and proof transformations |
+| `program` | typed normalization, authority, derivation, query and policy transformations |
 | `raw` | exact provider-native observations, coverage, remainders, diagnostics, and run provenance |
 | `canonical` | reconciled facts, conflicts, explicit unknowns, and normalized identities |
 | `derived` | application-owned graph/dataflow/effect/resource/summary outputs with algorithm and precision |
 | `public` | authorized stable semantic views and result projections |
-| `proof` | expectations, violations, coverage, causal mutations, provenance closure, and receipts |
 | `system` | derived catalog/runtime/capability/query/update/lease observations |
 | `_storage` | internal exact-version Delta and immutable-segment providers; never public |
 
 Relation and field identity comes from admitted schemas and explicit stable identity inputs.
 Current catalog contents come from live `information_schema` and runtime observation. Function,
-provider, capability, dependency,
-and extension inventories are derived from installation and compilation; they are not authored
-lists.
+provider and extension inventories describe installed support; workspace capability and coverage come from processing. Ordinary code declarations are allowed.
 
 Canonical identifiers are application-owned 16-byte values with stable public encodings. The
 logical Arrow representation is `FixedSizeBinary(16)` plus released typed identity metadata. Provider
@@ -153,49 +148,9 @@ paths are never canonical identity.
 
 ## 4. `FabricEpoch` and sealed catalog ownership
 
-One immutable `FabricEpoch` owns:
+One immutable snapshot owns source/context generation, provider versions and scoped coverage, exact Delta root/version pairs, any immutable segments, schema/authorization configuration, and a sealed DataFusion catalog. One shared workspace RuntimeEnv supplies memory/spill resources across candidates and leased snapshots. A query clones the selected snapshot once and never discovers latest tables during execution.
 
-```text
-fabric_epoch_id
-programmatic_assembly_id, transformation_set identity, and exact release vector
-source generation and source inventory identity
-provider runs, versions, coverage, and capability result
-exact Delta table root/version pairs
-immutable overlay segment identities
-policy and AccessScope inputs
-proof receipt and provenance-closure result
-sealed SessionState and catalog graph
-one governed RuntimeEnv and resource profile
-function, analyzer, optimizer, and extension implementations
-activation event, writer generation, and retention class
-```
-
-The builder starts from a fresh `SessionStateBuilder`, `MemoryCatalogProviderList`,
-`MemoryCatalogProvider`, and role-specific `MemorySchemaProvider`s. It explicitly installs the
-runtime, object stores, providers, functions, analyzer/optimizer rules, query planner, and
-extension planners. Only the builder retains registration handles. Published code receives a
-query/inspection facade and cannot register, deregister, or obtain a raw mutable context.
-
-An epoch is rejected unless input/program/catalog/schema/provider/function/policy/proof closure is exact.
-An accepted query clones the current `Arc<FabricEpoch>` once. It never discovers `latest`,
-refreshes a Delta handle, or consults a mutable global registry while planning or executing.
-
-### 4.1 Programmatic assembly and self-description
-
-`ProgrammaticSchemaAssembly` accepts exact provider batches, explicit typed inputs, and typed
-transformations. Each `ProgrammaticTransformation` declares its semantic identity, input relation
-IDs, plan builder, deterministic ordering contract, resource class, and expected output schema.
-The plan builder constructs the actual DataFusion logical plan; `plan.schema()` is the schema
-authority and the expected schema is a failing assertion over it.
-
-The builder repeatedly installs then observes the candidate catalog until the observation set is
-unchanged. It emits five typed histories: `system.programmatic_relation_observation`,
-`system.programmatic_field_observation`, `system.programmatic_schema_observation`,
-`system.programmatic_dependency_observation`, and
-`system.programmatic_provenance_observation`. A later iteration may describe these observation
-relations themselves. Closure is reached only when every installed relation, field, schema,
-dependency, and provenance edge is observed and no new row appears. A bootstrap metamodel,
-`ModelEpoch -> SchemaContract` projection, replayed schema registry, or model digest is prohibited.
+Typed Rust builders install actual providers, functions and plans. Observe schemas from these objects when useful; compare declared boundary schemas where needed. Do not require a generalized semantic release compiler, fixed-point self-description, five mandatory observation histories or independent proof receipts to construct a snapshot. Published query facades cannot mutate registration state.
 
 ## 5. Executable `SchemaContract`
 
@@ -214,7 +169,7 @@ owns:
 - nullability, nested-child, dictionary, decimal, timestamp/timezone, and map/list/struct rules;
 - fixed-width and extension-metadata requirements;
 - Delta column mapping and deletion-vector adaptation;
-- key, ordering, partitioning, and constraint metadata allowed after proof; and
+- key, ordering, partitioning, and constraint metadata justified by the actual provider contract; and
 - explicit empty-stream schema behavior.
 
 ### 5.2 Phase contract
@@ -271,24 +226,7 @@ deadlines, progress, flow control, cancellation, errors, and terminal status.
 
 ## 7. DataFusion compilation and extension policy
 
-Generic compilers consume explicit input/request/proof relations and typed
-`ProgrammaticTransformation` values, then construct DataFusion `Expr` and `LogicalPlan` values.
-They cover catalog assembly, normalization/authority/unknown selection, derivation, semantic
-queries, policy, and proof. Typed inputs name semantic IDs and bindings; they do not contain SQL,
-physical table names, Rust display strings, or general bytecode.
-
-The compiler uses this per-operation ladder:
-
-1. built-in Arrow/DataFusion expression or kernel;
-2. native projection/filter/join/semi-join/anti-join/union/window/aggregate/sort/limit or bounded
-   `RecursiveQuery`;
-3. scalar, aggregate, or window UDF with exact volatility/return semantics;
-4. planning-time table function/provider when scalar arguments fully name its inputs;
-5. higher-order UDF only for actual collection/lambda semantics;
-6. typed logical extension with relational children for a proved irreducible operation.
-
-Each compiled use emits an observed extension-selection row naming the chosen rung and rejected
-higher rungs. No graph family receives a blanket custom-extension designation.
+Typed Rust builders use DataFusion `Expr` and `LogicalPlan` values for normalization, authority, derivation and queries. Prefer expressions and native relational plans, then functions, then a custom bounded extension only for a concrete capability gap. Record consequential decisions in ordinary code/review notes; do not emit an extension-choice relation for every use. Public requests never supply arbitrary SQL or physical plan text.
 
 A surviving `UserDefinedLogicalNodeCore` exposes all expressions and children, supports
 expression/input rewrite, has stable equality/hash and output schema, and has an
@@ -322,7 +260,7 @@ query-aware feature requires, together, a typed program-selected producer, provi
 optimizer consumer, precision rules, request-sensitive cache identity, and an observable plan
 oracle.
 
-Uniqueness/nullability may become optimizer metadata only after independent relational proof.
+Advertise uniqueness/nullability only when enforced by the provider or established by the input contract; test those claims at that boundary.
 Foreign keys, checks, authority, and access policy remain executable invariants; DataFusion
 metadata is not enforcement.
 
@@ -361,33 +299,11 @@ are never opened through raw Parquet listings.
 
 ### 9.3 Physical layout and maintenance
 
-Partitioning, clustering, Z-ordering, target file size, compaction, checkpoints, and vacuum are
-physical policies derived from measured workload and retention facts. They never change logical
-identity. Optimize/compaction must prove relation equality before successor activation. Vacuum
-starts with a dry run and protects every version, segment, application/provider release, expectation,
-rollback, query, and result lease.
+Use native Delta checkpoint, compaction and vacuum APIs subject to actual supported capabilities. Preserve logical data/schema and exact snapshots referenced by current state, history policy or live leases. Test maintenance/reopen and retention safety at changed boundaries. Do not reimplement the Delta log engine or compare every table against an independent semantic proof before routine compaction.
 
 ### 9.4 Durability classification and exact reconstruction
 
-Delta is the durable authority for every proof-bearing relation needed after process loss. The
-five programmatic observation histories, provider coverage/remainder, canonical/derived state,
-proof violations and provenance closure, operation markers, epoch manifests, and activation events
-are Delta relations whenever restart, audit, incremental invalidation, or provenance resolution
-depends on them. Each table enables CDF where incremental transport is required, records exact
-schema/protocol and commit metadata, loads full statistics for serving, and is reopened at one
-explicit table root/version.
-
-Intermediate `RecordBatch` values used only within a deterministic transformation, optimizer
-scratch, physical plans, streams, and result buffers remain transient Arrow state. They are not
-silently promoted to durable truth. A typed `DurabilityClass` attached to the producing operation
-selects `DELTA_HISTORY`, `IMMUTABLE_ARROW_SEGMENT`, or `TRANSIENT_ARROW`; an unclassified
-proof-bearing output rejects epoch construction.
-
-CDF transports changes between exact versions; it never selects state. Consumers persist an exact
-version checkpoint outside the source table and enforce retention closure. Commit properties
-record operation, input vector, schema/program/release IDs, and provenance references, but are
-physical evidence rather than semantic correctness. Exact table versions and the epoch manifest
-remain the authority.
+Persist schema/provider/configuration identities and compact operation/publication outcomes needed to reconstruct selected state. Catalog introspection can be computed on demand. Generalized observation histories are optional diagnostics with bounded retention, not durable semantic authority or a publication prerequisite.
 
 ## 10. Effective state and immutable overlays
 
@@ -442,7 +358,7 @@ Delta provides atomicity per table, not a cross-table transaction. CodeFabric co
 validates all component versions first, then appends immutable `fabric_epoch` and
 `activation_event` control rows naming the complete exact set. Orphaned component versions are
 unreachable candidates. Current is the unique valid head of the predecessor-linked activation
-chain; forks, missing predecessors, multiple heads, invalid proof, or incompatible compiler
+chain; forks, missing predecessors, multiple heads, incompatible snapshot metadata, or incompatible compiler
 releases fail closed.
 
 An empty chain is lawful. Genesis uses the same command actor and activation
@@ -454,7 +370,7 @@ direct Delta write, default backend, or separate bootstrap authority.
 The only valid activation order is:
 
 ```text
-stage -> prove -> build and seal candidate
+stage -> validate boundaries -> build and seal candidate
       -> close new admissions and establish barrier
       -> revalidate predecessor and writer fence
       -> append and read back activation event
@@ -474,7 +390,7 @@ The installed value is the complete phase-typed `ActiveWorkspace`: exact
 `FabricEpoch`, `SelectedEpochRecord`, query authority, authorized child-session
 factory, admission runtime, resource coordinator, activation authority, and
 command/source lifecycle handles. There is no independently swappable epoch,
-catalog, proof, vector, or readiness flag. Recovery selects an exact retained
+catalog, coverage, vector, or readiness flag. Recovery selects an exact retained
 target epoch or issues a corrective forward epoch through `FabricCommand`; it
 never revives a legacy writer.
 
@@ -499,78 +415,18 @@ logging, or diagnostics.
 
 ## 13. Resources, observability, and proof
 
-One epoch `RuntimeEnv` owns a bounded memory pool, private quota-limited spill, batch size,
-target partitions, object-store registrations, and caches. Query/update admission assigns CPU,
-memory, spill, row, byte, time, and concurrency budgets. Cancellation reaches DataFusion streams,
-provider processes, graph work, artifact creation, and leases. Slow consumers produce
-backpressure rather than unbounded buffering.
+Share one workspace DataFusion budget and spill manager across current/candidate/leased work. Bound application queues, tasks, batches, retained state, query/result bytes, concurrency and deadlines. Own/join work through cancellation and contain external providers. Measure RSS/disk headroom, apply backpressure and recover interrupted operations. This does not promise universal allocation pre-admission or immunity from OOM.
 
-### 13.1 Bounded caches are never authority
+Runtime actions leave compact records containing operation/snapshot/source/context/provider identifiers, requested/completed/remainder scope, exact table versions, timing, terminal outcome and diagnostics. Avoid secrets and unbounded event detail. Detailed traces/intermediates are diagnostic options, not mandatory permanent history. Git records source edits.
 
-DataFusion metadata, file-statistics, and object-list caches have explicit entry/byte bounds;
-object-list entries additionally use a finite 30-second refresh TTL. TTL controls refresh cost,
-not semantic validity: every entry is keyed by exact object/table identity and version and is
-discarded on mismatch. The epoch owns a bounded LRU only for compiled and optimized logical plans,
-keyed by the full program identity, epoch and relation-root/version vector, runtime/session
-configuration, access scope, authorization/policy identity, and resource policy. Physical plans and
-query results are never cached. `ActivationReconciliationReceiptCache` stores only a reconstructible
-receipt/ack optimization and cannot select an epoch or substitute for durable activation evidence.
-
-Metrics and traces identify epoch, source generation, query/command, stage, provider, table
-versions, resource reservations, spill, cancellation, and terminal state without exposing
-credentials, source bytes, internal SQL, or unredacted paths. Metrics diagnose execution; they do
-not establish semantic correctness.
-
-Proof relations contain exact inputs, independently authored expectations, violations, coverage,
-provenance closure, causal mutants, resource outcomes, and `pass`/`fail`/`unknown`. Missing input
-or incomplete coverage is `unknown`, never pass. Capability begins unknown and is advertised only
-when its executable prover succeeds for the exact epoch. A stored receipt is useful only with the
-rows and identities from which it is re-executable.
+Ordinary runtime checks enforce schemas, snapshot identity, publication ownership and scoped coverage. Release tests establish confidence in algorithms; no executable prover must succeed on every epoch before support can be advertised. Distinguish installed support, current processing progress and test confidence.
 
 ## 14. Lifecycle, reconstruction, and fresh activation
 
-Source bytes remain authoritative; watcher and gix observations are hints/accelerators. Each
-accepted source generation produces immutable source images, provider runs, derived facts,
-candidate Delta versions/segments, proof, and an activation event through `FabricCommand`.
-Superseded or stale-generation results cannot commit.
+Source bytes remain authoritative. Conservative invalidation and owner replacement are acceptable; reject stale-generation provider output and publish current coverage/remainder honestly. Immutable snapshots and exact table selection remain mandatory.
 
-Cold reconstruction reads the exact explicit inputs, reruns exact providers and analyses,
-reconstructs typed transformations, opens the exact relation-root/version vector, rederives the
-activation head, builds one sealed session, and compares logical facts/public results with
-incremental state. Recovery closes admission and holds no candidate while reconciling durable
-operation/activation evidence; it installs the selected rebuilt epoch before reconciling the
-receipt/ack cache and reopening. Generated predecessor bundles, bootstrap/replay paths, and static
-registries are physically absent from this proof.
-
-The selected deployment profile is target-only `FreshActivation`. One
-`PreEpochWorkspace` owns command recovery and lawful genesis. A candidate is
-normalized, proved, durably published, selected, read back at one exact control
-horizon, and converted into one `ActiveWorkspace` before admission. Incoherent
-roots, versions, activation events, writer fences, or control horizons fail
-closed. Repair is forward-only; runtime fallback, predecessor comparison,
-rollback-to-predecessor, and dual writes are prohibited. A real deployed
-predecessor, if ever discovered, requires a separate accepted handoff design.
+Routine reopen reads the selected publication record and exact persisted versions, reconstructs the session and resumes interrupted work. A deliberate clean rebuild reruns providers and analyses for audit/differential tests. It is not a mandatory startup or update step. An empty store uses the same owned publication path for genesis. Recovery reconciles unknown writes and installs one coherent selected snapshot before admission; do not silently revive legacy mutation authority.
 
 ## 15. Executable acceptance obligations
 
-The following named commands are normative proof obligations:
-
-| Contract | Required executable oracle |
-|---|---|
-| one Arrow universe and relation-scoped IPC | `just relational-arrow-boundary-check`; `just arrow-universe-check` |
-| logical/physical schema meaning | `just relational-schema-lifecycle-check`; `just schema-phase-boundary-check` |
-| immutable epoch catalog | `just fabric-epoch-construction-check`; `just relational-catalog-closure-check` |
-| provider scan and honest metadata | `just table-provider-contract-check`; `just provider-statistics-contract-check` |
-| native-first compilation | `just semantic-plan-conformance-check`; `just plan-visibility-check` |
-| graph rung and physical duties | `just graph-extension-conformance-check`; `just graph-execution-contract-check` |
-| authorized bound plans | `just access-catalog-isolation-check`; `just authorized-view-bound-authority-check` |
-| Delta exact version and schema | `just delta-exact-version-reconstruction-check`; `just delta-provider-contract-check` |
-| one mutation path and writer | `just fabric-single-mutation-path-check`; `just single-writer-fence-check` |
-| activation ordering and recovery | `just fabric-activation-recovery-check`; `just activation-fault-matrix-check` |
-| epoch/resource reconstruction | `just durable-epoch-reconstruction-check`; `just resource-governance-check` |
-| proof/provenance/capability | `just fabric-epoch-proof-closure-check`; `just provenance-closure-check` |
-| public end-to-end semantics | `just semantic-delivery-vertical-check`; `just independent-semantic-oracle-check` |
-
-A v2.3 release is nonconforming if any required oracle is absent, skipped, self-authored by the
-production path it tests, or nonzero at the proving revision. Digest, file presence, plan text,
-row count, or execution capture alone is not acceptance.
+Validate relevant Arrow/schema/provider boundaries, exact Delta versions, one publication owner, atomic snapshot pinning, retention/recovery and real query results. Use ordinary focused checks and integrated release tests according to risk. A navigation check, source digest or passing process ledger does not establish semantics. Historical recipe lists are not required proof quotas.

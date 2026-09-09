@@ -1,5 +1,7 @@
 # Delta Lake / `delta-rs` Design-Principle Alignment Manual
 
+> Revised 2026-09-08: optional API/capability reference. Current principles and the selected suite govern product contracts. Examples of proof, provenance and lifecycle records are optional diagnostic techniques, not prerequisites for publication or development.
+
 ## Agent workflow for a model-first, contract-driven, authority-centered, provenance-native transactional data fabric
 
 **Version baseline:** `deltalake` / `deltalake-core` `1.0.0` at git revision `43a0cf10a313e5077c48637ad786a05359136bbb` (pre-release pin); Apache DataFusion `55.0.0`; Apache Arrow / Parquet `59.2.0`; `object_store` `0.13.2`; Rust `1.94.1`, edition 2024.
@@ -24,7 +26,7 @@ The manual therefore maps each of the 25 data-fabric principles to:
 2. the correct architectural use of those abstractions;
 3. responsibilities that remain application-owned;
 4. transaction, snapshot, schema, protocol, storage, maintenance, provenance, interoperability, and testing consequences;
-5. evidence an agent must produce before an implementation is considered aligned.
+5. evidence an agent may record before an implementation is considered aligned.
 
 A central premise is that **Delta Lake is strongest when treated as the durable state-transition authority for one logical table**. It is not automatically the authority for cross-table semantics, enterprise governance, authorization, domain models, or multi-table atomicity. Those concerns must remain explicit above the table layer.
 
@@ -122,60 +124,6 @@ If a future implementation question is not supported by the attached capability 
 ---
 
 # 1. How an LLM agent should use this manual
-
-## 1.1 Required input
-
-Before selecting Delta APIs, the agent should have a requirement statement that identifies, at minimum:
-
-- the semantic outcome or durable state transition;
-- the table(s) affected;
-- whether the operation is read-only, append, overwrite, DML, schema/protocol migration, CDF consumption, maintenance, restore, or repair;
-- required snapshot/freshness semantics;
-- schema and compatibility expectations;
-- atomicity and concurrency expectations;
-- retention, time-travel, and CDF requirements;
-- provenance and reproducibility expectations;
-- storage backend and deployment posture;
-- query-serving / DataFusion integration needs.
-
-The requirement should not begin by naming low-level `Add` actions, Parquet files, checkpoints, or `LogStore` internals unless those details are genuinely part of the required semantics.
-
-## 1.2 Mandatory review flow
-
-| Step | Agent action | Required output |
-|---|---|---|
-| 1. **Extract semantic transition** | Separate the intended table-state change or read semantics from storage mechanics. | `SemanticRequirement` + invariants. |
-| 2. **Assign authority** | Name the application semantic authority and the exact Delta table/version authority touched. | `AuthorityMap`. |
-| 3. **Choose snapshot/freshness semantics** | Latest strict, latest eventual, exact version, as-of timestamp, or metadata-only/lazy. | `SnapshotPolicy`. |
-| 4. **Validate schema/protocol/features** | Check table schema, constraints, properties, reader/writer protocol, and operation-specific feature support. | `DeltaTableContract`. |
-| 5. **Choose the highest-level operation** | Prefer `DeltaTable` operation builders / provider APIs before low-level log/action code. | `OperationSelectionRecord`. |
-| 6. **Define transaction and concurrency posture** | Identify read snapshot, conflict class, idempotency key, retry/reconciliation behavior. | `TransactionContract`. |
-| 7. **Define physical/layout policy separately** | Partitioning, target files, stats, optimize/Z-order, vacuum, checkpoint and lazy/eager behavior. | `PhysicalLayoutPolicy`. |
-| 8. **Define provenance and reproducibility** | Pin input versions, schema/protocol identity, operation/config/code IDs, commit metadata, output version. | `ProvenanceClosureMap`. |
-| 9. **Define retention consequences** | State how vacuum/log/CDF retention affects replay, restore, and consumers. | `RetentionSafetyReview`. |
-| 10. **Define serving/query integration** | If DataFusion is involved, bind exact provider snapshot and runtime/object-store state. | `ProviderBindingRecord`. |
-| 11. **Derive tests from claims** | Generate tests for state transition, conflict, schema, protocol, retention, cross-engine, and recovery behavior. | `TestEvidenceMatrix`. |
-| 12. **Run anti-pattern review** | Reject raw-Parquet bypass, implicit latest semantics, blind retries, metadata theater, and ungoverned vacuum. | `AntiPatternDisposition`. |
-| 13. **Produce implementation packet** | Only after the above is coherent, specify crates/modules/builders/configuration/migrations/jobs. | `ImplementationPacket`. |
-
-## 1.3 Stop conditions
-
-The agent should stop at design rather than proceed to code when any of the following remains unresolved:
-
-- “latest” is requested but freshness semantics are not defined;
-- a write retry can duplicate or overwrite data and no idempotency/reconciliation strategy exists;
-- schema evolution is proposed without a compatibility decision;
-- a table declares protocol/features that have not been certified for the intended operation;
-- a multi-table result claims atomicity without an application publication manifest or equivalent overlay;
-- vacuum retention could invalidate required time travel, restore, or CDF consumption;
-- a provider is assumed to refresh automatically after a Delta commit;
-- raw Parquet file listing is being used as a substitute for Delta snapshot state;
-- commit metadata is being treated as an enforced business constraint;
-- column mapping, type widening, deletion vectors, V2 checkpoints, variant, or other advanced features are assumed fully supported without operation-specific evidence;
-- a checkpoint file is being treated as the semantic identity instead of the Delta version;
-- tests cannot be written to prove the promised state transition and failure behavior.
-
----
 
 # 2. Canonical architecture and representation map
 
@@ -282,12 +230,6 @@ Important table-state meaning should exist as typed application models before it
 
 Delta supplies the durable table mechanics; it does not define the domain/business model that determines what a table or state transition means.
 
-### Required evidence
-
-- A serializable operation model exists independently of the Rust builder invocation.
-- One compiler/orchestrator maps the model to Delta operations.
-- Read/write/maintenance code does not independently restate the same domain policy.
-
 ### Reject
 
 - Hard-coded `SaveMode`, retention hours, partition columns, or merge clauses scattered across services.
@@ -322,11 +264,6 @@ A Delta operation model should validate, bind to a table snapshot, compile to th
 
 Cross-operation orchestration, stable semantic model serialization, versioning, and compilation remain application-owned.
 
-### Required evidence
-
-- One `WriteSpec` can generate validation, execution configuration, provenance fields, and contract tests.
-- One `MaintenanceSpec` can generate dry-run, approval, execution, and post-validation steps.
-
 ### Reject
 
 - Configuration DTOs that are immediately unpacked into unrelated procedural paths.
@@ -359,11 +296,6 @@ Delta's greatest architectural value is the existence of an exact durable per-ta
 ### Application-owned overlay
 
 Multi-table publication identity, domain semantics, and cross-table validation require an application authority above Delta.
-
-### Required evidence
-
-- Authority map distinguishes table identity/version, in-memory handles, providers, caches, files, and application publications.
-- Every derived provider/cache carries the exact Delta version it derives from.
 
 ### Reject
 
@@ -413,11 +345,6 @@ Delta snapshot
 - Keep table version, provider snapshot, and query execution state separate.
 - Add backend-specific variation at the storage/provider layer rather than branching throughout consumers.
 
-### Required evidence
-
-- Each layer documents invariant responsibilities and permitted variation.
-- A new storage backend does not change DML/schema/query consumers.
-
 ### Reject
 
 - One universal “DeltaStorage” object owning schema, business policy, auth, object I/O, and query planning.
@@ -449,11 +376,6 @@ Cloud/storage/catalog variability belongs behind Delta/object-store/log-store co
 
 Credential lifecycle, tenant isolation, secret management, and enterprise catalog governance remain outside Delta.
 
-### Required evidence
-
-- Same table operation tests run against local + selected object-store fixtures without semantic branches.
-- Storage configuration is centralized and redacted.
-
 ### Reject
 
 - `if s3 { ... } else if azure { ... }` throughout DML/query/maintenance code.
@@ -484,11 +406,6 @@ Delta operations have semantic intent that should remain stable while file sizin
 - Keep target file size, row-group size, optimize concurrency, vacuum scan concurrency, and checkpoint selection physical.
 - Treat same-version checkpoint adoption as performance/replay change, not semantic state transition.
 - Avoid encoding file paths or specific active files in a domain spec unless exact file selection is itself required.
-
-### Required evidence
-
-- Physical tuning can change without changing operation semantic fingerprint.
-- Query results at the same exact Delta version remain semantically equivalent across lazy/eager/provider variations.
 
 ### Reject
 
@@ -527,12 +444,6 @@ object_store / LogStore
 - Use Parquet as data-file representation, not a parallel table authority.
 - Use CDF as the canonical Delta incremental-change boundary when enabled and retention-appropriate.
 
-### Required evidence
-
-- Representation map has explicit conversion/authority points.
-- No subsystem-specific row format replaces Arrow in the core path without justification.
-- No raw-Parquet bypass exists for a governed Delta table.
-
 ### Reject
 
 - Directly scanning `*.parquet` under a Delta root in the normal query path.
@@ -565,12 +476,6 @@ Delta's durable state model and Arrow's columnar runtime model should be treated
 ### Application-owned overlay
 
 Memory budgets, batching policy, file-size SLOs, and workload-specific layout benchmarks are application concerns.
-
-### Required evidence
-
-- Batch/copy boundaries are inventoried.
-- Small-file and file-stats quality are observable.
-- Performance tests compare representative layout policies.
 
 ### Reject
 
@@ -608,12 +513,6 @@ Delta provides unusually strong native hooks for durable provenance because ever
 ### Application-owned overlay
 
 Delta history is table-local and retention-bound. Cross-table lineage, long-term provenance retention, artifact indexing, and source/code/environment closure remain application-owned.
-
-### Required evidence
-
-- Every committed operation can be resolved from output version to application execution record.
-- Every read-derived durable result records exact input table versions.
-- Provenance survives normal log retention through an application artifact store when required.
 
 ### Reject
 
@@ -659,11 +558,6 @@ application code/build/dependency environment
 - Treat CDF consumer checkpoints as version identities, not timestamps.
 - Preserve application provenance independently of Delta log retention if long-term audit/replay is required.
 
-### Required evidence
-
-- Closure traversal detects missing/expired links explicitly.
-- Replay validates that pinned table versions still exist and required files have not been vacuumed.
-
 ### Reject
 
 - Assuming `history()` is an indefinite provenance archive.
@@ -699,11 +593,6 @@ Delta's core model directly embodies this principle: logical table state advance
 ### Application-owned overlay
 
 For multi-table operations, create an immutable application snapshot/publication containing exact versions for each required table.
-
-### Required evidence
-
-- Concurrency tests prove requests cannot observe mid-operation version drift.
-- Re-execution against the same version produces the same logical table rows, subject to external code/query determinism.
 
 ### Reject
 
@@ -746,14 +635,6 @@ Delta's persisted schema, protocol, table properties, constraints, and write enf
 
 Semantic field IDs, units, business compatibility policy, schema fingerprints, consumer-impact workflow, and migration approvals remain application-owned.
 
-### Required evidence
-
-- Golden Delta/Arrow/DataFusion/Parquet schema fixtures.
-- Strict-write rejection tests.
-- Additive/breaking migration classification.
-- Cross-engine tests for any advanced feature enabled.
-- Nested-nullability and nested-field/partition-name-collision regressions.
-
 ### Reject
 
 - Schema inference as production contract.
@@ -793,13 +674,6 @@ Delta can enforce important table-level governance at the point where durable st
 
 Authentication, subject/tenant policy, row/column access control, approval workflow, and secret management remain outside Delta and should be enforced in catalog/provider/service layers.
 
-### Required evidence
-
-- Constraint violation tests.
-- Unsupported-feature rejection tests.
-- Governance bypass tests covering direct builder/service paths.
-- Vacuum/restore authorization and approval tests.
-
 ### Reject
 
 - Treating table properties as an authorization model.
@@ -836,11 +710,6 @@ DeltaTable read/load/snapshot API
 - Use `FileSelection` for targeted reads rather than constructing raw Parquet scans.
 - Use optimize/vacuum/restore builders rather than deleting/replacing files manually.
 - Descend to kernel/log-store APIs only with a documented semantic gap and protocol test suite.
-
-### Required evidence
-
-- `OperationSelectionRecord` lists higher-level alternatives reviewed.
-- Low-level use has explicit protocol, conflict, compatibility, and recovery tests.
 
 ### Reject
 
@@ -879,12 +748,6 @@ Delta's query performance depends on keeping partition values, file statistics, 
 ### Application-owned overlay
 
 Workload-driven layout policy and benchmark governance remain application responsibilities.
-
-### Required evidence
-
-- `EXPLAIN` proves projection/filter pushdown.
-- File-skipping/partition-pruning metrics or benchmarks exist.
-- Raw-Parquet bypass is absent from governed paths.
 
 ### Reject
 
@@ -939,12 +802,6 @@ Maintenance adds preflight/dry-run/approval phases; CDF adds checkpoint/read/app
 - Validate the new version/schema after mutation.
 - Keep vacuum physical cleanup downstream of retention approval.
 
-### Required evidence
-
-- Failure injection at load, validation, data execution, commit, refresh, and verification.
-- Unknown-commit-outcome test.
-- Dry-run/approval tests for destructive maintenance.
-
 ### Reject
 
 - One method that opens latest, mutates, retries blindly, vacuums, and returns success.
@@ -984,11 +841,6 @@ Important Delta operations produce or can expose rich intermediate artifacts tha
 
 Artifact storage, retention, redaction, indexing, and upgrade migration are application-owned.
 
-### Required evidence
-
-- Failed operations retain a partial artifact bundle through the failure phase.
-- Maintenance approvals can show exactly what was reviewed.
-
 ### Reject
 
 - Only final version number is retained for a complex DML/maintenance operation.
@@ -1022,12 +874,6 @@ Delta supplies a strong table-state ordinal—the version—but application sema
 - Do **not** include checkpoint file identity in semantic table-state fingerprints.
 - Do not hash debug/display output as a timeless semantic fingerprint.
 
-### Required evidence
-
-- Canonicalization is deterministic across process runs.
-- Same-version checkpoint adoption does not change application semantic identity.
-- Material schema/protocol change alters the relevant contract fingerprint.
-
 ### Reject
 
 - Cache key = table URI only.
@@ -1056,12 +902,6 @@ Delta versioning and time travel are powerful reproducibility primitives, but re
 
 Reproducibility across code changes, multi-table state, external sources, and long retention requires an application replay/provenance system.
 
-### Required evidence
-
-- Replay harness can reopen every pinned input version.
-- Vacuum policy is checked against active reproducibility commitments.
-- Operation reports why reproduction is partial when dependencies have expired.
-
 ### Reject
 
 - Timestamp-only replay when exact version is available.
@@ -1085,12 +925,6 @@ Delta protocol features and operation support are version- and operation-specifi
 - Treat variant/nanosecond/deletion-vector behavior as advanced compatibility surfaces.
 - Treat CDF availability as retention-bound.
 - Treat `skip_stats`/lazy replay as a performance posture, not a claim that stats are permanently unavailable.
-
-### Required evidence
-
-- Capability matrix maps table feature × read/write/DML/maintenance operation × engine/version.
-- Negative tests for unsupported features.
-- Cross-engine fixtures for enabled advanced features.
 
 ### Reject
 
@@ -1120,11 +954,6 @@ Delta has several distinct semantic classes that must not be conflated.
 - Use Delta constraints/schema when correctness depends on enforcement.
 - Use commit metadata for lineage references, not authorization or uniqueness enforcement.
 - Treat file stats as optimizer inputs, not truth about business rules.
-
-### Required evidence
-
-- Metadata dictionary classifies each key.
-- Enforcement tests prove real failures for enforced semantics.
 
 ### Reject
 
@@ -1162,11 +991,6 @@ Delta should be used as a protocol-aware transactional table format atop Parquet
 
 Cross-engine certification, protocol upgrade policy, and external catalog governance remain application-owned.
 
-### Required evidence
-
-- Golden tables are readable by every supported engine.
-- Protocol upgrades have explicit rollout/rollback notes.
-
 ### Reject
 
 - Treating Parquet compatibility as equivalent to Delta compatibility.
@@ -1201,11 +1025,6 @@ Delta introduces several state scopes that must be named and kept separate.
 - Keep CDF checkpoints durable and separate from table state.
 - Isolate tenant credentials/runtime mappings appropriately.
 - Explicitly invalidate/rebuild providers after a freshness-relevant table refresh.
-
-### Required evidence
-
-- `StateOwnershipMap` covers process/runtime/session/request/transaction/consumer/job scopes.
-- Concurrency tests prove no stale provider or cross-tenant object-store leakage.
 
 ### Reject
 
@@ -1246,11 +1065,6 @@ Delta can expose table versions, state transitions, conflict retries, maintenanc
 ### Application-owned overlay
 
 Metrics backend, tracing, dashboards, alerting, long-term audit storage, and cardinality policy are application concerns.
-
-### Required evidence
-
-- One operation ID correlates traces, Delta versions/history, metrics, and provenance artifact.
-- Upgrade benchmarks detect plan/layout/commit-contention drift.
 
 ### Reject
 
@@ -1315,7 +1129,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## MOD — Semantic modeling and table authority
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | MOD-01 | Application `TableSpec` | Model logical table purpose, schema authority, partitioning, required properties/features, retention class, and serving posture before creation. | P1, P3, P12 | Spec serialization + validation tests. |
 | MOD-02 | `SnapshotPolicy` | Represent `LatestStrict`, `LatestEventual`, `PinnedVersion`, `AsOfTime`, and `MetadataFirst` explicitly. | P1, P11, P19, P23 | Policy→load behavior tests. |
@@ -1328,7 +1142,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## STA — Table loading, snapshots, freshness, and time travel
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | STA-01 | `DeltaTableBuilder::load`, `open_table*` | Load table state through Delta, not filesystem enumeration. | P3, P7, P11 | Open/latest fixture tests. |
 | STA-02 | `version`, `get_latest_version` | Distinguish loaded local version from backing-store latest. | P3, P23, P24 | stale-state tests. |
@@ -1345,7 +1159,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## SCH — Schema and table-contract utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | SCH-01 | `StructType::try_new`, `StructField` | Compile the application schema authority into validated Delta logical schema. | P1, P3, P12 | Delta schema golden fixture. |
 | SCH-02 | Arrow schema mapping | Use Arrow schema/RecordBatch as runtime boundary while keeping Delta schema as persisted table contract. | P7, P8, P12 | Delta↔Arrow round trips. |
@@ -1362,7 +1176,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## GOV — Protocol, feature, policy, and mutation governance
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | GOV-01 | Check constraints | Place stable row invariants in Delta when expressible and supported. | P13, P21 | invalid write/DML rejection. |
 | GOV-02 | append-only property | Use to enforce append-only table classes; do not rely on naming convention. | P13, P21 | mutation rejection tests. |
@@ -1379,7 +1193,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## TXN — Transactions, optimistic concurrency, and commit semantics
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | TXN-01 | exact read snapshot | Record the Delta version against which a mutation is planned. | P11, P16 | before-version assertion. |
 | TXN-02 | optimistic validate-and-commit | Treat conflict validation as part of the transaction contract; do not emulate row locks. | P11, P16, P20 | conflicting-writer tests. |
@@ -1392,7 +1206,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## WRT — Write and append utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | WRT-01 | `DeltaTable::write` | Canonical governed Arrow/DataFusion write boundary. | P7, P14 | append/read-back test. |
 | WRT-02 | `SaveMode` | Select Append/Overwrite/ErrorIfExists/Ignore explicitly from semantic intent. | P1, P16 | mode semantics tests. |
@@ -1405,7 +1219,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## DML — Delete, update, merge, and row-level mutation
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | DML-01 | delete builder | Use deterministic predicate; model delete-all as explicit destructive operation. | P1, P13, P16 | predicate/all-row tests. |
 | DML-02 | update builder | Compile assignments/predicate from typed spec; validate casts and constraints. | P1, P12, P16 | update result + invalid cast tests. |
@@ -1420,7 +1234,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## CDF — Change Data Feed utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | CDF-01 | CDF enablement | Enable through governed property migration with retention/consumer design. | P13, P16 | before/after property tests. |
 | CDF-02 | `scan_cdf` | Consume changes via Delta's CDF API, not transaction-log scraping. | P7, P14, P22 | change-type fixtures. |
@@ -1435,7 +1249,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## LAY — Partitioning, file layout, statistics, and pruning
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | LAY-01 | partition columns | Select stable low/medium-cardinality query-pruning dimensions; treat as table contract. | P6, P12, P15 | partition pruning benchmark. |
 | LAY-02 | partition filters | Use Delta partition-filter APIs for metadata/file selection rather than parsing paths. | P5, P15 | filter/path fixtures. |
@@ -1450,7 +1264,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## MNT — Optimize, vacuum, restore, checkpoint, and repair
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | MNT-01 | optimize compact | Use for small-file reduction while asserting logical table equality before/after. | P6, P14, P25 | equality + file-count tests. |
 | MNT-02 | Z-order | Use only after workload benchmark shows file-skipping benefit. | P6, P15 | before/after query benchmark. |
@@ -1467,7 +1281,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## STO — LogStore, ObjectStore, cloud, and deployment
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | STO-01 | `LogStore` | Treat as table-scoped transaction-log consistency/commit boundary, distinct from raw object I/O. | P4, P5 | backend commit smoke tests. |
 | STO-02 | `ObjectStore` | Use as physical I/O abstraction; do not infer table state from listings. | P3, P5 | list-vs-snapshot tests. |
@@ -1482,7 +1296,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## QRY — DataFusion serving and Delta provider integration
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | QRY-01 | Delta `TableProvider` | Register Delta provider, never raw Parquet folder, for governed reads. | P7, P14, P15 | provider plan smoke. |
 | QRY-02 | `update_datafusion_session` | Register table-root object store into intended runtime; remember it does not overwrite an existing mapping. | P5, P23 | endpoint/mapping tests. |
@@ -1497,7 +1311,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## OBS — Provenance, history, observability, and reproducibility
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | OBS-01 | operation artifact bundle | Capture spec, pins, contract, plan/preflight, before/after versions, metrics, verification, errors. | P9, P10, P17 | complete/partial bundle tests. |
 | OBS-02 | `history()` | Use as durable table-local audit source within retention; copy/index externally for long retention. | P9, P10 | history lookup tests. |
@@ -1512,7 +1326,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## INT — Interoperability and compatibility
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | INT-01 | Arrow `RecordBatch` | Use as canonical Rust/Python/data-plane batch boundary. | P7, P8, P22 | Arrow round trips. |
 | INT-02 | Parquet | Use as Delta-managed data file format; do not expose it as alternate table authority. | P3, P7, P22 | Delta+Parquet cross-engine fixtures. |
@@ -1527,7 +1341,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## EXT — Lowest-necessary Delta extension level
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | EXT-01 | high-level load/provider | Use for ordinary read/query needs. | P14 | API review. |
 | EXT-02 | high-level write/DML builder | Use for ordinary state changes. | P14 | contract suite. |
@@ -1540,7 +1354,7 @@ The following stable identifiers allow future functional building blocks to map 
 
 ## TST — Contract-derived Delta testing
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 |---|---|---|---|---|
 | TST-01 | schema contract tests | Exact/nullability/nested/metadata/evolution/constraint fixtures. | P12, P25 | unit + integration. |
 | TST-02 | snapshot/version tests | Latest/stale/pinned/as-of/lazy/same-version-checkpoint behavior. | P11, P19, P25 | local + object-store fixtures. |
@@ -2080,254 +1894,10 @@ Mark provenance closure and reproducibility status
 
 ---
 
-# Part IV — Required agent design artifacts
+# Part IV — Optional design notes
 
-The following artifacts operationalize the design constitution for Delta-backed systems. For small/local workflows some may be compact, but important production state transitions should make these decisions explicit.
+Record only a decision that helps implementation or review. Use ordinary prose for ownership, chosen API, relevant risk and validation. No mandatory artifact classes or matrices.
 
-# 21. `SemanticRequirement`
-
-```yaml
-semantic_requirement:
-  id: stable requirement id
-  objective: externally meaningful read or state transition
-  tables:
-    - logical_table_id: ...
-      access: read | append | overwrite | dml | schema_migration | maintenance | cdf
-  snapshot_semantics: latest_strict | latest_eventual | pinned | as_of | metadata_first
-  output_contract: ...
-  invariants:
-    - machine-testable invariant
-  atomicity_scope: per_table | application_publication
-  retention_expectations: ...
-  non_semantic_preferences:
-    - latency, file size, concurrency, compression
-  prohibited_shortcuts:
-    - raw parquet bypass, blind retry, unapproved vacuum, etc.
-```
-
-# 22. `AuthorityMap`
-
-| Concept | Authority | Mutable by | Derived representations | Staleness/invalidation | Provenance identity |
-|---|---|---|---|---|---|
-| table semantic contract | application `TableSpec` / `SchemaContract` | governance workflow | Delta metadata/schema, Arrow schema, provider schema | contract fingerprint mismatch | table/spec ID + version |
-| durable table state | Delta transaction log | committed Delta operations | `DeltaTable`, snapshot, provider, file report | loaded version differs | table ID + Delta version |
-| multi-table state | application publication manifest | publication coordinator | provider set/query snapshot | any table version mismatch | publication ID/fingerprint |
-| CDF consumer progress | consumer checkpoint store | consumer commit | next version range | checkpoint lag/retention | source table ID + version |
-| maintenance policy | application policy | governance workflow | optimize/vacuum builder config | policy version change | maintenance policy ID |
-
-# 23. `DeltaTableContract`
-
-```yaml
-delta_table_contract:
-  logical_table_id: ...
-  canonical_uri_id: ...
-  schema:
-    contract_version: ...
-    fingerprint: ...
-    fields: ...
-  partition_columns: [...]
-  constraints: [...]
-  properties:
-    append_only: ...
-    cdf_enabled: ...
-    retention: ...
-  protocol:
-    min_reader_version: ...
-    min_writer_version: ...
-    reader_features: [...]
-    writer_features: [...]
-  advanced_feature_posture:
-    column_mapping: disabled | certified | restricted
-    deletion_vectors: ...
-    v2_checkpoint: ...
-    variant: ...
-    type_widening: unsupported | certified
-  supported_operations:
-    read: ...
-    write: ...
-    dml: ...
-    cdf: ...
-    optimize: ...
-    vacuum: ...
-  cross_engine_matrix: ...
-```
-
-# 24. `SnapshotPolicy`
-
-```yaml
-snapshot_policy:
-  mode: latest_strict | latest_eventual | pinned_version | as_of_time | metadata_first
-  requested_version: ...
-  requested_as_of: ...
-  resolved_version: ...
-  staleness_budget: ...
-  require_stats: true
-  allow_lazy_files: ...
-  provider_rebuild_on_refresh: true
-  persist_resolved_pin: true
-```
-
-# 25. `TransactionContract`
-
-```yaml
-transaction_contract:
-  operation_id: ...
-  input_delta_version: ...
-  mutation_class: append | overwrite | replace_where | delete | update | merge | migration | restore
-  idempotency:
-    deterministic_key: ...
-    retry_safe: ...
-    duplicate_detection: ...
-  conflict_posture:
-    expected_conflicts: ...
-    retry_limit_policy: ...
-  ambiguous_commit_reconciliation:
-    inspect_history: true
-    operation_reference: ...
-  provenance_commit_properties: [...]
-  expected_output:
-    new_version: one committed successor/retried successor
-    verification: ...
-```
-
-# 26. `FeatureUtilizationPlan`
-
-| Requirement/building block | Selected pattern IDs | Native Delta features | Application overlay | Why highest viable level | Key contracts | Evidence |
-|---|---|---|---|---|---|---|
-| reproducible read | STA-03, QRY-05, OBS-03 | exact version + provider | publication/query snapshot | preserves Delta authority and DataFusion pruning | version/schema/protocol | replay + EXPLAIN |
-| bounded rerun | WRT-03, TXN-03, TXN-04 | overwrite + replaceWhere | operation/idempotency model | simpler than row merge when whole slice regenerates | predicate + retry | predicate/retry tests |
-| incremental projection | CDF-03–CDF-09 | CDF | durable consumer checkpoint | native change semantics | version order + retention | crash/replay tests |
-
-# 27. `ContractAndCapabilityMatrix`
-
-| Claim | Semantic class | Exact/partial/unsupported | Owner | Consumer/enforcer | Failure consequence | Test |
-|---|---|---|---|---|---|---|
-| exact table state at version N | native authority | exact | Delta log | snapshot/provider | wrong reproducibility if false | pinned read fixture |
-| column mapping write | protocol + operation capability | operation-specific | delta-rs | write/DML builder | corrupt/incompatible table if overclaimed | feature matrix |
-| v2Checkpoint declared | protocol compatibility | recognized | delta-rs protocol checker | reader/writer gate | false incompatibility if absent | feature fixture |
-| commit metadata `schema_contract_version` | lineage metadata | advisory/reference | application | provenance resolver | lineage gap | history join test |
-| file statistics | planner metadata | exact/inexact/absent by file/action | Delta/provider | DataFusion pruning | performance drift, not business correctness | pruning test |
-
-# 28. `LifecycleArtifactMap`
-
-| Phase | Input | Delta/native artifact | Application artifact | Gate | Failure class |
-|---|---|---|---|---|---|
-| declare | requirement | none | operation spec | semantic validation | `declaration.*` |
-| resolve | table spec | URI/log store | resolved table identity | authorization/storage policy | `resolution.*` |
-| snapshot | table identity | exact snapshot/version | snapshot pin | freshness + retention | `snapshot.*` |
-| validate | snapshot + spec | schema/protocol/properties | contract report | feature/policy gate | `contract.*` |
-| plan | validated op | DataFusion plan / candidate files | plan/preflight artifact | predicate/layout safety | `planning.*` |
-| execute data | plan/input | Arrow/Parquet + candidate actions | execution telemetry | resource/schema checks | `execution.*` |
-| commit | candidate transition | transaction-log commit | transaction record | optimistic validation | `commit.*` |
-| verify | new version | reopened snapshot | verification report | output contract | `verification.*` |
-| observe/publish | verified version | history/metrics/CDF | provenance/publication | closure/repro status | `publication.*` |
-
-# 29. `ProvenanceClosureMap`
-
-```yaml
-provenance:
-  operation_id: ...
-  publication_id: ...
-  semantic_spec:
-    id: ...
-    version: ...
-    fingerprint: ...
-  inputs:
-    - table_id: ...
-      delta_version: ...
-      schema_fingerprint: ...
-      protocol_fingerprint: ...
-  output:
-    table_id: ...
-    delta_version: ...
-    commit_reference: ...
-  planning:
-    datafusion_plan_artifact: ...
-    config_fingerprint: ...
-  environment:
-    deltalake_rev: 43a0cf10a313e5077c48637ad786a05359136bbb
-    datafusion: 55.0.0
-    arrow: 59.2.0
-    parquet: 59.2.0
-    object_store: 0.13.2
-    rust: 1.94.1
-    cargo_lock_fingerprint: ...
-  observations:
-    operation_metrics: ...
-    write_retry_count: ...
-  retention:
-    replay_versions_still_available: ...
-    cdf_range_still_available: ...
-  reproducibility:
-    exact_table_inputs_pinned: ...
-    environment_recorded: ...
-    missing_links: [...]
-```
-
-# 30. `StateOwnershipMap`
-
-| State | Scope | Owner | Mutable? | Lifetime | Authority relationship | Refresh/reset | Concurrency/invalidation |
-|---|---|---|---|---|---|---|---|
-| loaded table state | service cache/table handle | table registry | yes via refresh/load | handle lifetime | derived from exact Delta version | `update_*` / reload | version-tagged |
-| snapshot file/stat cache | process/table internals | delta-rs | yes/rebuildable | process | non-authoritative | replay/rebuild | identity/capability checked |
-| provider | session/query snapshot | provider registry | immutable view | registration/query | derived from Delta snapshot | rebuild on version change | exact-version key |
-| transaction actions | request/operation | mutation executor | yes until commit | one attempt | non-authoritative candidate | discard/retry | operation scoped |
-| CDF checkpoint | consumer | checkpoint store | yes | consumer lifetime | application progress authority | monotonic commit | exactly-once protocol |
-| maintenance approval | job | governance workflow | controlled | job/audit retention | application policy state | immutable after execution | approval ID |
-| object-store mapping | runtime/session | runtime owner | controlled | session/runtime | resource state only | replace/new context | tenant/env isolated |
-
-# 31. `MaintenanceSafetyReview`
-
-```yaml
-maintenance_safety:
-  table_id: ...
-  loaded_version: ...
-  operation: optimize | zorder | vacuum | restore | filesystem_check
-  target_scope: ...
-  active_writer_assessment: ...
-  cdf_consumer_checkpoints: ...
-  pinned_versions_required: [...]
-  retention_policy: ...
-  dry_run:
-    required: ...
-    artifact: ...
-  semantic_equality_check: ...
-  rollback_posture: ...
-  approval_id: ...
-  post_validation: ...
-```
-
-# 32. `TestEvidenceMatrix`
-
-| Contract ID | Claim | Positive tests | Negative/adversarial tests | Concurrency/fault tests | Cross-engine tests | Upgrade tests | CI gate |
-|---|---|---|---|---|---|---|---|
-
-Every row in `ContractAndCapabilityMatrix` must map to at least one evidence row.
-
-# 33. `OperationSelectionRecord`
-
-```yaml
-operation_selection:
-  requirement: ...
-  candidates_reviewed:
-    - DeltaTable load/provider
-    - DeltaTable write
-    - BlindDeltaTable
-    - delete/update/merge
-    - schema/constraint/property/feature builders
-    - CDF
-    - optimize/vacuum/restore/filesystem-check
-    - FileSelection
-    - kernel transaction APIs
-    - LogStore/raw actions
-  selected_level: ...
-  why_higher_levels_are_insufficient: ...
-  protocol_risk_added: ...
-  concurrency_risk_added: ...
-  required_tests: ...
-```
-
----
 # Part V — Crosswalks for future functional building blocks
 
 # 34. Principle-to-pattern crosswalk
@@ -2414,147 +1984,9 @@ This preserves a crucial separation: **the functional catalogue says what the fa
 
 ---
 
-# Part VI — Comprehensive agent review checklist
+# Part VI — Optional review prompts
 
-# 37. Semantic and authority review
-
-- [ ] The table/state-transition meaning exists as a typed application model or the design explains why one is unnecessary.
-- [ ] One semantic authority is named for the table contract and one exact Delta version is named for persisted table state.
-- [ ] Loaded `DeltaTable`, snapshot, provider, cache, checkpoint, Parquet files, and object-store listings are explicitly classified as authority or derived state.
-- [ ] Multi-table consistency uses an application version manifest/publication rather than implied Delta atomicity.
-- [ ] A checkpoint is never treated as a semantic table version.
-- [ ] Every cache/provider carries the exact Delta version and relevant contract/config fingerprints.
-
-# 38. Snapshot and freshness review
-
-- [ ] Read policy is one of latest strict / latest eventual / pinned version / as-of time / metadata-first.
-- [ ] As-of timestamps are resolved and persisted as exact versions.
-- [ ] Long-running or reproducible queries pin versions for their full lifetime.
-- [ ] Shared handles are not mutated across incompatible freshness/time-travel semantics.
-- [ ] Provider rebuild rules are explicit after table refresh.
-- [ ] Lazy/without-files mode is treated as a performance posture, not a guarantee that file state will never be materialized.
-- [ ] Query-serving statistics policy is explicit and normally keeps pruning-capable stats.
-- [ ] Same-version checkpoint adoption is identity-neutral.
-
-# 39. Schema/protocol contract review
-
-- [ ] Application schema authority, Delta `StructType`, Arrow schema, provider schema, and Parquet physical schema have explicit relationships.
-- [ ] Types, nullability, decimal precision/scale, timestamp semantics, nested structure, partition columns, and metadata classes are defined.
-- [ ] Strict schema is the default write posture.
-- [ ] Merge/overwrite schema changes are explicit migrations.
-- [ ] Constraints and NOT NULL are used where Delta can enforce required invariants.
-- [ ] Reader/writer protocol and declared features are validated before every governed operation class.
-- [ ] Operation-specific feature restrictions are recorded.
-- [ ] Column mapping, variant, deletion vectors, V2 checkpoints, nanosecond timestamps, and type widening have explicit certification posture.
-- [ ] Nested logical non-null / physical optional Parquet interop is tested.
-- [ ] Nested field names matching top-level partition-column names are tested.
-
-# 40. Transaction and write review
-
-- [ ] Every mutation has an input version, operation ID, idempotency/retry model, expected output contract, and before/after version record.
-- [ ] Save mode is explicit.
-- [ ] Schema mode is explicit if enabled.
-- [ ] Cast policy is explicit.
-- [ ] `replaceWhere` rows are prevalidated against the predicate.
-- [ ] DataFusion plan writes preserve the exact intended `SessionState` / runtime configuration.
-- [ ] File sizing/partitioning/compression are classified as physical policy, not hidden semantics.
-- [ ] Blind append uses `BlindDeltaTable` only when no file-state reads/DML are required.
-- [ ] Unknown commit outcomes are reconciled before retry.
-- [ ] Write retry metrics are captured.
-- [ ] Multi-writer S3-style deployments have safe locking/conditional commit semantics.
-
-# 41. DML review
-
-- [ ] Delete/update/merge predicates are deterministic and type-correct.
-- [ ] Merge aliases and clause ordering are explicit.
-- [ ] Duplicate source/target matches have a defined policy.
-- [ ] Append-only and advanced-feature restrictions are checked first.
-- [ ] DataFusion session/runtime state is injected where required.
-- [ ] Rewritten-file/row metrics are observed.
-- [ ] Constraints and schema are revalidated after the mutation.
-- [ ] Retry behavior cannot duplicate or corrupt the intended logical transition.
-
-# 42. CDF review
-
-- [ ] CDF enablement is governed and retention-aware.
-- [ ] Consumer starts from an exact version or race-free initial-snapshot boundary.
-- [ ] `_commit_version` is the canonical ordering/checkpoint identity.
-- [ ] `_commit_timestamp` / in-commit timestamp is treated as temporal metadata, not exact identity.
-- [ ] Consumer checkpoint is durable and updated only after downstream success.
-- [ ] Duplicate replay is safe/idempotent.
-- [ ] Deletion-vector CDF semantics are fixture-tested where applicable.
-- [ ] Schema evolution across the consumed range has an explicit compatibility path.
-- [ ] Vacuum safety checks include every CDF consumer checkpoint.
-- [ ] A longer-lived audit/event layer exists if consumers can exceed source retention.
-
-# 43. Query/provider review
-
-- [ ] Delta provider is used instead of raw Parquet registration.
-- [ ] Provider exact version is recorded.
-- [ ] Runtime object-store mapping is correct and not silently stale.
-- [ ] Projection/predicate/partition pruning is verified with `EXPLAIN`/benchmarks.
-- [ ] Query-serving stats are not disabled accidentally.
-- [ ] Delta-aware column mapping, nested schema adaptation, and deletion vectors remain inside the provider.
-- [ ] File path diagnostic columns are access-controlled/redacted.
-- [ ] Multi-table queries bind to one coherent application publication/version set.
-
-# 44. Layout and maintenance review
-
-- [ ] Partition columns are selected from query patterns and remain stable/low-enough cardinality.
-- [ ] File statistics are retained/observed for important filter columns.
-- [ ] Small-file thresholds and target sizes are table-class specific.
-- [ ] Optimize is triggered by measured need, not schedule alone.
-- [ ] Z-order has workload benchmark evidence.
-- [ ] Optimize targets closed/inactive partitions when possible.
-- [ ] Logical row/schema equality is verified before/after optimize.
-- [ ] Vacuum always evaluates audit/replay/CDF/long-reader retention requirements.
-- [ ] Governed vacuum performs dry run and retains review evidence.
-- [ ] Required versions are protected/reopened after vacuum.
-- [ ] Restore behavior before/after vacuum is understood.
-- [ ] Filesystem check is treated as incident repair, not routine cleanup.
-
-# 45. Storage/deployment review
-
-- [ ] One canonical table root identity is used by all writers.
-- [ ] `LogStore` and `ObjectStore` responsibilities are separate.
-- [ ] Storage options are centralized in typed configuration.
-- [ ] Secrets never enter logs, metrics, or commit metadata.
-- [ ] TLS posture is deliberate.
-- [ ] Only required cloud/backend features are enabled.
-- [ ] S3 multi-writer safety is proven.
-- [ ] Test/prod object-store endpoints cannot share a stale runtime mapping accidentally.
-- [ ] Tenant credentials/object stores are correctly isolated.
-- [ ] OpenDAL is used deliberately for long-tail stores and not assumed equivalent to native backend behavior.
-
-# 46. Provenance/reproducibility review
-
-- [ ] Operation identity is allocated before execution.
-- [ ] Every read/write records exact input table versions.
-- [ ] Every mutation records output version and commit reference.
-- [ ] Schema/protocol/config/code/environment fingerprints are linked.
-- [ ] Commit properties contain compact lineage references but no secrets.
-- [ ] Delta history is not the only long-term provenance store if retention requirements exceed log retention.
-- [ ] Reproducibility status records whether every required version/file still exists.
-- [ ] Same-version checkpoint/cache changes do not alter semantic identity.
-- [ ] A durable result can recursively resolve its input Delta versions and operation/spec/environment artifacts.
-
-# 47. Test-evidence review
-
-- [ ] Every capability claim maps to tests.
-- [ ] Exact-version/latest/time-travel semantics are tested.
-- [ ] Strict schema and constraint failures are tested.
-- [ ] Protocol/table-feature negative cases are tested.
-- [ ] Concurrent mutation conflicts and unknown commit outcomes are fault-injected.
-- [ ] DML clause/duplicate-match edge cases are tested.
-- [ ] CDF deletion-vector/ICT/replay/retention cases are tested.
-- [ ] Provider refresh/pruning/schema adaptation is tested.
-- [ ] Optimize semantic equality and nested-schema regressions are tested.
-- [ ] Vacuum/restore/retention breakage is tested.
-- [ ] Storage backend concurrency and credential failures are tested.
-- [ ] Cross-engine compatibility is tested for every advanced feature used.
-- [ ] Dependency/type-universe drift is a CI gate.
-
----
+Inspect the changed boundary for identity, schema, ownership, precision, coverage and performance concerns. Select relevant tests; do not complete an exhaustive checklist for routine work.
 
 # Part VII — Anti-pattern diagnosis and prescribed correction
 
@@ -2583,31 +2015,9 @@ This preserves a crucial separation: **the functional catalogue says what the fa
 
 ---
 
-# Part VIII — Compact LLM-agent instruction block
+# Part VIII — Current development workflow
 
-> **Use Delta Lake as the durable per-table transactional state authority, not as a directory of Parquet files.** Every meaningful read should resolve to an explicit snapshot policy and exact Delta version; every meaningful mutation should be modeled as `version N + typed operation -> committed version N+1`, with optimistic conflict handling, verification, provenance, and retry/reconciliation semantics.
->
-> **Keep application semantics above Delta and compile them into Delta operations.** Define typed table, snapshot, write, DML, CDF, maintenance, retention, and provenance models. Prefer `DeltaTable` loading/provider/operation builders, `BlindDeltaTable` only for true blind appends, and public CDF/maintenance APIs before kernel transactions, log-store internals, or raw actions. Do not manually scan or mutate Parquet files under a Delta root for governed behavior.
->
-> **Assign authority precisely.** The Delta transaction log at an exact version owns one table's durable state. In-memory `DeltaTable`/snapshot/provider objects, file/stat caches, checkpoints, and Parquet/object-store listings are derived execution state. A newly available checkpoint at the same Delta version does not create a new semantic state. Multi-table atomicity/serving consistency requires an application publication manifest pinning exact versions for all tables.
->
-> **Treat schema, constraints, protocol, and table features as executable contracts.** Keep an application `SchemaContract` linked to the persisted Delta schema; default writes to strict schema; make merge/overwrite schema changes explicit migrations; validate protocol/features before every governed operation; fail closed on unsupported declared features. Treat column mapping, deletion vectors, variant, V2 checkpoints, nanosecond timestamps, type widening, and other advanced features as operation-specific compatibility surfaces, not blanket capabilities.
->
-> **Separate semantic transition from physical strategy.** Save mode, predicate, schema policy, source/target identity, snapshot version, and retention obligations are semantic. File sizes, row groups, compression, lazy/eager materialization, checkpoint selection, optimize concurrency, Z-order, and vacuum traversal are physical policies. Same semantic state should remain invariant across physical tuning.
->
-> **Preserve DataFusion/Arrow visibility.** Use Arrow `RecordBatch` as the data plane and the Delta `TableProvider` as the query boundary. Do not register raw Parquet folders for Delta tables. Preserve stats/partition metadata for query-serving pruning, pass the correct `SessionState` into plan-backed writes/DML/optimize, rebuild providers when snapshot freshness changes, and let delta-rs own deletion-vector, column-mapping, and nested physical-schema adaptation.
->
-> **Make concurrency and retry semantics explicit.** Delta uses optimistic concurrency. Assign operation/idempotency identity before execution, record the input version, distinguish pre-commit failures from unknown commit outcomes, reconcile history/latest version before retrying ambiguous writes, and capture commit retry metrics. Configure safe locking/conditional commit semantics for multi-writer object stores.
->
-> **Make provenance and reproducibility native to the flow.** Record exact input versions, output version, schema/protocol fingerprints, semantic model/config/code/environment identity, DataFusion plan artifacts when relevant, commit references, operation metrics, and retention status. Commit metadata should carry compact lineage references, not replace a durable provenance graph. CDF consumers should checkpoint `_commit_version`, not timestamps.
->
-> **Treat retention and maintenance as governed lifecycle operations.** Optimize and Z-order change physical layout while preserving logical table state and require equality/benchmark evidence. Vacuum physically destroys old-file availability and must respect readers, pinned versions, restore commitments, audit/replay requirements, and CDF checkpoints. Governed vacuum should dry-run first. Restore is a new committed version; filesystem check is incident repair, not normal cleanup.
->
-> **Be conservative about capability claims.** Protocol recognition does not prove every authoring/maintenance path is supported. Unknown/unsupported is safer than false confidence. Maintain an operation×feature×engine compatibility matrix and derive tests directly from every claim.
->
-> **Do not implement until the design states:** semantic authority, exact snapshot/freshness policy, table contract, transaction/idempotency behavior, feature compatibility, physical layout policy, retention consequences, provenance closure, state ownership, operation-selection level, and test evidence.
-
----
+Use AGENTS.md and the product-delivery workflow. The capability catalogue is an optional reference, not an artifact or proof quota.
 
 # Appendix A — Version-specific leverage map for `43a0cf10` / DataFusion 55 / Arrow 59
 

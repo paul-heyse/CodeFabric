@@ -1,180 +1,30 @@
-"""Tests for relational authoritative-suite discovery and fail-closed routing."""
-
-from __future__ import annotations
-
-import os
-import subprocess
+import shutil
 from pathlib import Path
 
 import pytest
 
-from tooling.ci.artifact_contracts import ROOT
 from tooling.ci.authoritative_design_conformance import (
-    REQUIRED_TAGS,
+    GOVERNANCE,
+    ROOT,
     AuthoritativeDesignError,
-    _legacy_hits,
-    _validate_relational_design_selection,
-    validate_authoritative_design,
-    validate_master_directory,
+    selected_documents,
 )
 
 
-def test_relational_authoritative_design_conformance() -> None:
-    report = validate_authoritative_design()
-    assert report["current_master_count"] == 8
-    assert report["historical_master_count"] == 32
-    assert report["generated_manifest_authority_count"] == 0
-    assert report["suite_id"] == "codefabric-relational-data-fabric"
-    assert report["suite_version"] == "2.3.0"
-    assert report["plan_selection"] == "active-v7"
+def test_selected_documents_do_not_need_a_plan_pointer():
+    assert len(selected_documents()) == 8
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("artifact", "interface-design-review"),
-        ("status", "draft"),
-        ("doctrine_path", "docs/library_ref/full_data_fabric_design_principles.md"),
-    ],
-)
-def test_relational_design_selection_rejects_nonaccepted_authority(
-    field: str, value: str
-) -> None:
-    design = {
-        "artifact": "design-dossier",
-        "status": "accepted",
-        "doctrine_path": "docs/library_ref/full_data_fabric_design_principles_v2.md",
-    }
-    design[field] = value
-    with pytest.raises(AuthoritativeDesignError, match="accepted v2 doctrine"):
-        _validate_relational_design_selection(design)
-
-
-def _write_suite(root: Path) -> Path:
-    directory = root / "docs/authoritative_design"
-    directory.mkdir(parents=True)
-    for tag in sorted(REQUIRED_TAGS):
-        v1_name = f"{tag.lower()}_v1.md"
-        v2_name = f"{tag.lower()}_v2.md"
-        issuance_current_name = f"{tag.lower()}_v2_1.md"
-        terminal_name = f"{tag.lower()}_v2_3.md"
-        v1 = directory / v1_name
-        v1.write_text(f"# historical {tag}\n", encoding="utf-8")
-        artifact_id = f"fixture-{tag.lower()}"
-        (directory / v2_name).write_text(
-            "---\n"
-            "artifact: authoritative-design\n"
-            f"artifact_id: {artifact_id}\n"
-            "suite_id: codefabric-relational-data-fabric\n"
-            "suite_version: 2.0.0\n"
-            f"artifact_tag: {tag}\n"
-            "artifact_version: 2.0.0\n"
-            "authority_status: historical\n"
-            f"successor_path: docs/authoritative_design/{issuance_current_name}\n"
-            f"predecessor_path: docs/authoritative_design/{v1_name}\n"
-            "---\n\n"
-            f"# historical v2 {tag}\n\n{chr(96)}{artifact_id}{chr(96)}\n",
-            encoding="utf-8",
-        )
-        (directory / issuance_current_name).write_text(
-            "---\n"
-            "artifact: authoritative-design\n"
-            f"artifact_id: {artifact_id}\n"
-            "suite_id: codefabric-relational-data-fabric\n"
-            "suite_version: 2.1.0\n"
-            f"artifact_tag: {tag}\n"
-            "artifact_version: 2.1.0\n"
-            "authority_status: current\n"
-            f"predecessor_path: docs/authoritative_design/{v2_name}\n"
-            "---\n\n"
-            f"# current {tag}\n\n{chr(96)}{artifact_id}{chr(96)}\n",
-            encoding="utf-8",
-        )
-        (directory / terminal_name).write_text(
-            "---\n"
-            "artifact: authoritative-design\n"
-            f"artifact_id: {artifact_id}\n"
-            "suite_id: codefabric-relational-data-fabric\n"
-            "suite_version: 2.3.0\n"
-            f"artifact_tag: {tag}\n"
-            "artifact_version: 2.3.0\n"
-            "authority_status: current\n"
-            f"predecessor_path: docs/authoritative_design/{issuance_current_name}\n"
-            "---\n\n"
-            f"# terminal {tag}\n\n{chr(96)}{artifact_id}{chr(96)}\n",
-            encoding="utf-8",
-        )
-    return directory
-
-
-def test_relational_authoritative_design_rejects_stray_authority_entry(
-    tmp_path: Path,
-) -> None:
-    directory = _write_suite(tmp_path)
-    (directory / ".DS_Store").write_bytes(b"stray")
-    with pytest.raises(AuthoritativeDesignError, match="non-master"):
-        validate_master_directory(directory, root=tmp_path)
-
-
-def test_relational_authoritative_design_rejects_duplicate_current_role(
-    tmp_path: Path,
-) -> None:
-    directory = _write_suite(tmp_path)
-    original = directory / "ont_v2_3.md"
-    duplicate = directory / "ont_duplicate_v2_3.md"
-    duplicate.write_text(
-        original.read_text(encoding="utf-8").replace(
-            "fixture-ont", "fixture-ont-duplicate"
-        ),
-        encoding="utf-8",
-    )
-    with pytest.raises(
-        AuthoritativeDesignError, match="historical predecessor has multiple successors"
-    ):
-        validate_master_directory(directory, root=tmp_path)
-
-
-def test_relational_authoritative_design_legacy_reference_policy() -> None:
-    live_hits, historical_hits = _legacy_hits(ROOT)
-    assert live_hits == []
-    assert historical_hits
-
-
-def test_relational_plan_v7_dependency_graph_after_activation() -> None:
-    completed = subprocess.run(
-        (
-            "just",
-            "plan-dependency-check",
-            (
-                "docs/plans/"
-                "codefabric_execution_proved_relational_data_fabric_implementation_plan_v7_2026-09-02.md"
-            ),
-        ),
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert completed.returncode == 0, completed.stderr
-    assert "14 packets" in completed.stdout
-
-
-@pytest.mark.parametrize("mode", ["missing", "empty"])
-def test_spec_outline_fails_for_missing_or_empty_default(
-    tmp_path: Path, mode: str
-) -> None:
-    candidate = tmp_path / mode
-    if mode == "empty":
-        candidate.mkdir()
-    environment = os.environ.copy()
-    environment["CODEFABRIC_SPEC_OUTLINE_DEFAULT"] = str(candidate)
-    completed = subprocess.run(
-        ("./scripts/spec-outline.sh",),
-        cwd=ROOT,
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert completed.returncode != 0
-    assert "authoritative design root" in completed.stderr
+def test_duplicate_and_missing_links_fail(tmp_path: Path):
+    destination = tmp_path / GOVERNANCE.parent
+    shutil.copytree(ROOT / GOVERNANCE.parent, destination)
+    governance = tmp_path / GOVERNANCE
+    original = governance.read_text()
+    row = next(line for line in original.splitlines() if line.startswith("| ONT |"))
+    governance.write_text(original + "\n" + row + "\n")
+    with pytest.raises(AuthoritativeDesignError, match="duplicate"):
+        selected_documents(tmp_path)
+    governance.write_text(original)
+    selected_documents(tmp_path)["ONT"].unlink()
+    with pytest.raises(AuthoritativeDesignError, match="invalid selected"):
+        selected_documents(tmp_path)

@@ -2546,72 +2546,13 @@ A separate `CONTRIBUTING.md` is optional for a solo project. Prefer one accurate
 
 # Part XI — LLM programming-agent operating specification
 
-## 59) Mandatory session bootstrap
+## 59) Session context
 
-Before a substantial code change, an agent SHOULD run or obtain the equivalent of:
-
-```bash
-pwd
-just --list
-rustc -vV
-cargo -V
-rustup show active-toolchain
-cargo metadata --format-version 1 --no-deps
-uv --version
-uv run python --version
-```
-
-Then inspect:
-
-```text
-Cargo.toml
-pyproject.toml
-rust-toolchain.toml
-justfile
-relevant Rust production source
-relevant Python interface source
-nearby tests
-```
-
-If the task depends on an optional deep tool, capture its version/help before relying on nontrivial flags.
-
-### 59.1 Baseline before edit
-
-For ordinary work:
-
-```bash
-just ci-fast
-```
-
-or a narrower repository-owned baseline if the full command is expensive. Record pre-existing failures; do not attribute them to the edit.
-
----
+Start with STATUS.md, AGENTS.md and relevant source. Use `just --list` for commands. The nonmutating session report supplies environment context; inspect exact versions when the task depends on them. Use relevant attributable results as a baseline. Do not run CI before every edit or reload every manifest for a documentation task.
 
 ## 60) Change-risk classification
 
-Every change should be classified before selecting validation.
-
-| Change | Minimum additional evidence |
-|---|---|
-| comment/docs only | Ruff/Typos as relevant |
-| local safe Rust logic | check/Clippy + targeted nextest |
-| public Python façade | pytest + Pyrefly + Ruff + wheel test if packaging-significant |
-| PyO3 conversion/binding | Rust tests + pytest + Maturin build; Miri where pure unsafe conversion logic permits |
-| error mapping | Rust error tests + Python exception tests |
-| Cargo feature | cargo-hack + featureless and `python` builds |
-| dependency | hygiene + deny/audit + tests + feature matrix |
-| unsafe/pointer/concurrency | Geiger + Miri + fuzz where input-driven + native tests |
-| parser/protocol | coverage + fuzz + snapshots + mutation testing on critical logic |
-| macro/derive issue | cargo-expand |
-| performance claim | Hyperfine baseline/after + profiler; codegen tools if mechanism matters |
-| binary/wheel size | cargo-bloat + binutils + final wheel size |
-| cross-target code | Cross/native target evidence |
-| Python packaging | fresh wheel install + pytest |
-| public Rust API | semver-checks + feature surface |
-
-The agent must not run Tier C tools merely to appear thorough. It should run them when they produce evidence relevant to the risk.
-
----
+Choose checks that answer the changed behavior: documentation links/format for docs, tooling tests for runners, Rust check and focused tests for logic, provider/wire compatibility for those boundaries, and integrated domain tests for cross-domain changes. Performance claims require measurements. Mutation/fuzz/coverage/MSRV are opt-in when useful, not a universal quota. No native Python extension exists; keep the four build domains.
 
 ## 61) Editing invariants
 
@@ -2735,37 +2676,7 @@ Do not change production code to compensate for an environment failure, or relax
 
 ## 65) Evidence record for nontrivial checks
 
-A programming agent reporting a result SHOULD preserve:
-
-```text
-tool + version
-rustc/Cargo version
-Python + Maturin version when relevant
-active toolchain
-target
-features
-profile
-exact command
-package/test scope
-exit status
-important counts/findings
-report/artifact path
-known exclusions
-source/environment mutations
-```
-
-Prefer a statement such as:
-
-```text
-cargo-nextest <version>, rustc <version>
-command: cargo nextest run -P ci
-result: N passed, 0 failed; doctests passed separately
-Python: pytest N passed after maturin development install
-```
-
-rather than “tests are good.”
-
----
+Report the command, revision/context when material, result and limitations. Preserve useful logs under ignored target output. A focused pass proves its tested scope; a failing product check remains visible. No typed evidence artifact, proving commit, source digest or separate review registry is required.
 
 # Part XII — Workflow recipes by development task
 
@@ -2778,7 +2689,7 @@ rather than “tests are good.”
 4. cargo fmt
 5. cargo check + Clippy
 6. targeted nextest
-7. full `just ci-fast` before completion
+7. integrated checks when changed behavior or unresolved risk warrants them
 ```
 
 No Miri/fuzz/mutants unless the changed semantics warrant them.
@@ -2840,9 +2751,7 @@ Fuzzer output is discovery evidence; ordinary tests become permanent regression 
 
 ## 70) Dependency change
 
-Use the campaign from §35 and additionally rebuild the Python wheel if the dependency participates in the native extension. A dependency that only builds under the pure Rust test profile may still fail in a Maturin release build because features/linking differ.
-
----
+Use the existing pinned domains. Check version/feature/type-universe conflicts and relevant compatibility. Ordinary compatible additions do not need a licensing audit or whole-library study. Investigate downgrades/conflicts explicitly. Keep source origins and lockfiles accurate.
 
 ## 71) Performance optimization
 
@@ -3407,20 +3316,7 @@ Do not assume every metric improves simultaneously.
 
 ## 92) Agent controls
 
-```text
-[ ] Agent inspects `just --list` and repository configuration first.
-[ ] Agent captures active toolchain/target/features for nontrivial evidence.
-[ ] Agent classifies change risk before selecting expensive tools.
-[ ] Agent does not create crates merely for organization.
-[ ] Agent does not widen Rust visibility merely for tests.
-[ ] Agent preserves Rust -> Python dependency direction without inventing a mandatory production source layout.
-[ ] Agent treats source/environment-mutating tool operations explicitly.
-[ ] Agent classifies failures before attempting fixes.
-[ ] Agent separates pre-existing failures from regressions.
-[ ] Agent reports exact evidence class and known exclusions.
-```
-
----
+AGENTS.md is canonical. Skills are optional task guidance; product-delivery replaces the old plan/execute/status chain. Explicit user scope takes precedence. Session hooks report context without running tests, installs, activation or mutation. Preserve user-selected sandbox settings and secret handling.
 
 # Part XVII — Recommended initial implementation sequence
 

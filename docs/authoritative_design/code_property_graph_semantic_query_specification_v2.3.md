@@ -11,6 +11,8 @@ predecessor_path: docs/authoritative_design/code_property_graph_semantic_query_s
 
 # Composable Semantic Query Specification v2.3
 
+> Target revised 2026-09-08 under the consolidated pragmatic delivery review. These are target contracts, not a claim of implemented behavior; see [current status](../../STATUS.md). Historical predecessors are unchanged.
+
 ## 0. Authority, identity, and compatibility
 
 The stable artifact ID is `codefabric-composable-semantic-cpg-query` (`QRY`). This document is
@@ -335,33 +337,11 @@ worded as complete for the workspace when relevant partitions were denied.
 
 ## 7. Evidence, unknowns, absence, and provenance
 
-Evidence dimensions remain orthogonal:
+Keep certainty (syntax/static/compiler/possible/heuristic/unresolved), resolution, directness, and completeness separate. Each response describes the pinned snapshot, requested scope, processed scope, pending/failed/unsupported scope, reason, provider/context, freshness and precision. Distinguish installed support from workspace progress and from confidence established by tests.
 
-```text
-certainty: source/syntax, static semantic, compiler/lowered, possible, heuristic, unresolved
-resolution: exact, sound possible set, heuristic candidate, unresolved, unavailable
-directness: direct, transitive, summary, materialized derivation
-completeness: COMPLETE, PARTIAL, INDETERMINATE, UNAVAILABLE, NOT_APPLICABLE
-```
+An empty result distinguishes complete scoped absence, no match after filters, unresolved inputs, unavailable family, partial failure, and truncation. Negative clauses require complete relevant scope or an explicit negative fact. No may-alias edge does not prove non-aliasing.
 
-Empty results distinguish:
-
-1. proven empty under complete scoped coverage;
-2. no match after filters;
-3. unresolved inputs;
-4. unavailable fact family;
-5. partial provider/owner failure; and
-6. explicit or hard limit.
-
-Negative properties or pattern clauses require an explicit negative fact or complete relevant
-owner/context coverage. `No may-alias edge` is not `proven not to alias`.
-
-Every fact identifies producer/release, owner, source where applicable, certainty, resolution,
-directness, and direct provenance. Derived facts additionally identify algorithm, precision,
-input epoch/projection, completeness, support facts/witness paths, and provenance edges. Closure
-is computed to source images, explicit typed-input and transformation decisions, provider runs,
-table versions, the application/provider release vector, and independent expectations; it is not
-a maintained boolean.
+Facts carry compact producer/source/owner provenance. Derived facts identify algorithm/precision and relevant input snapshot or supporting facts. Trace further when useful for explanation or diagnosis; generalized provenance closure and independent expectation receipts are not query prerequisites. Older facts are returned only under explicit historical/stale selection with their original generation and current remainder, never silently as current.
 
 ## 8. Canonical identity and ordering
 
@@ -452,7 +432,7 @@ capability_summaries, diagnostic_references
 
 The negotiated v2 profile additionally exposes `fabric_epoch_id`, application/provider release
 vector, programmatic assembly identity,
-proof receipt, policy identity, and exact epoch compatibility class. Additions do not change the
+processing coverage, policy identity, and exact epoch compatibility class. Additions do not change the
 v1.3 meanings above.
 
 ### 10.3 Record families
@@ -521,11 +501,7 @@ forbidden.
 
 ## 12. Dynamic reference and capability behavior
 
-Reference, schema, phrase, form, producer, capability, and proof views are filtered projections
-of the pinned epoch. Changing accepted typed-input, transformation, or provider/proof rows changes
-these surfaces after activation without editing a package bundle. A form is advertised only when
-its required program bindings, producer closure, functions/extensions, policies, and executable
-proof are present.
+Reference, schema, phrase, form and installed-support views describe the installed implementation and are filtered by authorization. Report per-snapshot coverage separately. A supported form can return precise unavailable or pending scope; it does not require an executable proof receipt before discovery.
 
 Validation may return normalized request relations, dependency graph, resolved semantics,
 capability requirements, cost class, errors, and warnings without executing retrieval. It does
@@ -607,26 +583,4 @@ resource, session, or lease identity.
 
 ## 14. Executable acceptance obligations
 
-| Contract | Required executable oracle |
-|---|---|
-| all eight forms and role composition | `just semantic-query-relational-conformance-check` |
-| released request/response compatibility | `just semantic-query-conformance-check`; `just proto-contract-check` |
-| DAG, cycles, fan-in/out, typed references | `just query-composition-dag-check` |
-| deterministic result semantics | `just query-determinism-check` |
-| no SQL/physical/plan public surface | `just public-query-port-check` |
-| typed-input/transformation-to-plan causality | `just programmatic-schema-causality-check` |
-| native plan and schema conformance | `just semantic-plan-conformance-check`; `just relational-schema-lifecycle-check` |
-| authorization and bound closure | `just access-catalog-isolation-check`; `just authorized-view-bound-authority-check` |
-| unknown/negative/coverage semantics | `just independent-semantic-oracle-check` |
-| dynamic references and capability | `just dynamic-reference-delivery-check` |
-| four-layer public equivalence | `just semantic-delivery-vertical-check` |
-| pure preparation and closed atomic start | `just fastmcp4-atomic-start-check` |
-| typed guarded continuation and replay rejection | `just fastmcp4-guard-roundtrip-check` |
-| daemon public handles and per-read authority | `just fastmcp4-resource-authority-check` |
-| authorized bounded completion | `just fastmcp4-completion-authorization-check` |
-| explicit cancellation and resume without resubmit | `just fastmcp4-cancellation-recovery-check` |
-
-Acceptance fixtures are independently authored and decoded. Production program/application output,
-stored plan text, count/digest agreement, or the predecessor engine alone cannot author expected
-semantics. Every required oracle MUST pass at the proving revision and retained public profiles
-MUST reject incompatible versions before query acceptance.
+Exercise the supported public forms through the real daemon/adapter and independently justified answers. Cover identity, scope/authorization, incomplete results, bounds, cancellation and persisted reopen as affected. All eight forms remain target scope; the production plan stages their delivery. Passing schema/navigation checks does not demonstrate query behavior. No plan/oracle certification dispatcher is required.

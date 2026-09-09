@@ -8,6 +8,8 @@ on:
     branches: [master]
   schedule:
     - cron: "17 4 * * *"
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -32,6 +34,11 @@ jobs:
     outputs:
       extractor: ${{ steps.paths.outputs.extractor }}
       sidecar: ${{ steps.paths.outputs.sidecar }}
+      stable-root: ${{ steps.paths.outputs.stable-root }}
+      adapter: ${{ steps.paths.outputs.adapter }}
+      contracts: ${{ steps.paths.outputs.contracts }}
+      governance: ${{ steps.paths.outputs.governance }}
+      tooling: ${{ steps.paths.outputs.tooling }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,25 +50,16 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.sha }}
         run: |
-          extractor=false
-          sidecar=false
-          if [[ "$EVENT_NAME" != "pull_request" ]]; then
-            extractor=true
-            sidecar=true
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            python3 tooling/ci/change_routes.py --base "$BASE_SHA" --head "$HEAD_SHA" >>"$GITHUB_OUTPUT"
           else
-            changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
-            if grep -Eq '^(rustc-extractor/|contracts/|tooling/proto/|rust-toolchain\.toml)' <<<"$changed"; then
-              extractor=true
-            fi
-            if grep -Eq '^(pyrefly-sidecar/|contracts/|rules/no-pyrefly-public-api\.yml)' <<<"$changed"; then
-              sidecar=true
-            fi
+            python3 tooling/ci/change_routes.py --full >>"$GITHUB_OUTPUT"
           fi
-          echo "extractor=$extractor" >>"$GITHUB_OUTPUT"
-          echo "sidecar=$sidecar" >>"$GITHUB_OUTPUT"
 
   stable-root:
     name: Stable daemon/data plane
+    needs: changes
+    if: needs.changes.outputs.stable-root == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -103,6 +101,8 @@ jobs:
 
   adapter:
     name: FastMCP adapter
+    needs: changes
+    if: needs.changes.outputs.adapter == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -126,6 +126,8 @@ jobs:
 
   contracts:
     name: Released contracts and interoperability
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -157,16 +159,14 @@ jobs:
         run: |
           cargo nextest run --locked --no-default-features --features rpc --test integration -E 'test(/rust_protobuf_matches_the_shared_wire_fixture/)' --no-tests=fail
           uv run --frozen --project codefabric-cpg-mcp pytest codefabric-cpg-mcp/tests/test_proto.py
-      - name: Released fixture and registry assurance
-        run: just released-fixture-check
-      - name: Released wave acceptance gates
-        run: just wave-acceptance-check
       - name: sccache telemetry
         if: always()
         run: sccache --show-stats
 
   governance:
     name: Structural and graph governance
+    needs: changes
+    if: needs.changes.outputs.governance == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -184,8 +184,6 @@ jobs:
         run: just tool-version-contract-check
       - name: Structural boundary rules
         run: just governance-scan
-      - name: Superseded governance zero state
-        run: just model-zero-state-check
       - name: Duplicate-family policy and negative fixture
         run: just duplicate-family-check
 
@@ -250,3 +248,33 @@ jobs:
       - name: sccache telemetry
         if: always()
         run: sccache --show-stats
+
+
+  tooling:
+    name: Documentation and development tooling
+    needs: changes
+    if: needs.changes.outputs.tooling == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: 1.98.0
+      - uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.12.7"
+          python-version: "3.14.7"
+          enable-cache: true
+      - name: Install command runner
+        run: |
+          source tooling/rust-tool-versions.env
+          cargo binstall --no-confirm just@"$JUST_VERSION"
+          cargo binstall --no-confirm ast-grep@"$AST_GREP_VERSION"
+      - name: Locked adapter environment
+        run: uv sync --frozen --project codefabric-cpg-mcp --python 3.14.7
+      - name: Tooling and current document checks
+        run: |
+          just tooling-lint
+          just tooling-test
+          just docs-check

@@ -40,3 +40,7 @@ never from this derived file.
 Consult the current manifest/lockfile, then the exact reference, then compile
 or import the API when load-bearing. A future library change is an explicit
 migration. No semantic facade is added merely because an API might change.
+
+## Current use
+
+These references are optional API navigation. The selected FAB table names the target API baseline; Cargo manifests, locks and local patch declarations identify installed sources. Local native patches remain selected until production consumers are migrated. Alignment manuals do not impose principle maps or proof artifacts. Use current headings after the 2026-09-08 revision.

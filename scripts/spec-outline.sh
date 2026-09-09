@@ -25,9 +25,6 @@ set -euo pipefail
 
 CF_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 RULES="${CF_ROOT}/tooling/ast-grep/outline/specs.yml"
-# The environment override exists only so the conformance test can prove that
-# missing and empty default roots fail closed without mutating the repository.
-DEFAULT_TARGET="${CODEFABRIC_SPEC_OUTLINE_DEFAULT:-docs/authoritative_design}"
 
 if [ ! -f "$RULES" ]; then
   echo "spec-outline: missing extractor at $RULES" >&2
@@ -97,16 +94,10 @@ fi
 # No path given: run from the repo root so the default resolves relatively and
 # the reported paths stay short.
 cd "$CF_ROOT"
-if [ ! -d "$DEFAULT_TARGET" ]; then
-  echo "spec-outline: authoritative design root does not exist: $DEFAULT_TARGET" >&2
+specs=()
+while IFS= read -r selected; do specs+=("$selected"); done < <(python3 "$CF_ROOT/tooling/ci/authoritative_design_conformance.py" --paths)
+if [ "${#specs[@]}" -ne 8 ]; then
+  echo "spec-outline: invalid current design selection" >&2
   exit 2
 fi
-shopt -s nullglob
-specs=("$DEFAULT_TARGET"/*.md)
-shopt -u nullglob
-if [ "${#specs[@]}" -eq 0 ]; then
-  echo "spec-outline: authoritative design root contains no Markdown masters: $DEFAULT_TARGET" >&2
-  exit 2
-fi
-exec ast-grep outline --outline-rules "$RULES" -l markdown "${defaults[@]}" "$@" \
-  "$DEFAULT_TARGET"
+exec ast-grep outline --outline-rules "$RULES" -l markdown "${defaults[@]}" "$@" "${specs[@]}"

@@ -6,7 +6,7 @@
 
 [files]
 extend-exclude = [
-  # Immutable upstream/amended dependency artifacts have their own exact census verifier.
+  # Vendored upstream sources retain their own vocabulary; do not edit them for spelling.
   "third_party/native/",
   "target/",
   "dist/",
@@ -62,3 +62,7 @@ WRONLY = "WRONLY"
 # gix-dir names its byte-native repository-relative path field `rela_path`.
 # This is a pinned upstream public API identifier and cannot be renamed locally.
 rela = "rela"
+
+# Pinned public names: Pydantic serialization settings and the gix debugging CLI.
+ser = "ser"
+ein = "ein"

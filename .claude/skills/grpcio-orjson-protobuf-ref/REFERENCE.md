@@ -514,3 +514,9 @@ tests (§18.7, §27, §37.3).
    code fences — `# gRPC Python Advanced`-style comments, `#` in shell blocks, and protobuf's
    `# 43.x` tables. A bare `rg '^# '` over-reports. `just lib-outline` already handles this;
    hand-rolled `grep` does not.
+
+## Current use
+
+API indexes above are navigation, not a development workflow. Consult the current suite and
+`STATUS.md` for product target and implementation status. Historical section/line references
+may require re-navigation; no conformance score, audit cycle, or source-edit artifacts are required.

@@ -1,15 +1,15 @@
-"""Falsification tests for the frozen WP65 method and measured evidence."""
+"""Regression tests for benchmark statistics using historical sample data."""
 
 from __future__ import annotations
 
 import copy
 import math
 import sys
+from pathlib import Path
 
 import pytest
 
 from tooling.benchmarks.fastmcp4_release_benchmark import (
-    DEFAULT_REPORT_PATH,
     METHOD_PATH,
     ROOT,
     BenchmarkError,
@@ -21,11 +21,18 @@ from tooling.benchmarks.fastmcp4_release_benchmark import (
     nearest_rank,
 )
 from tooling.ci.fastmcp4_release_performance import (
-    DEFAULT_SUMMARY_PATH,
     ReleasePerformanceError,
     summary_document,
     validate_report_document,
     validate_summary,
+)
+
+# Historical samples exercise numerical/report helpers, never current-product status.
+DEFAULT_REPORT_PATH = Path(
+    "contracts/evidence/relational-fabric-v7/wp65-raw-performance-v2.json"
+)
+DEFAULT_SUMMARY_PATH = Path(
+    "contracts/evidence/relational-fabric-v7/wp65-performance-review-v2.json"
 )
 
 

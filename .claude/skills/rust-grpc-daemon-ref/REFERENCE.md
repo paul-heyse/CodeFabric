@@ -794,3 +794,9 @@ Rules 1-6 are about finding things; 7-10 about reading them; 11-14 about trustin
 
 14. **Evidence over restatement.** If this file and a cited section disagree, open the section; if
     the disagreement survives, the document wins and this file needs a fix — flag it.
+
+## Current use
+
+API indexes above are navigation, not a development workflow. Consult the current suite and
+`STATUS.md` for product target and implementation status. Historical section/line references
+may require re-navigation; no conformance score, audit cycle, or source-edit artifacts are required.

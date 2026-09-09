@@ -1079,3 +1079,9 @@ sketches were not all borne out, and its §9-§12 describe the callback-channel 
 Always name the file you read. Note that `docs/spec_index/library-routing.md` still routes FastMCP
 questions to the 3.4.7 filename; that index is derived navigation, never normative, and this skill
 is the more current pointer.
+
+## Current use
+
+API indexes above are navigation, not a development workflow. Consult the current suite and
+`STATUS.md` for product target and implementation status. Historical section/line references
+may require re-navigation; no conformance score, audit cycle, or source-edit artifacts are required.

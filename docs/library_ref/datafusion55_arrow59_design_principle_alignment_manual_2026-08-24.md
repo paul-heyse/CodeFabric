@@ -1,5 +1,7 @@
 # DataFusion 55 + Arrow 59 Design-Principle Alignment Manual
 
+> Revised 2026-09-08: optional API/capability reference. Current principles and the selected suite govern product contracts. Examples of proof, provenance and lifecycle records are optional diagnostic techniques, not prerequisites for publication or development.
+
 ## Agent workflow for a model-first, contract-driven, authority-centered, provenance-native data fabric
 
 **Version baseline:** Apache DataFusion `55.0.0`; Apache Arrow Rust / Parquet `59.2.0`; `object_store` `0.13.2` where DataFusion storage integration is relevant.
@@ -22,7 +24,7 @@ It therefore maps each design principle to:
 2. the correct way to use those abstractions;
 3. application-owned responsibilities that the libraries do not supply automatically;
 4. optimizer, schema, state, governance, provenance, interoperability, and testing consequences;
-5. evidence an agent must produce before implementation is considered aligned.
+5. evidence an agent may record before implementation is considered aligned.
 
 The document deliberately avoids equating “library feature exists” with “architectural principle is satisfied.” For example, Arrow metadata can carry a provenance reference, but it is not a provenance system; a DataFusion catalog can be an authority boundary, but it is not automatically a durable governed catalog; `datafusion-proto` can serialize plans, but its bytes are not a stable cross-version semantic fingerprint.
 
@@ -70,55 +72,6 @@ DataFusion and Arrow supply the compiler IRs, runtime contracts, extension point
 ---
 
 # 1. How an LLM agent should use this manual
-
-## 1.1 Required input
-
-Before consulting feature details, the agent should have a high-level requirement statement that identifies, at minimum:
-
-- the semantic outcome;
-- inputs and outputs;
-- affected authorities and state;
-- required correctness and governance properties;
-- expected scale, latency, and execution posture;
-- interoperability boundaries;
-- reproducibility and provenance expectations.
-
-The requirement need not yet prescribe DataFusion or Arrow APIs. Prematurely naming a physical operator or storage implementation is itself a design smell unless the requirement is genuinely physical.
-
-## 1.2 Mandatory review flow
-
-For every material subsystem or capability, execute this sequence.
-
-| Step | Agent action | Required output |
-| --- | --- | --- |
-| 1. **Extract semantics** | Separate domain/query meaning from implementation mechanics. | `SemanticRequirement` and explicit invariants. |
-| 2. **Assign authority** | Name the single source of truth for each concept and every derived representation. | `AuthorityMap` with mutation, derivation, and staleness rules. |
-| 3. **Select canonical representations** | Choose the Arrow/DataFusion objects that will represent data, schema, expressions, plans, and execution. | `RepresentationMap`. |
-| 4. **Choose the highest viable extension level** | Attempt built-ins and transparent `Expr` composition before UDFs, providers, custom logical nodes, physical operators, or planners. | `ExtensionDecisionRecord`. |
-| 5. **Define contracts and capability truth** | State what is invariant, what may vary, and which optimizer/runtime claims are exact, inexact, absent, or unknown. | `ContractAndCapabilityMatrix`. |
-| 6. **Define lifecycle phases** | Expose declaration, resolution, validation, compilation, optimization, authorization, execution, verification, and persistence/observation boundaries. | `LifecycleArtifactMap`. |
-| 7. **Preserve optimizer visibility** | Keep predicates, types, ordering, constraints, and calculation structure visible wherever possible. | `OptimizerVisibilityReview`. |
-| 8. **Design provenance and reproducibility** | Specify identities, versions, fingerprints, configuration, plans, source snapshots, and result references produced by construction. | `ProvenanceClosureMap` and `ReproducibilityStatus`. |
-| 9. **Define state ownership and resource behavior** | Assign session/runtime/query/task/partition scopes and cache invalidation. | `StateOwnershipMap` and `ResourcePlan`. |
-| 10. **Derive evidence from contracts** | Generate tests for every advertised property and lifecycle boundary. | `TestEvidenceMatrix`. |
-| 11. **Run anti-pattern review** | Reject hidden semantics, duplicate authorities, backend leakage, opaque UDFs, premature physicalization, metadata theater, and capability overclaiming. | `AntiPatternDisposition`. |
-| 12. **Produce the implementation packet** | Only after the preceding artifacts are coherent, specify modules, traits, APIs, migrations, and ordered work. | `ImplementationPacket`. |
-
-## 1.3 Stop conditions
-
-The agent should stop at design—not proceed to code—when any of the following remains unresolved:
-
-- two representations both appear authoritative;
-- schema compatibility or null semantics are implicit;
-- a provider cannot truthfully state pushdown or ordering behavior;
-- a UDF is proposed only to hide transparent expression logic;
-- physical choices are embedded in the semantic model without semantic necessity;
-- provenance depends only on logs or human convention;
-- state scope, ownership, or invalidation is unclear;
-- a claimed metadata property is not consumed or enforced anywhere;
-- tests cannot be derived for a claimed invariant.
-
----
 
 # 2. Canonical architecture and representation map
 
@@ -220,13 +173,6 @@ Important meaning should exist as inspectable typed models before it becomes con
 - Arrow/DataFusion do not define the application semantic model, its versioning, or its stable identity.
 - The application must define validation, serialization, evolution, and compiler ownership for those models.
 
-### Required evidence
-
-- A serialized semantic model exists independently of executable Rust control flow.
-- One compiler path produces `Expr`/`LogicalPlan` and all consumers use it.
-- Dependency extraction from the compiled tree matches declared inputs.
-- No duplicated business rule appears in provider, writer, API, and test code.
-
 ### Reject these implementations
 
 - Runtime strings as durable expression identity.
@@ -263,12 +209,6 @@ A semantic model should behave like a declarative program: it should validate, b
 
 - Application models need their own semantic-version and compiler-version policy.
 - Cross-version compatibility of serialized DataFusion plans must be managed explicitly.
-
-### Required evidence
-
-- The same model can generate execution, documentation, dependency inventory, and tests.
-- Round-trip tests prove model serialization preserves meaning.
-- Optimized and unoptimized execution return equivalent results.
 
 ### Reject these implementations
 
@@ -307,12 +247,6 @@ Multiple representations are expected, but every representation must declare the
 - DataFusion in-memory catalogs are not automatically durable or governed.
 - Stable authority IDs and cache invalidation versions are application responsibilities.
 
-### Required evidence
-
-- An `AuthorityMap` lists owner, mutation route, derivations, and invalidation for every major concept.
-- No duplicate schema definition or function implementation is authoritative.
-- Cache entries carry source version/fingerprint.
-
 ### Reject these implementations
 
 - Rust struct, SQL DDL, JSON config, and writer each defining schema independently.
@@ -348,12 +282,6 @@ Hierarchy should encode responsibility and substitutability. Consumers should re
 ### Application-owned overlay
 
 - Application hierarchies should mirror native responsibility boundaries, not duplicate them with competing layers.
-
-### Required evidence
-
-- Each interface states invariant methods and legal variability.
-- Adding a new backend changes registration and one implementation, not consumers.
-- Function types match their cardinality/state semantics.
 
 ### Reject these implementations
 
@@ -392,12 +320,6 @@ Backend knowledge belongs at the adapter/provider boundary. The rest of the syst
 
 - Application-specific source identity, credential policy, and refresh lifecycle still require explicit models.
 
-### Required evidence
-
-- A new backend passes the same provider contract suite.
-- No normal consumer branches on Delta/Parquet/API/memory source type.
-- Projection and predicate mapping tests cover reordered and hidden backend fields.
-
 ### Reject these implementations
 
 - Backend enums threaded through every service.
@@ -433,12 +355,6 @@ Relational and domain intent should remain stable while DataFusion is free to op
 ### Application-owned overlay
 
 - Application models may expose non-semantic performance preferences, but they must be clearly classified as hints or policies.
-
-### Required evidence
-
-- A logical plan can be inspected without physical details.
-- Changing partition count or join strategy leaves semantic fingerprints and results unchanged.
-- Physical requirements are declared on operators, not embedded in domain specs.
 
 ### Reject these implementations
 
@@ -476,12 +392,6 @@ Subsystems should compose through a small set of canonical representations: Arro
 
 - Domain models and provenance identities sit above the fabric and should reference, not replace, its canonical objects.
 
-### Required evidence
-
-- A representation map shows few canonical types and explicit conversion points.
-- Copies and row-materialization boundaries are inventoried.
-- Interop tests prove schema and metadata behavior at every protocol boundary.
-
 ### Reject these implementations
 
 - A separate row DTO for every subsystem.
@@ -517,12 +427,6 @@ Arrow is not a serialization afterthought; it is the in-memory and interoperabil
 ### Application-owned overlay
 
 - Memory budgets and copy-boundary telemetry must be supplied by the application/runtime design.
-
-### Required evidence
-
-- A copy-boundary inventory exists.
-- Benchmarks compare kernels/expressions to row implementations.
-- Large-input tests prove bounded streaming and cancellation.
 
 ### Reject these implementations
 
@@ -562,12 +466,6 @@ Plans, schemas, source identities, configuration, software versions, execution I
 - Neither library automatically constructs a provenance graph or durable artifact store.
 - Source versions and durable result identities must come from providers/persistence systems.
 
-### Required evidence
-
-- Every durable result resolves to an execution record.
-- The execution record links inputs, schemas, calculations, configuration, plans, metrics, and software versions.
-- Missing provenance is a validation failure for governed operations.
-
 ### Reject these implementations
 
 - Only unstructured logs explain lineage.
@@ -604,12 +502,6 @@ A durable result should recursively resolve the material facts needed to explain
 
 - Closure requires an application artifact/lineage registry and retention policy.
 
-### Required evidence
-
-- A traversal from output ID reaches every required input and semantic artifact.
-- Fingerprints are revalidated during replay.
-- The system reports partial/non-reproducible closure rather than guessing.
-
 ### Reject these implementations
 
 - Human-readable names as the only links.
@@ -644,12 +536,6 @@ Arrow’s immutable arrays and DataFusion’s immutable plan transformations sho
 ### Application-owned overlay
 
 - Application semantic state transitions require version IDs, validation, and audit records.
-
-### Required evidence
-
-- Before/operation/after identities exist for semantic changes.
-- Concurrent queries see stable provider/schema/function snapshots.
-- Re-execution tests reset all runtime state.
 
 ### Reject these implementations
 
@@ -692,13 +578,6 @@ Schema must govern planning, projection, execution, interoperability, and valida
 - Schema version, semantic field IDs, units, compatibility policy, and fingerprints require application ownership.
 - Most arbitrary metadata is not runtime enforcement.
 
-### Required evidence
-
-- Schema contract tests cover exact, compatible, and rejected changes.
-- Provider projection order and runtime batches are validated.
-- Interop round trips preserve required metadata/extension semantics.
-- Evolution changes generate explicit migration artifacts.
-
 ### Reject these implementations
 
 - Silent widening, nullability changes, or reordering.
@@ -736,12 +615,6 @@ Policy should be enforced where namespace, table, function, plan, resource, or m
 ### Application-owned overlay
 
 - Authentication, authorization decisions, policy versioning, audit retention, and secret management are application responsibilities.
-
-### Required evidence
-
-- Policy tests use SQL, DataFrame, direct provider, and serialized-plan entry paths.
-- Exact pushdown claims include enforced tenant predicates.
-- Unauthorized functions/tables/columns cannot be resolved.
 
 ### Reject these implementations
 
@@ -781,12 +654,6 @@ Higher-level DataFusion and Arrow features retain more optimization, validation,
 
 - Maintain an extension decision record documenting rejected higher-level alternatives and the semantic necessity for the chosen level.
 
-### Required evidence
-
-- The implementation packet cites the built-ins/features reviewed.
-- Custom extensions implement all contract and optimizer hooks appropriate to their level.
-- A lower-level choice has a written semantic justification.
-
 ### Reject these implementations
 
 - Custom physical operator for code organization.
@@ -824,12 +691,6 @@ Encapsulation is valuable only if it does not hide facts needed for type inferen
 ### Application-owned overlay
 
 - Application-level semantic models should retain an optimizer-visibility review for every abstraction boundary.
-
-### Required evidence
-
-- `EXPLAIN` demonstrates expected pushdown, pruning, and operator selection.
-- UDF hook tests compare optimized and unoptimized behavior.
-- False metadata injection tests are rejected by invariants or contract tests.
 
 ### Reject these implementations
 
@@ -871,12 +732,6 @@ Declare, resolve, validate, normalize, compile, optimize, authorize, execute, ve
 
 - The application must define the complete operation lifecycle, write/commit phases, artifact retention, and error taxonomy.
 
-### Required evidence
-
-- Each phase has a named input/output artifact.
-- Tests inject failures at binding, logical planning, physical planning, execution, and verification.
-- No remote full-table read occurs during provider `scan`.
-
 ### Reject these implementations
 
 - One “run query” method hides all intermediate artifacts.
@@ -912,12 +767,6 @@ The system should preserve or reconstruct the semantic and physical artifacts be
 ### Application-owned overlay
 
 - Artifact storage, redaction, retention, indexing, and cross-version migration are application-owned.
-
-### Required evidence
-
-- A failed query still has a partial artifact bundle through the failure phase.
-- An upgrade harness can compare old/new logical and physical artifacts.
-- Artifacts identify exact library/config/catalog/function versions.
 
 ### Reject these implementations
 
@@ -955,12 +804,6 @@ Names do not prove semantic identity. Application-owned canonical encodings shou
 
 - Neither Arrow nor DataFusion promises stable cross-version semantic hashes.
 
-### Required evidence
-
-- Canonicalization tests are deterministic across process runs.
-- Material semantic changes alter the fingerprint; irrelevant metadata does not unless policy says otherwise.
-- Cache invalidation tests cover catalog, registry, config, and schema drift.
-
 ### Reject these implementations
 
 - Hashing `Debug` or `Display` text as a timeless ID.
@@ -997,12 +840,6 @@ Reproduction should be designed into execution by pinning semantic inputs and re
 ### Application-owned overlay
 
 - Durable source versioning and environment artifact retention require application/platform support.
-
-### Required evidence
-
-- Replay under the same environment reproduces contractually deterministic outputs.
-- The provenance record explains every non-deterministic dependency.
-- Upgrade tests distinguish semantic drift from physical-plan drift.
 
 ### Reject these implementations
 
@@ -1042,12 +879,6 @@ Optimizer and runtime metadata must be truthful. Unknown, absent, or inexact is 
 
 - Capability claims should be versioned as part of provider/function/operator contracts.
 
-### Required evidence
-
-- Contract tests falsify each claim with boundary cases.
-- `EXPLAIN` and result tests verify residual predicates and sort/repartition insertion.
-- Statistics and property tests cover empty, null, skewed, and partitioned inputs.
-
 ### Reject these implementations
 
 - Exact pushdown used for file pruning only.
@@ -1083,12 +914,6 @@ Types, runtime validation, policies, planner hints, contractual annotations, gov
 ### Application-owned overlay
 
 - Metadata governance schema, registry, validation, and retention are application responsibilities.
-
-### Required evidence
-
-- A metadata dictionary documents semantic class and consumer.
-- Tests prove enforced rules fail when violated.
-- Unknown metadata/extension consumers degrade safely.
 
 ### Reject these implementations
 
@@ -1127,12 +952,6 @@ Language, process, and storage boundaries should use standard Arrow/DataFusion p
 ### Application-owned overlay
 
 - Protocol compatibility matrices, authentication, transport governance, and schema negotiation require application/platform design.
-
-### Required evidence
-
-- Round-trip fixtures exist across each required language/engine/version.
-- Large streams remain bounded and cancellable.
-- Unsupported extension/schema cases fail explicitly.
 
 ### Reject these implementations
 
@@ -1173,12 +992,6 @@ Planning, runtime, task, expression, cache, and operator state should have named
 
 - Tenant lifecycle, cache governance, distributed state, and durable registry versions are application responsibilities.
 
-### Required evidence
-
-- A state ownership table covers process/runtime/session/query/task/partition/batch scopes.
-- Concurrency and cancellation tests show no leaked state/resources.
-- Cache invalidation tests cover every authority dependency.
-
 ### Reject these implementations
 
 - Global mutable `SessionContext` for all tenants without policy isolation.
@@ -1214,12 +1027,6 @@ Runtime latency and memory are necessary but insufficient. Observability should 
 ### Application-owned overlay
 
 - Cross-system trace storage, dashboards, provenance joins, and redaction policy are application/platform responsibilities.
-
-### Required evidence
-
-- A request ID joins traces, plan bundle, metrics, and result provenance.
-- Custom providers/operators expose meaningful metrics.
-- Plan/pushdown drift alerts can be tested on upgrades.
 
 ### Reject these implementations
 
@@ -1262,12 +1069,6 @@ Every claimed schema, provider, function, optimizer, physical-property, state, i
 
 - The application must maintain model-derived fixture generation, contract traceability, and release gates.
 
-### Required evidence
-
-- `TestEvidenceMatrix` links each contract to specific tests and CI jobs.
-- Every custom extension has negative and adversarial tests.
-- Upgrade tests distinguish API compilation, plan drift, performance drift, and semantic drift.
-
 ### Reject these implementations
 
 - Tests only around public service methods.
@@ -1286,7 +1087,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## MOD — Semantic modeling and compilation
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | MOD-01 | `DataType`, `Field`, `Schema`, typed application models | Represent domain concepts with typed fields/enums/models before execution code. | P1, P3, P12 | Model serialization and invariant tests. |
 | MOD-02 | `Expr` compiler | Compile calculation/predicate models into transparent DataFusion expressions through one owned compiler. | P1, P2, P15 | Model→Expr golden and dependency-extraction tests. |
@@ -1301,7 +1102,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## ARR — Arrow canonical data-plane utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | ARR-01 | `SchemaRef` / `FieldRef` / `DataType` | Use Arrow schema objects as the canonical runtime data contract. | P7, P8, P12 | Boundary schema equality/compatibility tests. |
 | ARR-02 | `ArrayRef` and typed arrays | Keep columns in Arrow arrays; avoid subsystem-specific row containers. | P7, P8 | Copy and allocation benchmarks. |
@@ -1318,7 +1119,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## SCH — Schema, type, metadata, and evolution utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | SCH-01 | Application `SchemaContract` → Arrow `Schema` | Compile one versioned semantic schema authority into the runtime schema. | P1, P3, P12 | Compiler and fingerprint tests. |
 | SCH-02 | Arrow `Schema` → DataFusion `DFSchema` | Add qualifiers and functional dependencies for planning without creating a second semantic authority. | P3, P6, P12 | Qualification and resolution tests. |
@@ -1337,7 +1138,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## CAT — Catalog, provider, and table-contract utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | CAT-01 | Catalog→schema→table hierarchy | Use native provider hierarchy as namespace and authority boundaries. | P3, P4, P7, P13 | Visibility and registration tests. |
 | CAT-02 | Provider registration through session/catalog APIs | Resolve tables through registries rather than constructing source-specific plans in consumers. | P3, P5, P7 | Resolution and replacement/version tests. |
@@ -1354,7 +1155,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## EXP — Expression and calculation utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | EXP-01 | Built-in DataFusion `Expr` and functions | Represent transparent arithmetic, predicates, casts, conditionals, arrays, and temporal logic with built-ins first. | P1, P14, P15 | Explain and result tests. |
 | EXP-02 | Reusable expression builders | Encapsulate construction without wrapping visible logic in opaque UDFs. | P2, P14, P15 | Tree-shape/dependency tests. |
@@ -1373,7 +1174,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## LOG — Logical planning and optimization utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | LOG-01 | SQL/DataFrame/builder → `LogicalPlan` | Converge all query entry paths on one logical IR. | P2, P6, P7, P16 | Cross-entry equivalence tests. |
 | LOG-02 | `PlannerContext` | Use explicit CTE, parameter, outer-scope, set-schema, and lambda planning state. | P1, P16, P23 | Scope/shadowing/correlation tests. |
@@ -1390,7 +1191,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## PHY — Physical planning, execution, and optimizer-contract utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | PHY-01 | `PhysicalPlanningContext` | Thread subtree scalar-subquery/lambda scope through physical planning and extension planners. | P6, P16, P23 | Subquery/lambda extension tests. |
 | PHY-02 | `ExecutionPlan` as physical contract | Implement schema/properties/children/expressions/execution/metrics/state consistently. | P4, P6, P16 | Full custom-plan contract suite. |
@@ -1409,7 +1210,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## SRC — Data source, file, Parquet, and object-store utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | SRC-01 | `RuntimeEnv` object-store registry | Register schemes/stores once and resolve through runtime state; isolate credentials by scope. | P3, P5, P13, P23 | Store resolution and isolation tests. |
 | SRC-02 | `FileSource` / `FileScanConfig` / `DataSourceExec` | Use native file-scan planning/execution contracts rather than custom loops. | P5, P7, P14 | Multi-file/partition/limit tests. |
@@ -1426,7 +1227,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## RUN — Session, runtime, state, cache, and resource utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | RUN-01 | State-scope taxonomy | Assign process/runtime/session/tenant/query/task/partition/batch scope before choosing an object. | P4, P23 | State ownership table. |
 | RUN-02 | `SessionContext` | Use as the public session/tenant boundary for catalogs, functions, SQL/DataFrame APIs, and shared state. | P3, P13, P23 | Tenant/session isolation tests. |
@@ -1443,7 +1244,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## INT — Interoperability and serialization utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | INT-01 | Arrow IPC file/stream | Use for Arrow-native schema/data interchange and bounded streams; version custom metadata. | P7, P22 | File/stream compression and metadata round trips. |
 | INT-02 | Parquet | Use as durable analytical columnar interchange with explicit writer properties and schema-evolution tests. | P7, P12, P22 | Cross-engine/read-write fixtures. |
@@ -1460,7 +1261,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## OBS — Provenance, observability, identity, and reproducibility utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | OBS-01 | Planning/execution artifact bundle | Capture request/spec, authorities, schemas, registry/config, logical/physical plans, metrics, output, and errors. | P9, P10, P17, P24 | Complete/partial bundle tests. |
 | OBS-02 | Logical-plan capture | Store bound and optimized logical artifacts with engine/catalog/function context. | P9, P17, P24 | Upgrade diff tests. |
@@ -1479,7 +1280,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## GOV — Governance, policy, and capability-truth utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | GOV-01 | Catalog/schema/table visibility | Build authorized namespace views at provider boundaries. | P13 | Discovery bypass tests. |
 | GOV-02 | Provider row and column enforcement | Apply tenant filters, masking, and visible schema at the table authority. | P13, P20 | Direct-provider and SQL bypass tests. |
@@ -1496,7 +1297,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## EXT — Extension-level selection and implementation utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | EXT-01 | Built-in Arrow kernel | Use when the requirement is one/few array operations without relational planning. | P14 | Built-in review and benchmark. |
 | EXT-02 | Built-in DataFusion expression/operator | Use when relational semantics are already expressible. | P14, P15 | `EXPLAIN` visibility evidence. |
@@ -1513,7 +1314,7 @@ This catalogue gives stable identifiers to the recommended ways Arrow and DataFu
 
 ## TST — Contract-derived testing and validation utilization
 
-| ID | Feature(s) | Required leverage | Primary principles | Minimum evidence |
+| ID | Feature(s) | Useful capability | Primary principles | Possible validation |
 | --- | --- | --- | --- | --- |
 | TST-01 | Schema contract tests | Cover exact equality, compatibility, nullability, nested fields, metadata, extension types, and rejected evolution. | P12, P21, P25 | Unit/property/golden schema suite. |
 | TST-02 | Provider contract tests | Verify schema stability, projection order, filter-only columns, limits, streams, errors, and DML outputs. | P5, P12, P25 | Reusable provider harness. |
@@ -1844,178 +1645,9 @@ Validate provenance closure and reproducibility status
 
 ---
 
-# Part IV — Required agent design artifacts
+# Part IV — Optional design notes
 
-The following artifact set operationalizes the design constitution. An agent should produce these before an implementation packet for any material subsystem.
-
-## 12. `SemanticRequirement`
-
-```yaml
-semantic_requirement:
-  id: stable requirement id
-  objective: externally meaningful outcome
-  inputs:
-    - semantic input and required version/snapshot semantics
-  outputs:
-    - output contract and identity
-  invariants:
-    - machine-testable invariant
-  non_semantic_preferences:
-    - latency, scale, deployment, physical hints
-  prohibited_shortcuts:
-    - hidden assumptions or disallowed implementation classes
-```
-
-## 13. `AuthorityMap`
-
-| Concept | Authority | Mutable by | Derived representations | Derivation | Staleness/invalidation | Provenance identity |
-|---|---|---|---|---|---|---|
-| schema | `SchemaContract` | schema governance workflow | Arrow Schema, DFSchema, provider/plan/batch schemas | schema compiler | version/fingerprint mismatch | schema ID/version/fingerprint |
-| calculation | `CalculationSpec` | calculation package owner | Expr/UDF/SQL/docs/tests | calculation compiler | spec/package/registry fingerprint | calculation ID/version |
-| table access | registered provider snapshot | provider/catalog owner | TableScan/ExecutionPlan/RecordBatch stream | scan planning | source/catalog/schema version | table/source snapshot ID |
-
-The agent should add every substantive concept; three rows are only illustrative.
-
-## 14. `RepresentationMap`
-
-```yaml
-representations:
-  semantic:
-    - application model and authority
-  runtime_data:
-    - Arrow Schema / Array / RecordBatch
-  logical_query:
-    - Expr / DFSchema / LogicalPlan
-  physical_execution:
-    - PhysicalExpr / ExecutionPlan / PlanProperties
-  persistence_or_transport:
-    - IPC / Parquet / Flight / C Stream / Substrait / native proto
-  provenance:
-    - external record IDs plus compact metadata references
-  conversions:
-    - source, target, copy behavior, null behavior, metadata behavior
-```
-
-## 15. `FeatureUtilizationPlan`
-
-For each requirement or future functional building block, create rows of this form:
-
-| Requirement/building block | Selected pattern IDs | Native features | Application overlay | Why highest viable level | Key contracts | Evidence |
-|---|---|---|---|---|---|---|
-| example calculation | EXP-01, EXP-02, SCH-02, TST-05 | built-in Expr + DFSchema | CalculationSpec registry | transparent expression retains pruning | types/nulls/alias | model→Expr + optimized equivalence |
-
-A building block is not considered mapped merely because a crate is named. It must select concrete utilization patterns.
-
-## 16. `ContractAndCapabilityMatrix`
-
-| Claim | Semantic class | Exact/inexact/absent | Owner | Consumer/enforcer | Failure consequence | Test |
-|---|---|---|---|---|---|---|
-| filter pushdown for predicate X | planner/runtime | Exact | provider | provider scan | wrong rows if false | adversarial pushdown test |
-| output ordering | physical property | Exact | execution node | optimizer/downstream operators | wrong algorithm/result if false | multipartition order test |
-| schema metadata unit | contractual annotation | Advisory unless calculation layer consumes | schema contract | calculation validator | semantic mismatch | metadata-consumer test |
-
-## 17. `LifecycleArtifactMap`
-
-| Phase | Input | Native Arrow/DataFusion artifact | Application artifact | Validation/policy gate | Failure code |
-|---|---|---|---|---|---|
-| declare | high-level request | none | semantic spec | model validation | `declaration.*` |
-| resolve | semantic spec | catalog/function lookup | bound dependencies | access policy | `resolution.*` |
-| compile | bound model | Expr/DFSchema/LogicalPlan | compiler diagnostics | schema/type validation | `logical_compilation.*` |
-| optimize | logical plan | optimized LogicalPlan | plan diff | optimizer invariants | `logical_optimization.*` |
-| physical plan | optimized plan | ExecutionPlan | physical summary | property/resource policy | `physical_planning.*` |
-| execute | physical plan | RecordBatch stream/metrics | execution record | runtime schema/resource checks | `execution.*` |
-| verify/result | batches | output schema/results | result identity/provenance | output contract | `verification.*` |
-
-## 18. `ProvenanceClosureMap`
-
-```yaml
-provenance:
-  result_id: ...
-  execution_id: ...
-  semantic_spec:
-    id: ...
-    version: ...
-    fingerprint: ...
-  schema_contracts:
-    - id/version/fingerprint
-  functions:
-    registry_fingerprint: ...
-    packages: [...]
-  sources:
-    - provider_id: ...
-      snapshot_id: ...
-      schema_fingerprint: ...
-  planning:
-    logical_artifact: ...
-    physical_artifact: ...
-    config_fingerprint: ...
-    policy_fingerprint: ...
-  environment:
-    datafusion: 55.0.0
-    arrow: 59.2.0
-    parquet: 59.2.0
-    rust_toolchain: ...
-    cargo_lock_fingerprint: ...
-  observations:
-    metrics_artifact: ...
-    output_schema_fingerprint: ...
-  reproducibility:
-    deterministic: ...
-    inputs_pinned: ...
-    volatile_functions: ...
-    external_dependencies_pinned: ...
-    missing_links: [...]
-```
-
-## 19. `StateOwnershipMap`
-
-| State | Scope | Owner | Mutable? | Lifetime | Authority relationship | Refresh/reset | Concurrency/invalidation |
-|---|---|---|---|---|---|---|---|
-| catalog/function registry | session/tenant | SessionState owner | controlled | session version | derived from governed registry | rebuild/version | invalidate plans/caches |
-| object stores/memory/disk | runtime | RuntimeEnv | controlled | runtime | resource authority, not semantic authority | deployment policy | tenant isolation |
-| scalar subquery slots | physical-plan subtree/query | PhysicalPlanningContext/result container | yes | execution | runtime only | clear/reset | scoped shared container |
-| accumulator | operator/partition/group | execution node | yes | execution | derived runtime state | emit/reset/drop | memory reservation |
-
-## 20. `OptimizerVisibilityReview`
-
-For every custom abstraction answer:
-
-1. Which columns, predicates, literals, types, ordering, constraints, and null properties remain visible?
-2. Which become opaque?
-3. Can a transparent `Expr` builder replace the abstraction?
-4. Which UDF/provider/operator hooks restore truthful optimizer knowledge?
-5. What `EXPLAIN` evidence proves the intended visibility?
-
-## 21. `TestEvidenceMatrix`
-
-| Contract ID | Claim | Positive tests | Negative/adversarial tests | Property/differential tests | Serialization/interop tests | Upgrade tests | CI gate |
-|---|---|---|---|---|---|---|---|
-
-Every row in `ContractAndCapabilityMatrix` must have a corresponding evidence row.
-
-## 22. `ExtensionDecisionRecord`
-
-```yaml
-extension_decision:
-  requirement: ...
-  candidates_reviewed:
-    - built-in Arrow kernel
-    - built-in DataFusion expression/operator
-    - expression builder
-    - scalar/aggregate/window/table/higher-order function
-    - provider/source/store
-    - planner hook
-    - logical extension
-    - physical extension
-    - custom planner
-  selected_level: ...
-  why_higher_levels_fail_semantically: ...
-  optimizer_visibility_preserved: ...
-  additional_contracts_introduced: ...
-  required_tests: ...
-```
-
----
+Record only a decision that helps implementation or review. Use ordinary prose for ownership, chosen API, relevant risk and validation. No mandatory artifact classes or matrices.
 
 # Part V — Crosswalks for future functional building blocks
 
@@ -2097,94 +1729,9 @@ This keeps the future capability catalogue **functional** while this document re
 
 ---
 
-# Part VI — Comprehensive agent review checklist
+# Part VI — Optional review prompts
 
-## 26. Semantic and authority review
-
-- [ ] Important meaning is represented in a typed application model or a documented reason says why no model is needed.
-- [ ] One authority is named for every schema, calculation, plan request, table contract, policy, configuration set, and provenance record.
-- [ ] Arrow/DataFusion objects are classified as authorities or derived compiled/runtime forms.
-- [ ] Derived representations carry authority identity/version/fingerprint.
-- [ ] No cache, debug string, SQL rendering, physical plan, or metadata tag silently becomes an alternative authority.
-
-## 27. Arrow data-fabric review
-
-- [ ] Arrow `Schema`, arrays, and `RecordBatch` are the default tabular boundary.
-- [ ] Row materialization and non-Arrow conversions are explicitly justified and inventoried.
-- [ ] Streaming readers/streams are used for unbounded or large results.
-- [ ] Null, dictionary, view, nested, timestamp, decimal, and extension semantics are explicit.
-- [ ] Copy and ownership behavior is documented at every boundary.
-- [ ] Built-in kernels are reviewed before custom loops.
-
-## 28. Schema-contract review
-
-- [ ] Schema version, fingerprint, field identity, names, types, nullability, nested structure, ordering, annotations, and compatibility are defined.
-- [ ] Source/physical schema is separated from canonical table schema.
-- [ ] `DFSchema` qualifiers and functional dependencies are derived, not competing authorities.
-- [ ] Projection field order and hidden/filter-only fields are tested.
-- [ ] Runtime batches are validated against stream/plan schema.
-- [ ] Metadata semantic classes and consumers are documented.
-- [ ] IPC/Parquet/FFI round trips preserve all required schema semantics.
-
-## 29. Calculation and optimizer review
-
-- [ ] Built-in Arrow/DataFusion functionality and transparent expression builders were reviewed first.
-- [ ] The selected function family matches scalar/async/lambda/aggregate/window/table semantics.
-- [ ] Signature, coercion, return field, null policy, strictness, volatility, ordering, bounds, and simplification are truthful.
-- [ ] UDF state is mergeable, memory-accounted, and resettable where applicable.
-- [ ] `EXPLAIN` proves important predicates/columns/order remain visible.
-- [ ] Function package and registry versions are in provenance/cache dependencies.
-
-## 30. Provider/source review
-
-- [ ] Provider schema is stable and cheap during a query.
-- [ ] Backend variation is contained within provider/source/store/adapters.
-- [ ] Projection, filters, limits, statistics, and DML have explicit contracts.
-- [ ] Exact/inexact/unsupported pushdown is truthful per predicate.
-- [ ] Scan planning is cheap; I/O occurs in execution/stream polling.
-- [ ] Source snapshot/version and schema fingerprint are available or reproducibility is downgraded explicitly.
-- [ ] File/Parquet pruning is distinguished from exact row filtering.
-
-## 31. Logical/physical planning review
-
-- [ ] All entry paths converge on `LogicalPlan`.
-- [ ] Binding, policy, logical optimization, physical planning, and physical optimization are separate phases.
-- [ ] Custom logical meaning uses a typed logical extension before custom physical code.
-- [ ] Every custom `ExecutionPlan` correctly implements expression traversal, child replacement, properties, requirements, statistics, state, metrics, and streaming.
-- [ ] Distribution and ordering claims are conservative and tested.
-- [ ] Memory, spill, cancellation, and repeated execution are designed.
-- [ ] Plan serialization is used only within its compatibility contract.
-
-## 32. Governance and state review
-
-- [ ] Policy is enforced at catalog/schema/table/function/plan/write/resource authority boundaries.
-- [ ] Direct provider, DataFrame, serialized-plan, and DML paths cannot bypass policy.
-- [ ] Session/runtime/query/task/operator state scopes are explicit.
-- [ ] Credentials, object stores, memory pools, spill, and caches are scoped correctly.
-- [ ] Cache keys include every authority dependency and have explicit invalidation.
-- [ ] Mutable runtime state cannot become semantic authority.
-
-## 33. Provenance, observability, and reproducibility review
-
-- [ ] Execution identity is allocated before planning.
-- [ ] Semantic spec, schema, policy, function registry, config, source snapshots, plans, environment, metrics, and output identity are linked.
-- [ ] Logical and physical plan artifacts are captured with version context.
-- [ ] Semantic observability includes pushdowns, source/file actions, and schema/plan fingerprints.
-- [ ] Reproducibility status explicitly records volatility and missing pins.
-- [ ] Provenance closure can be traversed from durable output.
-- [ ] Redaction and artifact-retention policy are defined.
-
-## 34. Test-evidence review
-
-- [ ] Every capability claim maps to a test.
-- [ ] Optimized/unoptimized and serialized/deserialized results are compared.
-- [ ] Provider pushdown and physical properties have adversarial tests.
-- [ ] Stateful functions/operators have partition, merge, reset, memory, and cancellation tests.
-- [ ] Protocol boundaries have cross-language/version fixtures.
-- [ ] Malformed input and FFI/unsafe paths are fuzzed where relevant.
-- [ ] Version/feature/dependency CI rejects duplicate Arrow/DataFusion universes.
-
----
+Inspect the changed boundary for identity, schema, ownership, precision, coverage and performance concerns. Select relevant tests; do not complete an exhaustive checklist for routine work.
 
 # Part VII — Anti-pattern diagnosis and prescribed correction
 
@@ -2207,24 +1754,9 @@ This keeps the future capability catalogue **functional** while this document re
 
 ---
 
-# Part VIII — Compact LLM-agent instruction block
+# Part VIII — Current development workflow
 
-> **Use Arrow and DataFusion as a semantic compiler and common data fabric, not merely as utility libraries.** Begin from explicit application-owned semantic authorities, validate and bind them, then compile them into Arrow schemas/data and DataFusion expressions/logical plans. Keep domain and relational meaning separate from physical execution strategy. Use catalog/provider and function hierarchies as authority and variability boundaries; consumers should not branch on backend type.
->
-> Select the highest-level built-in or extension point that fully expresses the semantics. Prefer Arrow kernels and transparent DataFusion expressions before UDFs; choose the correct scalar/aggregate/window/higher-order/table function family; use providers for sources; use logical extensions before physical operators; replace the global planner only as a last resort. Preserve optimizer visibility through built-in expressions, truthful UDF hooks, provider pushdown contracts, statistics, constraints, functional dependencies, and physical properties.
->
-> Treat Arrow `Schema`, arrays, `RecordBatch`, readers, and streams as infrastructure. Treat schemas as executable contracts with explicit identity, version, fingerprint, compatibility, nullability, metadata class, and evolution policy. Validate provider, plan, stream, batch, and protocol schemas. Do not silently widen, reorder, change nullability, or treat metadata as enforcement.
->
-> Use DataFusion lifecycle phases explicitly: resolve/bind, validate, compile to `LogicalPlan`, optimize, authorize, lower with `PhysicalPlanningContext`, physically optimize, execute as Arrow streams, validate outputs, and observe. Capture inspectable artifacts at each material phase. Custom `ExecutionPlan`s must truthfully implement schema/properties, expression traversal, child replacement, distribution/order requirements, statistics, state reset, memory/spill, metrics, serialization posture, streaming, and cancellation.
->
-> Make provenance and reproducibility application-owned but native to the flow. Before execution allocate identity and record semantic/schema/policy/function/config/source/environment fingerprints; capture logical and physical plans, metrics, output schema, and result identity; link them through stable references. Treat DataFusion plan serialization and hashes as version-coupled unless an explicit compatibility contract says otherwise.
->
-> Be conservative: unknown is safer than false. Exact/inexact/unsupported pushdown, statistics precision, ordering, partitioning, constraints, nullability, strictness, volatility, determinism, and idempotency must be truthful and tested. Classify metadata as enforced, planner-consumed, contractual, governance, lineage, or advisory and name its consumer.
->
-> Derive tests from contracts. Every claimed property must have positive, negative, adversarial, serialization/interoperability, resource/state, and upgrade evidence as applicable. Do not implement until semantic authority, legal variation, lifecycle, state scope, provenance closure, feature-utilization pattern IDs, and test evidence are explicit.
-
----
-
+Use AGENTS.md and the product-delivery workflow. The capability catalogue is an optional reference, not an artifact or proof quota.
 
 # Appendix A — DataFusion 55 and Arrow 59 version-specific leverage map
 
@@ -2248,7 +1780,7 @@ This appendix identifies features that are especially important in the pinned 55
 | `file_row_index()` source-dependent expression | Provide file-relative row provenance/identity as a source-rewritten virtual expression that moves toward scans. | P9, P12, P15 | It is not globally unique and errors outside a supporting file context; pair with file identity where durable row identity is required. |
 | `MERGE INTO` logical types and `TableProvider::merge_into` | Keep merge predicate/clauses/assignments as logical semantics and delegate target-specific mutation to the table authority. | P1, P6, P13, P16 | Generic DataFusion types do not supply transactional semantics; target/provider implementation and audit remain application/storage responsibilities. |
 | `UnnestOptions::NullHandling` | Model `NULL` and empty-list cardinality behavior explicitly (`Drop`, `Preserve`, `PreserveAndExpandEmpty`). | P1, P12, P20, P25 | Cardinality semantics must be part of the contract and tested separately for null and empty lists. |
-| Mandatory `GroupsAccumulator::convert_to_state` and revised merge contract | Implement the high-cardinality partial-aggregation bypass path explicitly; merge intermediate state without a raw-row filter. | P4, P14, P25 | State arrays, filters, emit order, memory, and FFI compatibility must be tested. |
+| Optional `GroupsAccumulator::convert_to_state` and revised merge contract | Implement the high-cardinality partial-aggregation bypass path explicitly; merge intermediate state without a raw-row filter. | P4, P14, P25 | State arrays, filters, emit order, memory, and FFI compatibility must be tested. |
 | Pluggable `SpillFile` / `TempFileFactory` | Put spill backend variability behind runtime resource contracts instead of hard-wiring local temp files. | P5, P23, P24 | Spill state is operational, not semantic authority; account size, errors, cleanup, and custom disk-manager modes. |
 | File-stream work stealing configuration | Treat cross-partition file reassignment as a physical optimization that must be disabled when order or declared file-group partitioning is semantically/operationally required. | P6, P20, P23 | Distributed executors that poll isolated partitions require explicit tests and usually disable stealing. |
 | Physical-plan self-serialization hooks | Let supported self-contained physical nodes serialize through native hooks while preserving fallback codecs for others. | P17, P18, P22 | Feature-gated and version-coupled; capture session/provider dependencies separately. |

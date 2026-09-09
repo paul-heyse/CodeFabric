@@ -10,9 +10,7 @@ The source README records upstream origins and the frozen staging locations used
 this import. Licenses and notices remain alongside upstream source. Cargo.lock and
 resolved-source checks preserve one selected package/type universe.
 
-The earlier artifact packaging utility and recipe are retained temporarily as prior
-implementation work; they are not part of dependency selection or ordinary Cargo
-execution. Do not continue developing that packaging mechanism as a WP79 prerequisite.
+The former per-edit artifact packaging/replay utility and process manifests were retired on 2026-09-08. Native origins and patches remain recorded with the sources and in Git.
 
 Native assurance harnesses under `tests/` retain distinct allocator-observation test
 binaries. They are test tooling, not an additional production build domain. The joined

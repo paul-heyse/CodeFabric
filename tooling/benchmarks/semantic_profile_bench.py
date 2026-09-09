@@ -47,7 +47,7 @@ def main() -> None:
             rustc,
             hashlib.sha256((ROOT / "Cargo.lock").read_bytes()).hexdigest(),
             baseline["version"],
-            "WP36-semantic-substrate-v1",
+            "synthetic-hash-microbenchmark-v1",
         ]
     )
     results: dict[str, dict[str, object]] = {}

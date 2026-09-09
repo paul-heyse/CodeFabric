@@ -58,3 +58,15 @@ prefix_rule(
         "just proto-gen",
     ],
 )
+
+# Product/harness commands may own local test process sockets under a future sandbox.
+prefix_rule(
+    pattern = ["just", "golden"],
+    decision = "allow",
+    justification = "Run selected real local daemon/MCP tests and clean up their children",
+)
+prefix_rule(
+    pattern = ["just", "tooling-test"],
+    decision = "allow",
+    justification = "Run development harness tests with bounded owned local children",
+)

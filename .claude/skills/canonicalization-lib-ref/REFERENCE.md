@@ -784,3 +784,9 @@ Is this a codefabric-jcs-v1 fingerprint?
 10. **One handoff leaves the pack.** `base64` §17 asks for parity against a Python URL-safe
     unpadded implementation that no pack document covers; `rfc8785` §15 is the only in-pack
     statement of that side.
+
+## Current use
+
+API indexes above are navigation, not a development workflow. Consult the current suite and
+`STATUS.md` for product target and implementation status. Historical section/line references
+may require re-navigation; no conformance score, audit cycle, or source-edit artifacts are required.
