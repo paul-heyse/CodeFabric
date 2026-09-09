@@ -107,7 +107,6 @@ impl CompiledSemanticRelease {
     ) -> Result<ReleasedProgrammaticDerivedAnalysisOutcome, ProgrammaticDerivedAnalysisError> {
         admit_and_compose_released_programmatic_derived_analyses(
             self.transformations(),
-            self.proof(),
             self.queries(),
             builder,
             runs,
@@ -125,7 +124,6 @@ impl CompiledSemanticRelease {
         admit_and_compose_production_relations(
             self.providers(),
             self.transformations(),
-            self.proof(),
             self.queries(),
             builder,
             authority,

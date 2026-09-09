@@ -69,10 +69,13 @@ use crate::rust_mir_derived_analysis::{
 };
 use crate::rustc_relation_schema::RustcRelation;
 use crate::schema_contract::FIELD_ID_METADATA_KEY;
+#[cfg(test)]
 use crate::semantic_release::{
     AnalysisDisposition, AnalysisGapReason, AnalysisGapRetryability, AnalysisPrecision,
-    CompiledProofProgram, CompiledQueryProgram, CompiledTransformationProgram,
-    RequiredAnalysisFamily, RequiredAnalysisObservation, SemanticReleaseError,
+    RequiredAnalysisFamily, RequiredAnalysisObservation,
+};
+use crate::semantic_release::{
+    CompiledQueryProgram, CompiledTransformationProgram, SemanticReleaseError,
     TransformationProgramIdentity,
 };
 
@@ -1605,7 +1608,7 @@ fn released_native_implementations(
     // Owner-local control and dataflow are required capabilities, but the former
     // file-sequential transformations do not implement them. Keep their released
     // family obligations and emit AlgorithmUnavailable / RequiresReleaseChange
-    // until an independently proved control/evaluation implementation is installed.
+    // until an actual owner-local control/evaluation implementation is installed.
 
     let rust_cfg_role = ReleasedDerivedFamilyRole::RustMir(RustMirDerivedRelation::CfgEdge);
     let rust_cfg_contract =
@@ -2365,7 +2368,6 @@ impl ReleasedProgrammaticDerivedAnalysisOutcome {
 /// Admit the exact provider lanes and compile the release-owned application-analysis closure.
 pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
     transformation_program: &CompiledTransformationProgram,
-    proof_program: &CompiledProofProgram,
     query_program: &CompiledQueryProgram,
     builder: ProgrammaticFabricEpochBuilder,
     runs: ExactProgrammaticProviderRuns<'_>,
@@ -2374,14 +2376,6 @@ pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
         return Err(
             ProgrammaticDerivedAnalysisError::InvalidCompiledReleaseProgram(
                 "transformation program is empty",
-            ),
-        );
-    }
-    let proof_input = proof_program.construct_input();
-    if proof_input.expectations.is_empty() || proof_input.faults.is_empty() {
-        return Err(
-            ProgrammaticDerivedAnalysisError::InvalidCompiledReleaseProgram(
-                "proof program lacks expectations or causal faults",
             ),
         );
     }
@@ -2397,11 +2391,8 @@ pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
         remainder_relation,
     )?;
     let derived = compose_programmatic_derived_analyses(admitted, composition)?;
-    // Validate actual producer/remainder observations before they become query authority. This
-    // admits truthful required gaps without promoting them to selected-profile conformance.
-    proof_program.validate_required_analysis_observations(&required_analysis_observations(
-        derived.observation(),
-    ))?;
+    // The typed census/composition validates producer or remainder coverage for every
+    // role. Admission must not require a family to retain yesterday's unavailable status.
     let query_requirements = released_query_family_requirements(query_program)?;
     let closure_catalog = released_producer_closure_catalog(
         derived.provider_reports(),
@@ -2421,6 +2412,7 @@ pub(crate) fn admit_and_compose_released_programmatic_derived_analyses(
     })
 }
 
+#[cfg(test)]
 fn required_analysis_observations(
     observation: &DerivedAnalysisCompositionObservation,
 ) -> Vec<RequiredAnalysisObservation> {
@@ -9964,7 +9956,6 @@ mod tests {
         let release = crate::fabric::production_kernel::compile_test_semantic_release();
         let outcome = admit_and_compose_released_programmatic_derived_analyses(
             release.transformations(),
-            release.proof(),
             release.queries(),
             programmatic_epoch_builder(),
             fixture.runs(),

@@ -56,7 +56,7 @@ use crate::rustc_relation_schema::{
 use crate::rustc_service::TrustQualifiedRustcCompilation;
 use crate::schema_contract::canonical_arrow_schema_fingerprint;
 use crate::semantic_release::{
-    CompiledProofProgram, CompiledProviderProgram, CompiledQueryProgram,
+    CompiledProviderProgram, CompiledQueryProgram,
     CompiledTransformationProgram, ProviderFamilyProgramDefinition, ProviderLaneProgramDefinition,
     ProviderProgramDefinition, SemanticReleaseError,
 };
@@ -278,7 +278,6 @@ pub(crate) fn admit_production_provider_relations(
 pub(crate) fn admit_and_compose_production_relations(
     provider_program: &CompiledProviderProgram,
     transformation_program: &CompiledTransformationProgram,
-    proof_program: &CompiledProofProgram,
     query_program: &CompiledQueryProgram,
     builder: ProgrammaticFabricEpochBuilder,
     authority: ProductionProviderAuthority,
@@ -312,7 +311,6 @@ pub(crate) fn admit_and_compose_production_relations(
     .map_err(ProductionProviderRecipeError::from)?;
     Ok(admit_and_compose_released_programmatic_derived_analyses(
         transformation_program,
-        proof_program,
         query_program,
         builder,
         exact,
