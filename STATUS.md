@@ -3,8 +3,9 @@
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
 Latest production commit: `4cc74d7c` (`Retain native Rust diagnostic locations and suggestion edits`),
 following primary failed-compilation diagnostics in `f1e44d80`.
-The user requested a natural stopping point, a full plan/status update and no further implementation.
-This is the paused handoff; the completed slices and their validation are recorded below.
+Implementation stopped at the requested diagnostic checkpoint. The subsequent planning request
+expands the detailed outcomes 4–8 plan against `d6d1369b`; it does not resume implementation.
+This handoff separates the revised design/backlog from completed slices and their validation.
 
 ## Current handoff
 
@@ -16,8 +17,9 @@ Follow the [production backlog](docs/plans/codefabric_pragmatic_production_imple
 and its [detailed outcomes 4–8 execution plan](docs/plans/codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md).
 The [consolidated review](docs/reviews/codefabric_pragmatic_product_delivery_consolidated_review_2026-09-08.md)
 and [selected design](docs/spec_index/README.md) retain the full Python/Rust CPG, all eight forms,
-composition, truthful incomplete scope and sustained operation. The detailed plan now separates
-implemented portions, unfinished acceptance and the next work for every slice.
+composition, truthful incomplete scope and sustained operation. The detailed plan separates
+implemented portions, unfinished acceptance and the next work for every slice, with library-grounded
+design enhancements integrated into the same delivery progression.
 
 Fresh daemon startup captures real Python/Rust inputs and publishes exact source/syntax Delta
 versions before readiness. The owned update coordinator runs contained semantic providers and
@@ -32,8 +34,33 @@ Fresh startup now uses this source-first path too. The first useful release rema
 
 The call-query continuation present at session start was preserved, exercised and committed in
 `80bc6d18`; declaration kinds/public subjects followed in `1a60e748`, and lexical references in
-`5964e5ff`. The full plan remains unfinished. No outcome from 4 through 8 is closed. Work stops at the
-user-requested diagnostic checkpoint; resumption tasks below are not being started.
+`5964e5ff`. The full plan remains unfinished. No outcome from 4 through 8 is closed. Implementation
+stopped at the diagnostic checkpoint; the subsequent plan expansion does not start resumption tasks.
+
+## Detailed plan expansion, 2026-09-09
+
+The planning revision preserves all 25 slices and the complete ontology coverage map. It adds:
+
+- Source-grounded usage of all eight requested library reference skills, including exact API/pin
+  constraints and conditional adoption of overlays, CDF, Rayon and orjson.
+- Seven architecture decisions covering validity/version reuse, retained providers, native semantic
+  ownership, typed request DAGs, durable layout, maintenance exclusion and shared scheduling.
+- Twenty-six identified code enhancements mapped to their owning slices and fourteen implementation
+  packages ordered by dependency, with concrete per-slice steps, compatibility/removal rules and
+  behavioral acceptance for all eight forms, edits, recovery and sustained retention.
+
+Current-code inspection corrects two earlier plan assumptions: native Ruff already has substantial
+owner-scoped CFG construction, and the DataFusion schema wrappers already implement native pushdown.
+Their remaining work is production integration/qualification and measured improvement. Other
+concrete enhancements include replacing whole-path shortest-path queueing, retaining checker state
+with a safe generation update view, reusing unchanged Delta pins, and fixing native optimize/vacuum
+commit properties before enabling maintenance. Optimized-MIR source-call completeness remains a
+qualification task, not a newly reproduced failure.
+
+Only this file and the detailed plan change. `just docs-check` reports two files and zero navigation
+errors; `typos` on both files and `git diff --check` pass. A one-off comparison confirms all 25 slices,
+29 ontology rows and historical plan validation evidence are preserved. No implementation or new native/product/performance
+validation is claimed. The detailed plan §3.3 defines P01–P14; §10 records the future entry point.
 
 ## Typed Rust diagnostic locations, notes and edits
 
@@ -814,12 +841,12 @@ identity and relationships; the wider edit and rename-continuity corpus remains 
 | Slice | Implemented prerequisite | Remaining delivery |
 |---|---|---|
 | 7A Python language semantics | Owned Ruff bindings/references/call syntax and selected Pyrefly call definition anchors | Complete scope/binding/import/type/member/call/decorator/pattern/comprehension and dynamic-semantics rows, canonical consumers and invalidation |
-| 7B Python CFG/dataflow | Typed analysis code and prepared source expectations | Correct owner-scoped control/evaluation semantics, normal/exception/cleanup/suspend edges, reaching definitions/liveness and real production input wiring; replace ordinal/sequential approximations |
+| 7B Python CFG/dataflow | Substantial native Ruff owner CFG/evaluation builders, typed analysis code and prepared source expectations | Integrate the explicit native graph, remove implicit production ordinal fallthrough, qualify normal/exception/cleanup/suspend edges and complete real dataflow/public/update wiring |
 | 7C Python advanced state | Existing analysis structures | Finite memory/points-to, effects/resources/exceptions, capture/generator/async/concurrency and unknown propagation, built on 7B |
 | 7D Rust source/types/MIR | Real typed compiler publication, stable declaration keys, selected canonical calls and ordinary native diagnostic messages/children/spans/suggestions/edits | Full types/generics/traits/instances/MIR payloads, generated/hygiene/coroutine/CTFE/FFI facts, separate compatibility diagnostics and canonical/public coverage |
 | 7E Rust derived/private borrow | Existing MIR analysis modules and contained compiler seam | Real typed inputs, finite dataflow/state/ownership analyses, exact private loans/regions, drop/unwind/coroutine and changed-body replacement |
 | 7F Common graphs/summaries | Existing petgraph/analysis integration and canonical calls | Demand-rooted projections, correct dominance/SCC/reachability, structural facts and bounded interprocedural fixpoints with precision/frontier scope |
-| 7G Complete forms/composition | Eight-form request/ingress infrastructure; four limited public forms | FindPaths, MatchPattern, Compare and Summarize; finish first four; real typed multi-block DAGs, fan-out/fan-in, repeated forms, references, authorization, negatives, ordering/limits and cancellation |
+| 7G Complete forms/composition | Eight-form request/ingress infrastructure; four limited public forms | FindPaths, MatchPattern, CombineResults and SummarizeFacts; finish first four; real typed multi-block DAGs, fan-out/fan-in, repeated forms, references, authorization, negatives, ordering/limits and cancellation |
 | 7H Modern presentation | Installed FastMCP transport/resources, guarded-input scenarios, typed processing and diagnostic correction | All-form presentation, full paging/cursors and source permissions; replay/expiry/reconnect/slow-reader/TTL integration for new workflows; one consistent daemon-authored response |
 
 Substantial existing algorithms and fixtures are reusable, but fixture-fed or schema-only families are
@@ -836,7 +863,7 @@ unknowns are legitimate terminal facts; unfinished implementation is a separate 
 | 8C Retention | Store budgets, headroom and existing leases/handles | Coordinated history/result/source/context/build/cache/diagnostic TTL and eviction; maintenance scheduling; finite retained state through real cycles while protecting readers and uncertain writers |
 | 8D Recovery | Linux containment, joined subprocess/native cleanup, exact restart and focused cancellation/lost-ack tests | Failures/races introduced by updates, retained providers, new forms and native maintenance; pressure/expiry recovery; explicit unsupported behavior for unimplemented deployment profiles |
 | 8E Measurement | RSS/cgroup/headroom signals, benchmark harness and small real scenario timings | Correlated phase metrics, representative small/medium/large and real-repository CPG workloads, distributions, convergence/first-batch/retention/recovery measurements |
-| 8F Performance | Native canonical joins, valid schema refinement, streaming lookahead and shared immutable input storage | Safe scan pushdown/statistics/physical properties, pruning/file-size tuning, workload-based parallelism/caches and measured before/after improvements; overlays/CDF/Rayon/orjson only with a concrete need |
+| 8F Performance | Native canonical joins, schema-preserving scan pushdown, streaming lookahead and shared immutable input storage | Qualify structured scan/statistics/physical properties through all consumers, pruning/file-size tuning, workload-based parallelism/caches and measured before/after improvements; overlays/CDF/Rayon/orjson only with a concrete need |
 
 `delta_guarded_maintenance.rs` still returns `OptimizeCommitIdentityAndRetryControl` and
 `AtomicVacuumApprovalBinding`. No optimize commit or destructive vacuum/reclamation is claimed.
@@ -942,22 +969,21 @@ golden setup; `just sidecar-check` checks/lints rather than installing a fresh e
 
 ## Paused handoff and resumption order
 
-The user requested that implementation stop after the current natural boundary and complete this
-status/plan update on 2026-09-09. No further slice is being started. The entire outcomes 4–8 scope
-remains the resumption target; none is complete. The detailed plan §10 is the current next-work list.
+Implementation stopped after the diagnostic-detail boundary. The subsequent 2026-09-09 planning
+request expands the remaining design and implementation progression without starting another slice.
+The entire outcomes 4–8 scope remains the resumption target; none is complete. The detailed plan
+§3.3 defines the integrated P01–P14 sequence and §10 is the current implementation entry point.
 
 When explicitly resumed:
 
-1. Extend 4A/7D exact external/generated compiler inputs, actual unit contexts and diagnostic
-   consumers; qualify separate compatibility reports and optimized-profile source-call coverage.
-   Preserve immutable capture checks rather than accepting mutable generated output as captured input.
-2. Finish 4B–4D/7A external Python contexts, full semantic/provider families, source census and canonical
-   authority/identity/conflict consumers. Keep established source/stub/root/path/decoding behavior.
-3. Complete 4E/5A–5B first-four meanings/composition, all-family scope, efficient status and targeted/
-   historical freshness; then extend 6A–6D external/Git/poll/root observations, retained providers,
-   selective persistence, fair scheduling and the full clean/incremental corpus.
-4. Deliver 7B–7H real analyses, all families/eight forms/typed DAGs/presentation and 8A–8F finite
-   retention, native maintenance, recovery, telemetry and representative measurements.
+1. P01: exact external/generated compiler units and external Python contexts, input/cache contracts,
+   source fidelity and phase instrumentation. Preserve the current capture and containment guards.
+2. P02–P05: canonical semantics/coverage, completed first-four meanings and typed block bindings,
+   target freshness, retained live providers/version reuse and broader clean/incremental comparison.
+3. P06–P11: every remaining language/analysis family, explicit native CFG/MIR/private inputs,
+   common graphs/summaries, all eight forms/full DAG semantics and modern delivery.
+4. Begin P12 native maintenance/finite retention after P04's ownership prerequisites while fact
+   scope grows; finish P13–P14 integrated recovery and representative workload optimization.
 
 Do not redo per-publication parser reuse, contained Cargo startup, supported captured selections,
 source-first activation, one-step call/reference queries or the completed source-context meanings.
