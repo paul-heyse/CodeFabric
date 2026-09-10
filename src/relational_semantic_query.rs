@@ -873,6 +873,8 @@ pub struct EpochBoundConsumerSlotBindingRow {
     pub consumer_role_id: Arc<str>,
     pub minimum_edges: usize,
     pub maximum_edges: usize,
+    /// The dependency is the complete input; no reference placeholder enters scalar input rows.
+    pub materialized: bool,
 }
 
 /// Catalog-side selection value contract.
@@ -1105,6 +1107,8 @@ pub struct EpochBoundExecutionOperatorRow {
 pub enum EpochBoundConsumerComposition {
     Single,
     Union(UnionKind),
+    /// Consume the returned rows of completed blocks once, through a runtime-owned Arrow input.
+    MaterializedUnion,
 }
 
 /// Execution mapping from a semantic consumer slot to a program input relation.
@@ -1233,6 +1237,14 @@ pub struct CompiledEpochBoundScopeHandoff {
     pub content_pin: [u8; 32],
 }
 
+/// A typed slot whose producers must finish before its query-local scan can be installed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompiledEpochBoundPriorResultHandoff {
+    pub query_id: Arc<str>,
+    pub input_relation_id: RelationId,
+    pub producer_query_ids: Vec<Arc<str>>,
+}
+
 /// Complete non-discardable runtime handoff accompanying direct compilation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EpochBoundSemanticRuntimeHandoff {
@@ -1240,13 +1252,14 @@ pub struct EpochBoundSemanticRuntimeHandoff {
     pub program_catalog_pin: [u8; 32],
     pub policy_pin: [u8; 32],
     pub request_inputs: Vec<CompiledEpochBoundRequestInputHandoff>,
+    pub prior_results: Vec<CompiledEpochBoundPriorResultHandoff>,
     pub scopes: Vec<CompiledEpochBoundScopeHandoff>,
 }
 
 impl EpochBoundSemanticRuntimeHandoff {
     #[must_use]
     pub fn requires_query_local_binding(&self) -> bool {
-        !self.request_inputs.is_empty() || !self.scopes.is_empty()
+        !self.request_inputs.is_empty() || !self.prior_results.is_empty() || !self.scopes.is_empty()
     }
 }
 
@@ -4995,7 +5008,7 @@ fn compile_epoch_runtime_handoff(
             handoff_pin: binding.handoff_pin,
             content_pin,
         });
-        observed_inputs.insert(key);
+        observed_inputs.insert((Arc::clone(&input.query_id), Arc::clone(&input.input_id)));
         request_inputs.push(CompiledEpochBoundRequestInputHandoff {
             query_id: Arc::clone(&input.query_id),
             program_binding_id: Arc::clone(&block.program_binding_id),
@@ -5009,17 +5022,16 @@ fn compile_epoch_runtime_handoff(
             content_pin,
         });
     }
-    for (program_binding_id, input_id) in catalog.request_inputs.keys() {
-        let used_program = blocks
-            .values()
-            .any(|block| block.program_binding_id == *program_binding_id);
-        if used_program
-            && !observed_inputs.contains(&(Arc::clone(program_binding_id), Arc::clone(input_id)))
-        {
-            return Err(EpochBoundSemanticCompileError::RequestInputHandoff {
-                query_id: program_binding_id.to_string(),
-                input_id: input_id.to_string(),
-            });
+    for block in blocks.values() {
+        for (program_binding_id, input_id) in catalog.request_inputs.keys() {
+            if block.program_binding_id == *program_binding_id
+                && !observed_inputs.contains(&(Arc::clone(&block.query_id), Arc::clone(input_id)))
+            {
+                return Err(EpochBoundSemanticCompileError::RequestInputHandoff {
+                    query_id: block.query_id.to_string(),
+                    input_id: input_id.to_string(),
+                });
+            }
         }
     }
     request_inputs.sort_by(|left, right| {
@@ -5059,11 +5071,38 @@ fn compile_epoch_runtime_handoff(
         });
     }
     scopes.sort_by(|left, right| left.scope_id.cmp(&right.scope_id));
+    let mut prior_results = Vec::new();
+    for block in blocks.values() {
+        for ((program, slot), binding) in &catalog.consumer_slots {
+            if *program == block.program_binding_id
+                && binding.composition == EpochBoundConsumerComposition::MaterializedUnion
+            {
+                let mut edges = ingress
+                    .ingress()
+                    .dependencies
+                    .iter()
+                    .filter(|edge| {
+                        edge.consumer_query_id == block.query_id && edge.consumer_slot_id == *slot
+                    })
+                    .collect::<Vec<_>>();
+                edges.sort_by_key(|edge| edge.ordinal);
+                prior_results.push(CompiledEpochBoundPriorResultHandoff {
+                    query_id: Arc::clone(&block.query_id),
+                    input_relation_id: binding.input_relation_id.clone(),
+                    producer_query_ids: edges
+                        .into_iter()
+                        .map(|edge| Arc::clone(&edge.producer_query_id))
+                        .collect(),
+                });
+            }
+        }
+    }
     Ok(EpochBoundSemanticRuntimeHandoff {
         fabric_epoch_pin: ingress.ingress().fabric_epoch_pin,
         program_catalog_pin: ingress.ingress().program_catalog_pin,
         policy_pin: ingress.ingress().policy_pin,
         request_inputs,
+        prior_results,
         scopes,
     })
 }
@@ -5116,6 +5155,8 @@ fn epoch_composition_inputs(
                 .expect("validated producer block exists");
             if producer_block.output_role_id != edge.producer_role_id
                 || binding.consumer_role_id != edge.consumer_role_id
+                || (binding.composition == EpochBoundConsumerComposition::MaterializedUnion
+                    && edge.producer_role_id != edge.consumer_role_id)
             {
                 return Err(EpochBoundSemanticCompileError::MissingBinding {
                     query_id: block.query_id.to_string(),
@@ -5137,7 +5178,9 @@ fn epoch_composition_inputs(
                     ),
                 });
             }
-            expressions.push(producer.expression.clone());
+            if binding.composition != EpochBoundConsumerComposition::MaterializedUnion {
+                expressions.push(producer.expression.clone());
+            }
             dependencies.insert(SemanticCompilerDependency::CompositionEdge(debug_pin(
                 b"epoch-bound-composition-edge",
                 edge,
@@ -5158,6 +5201,9 @@ fn epoch_composition_inputs(
                 inputs: expressions,
                 kind,
             },
+            EpochBoundConsumerComposition::MaterializedUnion => {
+                RelationalExpression::Input(binding.input_relation_id.clone())
+            }
         };
         if inputs
             .insert(binding.input_relation_id.clone(), expression)
@@ -6706,6 +6752,7 @@ mod tests {
                 },
             ],
             consumer_slots: vec![EpochBoundConsumerSlotBindingRow {
+                materialized: false,
                 program_binding_id: Arc::from("program.facts"),
                 consumer_slot_id: Arc::from("slot.about"),
                 consumer_role_id: Arc::from("role.entities"),

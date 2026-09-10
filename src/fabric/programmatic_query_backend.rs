@@ -1527,6 +1527,40 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             };
             output_by_query.insert(Arc::clone(query_id), output.relation_id().clone());
         }
+        for prior in &handoff.prior_results {
+            let Some(binding) = ports.program_result_binding(&prior.input_relation_id) else {
+                return failed(
+                    &artifacts,
+                    "prior_result_binding",
+                    "prior result schema is not installed",
+                );
+            };
+            let Some(index) = output_queries
+                .iter()
+                .position(|query| *query == prior.query_id)
+            else {
+                return failed(
+                    &artifacts,
+                    "prior_result_binding",
+                    "consumer block is not executable",
+                );
+            };
+            let producers = prior
+                .producer_query_ids
+                .iter()
+                .map(|query| output_by_query.get(query).cloned())
+                .collect::<Option<Vec<_>>>();
+            let Some(producers) = producers else {
+                return failed(
+                    &artifacts,
+                    "prior_result_binding",
+                    "producer block is not executable",
+                );
+            };
+            outputs[index] = outputs[index]
+                .clone()
+                .with_prior_result_input(binding.clone(), producers);
+        }
         let mut handoffs_by_output = BTreeMap::new();
         for request_input in handoff.request_inputs {
             let Some(output_relation) = output_by_query.get(&request_input.query_id).cloned()
@@ -1617,6 +1651,13 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "query_id": query_id,
                 "relation_id": output_by_query[query_id].as_str(),
             })).collect::<Vec<_>>(),
+            "query_dependencies": handoff.prior_results.iter().flat_map(|slot| {
+                slot.producer_query_ids.iter().map(|producer| serde_json::json!({
+                    "producer_query_id": producer,
+                    "consumer_query_id": slot.query_id,
+                    "input_selection": "returned-rows",
+                }))
+            }).collect::<Vec<_>>(),
         });
         let canonical_response = match serde_json_canonicalizer::to_vec(&response) {
             Ok(response) => response,
@@ -1867,11 +1908,13 @@ fn cancelled(
 }
 
 fn query_error(stage: &str, message: impl Into<String>) -> SemanticQueryError {
+    let message = message.into();
+    tracing::warn!(stage, detail = %message, "semantic query rejected");
     SemanticQueryError::Phase {
         code: "PROGRAMMATIC_QUERY_REJECTED",
         phase: "programmatic_query",
         pointer: stage.to_owned(),
-        message: message.into(),
+        message,
     }
 }
 

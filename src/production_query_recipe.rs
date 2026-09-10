@@ -46,6 +46,7 @@ use crate::semantic_query_contract::{COMPILED_V2_0_SCOPE_DEFINITIONS, ResultRole
 use crate::semantic_release::{CompiledQueryProgram, SemanticQueryForm};
 
 mod facts;
+mod prior;
 use crate::relational_semantic_query::EpochBoundSelectionTarget;
 pub(crate) use facts::families::{
     known_meaning as canonical_fact_meaning, result_family as canonical_result_family,
@@ -272,7 +273,8 @@ impl ProductionSemanticQueryRecipe {
                 }
             })?;
         }
-        let forms = compiled_released_form_programs(epoch, &producer_closure)?;
+        let mut forms = compiled_released_form_programs(epoch, &producer_closure)?;
+        prior::bind_entity_subjects(&mut forms, input.limits.compiler().max_fanin())?;
         let scopes = compiled_release_scopes();
         let program_release_pin = compiled_release_identity_pin(&forms, &scopes);
         validate_pin("program release", program_release_pin)?;
@@ -1571,6 +1573,7 @@ fn append_consumer_slots(
         ingress
             .consumer_slots
             .push(EpochBoundConsumerSlotBindingRow {
+                materialized: slot.composition == EpochBoundConsumerComposition::MaterializedUnion,
                 program_binding_id: Arc::clone(&definition.program_binding_id),
                 consumer_slot_id: Arc::clone(&slot.consumer_slot_id),
                 consumer_role_id: Arc::clone(&slot.consumer_role_id),
@@ -2391,6 +2394,7 @@ fn encode_consumer_slot(value: &ProductionConsumerSlotDefinition) -> CanonicalId
             frame.u64(6, 2);
             frame.u64(7, union_kind_code(kind));
         }
+        EpochBoundConsumerComposition::MaterializedUnion => frame.u64(6, 3),
     }
     frame
 }

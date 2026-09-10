@@ -614,6 +614,7 @@ impl RelationalProgramCompiler {
             input_plans,
             observations: CompilationObservations::default(),
             query_functions: Vec::new(),
+            derived_alias_ordinal: 0,
         };
         state
             .observations
@@ -997,6 +998,7 @@ struct BoundPlan {
 }
 
 struct CompileState {
+    derived_alias_ordinal: usize,
     query_functions: Vec<Arc<datafusion::logical_expr::ScalarUDF>>,
     bindings: ProgramBindings,
     input_plans: BTreeMap<RelationId, LogicalPlan>,
@@ -1147,6 +1149,14 @@ impl CompileState {
                         "union requires at least two inputs".to_owned(),
                     ));
                 }
+                // Native UNION strips qualifiers. Restore a private derived qualifier before
+                // later joins can encounter a canonical input column with the same name.
+                let alias = format!("__codefabric_union_{}", self.derived_alias_ordinal);
+                self.derived_alias_ordinal += 1;
+                let plan = LogicalPlanBuilder::from(accumulated.plan)
+                    .alias(alias)?
+                    .build()?;
+                accumulated = rebind_preserved(plan, &accumulated.fields)?;
                 self.require_intrinsic(RelationalPrimitive::Union)?;
                 self.observations
                     .extension_selections

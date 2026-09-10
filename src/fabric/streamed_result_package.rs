@@ -1546,7 +1546,7 @@ fn check_cancel_deadline(
     Ok(())
 }
 
-async fn next_batch(
+pub(crate) async fn next_batch(
     stream: &mut SendableRecordBatchStream,
     cancellation: &Cancellation,
     deadline: Instant,

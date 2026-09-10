@@ -6,8 +6,8 @@ P01's initial captured dependency/context vertical and phase costs are committed
 P02's initial canonical semantic vertical now publishes diagnostics, Python modules, Python/Rust
 imports, references and structural types with scoped public retrieval and exact reopen.
 The Rust type and HIR reference slices are committed in `ba35b4c7` and `1b515b7b`.
-P02 public family selection is committed in `f7adca03`. P03 is in progress: repeated-block output
-isolation passes installed-client and exact-reopen validation.
+P02 public family selection is committed in `f7adca03`. P03 repeated-block output isolation is
+committed in `7eefd2ea`. Typed prior-entity result consumption now passes native and regression validation.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -44,6 +44,46 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The current continuation adds explicit materialized consumer slots and a shared-pool Arrow result
+owner. Completed producer rows retain their exact schema and are reused across consumers; native
+semi joins preserve entity/context pairs. Explicit subject rows and prior dependencies are separate.
+Result-limit probes are excluded from downstream inputs, while the producer's published observation
+retains truncation. The canonical manifest records dependency edges, and consumer provenance names
+the actual producer block relations. Source-level schema metadata is replaced by the transient
+input's declared envelope; column types, nullability, names and semantic metadata match exactly.
+Arrow buffers and their shared reservation stay owned through consumer and publication streams.
+
+The nine-block installed-client case passes initial execution and exact reopen in 30.12 s
+(`/tmp/codefabric-p03-prior-native-6.log`). It checks a limited producer reused for facts/calls/source,
+two producer sets feeding one consumer, repeated subjects, typed empty inputs, and a block ID equal
+to a real entity ID that must never become a scalar entity subject. `prior-entities` selects it.
+All 51 compiler/ingress/runtime/ownership/public-family regression cases pass (75.25 s;
+`/tmp/codefabric-p03-prior-regression.log`), including the updated native case in 31.90 s and all
+eleven canonical families after reopen. Ownership cases verify one source poll across consumers,
+probe exclusion, unchanged field semantics, and reservation release on completion/row-limit/
+memory/cancellation/deadline failures. Default/featureless `just root-check` passes
+(`/tmp/codefabric-p03-prior-root-check.log`). All-target Clippy completes with the existing backlog
+and no diagnostics in the new modules/native tests (`/tmp/codefabric-p03-prior-clippy-final.jsonl`).
+The cleanup uses narrower native error types and retains an annotated coherent template rewrite.
+The final 34-case compiler/ingress/runtime/ownership run passes after that cleanup
+(`/tmp/codefabric-p03-prior-final-unit-tests.log`).
+Golden selection, focused Python lint, documentation navigation, spelling and diff checks pass.
+
+Native integration exposed and corrected rejection of repeated producer references, UNION's loss
+of qualifiers before source joins, and inherited provider-level schema metadata at the transient
+input boundary. The existing independent repeated-block case passes after the UNION correction
+(31.43 s; `/tmp/codefabric-p03-prior-tests-4.log`). Query rejection stages now reach the existing
+supervisor-owned warning sink with private diagnostic detail; the public error projection remains
+closed. Earlier failed runs are retained in `/tmp/codefabric-p03-prior-tests-2.log`,
+`/tmp/codefabric-p03-prior-tests-3.log`, `/tmp/codefabric-p03-prior-tests-4.log` and
+`/tmp/codefabric-p03-prior-native-5.log`; an initial test compile needed a longer-lived snapshot binding.
+
+This is the first typed entity-result vertical. Independent branch scheduling/failure, occurrence
+roles, full scopes/meanings and the broader P03 completion remain open. Eager legacy compiler
+fixtures retain their previous composition mode; modern production uses owned streaming execution.
+DataFusion planning §52/§54.8, resolved native UNION/alias/MemTable/MemoryReservation APIs, and Arrow
+59 RecordBatch schema/array sharing informed this implementation. No outcome 4–8 closure is claimed.
+
 Repeated forms now receive output relation/field bindings derived from the exact request,
 program catalog, query block and template schema authority. The typed field rewrite preserves
 canonical epoch inputs, source-disclosure parameters, row predicates, sorting and limits. Existing
@@ -63,9 +103,9 @@ All-target root Clippy completes with its existing backlog and no diagnostics in
 or native test (`/tmp/codefabric-p03-block-output-clippy-final.jsonl`). Golden selection, focused
 Python lint, documentation navigation, spelling and diff checks pass. Full-suite and doctest
 completion are not claimed.
-This is an initial P03 slice: actual prior-result
-consumption, typed fan-out/fan-in, independent branch failure and the remaining first-four meanings
-are still open. The rest of P03–P14 remains in package order.
+The typed entity-result vertical above extends this initial output-isolation slice. Broader prior
+roles, independent branch scheduling/failure and remaining first-four meanings remain open.
+The rest of P03–P14 remains in package order.
 
 ## P02: initial canonical semantic vertical delivered
 

@@ -221,6 +221,7 @@ pub struct SelectedQueryOutput {
     coverage: Option<ResultCoverage>,
     program_result_binding: Option<SupplementalProgramRelationBinding>,
     row_selection: Option<super::streamed_result_package::StreamedRowSelection>,
+    prior_results: Vec<block::PriorResultInputSelection>,
 }
 
 impl SelectedQueryOutput {
@@ -236,6 +237,7 @@ impl SelectedQueryOutput {
             coverage,
             program_result_binding: None,
             row_selection: None,
+            prior_results: Vec::new(),
         }
     }
 
@@ -447,6 +449,7 @@ impl RelationalQueryTransaction {
                 ));
             }
         }
+        let outputs = block::dependency_order(outputs)?;
         Ok(Self {
             owner,
             query_execution,
@@ -989,6 +992,15 @@ impl RelationalQueryRuntime {
                         &execution_resources,
                     )
                     .await?;
+                let reusable = outputs
+                    .iter()
+                    .flat_map(|output| &output.prior_results)
+                    .flat_map(|slot| slot.producers.iter().cloned())
+                    .collect::<BTreeSet<_>>();
+                let mut retained = BTreeMap::<
+                    RelationId,
+                    Arc<super::query_result_input::RetainedBlockResult>,
+                >::new();
                 let mut relation_streams = Vec::with_capacity(outputs.len());
                 let mut compiled_outputs = Vec::with_capacity(outputs.len());
                 for output in outputs {
@@ -1015,53 +1027,83 @@ impl RelationalQueryRuntime {
                             session_bound: session_relation.as_str().to_owned(),
                         });
                     }
-                    let streamed = match (
-                        request_inputs.get(&output.relation_id),
-                        output.program_result_binding.as_ref(),
-                    ) {
-                        (Some(request_inputs), Some(program_result)) => {
-                            child
-                                .execute_relational_program_stream_with_request_inputs_and_program_result(
-                                    &output.program,
-                                    request_inputs.as_ref(),
-                                    program_result,
-                                )
-                                .await?
-                        }
-                        (Some(request_inputs), None) => {
-                            child
-                                .execute_relational_program_stream_with_request_inputs(
-                                    &output.program,
-                                    request_inputs.as_ref(),
-                                )
-                                .await?
-                        }
-                        (None, Some(program_result)) => {
-                            child
-                                .execute_relational_program_stream_with_program_result(
-                                    &output.program,
-                                    program_result,
-                                )
-                                .await?
-                        }
-                        (None, None) => {
-                            child
-                                .execute_relational_program_stream(&output.program)
-                                .await?
-                        }
-                    };
+                    let prior_inputs = output
+                        .prior_results
+                        .iter()
+                        .map(|slot| {
+                            let owners = slot
+                                .producers
+                                .iter()
+                                .map(|producer| {
+                                    retained.get(producer).cloned().ok_or_else(|| {
+                                        RelationalProgramError::InvalidProgram(
+                                            "prior result has not completed".into(),
+                                        )
+                                        .into()
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, RelationalQueryRuntimeError>>()?;
+                            super::query_result_input::QueryResultInput::try_new(
+                                slot.binding.clone(),
+                                owners,
+                            )
+                            .map_err(RelationalQueryRuntimeError::from)
+                        })
+                        .collect::<Result<Vec<_>, RelationalQueryRuntimeError>>()?;
+                    let streamed = child
+                        .execute_relational_program_stream_with_query_local_bindings(
+                            &output.program,
+                            request_inputs.get(&output.relation_id).map(Arc::as_ref),
+                            output.program_result_binding.as_ref(),
+                            &prior_inputs,
+                        )
+                        .await?;
                     let schema = Arc::clone(streamed.schema());
                     let compilation = streamed.observations().clone();
-                    let provenance = compilation_provenance(&compilation);
+                    let mut provenance = compilation_provenance(&compilation);
+                    provenance.extend(
+                        output
+                            .prior_results
+                            .iter()
+                            .flat_map(|slot| slot.producers.iter())
+                            .collect::<BTreeSet<_>>()
+                            .into_iter()
+                            .map(|producer| ResultProvenance {
+                                kind: "prior_result_block".into(),
+                                identity: producer.as_str().into(),
+                            }),
+                    );
                     compiled_outputs.push((
                         output.relation_id.clone(),
                         schema.clone(),
                         compilation,
                     ));
+                    let stream = if reusable.contains(&output.relation_id) {
+                        let selected_rows = output
+                            .row_selection
+                            .as_ref()
+                            .map_or(max_output_rows, |selection| selection.maximum_rows);
+                        let result = super::query_result_input::RetainedBlockResult::collect(
+                            Arc::clone(&schema),
+                            streamed.into_stream(),
+                            child.reserve_prior_result_memory(),
+                            max_output_rows,
+                            usize::try_from(selected_rows)
+                                .map_err(|_| RelationalQueryRuntimeError::ResultCountOverflow)?,
+                            &seal_cancellation,
+                            deadline,
+                        )
+                        .await?;
+                        let stream = result.stream();
+                        retained.insert(output.relation_id.clone(), result);
+                        stream
+                    } else {
+                        streamed.into_stream()
+                    };
                     relation_streams.push(StreamedRelationInput {
                         relation_id: output.relation_id,
                         schema,
-                        stream: streamed.into_stream(),
+                        stream,
                         max_rows: max_output_rows,
                         coverage,
                         provenance,

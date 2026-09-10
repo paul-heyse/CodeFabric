@@ -39,6 +39,8 @@ use object_store::ObjectStore;
 use url::Url;
 
 #[cfg(feature = "daemon")]
+use super::query_result_input::QueryResultInput;
+#[cfg(feature = "daemon")]
 use crate::relational_program::SupplementalProgramRelationBinding;
 use crate::relational_program::{
     CompilationObservations, ProgramBindings, RelationInput, RelationalProgram,
@@ -1215,6 +1217,14 @@ const fn variable_type_identity(variable_type: &VarType) -> &'static str {
 }
 
 impl AuthorizedChildSession {
+    #[cfg(feature = "daemon")]
+    pub(crate) fn reserve_prior_result_memory(
+        &self,
+    ) -> datafusion::execution::memory_pool::MemoryReservation {
+        datafusion::execution::memory_pool::MemoryConsumer::new("codefabric.prior-result")
+            .register(&self.state.runtime_env().memory_pool)
+    }
+
     async fn try_from_epoch(
         epoch: &ProgrammaticFabricEpoch,
         policy: ChildSessionPolicy,
@@ -1710,6 +1720,7 @@ impl AuthorizedChildSession {
             program,
             Some(request_inputs),
             None,
+            &[],
         )
         .await
     }
@@ -1724,6 +1735,7 @@ impl AuthorizedChildSession {
             program,
             None,
             Some(program_result),
+            &[],
         )
         .await
     }
@@ -1739,24 +1751,28 @@ impl AuthorizedChildSession {
             program,
             Some(request_inputs),
             Some(program_result),
+            &[],
         )
         .await
     }
 
     #[cfg(feature = "daemon")]
-    async fn execute_relational_program_stream_with_query_local_bindings(
+    pub(crate) async fn execute_relational_program_stream_with_query_local_bindings(
         &self,
         program: &RelationalProgram,
         request_inputs: Option<&RequestOwnedRelationCollection>,
         program_result: Option<&SupplementalProgramRelationBinding>,
+        result_inputs: &[QueryResultInput],
     ) -> Result<ChildProgramStream, ChildSessionError> {
         if request_inputs.is_none_or(RequestOwnedRelationCollection::is_empty)
             && program_result.is_none()
+            && result_inputs.is_empty()
         {
             return self.execute_relational_program_stream(program).await;
         }
 
         let mut supplemental = Vec::new();
+        supplemental.extend(result_inputs.iter().map(|input| input.binding.clone()));
         if let Some(program_result) = program_result {
             supplemental.push(program_result.clone());
         }
@@ -1771,7 +1787,23 @@ impl AuthorizedChildSession {
         let context = self.context();
         let mut inputs = Vec::with_capacity(bindings.len());
         let mut consumed_request_relations = BTreeSet::new();
+        let mut consumed_result_relations = BTreeSet::new();
         for binding in bindings {
+            if let Some(result_input) = result_inputs
+                .iter()
+                .find(|input| input.binding.relation_id() == &binding.relation_id)
+            {
+                if result_input.binding.table_reference() != &binding.table_reference {
+                    return Err(ChildSessionError::ProgramBindingDrift {
+                        relation: binding.relation_id.as_str().to_owned(),
+                        expected: result_input.binding.table_reference().clone(),
+                        actual: binding.table_reference,
+                    });
+                }
+                consumed_result_relations.insert(binding.relation_id.clone());
+                inputs.push(result_input.input.clone());
+                continue;
+            }
             if let Some(request_input) =
                 request_inputs.and_then(|inputs| inputs.get(&binding.relation_id))
             {
@@ -1812,6 +1844,11 @@ impl AuthorizedChildSession {
             });
         }
 
+        if consumed_result_relations.len() != result_inputs.len() {
+            return Err(ChildSessionError::RequestOwnedPlanAuthorityDrift(
+                "unused or duplicate prior-result input".into(),
+            ));
+        }
         if let Some(request_inputs) = request_inputs
             && consumed_request_relations.len() != request_inputs.len()
         {
@@ -1850,13 +1887,12 @@ impl AuthorizedChildSession {
             expected_schema,
             compiled.observations,
         );
-        if let Some(request_inputs) = request_inputs {
-            self.validate_request_owned_plan_authority(
-                &query_local_plan,
-                request_inputs,
-                &query_state,
-            )?;
-        }
+        self.validate_request_owned_plan_authority(
+            &query_local_plan,
+            request_inputs,
+            result_inputs,
+            &query_state,
+        )?;
 
         // Physical planning and execution are intentionally fresh. `query_local_plan` is a local
         // digest/validation carrier and is never looked up in or inserted into the epoch cache.
@@ -1877,6 +1913,7 @@ impl AuthorizedChildSession {
             physical_plan,
             query_state.task_ctx(),
         )?);
+        let stream = QueryResultInput::retain_stream(result_inputs, stream);
         Ok(ChildProgramStream {
             schema: expected_schema,
             stream,
@@ -1973,7 +2010,8 @@ impl AuthorizedChildSession {
     fn validate_request_owned_plan_authority(
         &self,
         plan: &CachedLogicalPlan,
-        request_inputs: &RequestOwnedRelationCollection,
+        request_inputs: Option<&RequestOwnedRelationCollection>,
+        result_inputs: &[QueryResultInput],
         query_state: &SessionState,
     ) -> Result<(), ChildSessionError> {
         if plan.compiled_plan().schema().as_arrow() != plan.output_schema().as_ref()
@@ -1990,8 +2028,25 @@ impl AuthorizedChildSession {
         ] {
             let mut observed_request_relations = BTreeSet::new();
             validate_logical_plan_references(logical_plan, query_state, true, |scan| {
-                if let Some(request_input) = request_inputs
+                if let Some(result_input) = result_inputs
                     .iter()
+                    .find(|input| input.binding.table_reference() == &scan.table_name)
+                {
+                    let provider =
+                        source_as_provider(&scan.source).map_err(|error| error.to_string())?;
+                    if !Arc::ptr_eq(&provider, &result_input.provider)
+                        || provider.schema() != *result_input.binding.schema()
+                    {
+                        return Err(format!(
+                            "{phase} prior-result scan {} has different authority",
+                            scan.table_name
+                        ));
+                    }
+                    return Ok(());
+                }
+                if let Some(request_input) = request_inputs
+                    .into_iter()
+                    .flat_map(RequestOwnedRelationCollection::iter)
                     .find(|input| input.table_reference() == &scan.table_name)
                 {
                     let provider = source_as_provider(&scan.source).map_err(|error| {
@@ -2040,7 +2095,9 @@ impl AuthorizedChildSession {
             })
             .map_err(ChildSessionError::RequestOwnedPlanAuthorityDrift)?;
 
-            if observed_request_relations.len() != request_inputs.len() {
+            if let Some(request_inputs) = request_inputs
+                && observed_request_relations.len() != request_inputs.len()
+            {
                 let missing = request_inputs
                     .iter()
                     .find(|input| !observed_request_relations.contains(input.relation_id()))

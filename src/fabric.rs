@@ -105,6 +105,8 @@ pub mod relation_publication_command_effect;
 pub mod relational_query_runtime;
 #[cfg(feature = "daemon")]
 pub mod request_owned_relation;
+#[cfg(feature = "daemon")]
+pub(crate) mod query_result_input;
 pub(crate) mod resource_ownership;
 mod result_checksum;
 #[cfg(feature = "daemon")]

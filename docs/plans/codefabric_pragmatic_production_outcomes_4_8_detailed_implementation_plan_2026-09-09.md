@@ -490,6 +490,40 @@ All 19 runtime/compiler/public-family regressions and default/featureless root c
 
 ### 3.4 Compatibility and removal rules
 
+**P03 reusable-result decision, 2026-09-10 (first entity-result vertical implemented).** Production consumer
+slots will consume completed, typed Arrow outputs under the same admitted epoch and child
+authorization. Only outputs with downstream consumers need a retained buffer; final-only outputs
+keep streaming. A DataFusion `MemoryConsumer`/`MemoryReservation` on the existing shared pool owns
+buffered bytes, with the existing row envelope, deadline and cancellation. Buffer ownership follows
+the scan provider and final result stream. This initial bounded implementation can fail explicitly
+on memory pressure; spill/externalization is a later measured optimization, not unlimited buffering.
+Native semi joins retain canonical identity and analysis context. Repeated producers must have the
+slot's exact declared schema and role; their returned rows form the explicit prior-result input.
+The result manifest retains dependency edges and each producer's coverage/result-limit observation.
+
+The alternative of substituting cloned producer plans remains appropriate only for existing
+legacy compiler fixtures: it repeats execution and cannot establish one reusable selected result.
+Production slots therefore declare materialized composition explicitly. The first slice accepts
+entity results for facts, relationship subjects and source reads; other semantic roles follow with
+their concrete producer schemas. Check diamond reuse, empty typed inputs, context separation,
+returned-row limits, guarded role rejection, cancellation/pressure cleanup and exact reopen through
+installed clients. DataFusion planning §54.8 (memory pool), §52 (join planning), and the resolved
+DataFusion 55 memory-pool/MemTable sources guide the ownership and relational implementation.
+
+The first typed entity-result vertical now passes installed clients and exact reopen (30.12 s).
+Its nine blocks verify returned-row limits, reuse for facts/calls/source, multiple producer subjects,
+duplicate-free subject union, typed empty inputs and separation of query IDs from explicit entity
+subjects. Native semi joins preserve canonical ID/context pairs. Transient input envelopes preserve
+exact field semantics while replacing inherited provider-level schema metadata. Native UNION gains
+a private derived qualifier before subsequent joins. Actual producer block relations appear in
+consumer provenance and manifest dependency edges. Repeated references remain bounded inputs but
+share one producer execution. One-source-poll and memory/row/cancellation/deadline ownership cases
+pass; all 51 affected regressions and default/featureless root checks pass. `prior-entities` selects
+the new native case. All-target Clippy completes with its existing backlog and no diagnostics in
+the new modules/native tests; focused lint, golden selection, docs, spelling and diff checks pass.
+STATUS records corrections and logs. Independent branch
+scheduling/failure, occurrence roles and remaining first-four meanings still belong to P03.
+
 Evolve the existing schema descriptor/version checks and released wire deliberately. For each
 schema-changing slice, identify its raw producer, canonical consumers, persisted reader, public
 projection and update replacement. Add typed fields/relations only where these consumers need

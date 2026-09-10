@@ -629,13 +629,10 @@ impl ApplicationOwnedSemanticIngressPort {
         let mut fanin = BTreeMap::<&str, usize>::new();
         let mut fanout = BTreeMap::<&str, usize>::new();
         for clause in &request.queries {
-            let mut seen_producers = BTreeSet::new();
             for reference in clause.result_references() {
-                if reference.results_of == clause.query_id()
-                    || !seen_producers.insert(reference.results_of.as_str())
-                {
+                if reference.results_of == clause.query_id() {
                     return Err(rejected(format!(
-                        "query {} has a self or duplicate dependency",
+                        "query {} has a self dependency",
                         clause.query_id()
                     )));
                 }
@@ -1204,6 +1201,9 @@ impl ApplicationOwnedSemanticIngressPort {
                 &mapping.consumer_slot_id,
                 &slot.consumer_role_id,
             )?;
+            if slot.materialized {
+                return Ok(());
+            }
         }
         projection.push_input(query_id, &mapping.input_id, fields)
     }
@@ -3205,6 +3205,7 @@ mod tests {
             fields,
         ));
         slots.push(EpochBoundConsumerSlotBindingRow {
+            materialized: false,
             program_binding_id: Arc::clone(program_binding_id),
             consumer_slot_id: Arc::clone(&mapping.consumer_slot_id),
             consumer_role_id: arc(format!("consumer.{suffix}")),
