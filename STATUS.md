@@ -1,15 +1,16 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Baseline for this continuation: `56d2a36d` (`Activate source and syntax before fresh semantic convergence`);
-structured compiler diagnostics and closed failed-compilation observations are the current slice.
-The completed query slices and their validation are recorded below.
+Latest production commit: `4cc74d7c` (`Retain native Rust diagnostic locations and suggestion edits`),
+following primary failed-compilation diagnostics in `f1e44d80`.
+The user requested a natural stopping point, a full plan/status update and no further implementation.
+This is the paused handoff; the completed slices and their validation are recorded below.
 
 ## Current handoff
 
 **Outcomes 1–3 are implemented for the current Linux workflow. Outcomes 4 and 5 are partially
-implemented. Outcomes 6–8 remain open, with reusable infrastructure and some prerequisite work
-already present. No outcome from 4 through 8 is complete.**
+implemented. Outcome 6 has a partial production update loop; outcomes 7–8 remain open with selected implemented
+prerequisites. No outcome from 4 through 8 is complete.**
 
 Follow the [production backlog](docs/plans/codefabric_pragmatic_production_implementation_plan.md)
 and its [detailed outcomes 4–8 execution plan](docs/plans/codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md).
@@ -31,16 +32,58 @@ Fresh startup now uses this source-first path too. The first useful release rema
 
 The call-query continuation present at session start was preserved, exercised and committed in
 `80bc6d18`; declaration kinds/public subjects followed in `1a60e748`, and lexical references in
-`5964e5ff`. The full requested implementation remains unfinished. No outcome from 4 through 8 is closed.
+`5964e5ff`. The full plan remains unfinished. No outcome from 4 through 8 is closed. Work stops at the
+user-requested diagnostic checkpoint; resumption tasks below are not being started.
 
-## Structured Rust diagnostics and failed compilation observations
+## Typed Rust diagnostic locations, notes and edits
+
+The extractor now retains ordinary `DiagInner` child messages, labeled primary/secondary spans,
+native suggestion applicability/style, every alternative and each multipart replacement. Empty
+alternatives and disabled/sealed suggestion state remain distinct. Four application-owned Arrow
+relations carry the details; typed local formatter and SourceMap APIs stay inside the dated-nightly
+adapter. Primary compiler/lint codes still come from the native JSON emitter because the pinned
+compiler keeps lint names private. Cargo's artifact, timing, unused-extern and future-breakage report
+hooks continue to delegate to its native emitter; the separate compatibility report is outside this
+ordinary-diagnostic detail profile.
+
+Each location retains its raw local path independently of any remapped display name. Original byte
+ranges use rustc's BOM/CRLF normalization map. Captured source locations carry their own file identity
+and content digest, separately from the compilation owner's source fields. Dummy/non-file spans,
+unavailable local paths, uncaptured generated files and locations outside the captured universe
+retain explicit unmapped states. Changed or aliased captured inputs and invalid captured ranges
+remain hard failures. No external display filename is promoted to a source identity.
+
+The retained primary/detail capture shares an 8 MiB payload accounting limit, with separate finite
+primary/detail row limits. One pending detail bundle is independently bounded. Overflow drops detail
+bundles without orphaning their parent message, and all affected diagnostic families retain unknown
+capture scope. Exact detail locations can be unmapped even when the native diagnostic capture closes.
+
+Validation on 2026-09-09 for the code committed in `4cc74d7c`: all 20 extractor tests and
+strict check/lint pass, including native remapped diagnostic paths, multipart/empty alternatives and
+captured-source mutation rejection. The actual successful-warning and failed-no-MIR contained
+compiler scenarios pass (7.80/7.71 s in the final selection), including second-file identity/digest and BOM/CRLF byte ranges;
+the successful lint retains its note and exact replacement. All ten selected provider/schema checks
+pass with the four new relations. Default/featureless root checks and full governance pass; Clippy
+retains exactly 952 library/36 integration warnings, with no new findings. The expanded installed
+live/clean/repair/exact-reopen scenario passes (350.01 s), comparing all four detail relations through
+replacement and failed-epoch reopening. All-failed startup also passes (58.77 s). The final
+four-case native selection passes completely. Canonical/public diagnostic consumers and the
+remaining outcomes are still open. These are correctness samples, not performance comparisons.
+
+The raw compiler bundle now has 22 relations; the compiled release has 66 provider relations and
+transformations. Its schema-bundle digest changes, while the Protobuf fingerprint remains
+`8eddc258dc2129ec0f1580f1936ea4213898c8dd903dcdf36dadbb9451163bfe`. Exact reopening within
+this candidate is tested; migration of retained epochs from an older provider bundle was not tested.
+
+## Primary Rust diagnostics and failed compilation observations (`f1e44d80`)
 
 The dated-nightly extractor installs the native diagnostic emitter and retains typed primary
 messages, severity, compiler/lint code and invocation-local ordinal. Its additional capture is
 bounded to 8 MiB and 20,000 primary diagnostics; overflow, unfinished frames and unavailable sink
 initialization leave explicit unknown scope. Messages without a native code retain an empty code.
 The compiler's display paths are not source identities. Diagnostic owners bind the exact captured
-compilation root; per-message source spans, child notes and suggestions remain open.
+compilation root. The later typed-detail slice above adds per-message locations, child notes
+and suggestions; full generated/hygiene mapping and public consumers remain open.
 
 Closed diagnostic owners now survive ordinary compiler failure even when no MIR callback runs.
 Closed successful units within a failed Cargo invocation can also retain positive facts. Canonical
@@ -177,7 +220,8 @@ The bounded native projection removes whole-file bytes from public output and re
 identity, lossless UTF-8 or binary, half-open delivered byte positions, one-based line numbers,
 zero-based byte columns and exact returned/omitted byte counts. `return.maximum_source_bytes` is an
 independent per-span limit in 1..=1048576. Python declaration spans currently identify declaration
-names; Rust spans retain the compiler's declaration range. Surrounding syntax/body expansion is open.
+names; Rust spans retain the compiler's declaration range. The later source-context slices below
+add function definition/body selection and surrounding lines.
 
 Workspace registration defaults to metadata disclosure. `WorkspaceRegistry::set_source_disclosure`
 explicitly grants/revokes source access and advances the policy revision. Preparation, native batches
@@ -562,13 +606,18 @@ Implemented in `eba6f19a`, `baf533f4`, `52477365` and `b6a7d777`:
   excess units or substituted source/context pins are rejected. Target `processed` means output
   returned, not that every compiler family or semantic proposition is complete.
 
-Remaining: registry/git dependency materialization; build-script/proc-macro and generated `OUT_DIR`
-input closure/source mapping; effective Cargo configuration/environment and selectable feature,
-profile/target combinations; host-versus-target build separation; retained compatible compiler
-build caches; bounded parallel context scheduling; byte-safe compiler path handling; complete
-diagnostic spans/children and public consumers; broader update-time invalidation, cancellation and
-obsolete-completion scenarios. Primary compiler diagnostics now survive qualified ordinary failure
-as described above.
+Later committed slices add custom/default/disabled build inputs, Cargo-configured platforms/rustflags,
+library linkage combinations and captured feature/default-feature/profile selections with workspace
+inheritance and package override. Raw compiler source paths and ordinary structured diagnostic
+messages/details retain exact source binding. Fresh readiness and live updates publish source/syntax
+before semantic convergence. Their independent clean/reopen checks are recorded above.
+
+Remaining: registry/git materialization; generated `OUT_DIR`/build-script/proc-macro input closure;
+complete actual per-unit/unified-feature/environment and host-target contexts; retained compatible
+build caches and bounded parallel scheduling; raw compiler argv and external tool-change invalidation;
+full generated/hygiene diagnostic mapping, compatibility-report semantics and canonical/public
+consumers. Existing failed-target, source-stage, cancellation and stale-completion checks cover their
+selected scenarios; broader configuration/dependency races remain.
 
 ### 4B — Python contexts and semantic extraction: partial
 
@@ -588,7 +637,7 @@ imported aliases and bound methods are tested. The sidecar maps coordinates to c
 pins, and the daemon independently validates file, digest and range. Synthesized/unavailable or
 out-of-inventory definitions remain explicit gaps; qualified display names are not identity.
 
-The current change admits captured project configuration when the effective manifest accounts for
+The committed Python configuration slice admits captured project configuration when the effective manifest accounts for
 all checker settings. Version, platform and ordered workspace search paths are installed from that
 manifest; artifact digests remain part of context identity. Unapplied checker settings, unmaterialized
 project dependencies and older configurations without a setting census remain unavailable. No ambient
@@ -601,7 +650,7 @@ tests pass. Sidecar strict lint, default/featureless root checks, governance, do
 changed-file formatting pass. Root library Clippy retains 955 baseline warnings with no added findings.
 `just golden --case python-context-live` selects the installed scenario.
 
-The current sidecar change owns retained modules by input/file identity rather than import name.
+The committed source/stub slice owns retained modules by input/file identity rather than import name.
 A source/stub pair and same-name modules in ordered roots can be checked together. Duplicate file/input
 identities and substituted file/name/path bindings are rejected before checker mutation. Deletion
 reconstructs the checker so a removed stub cannot survive in its private handles. All 32 sidecar tests
@@ -657,14 +706,15 @@ error under colliding display paths), strict sidecar checking/lint and all 200 t
 Default/featureless root checks, tooling lint, governance, docs navigation and changed-file formatting
 pass. Root library Clippy retains the same 955 warning baseline. The installed scenario is selected by
 `just golden --case python-paths-live`. Decoded UTF-8/BOM/Latin-1 mappings now pass the separately
-recorded mixed source scenario above. Byte-safe Rust compiler input paths remain open.
+recorded mixed source scenario above. Raw Rust source-manifest/local-file paths also pass the
+separate compiler-path scenario; complete byte-safe compiler argument handling remains open.
 
 Remaining: full source/lexical/CST feature census; retained parsers/query packs and incremental trees;
 complete trivia/index/coordinate handling and further source codecs; reversible compiler paths
-and source presentation; rename/case-collision
-semantics; incomplete-edit behavior during actual live updates. Exact declaration-span source
-retrieval and exact function definitions/bodies are implemented; broader syntax/line/source-context
-selection remains open.
+and additional source presentation; rename/case-collision semantics and broader incomplete-edit
+behavior during actual live updates. Exact declaration spans, function definitions/bodies, bounded
+surrounding lines and explicit UTF-8/UTF-16 columns are implemented. Remaining subjects and complete
+syntax/coordinate contexts stay open.
 
 ### 4D — canonical normalization: partial
 
@@ -705,7 +755,7 @@ Raw provider coverage is not complete canonical-family coverage.
 | FindEntities | Installed client returns canonical functions and selected additional Python/Rust declaration kinds with reusable public IDs; language/context filters precede limits; stable name/entity ordering | Remaining kinds/representations, source boundaries, semantic name/ambiguity resolution and full directives |
 | RetrieveFacts | Explicit canonical entity IDs; `declarations` or `declaration locations and provenance`; native semi join prevents repeated subjects duplicating occurrences; partial and empty cases tested | Types, members, call/derived families, point filters, broad family expansion and phrase/fact/prior-result resolution |
 | FollowRelationships | Installed Python/Rust one-step calls and Python lexical references, repeated occurrences, scoped unknowns and limits | project-aware semantic references/imports, Rust references, candidates, full direction/distance/stop/filter behavior and composition |
-| RetrieveSourceContext | Exact canonical declaration spans, independently authorized captured bytes, Unicode/CRLF coordinates and explicit byte truncation; disk-change/reopen/revocation/empty/mixed-language cases | Broader syntax/line-bound selection, remaining subjects and composition |
+| RetrieveSourceContext | Exact declaration/function definition/function body spans, bounded surrounding lines, independently authorized bytes, original-byte and UTF-8/UTF-16 columns, observed truncation and hard-limit failures; live/clean/reopen/revocation cases | Remaining syntax meanings, subjects/coordinate contexts and composition |
 
 Unsupported subject meanings are explicitly rejected; they do not fall back to names. The generalized
 pragmatic expectation corpus is not fully connected to all public forms. The static four-form mixed-language
@@ -725,14 +775,15 @@ reason categories; coverage and row truncation are distinct.
 The first remainder page is bounded to 64 rows with `next_offset`; raw path bytes, optional display path,
 target/kind and known context survive projection. The summary is retained with the exact result package.
 The validated call-specific extension and lexical-reference scope are described above and conservatively
-include the selected context's potential callers or referring files. It does not yet derive exact owner/reverse-dependency scope.
+include the selected context's potential callers or referring files. Exact outgoing Rust caller
+partitions are implemented; full reverse-dependency and all-family owner scope remain open.
 
 Remaining: all family/owner dimensions; authorization-scoped efficient status
 scans; incoming reference/import and negative dependency/frontier propagation; shared live pending/running
 state; provider precision and actionable retry details; a clean distinction between terminal semantic
 unknowns and runnable pending work for convergence. Empty results alone never establish complete absence.
 
-### 5B — wire delivered in part; freshness barriers open
+### 5B — typed delivery and source/semantic barriers: partial
 
 `b865c6b2` adds typed Protobuf processing fields, strict Pydantic projections and retained manifest/reopen
 support. Presence distinguishes unobserved result exhaustion from observed false. Streaming observes one
@@ -753,7 +804,7 @@ source-current uses the separate source publication barrier.
 | 6A | Watch-before-census, owned native watcher, bounded coalesced queue, retained rescan obligation, periodic secure census and public observation/health | Git inclusion, selected external roots, polling profile, root recreation and ignore/config acceptance |
 | 6B | Whole-context replacement, monotonic generations, stale observation, changed-input fences, mixed clean comparison and delayed-completion rejection | Broader negative-dependency/config/context and owner-identity coverage |
 | 6C | Source/syntax then semantic publication, separate current barriers, exact pending-stage restart and old source-page retention | Retained Tree-sitter/Pyrefly/Cargo state, changed-version reuse and fair scheduling |
-| 6D | Persistent Python edits, mixed clean comparison, Python version/platform/negative imports, obsolete completion and pending restart | Full semantic/identity/coverage edit corpus, external inputs and Rust configuration/dependency cases |
+| 6D | Mixed live/clean comparison; Python version/platform/roots/stubs/paths/decoding, Cargo build/platform/feature/profile selections, failed compilation repair, obsolete completion and source-only restart | Full semantic/identity/coverage edit corpus, external/generated dependencies, complete context and rename cases |
 
 The installed live test is distinct from startup-versus-restart validation. The mixed comparison retains canonical
 identity and relationships; the wider edit and rename-continuity corpus remains open.
@@ -765,7 +816,7 @@ identity and relationships; the wider edit and rename-continuity corpus remains 
 | 7A Python language semantics | Owned Ruff bindings/references/call syntax and selected Pyrefly call definition anchors | Complete scope/binding/import/type/member/call/decorator/pattern/comprehension and dynamic-semantics rows, canonical consumers and invalidation |
 | 7B Python CFG/dataflow | Typed analysis code and prepared source expectations | Correct owner-scoped control/evaluation semantics, normal/exception/cleanup/suspend edges, reaching definitions/liveness and real production input wiring; replace ordinal/sequential approximations |
 | 7C Python advanced state | Existing analysis structures | Finite memory/points-to, effects/resources/exceptions, capture/generator/async/concurrency and unknown propagation, built on 7B |
-| 7D Rust source/types/MIR | Real typed compiler publication, stable declaration keys and selected canonical calls | Full types/generics/traits/instances/MIR payloads, macro/hygiene/generated spans, coroutine/CTFE/FFI facts, diagnostic spans/children and canonical/public coverage |
+| 7D Rust source/types/MIR | Real typed compiler publication, stable declaration keys, selected canonical calls and ordinary native diagnostic messages/children/spans/suggestions/edits | Full types/generics/traits/instances/MIR payloads, generated/hygiene/coroutine/CTFE/FFI facts, separate compatibility diagnostics and canonical/public coverage |
 | 7E Rust derived/private borrow | Existing MIR analysis modules and contained compiler seam | Real typed inputs, finite dataflow/state/ownership analyses, exact private loans/regions, drop/unwind/coroutine and changed-body replacement |
 | 7F Common graphs/summaries | Existing petgraph/analysis integration and canonical calls | Demand-rooted projections, correct dominance/SCC/reachability, structural facts and bounded interprocedural fixpoints with precision/frontier scope |
 | 7G Complete forms/composition | Eight-form request/ingress infrastructure; four limited public forms | FindPaths, MatchPattern, Compare and Summarize; finish first four; real typed multi-block DAGs, fan-out/fan-in, repeated forms, references, authorization, negatives, ordering/limits and cancellation |
@@ -793,8 +844,9 @@ No representative benchmark or sustained bounded-storage acceptance has been com
 
 ## Validation and limits at this checkpoint
 
-These are attributable implementation runs from 2026-09-09, not tests rerun for this documentation
-refresh. Counts below overlap; they must not be added into a full-suite total.
+These are attributable implementation runs from 2026-09-09. The final diagnostic rows include
+checks run while reaching this stopping point; earlier rows preserve evidence for unchanged scopes.
+Counts overlap and must not be added into a full-suite total.
 
 | Code scope | Command/observation | Result and boundary |
 |---|---|---|
@@ -808,6 +860,14 @@ refresh. Counts below overlap; they must not be added into a full-suite total.
 | Call-query continuation | Installed Python/call/reopen and mixed Rust/declaration/call tests; 16 focused scope/recipe/ingress/implicit-call tests; five final scope/implicit-call/reopen tests | Pass; full traversal, composition and live updates remain open |
 | Declaration kinds/public subjects (`1a60e748`) | Installed Python kinds/fact subjects, guard choices, mixed Rust constants/statics/facts, exact reopen; adapter fast and focused root checks | Pass: 12.95 s Python, 11.04 s guard, 63.91 s Rust, 17.94 s reopen; 95 adapter and 15 focused root cases; default root check and affected Clippy complete |
 | Lexical references (`5964e5ff`) | Installed Python complete/partial/reference/reopen and mixed Rust calls/declarations/unsupported-reference checks; root default/featureless check; affected Clippy/governance/docs/format | Pass: 30.39 s Python, 64.48 s Rust and three processing cases; Python call/reopen regression 17.49 s; Clippy retains 958 warnings |
+| Source/disclosure and richer source contexts (`46e260a9`, `10e577d5`, `33b2c2a5`) | Installed exact-span/disclosure/revocation, function definition/body live/clean and surrounding-line/reopen scenarios | Pass: 21.04 s source/revocation, 206.25 s function/body, 33.70 s lines/hard limits; remaining subjects/directives stay open |
+| Decoding/columns/raw paths (`55e50782`, `d07d81e4`, `4516a5a7`, `fcd62fd9`) | Real source/call/live/clean/reopen scenarios and strict provider checks | Pass: mixed decoding 203.40 s, text columns 202.48/204.34 s, Python paths 81.85 s, Rust paths 138.00 s; further codecs/argv/rename behavior open |
+| Python configuration/roots/stubs (`1c913767`, `6e339a3e`, `38629d50`) | Installed independent clean/live comparison with configuration changes and source/stub/root replacement | Pass: 165.86/72.87/73.85 s respectively; external distributions/roots and full semantic output open |
+| Rust custom build/caller/platform/toolchain/linkage/selections (`41438e2e` through `09988b9d`) | Actual contained targets, installed live/clean/reopen fixtures, typed scope/schema/adapter checks | Selected custom build, exact caller scope, platform flags, shared toolchain capture, linkage and feature/profile cases pass; feature/profile final scenario 192.07 s, rerun after source-first startup 212.76 s; complete generated/external/unit closure open |
+| Live lifecycle and source-first fresh startup (`a6d8569a`, `99b77ec0`, `56d2a36d`) | Running mixed daemon, independent clean comparisons, current barriers, obsolete completion and source-only restart | Final staged scenario 186.06 s; after primary diagnostics 188.20 s; public source precedes semantic successor; retained providers/full corpus open |
+| Retained processing continuation (`730a346d`) | Installed 130-partition paging through restart and a live successor, invalid ranges/blocks/released handles | Pass 53.38 s, later source-first regression 74.63 s; all-family/efficient status open |
+| Primary Rust diagnostics (`f1e44d80`) | Two contained compiler cases, mixed target/context, all-failed startup, live/clean repair and exact failed-epoch reopen; Rust service/launcher checks | Pass: failed-no-MIR 8.12 s, successful warning 8.21 s, mixed contexts 76.48 s, all-failed 48.36 s, live/clean/reopen 374.04 s; 18 service and 19 extractor tests; tooling 216; no containment weakening |
+| Typed Rust diagnostic details (`4cc74d7c`) | `just extractor-check`, `just extractor-test`, `just extractor-identity`; provider/schema cases; final four-case contained/installed native selection; `just root-check`, `just governance`, affected Clippy | Pass: 20 extractor and ten provider/schema tests; successful warning 7.80 s, failed-no-MIR 7.71 s, all-failed startup 58.77 s, live/clean/repair/exact reopen 350.01 s; 988 existing Clippy warnings, no new findings; no full-suite or cross-upgrade migration claim |
 
 Local observations for resumption include `/tmp/codefabric-call-processing-tests.log`,
 `/tmp/codefabric-public-calls-check.log`, `/tmp/codefabric-python-canonical-calls-final-regression.log`
@@ -816,11 +876,32 @@ and `/tmp/codefabric-python-call-anchors-*`. The current slices also retain
 and `/tmp/codefabric-outcomes-references-check-final.log`. They are optional local logs, not required runtime
 artifacts or a new certification mechanism. Git and named behavioral tests retain the useful history.
 
-The existing four golden scenarios have passed during earlier slices (startup, installed Python
+The original four golden scenarios passed during earlier slices (startup, installed Python
 serving, exact reopen and cancellation). Exact reopen was rerun on the call-query slice (16.65 s);
-these scenarios do not exercise full outcomes 4–8. Root Clippy retains a large warning backlog (955 warnings in the latest affected library run). The last older aggregate root result at `0cc7242`
+these scenarios do not exercise full outcomes 4–8. Latest affected Clippy retains 952 library/36 integration warnings (988 total), with no new findings
+in the diagnostic-detail slice. Strict lint remains open; the latest run was not a `-D warnings` pass. The last older aggregate root result at `0cc7242`
 reported 1,038 passed, 13 failed and two skipped; it is historical, not a current verdict. No new
 four-domain aggregate, full-root green result or universal product completion is claimed here.
+
+Final diagnostic logs remain locally under `/tmp/codefabric-diagnostic-details-*`: `native2.log`
+contains the four final behavior checks; `extractor-tests2.log` contains the 20 tests;
+`root2.log`, `clippy2.jsonl` and `governance1.log` contain the integrated static evidence.
+`native1.log` contains the ten provider/schema cases plus the two earlier contained runs.
+The previous `/tmp/codefabric-rust-diagnostics-*` logs belong to `f1e44d80`.
+
+The final native selection used the two provider binary paths described below and a temporary
+`systemd-run --user --scope --quiet --property=Delegate=yes env` scope, followed by:
+
+```sh
+just root-test-incremental -E 'test(mixed_live_updates_equal_independent_clean_public_queries) | test(pragmatic_all_rust_targets_failed_retains_diagnostics_and_source) | test(contained_cargo_extracts_real_selected_rust_call) | test(contained_cargo_retains_structured_diagnostics_without_mir)' --test-threads 2 --no-tests=fail
+```
+
+Affected Clippy used `./scripts/cargo-check-mode.sh cargo clippy --locked --lib --test integration
+--message-format=json`; the comparison to the preceding 988-warning candidate found no new findings.
+Changed Rust formatting, new-text spelling, document navigation and `git diff --check` pass.
+All validation processes and fixture daemons launched for this slice have finished; no continuation
+is scheduled. A separate terminal-owned nextest run was observed during handoff; it was left
+untouched and its results are not included here.
 
 ## Runtime profile and completed foundations
 
@@ -850,7 +931,8 @@ Current source/transport ceilings: 1 GiB mixed captured source set; Pyrefly 16,3
 per chunk, 32 MiB per file, 512 MiB source bytes and 32 MiB aggregate descriptors per run; individual RPC
 frames remain 4 MiB. Context opening remains unary/bounded and external roots remain unfinished. These
 are configured ceilings, not measured optimal workload sizes. Dependency blobs avoid repeated sysroot
-disk copies, but toolchain verification cost, retained build state and cache reclamation still need work.
+disk copies, and one charged toolchain capture is shared per semantic pass. External tool changes, retained
+build state, cache reclamation and representative cost validation still need work.
 
 Use self-contained `just` recipes; keep stable/sidecar shared `target/` and the extractor's separate
 dated-nightly target. Real root provider tests require current `CODEFABRIC_RUSTC_EXTRACTOR_BIN` and
@@ -858,19 +940,27 @@ dated-nightly target. Real root provider tests require current `CODEFABRIC_RUSTC
 golden setup; `just sidecar-check` checks/lints rather than installing a fresh executable. No routine
 `cargo clean`, independent worktrees, source-edit artifacts or new approval cycle is required.
 
-## Next action
+## Paused handoff and resumption order
 
-1. Retain the validated one-step call-query slice and extend it with the remaining canonical families
-   and traversal semantics. Full FollowRelationships is still open.
-2. Finish 4A–4D effective/external/generated inputs and canonical families needed by the first four forms;
-   complete 4E and 5A–5B, especially all-family scope and target/family-specific freshness barriers. Retain the broad
-   workstation allowances and honest partial semantics.
-3. Extend the implemented 6A–6D observation/invalidation/two-speed publication loop with retained
-   providers, external/configuration inputs and the full independent clean/incremental corpus.
-   Complete first-four semantics before claiming the first useful release.
-4. Continue 7A–7H and 8A–8F to the full plan acceptance: every family and all forms/composition, finite
-   retention, actual native maintenance, recovery and representative performance. Add phase metrics and
-   persistence improvements while integrating updates; optional performance mechanisms remain conditional.
+The user requested that implementation stop after the current natural boundary and complete this
+status/plan update on 2026-09-09. No further slice is being started. The entire outcomes 4–8 scope
+remains the resumption target; none is complete. The detailed plan §10 is the current next-work list.
 
-The active user request is implementation of the entire remaining detailed plan. The limited call
-slice above is progress; all other stated acceptance remains required.
+When explicitly resumed:
+
+1. Extend 4A/7D exact external/generated compiler inputs, actual unit contexts and diagnostic
+   consumers; qualify separate compatibility reports and optimized-profile source-call coverage.
+   Preserve immutable capture checks rather than accepting mutable generated output as captured input.
+2. Finish 4B–4D/7A external Python contexts, full semantic/provider families, source census and canonical
+   authority/identity/conflict consumers. Keep established source/stub/root/path/decoding behavior.
+3. Complete 4E/5A–5B first-four meanings/composition, all-family scope, efficient status and targeted/
+   historical freshness; then extend 6A–6D external/Git/poll/root observations, retained providers,
+   selective persistence, fair scheduling and the full clean/incremental corpus.
+4. Deliver 7B–7H real analyses, all families/eight forms/typed DAGs/presentation and 8A–8F finite
+   retention, native maintenance, recovery, telemetry and representative measurements.
+
+Do not redo per-publication parser reuse, contained Cargo startup, supported captured selections,
+source-first activation, one-step call/reference queries or the completed source-context meanings.
+Cross-edit provider retention and complete context/analysis/query acceptance remain missing.
+No representative performance, native optimize/destructive vacuum or sustained reclamation result
+was produced in this continuation.
