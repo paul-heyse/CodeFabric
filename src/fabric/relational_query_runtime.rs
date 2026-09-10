@@ -13,6 +13,8 @@ use std::time::Instant;
 
 use arrow_schema::SchemaRef;
 
+mod block;
+
 use crate::cancellation::Cancellation;
 use crate::relational_program::{
     CompilationDependency, CompilationObservations, RelationId, RelationalProgram,

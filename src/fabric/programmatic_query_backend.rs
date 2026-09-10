@@ -1516,6 +1516,17 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 }
             };
         }
+        for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
+            *output = match output.clone().bind_block_output(
+                validated.ingress().request_content_pin,
+                validated.ingress().program_catalog_pin,
+                query_id,
+            ) {
+                Ok(output) => output,
+                Err(error) => return failed(&artifacts, "block_output_binding", error.to_string()),
+            };
+            output_by_query.insert(Arc::clone(query_id), output.relation_id().clone());
+        }
         let mut handoffs_by_output = BTreeMap::new();
         for request_input in handoff.request_inputs {
             let Some(output_relation) = output_by_query.get(&request_input.query_id).cloned()
@@ -1602,6 +1613,10 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             "format": "codefabric.semantic-query-response.v2",
             "semantic_request_id": request.parsed().request.semantic_request_id,
             "snapshot": &snapshot,
+            "queries": output_queries.iter().map(|query_id| serde_json::json!({
+                "query_id": query_id,
+                "relation_id": output_by_query[query_id].as_str(),
+            })).collect::<Vec<_>>(),
         });
         let canonical_response = match serde_json_canonicalizer::to_vec(&response) {
             Ok(response) => response,

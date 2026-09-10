@@ -165,6 +165,7 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         "canonical-rust-types",
         "canonical-rust-references",
         "canonical-fact-families",
+        "repeated-first-four",
         "python-live",
         "mixed-clean-live",
         "staged-live",

@@ -31,6 +31,7 @@ const DEFAULT_PRODUCTION_SOURCE: &[u8] = b"def answer(value: int) -> int:\n    r
 #[cfg(target_os = "linux")]
 mod semantic_references;
 mod fact_families;
+mod block_queries;
 mod types;
 
 struct InstalledProductionStack {

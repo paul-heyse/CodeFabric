@@ -19,6 +19,8 @@ use datafusion::logical_expr::{Expr, ExprSchemable, JoinType, LogicalPlan, Logic
 
 use crate::schema_contract::{SchemaContract, SchemaRole};
 
+mod remap;
+
 /// A stable application-owned relation identity.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RelationId(String);
@@ -424,6 +426,12 @@ pub enum RelationalExpression {
 pub struct RelationalProgram {
     pub root: RelationalExpression,
     pub output_fields: Vec<FieldId>,
+}
+
+impl RelationalProgram {
+    pub(crate) fn remap_fields(&mut self, mapping: &BTreeMap<FieldId, FieldId>) {
+        remap::fields(self, mapping);
+    }
 }
 
 /// A dependency observed while successfully compiling the actual program tree.

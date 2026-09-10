@@ -478,6 +478,16 @@ Complete recursive/binder/alias/overload/ParamSpec/TypedDict
 normalization, expanded type observation roles and members in P06. This does not defer or close any
 of P02's required semantic verticals. P03–P14 remain in the table's order.
 
+**P03 repeated-block output isolation passes native validation, 2026-09-10.**
+The output binding is instantiated from the request, selected catalog, block ID and
+exact schema authority. Native DataFusion execution keeps original public field names and canonical
+input capabilities; the manifest now maps block IDs to output relation/page identities. This first
+slice does not implement prior-result consumption, fan-out/fan-in or independent branch execution.
+Two independent blocks of each first-four form pass installed-client and exact-reopen checks
+(30.36 s), including distinct subjects, empty calls, source disclosure and page association.
+All 19 runtime/compiler/public-family regressions and default/featureless root checks pass.
+`repeated-first-four` selects the case; STATUS records commands, fixture correction and limits.
+
 ### 3.4 Compatibility and removal rules
 
 Evolve the existing schema descriptor/version checks and released wire deliberately. For each

@@ -6,7 +6,8 @@ P01's initial captured dependency/context vertical and phase costs are committed
 P02's initial canonical semantic vertical now publishes diagnostics, Python modules, Python/Rust
 imports, references and structural types with scoped public retrieval and exact reopen.
 The Rust type and HIR reference slices are committed in `ba35b4c7` and `1b515b7b`.
-P02 public family selection passes native installed-client and regression checks. P03 is next.
+P02 public family selection is committed in `f7adca03`. P03 is in progress: repeated-block output
+isolation passes installed-client and exact-reopen validation.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -40,6 +41,31 @@ The call-query continuation present at session start was preserved, exercised an
 `5964e5ff`. The full plan remains unfinished. No outcome from 4 through 8 is closed. Implementation
 originally stopped at the diagnostic checkpoint. The subsequent user instruction resumes execution
 of the cross-cutting packages in §3.3 of the detailed plan.
+
+## P03 in progress: block composition and first-four completion
+
+Repeated forms now receive output relation/field bindings derived from the exact request,
+program catalog, query block and template schema authority. The typed field rewrite preserves
+canonical epoch inputs, source-disclosure parameters, row predicates, sorting and limits. Existing
+request-owned Arrow relations remain isolated per output execution. The canonical response manifest
+maps query IDs to their distinct output relations, so sorted resource pages can be associated with
+the correct block. Legacy direct epoch outputs retain their existing binding path.
+
+`just root-check-fast` and default/featureless all-target `just root-check` pass
+(`/tmp/codefabric-p03-block-output-check.log`, `/tmp/codefabric-p03-block-output-root-check.log`).
+The native installed-client case with two independent blocks of each first-four form passes
+in 30.36 s (`/tmp/codefabric-p03-block-output-native-2.log`); it checks distinct subjects, an empty
+caller, source text, page association and exact reopen. The first run correctly denied source
+access; the fixture now explicitly grants its private workspace's disclosure policy. All 19
+runtime/compiler/public-family regression cases pass (93.08 s;
+`/tmp/codefabric-p03-block-output-regression.log`). `repeated-first-four` selects the new native case.
+All-target root Clippy completes with its existing backlog and no diagnostics in the new modules
+or native test (`/tmp/codefabric-p03-block-output-clippy-final.jsonl`). Golden selection, focused
+Python lint, documentation navigation, spelling and diff checks pass. Full-suite and doctest
+completion are not claimed.
+This is an initial P03 slice: actual prior-result
+consumption, typed fan-out/fan-in, independent branch failure and the remaining first-four meanings
+are still open. The rest of P03–P14 remains in package order.
 
 ## P02: initial canonical semantic vertical delivered
 
@@ -85,7 +111,7 @@ completes with the existing warning backlog; full-suite, doctest and public fami
 completion are not claimed by this slice. The code-facts and DataFusion reference skills and exact
 local sources guided the bulk resolver, typed Arrow boundary, joins, aggregates and alias metadata.
 
-Public family selection remains P02 work.
+The public family selection required at this cluster checkpoint is delivered below.
 P03–P14 remain required in package order.
 
 ### Public canonical family selection
@@ -109,8 +135,8 @@ The available meanings state their scope: module metadata; imports and type obse
 in declaring files; semantic references to entities; structural types and diagnostics in analysis
 contexts. These do not assert Python declaration-owned type roles or diagnostic ownership by an
 arbitrary function. Narrower ownership, broad mixed-family requests and full block-local composition
-continue in P03/P06. A request spanning different family schemas currently uses separate requests;
-block-local execution remains P03 and is not claimed by this slice.
+continue in P03/P06. A request spanning different family schemas uses separate blocks; P03's
+initial output isolation preserves their distinct bindings and resource association.
 
 On 2026-09-10 the 16 focused dispatcher/compiler/processing checks pass
 (`/tmp/codefabric-p02-family-programs-tests.log`). The real mixed native installed-client case passes

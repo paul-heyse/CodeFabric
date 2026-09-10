@@ -25,6 +25,7 @@ CASES = {
     "canonical-rust-types": "pragmatic_rust_canonical_structural_types_and_reopen",
     "canonical-rust-references": "pragmatic_rust_canonical_imports_references_and_reopen",
     "canonical-fact-families": "pragmatic_canonical_fact_families_through_installed_clients_and_reopen",
+    "repeated-first-four": "pragmatic_repeated_first_four_blocks_keep_independent_results_and_reopen",
     "python-live": "pragmatic_live_python_edits_converge_without_restart",
     "mixed-clean-live": "live_updates::mixed_live_updates_equal_independent_clean_public_queries",
     "staged-live": "live_updates::source_current_publication_fences_delayed_semantics_and_resumes_after_restart",
