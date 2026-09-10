@@ -56,6 +56,8 @@ struct Manifest {
     source_roots: Vec<String>,
     stub_roots: Vec<String>,
     dependency_roots: Vec<String>,
+    #[serde(default)]
+    typing_markers: Vec<TypingMarker>,
     namespace_package_policy: String,
     import_precedence: Vec<String>,
     #[serde(deserialize_with = "required_nullable_digest")]
@@ -81,6 +83,14 @@ struct Manifest {
 struct Artifact {
     file_id: String,
     digest: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TypingMarker {
+    relative_path: Vec<u8>,
+    digest: String,
+    contents: Vec<u8>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -153,10 +163,9 @@ impl SelectedPyreflyPreparation {
         if !selected.configuration_applied() {
             remainders.push(PreparationRemainder::CheckerConfigurationAuthorityUnavailable);
         }
-        if !selected.manifest.dependency_roots.is_empty()
-            || !selected.manifest.stub_roots.is_empty()
-            || !selected.manifest.lockfile_artifacts.is_empty()
-        {
+        // Explicit roots refer only to the admitted captured inventory. A dependency lock
+        // still needs separate resolution authority; root admission alone cannot prove it.
+        if !selected.manifest.lockfile_artifacts.is_empty() {
             remainders.push(PreparationRemainder::DependencyRootAuthorityUnavailable);
         }
         if remainders.is_empty() {
@@ -266,6 +275,12 @@ impl SelectedPyreflyPreparation {
         for path in search_path.iter().chain(&dependencies) {
             std::fs::create_dir_all(path)
                 .map_err(|_| "selected Pyrefly root could not be materialized".to_owned())?;
+        }
+        for marker in &self.manifest.typing_markers {
+            super::write_provider_source(
+                &root.join(OsString::from_vec(marker.relative_path.clone())),
+                &marker.contents,
+            )?;
         }
         let mut config = ConfigFile {
             source: ConfigSource::File(root.join(ConfigFile::PYREFLY_FILE_NAME)),
@@ -468,6 +483,29 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), PreparationError> {
         }
     }
     validate_modules(&manifest.module_map, &roots)?;
+    let mut marker_paths = BTreeSet::new();
+    let mut marker_bytes = 0_usize;
+    for marker in &manifest.typing_markers {
+        marker_bytes =
+            marker_bytes.saturating_add(marker.contents.len() + marker.relative_path.len());
+        if manifest.typing_markers.len() > 4096
+            || marker.contents.len() > 4096
+            || marker_bytes > 128 * 1024
+            || !valid_path(&marker.relative_path, false)
+            || !marker.relative_path.ends_with(b"/py.typed")
+            || !marker_paths.insert(&marker.relative_path)
+            || marker.digest != super::b3(&marker.contents)
+            || !manifest
+                .dependency_roots
+                .iter()
+                .chain(&manifest.stub_roots)
+                .any(|id| within(&marker.relative_path, roots[id]))
+        {
+            return Err(PreparationError::InvalidManifest(
+                "captured typing marker identity or scope",
+            ));
+        }
+    }
     let mut platforms = BTreeSet::new();
     if manifest.platforms.iter().any(|p| !platforms.insert(p)) {
         return Err(PreparationError::InvalidManifest(
@@ -533,6 +571,48 @@ pub(crate) fn test_manifest(version: &str, platform: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captured_dependency_roots_install_verified_pep561_markers() {
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&test_manifest("3.14", "linux")).unwrap();
+        manifest["dependency_roots"] = serde_json::json!(["vendor"]);
+        manifest["root_bindings"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"root_id": "vendor", "relative_path": b"vendor".as_slice()}));
+        manifest["typing_markers"] = serde_json::json!([{
+            "relative_path": b"vendor/package/py.typed".as_slice(),
+            "digest": super::super::b3(b"partial\n"), "contents": b"partial\n".as_slice()
+        }]);
+        let selected =
+            SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                .unwrap();
+        let root = super::super::tests::claim_001_temp_root("captured-site-package");
+        std::fs::create_dir_all(&root).unwrap();
+        let config = selected.config_for_root(&root).unwrap();
+        assert_eq!(
+            config.python_environment.site_package_path,
+            Some(vec![root.join("vendor")])
+        );
+        assert_eq!(
+            std::fs::read(root.join("vendor/package/py.typed")).unwrap(),
+            b"partial\n"
+        );
+        manifest["typing_markers"][0]["contents"] = serde_json::json!(b"modified".as_slice());
+        assert!(matches!(
+            SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap()),
+            Err(PreparationError::InvalidManifest(_))
+        ));
+        manifest["typing_markers"][0]["contents"] = serde_json::json!(b"partial\n".as_slice());
+        manifest["typing_markers"][0]["relative_path"] =
+            serde_json::json!(b"other/package/py.typed".as_slice());
+        assert!(matches!(
+            SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap()),
+            Err(PreparationError::InvalidManifest(_))
+        ));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn captured_configuration_requires_complete_application_of_checker_settings() {

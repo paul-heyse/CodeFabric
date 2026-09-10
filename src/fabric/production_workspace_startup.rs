@@ -108,6 +108,7 @@ use crate::source_image::{SourceLanguage, advance_source_generation, current_sou
 use crate::workspace_registry::WorkspaceRecord;
 
 mod canonical;
+mod costs;
 mod input_observations;
 mod inputs;
 mod processing;
@@ -536,6 +537,7 @@ struct FreshNativeSource {
     analysis_context: [u8; 32],
     semantic_environment: [u8; 32],
     native_pin: SourcePin,
+    costs: costs::PreparationCosts,
 }
 
 /// One owned blocking operation carries source capture, parser owners, and exact admission.
@@ -572,6 +574,7 @@ fn build_fresh_native_source(
             .map_err(|error| step("source-generation-genesis", error))?;
     }
     drop(store);
+    let mut costs = costs::PreparationCosts::new(&workspace_root, generation, stage);
     let mut prepared_inputs = inputs::capture_inputs(
         &workspace_root,
         operational_database,
@@ -583,6 +586,16 @@ fn build_fresh_native_source(
     )?;
     prepared_inputs.detach_writer(operational_database.to_owned(), Arc::clone(&writer));
     drop(capture_writer);
+    costs.inputs(
+        prepared_inputs.capture()?.images().len(),
+        prepared_inputs
+            .capture()?
+            .images()
+            .iter()
+            .map(|image| image.byte_length)
+            .sum(),
+    );
+    costs.start("python-context");
     let inventory_digest = prepared_inputs.inventory.identity();
     let context_product = inputs::discover_python_inputs(&prepared_inputs, record)?;
     let prepared_context = inputs::provider_context(&context_product)?;
@@ -596,6 +609,7 @@ fn build_fresh_native_source(
     ));
     let analysis_context = prepared_context.context_fingerprint();
     let semantic_environment = prepared_context.semantic_environment_id();
+    costs.start("python-syntax");
     let source_count = prepared_inputs.capture()?.images().len();
     let working_bytes =
         prepared_inputs
@@ -824,6 +838,7 @@ fn build_fresh_native_source(
     }
     let native_pin = native_source_pin(&native_runs, &sources);
     let requested_native = u64::try_from(native_runs.len()).unwrap_or(u64::MAX).max(1);
+    costs.start("pyrefly");
     let pyrefly = pyrefly::run(
         &workspace_root,
         release,
@@ -833,6 +848,7 @@ fn build_fresh_native_source(
         cancellation.clone(),
         work,
     )?;
+    costs.start("cargo-rustc");
     let rustc = rustc::run(
         &workspace_root,
         release,
@@ -841,6 +857,7 @@ fn build_fresh_native_source(
         &cancellation,
         work,
     )?;
+    costs.start("provider-composition");
     let authority = ProductionProviderAuthority::try_new(
         ExactProviderLaneAuthority::try_new(
             native_pin,
@@ -884,6 +901,7 @@ fn build_fresh_native_source(
     }
     input_observations::install_rust_target_progress(&mut builder, generation, &rustc.progress)?;
     admitted_runs.extend(rustc.admitted);
+    costs.start("rust-syntax");
     admitted_runs.extend(rust_syntax::install(
         &mut builder,
         &prepared_inputs,
@@ -891,6 +909,7 @@ fn build_fresh_native_source(
         release,
         &cancellation,
     )?);
+    costs.start("canonical-registration");
     processing::install(
         &mut builder,
         &prepared_inputs.inventory,
@@ -919,6 +938,7 @@ fn build_fresh_native_source(
     )?;
     // Registered batches own their buffers; source leases are no longer needed after providers join.
     prepared_inputs.release()?;
+    costs.start("publication-admission");
     Ok(FreshNativeSource {
         builder,
         workspace_root,
@@ -929,6 +949,7 @@ fn build_fresh_native_source(
         analysis_context,
         semantic_environment,
         native_pin,
+        costs,
     })
 }
 
@@ -1108,7 +1129,9 @@ async fn publish_fresh_candidate(
         analysis_context,
         semantic_environment,
         native_pin,
+        mut costs,
     } = source;
+    costs.start("delta-provision");
     let observation_root = workspace_root
         .join("epochs")
         .join(lower_hex(epoch_id.as_bytes()))
@@ -1135,6 +1158,7 @@ async fn publish_fresh_candidate(
         .join(lower_hex(epoch_id.as_bytes()))
         .join("relations");
     private_directory(&relation_root)?;
+    costs.start("relational-execution-and-delta-write");
     let candidate = Arc::new(
         builder
             .seal(
@@ -1193,6 +1217,7 @@ async fn publish_fresh_candidate(
     // Compact identity for this published candidate. The wire field retains its
     // historical name, but no proof language or independent histories are executed.
     let table_versions = candidate.table_version_set_ref();
+    costs.finish(candidate.table_version_set().components().count());
     let proof_receipt = ProofReceiptRef::from_bytes(digest32(
         b"codefabric.published-candidate-record.v1\0",
         &[

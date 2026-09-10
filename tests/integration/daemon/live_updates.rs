@@ -905,6 +905,70 @@ fn ordered_python_import_observation(
 }
 
 #[test]
+fn captured_python_site_packages_survive_public_queries_and_reopen() {
+    let fixture = ProductionFixture::with_source(
+        b"from external import py_leaf\ndef py_caller() -> int:\n    return py_leaf()\n",
+    );
+    let root = Path::new(&fixture.workspace.root_path_display);
+    fs::create_dir_all(root.join("vendor/python/external")).unwrap();
+    fs::write(
+        root.join("vendor/python/external/__init__.py"),
+        b"def py_leaf() -> int:\n    return 42\n",
+    )
+    .unwrap();
+    fs::write(root.join("vendor/python/external/py.typed"), b"").unwrap();
+    fs::write(
+        root.join("pyrefly.toml"),
+        "site-package-path=['vendor/python']\n",
+    )
+    .unwrap();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    WorkspaceRegistry::new(
+        &mut OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap(),
+    )
+    .set_source_disclosure(fixture.workspace.workspace_id, true)
+    .unwrap();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let expected = ["py_caller", "py_leaf"];
+    let observed = four_forms(&fixture, &stack, "site-packages-initial", &expected);
+    let raw = fresh_activation_relation_batches(&fixture, "provider.pyrefly.call_target.v1");
+    assert!(raw.iter().any(|batch| batch.num_rows() > 0));
+    let costs: Value = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .fabric_workspace_root()
+                .join("semantic-preparation-costs.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(costs["finished"], true);
+    assert_eq!(costs["source_files"], 4);
+    assert!(
+        costs["phases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|phase| phase["phase"] == "pyrefly"
+                && phase["elapsed_micros"].as_u64().unwrap() > 0)
+    );
+    eprintln!("Python external-root phase costs: {costs}");
+    let selected = wait_for_semantic_activation(&fixture);
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        selected.table_versions(),
+        wait_for_semantic_activation(&fixture).table_versions()
+    );
+    assert_eq!(
+        observed,
+        four_forms(&fixture, &stack, "site-packages-reopen", &expected)
+    );
+    supervisor.stop();
+}
+
+#[test]
 fn live_python_search_paths_preserve_all_sources_and_equal_independent_clean_queries() {
     let fixture = ProductionFixture::with_source(
         b"from helper import selected\ndef caller():\n    return selected()\n",
@@ -1572,7 +1636,7 @@ fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
     supervisor.stop();
 }
 
-fn print_cargo_failure(fixture: &ProductionFixture) {
+pub(super) fn print_cargo_failure(fixture: &ProductionFixture) {
     if let Ok(outputs) = fs::read_dir(fixture.fabric_workspace_root().join("provider-output")) {
         for output in outputs.flatten() {
             for stage in ["rust-compilation-metadata", "rust-compilation-compiler"] {

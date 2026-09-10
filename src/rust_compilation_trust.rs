@@ -1809,6 +1809,49 @@ fn compile_rust_launch_plan(
             .ok_or(RustCompilationTrustError::UnrepresentableInvocationPath)?
             .to_owned(),
     ];
+    // The sandbox starts Cargo in its writable output directory. `--manifest-path` does not
+    // make Cargo discover the workspace's configuration there. Pass the captured ancestor
+    // files explicitly, least-specific first, preserving Cargo's native source replacement
+    // and relative-path semantics without consulting daemon-home configuration.
+    let configuration_product = match &request.preparation.authority {
+        RustPreparationAuthority::Unresolved(product) => Some(product.as_ref()),
+        #[cfg(test)]
+        RustPreparationAuthority::ContainmentFixture => None,
+    };
+    if let Some(product) = configuration_product {
+        for root in product.search_scope.ordered_roots.iter().rev() {
+            let prefix = if root.relative_path == b"." {
+                &[][..]
+            } else {
+                root.relative_path.as_slice()
+            };
+            for name in [b".cargo/config".as_slice(), b".cargo/config.toml"] {
+                let path = if prefix.is_empty() {
+                    name.to_vec()
+                } else {
+                    [prefix, name].join(&b'/')
+                };
+                if product.lookup_evidence.iter().any(|lookup| {
+                    lookup.relative_path == path
+                        && matches!(
+                            lookup.observation,
+                            crate::analysis_context::ContextLookupObservation::Present { .. }
+                        )
+                }) {
+                    let path = layout
+                        .workspace_view
+                        .join(std::ffi::OsString::from_vec(path));
+                    contained_arguments.extend([
+                        "--config".to_owned(),
+                        path.to_str()
+                            .ok_or(RustCompilationTrustError::UnrepresentableInvocationPath)?
+                            .to_owned(),
+                    ]);
+                    break;
+                }
+            }
+        }
+    }
     if purpose == RustLaunchPurpose::Compilation {
         contained_arguments.extend(request.preparation.cargo_selection_arguments.clone());
     } else {

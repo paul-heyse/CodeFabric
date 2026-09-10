@@ -3066,19 +3066,25 @@ fn pragmatic_python_chunked_inventory_publishes_cross_module_semantics() {
 #[test]
 #[cfg(target_os = "linux")]
 fn pragmatic_rust_semantics_publish_real_call_targets() {
-    rust_semantics_publication(false, false);
+    rust_semantics_publication(None, false);
 }
 
 #[test]
 #[cfg(target_os = "linux")]
 fn pragmatic_rust_semantics_publish_captured_path_dependency() {
-    rust_semantics_publication(true, false);
+    rust_semantics_publication(Some(RustFixtureDependency::Path), false);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn pragmatic_rust_semantics_publish_locked_directory_dependency_and_reopen() {
+    rust_semantics_publication(Some(RustFixtureDependency::Directory), false);
 }
 
 #[test]
 #[cfg(target_os = "linux")]
 fn pragmatic_rust_target_failure_retains_other_targets() {
-    rust_semantics_publication(false, true);
+    rust_semantics_publication(None, true);
 }
 
 #[cfg(target_os = "linux")]
@@ -3157,7 +3163,14 @@ fn pragmatic_all_rust_targets_failed_retains_diagnostics_and_source() {
 }
 
 #[cfg(target_os = "linux")]
-fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
+#[derive(Clone, Copy)]
+enum RustFixtureDependency {
+    Path,
+    Directory,
+}
+
+fn rust_semantics_publication(dependency: Option<RustFixtureDependency>, with_failure: bool) {
+    let with_dependency = dependency.is_some();
     let fixture = if with_failure {
         ProductionFixture::with_source(b"def answer(value: int) -> int:\n    return value + 1\n\ndef zebra() -> int:\n    return 2\n")
     } else {
@@ -3214,6 +3227,32 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
             .unwrap();
         fs::write(workspace.join("Cargo.lock"), "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\ndependencies = [\"helper\"]\n[[package]]\nname = \"helper\"\nversion = \"0.1.0\"\n").unwrap();
     }
+    if matches!(dependency, Some(RustFixtureDependency::Directory)) {
+        fs::create_dir(workspace.join("third_party")).unwrap();
+        fs::rename(
+            workspace.join("helper"),
+            workspace.join("third_party/helper"),
+        )
+        .unwrap();
+        fs::create_dir(workspace.join(".cargo")).unwrap();
+        fs::write(workspace.join(".cargo/config.toml"), "[source.crates-io]\nreplace-with='captured'\n[source.captured]\ndirectory='third_party'\n").unwrap();
+        fs::write(workspace.join("Cargo.toml"), "[package]\nname='fixture'\nversion='0.1.0'\nedition='2024'\n[dependencies]\nhelper='=0.1.0'\n").unwrap();
+        // A deliberately local directory-source fixture. Cargo checks the package checksum
+        // against the locked source identity; production also pins every captured file byte.
+        let checksum = "a".repeat(64);
+        fs::write(workspace.join("Cargo.lock"), format!("version = 4\n[[package]]\nname='fixture'\nversion='0.1.0'\ndependencies=['helper']\n[[package]]\nname='helper'\nversion='0.1.0'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='{checksum}'\n")).unwrap();
+        fs::write(
+            workspace.join("third_party/helper/.cargo-checksum.json"),
+            serde_json::to_vec(&json!({"package": checksum, "files": {}})).unwrap(),
+        )
+        .unwrap();
+        fs::create_dir(workspace.join("third_party/helper/tests")).unwrap();
+        fs::write(
+            workspace.join("third_party/helper/tests/not_selected.rs"),
+            "compile_error!(\"dependency tests are not selected\");\n",
+        )
+        .unwrap();
+    }
     if with_failure {
         fs::OpenOptions::new()
             .append(true)
@@ -3239,6 +3278,13 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         |stack| fixture.start_supervisor_with(&stack.codefabric),
     );
     let entities = canonical_entity_names(&fixture);
+    if with_dependency && !entities.iter().any(|(language, _)| language == "rust") {
+        live_updates::print_cargo_failure(&fixture);
+        eprintln!(
+            "Rust progress: {:?}",
+            fresh_activation_relation_batches(&fixture, "system.rust_target_progress")
+        );
+    }
     assert!(
         entities.contains(&("python".to_owned(), "answer".to_owned())),
         "{entities:?}"
@@ -3322,7 +3368,57 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
             "fresh",
         );
     }
-    supervisor.stop();
+    if matches!(dependency, Some(RustFixtureDependency::Directory)) {
+        let progress = fresh_activation_relation_batches(&fixture, "system.rust_target_progress");
+        let costs: Value = serde_json::from_slice(
+            &fs::read(
+                fixture
+                    .fabric_workspace_root()
+                    .join("semantic-preparation-costs.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(costs["finished"], true);
+        assert!(
+            costs["phases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|phase| phase["phase"] == "cargo-rustc"
+                    && phase["elapsed_micros"].as_u64().unwrap() > 0)
+        );
+        eprintln!("Rust directory-source phase costs: {costs}");
+        let names = progress
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .column_by_name("target_name")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<arrow::array::StringArray>()
+                    .unwrap()
+                    .iter()
+                    .flatten()
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(names, BTreeSet::from(["fixture"]));
+        assert!(
+            entities
+                .iter()
+                .any(|(language, name)| language == "rust" && name.ends_with("helper::increment")),
+            "{entities:?}"
+        );
+        let selected = wait_for_semantic_activation(&fixture);
+        supervisor.stop();
+        let supervisor = fixture.start_supervisor();
+        let reopened = wait_for_semantic_activation(&fixture);
+        assert_eq!(selected.table_versions(), reopened.table_versions());
+        assert_eq!(entities, canonical_entity_names(&fixture));
+        supervisor.stop();
+    } else {
+        supervisor.stop();
+    }
 }
 
 #[cfg(target_os = "linux")]

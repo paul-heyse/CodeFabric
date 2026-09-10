@@ -1,8 +1,8 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `126cf71f`; implementation progress remains through `4cc74d7c` (`Retain native Rust diagnostic locations and suggestion edits`). Design and remaining work expanded 2026-09-09 against the clean canonical `master` tree at `d6d1369b`. This revision answers the subsequent planning request; it does not resume implementation.
+Created 2026-09-09 against `126cf71f`; the diagnostic checkpoint was `4cc74d7c`. Design and remaining work expanded against `d6d1369b` and committed in `b2a97b9c`. Package execution resumed under the subsequent user instruction. Updated 2026-09-10 with P01's initial captured dependency/context vertical and phase measurements.
 
-This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Implementation is paused at the user-requested checkpoint. The status notes distinguish demonstrated committed behavior, uncommitted work and remaining acceptance; writing or updating this plan is not implementation evidence.
+This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Execute the cross-cutting packages in §3.3 order. The status notes distinguish demonstrated behavior and remaining acceptance; writing or updating this plan is not implementation evidence.
 
 The objective is a useful, continuously updated Python/Rust code property graph, queried through the Rust daemon and thin FastMCP adapter, with Arrow, DataFusion and Delta doing the data work. Every selected fact family, all eight query forms, composition, truthful unfinished scope and sustained operation remain required. The first useful release is an intermediate delivery boundary, not a reduction of the full target.
 
@@ -269,7 +269,8 @@ a second registry merely to carry these fields:
 
 ### 3.2 Existing-code enhancement register
 
-All entries below are planned work. “Confirmed” describes the inspected structure/limitation,
+Entries below describe the enhancement scope; delivered portions are recorded with package progress.
+“Confirmed” describes the inspected structure/limitation,
 not a newly reproduced product failure. “Qualification” identifies a risk or integration boundary
 whose behavior must be tested before drawing a stronger conclusion. Existing code paths listed
 here are starting points, not instructions to replace entire files.
@@ -330,6 +331,31 @@ retention ownership until every semantic family is finished.
 P06–P11 do not wait for an artificial “all providers complete” global flag. Each accepted family
 becomes queryable with its actual scope. P12 begins early enough to avoid full-ontology data growth
 on a rewrite-everything storage path. Do not claim that P01 or P05 closes the full outcomes.
+
+**P01 initial exit delivered, 2026-09-10.** Captured Cargo directory-source dependencies and an
+explicit native Pyrefly site-package root now reach real provider facts and exact reopen. Python
+declarations, calls and source also pass through installed FastMCP clients. Cargo explicitly loads
+the captured configuration files from its isolated output working directory; directory-source
+packages are not independently selected as top-level projects. Cargo retains native locked/offline
+resolution and checksum handling. The Python context carries bounded digest-verified `py.typed`
+markers into the checker view, binds package-relative module names, and preserves explicit workspace
+root order. Context/source identities and existing provider admission remain authoritative.
+
+The latest source and semantic preparation reports record source counts/bytes, phase elapsed time
+and relation counts with finite overwrite retention. Twenty-four affected root cases, all 37 sidecar
+tests, strict sidecar check/lint and default/featureless root checks pass. The real Rust dependency
+and reopen case takes 53.18 s; the Python installed-client/reopen case passes. The 4-file/146-byte
+Python sample spends 0.523 s in Pyrefly and 5.600 s in relational execution/Delta writes; the
+10-file/846-byte mixed sample spends 25.915 s in Cargo/rustc and 9.944 s in execution/writes.
+These are initial cost observations, not comparative or representative performance evidence.
+See STATUS for commands, logs and the transient delegated user-systemd validation environment.
+
+This first external-input vertical uses dependency material already captured inside the authorized
+workspace. Physical external-root registration/fetching, complete ecosystem identity, generated
+source freezing, full Cargo unit/effective-configuration closure, raw argv, retained caches/checkers/
+parsers and cost-aware concurrency remain in 4A–4C/P04/P06/8E. The existing immutable input and
+provider contracts carry the new roots; full retention and scheduling acceptance is still required.
+P02 is the next package. No outcome from 4 through 8 is complete.
 
 ### 3.4 Compatibility and removal rules
 
@@ -1630,18 +1656,17 @@ passed. A one-off comparison with `d6d1369b` confirmed all 25 slice headings, al
 and the historical §9.1 evidence/command section are preserved, with unique D1–D7, E01–E26 and
 P01–P14 register entries. These checks validate the planning artifact, not production behavior.
 
-## 10. Planning handoff and implementation entry point
+## 10. Package execution handoff
 
-Implementation remains paused after `4cc74d7c`; the prior handoff is `d6d1369b`. The subsequent
-planning request is fulfilled by expanding this same document and reconciling STATUS. This
-revision does not start another implementation slice or schedule an automatic continuation.
+Implementation resumed from `b2a97b9c` under the user's instruction to execute §3.3 package by
+package across outcomes 4–8. P01's initial dependency/context vertical and phase costs are now
+implemented and exercised, with the limits recorded in §3.3 and STATUS. P02 is next.
 
-On a future implementation request, use §3.3 as the integrated order:
+Continue using §3.3 as the integrated order:
 
-1. Start **P01** in the existing 4A/4B/4C owners: one exact external/generated Cargo unit and one
-   external Python context through real providers, with the input/cache contracts and phase metrics
-   needed by the rest of the work. Reuse current source-first startup, captured configuration,
-   diagnostic details and within-pass parser reuse.
+1. Preserve **P01**'s captured dependency roots, native configuration/marker installation, exact
+   input bindings and phase measurements. Extend the full context/cache variants in their owning
+   slices; initial dependency-root acceptance does not establish retained native operation.
 2. Complete **P02–P05** canonical types/imports/references and coverage, first-four public meanings,
    typed block bindings, target freshness, retained live providers/version reuse and the broader
    clean/incremental corpus. This delivers the first useful release, not the full product.

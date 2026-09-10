@@ -165,6 +165,8 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         "python-context-live",
         "python-stubs-live",
         "python-roots-live",
+        "python-site-packages",
+        "cargo-directory-source",
         "python-paths-live",
         "decoded-source-live",
         "rust-paths-live",

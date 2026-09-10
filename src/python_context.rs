@@ -172,6 +172,15 @@ pub struct PythonContextArtifact {
     pub digest: String,
 }
 
+/// Captured PEP 561 marker consumed by the native resolver, never executed as a module.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PythonTypingMarker {
+    pub relative_path: Vec<u8>,
+    pub digest: String,
+    pub contents: Vec<u8>,
+}
+
 /// The complete compatibility-sensitive Python context identity authority.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -184,6 +193,8 @@ pub struct PythonAnalysisContextManifest {
     pub source_roots: Vec<String>,
     pub stub_roots: Vec<String>,
     pub dependency_roots: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub typing_markers: Vec<PythonTypingMarker>,
     pub namespace_package_policy: String,
     pub import_precedence: Vec<String>,
     pub typeshed_bundle_digest: Option<String>,
@@ -537,6 +548,18 @@ pub fn discover_python_context(
         &mut diagnostics,
     )?;
     manifest.platforms = selected_platforms(request, pyrefly.as_ref(), pyproject.as_ref())?;
+    let configured_dependencies = configured_dependency_roots(
+        request,
+        pyrefly.as_ref(),
+        pyproject.as_ref(),
+        pyrefly_file,
+        pyproject_file,
+    )?;
+    if request.registered.dependency_roots.is_empty() {
+        manifest.dependency_roots =
+            validate_ordered_ids(&configured_dependencies, "dependency roots")?;
+    }
+    manifest.typing_markers = captured_typing_markers(&files, &manifest)?;
     if !manifest.project_config_artifacts.is_empty() {
         manifest.unapplied_checker_settings = Some(unapplied_checker_settings(
             request,
@@ -573,6 +596,49 @@ pub fn discover_python_context(
     };
     product.validate()?;
     Ok(product)
+}
+
+fn captured_typing_markers(
+    files: &BTreeMap<Vec<u8>, &PythonDiscoveryFile>,
+    manifest: &PythonAnalysisContextManifest,
+) -> Result<Vec<PythonTypingMarker>, PythonContextDiscoveryError> {
+    let mut markers = Vec::new();
+    let mut marker_bytes = 0_usize;
+    for file in files
+        .values()
+        .filter(|file| file.relative_path.ends_with(b"/py.typed"))
+    {
+        if !manifest
+            .dependency_roots
+            .iter()
+            .chain(&manifest.stub_roots)
+            .any(|id| {
+                manifest.root_bindings.iter().any(|root| {
+                    root.root_id == *id
+                        && (root.relative_path == b"."
+                            || file
+                                .relative_path
+                                .strip_prefix(root.relative_path.as_slice())
+                                .is_some_and(|suffix| suffix.starts_with(b"/")))
+                })
+            })
+        {
+            continue;
+        }
+        marker_bytes = marker_bytes.saturating_add(file.contents.len() + file.relative_path.len());
+        if file.contents.len() > 4096 || marker_bytes > 128 * 1024 || markers.len() >= 4096 {
+            return Err(PythonContextDiscoveryError::terminal(
+                "CONTEXT_TYPING_MARKER_BOUND",
+                "captured typing markers exceed the context bound",
+            ));
+        }
+        markers.push(PythonTypingMarker {
+            relative_path: file.relative_path.clone(),
+            digest: digest_string(&file.digest),
+            contents: file.contents.clone(),
+        });
+    }
+    Ok(markers)
 }
 
 struct ManifestAssembly<'a> {
@@ -667,6 +733,7 @@ fn assemble_manifest(
                 &request.registered.dependency_roots,
                 "dependency roots",
             )?,
+            typing_markers: Vec::new(),
             namespace_package_policy: NAMESPACE_PACKAGE_POLICY.to_owned(),
             import_precedence: IMPORT_PRECEDENCE.iter().map(ToString::to_string).collect(),
             typeshed_bundle_digest: request.typeshed_bundle_digest.as_ref().map(digest_string),
@@ -991,12 +1058,15 @@ fn discover_module_map(
     let mut files = request.files.iter().collect::<Vec<_>>();
     files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     let mut selected_roots = Vec::new();
+    // Bind admitted dependency files relative to their package root before a broad workspace
+    // root can rename them. This only assigns input modules; resolver search precedence and
+    // the explicit order within each class remain unchanged.
     for id in manifest
         .stub_roots
         .iter()
+        .chain(&manifest.dependency_roots)
         .chain(&manifest.module_roots)
         .chain(&manifest.source_roots)
-        .chain(&manifest.dependency_roots)
     {
         if !selected_roots.contains(id) {
             selected_roots.push(id.clone());
@@ -1318,6 +1388,44 @@ fn resolve_lock_artifacts(
     ))
 }
 
+fn configured_dependency_roots(
+    request: &PythonContextDiscoveryRequest,
+    pyrefly: Option<&toml::Value>,
+    pyproject: Option<&toml::Value>,
+    pyrefly_file: Option<&PythonDiscoveryFile>,
+    pyproject_file: Option<&PythonDiscoveryFile>,
+) -> Result<Vec<String>, PythonContextDiscoveryError> {
+    let mut selected = None;
+    for (document, file) in [
+        (pyrefly, pyrefly_file),
+        (
+            pyproject
+                .and_then(|value| value.get("tool"))
+                .and_then(|value| value.get("pyrefly")),
+            pyproject_file,
+        ),
+    ] {
+        let Some(document) = document else { continue };
+        for field in ["site-package-path", "site_package_path"] {
+            let Some(value) = document.get(field) else {
+                continue;
+            };
+            let paths = optional_string_array(Some(value), field)?
+                .iter()
+                .map(|path| authorized_root_id(request, path, configuration_origin(file)))
+                .collect::<Result<Vec<_>, _>>()?;
+            if selected.as_ref().is_some_and(|previous| *previous != paths) {
+                return Err(PythonContextDiscoveryError::terminal(
+                    "CONTEXT_ROOTS_CONFLICT",
+                    "Pyrefly configurations select different site-package roots",
+                ));
+            }
+            selected = Some(paths);
+        }
+    }
+    Ok(selected.unwrap_or_default())
+}
+
 fn configured_package_roots(
     request: &PythonContextDiscoveryRequest,
     pyrefly: Option<&toml::Value>,
@@ -1419,7 +1527,11 @@ fn checker_settings_remainder(
         let applied = match key.as_str() {
             "python-version" | "python_version" => value.is_str(),
             "python-platform" if !environment => value.is_str() || value.is_array(),
-            "search-path" | "search_path" if !environment => value.is_array(),
+            "search-path" | "search_path" | "site-package-path" | "site_package_path"
+                if !environment =>
+            {
+                value.is_array()
+            }
             "environment" if !environment => {
                 checker_settings_remainder(&format!("{prefix}.environment"), value, true, result);
                 true
@@ -1907,6 +2019,65 @@ mod tests {
                 },
             },
         }
+    }
+
+    #[test]
+    fn captured_site_packages_bind_native_modules_and_typing_markers() {
+        let mut request = base_request();
+        request.files.push(file(
+            "pyrefly.toml",
+            "file:checker",
+            "site-package-path=['vendor']\n",
+        ));
+        request
+            .registered
+            .authorized_roots
+            .push(PythonAuthorizedRoot {
+                relative_path: "vendor".into(),
+                path_id: "path:vendor".into(),
+            });
+        request.files.push(file(
+            "vendor/external/__init__.py",
+            "file:external",
+            "def selected() -> int: return 1\n",
+        ));
+        request
+            .files
+            .push(file("vendor/external/py.typed", "file:typed", "partial\n"));
+        let first = discover_python_context(&request).unwrap();
+        assert_eq!(first.manifest.dependency_roots, ["path:vendor"]);
+        assert_eq!(first.manifest.typing_markers[0].contents, b"partial\n");
+        assert!(
+            first
+                .manifest
+                .module_map
+                .iter()
+                .any(|module| module.file_id == "file:external"
+                    && module.module_name == "external"
+                    && module.root_id == "path:vendor")
+        );
+        assert!(
+            first
+                .manifest
+                .unapplied_checker_settings
+                .as_ref()
+                .unwrap()
+                .is_empty()
+        );
+        request.files.retain(|file| file.file_id != "file:typed");
+        let removed = discover_python_context(&request).unwrap();
+        assert_ne!(
+            first.context.analysis_context_id,
+            removed.context.analysis_context_id
+        );
+        assert!(removed.manifest.typing_markers.is_empty());
+        request.files.retain(|file| file.file_id != "file:checker");
+        request.files.push(file(
+            "pyrefly.toml",
+            "file:checker",
+            "site-package-path=['../outside']\n",
+        ));
+        assert!(discover_python_context(&request).is_err());
     }
 
     #[test]

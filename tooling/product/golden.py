@@ -25,6 +25,8 @@ CASES = {
     "python-context-live": "live_updates::live_python_context_and_negative_imports_equal_independent_clean_queries",
     "python-stubs-live": "live_updates::live_python_namespace_stub_precedence_equals_independent_clean_queries",
     "python-roots-live": "live_updates::live_python_search_paths_preserve_all_sources_and_equal_independent_clean_queries",
+    "python-site-packages": "live_updates::captured_python_site_packages_survive_public_queries_and_reopen",
+    "cargo-directory-source": "pragmatic_rust_semantics_publish_locked_directory_dependency_and_reopen",
     "python-paths-live": "live_updates::live_python_raw_paths_and_root_initializer_keep_exact_source_identity",
     "decoded-source-live": "live_updates::live_mixed_decoded_sources_equal_original_bytes_and_independent_clean_queries",
     "rust-paths-live": "live_updates::mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen",

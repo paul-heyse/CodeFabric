@@ -1,6 +1,6 @@
 //! Cargo target selection from captured manifests and source paths.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{ProductionWorkspaceStartupError, step};
 use crate::analysis_context::{ContextFileInput, RustTargetKind, RustTargetSettings};
@@ -69,8 +69,14 @@ pub(super) fn discover(
     files: &[ContextFileInput],
 ) -> Result<Vec<CargoTarget>, ProductionWorkspaceStartupError> {
     let mut targets = BTreeMap::new();
+    let directory_sources = captured_directory_sources(files);
     for manifest in files.iter().filter(|file| {
-        file.relative_path == b"Cargo.toml" || file.relative_path.ends_with(b"/Cargo.toml")
+        (file.relative_path == b"Cargo.toml" || file.relative_path.ends_with(b"/Cargo.toml"))
+            && !directory_sources.iter().any(|root| {
+                file.relative_path
+                    .strip_prefix(root.as_slice())
+                    .is_some_and(|suffix| suffix.starts_with(b"/"))
+            })
     }) {
         let document: toml::Value = toml::from_str(
             std::str::from_utf8(&manifest.contents)
@@ -369,6 +375,64 @@ pub(super) fn build_inputs(
     Ok(inputs.into_values().collect())
 }
 
+/// Cargo directory sources are dependency material, not independently selected packages.
+/// Cargo still selects and compiles their actual units through the ordinary wrapper, preserving
+/// locked registry/git identities and native checksum validation in the captured workspace.
+fn captured_directory_sources(files: &[ContextFileInput]) -> BTreeSet<Vec<u8>> {
+    let mut configurations = BTreeMap::new();
+    for file in files {
+        let path = file.relative_path.as_slice();
+        let Some((parent, priority)) = path
+            .strip_suffix(b".cargo/config")
+            .map(|parent| (parent, 1))
+            .or_else(|| {
+                path.strip_suffix(b".cargo/config.toml")
+                    .map(|parent| (parent, 0))
+            })
+        else {
+            continue;
+        };
+        if !parent.is_empty() && !parent.ends_with(b"/") {
+            continue;
+        }
+        let entry = configurations.entry(parent).or_insert((priority, file));
+        if priority > entry.0 {
+            *entry = (priority, file);
+        }
+    }
+    let mut roots = BTreeSet::new();
+    for (parent, (_, file)) in configurations {
+        // This inventory classification grants no access and is not configuration admission.
+        // Invalid selections retain per-target errors in context/Cargo preparation; they must
+        // not prevent source publication or an unrelated valid context from running.
+        let Ok(text) = std::str::from_utf8(&file.contents) else {
+            continue;
+        };
+        let Ok(document) = toml::from_str::<toml::Value>(text) else {
+            continue;
+        };
+        for source in document
+            .get("source")
+            .and_then(toml::Value::as_table)
+            .into_iter()
+            .flat_map(toml::Table::values)
+        {
+            let Some(directory) = source.get("directory") else {
+                continue;
+            };
+            let Some(directory) = directory.as_str() else {
+                continue;
+            };
+            if let Ok(root) = join(parent, directory)
+                && !root.is_empty()
+            {
+                roots.insert(root);
+            }
+        }
+    }
+    roots
+}
+
 fn join(parent: &[u8], relative: &str) -> Result<Vec<u8>, ProductionWorkspaceStartupError> {
     if relative.starts_with('/') || relative.as_bytes().contains(&0) {
         return Err(step(
@@ -409,6 +473,55 @@ mod tests {
             contents: text.as_bytes().to_vec(),
         }
     }
+    #[test]
+    fn captured_directory_sources_are_compiled_only_as_cargo_dependencies() {
+        let inputs = vec![
+            file(
+                "Cargo.toml",
+                "[package]\nname='consumer'\nversion='0.1.0'\n",
+            ),
+            file("src/lib.rs", ""),
+            file(
+                ".cargo/config.toml",
+                "[source.frozen]\ndirectory='third_party'\n[source.crates-io]\nreplace-with='frozen'\n",
+            ),
+            file(
+                "third_party/helper/Cargo.toml",
+                "[package]\nname='helper'\nversion='0.1.0'\n",
+            ),
+            file("third_party/helper/src/lib.rs", ""),
+            file("third_party/helper/tests/unselected.rs", ""),
+            file(
+                "third_party_extra/Cargo.toml",
+                "[package]\nname='local'\nversion='0.1.0'\n",
+            ),
+            file("third_party_extra/src/lib.rs", ""),
+        ];
+        let targets = discover(&inputs).unwrap();
+        assert_eq!(
+            targets
+                .iter()
+                .map(|target| target.package.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["consumer", "local"])
+        );
+        let mut overridden = inputs;
+        overridden.push(file(
+            ".cargo/config",
+            "[source.frozen]\ndirectory='third_party_extra'\n",
+        ));
+        let targets = discover(&overridden).unwrap();
+        assert!(targets.iter().any(|target| target.package == "helper"));
+        assert!(!targets.iter().any(|target| target.package == "local"));
+        assert!(
+            captured_directory_sources(&[file(
+                ".cargo/config",
+                "[source.frozen]\ndirectory='../host'\n"
+            )])
+            .is_empty()
+        );
+    }
+
     #[test]
     fn captured_targets_include_directory_binaries_and_explicit_library() {
         let inputs = vec![

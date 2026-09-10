@@ -660,6 +660,17 @@ fn python_product_memory_bytes(product: &PythonContextDiscoveryProduct) -> u64 {
             .map(|v| (v.file_id.capacity() + v.digest.capacity()) as u64)
             .sum::<u64>();
     }
+    bytes += (manifest.typing_markers.capacity()
+        * std::mem::size_of::<crate::python_context::PythonTypingMarker>()) as u64;
+    bytes += manifest
+        .typing_markers
+        .iter()
+        .map(|marker| {
+            (marker.relative_path.capacity()
+                + marker.digest.capacity()
+                + marker.contents.capacity()) as u64
+        })
+        .sum::<u64>();
     bytes += (manifest.module_map.capacity()
         * std::mem::size_of::<crate::analysis_context::PythonModuleBinding>()) as u64;
     bytes += manifest

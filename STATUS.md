@@ -1,11 +1,10 @@
 # CodeFabric status
 
-Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Latest production commit: `4cc74d7c` (`Retain native Rust diagnostic locations and suggestion edits`),
-following primary failed-compilation diagnostics in `f1e44d80`.
-Implementation stopped at the requested diagnostic checkpoint. The subsequent planning request
-expands the detailed outcomes 4–8 plan against `d6d1369b`; it does not resume implementation.
-This handoff separates the revised design/backlog from completed slices and their validation.
+Updated 2026-09-10 from the canonical `/home/paul/CodeFabric` working tree on `master`.
+Implementation has resumed from `b2a97b9c` in the detailed plan's P01–P14 package order, as requested.
+The latest changes implement P01's initial captured dependency/context vertical and phase costs.
+The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
+Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
 ## Current handoff
 
@@ -35,7 +34,66 @@ Fresh startup now uses this source-first path too. The first useful release rema
 The call-query continuation present at session start was preserved, exercised and committed in
 `80bc6d18`; declaration kinds/public subjects followed in `1a60e748`, and lexical references in
 `5964e5ff`. The full plan remains unfinished. No outcome from 4 through 8 is closed. Implementation
-stopped at the diagnostic checkpoint; the subsequent plan expansion does not start resumption tasks.
+originally stopped at the diagnostic checkpoint. The subsequent user instruction resumes execution
+of the cross-cutting packages in §3.3 of the detailed plan.
+
+## P01: captured dependency contexts and initial phase costs
+
+Contained Cargo now loads the captured ancestor `.cargo/config` or `.cargo/config.toml` files
+explicitly, in native precedence order. Its writable working directory previously prevented native
+configuration discovery through `--manifest-path` alone. Cargo's directory-source replacement now
+resolves locked dependency material in the captured universe, preserving registry/git source
+identity in the lock and native checksum handling. Target discovery excludes directory-source
+packages from independent top-level target selection; their actual dependency units still run
+through the compiler wrapper. A dependency's unselected tests do not become analysis targets.
+
+Captured native Pyrefly `site-package-path`/`site_package_path` configuration selects authorized
+dependency roots. Bounded, digest-verified `py.typed` markers enter the identity-bearing context
+and the checker's private view. Dependency modules bind relative to their package root; explicit
+workspace root ordering remains intact. The existing one-checker bulk API supplies real calls,
+types and source anchors. No interpreter probing or import execution is added. Existing manifests
+without markers retain their previous serialized shape; older sidecars reject unfamiliar context
+fields rather than silently ignoring them. Unresolved dependency locks remain unavailable.
+
+Each workspace retains only its latest `source-preparation-costs.json` and
+`semantic-preparation-costs.json`, with bounded phase names, source file/byte counts and relation
+version counts. These record preparation and relational execution/write costs, including ordinary
+failure/drop state. They are operational diagnostics, separate from semantic coverage; abrupt
+process death can leave the preceding report. They do not yet measure every compiler subphase,
+query cost, CPU/RSS or retention cost required by P14/8E.
+
+Validation on 2026-09-10: 24 affected root tests pass, including the real locked directory dependency
+and exact reopen (53.18 s) and installed Python dependency declaration/call/source queries and reopen
+(32.84 s in the preceding equivalent integrated sample). All 37 sidecar tests and strict sidecar
+check/Clippy pass. Default and featureless root checks pass. The broader context selection caught
+and resolved an overlapping-root precedence regression. Native tests ran in a transient delegated
+user-systemd scope: the initial login shell lacked the required cgroup ancestry and correctly
+reported containment unavailable. No containment checks were weakened.
+
+Logs: `/tmp/codefabric-p01-integrated-tests.log`, `/tmp/codefabric-p01-sidecar-tests.log`,
+`/tmp/codefabric-p01-sidecar-check.log`, `/tmp/codefabric-p01-root-check.log`.
+After a behavior-preserving marker-helper extraction, all 14 Python context checks pass; all seven
+target checks also pass after keeping invalid directory-source configuration in per-target
+preparation scope. Final root check output is `/tmp/codefabric-p01-root-check-final.log`.
+Affected Clippy inspection retains existing root warnings; strict root lint is not claimed clean.
+The golden selector harness and both document navigation/spelling checks pass.
+The integrated command used `just root-test-incremental --no-tests=fail --success-output immediate`
+with selector `test(python_context::tests::) | test(production_workspace_startup::rustc::targets::tests::) | test(rust_selected_settings_causally_prepare_contained_arguments_and_environment) | test(pragmatic_rust_semantics_publish_locked_directory_dependency_and_reopen) | test(captured_python_site_packages_survive_public_queries_and_reopen)`.
+It was wrapped by `systemd-run --user --scope --quiet --property=Delegate=yes`, with
+`DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`, `XDG_RUNTIME_DIR=/run/user/1000`, and both
+`CODEFABRIC_RUSTC_EXTRACTOR_BIN`/`CODEFABRIC_PYREFLY_SIDECAR_BIN` selecting the current repository
+builds. `just golden --case cargo-directory-source` and `--case python-site-packages` select the
+same native cases; the same delegated environment is required on this login-shell host.
+The measured small inputs contain 4 Python-context files/146 bytes and 10 mixed-context files/846
+bytes. Native Pyrefly takes 0.523 s in the first case; Cargo/rustc takes 25.915 s in the second.
+Relational execution plus Delta writing takes 5.600/9.944 s. These are initial samples, not a
+before/after performance claim or representative scale qualification.
+
+This delivers P01's first external-input vertical using deliberately captured dependency material
+inside the authorized workspace. Separate external filesystem-root registration/fetching, full
+package/distribution identity, generated `OUT_DIR` freezing, effective Cargo unit/config closure,
+byte-safe compiler argv, retained providers/caches and measured shared scheduling remain in their
+4A–4C/P04/P06/8E slices. Next is P02 canonical semantic normalization and scoped coverage.
 
 ## Detailed plan expansion, 2026-09-09
 
@@ -967,17 +1025,16 @@ dated-nightly target. Real root provider tests require current `CODEFABRIC_RUSTC
 golden setup; `just sidecar-check` checks/lints rather than installing a fresh executable. No routine
 `cargo clean`, independent worktrees, source-edit artifacts or new approval cycle is required.
 
-## Paused handoff and resumption order
+## Active package order
 
-Implementation stopped after the diagnostic-detail boundary. The subsequent 2026-09-09 planning
-request expands the remaining design and implementation progression without starting another slice.
-The entire outcomes 4–8 scope remains the resumption target; none is complete. The detailed plan
-§3.3 defines the integrated P01–P14 sequence and §10 is the current implementation entry point.
+Implementation resumed under the user's package-order instruction after the 2026-09-09 planning
+revision. The entire outcomes 4–8 scope remains required; none is complete. The detailed plan
+§3.3 defines P01–P14 and §10 records the current entry point. P01's initial vertical is described above.
 
-When explicitly resumed:
+Continue in this order:
 
-1. P01: exact external/generated compiler units and external Python contexts, input/cache contracts,
-   source fidelity and phase instrumentation. Preserve the current capture and containment guards.
+1. Preserve P01's captured dependency roots and phase instrumentation, extending its full context,
+   cache and source-fidelity variants in the owning later slices.
 2. P02–P05: canonical semantics/coverage, completed first-four meanings and typed block bindings,
    target freshness, retained live providers/version reuse and broader clean/incremental comparison.
 3. P06–P11: every remaining language/analysis family, explicit native CFG/MIR/private inputs,
