@@ -3,6 +3,7 @@
 use super::arrow_result_resource::{ResultCompleteness, ResultCoverage, ResultUnknownCause};
 use super::programmatic_epoch::ProgrammaticFabricEpoch;
 use super::programmatic_schema::ProgrammaticRelationId;
+use super::relational_query_runtime::source_boundary::SourceBoundaries;
 use crate::resource_budget::{ChargedValue, ResourceBudget};
 use arrow_array::{
     Array, BinaryArray, FixedSizeBinaryArray, RecordBatch, StringArray, UInt64Array,
@@ -158,6 +159,7 @@ impl QueryProcessing {
 }
 
 pub(crate) struct EntityQueryScope {
+    boundaries: SourceBoundaries,
     family: &'static str,
     // Empty preserves the historical single-family selection.
     families: BTreeSet<&'static str>,
@@ -204,11 +206,10 @@ impl EntityQueryScope {
         request: &crate::semantic_query_contract::SemanticQueryRequest,
         selector: &str,
     ) -> Result<Self, String> {
-        if !request.source_boundaries.is_empty()
-            || request
-                .representations
-                .iter()
-                .any(|value| value != "semantic")
+        if request
+            .representations
+            .iter()
+            .any(|value| value != "semantic")
             || request
                 .external_entity_policy
                 .as_deref()
@@ -264,6 +265,7 @@ impl EntityQueryScope {
             })
             .collect::<Result<_, _>>()?;
         Ok(Self {
+            boundaries: SourceBoundaries::authorize(&request.source_boundaries)?,
             family: match selector {
                 "python:module" => "modules",
                 selected
@@ -514,6 +516,8 @@ impl EntityProcessingSnapshot {
             remaining_partitions: 0,
             scope: if scope.owners.is_some() {
                 "selected_rust_call_owners"
+            } else if !scope.boundaries.is_empty() {
+                "requested_python_source_boundaries_and_selected_cargo_targets"
             } else {
                 "requested_python_sources_and_selected_cargo_targets"
             }
@@ -550,6 +554,8 @@ impl EntityProcessingSnapshot {
                 }
                 if !scope.selects_family(families.value(row))
                     || !scope.languages.contains(languages.value(row))
+                    || (languages.value(row) == "python"
+                        && !scope.boundaries.selects(paths.value(row)))
                 {
                     continue;
                 }
@@ -839,6 +845,7 @@ mod tests {
     fn processing_scope_keeps_python_complete_and_paginates_rust_remainder() {
         let processing = fixture();
         let python = EntityQueryScope {
+            boundaries: SourceBoundaries::default(),
             families: BTreeSet::new(),
             family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned()]),
@@ -859,6 +866,7 @@ mod tests {
             ResultCompleteness::Complete
         );
         let rust = EntityQueryScope {
+            boundaries: SourceBoundaries::default(),
             families: BTreeSet::new(),
             family: "function-declarations",
             languages: BTreeSet::from(["rust".to_owned()]),
@@ -907,6 +915,7 @@ mod tests {
             };
             let summary = processing.summarize(
                 &EntityQueryScope {
+                    boundaries: SourceBoundaries::default(),
                     families: BTreeSet::new(),
                     family: "function-declarations",
                     languages: BTreeSet::from(["python".to_owned()]),
@@ -936,6 +945,7 @@ mod tests {
         validate(&calls, [1; 16], 3).unwrap();
         processing.batches.push(ChargedValue::for_test(calls));
         let mut scope = EntityQueryScope {
+            boundaries: SourceBoundaries::default(),
             families: BTreeSet::new(),
             family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned()]),
@@ -990,6 +1000,7 @@ mod tests {
         assert!(!processing.matches([1; 16], processing.epoch, 4));
         assert!(validate(&processing.batches[0], [1; 16], 4).is_err());
         let scope = EntityQueryScope {
+            boundaries: SourceBoundaries::default(),
             families: BTreeSet::new(),
             family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned(), "rust".to_owned()]),
@@ -1002,6 +1013,7 @@ mod tests {
             (0, 130)
         );
         let empty = EntityQueryScope {
+            boundaries: SourceBoundaries::default(),
             families: BTreeSet::new(),
             family: "function-declarations",
             languages: BTreeSet::new(),
@@ -1054,6 +1066,7 @@ mod tests {
             row(Some(&[11; 16]), "partial", "unresolved_targets"),
         ];
         let scope = || EntityQueryScope {
+            boundaries: SourceBoundaries::default(),
             families: BTreeSet::new(),
             family: "call-targets",
             languages: BTreeSet::from(["rust".into()]),

@@ -20,6 +20,8 @@ const MAX_PAGE_BYTES: usize = 2 * 1024 * 1024;
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ProcessingSelection {
+    #[serde(default, skip_serializing_if = "SourceBoundaries::is_empty")]
+    boundaries: SourceBoundaries,
     table_root: String,
     table_version: u64,
     workspace: [u8; 16],
@@ -48,6 +50,7 @@ impl ProcessingSelection {
             .get(&ProgrammaticRelationId::new(ENTITY_PROCESSING_RELATION))
             .ok_or("processing relation has no exact retained selection")?;
         Ok(Some(Self {
+            boundaries: scope.boundaries.clone(),
             table_root: pin.canonical_root().to_string(),
             table_version: pin.version(),
             workspace,
@@ -65,6 +68,7 @@ impl ProcessingSelection {
 
     pub(super) fn validate(&self, summary: &EntityProcessingSummary) -> bool {
         !self.table_root.is_empty()
+            && self.boundaries.valid()
             && self.workspace != [0; 16]
             && self.languages.iter().eq(summary.languages.iter())
             && super::canonical_processing_family(&self.family).is_some()
@@ -83,9 +87,13 @@ impl ProcessingSelection {
     }
 
     fn scope(&self) -> Result<EntityQueryScope, String> {
+        if !self.boundaries.valid() {
+            return Err("invalid retained source boundaries".into());
+        }
         let family = super::canonical_processing_family(&self.family)
             .ok_or("invalid retained processing family")?;
         Ok(EntityQueryScope {
+            boundaries: self.boundaries.clone(),
             family,
             families: self
                 .families
@@ -183,6 +191,14 @@ fn selected_remainder(
                     .collect(),
                 false,
             )),
+        );
+    }
+    if !selection.boundaries.is_empty() {
+        // Rust partitions cover compilation targets; no file dependency closure is available yet.
+        predicate = predicate.and(
+            col("language")
+                .not_eq(lit("python"))
+                .or(selection.boundaries.native_predicate(&col("relative_path"))),
         );
     }
     if let Some(owners) = &selection.owners {
@@ -397,6 +413,7 @@ mod tests {
         .unwrap();
         let frame = context.read_batch(batch).unwrap();
         let mut selection = ProcessingSelection {
+            boundaries: SourceBoundaries::default(),
             table_root: "file:///owned/processing".into(),
             table_version: 0,
             workspace: [1; 16],
@@ -514,5 +531,90 @@ mod tests {
         invalid["families"] = serde_json::json!(["unknown-family"]);
         let invalid: ProcessingSelection = serde_json::from_value(invalid).unwrap();
         assert!(invalid.scope().is_err());
+    }
+    #[tokio::test]
+    async fn retained_source_boundaries_match_initial_counts_and_pages() {
+        let mut snapshot = super::super::tests::fixture();
+        let original = &snapshot.batches[0];
+        let mut columns = original.columns().to_vec();
+        let count = original.num_rows();
+        let replace = |columns: &mut Vec<arrow_array::ArrayRef>, name: &str, array| {
+            columns[original.schema().index_of(name).unwrap()] = array;
+        };
+        replace(
+            &mut columns,
+            "language",
+            Arc::new(StringArray::from_iter_values(
+                (0..count).map(|row| if row < 129 { "python" } else { "rust" }),
+            )),
+        );
+        replace(
+            &mut columns,
+            "relative_path",
+            Arc::new(BinaryArray::from_iter_values((0..count).map(|row| {
+                if row < 100 {
+                    b"src/in.py".as_slice()
+                } else {
+                    b"src_other/out.py".as_slice()
+                }
+            }))),
+        );
+        let batch = RecordBatch::try_new(original.schema(), columns).unwrap();
+        snapshot.batches = ordered(SessionContext::new().read_batch(batch.clone()).unwrap())
+            .unwrap()
+            .collect()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(ChargedValue::for_test)
+            .collect();
+        let selection: ProcessingSelection = serde_json::from_value(serde_json::json!({
+            "table_root":"/private/exact/processing", "table_version":7,
+            "workspace":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], "family":"function-declarations",
+            "languages":["python","rust"], "contexts":[], "boundaries":["src"]
+        }))
+        .unwrap();
+        let selection: ProcessingSelection =
+            serde_json::from_slice(&serde_json::to_vec(&selection).unwrap()).unwrap();
+        let scope = selection.scope().unwrap();
+        let first = snapshot.summarize(&scope, 0);
+        assert_eq!(
+            (
+                first.requested_partitions,
+                first.completed_partitions,
+                first.remaining_partitions
+            ),
+            (102, 1, 101)
+        );
+        assert_eq!(first.next_offset, Some(64));
+        assert!(selection.validate(&first));
+        let later = snapshot.summarize(&scope, 64);
+        assert_eq!(later.remainder.len(), 37);
+        assert_eq!(
+            later
+                .remainder
+                .iter()
+                .filter(|row| row.language == "rust")
+                .count(),
+            2
+        );
+        let frame = SessionContext::new().read_batch(batch).unwrap();
+        let selected = ordered(selected_remainder(frame, &selection, 3).unwrap())
+            .unwrap()
+            .limit(64, Some(64))
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let selected_snapshot = EntityProcessingSnapshot {
+            batches: selected.into_iter().map(ChargedValue::for_test).collect(),
+            generation: snapshot.generation,
+            workspace: snapshot.workspace,
+            epoch: snapshot.epoch,
+        };
+        assert_eq!(
+            selected_snapshot.summarize(&scope, 0).remainder,
+            later.remainder
+        );
     }
 }

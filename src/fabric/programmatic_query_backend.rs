@@ -382,6 +382,10 @@ impl ProgrammaticScopeAuthorizationPort for CompiledV20ProgrammaticScopeAuthoriz
         }
         let expected = compiled_v2_0_scope_values(request);
         validate_compiled_v2_0_scope_handoffs(&self.rules, &expected, scopes)?;
+        super::relational_query_runtime::source_boundary::SourceBoundaries::authorize(
+            &request.request.source_boundaries,
+        )
+        .map_err(ProgrammaticQueryPortError::Rejected)?;
 
         let mut scope_identity = blake3::Hasher::new();
         frame_scope_identity(
@@ -1271,6 +1275,24 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "scope authorization port differs from the compiled policy pin",
             );
         }
+        let source_boundaries =
+            match super::relational_query_runtime::source_boundary::SourceBoundaries::authorize(
+                &request.parsed().request.source_boundaries,
+            ) {
+                Ok(boundaries) => boundaries,
+                Err(message) => {
+                    return failed_error(
+                        &artifacts,
+                        "source_boundary_authorization",
+                        SemanticQueryError::Phase {
+                            code: "SEMANTIC_REFERENCE_UNAVAILABLE",
+                            phase: "scope_resolution",
+                            pointer: "scope.source_boundaries".into(),
+                            message,
+                        },
+                    );
+                }
+            };
         let authorization = match ports.scope_authorization.authorize(
             request.parsed(),
             context.owner(),
@@ -1296,6 +1318,23 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             );
         }
         let mut processing_summaries = Vec::new();
+        for output in &mut outputs {
+            *output = match output.clone().with_source_boundaries(&source_boundaries) {
+                Ok(output) => output,
+                Err(message) => {
+                    return failed_error(
+                        &artifacts,
+                        "source_boundary_scope",
+                        SemanticQueryError::Phase {
+                            code: "SEMANTIC_REFERENCE_UNAVAILABLE",
+                            phase: "scope_resolution",
+                            pointer: "scope.source_boundaries".into(),
+                            message,
+                        },
+                    );
+                }
+            };
+        }
         if let Some(processing) = authority.entity_processing() {
             use super::processing_status::{ENTITY_PROCESSING_RELATION, EntityQueryScope};
             if !authorization
@@ -1701,6 +1740,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             "format": "codefabric.semantic-query-response.v2",
             "semantic_request_id": request.parsed().request.semantic_request_id,
             "snapshot": &snapshot,
+            "resolved_scope": {"source_boundaries": source_boundaries.resolved()},
             "queries": output_queries.iter().map(|query_id| serde_json::json!({
                 "query_id": query_id,
                 "relation_id": output_by_query[query_id].as_str(),

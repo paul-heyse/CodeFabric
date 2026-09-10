@@ -34,6 +34,7 @@ mod fact_families;
 mod block_queries;
 mod relationship_queries;
 mod literal_queries;
+mod source_boundary_queries;
 mod types;
 
 struct InstalledProductionStack {

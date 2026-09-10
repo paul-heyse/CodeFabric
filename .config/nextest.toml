@@ -123,9 +123,9 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 # including authorized source materialization. Literal/filter scenarios also install the real
 # native stack and reopen it. Keep the slow signal and a finite bound.
 [[profile.default.overrides]]
-filter = 'test(pragmatic_semantic_relationships_through_installed_clients_and_reopen) | test(pragmatic_literal_identifiers_and_property_filters_survive_public_reopen) | test(pragmatic_canonical_fact_families_through_installed_clients_and_reopen)'
+filter = 'test(pragmatic_semantic_relationships_through_installed_clients_and_reopen) | test(pragmatic_literal_identifiers_and_property_filters_survive_public_reopen) | test(pragmatic_source_boundaries_narrow_first_four_forms_and_survive_reopen) | test(pragmatic_canonical_fact_families_through_installed_clients_and_reopen)'
 slow-timeout = { period = "60s", terminate-after = 5 }
 
 [[profile.ci.overrides]]
-filter = 'test(pragmatic_semantic_relationships_through_installed_clients_and_reopen) | test(pragmatic_literal_identifiers_and_property_filters_survive_public_reopen) | test(pragmatic_canonical_fact_families_through_installed_clients_and_reopen)'
+filter = 'test(pragmatic_semantic_relationships_through_installed_clients_and_reopen) | test(pragmatic_literal_identifiers_and_property_filters_survive_public_reopen) | test(pragmatic_source_boundaries_narrow_first_four_forms_and_survive_reopen) | test(pragmatic_canonical_fact_families_through_installed_clients_and_reopen)'
 slow-timeout = { period = "60s", terminate-after = 5 }

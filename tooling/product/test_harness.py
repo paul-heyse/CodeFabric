@@ -152,42 +152,24 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         ),
     )
     output = tmp_path / "golden.json"
-    assert golden.main(["--output", str(output)]) == 1
+    assert (
+        golden.main(
+            [
+                "--case",
+                "startup",
+                "--case",
+                "python-serving",
+                "--case",
+                "reopen",
+                "--output",
+                str(output),
+            ]
+        )
+        == 1
+    )
     report = json.loads(output.read_text())
-    assert report["passed"] is False and report["not_run"] == [
-        "python-serving",
-        "reopen",
-        "cancellation",
-        "rust-failure",
-        "canonical-diagnostics",
-        "canonical-python-references",
-        "canonical-python-types",
-        "canonical-rust-types",
-        "canonical-rust-references",
-        "canonical-fact-families",
-        "repeated-first-four",
-        "prior-entities",
-        "semantic-relationships",
-        "literal-identifiers",
-        "python-live",
-        "mixed-clean-live",
-        "staged-live",
-        "python-context-live",
-        "python-stubs-live",
-        "python-roots-live",
-        "python-site-packages",
-        "cargo-directory-source",
-        "python-paths-live",
-        "decoded-source-live",
-        "rust-paths-live",
-        "cargo-build-live",
-        "cargo-platforms-live",
-        "cargo-linkage-live",
-        "cargo-selections-live",
-        "source-lines-live",
-        "function-source-live",
-        "processing-pages",
-    ]
+    assert report["passed"] is False
+    assert report["not_run"] == ["python-serving", "reopen"]
 
 
 @pytest.mark.parametrize(

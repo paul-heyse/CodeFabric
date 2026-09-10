@@ -155,11 +155,13 @@ impl EntityQueryScope {
 
 #[cfg(test)]
 mod tests {
+    use super::super::SourceBoundaries;
     use super::*;
     use crate::semantic_query_contract::{PriorResultReference, ResultRole};
 
     fn scope() -> EntityQueryScope {
         EntityQueryScope {
+            boundaries: SourceBoundaries::default(),
             family: "function-declarations",
             families: BTreeSet::new(),
             languages: BTreeSet::from(["python".into(), "rust".into()]),

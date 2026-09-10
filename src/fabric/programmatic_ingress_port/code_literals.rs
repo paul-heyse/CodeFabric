@@ -34,6 +34,11 @@ fn parsed_entity_selection(value: &str) -> Option<(&'static str, TextPropertyPre
     }
     let phrase = phrase.trim().strip_prefix("the ").unwrap_or(phrase.trim());
     let phrase = phrase.strip_suffix(" named").unwrap_or(phrase);
+    // Dotted declaration paths require lexical qualification that Python does not yet emit.
+    // A dotted module name is already an exact checker-provided module identity.
+    if name.contains('.') && phrase != "Python module" {
+        return None;
+    }
     let meaning = match phrase {
         "Python function" => "Python function declarations",
         "Rust function" => "Rust function declarations",
@@ -132,10 +137,15 @@ mod tests {
             "Python function named ``",
             "Python function `a` or `b`",
             "Python function `a` extra",
+            "Python function `package.Class.method`",
+            "function `package.Class.method`",
             "safe to refactor `a`",
         ] {
             assert!(entity_selection(invalid).is_none());
         }
+        let module = named_subject("Python module `package.module`").unwrap();
+        assert_eq!(module.selector, "python:module");
+        assert_eq!(module.predicate.value, "package.module");
     }
     #[test]
     fn objective_intent_check_distinguishes_code_literals_from_judgments() {

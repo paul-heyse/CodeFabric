@@ -48,6 +48,37 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The source-boundary continuation after `2a90b5eb` accepts the closed
+`{"kind":"path","root":"selected"}` descriptor over captured workspace-relative paths.
+Native DataFusion binary range predicates preserve literal path components and non-UTF8
+children; balanced predicates respect the existing 256-boundary request limit. An exact file-ID
+semi-join narrows file-anchored outputs before result limits/probes. The manifest records resolved
+boundaries. Invalid traversal/unknown descriptors and unanchored result families fail explicitly;
+no filesystem lookup or source registration occurs. Python processing uses the same captured path
+selection, including retained continuation; Rust target/owner scope remains conservatively broad
+where file dependency ownership is unavailable. Dotted Python declaration names now reject missing
+qualification semantics, while checker-qualified Python module names remain supported.
+
+The eight-block mixed Python/Rust installed-client scenario passes initial publication and exact
+reopen in 111.41 s (`/tmp/codefabric-p03-boundaries-native-3.log`). It checks the first four forms,
+literal source bytes, pre-limit selection, truncation, complete empty scope, excluded incomplete
+Python files and non-retryable invalid-path errors. Native binary-path and retained 101-partition
+remainder/page comparisons also pass. Run 1 found an incorrect fixture expectation for Pyrefly's
+qualified call-target name; run 2 found a fixture closure type mismatch. Both are corrected.
+`source-boundaries` selects this scenario in the existing product harness.
+
+All 218 tooling cases and affected Python lint pass (`/tmp/codefabric-p03-boundaries-tooling-2.log`).
+The initial broader tooling run exposed an existing false positive for the daemon's native
+`tracing_subscriber::registry()` diagnostic sink; that precise library call is now distinguished
+from semantic registries. The harness failure test uses explicit cases rather than duplicating
+its growing catalog. Default/featureless root checks pass
+(`/tmp/codefabric-p03-boundaries-root-check.log`). All 29 final affected Rust cases pass in 0.34 s
+(`/tmp/codefabric-p03-boundaries-final-units.log`). Final all-target Clippy has no new-file or
+changed-line findings (`/tmp/codefabric-p03-boundaries-final-clippy.jsonl`); existing warnings remain.
+Documentation/navigation, spelling and diff checks pass. No full-suite or doctest closure is claimed.
+Full source/syntax/context scopes, broader references, directives and independent block failure
+remain P03 work. No package or outcome exit is claimed.
+
 The named-subject continuation passes installed-client validation after `ff89d115`. Facts,
 relationships and source accept supported backtick-quoted declaration/module names, including
 structured `semantic_reference` objects. The compiler selects canonical entities by kind and

@@ -63,6 +63,9 @@ pub struct RelationalQueryAuthorization {
     registries: ChildRegistryAllowlist,
 }
 
+#[cfg(feature = "daemon")]
+pub(crate) mod source_boundary;
+
 impl RelationalQueryAuthorization {
     /// Construct a bounded authorization input without selecting an epoch.
     ///
