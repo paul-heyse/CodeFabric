@@ -1,7 +1,7 @@
 use super::super::block_queries::{block_rows, resource_bytes};
 use super::*;
 
-const SOURCE: &str = "from typing import ClassVar, Final\nclass Empty:\n    pass\nclass Café:\n    counter: ClassVar[int] = 0\n    label: Final[str] = 'café'\n    def __init__(self):\n        self.instance = 1\n    @property\n    def value(self) -> int:\n        return self.instance\n    class Nested:\n        item: bytes\n";
+const SOURCE: &str = "from typing import ClassVar, Final\nclass Empty:\n    pass\nclass Incomplete:\n    field: Missing\nclass Café:\n    counter: ClassVar[int] = 0\n    label: Final[str] = 'café'\n    def __init__(self):\n        self.instance = 1\n    @property\n    def value(self) -> int:\n        return self.instance\n    class Nested:\n        item: bytes\n";
 
 fn public_members(
     fixture: &ProductionFixture,
@@ -25,6 +25,7 @@ fn public_members(
         {"request":"retrieve facts about code","query_id":"all","about":[{"results_of":"classes","select":"entities"},{"results_of":"classes","select":"entities"}],"facts":["associated member observations"]},
         {"request":"retrieve facts about code","query_id":"empty","about":[{"entity_id":owner("Empty")["public_entity_id"]}],"facts":["associated member observations"]},
         {"request":"retrieve facts about code","query_id":"cafe","about":[{"entity_id":owner("Café")["public_entity_id"]}],"facts":["associated member observations"]},
+        {"request":"retrieve facts about code","query_id":"incomplete","about":[{"entity_id":owner("Incomplete")["public_entity_id"]}],"facts":["associated member observations"]},
         {"request":"find code entities","query_id":"absent","looking_for":"Python function named `absent`"},
         {"request":"retrieve facts about code","query_id":"none","about":[{"results_of":"absent","select":"entities"}],"facts":["associated member observations"]}
     ]);
@@ -42,6 +43,30 @@ fn public_members(
     let report = modern_client_report(&run_modern_client(stack, &path));
     let result = modern_structured(modern_step(&report, "query"));
     assert_eq!(result["execution_state"], "SUCCEEDED", "{result}");
+    let processing = |query: &str| {
+        result["processing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["query_id"] == query)
+            .unwrap()
+    };
+    assert_eq!(
+        processing("empty")["scope"],
+        "selected_python_member_owners"
+    );
+    assert_eq!(processing("empty")["requested_partitions"], 1);
+    assert_eq!(processing("empty")["remaining_partitions"], 0);
+    assert_eq!(processing("incomplete")["requested_partitions"], 1);
+    assert_eq!(processing("incomplete")["remaining_partitions"], 1);
+    assert_eq!(
+        processing("incomplete")["remainder"][0]["entity_id"],
+        owner("Incomplete")["public_entity_id"]
+    );
+    assert_eq!(
+        processing("incomplete")["remainder"][0]["scope_kind"],
+        "member_owner"
+    );
     let manifest: Value = serde_json::from_slice(&resource_bytes(&report, "manifest")).unwrap();
     let steps = result["pages"].as_array().unwrap().iter().enumerate().map(|(index, page)| json!({"id":format!("page{index}"),"operation":"read_resource","uri":page["uri"]})).collect::<Vec<_>>();
     let scenario = modern_client_scenario(fixture, stack, "policy-one", json!([]), json!(steps));
@@ -68,6 +93,11 @@ fn public_members(
         rows.sort_by_cached_key(Value::to_string);
         rows
     });
+    assert_member_facts(fixture, &rows, owner("Café"));
+    rows.to_vec()
+}
+
+fn assert_member_facts(fixture: &ProductionFixture, rows: &[Vec<Value>], cafe: &Value) {
     let expected = canonical_diagnostic_rows(fixture, "fact.code_member_observation");
     assert_eq!(rows[0], expected);
     assert_eq!(rows[1].len(), 1);
@@ -84,7 +114,7 @@ fn public_members(
     assert!(
         rows[2]
             .iter()
-            .all(|row| row["owner_entity_id"] == owner("Café")["entity_id"])
+            .all(|row| row["owner_entity_id"] == cafe["entity_id"])
     );
     let member = |name: &str| {
         rows[2]
@@ -107,7 +137,6 @@ fn public_members(
         let end = usize::try_from(row["class_end_byte"].as_u64().unwrap()).unwrap();
         assert_eq!(&SOURCE[start..end], row["class_name"].as_str().unwrap());
     }
-    rows.to_vec()
 }
 
 #[test]

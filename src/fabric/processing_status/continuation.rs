@@ -81,7 +81,7 @@ impl ProcessingSelection {
             && self.owners.as_ref().is_none_or(|owners| {
                 !owners.is_empty()
                     && owners.len() <= 4096
-                    && self.family == "call-targets"
+                    && matches!(self.family.as_str(), "call-targets" | "members")
                     && (self.families.is_empty() || self.families.len() == 1)
             })
     }
@@ -373,106 +373,113 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "both native owner families exercise identical retained context and owner isolation plus legacy decoding"
+    )]
     async fn retained_owner_remainder_selects_owners_without_double_counting_contexts() {
-        let context = SessionContext::new();
-        let batch = RecordBatch::try_from_iter([
-            (
-                "family",
-                Arc::new(StringArray::from(vec!["call-targets"; 4])) as arrow_array::ArrayRef,
-            ),
-            ("language", Arc::new(StringArray::from(vec!["rust"; 4]))),
-            (
-                "workspace_id",
-                crate::fabric::id16_array([Some(&[1; 16]); 4]),
-            ),
-            ("source_generation", Arc::new(UInt64Array::from(vec![3; 4]))),
-            (
-                "context_id",
-                crate::fabric::id16_array([
-                    Some(&[2; 16]),
-                    Some(&[2; 16]),
-                    Some(&[2; 16]),
-                    Some(&[3; 16]),
-                ]),
-            ),
-            (
-                "processing_state",
-                Arc::new(StringArray::from(vec![
-                    "partial", "complete", "partial", "partial",
-                ])),
-            ),
-            (
-                "owner_entity_id",
-                crate::fabric::id16_array([
-                    None,
-                    Some(&[10; 16]),
-                    Some(&[11; 16]),
-                    Some(&[12; 16]),
-                ]),
-            ),
-        ])
-        .unwrap();
-        let frame = context.read_batch(batch).unwrap();
-        let mut selection = ProcessingSelection {
-            boundaries: SourceBoundaries::default(),
-            table_root: "file:///owned/processing".into(),
-            table_version: 0,
-            workspace: [1; 16],
-            family: "call-targets".into(),
-            families: BTreeSet::new(),
-            languages: BTreeSet::from(["rust".into()]),
-            contexts: BTreeSet::new(),
-            owners: None,
-        };
-        for (owners, contexts, expected) in [
-            (None, BTreeSet::new(), vec![None]),
-            (
-                Some(BTreeSet::from([[10; 16], [11; 16]])),
-                BTreeSet::new(),
-                vec![Some([11; 16])],
-            ),
-            (
-                Some(BTreeSet::from([[12; 16]])),
-                BTreeSet::from([[2; 16]]),
-                vec![],
-            ),
-            (
-                Some(BTreeSet::from([[12; 16]])),
-                BTreeSet::new(),
-                vec![Some([12; 16])],
-            ),
-        ] {
-            selection.owners = owners;
-            selection.contexts = contexts;
-            let batches = selected_remainder(frame.clone(), &selection, 3)
-                .unwrap()
-                .collect()
-                .await
-                .unwrap();
-            let mut actual = Vec::new();
-            for batch in batches {
-                let ids = batch
-                    .column_by_name("owner_entity_id")
+        for (family, language) in [("call-targets", "rust"), ("members", "python")] {
+            let context = SessionContext::new();
+            let batch = RecordBatch::try_from_iter([
+                (
+                    "family",
+                    Arc::new(StringArray::from(vec![family; 4])) as arrow_array::ArrayRef,
+                ),
+                ("language", Arc::new(StringArray::from(vec![language; 4]))),
+                (
+                    "workspace_id",
+                    crate::fabric::id16_array([Some(&[1; 16]); 4]),
+                ),
+                ("source_generation", Arc::new(UInt64Array::from(vec![3; 4]))),
+                (
+                    "context_id",
+                    crate::fabric::id16_array([
+                        Some(&[2; 16]),
+                        Some(&[2; 16]),
+                        Some(&[2; 16]),
+                        Some(&[3; 16]),
+                    ]),
+                ),
+                (
+                    "processing_state",
+                    Arc::new(StringArray::from(vec![
+                        "partial", "complete", "partial", "partial",
+                    ])),
+                ),
+                (
+                    "owner_entity_id",
+                    crate::fabric::id16_array([
+                        None,
+                        Some(&[10; 16]),
+                        Some(&[11; 16]),
+                        Some(&[12; 16]),
+                    ]),
+                ),
+            ])
+            .unwrap();
+            let frame = context.read_batch(batch).unwrap();
+            let mut selection = ProcessingSelection {
+                boundaries: SourceBoundaries::default(),
+                table_root: "file:///owned/processing".into(),
+                table_version: 0,
+                workspace: [1; 16],
+                family: family.into(),
+                families: BTreeSet::new(),
+                languages: BTreeSet::from([language.into()]),
+                contexts: BTreeSet::new(),
+                owners: None,
+            };
+            for (owners, contexts, expected) in [
+                (None, BTreeSet::new(), vec![None]),
+                (
+                    Some(BTreeSet::from([[10; 16], [11; 16]])),
+                    BTreeSet::new(),
+                    vec![Some([11; 16])],
+                ),
+                (
+                    Some(BTreeSet::from([[12; 16]])),
+                    BTreeSet::from([[2; 16]]),
+                    vec![],
+                ),
+                (
+                    Some(BTreeSet::from([[12; 16]])),
+                    BTreeSet::new(),
+                    vec![Some([12; 16])],
+                ),
+            ] {
+                selection.owners = owners;
+                selection.contexts = contexts;
+                let batches = selected_remainder(frame.clone(), &selection, 3)
                     .unwrap()
-                    .as_any()
-                    .downcast_ref::<FixedSizeBinaryArray>()
+                    .collect()
+                    .await
                     .unwrap();
-                for row in 0..batch.num_rows() {
-                    actual.push(
-                        (!ids.is_null(row)).then(|| <[u8; 16]>::try_from(ids.value(row)).unwrap()),
-                    );
+                let mut actual = Vec::new();
+                for batch in batches {
+                    let ids = batch
+                        .column_by_name("owner_entity_id")
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<FixedSizeBinaryArray>()
+                        .unwrap();
+                    for row in 0..batch.num_rows() {
+                        actual.push(
+                            (!ids.is_null(row))
+                                .then(|| <[u8; 16]>::try_from(ids.value(row)).unwrap()),
+                        );
+                    }
                 }
+                assert_eq!(actual, expected);
             }
-            assert_eq!(actual, expected);
+            let mut serialized = serde_json::to_value(&selection).unwrap();
+            serialized.as_object_mut().unwrap().remove("owners");
+            assert!(
+                serde_json::from_value::<ProcessingSelection>(serialized)
+                    .unwrap()
+                    .owners
+                    .is_none()
+            );
         }
-        let mut serialized = serde_json::to_value(&selection).unwrap();
-        serialized.as_object_mut().unwrap().remove("owners");
-        assert!(
-            serde_json::from_value::<ProcessingSelection>(serialized)
-                .unwrap()
-                .owners
-                .is_none()
-        );
     }
 
     #[tokio::test]

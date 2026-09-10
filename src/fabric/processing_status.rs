@@ -14,6 +14,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 mod continuation;
+#[cfg(test)]
+mod member_tests;
 mod rust_build;
 mod source;
 pub(crate) use continuation::{ProcessingPageReader, ProcessingSelection};
@@ -134,13 +136,14 @@ impl QueryProcessing {
                         .as_ref()
                         .is_none_or(ProcessingRustBuildSelection::valid)
                     && row.entity_id.as_ref().is_none_or(|id| {
-                        row.scope_kind == "call_owner"
-                            && crate::identity::decode_public_id(
+                        owner_entity_kind(&row.scope_kind).is_some_and(|kind| {
+                            crate::identity::decode_public_id(
                                 crate::identity::IdentityDomain::Entity,
-                                Some("function"),
+                                Some(kind),
                                 id,
                             )
                             .is_ok()
+                        })
                     })
                     && row.path.as_deref() == std::str::from_utf8(&row.path_bytes).ok()
                     && matches!(
@@ -479,31 +482,35 @@ impl EntityProcessingSnapshot {
         self.workspace == workspace && self.epoch == epoch && self.generation == generation
     }
 
-    /// Narrow only explicit outgoing subjects with an exact retained owner partition.
+    /// Narrow explicit subjects only when their selected family has exact retained owner partitions.
     /// Unknown subjects and older epochs retain the broader requested input scope.
-    pub(crate) fn select_outgoing_owners(
+    pub(crate) fn select_subject_owners(
         &self,
         scope: &mut EntityQueryScope,
         clause: &crate::semantic_query_contract::SemanticQueryClause,
     ) -> Result<(), String> {
         use crate::semantic_query_contract::{SemanticQueryClause, SemanticReference};
-        let SemanticQueryClause::FollowRelationships {
-            starting_from,
-            direction,
-            ..
-        } = clause
-        else {
-            return Ok(());
+        let subjects = match clause {
+            SemanticQueryClause::FollowRelationships {
+                starting_from,
+                direction,
+                ..
+            } if scope.family == "call-targets"
+                && direction.as_deref().unwrap_or("outgoing") == "outgoing" =>
+            {
+                starting_from
+            }
+            SemanticQueryClause::RetrieveFacts { about, .. } if scope.family == "members" => about,
+            _ => return Ok(()),
         };
-        if scope.family != "call-targets"
-            || direction.as_deref().unwrap_or("outgoing") != "outgoing"
-            || starting_from.is_empty()
-            || starting_from.len() > 4096
+        if subjects.is_empty()
+            || subjects.len() > 4096
+            || (!scope.families.is_empty() && scope.families.len() != 1)
         {
             return Ok(());
         }
         let mut selected = BTreeSet::new();
-        for subject in starting_from {
+        for subject in subjects {
             let SemanticReference::Entity { entity_id } = subject else {
                 return Ok(());
             };
@@ -529,12 +536,14 @@ impl EntityProcessingSnapshot {
                 continue;
             };
             let languages = strings(batch, "language")?;
+            let families = strings(batch, "family")?;
             let contexts = batch
                 .column_by_name("context_id")
                 .and_then(|a| a.as_any().downcast_ref::<FixedSizeBinaryArray>())
                 .ok_or("invalid owner context")?;
             for row in 0..batch.num_rows() {
-                if owners.is_null(row)
+                if !scope.selects_family(families.value(row))
+                    || owners.is_null(row)
                     || !scope.languages.contains(languages.value(row))
                     || (!scope.contexts.is_empty()
                         && !contexts.is_null(row)
@@ -559,6 +568,10 @@ impl EntityProcessingSnapshot {
 
     /// Current query profile counts source-file and selected-Cargo-target work partitions.
     /// Pagination limits explanation size; it never changes the reported remainder count.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one bounded Arrow traversal counts and pages the same selected processing partitions"
+    )]
     pub(crate) fn summarize(
         &self,
         scope: &EntityQueryScope,
@@ -569,7 +582,9 @@ impl EntityProcessingSnapshot {
             requested_partitions: 0,
             completed_partitions: 0,
             remaining_partitions: 0,
-            scope: if scope.owners.is_some() {
+            scope: if scope.owners.is_some() && scope.family == "members" {
+                "selected_python_member_owners"
+            } else if scope.owners.is_some() {
                 "selected_rust_call_owners"
             } else if !scope.boundaries.is_empty() {
                 "requested_python_source_boundaries_and_selected_cargo_targets"
@@ -654,7 +669,7 @@ impl EntityProcessingSnapshot {
                     entity_id: owner.map(|id| {
                         public_processing_id(
                             crate::identity::IdentityDomain::Entity,
-                            Some("function"),
+                            owner_entity_kind(kinds.value(row)),
                             id,
                         )
                     }),
@@ -669,6 +684,14 @@ impl EntityProcessingSnapshot {
                 .expect("bounded processing partition count"))
         .then_some(next);
         summary
+    }
+}
+
+fn owner_entity_kind(scope: &str) -> Option<&'static str> {
+    match scope {
+        "call_owner" => Some("function"),
+        "member_owner" => Some("class"),
+        _ => None,
     }
 }
 
@@ -785,9 +808,13 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
         None
     };
     for row in 0..batch.num_rows() {
-        if owners.is_some_and(|owners| owners.is_null(row) == (kinds.value(row) == "call_owner"))
+        let owner_scope = owner_entity_kind(kinds.value(row)).is_some();
+        if (owner_scope && (owners.is_none() || contexts.is_null(row)))
+            || owners.is_some_and(|owners| owners.is_null(row) == owner_scope)
             || (kinds.value(row) == "call_owner"
                 && (family.value(row) != "call-targets" || language.value(row) != "rust"))
+            || (kinds.value(row) == "member_owner"
+                && (family.value(row) != "members" || language.value(row) != "python"))
             || workspace_ids.is_null(row)
             || workspace_ids.value(row) != workspace
             || generations.is_null(row)
@@ -1186,7 +1213,7 @@ mod tests {
         );
         let mut selected = scope();
         processing
-            .select_outgoing_owners(&mut selected, &clause(&[10, 10], "outgoing"))
+            .select_subject_owners(&mut selected, &clause(&[10, 10], "outgoing"))
             .unwrap();
         let exact = processing.summarize(&selected, 0);
         assert_eq!(
@@ -1196,7 +1223,7 @@ mod tests {
         assert_eq!(exact.scope, "selected_rust_call_owners");
         let mut both = scope();
         processing
-            .select_outgoing_owners(&mut both, &clause(&[10, 11], "outgoing"))
+            .select_subject_owners(&mut both, &clause(&[10, 11], "outgoing"))
             .unwrap();
         let both = processing.summarize(&both, 0);
         assert_eq!(
@@ -1206,7 +1233,7 @@ mod tests {
         for query in [clause(&[10, 12], "outgoing"), clause(&[10], "incoming")] {
             let mut fallback = scope();
             processing
-                .select_outgoing_owners(&mut fallback, &query)
+                .select_subject_owners(&mut fallback, &query)
                 .unwrap();
             assert!(fallback.owners.is_none());
             assert_eq!(processing.summarize(&fallback, 0), broad);

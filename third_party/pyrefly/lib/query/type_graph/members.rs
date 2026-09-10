@@ -10,8 +10,9 @@
 use ruff_python_ast::Identifier;
 use ruff_text_size::Ranged;
 use starlark_map::Hashed;
+use std::collections::VecDeque;
 
-use super::{CalleeDefinition, GraphBuilder, Type, TypeShapeContext};
+use super::{CalleeDefinition, GraphBuilder, NativeTypeKind, Type, TypeShapeContext};
 use crate::alt::answers::Answers;
 use crate::binding::binding::{ClassFieldDefinition, KeyClassField};
 use crate::binding::bindings::Bindings;
@@ -44,6 +45,60 @@ pub struct NativeClassMembers {
     pub members: Vec<NativeMember>,
     pub complete: bool,
     pub unknown_reason: Option<&'static str>,
+}
+
+/// Structural identities can represent error types. Propagate incomplete components once so
+/// an error-bearing signature or container cannot masquerade as a fully known member type.
+pub(super) fn qualify(graph: &mut GraphBuilder) {
+    if graph.classes.iter().all(|class| class.members.is_empty()) {
+        return;
+    }
+    let mut parents = vec![Vec::new(); graph.nodes.len()];
+    let mut incomplete = vec![false; graph.nodes.len()];
+    for (index, node) in graph.nodes.iter().enumerate() {
+        incomplete[index] = matches!(
+            node.kind,
+            NativeTypeKind::Unknown | NativeTypeKind::Error | NativeTypeKind::Unsupported
+        );
+        for component in &node.components {
+            if let Some(parent_list) = component.target.and_then(|target| parents.get_mut(target)) {
+                parent_list.push(index);
+            } else {
+                incomplete[index] = true;
+            }
+        }
+    }
+    let mut pending = incomplete
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| value.then_some(index))
+        .collect::<VecDeque<_>>();
+    while let Some(index) = pending.pop_front() {
+        for &parent in &parents[index] {
+            if !incomplete[parent] {
+                incomplete[parent] = true;
+                pending.push_back(parent);
+            }
+        }
+    }
+    let unknown = |index: Option<usize>| {
+        index
+            .and_then(|index| incomplete.get(index))
+            .is_none_or(|value| *value)
+    };
+    for class in &mut graph.classes {
+        for member in &mut class.members {
+            if member.unknown_reason.is_none() {
+                if unknown(member.computed_type_index) {
+                    member.unknown_reason = Some("native_member_computed_type_incomplete");
+                } else if member.annotation_present == Some(true)
+                    && unknown(member.declared_type_index)
+                {
+                    member.unknown_reason = Some("native_member_declared_type_incomplete");
+                }
+            }
+        }
+    }
 }
 
 pub(super) fn collect(

@@ -157,7 +157,8 @@ impl Query {
                 )
             })
             .unzip();
-        let structural = structural.into_inner();
+        let mut structural = structural.into_inner();
+        members::qualify(&mut structural);
         Some(TypeFactsResponseData {
             presentation: TypeTableResponseData {
                 type_table: presentation.into_inner().into_type_table(),

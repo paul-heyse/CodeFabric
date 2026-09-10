@@ -48,6 +48,30 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The P03 owner-processing continuation after `9a5d8e0b` passes public validation. Native
+DataFusion groups associated member observations by exact class owner/workspace/context/source
+generation, counts class census rows and local unknowns, and preserves pending/failed provider
+states. Explicit class-ID member queries select those owned partitions; broad and older-epoch
+fallbacks remain available. Retained remainders use class public IDs and the selected member family.
+Structural error types retain valid IDs, so a bounded linear native reverse-dependency pass now
+propagates error/unknown/unsupported/missing components to affected declared/computed member
+roots. Associated-name census completion remains independent of type completeness.
+
+Four focused owner/family/pending/wrong-pin/retained-selection checks pass in 0.088 s. All 39
+processing/canonical checks pass in 12.733 s (`/tmp/codefabric-p03-member-owner-integrated-focused.log`).
+All 42 sidecar cases pass in 2.07 s (`/tmp/codefabric-p03-member-precision-sidecar-tests.log`),
+including direct errors, nested tuples and method parameters without widening the known class.
+Strict sidecar check/Clippy and the rebuilt provider pass. Final installed empty/incomplete class
+queries and exact reopen pass in 86.056 s (`/tmp/codefabric-p03-member-owner-native-precision.log`):
+the empty class is complete, the error-bearing class retains one owner remainder with its actual
+class public ID, and every fact page is read. Default/featureless checks, final affected root Clippy
+(including changed function headers), local Pyrefly package Clippy, docs, spelling and diff checks
+pass. The earlier installed run exposed the error-type coverage issue and remains attributable
+in `/tmp/codefabric-p03-member-owner-native.log`. Validation uses the rebuilt sidecar and delegated
+user-systemd scope. Prior-result/descriptive-subject processing refinement remains open; their
+facts remain correctly selected by native query plans. Remaining P03 traversal/directive/context
+scope and P04–P14 stay open.
+
 The P03 native member continuation after `71353d60` passes installed public validation. Native
 class declarations supply bounded class/member DTOs from exact `KeyClassField` bindings, with
 separate declared/computed type indices into the shared graph, source anchors, final/class-variable/

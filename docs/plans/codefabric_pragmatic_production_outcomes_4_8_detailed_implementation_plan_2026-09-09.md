@@ -1010,6 +1010,27 @@ Default/featureless root checks, affected Clippy, docs, spelling and diff checks
 records commands/logs and configuration. Owner-specific processing, full signatures, effective
 lookup and Rust member production remain in P03/P06; this vertical does not close P03 or an outcome.
 
+**P03 explicit member-owner processing passes public validation, 2026-09-10.** Native
+DataFusion aggregates member census and type gaps by exact class owner/workspace/context/source
+generation. Only complete/partial terminal scope can be refined from the selected class; pending
+and failed work retain their state. Explicit class-ID queries select owned partitions, and retained
+remainders encode class IDs with the member family. Other families' owner rows cannot satisfy this
+selection. Four focused native-plan/selection tests pass (0.088 s), including unrelated class gaps,
+missing census, wrong pins, pending work, family isolation and retained filtering. All 39
+processing/canonical cases pass (12.733 s).
+
+The first installed run exposed error-bearing structural IDs being counted as complete member
+types. A native O(nodes + edges + members) reverse-dependency pass now qualifies only affected
+declared/computed roots while retaining structural identities and independent membership census.
+All 42 sidecar cases pass (2.07 s), including error-bearing fields, nested tuples and method
+parameters beside a known class; strict sidecar check/Clippy passes and the provider is rebuilt.
+The final installed case passes in 86.056 s: empty class scope is complete, the incomplete class
+has its own correctly typed public remainder, all member fact pages are read, and exact reopen
+preserves facts/status. Default/featureless checks, affected root Clippy, local Pyrefly package
+Clippy, docs, spelling and diff checks pass. STATUS records logs/configuration. Prior-result and
+descriptive processing scopes remain broad until selected owners are available; native semi joins
+already select their facts exactly. P03 and the full outcomes remain open.
+
 **Next:** remaining first-four scopes/meanings, reusable subject roles and precise dependency
 scope, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.
@@ -1278,7 +1299,7 @@ Implement compositional typed plans for:
 | RetrieveFacts | Family-selected joins, properties, provenance and point/context filters; expanded family scope for broad requests | Parameter/return types, members, call resolution and unknown reasons from actual semantic providers |
 | RetrieveSourceContext | Exact snapshot source descriptors and independent disclosure authorization; byte/line bounds and syntax joins | Correct source span after current disk changes, Unicode positions and exact omitted bytes on truncation |
 
-FindEntities now uses canonical declaration semantics, including Python class/parameter/binding/import/type-alias/type-parameter and Rust constant/static queries. P03 additionally exposes Python/Rust call, semantic-reference and import occurrences through an explicit occurrence-capable snapshot profile. New results carry reusable public entity IDs; installed clients use them for declaration fact retrieval. Guard choices have readable labels without changing their submitted opaque identities. Owner-scoped Python callable and Rust MIR parameter/return observations now pass public prior-result consumption and exact reopen with independent primitive type identities. Retain that path and extend its remaining kinds/scopes. Reuse the existing form/request infrastructure but remove assumptions that a form can exist only when every producer is globally complete. Unsupported semantic meanings must yield a typed gap, never a syntax/name fallback.
+FindEntities now uses canonical declaration semantics, including Python class/parameter/binding/import/type-alias/type-parameter and Rust constant/static queries. P03 additionally exposes Python/Rust call, semantic-reference and import occurrences through an explicit occurrence-capable snapshot profile. New results carry reusable public entity IDs; installed clients use them for declaration fact retrieval. Guard choices have readable labels without changing their submitted opaque identities. Owner-scoped Python callable and Rust MIR parameter/return observations now pass public prior-result consumption and exact reopen with independent primitive type identities. Python associated-member census/type observations also pass public retrieval, repeated prior subjects and exact reopen; explicit class IDs receive owner-specific processing that separates empty membership from unknown member types. Retain that path and extend its remaining kinds/scopes. Reuse the existing form/request infrastructure but remove assumptions that a form can exist only when every producer is globally complete. Unsupported semantic meanings must yield a typed gap, never a syntax/name fallback.
 
 Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/daemon.rs` and the modern client driver. Use the existing registered-supervisor fixture and installed provider binaries. Check at least one real Pyrefly and one real rustc semantic result through the public adapter, plus partial and empty cases. This closes the static mixed-language vertical, while the first useful release still awaits outcome 6.
 
@@ -1568,7 +1589,7 @@ Each row includes its raw observations, canonical properties/relationships, deri
 | §7 Semantic identity ontology; §8 Scope, binding, and name-resolution ontology | Declarations, symbols, definitions/references, lexical owners, qualified identity, overload/candidate sets, local/global/nonlocal scopes and Rust namespaces | 4D, 7A, 7D | Partial: canonical declarations and Python lexical references; semantic scopes/references open |
 | §9 Module, import, export, and dependency ontology | Packages/modules/crates, aliases/re-exports/globs, dependencies, external endpoints, positive and negative resolution inputs | 4A–4B, 7A, 7D | Partial captured Cargo inputs; canonical modules/imports/exports and external roots open |
 | §10 Type ontology; §35 Python type ontology extensions; §47 Rust type ontology extensions | Canonical structural type algebra; declared/computed/expected/narrowed propositions; generics, unions, callable types, traits/projections and unknown/error forms | 4B/4D, 7A, 7D | Initial Python/Rust canonical structural types and observation roles publish with unknown coverage; complete algebra/propositions open |
-| §11 Member and object-model ontology; §36 Python object-model ontology | Fields/properties/descriptors, inheritance/MRO/protocols, visibility, overrides, Rust impl/trait items and associated members | 7A, 7D | Selected provider observations only; complete canonical/public object model open |
+| §11 Member and object-model ontology; §36 Python object-model ontology | Fields/properties/descriptors, inheritance/MRO/protocols, visibility, overrides, Rust impl/trait items and associated members | 7A, 7D | Native Python associated-member census/type facts and public retrieval; complete object model open |
 | §12 Callable contract ontology; §13 Call-site ontology; §14 Dispatch ontology | Signatures, defaults/argument binding, receiver, call occurrence, resolved/possible/unknown target, callable value and executable instance distinctions | 4D, 7A, 7D | Partial: actual canonical calls; full contracts/dispatch and public traversal open |
 | §15 Control-flow ontology; §16 Derived control-flow facts | Normal/exception/cleanup/unwind/suspend edges, entry/exits, reachability, dominance/post-dominance, control dependence and loops | 7B, 7E, 7F | Existing algorithms/raw inputs; real complete CFG/derived delivery open |
 | §17 Value and computation ontology; §18 Definition/use and dataflow ontology | Evaluation order, temporaries/constants/operators, definitions/uses, reaching definitions, liveness and value/data dependence | 7B, 7E | Existing algorithms/raw inputs; real complete value/dataflow delivery open |

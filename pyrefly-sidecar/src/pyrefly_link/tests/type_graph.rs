@@ -153,6 +153,68 @@ fn native_class_members_preserve_anchors_types_flags_empty_scopes_and_bounds() {
 }
 
 #[test]
+fn native_member_precision_follows_nested_error_types_without_widening_other_classes() {
+    let root = claim_001_temp_root("native-member-precision");
+    std::fs::create_dir_all(&root).unwrap();
+    let source = b"class Known:\n    field: int\nclass Broken:\n    field: Missing\n    nested: tuple[int, Missing]\n    def method(self, value: Missing) -> int:\n        return 1\n";
+    let mut context = SemanticContext::test_only_fixture(&root, "native-member-precision").unwrap();
+    context
+        .analyze_modules(
+            &inventory_run(1),
+            &complete([inventory_module(&root, "main", source)]),
+        )
+        .unwrap();
+    let loaded = &context.loaded["module:main"];
+    let graph = context
+        .query
+        .get_type_facts_in_file(
+            ModuleName::from_str("main"),
+            ModulePath::filesystem(loaded.provider_path.clone()),
+            MAX_RELATION_ROWS,
+        )
+        .unwrap()
+        .structural;
+    let known = graph
+        .classes
+        .iter()
+        .find(|class| class.name == "Known")
+        .unwrap();
+    let broken = graph
+        .classes
+        .iter()
+        .find(|class| class.name == "Broken")
+        .unwrap();
+    assert!(
+        known.complete && broken.complete,
+        "both associated-name censuses are complete"
+    );
+    assert!(
+        known
+            .members
+            .iter()
+            .all(|member| member.unknown_reason.is_none())
+    );
+    for name in ["field", "nested", "method"] {
+        let member = broken
+            .members
+            .iter()
+            .find(|member| member.name == name)
+            .unwrap();
+        assert!(
+            member.computed_type_index.is_some(),
+            "the native type graph retains error-bearing structures"
+        );
+        assert_eq!(
+            member.unknown_reason,
+            Some("native_member_computed_type_incomplete"),
+            "{name}: {member:?}"
+        );
+    }
+    drop(context);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn native_type_graph_includes_unreferenced_nested_declarations() {
     let root = claim_001_temp_root("native-declaration-types");
     std::fs::create_dir_all(&root).unwrap();

@@ -1624,7 +1624,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     .find(|clause| clause.query_id() == query_id.as_ref())
                     && let Err(error) = scope
                         .narrow_location_files(clause)
-                        .and_then(|()| processing.select_outgoing_owners(&mut scope, clause))
+                        .and_then(|()| processing.select_subject_owners(&mut scope, clause))
                 {
                     return failed(&artifacts, "processing_scope", error);
                 }

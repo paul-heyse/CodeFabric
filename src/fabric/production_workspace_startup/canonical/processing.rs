@@ -8,6 +8,7 @@ use datafusion::functions::core::expr_fn::coalesce;
 use datafusion::functions_aggregate::count::count;
 
 mod call_owners;
+mod member_owners;
 
 pub(super) const INPUT: &str = "system.requested_processing_scope";
 pub(super) const OUTPUT: &str = "system.entity_processing_scope";
@@ -240,6 +241,7 @@ pub(super) fn build(
             .map(|(name, _, _)| col(*name))
             .chain([lit(ScalarValue::FixedSizeBinary(16, None)).alias("owner_entity_id")]),
     )?;
+    let broad = broad.union(member_owners::build(inputs)?)?;
     Ok(if rust.bodies {
         broad
             .union(call_owners::build(inputs, workspace)?)?
