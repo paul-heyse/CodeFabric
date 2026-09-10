@@ -48,6 +48,31 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The scheduling continuation after `12b95a1b` uses a native petgraph dependency graph and a
+deterministically ordered ready set. Completed producers unlock their consumers immediately;
+unrelated running roots do not create a wave barrier. Query-owned `FuturesUnordered` work is bounded
+by the admitted child's target partition count (16 in the current workstation profile). Producer
+results retain one canonical Arrow materialization and shared-pool ownership. Completion order
+cannot change sealed relation order, per-query outcome order or prior-input order.
+
+Child plans now defer native `execute_stream` until their consumer polls. Preparing leaf plans
+therefore starts no unconsumed native execution; the owned stream wrapper still supplies native
+task enrollment, cancellation and destruction scope. DataFusion §21.4, petgraph §16.10 and the Rust
+daemon reference §25.3 inform this use of native streaming, DAG validation and query-owned work.
+The scheduler updates only outgoing dependency counts instead of rescanning every pending block.
+
+Eleven deferred-stream/native-owner tests pass in 0.37 s. All 24 expanded runtime/graph/ownership
+cases pass in 0.43 s (`/tmp/codefabric-p03-ready-tests-2.log`), including controlled native scans
+that prove two-block overlap, bounded admission, immediate refill and cancellation of all pending
+planners. The initial concurrency fixture mistakenly retained its one-partition configuration;
+the corrected test binds both its workspace resources and child authority to two partitions.
+Installed-client branch/reopen passes in 82.80 s and ordering/prior/reopen in 157.19 s; all 24
+package/client cases pass (`/tmp/codefabric-p03-ready-native.log`). Default/featureless root checks,
+navigation and affected spelling/diff checks pass. Final affected Clippy reports zero diagnostics
+(`/tmp/codefabric-p03-ready-clippy-final.jsonl`); the final 13-case runtime/deferred-stream selection
+passes in 2.52 s (`/tmp/codefabric-p03-ready-tests-final.log`). The earlier preparation cost limitation remains visible
+below; these timings do not establish a comparative performance improvement.
+
 The runtime continuation after `bb059db5` isolates native computation errors in both reusable
 producers and leaf streams. Failed producers skip their dependents; independent blocks keep their
 real Arrow results. Failed leaves stop native production, delete their trailing private pages and
@@ -82,7 +107,7 @@ deadline remains unqualified; preparation performance stays in P04/P14.
 Default/featureless root checks and final affected Clippy pass. All
 218 tooling cases pass in 6.58 s. The workstation uv mismatch
 was reconciled from 0.12.12 to the required 0.12.11; `just tool-version-contract-check` passes.
-Early phrase/input/authorization errors, ready-block concurrency, prior FindEntities scopes and
+Early phrase/input/authorization errors, prior FindEntities scopes and
 broader first-four semantics remain P03 work. No package or outcome exit is claimed.
 
 The continuation after `82bda01b` now retains an all-failed compiler request as a typed result
@@ -134,7 +159,7 @@ spelling and diff checks pass; full-suite/strict baseline lint closure is not cl
 
 This is the initial compiler-failure vertical. The runtime continuation above handles native
 computation failures; other early phrase/input
-and authorization failures, ready-block concurrency, prior FindEntities scopes and broader
+and authorization failures, prior FindEntities scopes and broader
 first-four semantics remain P03 work. The subsequent continuation above adds all-failed request
 result envelopes. P03 and subsequent packages remain open.
 

@@ -12,8 +12,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use arrow_schema::SchemaRef;
+use futures::StreamExt as _;
 
 mod block;
+mod execution;
 mod result_order;
 
 use crate::cancellation::Cancellation;
@@ -974,7 +976,11 @@ impl RelationalQueryRuntime {
     /// The epoch lease is acquired before semantic compilation by the caller and transferred into
     /// the successful publication. Every stream is authorized by the same reduced child session,
     /// and every page is created before the canonical manifest is atomically created last.
-    #[allow(clippy::too_many_lines)]
+    #[allow(
+        clippy::too_many_lines,
+        clippy::result_large_err,
+        reason = "one owned sealing transaction preserves the existing structured query error contract"
+    )]
     pub async fn execute_admitted_and_seal(
         &self,
         epoch_lease: FabricQueryLease,
@@ -1031,9 +1037,11 @@ impl RelationalQueryRuntime {
         let seal_cancellation = cancellation.clone();
         let (package, observations) = work
             .run(async move {
-                let mut response: serde_json::Value = serde_json::from_slice(&canonical_semantic_response)
-                    .map_err(StreamedResultPackageError::CanonicalResponse)?;
-                let mut block_outcomes = super::query_block_outcomes::QueryBlockOutcomes::parse(&response)?;
+                let mut response: serde_json::Value =
+                    serde_json::from_slice(&canonical_semantic_response)
+                        .map_err(StreamedResultPackageError::CanonicalResponse)?;
+                let mut block_outcomes =
+                    super::query_block_outcomes::QueryBlockOutcomes::parse(&response)?;
                 let child = if outputs.is_empty() {
                     None
                 } else {
@@ -1046,149 +1054,103 @@ impl RelationalQueryRuntime {
                             .await?,
                     )
                 };
-                let reusable = outputs
-                    .iter()
-                    .flat_map(|output| &output.prior_results)
-                    .flat_map(|slot| slot.producers.iter().cloned())
-                    .collect::<BTreeSet<_>>();
+                let maximum_running = child
+                    .as_ref()
+                    .map_or(1, |child| child.resource_observation().target_partitions);
+                let mut ready = block::ReadyBlocks::try_new(outputs)?;
+                let mut running = futures::stream::FuturesUnordered::new();
                 let mut retained = BTreeMap::<
                     RelationId,
                     Arc<super::query_result_input::RetainedBlockResult>,
                 >::new();
-                let mut relation_streams = Vec::with_capacity(outputs.len());
-                let mut compiled_outputs = Vec::with_capacity(outputs.len());
-                for output in outputs {
-                    if let Some(outcomes) = &mut block_outcomes {
-                        let failed = output.prior_results.iter().flat_map(|slot| &slot.producers)
-                            .map(RelationId::as_str).filter(|relation| outcomes.failed(relation))
-                            .collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>();
-                        if !failed.is_empty() {
-                            outcomes.fail_dependencies(output.relation_id.as_str(), &failed)?;
-                            continue;
-                        }
-                    }
-                    let child = child
-                        .as_ref()
-                        .expect("nonempty output execution owns its child");
-                    let coverage = output.coverage.ok_or_else(|| {
-                        RelationalQueryRuntimeError::CompletenessUndeclared(
-                            output.relation_id.as_str().to_owned(),
-                        )
-                    })?;
-                    let query_bindings = if let Some(binding) = &output.program_result_binding {
-                        epoch
-                            .program_bindings()
-                            .with_supplemental_relations([binding.clone()])?
-                    } else {
-                        epoch.program_bindings().as_ref().clone()
-                    };
-                    let session_relation =
-                        RelationalProgramCompiler::resolve_output_relation_with_bindings(
-                            &query_bindings,
-                            &output.program,
-                        )?;
-                    if session_relation != output.relation_id {
-                        return Err(RelationalQueryRuntimeError::OutputRelationMismatch {
-                            advertised: output.relation_id.as_str().to_owned(),
-                            session_bound: session_relation.as_str().to_owned(),
-                        });
-                    }
-                    let prior_inputs = output
-                        .prior_results
-                        .iter()
-                        .map(|slot| {
-                            let owners = slot
-                                .producers
+                let mut relation_streams = Vec::new();
+                let mut compiled_outputs = Vec::new();
+                loop {
+                    while running.len() < maximum_running {
+                        let Some(output) = ready.pop_ready() else {
+                            break;
+                        };
+                        let relation_id = output.relation_id.clone();
+                        if let Some(outcomes) = &mut block_outcomes {
+                            let failed = output
+                                .prior_results
                                 .iter()
-                                .map(|producer| {
-                                    retained.get(producer).cloned().ok_or_else(|| {
-                                        RelationalProgramError::InvalidProgram(
-                                            "prior result has not completed".into(),
-                                        )
-                                        .into()
-                                    })
-                                })
-                                .collect::<Result<Vec<_>, RelationalQueryRuntimeError>>()?;
-                            super::query_result_input::QueryResultInput::try_new(
-                                slot.binding.clone(),
-                                owners,
-                            )
-                            .map_err(RelationalQueryRuntimeError::from)
-                        })
-                        .collect::<Result<Vec<_>, RelationalQueryRuntimeError>>()?;
-                    let streamed = match child
-                        .execute_relational_program_stream_with_query_local_bindings(
-                            &output.program,
-                            request_inputs.get(&output.relation_id).map(Arc::as_ref),
-                            output.program_result_binding.as_ref(),
-                            &prior_inputs,
-                        )
-                        .await {
-                            Ok(streamed) => streamed,
-                            Err(error) if block_outcomes.is_some() && isolated_child_execution_error(&error) => {
-                                tracing::warn!(relation = output.relation_id.as_str(), %error, "query block execution failed");
-                                block_outcomes.as_mut().expect("outcome presence checked").fail_execution(output.relation_id.as_str())?;
+                                .flat_map(|slot| &slot.producers)
+                                .map(RelationId::as_str)
+                                .filter(|relation| outcomes.failed(relation))
+                                .collect::<BTreeSet<_>>()
+                                .into_iter()
+                                .collect::<Vec<_>>();
+                            if !failed.is_empty() {
+                                outcomes.fail_dependencies(relation_id.as_str(), &failed)?;
+                                ready.complete(&relation_id)?;
                                 continue;
                             }
-                            Err(error) => return Err(error.into()),
-                        };
-                    let schema = Arc::clone(streamed.schema());
-                    let compilation = streamed.observations().clone();
-                    let mut provenance = compilation_provenance(&compilation);
-                    provenance.extend(
-                        output
+                        }
+                        let prior_inputs = output
                             .prior_results
                             .iter()
-                            .flat_map(|slot| slot.producers.iter())
-                            .collect::<BTreeSet<_>>()
-                            .into_iter()
-                            .map(|producer| ResultProvenance {
-                                kind: "prior_result_block".into(),
-                                identity: producer.as_str().into(),
-                            }),
-                    );
-                    let stream = if reusable.contains(&output.relation_id) {
-                        let selected_rows = output
-                            .row_selection
-                            .as_ref()
-                            .map_or(max_output_rows, |selection| selection.maximum_rows);
-                        let result = match super::query_result_input::RetainedBlockResult::collect(
-                            Arc::clone(&schema),
-                            streamed.into_stream(),
-                            child.reserve_prior_result_memory(),
+                            .map(|slot| {
+                                let owners = slot
+                                    .producers
+                                    .iter()
+                                    .map(|producer| {
+                                        retained.get(producer).cloned().ok_or_else(|| {
+                                            RelationalProgramError::InvalidProgram(
+                                                "prior result has not completed".into(),
+                                            )
+                                            .into()
+                                        })
+                                    })
+                                    .collect::<Result<Vec<_>, RelationalQueryRuntimeError>>()?;
+                                super::query_result_input::QueryResultInput::try_new(
+                                    slot.binding.clone(),
+                                    owners,
+                                )
+                                .map_err(RelationalQueryRuntimeError::from)
+                            })
+                            .collect::<Result<Vec<_>, RelationalQueryRuntimeError>>()?;
+                        let execution = execution::BlockExecution {
+                            epoch: &epoch,
+                            child: child.as_ref().expect("nonempty execution owns its child"),
                             max_output_rows,
-                            usize::try_from(selected_rows)
-                                .map_err(|_| RelationalQueryRuntimeError::ResultCountOverflow)?,
-                            &seal_cancellation,
+                            cancellation: &seal_cancellation,
                             deadline,
-                        )
-                        .await {
-                            Ok(result) => result,
-                            Err(StreamedResultPackageError::DataFusion(error)) if block_outcomes.is_some()
-                                && super::query_block_outcomes::isolated_execution_error(&error) => {
-                                tracing::warn!(relation = output.relation_id.as_str(), %error, "reusable query block execution failed");
-                                block_outcomes.as_mut().expect("outcome presence checked").fail_execution(output.relation_id.as_str())?;
-                                continue;
-                            }
-                            Err(error) => return Err(error.into()),
+                            isolate_errors: block_outcomes.is_some(),
                         };
-                        let stream = result.stream();
-                        retained.insert(output.relation_id.clone(), result);
-                        stream
-                    } else {
-                        streamed.into_stream()
+                        let inputs = request_inputs.get(&relation_id).map(Arc::as_ref);
+                        let reusable = ready.reusable(&relation_id);
+                        // These futures stay inside the admitted work scope. Dropping this set
+                        // cancels pending block work; native task ownership still drains below it.
+                        running.push(async move {
+                            let result = execution
+                                .execute(output, inputs, prior_inputs, reusable)
+                                .await;
+                            (relation_id, result)
+                        });
+                    }
+                    let Some((relation_id, result)) = running.next().await else {
+                        break;
                     };
-                    compiled_outputs.push((output.relation_id.clone(), schema.clone(), compilation));
-                    relation_streams.push(StreamedRelationInput {
-                        relation_id: output.relation_id,
-                        schema,
-                        stream,
-                        max_rows: max_output_rows,
-                        coverage,
-                        provenance,
-                        row_selection: output.row_selection,
-                    });
+                    if let Some(executed) = result? {
+                        if let Some(result) = executed.retained {
+                            retained.insert(relation_id.clone(), result);
+                        }
+                        compiled_outputs.push((
+                            relation_id.clone(),
+                            executed.relation.schema.clone(),
+                            executed.compilation,
+                        ));
+                        relation_streams.push(executed.relation);
+                    } else {
+                        block_outcomes
+                            .as_mut()
+                            .expect("isolated failures require typed outcomes")
+                            .fail_execution(relation_id.as_str())?;
+                    }
+                    ready.complete(&relation_id)?;
                 }
+                compiled_outputs.sort_by(|left, right| left.0.cmp(&right.0));
                 if let Some(outcomes) = &block_outcomes {
                     outcomes.write_response(&mut response)?;
                     outcomes.retain_processing(&mut processing);
@@ -1214,13 +1176,23 @@ impl RelationalQueryRuntime {
                     .iter()
                     .map(|relation| (relation.relation_id.as_str(), relation))
                     .collect::<BTreeMap<_, _>>();
-                let failed_queries = package.manifest().query_results()?.unwrap_or_default().into_iter()
-                    .filter(|row| row.execution_state != crate::semantic_query_contract::QueryBlockExecutionState::Complete)
-                    .map(|row| row.query_id).collect::<BTreeSet<_>>();
+                let failed_queries = package
+                    .manifest()
+                    .query_results()?
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|row| {
+                        row.execution_state
+                            != crate::semantic_query_contract::QueryBlockExecutionState::Complete
+                    })
+                    .map(|row| row.query_id)
+                    .collect::<BTreeSet<_>>();
                 let observations = compiled_outputs
                     .into_iter()
                     .filter(|(relation, _, _)| {
-                        !block_outcomes.as_ref().and_then(|outcomes| outcomes.query_id(relation.as_str()))
+                        !block_outcomes
+                            .as_ref()
+                            .and_then(|outcomes| outcomes.query_id(relation.as_str()))
                             .is_some_and(|query| failed_queries.contains(query))
                     })
                     .map(|(relation_id, schema, compilation)| {
@@ -1434,6 +1406,8 @@ pub enum RelationalQueryRuntimeError {
 
 #[cfg(test)]
 mod tests {
+    mod concurrency;
+
     use std::collections::HashMap;
     use std::io::Cursor;
 
@@ -1752,8 +1726,15 @@ mod tests {
     }
 
     fn resource_coordinator(epoch: &ProgrammaticFabricEpoch) -> Arc<EpochResourceCoordinator> {
+        resource_coordinator_with_limits(epoch, child_resources())
+    }
+
+    fn resource_coordinator_with_limits(
+        epoch: &ProgrammaticFabricEpoch,
+        limits: ChildResourceLimits,
+    ) -> Arc<EpochResourceCoordinator> {
         let policy = super::super::child_session::resource_governance::EpochResourcePolicy::try_new(
-            child_resources(),
+            limits,
             super::super::child_session::resource_governance::test_lifecycle_work_class_policies(),
             4, 1, 8, 30_000, 1, 2, 8, 64 * 1024 * 1024, 60_000,
         ).unwrap();

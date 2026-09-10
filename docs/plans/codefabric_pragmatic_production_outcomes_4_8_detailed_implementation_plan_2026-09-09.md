@@ -834,8 +834,34 @@ reuse and relational preparation costs using these actual phases; this checkpoin
 post-publication query behavior without asserting startup or comparative performance closure.
 Early phrase/input/authorization errors, ready-block concurrency and broader P03 semantics remain.
 
-**Next:** remaining first-four scopes/meanings, precise dependency scope and independent block
-execution/failure, then proceed to P04 in package order.
+**P03 ready-block scheduling continuation passes native validation,
+2026-09-10.** A petgraph `DiGraph` and native iterative `toposort` reject cycles before execution.
+Private node indices and outgoing dependency counts support immediate consumer readiness;
+repeated producer slots count as one scheduling dependency. Stable relation-ID ordering chooses
+among ready blocks. The query-owned `FuturesUnordered` set admits up to the child policy's target
+partition count, within the existing query owner and shared resource pool. Completion of a fast
+branch can release its consumers while an unrelated branch remains active. Failed producers still
+propagate typed dependency failures; ordinary empty results remain complete returned relations.
+
+DataFusion reference §21.4 (incremental polling and backpressure), petgraph §16.10 (`toposort`) and
+Rust daemon §25.3 (task ownership), checked against resolved native sources, inform this realization.
+Prepared leaf plans defer native `execute_stream` until consumption. The existing owned stream
+wrapper enrolls native tasks under the creating query during both polling and destruction.
+Reusable producers collect once with native shared-pool reservations; leaf delivery stays streamed.
+Physical/output schema validation remains adjacent to planning. Sealed relations and observations
+are deterministic despite completion order, and original public block and prior-input order remain.
+
+Eleven deferred-stream/native-owner cases and all 24 expanded runtime/graph cases pass. Controlled
+native `ScanArgs` gates prove bounded overlap, slot refill and cancellation cleanup without relying
+on elapsed-time comparisons. The test corrects its initial one-partition fixture to an explicit
+two-partition workspace/child authority. Installed-client branch/reopen passes in 82.80 s and
+ordering/prior/reopen in 157.19 s; all 24 selected package/client cases pass. Default/featureless root
+checks, navigation and affected spelling/diff checks pass. Final affected Clippy reports zero
+diagnostics; the final 13-case runtime/deferred-stream selection passes in 2.52 s. STATUS carries logs. Broader P03 semantics and package
+exit remain open. These observations do not establish comparative performance improvement.
+
+**Next:** remaining first-four scopes/meanings, precise dependency scope and early block-local
+input/authorization failures, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.
 
 Evolve the existing schema descriptor/version checks and released wire deliberately. For each
@@ -1631,7 +1657,7 @@ Complete resource acquisition/transfer/drop/escape, unwind paths, closure captur
 
 ### 7G. Remaining forms, complete composition and query semantics
 
-**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Compiler return-resolution/lowering and native computation failures preserve independent results with typed outcomes and failed-dependency states. Failed leaf streams reconcile owned partial-page cleanup before exact sealing/reopen. Broader prior roles/scopes, early input/authorization failures, ready-block concurrency and the full mixed-form DAG remain.
+**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Compiler return-resolution/lowering and native computation failures preserve independent results with typed outcomes and failed-dependency states. Failed leaf streams reconcile owned partial-page cleanup before exact sealing/reopen. Ready blocks execute through bounded query-owned futures; native leaf execution is deferred until consumption. Broader prior roles/scopes, early input/authorization failures and the full mixed-form DAG remain.
 
 **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, query contracts and graph integration. Complete the first four forms from 4E and extend them to every relevant family in the coverage map as those families land.
 

@@ -6,6 +6,7 @@
 //! public `SessionContext`, `SessionState`, catalog, schema, provider, runtime,
 //! function-registry, or object-store-registry handle.
 
+mod deferred;
 pub mod resource_governance;
 mod schema_metadata;
 
@@ -32,7 +33,7 @@ use datafusion::logical_expr::{
     AggregateUDF, LogicalPlan, LogicalPlanBuilder, ScalarUDF, TableScanBuilder, TableType,
     WindowUDF,
 };
-use datafusion::physical_plan::{SendableRecordBatchStream, execute_stream};
+use datafusion::physical_plan::SendableRecordBatchStream;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use datafusion::variable::{VarProvider, VarType};
 use futures::StreamExt as _;
@@ -1684,10 +1685,7 @@ impl AuthorizedChildSession {
                 actual: physical_plan.schema(),
             });
         }
-        let stream = super::native_operations::bind_stream(execute_stream(
-            physical_plan,
-            self.state.task_ctx(),
-        )?);
+        let stream = deferred::program_stream(physical_plan, self.state.task_ctx());
         Ok(ChildProgramStream {
             schema: expected_schema,
             stream,
@@ -1928,10 +1926,7 @@ impl AuthorizedChildSession {
                 actual: physical_plan.schema(),
             });
         }
-        let stream = super::native_operations::bind_stream(execute_stream(
-            physical_plan,
-            query_state.task_ctx(),
-        )?);
+        let stream = deferred::program_stream(physical_plan, query_state.task_ctx());
         let stream = QueryResultInput::retain_stream(result_inputs, stream);
         Ok(ChildProgramStream {
             schema: expected_schema,
