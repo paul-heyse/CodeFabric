@@ -30,7 +30,11 @@ fn branch_queries(
         {"request":"retrieve facts about code","query_id":"property-dependent","about":[{"results_of":"property","select":"entities"}],"facts":["declarations"]},
         {"request":"retrieve facts about code","query_id":"subject","about":["the unattested target"],"facts":["declarations"]},
         {"request":"retrieve source and syntax context","query_id":"denied","about":[{"results_of":"good","select":"entities"}],"context":"exact source span"},
-        {"request":"find code entities","query_id":"property","looking_for":"Python function declarations","where":[{"property":"qualified name","operator":"equals","value":"alpha"}]}
+        {"request":"find code entities","query_id":"property","looking_for":"Python function declarations","where":[{"property":"qualified name","operator":"equals","value":"alpha"}]},
+        {"request":"retrieve facts about code","query_id":"scope-dependent","about":[{"results_of":"scope","select":"entities"}],"facts":["declarations"]},
+        {"request":"find code entities","query_id":"scope","looking_for":"Python function declarations","within":[{"results_of":"good","select":"entities"}]},
+        {"request":"find code entities","query_id":"quoted","looking_for":"uninstalled meaning `alpha`"},
+        {"request":"summarize objective facts","query_id":"summary","about":[{"results_of":"facts","select":"facts"}],"measure":"count","group_by":[]}
     ]);
     let scenario = modern_client_scenario(
         fixture,
@@ -69,7 +73,11 @@ fn branch_queries(
             ("property-dependent", "NOT_EXECUTED_DEPENDENCY"),
             ("subject", "FAILED"),
             ("denied", "FAILED"),
-            ("property", "FAILED")
+            ("property", "FAILED"),
+            ("scope-dependent", "NOT_EXECUTED_DEPENDENCY"),
+            ("scope", "FAILED"),
+            ("quoted", "FAILED"),
+            ("summary", "FAILED")
         ]
     );
     assert_eq!(outcomes[0]["errors"][0]["related_id"], "unavailable");
@@ -88,6 +96,10 @@ fn branch_queries(
         outcomes[8]["errors"][0]["code"],
         "SEMANTIC_REFERENCE_UNAVAILABLE"
     );
+    assert_eq!(outcomes[9]["errors"][0]["related_id"], "scope");
+    assert_eq!(outcomes[10]["errors"][0]["subject_id"], "slot.within");
+    assert_eq!(outcomes[11]["errors"][0]["subject_id"], "looking-for");
+    assert_eq!(outcomes[12]["errors"][0]["subject_id"], "request");
     assert!(
         result["processing"]
             .as_array()
@@ -158,6 +170,7 @@ fn pragmatic_failed_query_branches_preserve_independent_results_and_exact_reopen
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     let expected = branch_queries(&fixture, &stack, "initial");
     let failed = outcomes_only_queries(&fixture, &stack, "initial");
+    let unprojected = unprojected_only_queries(&fixture, &stack, "initial");
     let selected = wait_for_semantic_activation(&fixture);
     supervisor.stop();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
@@ -167,6 +180,10 @@ fn pragmatic_failed_query_branches_preserve_independent_results_and_exact_reopen
     );
     assert_eq!(expected, branch_queries(&fixture, &stack, "reopened"));
     assert_eq!(failed, outcomes_only_queries(&fixture, &stack, "reopened"));
+    assert_eq!(
+        unprojected,
+        unprojected_only_queries(&fixture, &stack, "reopened")
+    );
     supervisor.stop();
 }
 
@@ -225,6 +242,51 @@ fn outcomes_only_queries(
         manifest["canonical_semantic_response"]["queries"],
         json!([])
     );
+    assert_eq!(
+        manifest["canonical_semantic_response"]["query_results"],
+        result["query_results"]
+    );
+    result["query_results"].clone()
+}
+
+fn unprojected_only_queries(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+) -> Value {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        &format!("request:unprojected-{phase}"),
+        "unused",
+    );
+    request["queries"] = json!([
+        {"request":"retrieve facts about code","query_id":"dependent","about":[{"results_of":"root","select":"entities"}],"facts":["declarations"]},
+        {"request":"find code entities","query_id":"root","looking_for":"uninstalled meaning `alpha`"}
+    ]);
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id":"query","operation":"call_tool","name":"query_code_graph","arguments":{"request":request,"delivery":"resource"}},
+            {"id":"manifest","operation":"read_resource","uri":{"$ref":"query.structured_content.manifest.uri"}}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, &format!("unprojected-{phase}"), &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let result = modern_structured(modern_step(&report, "query"));
+    assert_eq!(result["execution_state"], "SUCCEEDED");
+    assert_eq!(result["pages"], json!([]));
+    assert_eq!(result["processing"], json!([]));
+    assert_eq!(result["total_rows"], 0);
+    assert_eq!(
+        result["query_results"][0]["execution_state"],
+        "NOT_EXECUTED_DEPENDENCY"
+    );
+    assert_eq!(result["query_results"][1]["execution_state"], "FAILED");
+    let manifest: Value = serde_json::from_slice(&resource_bytes(&report, "manifest")).unwrap();
+    assert_eq!(manifest["relations"], json!([]));
     assert_eq!(
         manifest["canonical_semantic_response"]["query_results"],
         result["query_results"]

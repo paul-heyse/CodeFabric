@@ -883,8 +883,28 @@ schema change is required: existing typed block outcomes carry these preparation
 form and consumer-slot projection gaps still require further block-local ingress work; malformed
 request structure, invalid DAGs and inconsistent authority remain request-wide errors.
 
-**Next:** remaining first-four scopes/meanings, precise dependency scope and early block-local
-input/authorization failures, then proceed to P04 in package order.
+**P03 unavailable ingress continuation passes native validation, 2026-09-10.**
+An unavailable block retains its original identity, form and typed issues without inventing an
+executable program binding. Missing form programs/consumer slots and selection/return/input targets,
+unsupported quoted meanings/source-location interpretations, and incompatible fact-family
+combinations use this representation.
+Partial input/selection/return projections and guard prompts are removed for failed blocks and
+descendants. The original canonical request and exact epoch authority remain selected.
+
+The bounded unavailable dependency graph uses native petgraph `DiGraph` and iterative `toposort`
+(reference §16.10, checked against 0.8.3), including cycle and unknown-predecessor rejection.
+Compiler output retains non-executable outcomes alongside independent native programs; all-unavailable
+ingress uses the existing manifest-only result path. Twenty-two initial ingress/compiler cases,
+26 broader compiler/recipe cases and 16 final focused cases pass. Installed prior-result
+fan-out/facts/calls/source/reopen passes in 75.60 s; the expanded failed-branch/all-unavailable
+manifest and reopen case passes in 80.99 s. The new summary fixture now supplies required
+`group_by`; the older one-row fan-out producer explicitly requests name-ascending order instead
+of relying on an obsolete default. Default/featureless checks, final affected Clippy, navigation,
+spelling and diff checks pass. Global request/catalog/authority failures remain request-wide;
+guard answers remain exact catalog choices. STATUS carries attributable logs and limits.
+
+**Next:** remaining first-four scopes/meanings, reusable subject roles and precise dependency
+scope, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.
 
 Evolve the existing schema descriptor/version checks and released wire deliberately. For each
@@ -1680,7 +1700,7 @@ Complete resource acquisition/transfer/drop/escape, unwind paths, closure captur
 
 ### 7G. Remaining forms, complete composition and query semantics
 
-**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Compiler return-resolution/lowering and native computation failures preserve independent results with typed outcomes and failed-dependency states. Failed leaf streams reconcile owned partial-page cleanup before exact sealing/reopen. Ready blocks execute through bounded query-owned futures; native leaf execution is deferred until consumption. Broader prior roles/scopes, early input/authorization failures and the full mixed-form DAG remain.
+**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Compiler return-resolution/lowering and native computation failures preserve independent results with typed outcomes and failed-dependency states. Failed leaf streams reconcile owned partial-page cleanup before exact sealing/reopen. Ready blocks execute through bounded query-owned futures; native leaf execution is deferred until consumption. Canonical input/source authorization and unavailable ingress failures now remain local to their blocks. Broader prior roles/scopes and the full mixed-form DAG remain.
 
 **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, query contracts and graph integration. Complete the first four forms from 4E and extend them to every relevant family in the coverage map as those families land.
 

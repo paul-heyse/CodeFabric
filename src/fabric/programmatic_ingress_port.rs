@@ -6,6 +6,8 @@
 //! already-admitted epoch catalog. No program binding ID or execution program pin is embedded in
 //! this module.
 
+mod unavailable;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -462,32 +464,50 @@ impl ApplicationOwnedSemanticIngressPort {
         self.project_globals(&request.request, &mut projection)?;
         let mut blocks = Vec::with_capacity(request.request.queries.len());
 
+        let mut failures = unavailable::ProjectionFailures::default();
         for clause in &request.request.queries {
-            let form = released_form(clause);
-            let output_role_id = self.role_id(clause.output_role())?;
-            let Some(binding) =
-                select_clause_program(catalog, clause, output_role_id, &mut projection)?
-            else {
-                continue;
-            };
-            let query_id: Arc<str> = Arc::from(clause.query_id());
-            projection.bind_query_program(&query_id, &binding.program_binding_id)?;
-            blocks.push(EpochBoundBlockBindingRow {
-                query_id: Arc::clone(&query_id),
-                compatibility_form: form,
-                program_binding_id: Arc::clone(&binding.program_binding_id),
-                program_binding_pin: binding.program_binding_pin,
-                output_role_id: Arc::clone(output_role_id),
-                explicit_result_limit: Some(clause.maximum_results()),
-            });
-            let fields = self.forms.get(&form).ok_or_else(|| {
-                rejected(format!(
-                    "no field mapping for released form {}",
-                    form.label()
-                ))
-            })?;
-            self.project_clause(clause, fields, binding, catalog, &mut projection)?;
+            let requirement_start = projection.requirements.len();
+            let result: Result<(), ProgrammaticQueryPortError> = (|| {
+                let form = released_form(clause);
+                let output_role_id = self.role_id(clause.output_role())?;
+                let Some(binding) =
+                    select_clause_program(catalog, clause, output_role_id, &mut projection)?
+                else {
+                    return Ok(());
+                };
+                let query_id: Arc<str> = Arc::from(clause.query_id());
+                projection.bind_query_program(&query_id, &binding.program_binding_id)?;
+                blocks.push(EpochBoundBlockBindingRow {
+                    query_id: Arc::clone(&query_id),
+                    compatibility_form: form,
+                    program_binding_id: Arc::clone(&binding.program_binding_id),
+                    program_binding_pin: binding.program_binding_pin,
+                    output_role_id: Arc::clone(output_role_id),
+                    explicit_result_limit: Some(clause.maximum_results()),
+                });
+                let fields = self.forms.get(&form).ok_or_else(|| {
+                    rejected(format!(
+                        "no field mapping for released form {}",
+                        form.label()
+                    ))
+                })?;
+                self.project_clause(clause, fields, binding, catalog, &mut projection)?;
+                Ok(())
+            })();
+            failures.track_requirements(
+                clause.query_id(),
+                &projection.requirements[requirement_start..],
+            );
+            match result {
+                Ok(()) => {}
+                Err(ProgrammaticQueryPortError::SemanticUnavailable { subject_id, detail }) => {
+                    tracing::debug!(query_id = clause.query_id(), %subject_id, %detail, "query ingress semantics unavailable");
+                    failures.reject(clause, subject_id);
+                }
+                Err(error) => return Err(error),
+            }
         }
+        let unavailable_blocks = failures.finish(&request.request, &mut blocks, &mut projection)?;
 
         projection.validate_answer_consumption()?;
         if !projection.requirements.is_empty() {
@@ -496,6 +516,7 @@ impl ApplicationOwnedSemanticIngressPort {
         let dependency_order = dependency_order(&blocks, &projection.dependencies)?;
         let ingress = EpochBoundSemanticIngress {
             semantic_request_id: Arc::from(request.request.semantic_request_id.as_str()),
+            unavailable_blocks,
             request_content_pin: canonical_request_content_pin(&request.canonical_bytes),
             fabric_epoch_pin: catalog.fabric_epoch_pin,
             program_catalog_pin: catalog.program_catalog_pin,
@@ -740,7 +761,8 @@ impl ApplicationOwnedSemanticIngressPort {
             } => {
                 let literal = code_literals::entity_selection(looking_for);
                 if looking_for.contains('`') && literal.is_none() {
-                    return Err(rejected(
+                    return Err(unavailable(
+                        "looking-for",
                         "quoted entity identifiers require a supported kind phrase and one nonempty literal",
                     ));
                 }
@@ -1183,7 +1205,9 @@ impl ApplicationOwnedSemanticIngressPort {
             &reference
         {
             source_location.validate().map_err(rejected)?;
-            source_location.meaning().map_err(rejected)?;
+            source_location
+                .meaning()
+                .map_err(|message| unavailable("source-location", message))?;
             if parent.is_none()
                 && mapping.input_id.as_ref() == "input.within"
                 && catalog
@@ -1201,7 +1225,8 @@ impl ApplicationOwnedSemanticIngressPort {
                         && selection.selection_id.as_ref() == "selection.source-location"
                 })
             {
-                return Err(rejected(
+                return Err(unavailable(
+                    "source-location",
                     "source-location subjects are unavailable for the selected snapshot or form",
                 ));
             }
@@ -1656,6 +1681,9 @@ struct IngressProjection {
     input_ordinals: BTreeMap<(Arc<str>, Arc<str>), u32>,
     dependency_ordinals: BTreeMap<(Arc<str>, Arc<str>), u32>,
     query_programs: BTreeMap<Arc<str>, Arc<str>>,
+    installed_selections: BTreeSet<(Arc<str>, Arc<str>)>,
+    installed_returns: BTreeSet<(Arc<str>, Arc<str>)>,
+    installed_inputs: BTreeSet<(Arc<str>, Arc<str>)>,
     selection_resolution_required: BTreeSet<(Arc<str>, Arc<str>)>,
     selection_resolutions: BTreeMap<(Arc<str>, Arc<str>, SemanticClauseValue), SemanticClauseValue>,
     answers: BTreeMap<String, SemanticInputValue>,
@@ -1668,7 +1696,24 @@ impl IngressProjection {
         catalog: &EpochBoundSemanticIngressCatalog,
         answers: &[SemanticInputAnswer],
     ) -> Result<Self, ProgrammaticQueryPortError> {
-        let mut projection = Self::default();
+        let mut projection = Self {
+            installed_selections: catalog
+                .selections
+                .iter()
+                .map(|row| (row.program_binding_id.clone(), row.selection_id.clone()))
+                .collect(),
+            installed_returns: catalog
+                .returns
+                .iter()
+                .map(|row| (row.program_binding_id.clone(), row.return_id.clone()))
+                .collect(),
+            installed_inputs: catalog
+                .request_inputs
+                .iter()
+                .map(|row| (row.program_binding_id.clone(), row.input_id.clone()))
+                .collect(),
+            ..Self::default()
+        };
         for answer in answers {
             if projection
                 .answers
@@ -1740,12 +1785,32 @@ impl IngressProjection {
         Ok(())
     }
 
+    fn require_target(
+        &self,
+        query: &str,
+        target: &Arc<str>,
+        installed: &BTreeSet<(Arc<str>, Arc<str>)>,
+    ) -> Result<(), ProgrammaticQueryPortError> {
+        let program = self
+            .query_programs
+            .get(query)
+            .ok_or_else(|| rejected("query has no selected program"))?;
+        if !installed.contains(&(program.clone(), target.clone())) {
+            return Err(unavailable(
+                target,
+                "the selected program does not implement this input",
+            ));
+        }
+        Ok(())
+    }
+
     fn push_selection(
         &mut self,
         query_id: &str,
         selection_id: &Arc<str>,
         value: SemanticClauseValue,
     ) -> Result<(), ProgrammaticQueryPortError> {
+        self.require_target(query_id, selection_id, &self.installed_selections)?;
         let query_id: Arc<str> = Arc::from(query_id);
         let program_binding_id = self.query_programs.get(query_id.as_ref()).ok_or_else(|| {
             rejected(format!(
@@ -1854,6 +1919,7 @@ impl IngressProjection {
         return_id: &Arc<str>,
         value: SemanticClauseValue,
     ) -> Result<(), ProgrammaticQueryPortError> {
+        self.require_target(query_id, return_id, &self.installed_returns)?;
         let query_id: Arc<str> = Arc::from(query_id);
         let key = (Arc::clone(&query_id), Arc::clone(return_id));
         let ordinal = next_ordinal(&mut self.return_ordinals, key)?;
@@ -1886,6 +1952,7 @@ impl IngressProjection {
         input_id: &Arc<str>,
         fields: Vec<EpochBoundRequestInputFieldValue>,
     ) -> Result<(), ProgrammaticQueryPortError> {
+        self.require_target(query_id, input_id, &self.installed_inputs)?;
         let query_id: Arc<str> = Arc::from(query_id);
         let key = (Arc::clone(&query_id), Arc::clone(input_id));
         let ordinal = next_ordinal(&mut self.input_ordinals, key)?;
@@ -2301,11 +2368,14 @@ fn select_program_binding<'a>(
         binding.compatibility_form == form && binding.output_role_id == *output_role_id
     });
     let selected = matches.next().ok_or_else(|| {
-        rejected(format!(
-            "admitted catalog has no program for {} and output role {}",
-            form.label(),
-            output_role_id
-        ))
+        unavailable(
+            "request",
+            format!(
+                "admitted catalog has no program for {} and output role {}",
+                form.label(),
+                output_role_id
+            ),
+        )
     })?;
     if matches.next().is_some() {
         return Err(rejected(format!(
@@ -2326,10 +2396,13 @@ fn select_consumer_slot<'a>(
         slot.program_binding_id == binding.program_binding_id && slot.consumer_slot_id == *slot_id
     });
     let selected = matches.next().ok_or_else(|| {
-        rejected(format!(
-            "program {} has no consumer slot {}",
-            binding.program_binding_id, slot_id
-        ))
+        unavailable(
+            slot_id.as_ref(),
+            format!(
+                "program {} has no consumer slot {}",
+                binding.program_binding_id, slot_id
+            ),
+        )
     })?;
     if matches.next().is_some() {
         return Err(rejected(format!(
@@ -2980,12 +3053,21 @@ fn incompatible_target(field: ProgrammaticFormIngressField) -> ProgrammaticQuery
     ))
 }
 
+fn unavailable(subject: &str, detail: impl Into<String>) -> ProgrammaticQueryPortError {
+    ProgrammaticQueryPortError::SemanticUnavailable {
+        subject_id: subject.into(),
+        detail: detail.into(),
+    }
+}
+
 fn rejected(message: impl Into<String>) -> ProgrammaticQueryPortError {
     ProgrammaticQueryPortError::Rejected(message.into())
 }
 
 #[cfg(test)]
 mod tests {
+    mod unavailable;
+
     use super::*;
     use crate::relational_program::RelationId;
     use crate::relational_semantic_query::{

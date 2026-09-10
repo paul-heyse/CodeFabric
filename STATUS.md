@@ -48,6 +48,29 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The ingress continuation after `d0c437b8` retains typed unavailable blocks without inventing a
+program or relation binding. Missing released-form programs, prior-input consumer slots and
+selection/return/input targets,
+unsupported quoted entity meanings/source-location interpretations and incompatible fact-family
+combinations now remain local to their query blocks. Partial projections and guard requirements
+from failed branches are removed; descendants receive typed dependency failures. Existing exact
+catalog, global scope, guard-answer, request-shape and DAG validation still applies.
+
+Native petgraph `DiGraph`/`toposort` validates the unavailable dependency graph, including cycles,
+unknown/active predecessors and configured edge/fan-in/fan-out bounds. Private indices never escape.
+The existing manifest-only path can retain a request with no executable ingress blocks at all.
+Twenty-two ingress/compiler cases pass in 0.12 s
+(`/tmp/codefabric-p03-unavailable-ingress-tests-1.log`); all 26 broader compiler/recipe cases pass.
+The expanded public fixture initially omitted the summary form's required `group_by`; this is
+corrected. All 16 final focused cases pass. The older fan-out fixture had a stale ordering
+assumption: the released default selects `helper` first by source position, while that scenario
+expects `first`. It now explicitly requests name-ascending ordering for its intended one-row
+producer. Final installed fan-out/facts/calls/source/reopen passes in 75.60 s; the expanded
+independent/all-unavailable branch and reopen case passes in 80.99 s
+(`/tmp/codefabric-p03-unavailable-ingress-public-final.log`). Default/featureless checks and final
+affected Clippy (zero diagnostics) pass, as do navigation, affected spelling and diff checks.
+Full first-four meanings/scopes and later packages remain open.
+
 The preparation continuation after `f5311963` changes canonical subject/property checks and source
 disclosure denial from request-wide errors to typed block failures. Unsupported captured-location
 scope also stays local to its block. Failed branches are removed before query-relevant processing,
@@ -70,7 +93,9 @@ The focused rerun passes in 152.46 s (`/tmp/codefabric-p03-preparation-source-90
 revocation, restart and the pinned old source read after an edit. This does not qualify convergence
 within 60 seconds. Default/featureless checks, final affected Clippy (zero diagnostics), all 218
 tooling cases (3.19 s), navigation and affected spelling/diff checks pass. This remains a P03 slice;
-unavailable catalog/form/consumer-slot projection and other early ingress errors remain request-wide.
+the unavailable catalog/form/consumer-slot projection gaps at that checkpoint are addressed by
+the ingress continuation above. Malformed structure and inconsistent global authority remain
+request-wide errors.
 
 The scheduling continuation after `12b95a1b` uses a native petgraph dependency graph and a
 deterministically ordered ready set. Completed producers unlock their consumers immediately;
@@ -131,8 +156,8 @@ deadline remains unqualified; preparation performance stays in P04/P14.
 Default/featureless root checks and final affected Clippy pass. All
 218 tooling cases pass in 6.58 s. The workstation uv mismatch
 was reconciled from 0.12.12 to the required 0.12.11; `just tool-version-contract-check` passes.
-Catalog/form/consumer-slot projection gaps, prior FindEntities scopes and
-broader first-four semantics remain P03 work. No package or outcome exit is claimed.
+Catalog/form/consumer-slot projection failures are now block-local as described above.
+Prior FindEntities scopes and broader first-four semantics remain P03 work. No package or outcome exit is claimed.
 
 The continuation after `82bda01b` now retains an all-failed compiler request as a typed result
 manifest with zero relations, pages and data rows. The request operation finishes successfully;

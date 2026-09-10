@@ -5,7 +5,7 @@ use super::{
     ProgrammaticQueryPortError, SemanticAuthorizedChoice, SemanticClauseValue,
     SemanticInputConstraints, SemanticInputKind, SemanticInputRequirement, SemanticInputValue,
     guarded_selection_choice_id, guarded_selection_field_id, hex_bytes, rejected,
-    selection_presentation, semantic_input_value,
+    selection_presentation, semantic_input_value, unavailable,
 };
 
 // Keep candidate resolution, guarded choice validation and replay binding in one audited path.
@@ -44,8 +44,9 @@ pub(super) fn select<'a>(
         }
     }
     let [original] = facts else {
-        return Err(rejected(
-            "requested fact meanings require different typed family programs; use separate requests",
+        return Err(unavailable(
+            "facts",
+            "requested fact meanings require different typed family programs; use separate blocks",
         ));
     };
     let selection: Arc<str> = Arc::from("selection.facts");

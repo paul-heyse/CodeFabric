@@ -3058,6 +3058,7 @@ mod tests {
         let query_id = Arc::clone(&blocks[0].query_id);
         let request = EpochBoundSemanticIngress {
             semantic_request_id: Arc::from("request.production.proved-forms"),
+            unavailable_blocks: Vec::new(),
             request_content_pin: [0x31; 32],
             fabric_epoch_pin: catalog.fabric_epoch_pin,
             program_catalog_pin: catalog.program_catalog_pin,

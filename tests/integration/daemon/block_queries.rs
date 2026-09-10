@@ -152,7 +152,7 @@ fn prior_blocks(fixture: &ProductionFixture, stack: &InstalledProductionStack, p
         .to_owned();
     let prior = |query: &str| json!({"results_of":query,"select":"entities"});
     let queries = json!([
-        {"request":"find code entities","query_id":"functions","looking_for":"Python function declarations","return":{"limit":{"maximum_results":1}}},
+        {"request":"find code entities","query_id":"functions","looking_for":"Python function declarations","return":{"order_by":["name ascending"],"limit":{"maximum_results":1}}},
         {"request":"find code entities","query_id":"classes","looking_for":"Python class declarations"},
         {"request":"find code entities","query_id":module,"looking_for":"Rust function declarations"},
         {"request":"retrieve facts about code","query_id":"facts","about":[prior("functions")],"facts":["declarations"]},

@@ -2178,6 +2178,8 @@ fn query_error(stage: &str, message: impl Into<String>) -> SemanticQueryError {
 pub enum ProgrammaticQueryPortError {
     #[error("programmatic query port rejected input: {0}")]
     Rejected(String),
+    #[error("semantic input {subject_id} is unavailable: {detail}")]
+    SemanticUnavailable { subject_id: String, detail: String },
 }
 
 #[derive(Debug, thiserror::Error)]

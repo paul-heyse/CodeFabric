@@ -9,6 +9,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+mod unavailable;
+pub use unavailable::EpochBoundUnavailableBlockRow;
+
 use datafusion::common::ScalarValue;
 
 use crate::fabric::arrow_result_resource::{
@@ -889,6 +892,8 @@ pub struct EpochBoundSemanticIngress {
     pub limits_pin: [u8; 32],
     pub limits: EpochBoundSemanticIngressLimits,
     pub blocks: Vec<EpochBoundBlockBindingRow>,
+    /// Blocks whose requested semantics have no executable ingress projection.
+    pub unavailable_blocks: Vec<EpochBoundUnavailableBlockRow>,
     pub selections: Vec<EpochBoundSelectionRow>,
     pub returns: Vec<EpochBoundReturnRow>,
     pub scopes: Vec<EpochBoundScopeRow>,
@@ -1022,6 +1027,7 @@ pub struct ValidatedEpochBoundRequestInput {
 #[derive(Clone, Debug)]
 pub struct ValidatedEpochBoundSemanticIngress {
     ingress: EpochBoundSemanticIngress,
+    unavailable_order: Vec<Arc<str>>,
     execution_programs: BTreeMap<Arc<str>, [u8; 32]>,
     request_inputs: Vec<ValidatedEpochBoundRequestInput>,
     consumption: EpochBoundIngressConsumption,
@@ -1113,6 +1119,8 @@ pub enum EpochBoundSemanticIngressError {
     UnknownDependencyQuery(String),
     #[error("dependency for query {query_id} has an invalid consumer slot {slot_id}")]
     ConsumerSlot { query_id: String, slot_id: String },
+    #[error("query {0} has an invalid unavailable-block outcome")]
+    InvalidUnavailableBlock(String),
     #[error("query dependency graph contains a cycle")]
     DependencyCycle,
     #[error("declared dependency order differs from the proved topology")]
@@ -3604,7 +3612,11 @@ pub fn validate_epoch_bound_semantic_ingress(
     let validated_catalog = validate_epoch_bound_ingress_catalog(catalog, ingress.limits)?;
     let compiler_limits = ingress.limits.compiler();
 
-    if ingress.blocks.is_empty() {
+    let block_count = ingress
+        .blocks
+        .len()
+        .saturating_add(ingress.unavailable_blocks.len());
+    if block_count == 0 {
         return Err(EpochBoundSemanticIngressError::Limit {
             limit: "max_blocks",
             observed: 0,
@@ -3612,11 +3624,7 @@ pub fn validate_epoch_bound_semantic_ingress(
         });
     }
     for (limit, observed, maximum) in [
-        (
-            "max_blocks",
-            ingress.blocks.len(),
-            compiler_limits.max_blocks(),
-        ),
+        ("max_blocks", block_count, compiler_limits.max_blocks()),
         (
             "max_dependencies",
             ingress.dependencies.len(),
@@ -3646,6 +3654,7 @@ pub fn validate_epoch_bound_semantic_ingress(
         validate_epoch_limit(limit, observed, maximum)?;
     }
 
+    let unavailable_order = unavailable::validate(&mut ingress)?;
     let mut blocks = BTreeMap::new();
     let mut execution_programs = BTreeMap::new();
     for block in &ingress.blocks {
@@ -4149,7 +4158,7 @@ pub fn validate_epoch_bound_semantic_ingress(
     });
 
     let consumption = EpochBoundIngressConsumption {
-        blocks: ingress.blocks.len(),
+        blocks: block_count,
         selections: ingress.selections.len(),
         returns: ingress.returns.len(),
         scopes: ingress.scopes.len(),
@@ -4191,6 +4200,7 @@ pub fn validate_epoch_bound_semantic_ingress(
 
     Ok(ValidatedEpochBoundSemanticIngress {
         ingress,
+        unavailable_order,
         execution_programs,
         request_inputs: validated_request_inputs,
         consumption,
@@ -6031,6 +6041,20 @@ pub fn compile_epoch_bound_semantic_request(
         });
     }
 
+    for query_id in &ingress.unavailable_order {
+        let row = request
+            .unavailable_blocks
+            .iter()
+            .find(|row| &row.query_id == query_id)
+            .expect("unavailable order is validated");
+        compiled_blocks.push(CompiledSemanticBlock {
+            query_id: row.query_id.clone(),
+            form: row.compatibility_form,
+            disposition: row.disposition,
+            output: None,
+            issues: row.issues.clone(),
+        });
+    }
     let compiler_proof_pin =
         epoch_bound_compiler_proof_pin(request, &dependencies, &operators, &compiled_blocks);
     Ok(CompiledEpochBoundSemanticRequest {
@@ -6041,7 +6065,12 @@ pub fn compile_epoch_bound_semantic_request(
                 compiler_proof_pin,
                 dependencies,
                 operators,
-                dependency_order: request.dependency_order.clone(),
+                dependency_order: request
+                    .dependency_order
+                    .iter()
+                    .chain(&ingress.unavailable_order)
+                    .cloned()
+                    .collect(),
                 limits: request.limits.compiler(),
             },
         },
@@ -6051,6 +6080,8 @@ pub fn compile_epoch_bound_semantic_request(
 
 #[cfg(test)]
 mod tests {
+    mod unavailable;
+
     use super::*;
 
     #[test]
@@ -6372,6 +6403,7 @@ mod tests {
         };
         let ingress = EpochBoundSemanticIngress {
             semantic_request_id: Arc::from("request.all-eight.epoch-bound"),
+            unavailable_blocks: Vec::new(),
             request_content_pin: [11; 32],
             fabric_epoch_pin: [12; 32],
             program_catalog_pin: [13; 32],
@@ -7067,6 +7099,7 @@ mod tests {
         let limits = epoch_ingress_limits();
         EpochBoundSemanticIngress {
             semantic_request_id: Arc::from("request.epoch-bound"),
+            unavailable_blocks: Vec::new(),
             request_content_pin: [11; 32],
             fabric_epoch_pin: [12; 32],
             program_catalog_pin: [13; 32],
