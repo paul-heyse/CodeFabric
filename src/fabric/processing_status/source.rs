@@ -37,11 +37,16 @@ impl EntityQueryScope {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "keep resolved subject kinds and retained coverage capability checks together"
+    )]
     pub(crate) fn for_source_subjects(
         self,
         clause: &SemanticQueryClause,
         selections: &[EpochBoundSelectionRow],
         has_occurrence_sources: bool,
+        has_syntax_sources: bool,
     ) -> Result<Self, String> {
         let SemanticQueryClause::RetrieveSourceContext { for_inputs, .. } = clause else {
             return Err("source processing scope requires a source clause".into());
@@ -76,6 +81,9 @@ impl EntityQueryScope {
                         .nth(1)
                         .ok_or("invalid source entity ID")?;
                     match kind {
+                        "syntax-node" => {
+                            families.insert("syntax-nodes");
+                        }
                         "call" => {
                             families.insert("call-targets");
                         }
@@ -116,11 +124,16 @@ impl EntityQueryScope {
                             value,
                         )
                         .ok_or("source input has no supported literal entity meaning")?;
-                    families.insert(if named.selector == "python:module" {
-                        "modules"
-                    } else {
-                        "function-declarations"
-                    });
+                    families.insert(
+                        crate::production_query_recipe::canonical_occurrence_family(
+                            &named.selector,
+                        )
+                        .unwrap_or(if named.selector == "python:module" {
+                            "modules"
+                        } else {
+                            "function-declarations"
+                        }),
+                    );
                     if let Some((language, _)) = named.selector.split_once(':') {
                         languages.insert(language.to_owned());
                     } else {
@@ -133,6 +146,9 @@ impl EntityQueryScope {
                     );
                 }
             }
+        }
+        if !has_syntax_sources && families.contains("syntax-nodes") {
+            return Err("selected snapshot does not contain syntax source mappings".into());
         }
         if !has_occurrence_sources
             && families
@@ -206,6 +222,7 @@ mod tests {
                 &clause(vec![prior("calls"), prior("imports")]),
                 &selections,
                 true,
+                true,
             )
             .unwrap();
         assert_eq!(
@@ -215,17 +232,17 @@ mod tests {
         assert_eq!(selected.languages, scope().languages);
         assert_eq!(selected.contexts, scope().contexts);
         let python = scope()
-            .for_source_subjects(&clause(vec![prior("calls")]), &selections, true)
+            .for_source_subjects(&clause(vec![prior("calls")]), &selections, true, true)
             .unwrap();
         assert_eq!(python.languages, BTreeSet::from(["python".into()]));
         assert!(
             scope()
-                .for_source_subjects(&clause(vec![prior("calls")]), &selections, false)
+                .for_source_subjects(&clause(vec![prior("calls")]), &selections, false, false)
                 .is_err()
         );
         assert!(
             scope()
-                .for_source_subjects(&clause(vec![prior("unresolved")]), &selections, true)
+                .for_source_subjects(&clause(vec![prior("unresolved")]), &selections, true, true)
                 .is_err()
         );
     }
@@ -236,7 +253,7 @@ mod tests {
             entity_id: "entity:reference:opaque".into(),
         };
         let selected = scope()
-            .for_source_subjects(&clause(vec![reference]), &[], true)
+            .for_source_subjects(&clause(vec![reference]), &[], true, true)
             .unwrap();
         assert_eq!(
             selected.families,
@@ -247,19 +264,33 @@ mod tests {
             entity_id: "entity:function:opaque".into(),
         };
         let selected = scope()
-            .for_source_subjects(&clause(vec![function]), &[], false)
+            .for_source_subjects(&clause(vec![function]), &[], false, false)
             .unwrap();
         assert_eq!(selected.families, BTreeSet::from(["function-declarations"]));
     }
 
     #[test]
     fn literal_source_subjects_preserve_declared_language_and_module_family() {
+        let syntax = clause(vec![SemanticReference::Phrase(
+            "Python syntax node `.`".into(),
+        )]);
+        let selected = scope()
+            .for_source_subjects(&syntax, &[], true, true)
+            .unwrap();
+        assert_eq!(selected.families, BTreeSet::from(["syntax-nodes"]));
+        assert_eq!(selected.languages, BTreeSet::from(["python".into()]));
+        assert!(
+            scope()
+                .for_source_subjects(&syntax, &[], true, false)
+                .is_err()
+        );
         let selected = scope()
             .for_source_subjects(
                 &clause(vec![SemanticReference::Phrase(
                     "Python module `package`".into(),
                 )]),
                 &[],
+                true,
                 true,
             )
             .unwrap();
@@ -273,6 +304,7 @@ mod tests {
                 ]),
                 &[],
                 true,
+                true,
             )
             .unwrap();
         assert_eq!(mixed.languages, scope().languages);
@@ -285,6 +317,7 @@ mod tests {
             .for_source_subjects(
                 &clause(vec![prior("functions")]),
                 &[selection("source", "selection.context", "function body")],
+                false,
                 false,
             )
             .unwrap();

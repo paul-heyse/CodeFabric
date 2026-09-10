@@ -48,6 +48,39 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The syntax continuation after `2f7dc7cb` exposes the complete admitted Python/Rust CST as
+canonical source-context entities. Native DataFusion grouping, Arrow structs/lists and an immutable
+bounded identity fold replace provider-local node numbers with application-owned parent/sibling
+identities. Raw kinds, fields, spans, anonymous/trivia/recovery flags and provider provenance remain
+available. Exact captured digest/generation joins reject stale syntax. No Cargo target is needed
+for Rust syntax. Requested file partitions govern syntax coverage; a missing canonical root cannot
+turn a completed native run into a complete canonical census.
+
+All first-four forms now accept syntax nodes: FindEntities, `syntax node properties`, incoming/
+outgoing `syntax parents`, and exact/surrounding source. Typed entity priors and quoted raw kinds
+are reusable subjects. Source context mode selects the reserved source identity; syntax/semantic
+representation selection keeps those layers distinct. Existing `explicit` context selection remains
+a compatibility spelling of `selected`. New retained schema profiles advertise the added syntax
+capability; historical profiles do not gain meanings they cannot serve. Broader configured-default
+contexts, source locations/outlines, directives and independent branch failure remain open.
+
+The ten-block installed-client Python/Rust scenario passes initial publication and exact reopen
+in 67.73 s. It reads every advertised Arrow page, checks all nodes and parent edges, CRLF/Unicode
+source bytes, anonymous/extra/recovery nodes and complete syntax scope without a Cargo target.
+The failed-Rust-target diagnostic/source regression also passes in 87.52 s
+(`/tmp/codefabric-p03-syntax-native-5.log`). The `syntax-nodes` product selector names the new case.
+All 36 focused Rust checks pass (`/tmp/codefabric-p03-syntax-final-units-2.log`), including invalid
+parents, duplicate/zero-width siblings, provider renumbering, stale generation, retained profile
+capability and Python/Rust boundary continuation. The public run exposed and corrected an inner
+parent-join nullability declaration; subsequent fixture corrections covered envelope freshness,
+multiple Arrow pages and hexadecimal case. All 218 tooling cases pass in 3.00 s.
+Default/featureless root checks pass (`/tmp/codefabric-p03-syntax-root-check.log`). Final all-target
+Clippy has no new-file/changed-line findings (`/tmp/codefabric-p03-syntax-final-clippy-2.jsonl`);
+existing warnings remain. The extracted native assertion helper also passes its focused case.
+Affected Python lint, documentation/navigation, spelling and diff checks pass. Native validation
+uses the same delegated Linux user-systemd scope and installed provider binaries recorded above.
+No package, outcome, full-suite or doctest closure is claimed.
+
 The source-boundary continuation after `2a90b5eb` accepts the closed
 `{"kind":"path","root":"selected"}` descriptor over captured workspace-relative paths.
 Native DataFusion binary range predicates preserve literal path components and non-UTF8
@@ -1402,10 +1435,10 @@ Raw provider coverage is not complete canonical-family coverage.
 
 | Form | Demonstrated current behavior | Remaining |
 |---|---|---|
-| FindEntities | Installed client returns canonical functions and selected additional Python/Rust declaration kinds with reusable public IDs; language/context filters precede limits; stable name/entity ordering | Remaining kinds/representations, source boundaries, semantic name/ambiguity resolution and full directives |
-| RetrieveFacts | Explicit canonical entity IDs; `declarations` or `declaration locations and provenance`; native semi join prevents repeated subjects duplicating occurrences; partial and empty cases tested | Types, members, call/derived families, point filters, broad family expansion and phrase/fact/prior-result resolution |
-| FollowRelationships | Installed Python/Rust one-step calls and Python lexical references, repeated occurrences, scoped unknowns and limits | project-aware semantic references/imports, Rust references, candidates, full direction/distance/stop/filter behavior and composition |
-| RetrieveSourceContext | Exact declaration/function definition/function body spans, bounded surrounding lines, independently authorized bytes, original-byte and UTF-8/UTF-16 columns, observed truncation and hard-limit failures; live/clean/reopen/revocation cases | Remaining syntax meanings, subjects/coordinate contexts and composition |
+| FindEntities | Canonical declarations, modules, call/reference/import occurrences and complete admitted syntax nodes; reusable IDs/priors, literal names, text properties, captured path bounds and source context selection | Remaining kinds, configured context defaults, broader boundaries, ambiguity and directives |
+| RetrieveFacts | Canonical declarations, syntax properties and initial module/import/reference/type/diagnostic families; typed entity priors and literal subjects; native semi joins preserve occurrence identity | Full signatures/members/arguments, point filters, broad family expansion and fact/instance subjects |
+| FollowRelationships | Python/Rust one-step calls, semantic references/imports, syntax parent links and Python lexical references; both directions, typed entity priors and scoped unknowns | Full distance/stop/filter behavior, remaining endpoint roles and dependency scope |
+| RetrieveSourceContext | Exact declaration, module, occurrence and syntax-node spans; function definitions/bodies and surrounding lines; independent disclosure, original-byte/UTF-8/UTF-16 coordinates, truncation and retained revocation | Source-location/fact/instance subjects, outlines, related contexts and full history selection |
 
 Unsupported subject meanings are explicitly rejected; they do not fall back to names. The generalized
 pragmatic expectation corpus is not fully connected to all public forms. The static four-form mixed-language

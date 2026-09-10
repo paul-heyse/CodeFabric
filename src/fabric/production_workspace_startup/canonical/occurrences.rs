@@ -9,6 +9,7 @@ use super::{
 pub(super) fn dependencies() -> Vec<&'static str> {
     vec![
         DECLARATION,
+        super::syntax::RELATION,
         modules::RELATION,
         calls::RELATION,
         semantic_references::RELATION,
@@ -19,7 +20,7 @@ pub(super) fn dependencies() -> Vec<&'static str> {
 pub(super) fn entities(
     inputs: &TransformationInputs,
 ) -> Result<LogicalPlan, TransformationPlanError> {
-    let mut branches = [DECLARATION, modules::RELATION]
+    let mut branches = [DECLARATION, modules::RELATION, super::syntax::RELATION]
         .into_iter()
         .map(|relation| {
             Ok(LogicalPlanBuilder::from(plan(inputs, relation)?)

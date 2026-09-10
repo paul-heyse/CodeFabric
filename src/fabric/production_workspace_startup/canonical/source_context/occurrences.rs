@@ -12,6 +12,14 @@ pub(super) fn descriptors(
 ) -> Result<Vec<LogicalPlan>, TransformationPlanError> {
     [
         (
+            super::super::syntax::RELATION,
+            "entity_id",
+            "syntax-node",
+            col("d.name"),
+            col("d.raw_kind"),
+            "syntax-nodes",
+        ),
+        (
             calls::RELATION,
             "call_site_id",
             "call",

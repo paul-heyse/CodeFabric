@@ -30,6 +30,7 @@ CASES = {
     "semantic-relationships": "relationship_queries::pragmatic_semantic_relationships_through_installed_clients_and_reopen",
     "literal-identifiers": "literal_queries::pragmatic_literal_identifiers_and_property_filters_survive_public_reopen",
     "source-boundaries": "source_boundary_queries::pragmatic_source_boundaries_narrow_first_four_forms_and_survive_reopen",
+    "syntax-nodes": "syntax_queries::pragmatic_syntax_nodes_properties_parents_and_source_survive_public_reopen",
     "python-live": "pragmatic_live_python_edits_converge_without_restart",
     "mixed-clean-live": "live_updates::mixed_live_updates_equal_independent_clean_public_queries",
     "staged-live": "live_updates::source_current_publication_fences_delayed_semantics_and_resumes_after_restart",

@@ -1458,7 +1458,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                         .iter()
                         .find(|clause| clause.query_id() == query_id.as_ref())
                         .expect("compiled source clause");
-                    occurrence_sources = authority
+                    let source_role = authority
                         .epoch()
                         .relation(&ProgrammaticRelationId::new("fact.code_source_context"))
                         .and_then(|relation| {
@@ -1467,16 +1467,36 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                                 .relation_semantic_role(crate::schema_contract::SchemaRole::Logical)
                                 .ok()
                                 .flatten()
-                        })
-                        == Some(crate::production_query_recipe::SOURCE_OCCURRENCES_ROLE);
+                        });
+                    occurrence_sources = matches!(
+                        source_role,
+                        Some(
+                            crate::production_query_recipe::SOURCE_OCCURRENCES_ROLE
+                                | crate::production_query_recipe::SOURCE_SYNTAX_ROLE
+                        )
+                    );
                     scope = match scope.for_source_subjects(
                         clause,
                         &validated.ingress().selections,
                         occurrence_sources,
+                        source_role == Some(crate::production_query_recipe::SOURCE_SYNTAX_ROLE),
                     ) {
                         Ok(scope) => scope,
                         Err(error) => return failed(&artifacts, "source_dependency_scope", error),
                     };
+                }
+                if !source_context
+                    || !request
+                        .parsed()
+                        .request
+                        .representations
+                        .iter()
+                        .any(|layer| layer == "source")
+                {
+                    scope.select_representations(&request.parsed().request.representations);
+                }
+                if request.parsed().request.analysis_context_mode.as_deref() == Some("source") {
+                    scope.select_source_context();
                 }
                 if let Some(clause) = request
                     .parsed()

@@ -36,11 +36,18 @@ fn parsed_entity_selection(value: &str) -> Option<(&'static str, TextPropertyPre
     let phrase = phrase.strip_suffix(" named").unwrap_or(phrase);
     // Dotted declaration paths require lexical qualification that Python does not yet emit.
     // A dotted module name is already an exact checker-provided module identity.
-    if name.contains('.') && phrase != "Python module" {
+    if name.contains('.')
+        && !matches!(
+            phrase,
+            "Python module" | "Python syntax node" | "Rust syntax node"
+        )
+    {
         return None;
     }
     let meaning = match phrase {
         "Python function" => "Python function declarations",
+        "Python syntax node" => "Python syntax nodes",
+        "Rust syntax node" => "Rust syntax nodes",
         "Rust function" => "Rust function declarations",
         "function" => "function declarations",
         "Python class" => "Python class declarations",

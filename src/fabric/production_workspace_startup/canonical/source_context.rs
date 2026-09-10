@@ -31,6 +31,7 @@ pub(super) fn dependencies(python: bool, rust: bool) -> Vec<&'static str> {
         super::imports::RELATION,
         super::REFERENCE,
         super::modules::RELATION,
+        super::syntax::RELATION,
     ];
     if python {
         inputs.push(super::NativeSyntaxRelation::TreeSitterCstNode.as_str());

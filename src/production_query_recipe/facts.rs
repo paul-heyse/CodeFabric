@@ -172,7 +172,11 @@ fn subject_facts(
                         .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
                             detail: error.to_string(),
                         })?,
-                    Some("canonical.source-context.line-window" | super::SOURCE_OCCURRENCES_ROLE)
+                    Some(
+                        "canonical.source-context.line-window"
+                            | super::SOURCE_OCCURRENCES_ROLE
+                            | super::SOURCE_SYNTAX_ROLE
+                    )
                 ) {
                     &[
                         "exact source span",

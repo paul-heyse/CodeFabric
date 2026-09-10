@@ -60,6 +60,7 @@ pub(super) fn dependencies(pyrefly: bool, rust: super::RustInputs) -> Vec<&'stat
         super::types::RUST_GRAPH,
         super::DECLARATION,
         super::source_context::RELATION,
+        super::syntax::RELATION,
     ];
     if rust.bodies {
         result.extend([
@@ -246,11 +247,61 @@ pub(super) fn build(
     })
 }
 
+fn qualify_syntax(inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
+    let roots = LogicalPlanBuilder::from(plan(inputs, super::syntax::RELATION)?)
+        .filter(col("parent_entity_id").is_null())?
+        .project([
+            col("workspace_id"),
+            col("file_id"),
+            col("source_generation"),
+        ])?
+        .distinct()?
+        .alias("s")?
+        .build()?;
+    let missing = col("b.family")
+        .eq(lit("syntax-nodes"))
+        .and(col("b.processing_state").eq(lit("complete")))
+        .and(col("s.file_id").is_null());
+    Ok(LogicalPlanBuilder::from(plan(inputs, INPUT)?)
+        .alias("b")?
+        .join(
+            roots,
+            JoinType::Left,
+            (
+                vec!["b.workspace_id", "b.file_id", "b.source_generation"],
+                vec!["s.workspace_id", "s.file_id", "s.source_generation"],
+            ),
+            None,
+        )?
+        .project(
+            fields()
+                .iter()
+                .map(|(name, _, _)| {
+                    Ok(match *name {
+                        "processing_state" => {
+                            datafusion::logical_expr::when(missing.clone(), lit("partial"))
+                                .otherwise(col("b.processing_state"))?
+                                .alias(*name)
+                        }
+                        "reason" => datafusion::logical_expr::when(
+                            missing.clone(),
+                            lit("canonical_syntax_tree_unavailable"),
+                        )
+                        .otherwise(col("b.reason"))?
+                        .alias(*name),
+                        _ => col(format!("b.{name}")),
+                    })
+                })
+                .collect::<Result<Vec<_>, datafusion::common::DataFusionError>>()?,
+        )?
+        .build()?)
+}
+
 fn qualify_references(
     inputs: &TransformationInputs,
     rust: super::RustInputs,
 ) -> Result<LogicalPlan, TransformationPlanError> {
-    let mut base = plan(inputs, INPUT)?;
+    let mut base = qualify_syntax(inputs)?;
     for (relation, family, reason) in [
         (
             super::REFERENCE,

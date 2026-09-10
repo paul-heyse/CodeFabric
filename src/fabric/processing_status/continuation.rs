@@ -198,6 +198,7 @@ fn selected_remainder(
         predicate = predicate.and(
             col("language")
                 .not_eq(lit("python"))
+                .and(col("family").not_eq(lit("syntax-nodes")))
                 .or(selection.boundaries.native_predicate(&col("relative_path"))),
         );
     }
@@ -534,87 +535,95 @@ mod tests {
     }
     #[tokio::test]
     async fn retained_source_boundaries_match_initial_counts_and_pages() {
-        let mut snapshot = super::super::tests::fixture();
-        let original = &snapshot.batches[0];
-        let mut columns = original.columns().to_vec();
-        let count = original.num_rows();
-        let replace = |columns: &mut Vec<arrow_array::ArrayRef>, name: &str, array| {
-            columns[original.schema().index_of(name).unwrap()] = array;
-        };
-        replace(
-            &mut columns,
-            "language",
-            Arc::new(StringArray::from_iter_values(
-                (0..count).map(|row| if row < 129 { "python" } else { "rust" }),
-            )),
-        );
-        replace(
-            &mut columns,
-            "relative_path",
-            Arc::new(BinaryArray::from_iter_values((0..count).map(|row| {
-                if row < 100 {
-                    b"src/in.py".as_slice()
-                } else {
-                    b"src_other/out.py".as_slice()
-                }
-            }))),
-        );
-        let batch = RecordBatch::try_new(original.schema(), columns).unwrap();
-        snapshot.batches = ordered(SessionContext::new().read_batch(batch.clone()).unwrap())
-            .unwrap()
-            .collect()
-            .await
-            .unwrap()
-            .into_iter()
-            .map(ChargedValue::for_test)
-            .collect();
-        let selection: ProcessingSelection = serde_json::from_value(serde_json::json!({
-            "table_root":"/private/exact/processing", "table_version":7,
-            "workspace":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], "family":"function-declarations",
-            "languages":["python","rust"], "contexts":[], "boundaries":["src"]
-        }))
-        .unwrap();
-        let selection: ProcessingSelection =
-            serde_json::from_slice(&serde_json::to_vec(&selection).unwrap()).unwrap();
-        let scope = selection.scope().unwrap();
-        let first = snapshot.summarize(&scope, 0);
-        assert_eq!(
-            (
-                first.requested_partitions,
-                first.completed_partitions,
-                first.remaining_partitions
-            ),
-            (102, 1, 101)
-        );
-        assert_eq!(first.next_offset, Some(64));
-        assert!(selection.validate(&first));
-        let later = snapshot.summarize(&scope, 64);
-        assert_eq!(later.remainder.len(), 37);
-        assert_eq!(
-            later
-                .remainder
-                .iter()
-                .filter(|row| row.language == "rust")
-                .count(),
-            2
-        );
-        let frame = SessionContext::new().read_batch(batch).unwrap();
-        let selected = ordered(selected_remainder(frame, &selection, 3).unwrap())
-            .unwrap()
-            .limit(64, Some(64))
-            .unwrap()
-            .collect()
-            .await
+        for family in ["function-declarations", "syntax-nodes"] {
+            let rust_partitions = if family == "syntax-nodes" { 0 } else { 2 };
+            let mut snapshot = super::super::tests::fixture();
+            let original = &snapshot.batches[0];
+            let mut columns = original.columns().to_vec();
+            let count = original.num_rows();
+            let replace = |columns: &mut Vec<arrow_array::ArrayRef>, name: &str, array| {
+                columns[original.schema().index_of(name).unwrap()] = array;
+            };
+            replace(
+                &mut columns,
+                "family",
+                Arc::new(StringArray::from(vec![family; count])),
+            );
+            replace(
+                &mut columns,
+                "language",
+                Arc::new(StringArray::from_iter_values(
+                    (0..count).map(|row| if row < 129 { "python" } else { "rust" }),
+                )),
+            );
+            replace(
+                &mut columns,
+                "relative_path",
+                Arc::new(BinaryArray::from_iter_values((0..count).map(|row| {
+                    if row < 100 {
+                        b"src/in.py".as_slice()
+                    } else {
+                        b"src_other/out.py".as_slice()
+                    }
+                }))),
+            );
+            let batch = RecordBatch::try_new(original.schema(), columns).unwrap();
+            snapshot.batches = ordered(SessionContext::new().read_batch(batch.clone()).unwrap())
+                .unwrap()
+                .collect()
+                .await
+                .unwrap()
+                .into_iter()
+                .map(ChargedValue::for_test)
+                .collect();
+            let selection: ProcessingSelection = serde_json::from_value(serde_json::json!({
+                "table_root":"/private/exact/processing", "table_version":7,
+                "workspace":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], "family":family,
+                "languages":["python","rust"], "contexts":[], "boundaries":["src"]
+            }))
             .unwrap();
-        let selected_snapshot = EntityProcessingSnapshot {
-            batches: selected.into_iter().map(ChargedValue::for_test).collect(),
-            generation: snapshot.generation,
-            workspace: snapshot.workspace,
-            epoch: snapshot.epoch,
-        };
-        assert_eq!(
-            selected_snapshot.summarize(&scope, 0).remainder,
-            later.remainder
-        );
+            let selection: ProcessingSelection =
+                serde_json::from_slice(&serde_json::to_vec(&selection).unwrap()).unwrap();
+            let scope = selection.scope().unwrap();
+            let first = snapshot.summarize(&scope, 0);
+            assert_eq!(
+                (
+                    first.requested_partitions,
+                    first.completed_partitions,
+                    first.remaining_partitions
+                ),
+                (100 + rust_partitions, 1, 99 + rust_partitions)
+            );
+            assert_eq!(first.next_offset, Some(64));
+            assert!(selection.validate(&first));
+            let later = snapshot.summarize(&scope, 64);
+            assert_eq!(later.remainder.len() as u64, 35 + rust_partitions);
+            assert_eq!(
+                later
+                    .remainder
+                    .iter()
+                    .filter(|row| row.language == "rust")
+                    .count() as u64,
+                rust_partitions
+            );
+            let frame = SessionContext::new().read_batch(batch).unwrap();
+            let selected = ordered(selected_remainder(frame, &selection, 3).unwrap())
+                .unwrap()
+                .limit(64, Some(64))
+                .unwrap()
+                .collect()
+                .await
+                .unwrap();
+            let selected_snapshot = EntityProcessingSnapshot {
+                batches: selected.into_iter().map(ChargedValue::for_test).collect(),
+                generation: snapshot.generation,
+                workspace: snapshot.workspace,
+                epoch: snapshot.epoch,
+            };
+            assert_eq!(
+                selected_snapshot.summarize(&scope, 0).remainder,
+                later.remainder
+            );
+        }
     }
 }

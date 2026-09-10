@@ -46,6 +46,7 @@ pub(super) fn install(
     let pyrefly = pyrefly_by_file(runs);
     let semantic_coverage = semantic_coverage::index(runs)?;
     let mut rows = Vec::new();
+    append_syntax_partitions(&mut rows, inventory, runs);
     let mut rust_requested = false;
     for member in inventory.members() {
         let path = member.relative_path.as_slice();
@@ -175,6 +176,75 @@ fn undiscovered_rust_partition(publication: super::PublicationStage) -> Partitio
         } else {
             "cargo_context_preparation_incomplete"
         },
+    }
+}
+
+fn append_syntax_partitions<'a>(
+    rows: &mut Vec<Partition<'a>>,
+    inventory: &'a ProviderSourceInventory,
+    runs: &[AdmittedProviderResult],
+) {
+    let observed = runs
+        .iter()
+        .filter(|run| {
+            matches!(
+                run.job().lane(),
+                ProviderLane::TreeSitter | ProviderLane::TreeSitterRust
+            )
+        })
+        .filter_map(|run| match run.job().source().selection() {
+            ProviderSourceSelection::File { file_id, .. } => Some((*file_id, run)),
+            ProviderSourceSelection::Inventory(_) => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    for member in inventory.members() {
+        let (language, relation) = if member.relative_path.ends_with(b".rs") {
+            (
+                "rust",
+                crate::provider_native_rust_syntax::RustSyntaxRelation::CstNode.name(),
+            )
+        } else if member.relative_path.ends_with(b".py") || member.relative_path.ends_with(b".pyi")
+        {
+            ("python", NativeSyntaxRelation::TreeSitterCstNode.as_str())
+        } else {
+            continue;
+        };
+        let file = match member.disposition {
+            ProviderInputDisposition::Captured { file_id, .. } => Some(file_id),
+            _ => None,
+        };
+        let (state, reason) = if let Some(file) = file {
+            family_state(observed.get(&file).copied(), relation)
+        } else {
+            (
+                if matches!(
+                    member.disposition,
+                    ProviderInputDisposition::ExcludedPolicy
+                        | ProviderInputDisposition::ExcludedSpecialFile
+                        | ProviderInputDisposition::Generated
+                        | ProviderInputDisposition::Vendored
+                ) {
+                    "excluded"
+                } else {
+                    "unavailable"
+                },
+                input_observations::disposition(&member.disposition),
+            )
+        };
+        rows.push(Partition {
+            family: "syntax-nodes",
+            language,
+            scope_kind: "source_file",
+            path: &member.relative_path,
+            target: None,
+            target_kind: None,
+            target_platform: None,
+            rust_build: None,
+            context: Some(crate::identity::SOURCE_CONTEXT_ID),
+            file,
+            state,
+            reason,
+        });
     }
 }
 

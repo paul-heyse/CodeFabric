@@ -35,6 +35,7 @@ mod block_queries;
 mod relationship_queries;
 mod literal_queries;
 mod source_boundary_queries;
+mod syntax_queries;
 mod types;
 
 struct InstalledProductionStack {
@@ -3120,7 +3121,12 @@ fn pragmatic_all_rust_targets_failed_retains_diagnostics_and_source() {
     fs::write(workspace.join("diagnostic.py"), "value: int = 'wrong'\n").unwrap();
     let supervisor = fixture.start_supervisor();
     let names = canonical_entity_names(&fixture);
-    assert!(names.iter().all(|(language, _)| language == "python"));
+    assert!(names.contains(&("rust".into(), "source_file".into())));
+    assert!(
+        canonical_diagnostic_rows(&fixture, "fact.code_declaration")
+            .iter()
+            .all(|row| row["language"] == "python")
+    );
     assert_structured_rust_failure_diagnostics(&fixture);
     assert!(
         fresh_activation_relation_batches(&fixture, "source.exact_source_bytes")

@@ -65,15 +65,18 @@ const RELEASE_FACTUAL_SEMANTIC_CLASS_ID: &str = "semantic.fact.v2";
 const RELEASE_SELECTION_MAXIMUM_VALUES: usize = 64;
 
 pub(crate) const SOURCE_OCCURRENCES_ROLE: &str = "canonical.source-context.occurrences.v1";
+pub(crate) const SOURCE_SYNTAX_ROLE: &str = "canonical.source-context.syntax.v1";
 
 pub(crate) const CANONICAL_OCCURRENCE_SELECTOR_ROLE: &str =
     "canonical.entity-selector.occurrences.v1";
+pub(crate) const CANONICAL_SYNTAX_SELECTOR_ROLE: &str = "canonical.entity-selector.syntax.v1";
 
 pub(crate) fn canonical_occurrence_family(selector: &str) -> Option<&'static str> {
     match selector {
         "python:call" | "rust:call" => Some("call-targets"),
         "python:reference" | "rust:reference" => Some("semantic-references"),
         "python:import-occurrence" | "rust:import-occurrence" => Some("imports"),
+        "python:syntax-node" | "rust:syntax-node" => Some("syntax-nodes"),
         _ => None,
     }
 }
@@ -86,6 +89,8 @@ pub(crate) const CANONICAL_ENTITY_SELECTORS: &[(&str, &str)] = &[
     ("function", "function"),
     ("Python class declarations", "python:class"),
     ("Python modules", "python:module"),
+    ("Python syntax nodes", "python:syntax-node"),
+    ("Rust syntax nodes", "rust:syntax-node"),
     ("Python call occurrences", "python:call"),
     ("Rust call occurrences", "rust:call"),
     ("Python semantic reference occurrences", "python:reference"),
@@ -531,6 +536,7 @@ struct EpochSemanticRelation {
     selector: FieldId,
     canonical: bool,
     occurrences: bool,
+    syntax: bool,
     scope_fields: Vec<(FieldId, &'static str)>,
 }
 
@@ -541,7 +547,11 @@ fn compiled_released_form_programs(
     BTreeMap<(ReleasedSemanticForm, Arc<str>), ProductionSemanticFormProgram>,
     ProductionQueryRecipeError,
 > {
-    let canonical = epoch_semantic_relation(epoch, CANONICAL_OCCURRENCE_SELECTOR_ROLE)?
+    let canonical = epoch_semantic_relation(epoch, CANONICAL_SYNTAX_SELECTOR_ROLE)?
+        .or(epoch_semantic_relation(
+            epoch,
+            CANONICAL_OCCURRENCE_SELECTOR_ROLE,
+        )?)
         .or(epoch_semantic_relation(epoch, "canonical.entity-selector")?);
     if let Some(source) = canonical {
         if epoch
@@ -750,7 +760,9 @@ fn epoch_semantic_relation(
         };
         let canonical = matches!(
             semantic_role,
-            "canonical.entity-selector" | CANONICAL_OCCURRENCE_SELECTOR_ROLE
+            "canonical.entity-selector"
+                | CANONICAL_OCCURRENCE_SELECTOR_ROLE
+                | CANONICAL_SYNTAX_SELECTOR_ROLE
         );
         matched.push(EpochSemanticRelation {
             relation_id: release_relation_id(contract_relation)?,
@@ -764,7 +776,11 @@ fn epoch_semantic_relation(
                 SEMANTIC_ENTITY_KIND_ROLE
             })?,
             canonical,
-            occurrences: semantic_role == CANONICAL_OCCURRENCE_SELECTOR_ROLE,
+            occurrences: matches!(
+                semantic_role,
+                CANONICAL_OCCURRENCE_SELECTOR_ROLE | CANONICAL_SYNTAX_SELECTOR_ROLE
+            ),
+            syntax: semantic_role == CANONICAL_SYNTAX_SELECTOR_ROLE,
             scope_fields: if canonical {
                 {
                     let mut fields = canonical_entity_scope_fields(
@@ -953,7 +969,11 @@ fn compiled_find_entities_program(
                     .iter()
                     .copied()
                     .filter(|(_, selector)| {
-                        source.occurrences || canonical_occurrence_family(selector).is_none()
+                        if canonical_occurrence_family(selector) == Some("syntax-nodes") {
+                            source.syntax
+                        } else {
+                            source.occurrences || canonical_occurrence_family(selector).is_none()
+                        }
                     })
                     .collect()
             } else {
@@ -2772,6 +2792,7 @@ mod tests {
         for role in [
             "canonical.entity-selector",
             CANONICAL_OCCURRENCE_SELECTOR_ROLE,
+            CANONICAL_SYNTAX_SELECTOR_ROLE,
         ] {
             let relation_id = "fact.code_entity_selector";
             let fields = [
@@ -2861,7 +2882,9 @@ mod tests {
             let occurrences = meanings.iter().filter(|r| matches!(&r.execution_value, SemanticClauseValue::Text(value) if canonical_occurrence_family(value).is_some())).count();
             assert_eq!(
                 occurrences,
-                if role == CANONICAL_OCCURRENCE_SELECTOR_ROLE {
+                if role == CANONICAL_SYNTAX_SELECTOR_ROLE {
+                    8
+                } else if role == CANONICAL_OCCURRENCE_SELECTOR_ROLE {
                     6
                 } else {
                     0

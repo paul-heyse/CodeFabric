@@ -30,6 +30,7 @@ pub(crate) fn canonical_processing_family(value: &str) -> Option<&'static str> {
         "lexical-references" => Some("lexical-references"),
         "semantic-references" => Some("semantic-references"),
         "modules" => Some("modules"),
+        "syntax-nodes" => Some("syntax-nodes"),
         "imports" => Some("imports"),
         "types" => Some("types"),
         "diagnostic-messages" => Some("diagnostic-messages"),
@@ -209,7 +210,7 @@ impl EntityQueryScope {
         if request
             .representations
             .iter()
-            .any(|value| value != "semantic")
+            .any(|value| !matches!(value.as_str(), "semantic" | "syntax" | "source"))
             || request
                 .external_entity_policy
                 .as_deref()
@@ -252,7 +253,7 @@ impl EntityQueryScope {
                 return Err("entity selector is not a compiled declaration meaning".to_owned());
             }
         }
-        let contexts = request
+        let mut contexts = request
             .analysis_context_ids
             .iter()
             .map(|value| {
@@ -263,7 +264,23 @@ impl EntityQueryScope {
                 )
                 .map_err(|e| e.to_string())
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        match request.analysis_context_mode.as_deref() {
+            Some("source") => {
+                if contexts
+                    .iter()
+                    .any(|id| *id != crate::identity::SOURCE_CONTEXT_ID)
+                {
+                    return Err("source context mode cannot select semantic context IDs".into());
+                }
+                contexts.insert(crate::identity::SOURCE_CONTEXT_ID);
+            }
+            Some("selected" | "explicit") if contexts.is_empty() => {
+                return Err("selected context mode requires explicit context IDs".into());
+            }
+            None | Some("default" | "selected" | "explicit" | "all") => {}
+            Some(_) => return Err("unsupported analysis context mode".into()),
+        }
         Ok(Self {
             boundaries: SourceBoundaries::authorize(&request.source_boundaries)?,
             family: match selector {
@@ -288,6 +305,43 @@ impl EntityQueryScope {
             contexts,
             owners: None,
         })
+    }
+
+    /// Apply layer selection after source subjects establish their real dependency families.
+    pub(crate) fn select_representations(&mut self, representations: &[String]) {
+        if representations.is_empty() {
+            return;
+        }
+        let selected = |family: &&str| {
+            let layer = if *family == "syntax-nodes" {
+                "syntax"
+            } else {
+                "semantic"
+            };
+            representations.iter().any(|value| value == layer)
+        };
+        if self.families.is_empty() {
+            if !selected(&self.family) {
+                self.languages.clear();
+            }
+        } else {
+            let families = self
+                .families
+                .iter()
+                .copied()
+                .filter(selected)
+                .collect::<BTreeSet<_>>();
+            if let Some(family) = families.first() {
+                self.family = family;
+                self.families = families;
+            } else {
+                self.languages.clear();
+            }
+        }
+    }
+
+    pub(crate) fn select_source_context(&mut self) {
+        self.select_representations(&["syntax".into()]);
     }
 
     pub(crate) fn predicate(&self) -> Result<crate::relational_program::ScalarExpression, String> {
@@ -554,7 +608,7 @@ impl EntityProcessingSnapshot {
                 }
                 if !scope.selects_family(families.value(row))
                     || !scope.languages.contains(languages.value(row))
-                    || (languages.value(row) == "python"
+                    || ((languages.value(row) == "python" || families.value(row) == "syntax-nodes")
                         && !scope.boundaries.selects(paths.value(row)))
                 {
                     continue;
@@ -628,6 +682,11 @@ fn public_processing_id(
     kind: Option<&str>,
     bytes: &[u8],
 ) -> String {
+    if domain == crate::identity::IdentityDomain::AnalysisContext
+        && bytes == crate::identity::SOURCE_CONTEXT_ID
+    {
+        return "context:source".into();
+    }
     crate::identity::encode_public_id(
         domain,
         kind,
@@ -763,6 +822,45 @@ mod tests {
     use super::*;
     use arrow_array::ArrayRef;
     use arrow_schema::{Field, Schema};
+
+    #[test]
+    fn source_context_and_layer_selection_preserve_context_and_family_separation() {
+        let request = serde_json::json!({
+            "specification":"composable semantic CPG fact query", "version":"2.0",
+            "semantic_request_id":"request:syntax-scope",
+            "scope":{"workspace_id":"workspace:test", "analysis_contexts":{"mode":"source"}, "representations":["syntax"]},
+            "freshness":{"policy":"best_available_snapshot"},
+            "queries":[{"request":"find code entities", "query_id":"syntax", "looking_for":"Python syntax nodes"}]
+        });
+        let parsed =
+            crate::semantic_query_contract::parse_request(&serde_json::to_vec(&request).unwrap())
+                .unwrap();
+        let mut selected =
+            EntityQueryScope::from_request(&parsed.request, "python:syntax-node").unwrap();
+        assert_eq!(
+            selected.contexts,
+            BTreeSet::from([crate::identity::SOURCE_CONTEXT_ID])
+        );
+        selected.select_representations(&parsed.request.representations);
+        assert_eq!(selected.languages, BTreeSet::from(["python".into()]));
+        let mut selected = selected
+            .with_families(BTreeSet::from(["syntax-nodes", "function-declarations"]))
+            .unwrap();
+        selected.select_representations(&["syntax".into()]);
+        assert_eq!(selected.families, BTreeSet::from(["syntax-nodes"]));
+        selected.select_representations(&["semantic".into()]);
+        assert!(selected.languages.is_empty());
+        assert!(!selected.families.is_empty());
+        let mut semantic =
+            EntityQueryScope::from_request(&parsed.request, "rust:function").unwrap();
+        semantic.select_source_context();
+        assert_eq!(fixture().summarize(&semantic, 0).requested_partitions, 0);
+        for mode in ["selected", "explicit", "misspelled"] {
+            let mut request = parsed.request.clone();
+            request.analysis_context_mode = Some(mode.into());
+            assert!(EntityQueryScope::from_request(&request, "python:syntax-node").is_err());
+        }
+    }
 
     pub(super) fn fixture() -> EntityProcessingSnapshot {
         let rows = 131;

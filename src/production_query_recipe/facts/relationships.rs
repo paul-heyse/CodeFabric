@@ -26,6 +26,8 @@ pub(crate) fn known_meaning(value: &str) -> bool {
             | "semantic references"
             | "semantic-references"
             | "imports"
+            | "syntax parents"
+            | "syntax-nodes"
             | "incoming"
             | "outgoing"
             | "one relationship step"
@@ -41,13 +43,14 @@ pub(in crate::production_query_recipe) fn programs(
     epoch: &ProgrammaticFabricEpoch,
 ) -> Result<Vec<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
     let mut programs = Vec::new();
-    for (family, relation, occurrence, kind, meaning) in [
+    for (family, relation, occurrence, kind, meaning, target) in [
         (
             "semantic-references",
             "fact.code_semantic_reference",
             "reference_id",
             "reference",
             "semantic references",
+            "target_entity_id",
         ),
         (
             "imports",
@@ -55,6 +58,7 @@ pub(in crate::production_query_recipe) fn programs(
             "import_id",
             "import-occurrence",
             "imports",
+            "target_entity_id",
         ),
         (
             "call-targets",
@@ -62,11 +66,20 @@ pub(in crate::production_query_recipe) fn programs(
             "call_site_id",
             "call",
             "call targets",
+            "target_entity_id",
+        ),
+        (
+            "syntax-nodes",
+            "fact.code_syntax_node",
+            "entity_id",
+            "syntax-node",
+            "syntax parents",
+            "parent_entity_id",
         ),
     ] {
         for direction in ["incoming", "outgoing"] {
             if let Some(program) = program(
-                epoch, family, relation, occurrence, kind, meaning, direction,
+                epoch, family, relation, occurrence, kind, meaning, direction, target,
             )? {
                 programs.push(program);
             }
@@ -85,6 +98,7 @@ fn program(
     kind: &str,
     meaning: &str,
     direction: &str,
+    target: &str,
 ) -> Result<Option<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
     let Some(source) = families::definition(epoch, relation)? else {
         return Ok(None);
@@ -118,6 +132,7 @@ fn program(
         .fields
         .iter()
         .zip(schema.fields())
+        .filter(|(_, f)| f.name() != "public_entity_id")
         .map(|(id, f)| {
             Ok(ProgramProjectionField {
                 input_field_id: id.clone(),
@@ -132,28 +147,21 @@ fn program(
         input_field_id: target_fields[1].clone(),
         output_field_id: field(&output, "target_entity_kind")?,
         output_name: Some(Arc::from("target_entity_kind")),
-        output_nullable: Some(true),
+        output_nullable: Some(family != "syntax-nodes"),
         public_entity_kind: None,
     });
-    for (name, target) in [
+    for (name, is_target) in [
         ("public_source_entity_id", false),
         ("public_occurrence_id", false),
         ("public_target_entity_id", true),
         ("public_entity_id", direction == "incoming"),
     ] {
         projections.push(ProgramProjectionField {
-            input_field_id: field(
-                relation,
-                if target {
-                    "target_entity_id"
-                } else {
-                    occurrence
-                },
-            )?,
+            input_field_id: field(relation, if is_target { target } else { occurrence })?,
             output_field_id: field(&output, name)?,
             output_name: Some(Arc::from(name)),
             output_nullable: Some(true),
-            public_entity_kind: Some(if target {
+            public_entity_kind: Some(if is_target {
                 ProgramPublicEntityKind::Field(target_fields[1].clone())
             } else {
                 ProgramPublicEntityKind::Literal(Arc::from(kind))
@@ -213,9 +221,13 @@ fn program(
         "targets",
         &["source", "target-kinds"],
         ProgramRelationalOperator::Join {
-            kind: JoinKind::Left,
+            kind: if family == "syntax-nodes" {
+                JoinKind::Inner
+            } else {
+                JoinKind::Left
+            },
             predicates: [
-                ("target_entity_id", "entity_id"),
+                (target, "entity_id"),
                 ("context_id", "context_id"),
                 ("workspace_id", "workspace_id"),
             ]

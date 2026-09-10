@@ -45,6 +45,7 @@ mod relationship_selector;
 mod rust_references;
 mod semantic_references;
 mod source_context;
+mod syntax;
 mod types;
 
 /// Each canonical projection requires its own native input set. Diagnostic-only compilation and
@@ -112,9 +113,14 @@ pub(super) fn install(
     python: bool,
     rust: RustInputs,
     pyrefly: bool,
+    rust_syntax: bool,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     for kind in [
         Kind::Source,
+        Kind::Syntax {
+            python,
+            rust: rust_syntax,
+        },
         Kind::Declaration {
             python,
             rust: rust.declarations,
@@ -192,6 +198,10 @@ pub(super) fn install(
 
 #[derive(Clone, Copy)]
 enum Kind {
+    Syntax {
+        python: bool,
+        rust: bool,
+    },
     Type {
         relation: types::Relation,
         inputs: types::Inputs,
@@ -258,6 +268,11 @@ impl Canonical {
     )]
     fn new(kind: Kind, inventory: &ProviderSourceInventory) -> Self {
         let (id, names, mut dependencies) = match kind {
+            Kind::Syntax { python, rust } => (
+                syntax::RELATION,
+                syntax::fields(),
+                syntax::dependencies(python, rust),
+            ),
             Kind::Type {
                 relation,
                 inputs: available,
@@ -376,8 +391,7 @@ impl Canonical {
             fields,
         );
         if matches!(kind, Kind::SourceContext { .. }) {
-            output =
-                output.with_semantic_role(crate::production_query_recipe::SOURCE_OCCURRENCES_ROLE);
+            output = output.with_semantic_role(crate::production_query_recipe::SOURCE_SYNTAX_ROLE);
         }
         if matches!(kind, Kind::Entity) {
             // Kept distinct from the predecessor Ruff-only role until scoped public queries
@@ -385,9 +399,8 @@ impl Canonical {
             output = output.with_semantic_role("canonical.entity-source");
         }
         if matches!(kind, Kind::EntitySelector) {
-            output = output.with_semantic_role(
-                crate::production_query_recipe::CANONICAL_OCCURRENCE_SELECTOR_ROLE,
-            );
+            output = output
+                .with_semantic_role(crate::production_query_recipe::CANONICAL_SYNTAX_SELECTOR_ROLE);
         }
         if matches!(kind, Kind::Reference { .. }) {
             output = output.with_semantic_role("canonical.reference");
@@ -669,6 +682,7 @@ impl ProgrammaticTransformation for Canonical {
     )]
     fn build(&self, inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
         match self.kind {
+            Kind::Syntax { python, rust } => syntax::build(inputs, python, rust),
             Kind::Type {
                 relation,
                 inputs: available,
@@ -1179,6 +1193,7 @@ mod tests {
     mod rust_types;
     mod semantic_references;
     mod source_context;
+    mod syntax;
     mod types;
     use super::*;
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig};
@@ -1368,6 +1383,7 @@ mod tests {
             &inventory,
             python,
             RustInputs::from_relations([]),
+            false,
             false,
         )
         .unwrap();

@@ -24,6 +24,13 @@ pub(crate) struct Family {
 
 pub(crate) const FAMILIES: &[Family] = &[
     Family {
+        slug: "syntax-nodes",
+        relation: "fact.code_syntax_node",
+        meaning: "syntax node properties",
+        coverage: "syntax-nodes",
+        keys: Some(("entity_id", "entity_id")),
+    },
+    Family {
         slug: "modules",
         relation: "fact.code_module",
         meaning: "module metadata",

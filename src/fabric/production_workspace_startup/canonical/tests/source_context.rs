@@ -94,6 +94,10 @@ async fn occurrence_sources_require_exact_pins_valid_spans_and_provenance() {
         ],
     );
     for (relation, fields) in [
+        (
+            super::super::syntax::RELATION,
+            super::super::syntax::fields(),
+        ),
         (DECLARATION, declaration_fields()),
         (REFERENCE, reference_fields()),
         (

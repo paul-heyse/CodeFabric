@@ -495,6 +495,8 @@ impl super::native_execution_lane::NativeLaneOutput for FreshCandidatePublicatio
     }
 }
 
+const INPROCESS_MAX_VISITED_NODES: u64 = 2_000_000;
+
 fn inprocess_operational_ceilings() -> Result<ProviderResourceCeilings, ProviderContractError> {
     ProviderResourceCeilings::try_new(ProviderResourceCeilingSpec {
         max_relations: 64,
@@ -505,7 +507,7 @@ fn inprocess_operational_ceilings() -> Result<ProviderResourceCeilings, Provider
         max_diagnostics: 10_000,
         max_work_units: 10_000_000,
         max_wall_millis: 30_000,
-        max_visited_nodes: 2_000_000,
+        max_visited_nodes: INPROCESS_MAX_VISITED_NODES,
         max_traversal_depth: 256,
         max_workers: 4,
         max_retained_revisions: 2,
@@ -902,13 +904,15 @@ fn build_fresh_native_source(
     input_observations::install_rust_target_progress(&mut builder, generation, &rustc.progress)?;
     admitted_runs.extend(rustc.admitted);
     costs.start("rust-syntax");
-    admitted_runs.extend(rust_syntax::install(
+    let rust_syntax_runs = rust_syntax::install(
         &mut builder,
         &prepared_inputs,
         record,
         release,
         &cancellation,
-    )?);
+    )?;
+    let rust_syntax_available = !rust_syntax_runs.is_empty();
+    admitted_runs.extend(rust_syntax_runs);
     costs.start("canonical-registration");
     processing::install(
         &mut builder,
@@ -929,6 +933,7 @@ fn build_fresh_native_source(
         !native_runs.is_empty(),
         rustc_inputs,
         pyrefly_available,
+        rust_syntax_available,
     )?;
     canonical::install_processing(
         &mut builder,
