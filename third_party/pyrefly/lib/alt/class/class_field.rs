@@ -837,6 +837,29 @@ impl ClassField {
         matches!(&self.0, ClassFieldInner::Property { .. })
     }
 
+    /// Native field classification for bulk query export, independent of receiver lookup.
+    pub fn query_kind(&self) -> &'static str {
+        match &self.0 {
+            ClassFieldInner::Property { .. } => "property",
+            ClassFieldInner::Descriptor { .. } => "descriptor",
+            ClassFieldInner::Method { .. } => "method",
+            ClassFieldInner::ProxyMethod { .. } => "proxy-method",
+            ClassFieldInner::NestedClass { .. } => "nested-class",
+            ClassFieldInner::ClassAttribute { .. } => "class-attribute",
+            ClassFieldInner::InstanceAttribute { .. } => "instance-attribute",
+        }
+    }
+
+    /// Preserve descriptor write hooks without the initialization filters used by dataclasses.
+    pub fn query_descriptor_write_hooks(&self) -> Option<(bool, bool)> {
+        match &self.0 {
+            ClassFieldInner::Descriptor { descriptor, .. } => {
+                Some((descriptor.setter, descriptor.deleter))
+            }
+            _ => None,
+        }
+    }
+
     pub fn is_simple_instance_attribute(&self) -> bool {
         matches!(&self.0, ClassFieldInner::InstanceAttribute { .. })
     }

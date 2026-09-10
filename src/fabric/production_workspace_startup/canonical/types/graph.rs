@@ -67,8 +67,11 @@ pub(super) fn accepted(
         )?)
 }
 
-fn definitions(inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
+pub(super) fn definitions(
+    inputs: &TransformationInputs,
+) -> Result<LogicalPlan, TransformationPlanError> {
     let anchors = [
+        "workspace_id",
         "context_id",
         "file_id",
         "content_digest",
@@ -128,6 +131,7 @@ pub(super) fn definition_nodes(
             JoinType::Left,
             vec![
                 col("r.context_id").eq(col("d.context_id")),
+                col("s.workspace_id").eq(col("d.workspace_id")),
                 file_id_udf()
                     .call(vec![col("p.definition_file_id")])
                     .eq(col("d.file_id")),

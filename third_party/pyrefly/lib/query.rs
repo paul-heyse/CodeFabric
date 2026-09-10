@@ -109,8 +109,8 @@ pub use ruff_python_ast::Stmt as TypeQueryStmt;
 pub use ruff_python_ast::StmtClassDef as TypeQueryStmtClassDef;
 pub use ruff_python_ast::StmtFunctionDef as TypeQueryStmtFunctionDef;
 pub use type_graph::{
-    NativeTypeComponent, NativeTypeGraph, NativeTypeKind, NativeTypeLiteral, NativeTypeNode,
-    NativeTypeOccurrence, TypeFactsResponseData,
+    NativeClassMembers, NativeMember, NativeTypeComponent, NativeTypeGraph, NativeTypeKind,
+    NativeTypeLiteral, NativeTypeNode, NativeTypeOccurrence, TypeFactsResponseData,
 };
 pub use type_table::IndexedTypeShapeKind;
 pub use type_table::LocatedTypeTableRef;

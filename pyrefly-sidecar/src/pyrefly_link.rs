@@ -27,6 +27,7 @@ use relation_schema::{PYREFLY_RELEASE, PYREFLY_REVISION};
 pub(crate) use relation_schema::{PyreflyRelation, schema_bundle_digest, schema_digests};
 
 pub(crate) mod preparation;
+mod members;
 mod references;
 mod type_graph;
 use preparation::SelectedPyreflyPreparation;
@@ -634,7 +635,8 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
     let (shape_rows, component_rows, trait_rows, located_rows) =
         project_type_table(type_table, source)?;
     let call_rows = project_callees(callees.as_deref(), source, definition_sources)?;
-    let member_rows = project_members(query, name, &path, type_table);
+    let structural = type_facts.as_ref().map(|facts| &facts.structural);
+    let member_rows = members::display_rows(structural);
     let module_diagnostics = diagnostics
         .iter()
         .filter(|(owner, _)| owner == &path)
@@ -646,15 +648,15 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
         shape_rows.len(),
         located_rows.len(),
         call_rows.len(),
-        member_rows.len(),
         module_diagnostics.len(),
     );
     let reference_rows = references::project(references.as_ref(), source, definition_sources)?;
     references::qualify_coverage(&mut coverage_rows, references.as_ref(), &reference_rows);
-    let structural = type_facts.as_ref().map(|facts| &facts.structural);
+    members::coverage(&mut coverage_rows, structural);
     type_graph::coverage(&mut coverage_rows, structural);
 
     let mut relations = vec![
+        members::project(&common, structural, source)?,
         encode_relation(
             PyreflyRelation::Reference,
             &references::batch(&common, &reference_rows)?,
@@ -700,13 +702,13 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
             &coverage_batch(&common, &coverage_rows)?,
         )?,
     ];
-    relations.sort_by_key(|relation| relation.relation);
     relations.extend(type_graph::project(
         &common,
         structural,
         source,
         definition_sources,
     )?);
+    relations.sort_by_key(|relation| relation.relation);
     let module_digest = module_digest(module, &relations);
     Ok(ModuleAnalysis {
         module_id: module.module_id.clone(),
@@ -883,48 +885,6 @@ fn project_callees(
     Ok(rows)
 }
 
-fn project_members(
-    query: &Query,
-    name: ModuleName,
-    path: &ModulePath,
-    response: Option<&TypeTableResponseData>,
-) -> Vec<MemberRow> {
-    let candidates = response
-        .into_iter()
-        .flat_map(|response| &response.type_table)
-        .filter_map(|entry| match &entry.kind {
-            IndexedTypeShapeKind::Named { name, .. } => name
-                .rsplit(['.', ':'])
-                .next()
-                .filter(|candidate| {
-                    !candidate.is_empty()
-                        && candidate
-                            .bytes()
-                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-                })
-                .map(str::to_owned),
-            _ => None,
-        })
-        .collect::<BTreeSet<_>>();
-    let mut rows = Vec::new();
-    for candidate in candidates {
-        let Some(attributes) = query.get_attributes(name, path.clone(), &candidate) else {
-            continue;
-        };
-        for (ordinal, attribute) in attributes.into_iter().enumerate() {
-            rows.push(MemberRow {
-                class_name: candidate.clone(),
-                ordinal: u64::try_from(ordinal).unwrap_or(u64::MAX),
-                name: attribute.name,
-                kind: attribute.kind,
-                annotation: attribute.annotation,
-                is_final: attribute.is_final,
-            });
-        }
-    }
-    rows
-}
-
 /// One admitted source, transcoded for the checker with indexed exact original boundaries.
 struct CheckerSource {
     text: String,
@@ -1004,7 +964,6 @@ fn coverage_rows(
     type_shapes: usize,
     located_types: usize,
     calls: usize,
-    members: usize,
     diagnostics: usize,
 ) -> Vec<CoverageRow> {
     vec![
@@ -1037,24 +996,6 @@ fn coverage_rows(
                 "NO_STRUCTURAL_CALL_SITE_CENSUS"
             } else {
                 "QUERY_RETURNED_NONE"
-            }),
-            unknown: true,
-        },
-        CoverageRow {
-            family: "members",
-            surface: "Query::get_attributes",
-            requested: 1,
-            completed: u64::from(types_available),
-            emitted: as_u64(members),
-            completeness: if types_available {
-                "partial"
-            } else {
-                "unknown"
-            },
-            remainder: Some(if types_available {
-                "QUERY_REQUIRES_CLASS_NAME_NO_CLASS_CENSUS"
-            } else {
-                "TYPE_TABLE_UNAVAILABLE_FOR_MEMBER_CANDIDATES"
             }),
             unknown: true,
         },
@@ -1392,7 +1333,7 @@ fn member_batch(common: &CommonIdentity<'_>, rows: &[MemberRow]) -> Result<Recor
                 rows.iter().map(|row| Some(row.is_final)),
             )),
             Arc::new(StringArray::from_iter_values(std::iter::repeat_n(
-                "query-type-table-named-candidate",
+                "native-class-field-census",
                 rows.len(),
             ))),
         ],
@@ -2735,6 +2676,11 @@ mod tests {
         assert!(result.proven_rechecked_module_ids.is_empty());
         let module = &result.modules[0];
         assert_eq!(module.relations.len(), PyreflyRelation::ALL.len());
+        assert_eq!(
+            module.relations.iter().map(|relation| relation.relation).collect::<Vec<_>>(),
+            PyreflyRelation::ALL,
+            "module digest order must agree with the daemon's closed relation census"
+        );
         for relation in &module.relations {
             let mut reader = StreamReader::try_new(Cursor::new(&relation.arrow_ipc), None).unwrap();
             assert_eq!(

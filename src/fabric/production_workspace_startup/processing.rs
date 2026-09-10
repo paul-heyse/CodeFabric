@@ -142,6 +142,7 @@ pub(super) fn install(
             "diagnostic-locations",
             "diagnostic-suggestions",
             "types",
+            "members",
             "semantic-references",
             "imports",
         ] {
@@ -383,6 +384,12 @@ fn append_rust_partitions<'a>(
         };
         rows.push(partition);
         rows.push(unsupported_rust_references(partition));
+        rows.push(Partition {
+            family: "members",
+            state: "unavailable",
+            reason: "native_rust_associated_member_census_unavailable",
+            ..partition
+        });
         for (family, relations) in [
             ("types", &[RustcRelation::Type][..]),
             ("semantic-references", &[RustcRelation::HirReference][..]),

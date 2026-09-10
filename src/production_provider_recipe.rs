@@ -986,7 +986,7 @@ fn pyrefly_coverage(
         PyreflyRelation::TypeNode
         | PyreflyRelation::TypeEdge
         | PyreflyRelation::TypeObservation => "structural_types",
-        PyreflyRelation::Member => "members",
+        PyreflyRelation::Member | PyreflyRelation::MemberObservation => "members",
         PyreflyRelation::Diagnostic => "diagnostics",
         PyreflyRelation::AffectedModule => "affected_modules",
         PyreflyRelation::ModuleContext | PyreflyRelation::Coverage => unreachable!(),
@@ -1212,6 +1212,7 @@ const fn pyrefly_authority(relation: PyreflyRelation) -> ProviderAuthorityRole {
         | PyreflyRelation::TypeEdge
         | PyreflyRelation::TypeObservation
         | PyreflyRelation::Member
+        | PyreflyRelation::MemberObservation
         | PyreflyRelation::Coverage => ProviderAuthorityRole::Primary,
     }
 }
@@ -1262,10 +1263,11 @@ const fn pyrefly_upstream_symbol(relation: PyreflyRelation) -> &'static str {
         | PyreflyRelation::LocatedType
         | PyreflyRelation::TypeNode
         | PyreflyRelation::TypeEdge
-        | PyreflyRelation::TypeObservation => "pyrefly::query::Query::get_type_facts_in_file",
+        | PyreflyRelation::TypeObservation
+        | PyreflyRelation::Member
+        | PyreflyRelation::MemberObservation => "pyrefly::query::Query::get_type_facts_in_file",
         PyreflyRelation::CallTarget => "pyrefly::query::Query::get_callees_with_location",
         PyreflyRelation::Reference => "pyrefly::query::Query::get_semantic_references_in_file",
-        PyreflyRelation::Member => "pyrefly::query::Query::get_attributes",
         PyreflyRelation::Diagnostic => "pyrefly::query::Query::add_files",
         PyreflyRelation::AffectedModule => "pyrefly::query::Query::change_files",
         PyreflyRelation::Coverage => "codefabric::pyrefly::coverage",
@@ -2120,6 +2122,38 @@ fn compiled_provider_field_role(
             "start_byte" | "target_start_byte" => Some(BYTE_START_ROLE),
             "end_byte" | "target_end_byte" => Some(BYTE_END_ROLE),
             "callee_kind" => Some(PROVIDER_KIND_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Pyrefly(PyreflyRelation::MemberObservation) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "class_start_byte" | "member_start_byte" => Some(BYTE_START_ROLE),
+            "class_end_byte" | "member_end_byte" => Some(BYTE_END_ROLE),
+            "declared_local_type_index" | "computed_local_type_index" => {
+                Some(RESPONSE_LOCAL_INDEX_ROLE)
+            }
+            "record_kind" | "definition_kind" | "native_kind" => Some(PROVIDER_KIND_ROLE),
+            "annotation_rendering" => Some(RAW_RENDERING_ROLE),
+            "class_ordinal"
+            | "class_name"
+            | "class_expected_members"
+            | "class_census_complete"
+            | "class_unknown_reason"
+            | "member_ordinal"
+            | "member_name"
+            | "annotation_present"
+            | "is_property"
+            | "is_class_var"
+            | "is_final"
+            | "is_abstract"
+            | "descriptor_has_set"
+            | "descriptor_has_delete"
+            | "unknown_reason" => Some(PROVIDER_FACT_ROLE),
             _ => None,
         },
         ProviderRelation::Pyrefly(PyreflyRelation::Member) => match name {

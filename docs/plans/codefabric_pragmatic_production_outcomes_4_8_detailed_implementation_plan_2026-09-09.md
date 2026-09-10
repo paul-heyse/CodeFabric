@@ -980,6 +980,36 @@ full signatures, member extraction and P03 completion remain open. ONT §11/§36
 member evidence to stay distinct from resolved, inherited and descriptor lookup behavior in the
 next member slice.
 
+**P03 native associated-member vertical passes public validation, 2026-09-10.**
+Extend the same declaration census with bounded per-class member observations from native
+`ClassFields`/`KeyClassField` and `ClassField` answers. Preserve raw binding kind, native field
+kind, exact anchors, separate declared/computed type indices, finality, class variables, properties
+and descriptor setter/deleter hooks. The existing dataclass descriptor helpers filter by
+initialization, so a narrow exhaustive native kind/write-hook export supplies query evidence
+without importing that filter. Missing binding/answer fields remain nullable; known empty class
+membership and graph/census limits are explicit. This is associated-field evidence, not a complete
+inherited/effective lookup result. An additive Arrow member relation uses family code 149,
+leaving Rust families 147/148 intact. The old rendered-name candidate discovery is removed;
+legacy display rows derive only known native values. All 41 sidecar cases pass (2.04 s), including
+native descriptor setter/deleter hooks, typed Arrow anchors/nullable flags and census bounds.
+Strict sidecar check/Clippy passes, and the final transport binary is rebuilt. Canonical
+`fact.code_member_observation` joins workspace/context/source/generation/run-scoped class owners
+and declared/computed structural type IDs. Exact member declaration mappings are optional;
+implicit associated fields retain native evidence without invented canonical declarations. Class
+census rows distinguish known empty membership from missing answers. Public `associated member
+observations` accepts canonical and repeated prior-entity subjects; member-processing coverage
+is conservatively per-file.
+
+All 29 affected canonical/query cases pass after adding workspace identity to two synthetic
+anchor fixtures. Native validation first exposed a missing closed processing-family registration,
+then a module digest order mismatch: the additive member stream was sorted before type streams
+were appended. Final relation sorting now follows complete assembly, with a contract regression.
+The final installed Unicode/nested/empty/property/final/class-variable/prior/reopen scenario passes
+in 84.109 s, reads every advertised page and independently verifies Python primitive type identity.
+Default/featureless root checks, affected Clippy, docs, spelling and diff checks pass. STATUS
+records commands/logs and configuration. Owner-specific processing, full signatures, effective
+lookup and Rust member production remain in P03/P06; this vertical does not close P03 or an outcome.
+
 **Next:** remaining first-four scopes/meanings, reusable subject roles and precise dependency
 scope, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.

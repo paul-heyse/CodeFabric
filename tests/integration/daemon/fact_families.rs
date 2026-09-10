@@ -1,6 +1,7 @@
 use super::*;
 
 mod callables;
+mod members;
 
 const FAMILIES: &[(&str, &str, &str, Option<&str>)] = &[
     ("modules", "module metadata", "modules", Some("entity_id")),

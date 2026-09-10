@@ -48,6 +48,34 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The P03 native member continuation after `71353d60` passes installed public validation. Native
+class declarations supply bounded class/member DTOs from exact `KeyClassField` bindings, with
+separate declared/computed type indices into the shared graph, source anchors, final/class-variable/
+property facts and native descriptor setter/deleter hooks. Missing binding/answer fields remain
+nullable. Associated membership census completion is separate from type completeness; inherited
+or effective receiver lookup is not asserted. An additive Arrow member stream (family 149)
+replaces rendered-name candidate discovery; the legacy display relation derives only known native
+values. Canonical `fact.code_member_observation` joins exact workspace/context/source/generation/
+run-scoped owners and structural type IDs. Member declaration mappings remain optional; implicit
+associated fields retain their native evidence. Class census rows distinguish known empty scopes
+from missing native answers. Public `associated member observations` supports canonical and prior
+entity subjects with conservative per-file member-processing coverage.
+
+All 41 sidecar cases pass in 2.04 s (`/tmp/codefabric-p03-members-transport-tests.log`), including
+native descriptor hooks, Arrow anchors/nullable flags and census limits. Strict sidecar check/Clippy
+passes; the final transport binary is rebuilt. All 29 canonical/query cases pass in the combined
+initial run; its native case exposed a missing closed processing-family registration, now fixed.
+The next run exposed differing producer/consumer module digest order after the additive relation.
+Sorting after all native relations are assembled fixes it, with a focused contract regression.
+The final installed Unicode/nested/empty/final/property/class-variable/prior/reopen scenario passes
+in 84.109 s (`/tmp/codefabric-p03-members-native-transport-fixed.log`), reading every advertised
+page and independently constructing the expected Python primitive type identity. Default and
+featureless checks, affected root Clippy, docs, spelling and diff checks pass. The local Pyrefly
+package Clippy invocation succeeds using its cached checked artifact. Validation uses the rebuilt
+sidecar, stable root and delegated user-systemd scope; failed earlier runs remain in `/tmp`.
+Precise owner processing, full signatures, inherited/dispatch/member normalization, Rust member
+production and the remaining P03–P14 scope stay open.
+
 The P03 continuation after `695a51e2` adds a validated declaration-type census inside the existing
 Pyrefly expression-type transaction. Native Ruff AST visitation reaches unused and nested function/
 class declarations; exact native `Key::Definition`/`Answers::get_type_at` lookups seed the same

@@ -57,6 +57,7 @@ pub(super) fn dependencies(pyrefly: bool, rust: super::RustInputs) -> Vec<&'stat
         super::imports::RELATION,
         super::types::OBSERVATION,
         super::types::CALLABLE,
+        super::types::MEMBER,
         super::types::GRAPH,
         super::types::RUST_GRAPH,
         super::DECLARATION,
@@ -360,6 +361,15 @@ fn qualify_references(
                 .or(col("unknown_reason").is_not_null()),
         )?;
     }
+    base = qualify_observation_gaps(
+        base,
+        plan(inputs, super::types::MEMBER)?,
+        "members",
+        "canonical_members_unknown",
+        col("unknown_reason")
+            .is_not_null()
+            .or(col("owner_entity_id").is_null()),
+    )?;
     if rust.types {
         base = qualify_observation_gaps(
             base,

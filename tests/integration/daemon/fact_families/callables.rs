@@ -5,7 +5,7 @@ use codefabric::identity::{
 };
 use std::fmt::Write as _;
 
-fn primitive(owner: &Value, language: &str) -> String {
+pub(super) fn primitive(owner: &Value, language: &str) -> String {
     let text = |value: &str| CbefValue::Utf8 {
         value: value.to_owned(),
         normalization: StringNormalization::None,

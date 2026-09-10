@@ -34,10 +34,14 @@ pub(super) fn collect(context: &TypeShapeContext, body: &[Stmt], graph: &mut Gra
         // Use the indexed export-boundary answer directly, avoiding a position-based AST search
         // for every declaration and preserving its definition-linked type through decorators.
         let key = Key::Definition(ShortIdentifier::new(name));
-        if let Some(index) = bindings.key_to_idx_hashed_opt(Hashed::new(&key))
-            && let Some(ty) = answers.get_type_at(index)
-        {
-            graph.index(context, &ty);
+        let ty = bindings
+            .key_to_idx_hashed_opt(Hashed::new(&key))
+            .and_then(|index| answers.get_type_at(index));
+        if let Some(ty) = &ty {
+            graph.index(context, ty);
+        }
+        if matches!(statement, Stmt::ClassDef(_)) {
+            super::members::collect(context, name, ty.as_ref(), &bindings, &answers, graph);
         }
     };
     let mut visitor = Declarations {

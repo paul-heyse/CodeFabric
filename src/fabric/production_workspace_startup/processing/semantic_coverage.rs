@@ -72,6 +72,7 @@ pub(super) fn index(
                     "semantic_references" => "semantic-references",
                     "import_resolution" => "imports",
                     "structural_types" => "types",
+                    "members" => "members",
                     _ => continue,
                 };
                 let file = decode_public_id(IdentityDomain::SourceFile, None, files.value(row))
@@ -106,7 +107,13 @@ pub(super) fn append<'a>(
     index: &CoverageIndex,
     publication: super::super::PublicationStage,
 ) {
-    for family in ["modules", "semantic-references", "imports", "types"] {
+    for family in [
+        "modules",
+        "semantic-references",
+        "imports",
+        "types",
+        "members",
+    ] {
         let mut semantic = Partition {
             family,
             ..partition
@@ -117,6 +124,8 @@ pub(super) fn append<'a>(
                 run,
                 if family == "modules" {
                     PyreflyRelation::ModuleContext.relation_id()
+                } else if family == "members" {
+                    PyreflyRelation::MemberObservation.relation_id()
                 } else if family == "types" {
                     PyreflyRelation::TypeNode.relation_id()
                 } else {

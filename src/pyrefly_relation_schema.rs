@@ -36,10 +36,11 @@ pub enum PyreflyRelation {
     TypeNode = 144,
     TypeEdge = 145,
     TypeObservation = 146,
+    MemberObservation = 149,
 }
 
 impl PyreflyRelation {
-    pub(crate) const ALL: [Self; 14] = [
+    pub(crate) const ALL: [Self; 15] = [
         Self::ModuleContext,
         Self::TypeShape,
         Self::TypeComponent,
@@ -54,6 +55,7 @@ impl PyreflyRelation {
         Self::TypeNode,
         Self::TypeEdge,
         Self::TypeObservation,
+        Self::MemberObservation,
     ];
 
     #[must_use]
@@ -78,6 +80,7 @@ impl PyreflyRelation {
             Self::TypeNode => "provider.pyrefly.type_node.v1",
             Self::TypeEdge => "provider.pyrefly.type_edge.v1",
             Self::TypeObservation => "provider.pyrefly.type_observation.v1",
+            Self::MemberObservation => "provider.pyrefly.member_observation.v1",
         }
     }
 
@@ -184,6 +187,10 @@ impl PyreflyRelation {
         )
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "closed typed schemas keep each relation field order together"
+    )]
     fn field_specs(self) -> Vec<FieldSpec> {
         let mut fields = common_fields();
         let specific = match self {
@@ -259,6 +266,33 @@ impl PyreflyRelation {
                 utf8("annotation_representation", false),
                 bool_field("is_final", false),
                 utf8("discovery_basis", false),
+            ],
+            Self::MemberObservation => vec![
+                utf8("record_kind", false),
+                u64_field("class_ordinal", false),
+                utf8("class_name", false),
+                u64_field("class_start_byte", false),
+                u64_field("class_end_byte", false),
+                u64_field("class_expected_members", true),
+                bool_field("class_census_complete", false),
+                utf8("class_unknown_reason", true),
+                u64_field("member_ordinal", true),
+                utf8("member_name", true),
+                u64_field("member_start_byte", true),
+                u64_field("member_end_byte", true),
+                utf8("definition_kind", true),
+                utf8("native_kind", true),
+                u64_field("declared_local_type_index", true),
+                u64_field("computed_local_type_index", true),
+                bool_field("annotation_present", true),
+                bool_field("is_property", true),
+                bool_field("is_class_var", true),
+                bool_field("is_final", true),
+                bool_field("is_abstract", true),
+                bool_field("descriptor_has_set", true),
+                bool_field("descriptor_has_delete", true),
+                utf8("annotation_rendering", true),
+                utf8("unknown_reason", true),
             ],
             Self::Diagnostic => vec![
                 u64_field("diagnostic_ordinal", false),

@@ -1,6 +1,7 @@
 //! Canonical structural types and source propositions over admitted native type graphs.
 
 mod callable;
+mod members;
 mod normalize;
 mod rust;
 mod udf;
@@ -22,6 +23,7 @@ pub(super) const RUST_GRAPH: &str = rust::GRAPH;
 pub(super) const TYPE: &str = "fact.code_type";
 pub(super) const OBSERVATION: &str = "fact.code_type_observation";
 pub(super) const COMPONENT: &str = "fact.code_type_component";
+pub(super) const MEMBER: &str = "fact.code_member_observation";
 pub(super) const CALLABLE: &str = "fact.code_callable_type";
 
 #[derive(Clone, Copy)]
@@ -55,6 +57,7 @@ pub(super) enum Relation {
     Observation,
     Component,
     Callable,
+    Member,
 }
 
 impl Relation {
@@ -66,12 +69,14 @@ impl Relation {
             Self::Observation => OBSERVATION,
             Self::Component => COMPONENT,
             Self::Callable => CALLABLE,
+            Self::Member => MEMBER,
         }
     }
 
     pub fn fields(self) -> Vec<FieldSpec> {
         match self {
             Self::Callable => callable::fields(),
+            Self::Member => members::fields(),
             Self::Graph => graph::fields(),
             Self::RustGraph => rust::fields(),
             Self::Type => vec![
@@ -135,6 +140,18 @@ impl Relation {
 
     pub fn dependencies(self, available: Inputs) -> Vec<&'static str> {
         let mut result = match self {
+            Self::Member => {
+                let mut dependencies = vec![DECLARATION];
+                if available.python {
+                    dependencies.extend([
+                        SOURCE,
+                        RUN,
+                        GRAPH,
+                        PyreflyRelation::MemberObservation.relation_id(),
+                    ]);
+                }
+                dependencies
+            }
             Self::Callable => {
                 let mut dependencies = vec![DECLARATION, OBSERVATION];
                 if available.python {
@@ -200,6 +217,7 @@ impl Relation {
     ) -> Result<LogicalPlan, TransformationPlanError> {
         match self {
             Self::Callable => callable::build(inputs, available.python),
+            Self::Member => members::build(inputs, available.python),
             Self::Graph if available.python => graph::build(inputs),
             Self::Graph => empty(self.fields()),
             Self::RustGraph => rust::build(workspace, inputs, available.rust),

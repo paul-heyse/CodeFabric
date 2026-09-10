@@ -31,6 +31,8 @@ use crate::binding::binding::KeyUndecoratedFunctionRange;
 use ruff_text_size::Ranged;
 
 mod declarations;
+mod members;
+pub use members::{NativeClassMembers, NativeMember};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeTypeKind {
@@ -107,6 +109,8 @@ pub struct NativeTypeGraph {
     pub nodes: Vec<NativeTypeNode>,
     pub types: Vec<NativeTypeOccurrence>,
     pub complete: bool,
+    pub classes: Vec<NativeClassMembers>,
+    pub member_census_complete: bool,
 }
 
 pub struct TypeFactsResponseData {
@@ -163,6 +167,8 @@ impl Query {
                 nodes: structural.nodes,
                 types: native,
                 complete: structural.complete,
+                classes: structural.classes,
+                member_census_complete: structural.member_census_complete,
             },
         })
     }
@@ -174,6 +180,9 @@ struct GraphBuilder {
     nodes: Vec<NativeTypeNode>,
     maximum_nodes: usize,
     complete: bool,
+    classes: Vec<NativeClassMembers>,
+    member_rows: usize,
+    member_census_complete: bool,
 }
 
 impl GraphBuilder {
@@ -184,6 +193,9 @@ impl GraphBuilder {
             nodes: vec![],
             maximum_nodes,
             complete: true,
+            classes: vec![],
+            member_rows: 0,
+            member_census_complete: true,
         }
     }
 

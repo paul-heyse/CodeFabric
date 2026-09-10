@@ -172,6 +172,10 @@ pub(super) fn install(
             relation: types::Relation::Callable,
             inputs: types::Inputs::new(pyrefly, rust),
         },
+        Kind::Type {
+            relation: types::Relation::Member,
+            inputs: types::Inputs::new(pyrefly, rust),
+        },
         Kind::Diagnostic {
             pyrefly,
             rust: rust.diagnostics.primary,
@@ -1576,6 +1580,7 @@ mod tests {
             "fact.code_type_observation",
             "fact.code_type_component",
             "fact.code_callable_type",
+            "fact.code_member_observation",
             "system.canonical_python_type_graph",
             "fact.code_call_site",
         ] {

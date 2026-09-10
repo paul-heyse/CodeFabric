@@ -65,6 +65,7 @@ async fn fixture(generation: u64, run: u8, context: u8) -> datafusion::prelude::
         DECLARATION,
         vec![
             ("entity_id", ids16(&[70, 80, 81, 99])),
+            ("workspace_id", ids16(&[6; 4])),
             ("context_id", ids16(&[context, context, context, 99])),
             ("file_id", ids16(&[8; 4])),
             ("content_digest", digests(&[17; 4])),

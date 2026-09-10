@@ -80,6 +80,13 @@ pub(crate) const FAMILIES: &[Family] = &[
         keys: Some(("owner_entity_id", "entity_id")),
     },
     Family {
+        slug: "members",
+        relation: "fact.code_member_observation",
+        meaning: "associated member observations",
+        coverage: "members",
+        keys: Some(("owner_entity_id", "entity_id")),
+    },
+    Family {
         slug: "diagnostics",
         relation: "fact.code_diagnostic",
         meaning: "diagnostic messages in analysis contexts",

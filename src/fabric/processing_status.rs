@@ -33,6 +33,7 @@ pub(crate) fn canonical_processing_family(value: &str) -> Option<&'static str> {
         "syntax-nodes" => Some("syntax-nodes"),
         "imports" => Some("imports"),
         "types" => Some("types"),
+        "members" => Some("members"),
         "diagnostic-messages" => Some("diagnostic-messages"),
         "diagnostic-children" => Some("diagnostic-children"),
         "diagnostic-locations" => Some("diagnostic-locations"),
