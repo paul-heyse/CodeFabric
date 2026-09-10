@@ -34,6 +34,7 @@ use crate::rustc_relation_schema::RustcRelation;
 
 mod call_selector;
 mod calls;
+mod diagnostics;
 mod processing;
 mod python_calls;
 mod relationship_selector;
@@ -46,6 +47,7 @@ pub(super) struct RustInputs {
     declarations: bool,
     calls: bool,
     pub bodies: bool,
+    diagnostics: diagnostics::Inputs,
 }
 
 impl RustInputs {
@@ -60,6 +62,7 @@ impl RustInputs {
                 && relations.contains(&RustcRelation::Call)
                 && relations.contains(&RustcRelation::MirTerminator),
             bodies: declarations && relations.contains(&RustcRelation::MirBody),
+            diagnostics: diagnostics::Inputs::from_relations(&relations),
         }
     }
 }
@@ -100,6 +103,26 @@ pub(super) fn install(
             rust: rust.declarations,
         },
         Kind::Reference { python },
+        Kind::Diagnostic {
+            pyrefly,
+            rust: rust.diagnostics.primary,
+        },
+        Kind::DiagnosticDetail {
+            detail: diagnostics::Detail::Child,
+            available: rust.diagnostics.details[0],
+        },
+        Kind::DiagnosticDetail {
+            detail: diagnostics::Detail::Span,
+            available: rust.diagnostics.details[1],
+        },
+        Kind::DiagnosticDetail {
+            detail: diagnostics::Detail::Suggestion,
+            available: rust.diagnostics.details[2],
+        },
+        Kind::DiagnosticDetail {
+            detail: diagnostics::Detail::Edit,
+            available: rust.diagnostics.details[3],
+        },
         Kind::CallSite {
             python,
             rust: rust.calls,
@@ -134,6 +157,14 @@ enum Kind {
     },
     Reference {
         python: bool,
+    },
+    Diagnostic {
+        pyrefly: bool,
+        rust: bool,
+    },
+    DiagnosticDetail {
+        detail: diagnostics::Detail,
+        available: bool,
     },
     CallSite {
         python: bool,
@@ -172,6 +203,16 @@ impl Canonical {
                 processing::dependencies(pyrefly, rust),
             ),
             Kind::Source => (SOURCE, source_fields(), vec![INPUT]),
+            Kind::Diagnostic { pyrefly, rust } => (
+                diagnostics::RELATION,
+                diagnostics::fields(),
+                diagnostics::dependencies(pyrefly, rust),
+            ),
+            Kind::DiagnosticDetail { detail, available } => (
+                detail.relation(),
+                detail.fields(),
+                detail.dependencies(available),
+            ),
             Kind::Declaration { python, rust } => (
                 DECLARATION,
                 declaration_fields(),
@@ -266,6 +307,9 @@ impl Canonical {
         }
         if matches!(kind, Kind::CallSite { .. }) {
             output = output.with_semantic_role("canonical.call-site");
+        }
+        if matches!(kind, Kind::Diagnostic { .. }) {
+            output = output.with_semantic_role("canonical.diagnostic");
         }
         let identity =
             *blake3::hash(format!("codefabric.canonical-code.v1:{id}").as_bytes()).as_bytes();
@@ -545,6 +589,10 @@ impl ProgrammaticTransformation for Canonical {
             Kind::RelationshipSelector => relationship_selector::build(inputs),
             Kind::SourceContext { python, rust } => source_context::build(inputs, python, rust),
             Kind::Source => self.source(inputs),
+            Kind::Diagnostic { pyrefly, rust } => {
+                diagnostics::build(self.workspace, inputs, pyrefly, rust)
+            }
+            Kind::DiagnosticDetail { detail, available } => detail.build(inputs, available),
             Kind::Reference { python: true } => self.references(inputs),
             Kind::Reference { python: false } => empty(reference_fields()),
             Kind::CallSite {
@@ -1007,6 +1055,7 @@ fn source_occurrence_id(workspace: [u8; 16], name: &str, kind: u16, family: u16)
 
 #[cfg(test)]
 mod tests {
+    mod diagnostics;
     use super::*;
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig};
     use crate::fabric::programmatic_schema::ProviderInput;
@@ -1367,6 +1416,11 @@ mod tests {
             "fact.code_entity",
             "fact.code_declaration",
             "fact.code_reference",
+            "fact.code_diagnostic",
+            "fact.code_diagnostic_child",
+            "fact.code_diagnostic_span",
+            "fact.code_diagnostic_suggestion",
+            "fact.code_diagnostic_edit",
             "fact.code_call_site",
         ] {
             let batches = context.table(table).await.unwrap().collect().await.unwrap();

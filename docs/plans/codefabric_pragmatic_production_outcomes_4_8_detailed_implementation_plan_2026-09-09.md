@@ -1,6 +1,6 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `126cf71f`; the diagnostic checkpoint was `4cc74d7c`. Design and remaining work expanded against `d6d1369b` and committed in `b2a97b9c`. Package execution resumed under the subsequent user instruction. Updated 2026-09-10 with P01's initial captured dependency/context vertical and phase measurements.
+Created 2026-09-09 against `126cf71f`; the diagnostic checkpoint was `4cc74d7c`. Design and remaining work expanded against `d6d1369b` and committed in `b2a97b9c`. Package execution resumed under the subsequent user instruction. Updated 2026-09-10 with P01's initial captured dependency/context vertical and phase measurements, and P02's canonical diagnostic/coverage slice.
 
 This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Execute the cross-cutting packages in §3.3 order. The status notes distinguish demonstrated behavior and remaining acceptance; writing or updating this plan is not implementation evidence.
 
@@ -355,7 +355,29 @@ workspace. Physical external-root registration/fetching, complete ecosystem iden
 source freezing, full Cargo unit/effective-configuration closure, raw argv, retained caches/checkers/
 parsers and cost-aware concurrency remain in 4A–4C/P04/P06/8E. The existing immutable input and
 provider contracts carry the new roots; full retention and scheduling acceptance is still required.
-P02 is the next package. No outcome from 4 through 8 is complete.
+P02 is in progress. No outcome from 4 through 8 is complete.
+
+**P02 diagnostic slice implemented, 2026-09-10; package exit remains open.** Native DataFusion
+plans publish canonical primary messages for Python/Rust and Rust's child/span/suggestion/edit
+hierarchy. Exact provider-run, owner-file, digest and generation joins fence message validity;
+independent location joins additionally enforce captured byte bounds. Invalidated locations retain
+native evidence without canonical source coordinates. CBEF message identity separates unchanged
+content/context from execution run and generation. Python rendered diagnostics preserve their
+explicit lack of structured fields.
+
+Requested diagnostic messages, locations and suggestions have separate processing partitions.
+Failed Rust targets retain positive messages with failed/incomplete coverage; Python structured
+details are unsupported. Empty source-only relations and the closed processing validator support
+fresh activation. A real failed Rust target plus Python type error passes exact canonical/raw
+message comparison and Delta reopen of all five relations (46.95 s); independent Arrow cases cover
+stale owners, cross-file locations, invalidated ranges and stable IDs. `canonical-diagnostics`
+selects the native scenario. STATUS records checks and remaining scope.
+
+Continue P02 with canonical types/imports/semantic references, scoped requested coverage and family
+selection. Pyrefly's existing deduplicated shape table erases some native type distinctions; extend
+the typed native query boundary and reuse the application's type interner, without promoting display
+strings or 64-bit provider hashes to canonical type identity. This does not defer or close any of
+P02's required semantic verticals. P03–P14 remain in the table's order.
 
 ### 3.4 Compatibility and removal rules
 
@@ -564,6 +586,10 @@ choosing more checker contexts or finer extraction.
 **Current status — partial, committed.** Native DataFusion constructs captured source, Python/Rust entities/declarations, function selectors, Python lexical references and both languages' call occurrences. Exact Python checker anchors and Rust stable keys resolve selected targets; unknown and unmapped calls remain explicit. Schema nullability refinement and exact ID/storage restoration work. Imports/exports, semantic references, structural types/propositions, members/signatures, complete dispatch/instances, module/lambda entities, external/generated endpoints and edit-time identity/authority remain. The validated call selector is a query projection, not completion of these families.
 
 **Surfaces:** `src/production_provider_recipe.rs`, `src/provider_admission.rs`, `src/programmatic_derived_analysis.rs`, `src/schema_contract.rs`, programmatic relation builders and startup publication.
+
+The P02 diagnostic continuation adds canonical Python/Rust messages, Rust child/span/suggestion/edit
+relations and separate requested diagnostic coverage. Exact native-provider publication and reopen
+are exercised; public diagnostic family selection and the other semantic clusters below remain open.
 
 1. Route raw source/syntax, Pyrefly and rustc outputs into typed canonical entity, occurrence, declaration, binding, reference, import/export, type, member, callable, call-site and dispatch relations. Preserve raw relations alongside normalized facts.
 2. Join ranges on `(file_id, content_digest, start_byte, end_byte)` and semantic role. Use exact matches first; a permitted containment/overlap rule records method and ambiguity. Never match unrelated declarations just because their ranges coincide.
@@ -1660,7 +1686,8 @@ P01–P14 register entries. These checks validate the planning artifact, not pro
 
 Implementation resumed from `b2a97b9c` under the user's instruction to execute §3.3 package by
 package across outcomes 4–8. P01's initial dependency/context vertical and phase costs are now
-implemented and exercised, with the limits recorded in §3.3 and STATUS. P02 is next.
+implemented and exercised, with the limits recorded in §3.3 and STATUS. P02's canonical diagnostic
+and coverage slice is implemented; its types/imports/semantic references and family selection remain.
 
 Continue using §3.3 as the integrated order:
 

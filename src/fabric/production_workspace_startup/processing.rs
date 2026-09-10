@@ -38,19 +38,7 @@ pub(super) fn install(
     targets: &[RustTargetProgress],
     publication: super::PublicationStage,
 ) -> Result<(), ProductionWorkspaceStartupError> {
-    let python = runs
-        .iter()
-        .filter_map(|run| {
-            if run.job().lane() != ProviderLane::Ruff {
-                return None;
-            }
-            let ProviderSourceSelection::File { file_id, .. } = run.job().source().selection()
-            else {
-                return None;
-            };
-            Some((*file_id, run))
-        })
-        .collect::<BTreeMap<_, _>>();
+    let python = ruff_by_file(runs);
     let pyrefly = pyrefly_by_file(runs);
     let mut rows = Vec::new();
     let mut rust_requested = false;
@@ -99,6 +87,12 @@ pub(super) fn install(
         };
         rows.push(partition);
         rows.push(python_references(partition, run));
+        append_python_diagnostics(
+            &mut rows,
+            partition,
+            file.and_then(|id| pyrefly.get(&id).copied()),
+            publication,
+        );
         let mut calls = Partition {
             family: "call-targets",
             ..partition
@@ -128,6 +122,16 @@ pub(super) fn install(
             ..partition
         });
         rows.push(unsupported_rust_references(partition));
+        for family in [
+            "diagnostic-messages",
+            "diagnostic-locations",
+            "diagnostic-suggestions",
+        ] {
+            rows.push(Partition {
+                family,
+                ..partition
+            });
+        }
     }
     register(builder, inventory, &rows)
 }
@@ -155,6 +159,61 @@ fn undiscovered_rust_partition(publication: super::PublicationStage) -> Partitio
             "cargo_context_preparation_incomplete"
         },
     }
+}
+
+fn append_python_diagnostics<'a>(
+    rows: &mut Vec<Partition<'a>>,
+    partition: Partition<'a>,
+    run: Option<&AdmittedProviderResult>,
+    publication: super::PublicationStage,
+) {
+    let mut message = Partition {
+        family: "diagnostic-messages",
+        ..partition
+    };
+    if message.file.is_some() {
+        (message.state, message.reason) = family_state(
+            run,
+            crate::pyrefly_service::PyreflyRelation::Diagnostic.relation_id(),
+        );
+        message.context = run.map(|run| run.job().context().analysis_context_id());
+        if publication == super::PublicationStage::Source && message.reason == "provider_not_run" {
+            message.state = "pending";
+            message.reason = "semantic_work_pending";
+        }
+    }
+    rows.push(message);
+    for family in ["diagnostic-locations", "diagnostic-suggestions"] {
+        rows.push(Partition {
+            family,
+            state: if message.file.is_some() {
+                "unsupported"
+            } else {
+                message.state
+            },
+            reason: if message.file.is_some() {
+                "pyrefly_structured_diagnostics_unavailable"
+            } else {
+                message.reason
+            },
+            ..message
+        });
+    }
+}
+
+fn ruff_by_file(runs: &[AdmittedProviderResult]) -> BTreeMap<[u8; 16], &AdmittedProviderResult> {
+    runs.iter()
+        .filter_map(|run| {
+            if run.job().lane() != ProviderLane::Ruff {
+                return None;
+            }
+            let ProviderSourceSelection::File { file_id, .. } = run.job().source().selection()
+            else {
+                return None;
+            };
+            Some((*file_id, run))
+        })
+        .collect()
 }
 
 fn pyrefly_by_file(runs: &[AdmittedProviderResult]) -> BTreeMap<[u8; 16], &AdmittedProviderResult> {
@@ -233,6 +292,38 @@ fn append_rust_partitions<'a>(
         };
         rows.push(partition);
         rows.push(unsupported_rust_references(partition));
+        for (family, relations) in [
+            ("diagnostic-messages", &[RustcRelation::Diagnostic][..]),
+            (
+                "diagnostic-locations",
+                &[RustcRelation::Diagnostic, RustcRelation::DiagnosticSpan][..],
+            ),
+            (
+                "diagnostic-suggestions",
+                &[
+                    RustcRelation::Diagnostic,
+                    RustcRelation::DiagnosticSuggestion,
+                    RustcRelation::DiagnosticEdit,
+                ][..],
+            ),
+        ] {
+            let mut diagnostic = Partition {
+                family,
+                ..partition
+            };
+            // Failed compilation may have accepted diagnostic output without declarations or MIR.
+            if run.is_some() {
+                (diagnostic.state, diagnostic.reason) = ("complete", "");
+                for relation in relations {
+                    let state = family_state(run, relation.relation_id());
+                    if state.0 != "complete" {
+                        (diagnostic.state, diagnostic.reason) = state;
+                        break;
+                    }
+                }
+            }
+            rows.push(diagnostic);
+        }
         let mut calls = Partition {
             family: "call-targets",
             ..partition

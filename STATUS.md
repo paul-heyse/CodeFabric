@@ -2,7 +2,8 @@
 
 Updated 2026-09-10 from the canonical `/home/paul/CodeFabric` working tree on `master`.
 Implementation has resumed from `b2a97b9c` in the detailed plan's P01–P14 package order, as requested.
-The latest changes implement P01's initial captured dependency/context vertical and phase costs.
+P01's initial captured dependency/context vertical and phase costs are committed in `a31e2a3a`.
+P02 is in progress; its canonical diagnostic message/detail and coverage slice is implemented.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -36,6 +37,59 @@ The call-query continuation present at session start was preserved, exercised an
 `5964e5ff`. The full plan remains unfinished. No outcome from 4 through 8 is closed. Implementation
 originally stopped at the diagnostic checkpoint. The subsequent user instruction resumes execution
 of the cross-cutting packages in §3.3 of the detailed plan.
+
+## P02 in progress: canonical diagnostics and scoped coverage
+
+The daemon now publishes `fact.code_diagnostic` for accepted Python and Rust messages, plus
+`fact.code_diagnostic_child`, `fact.code_diagnostic_span`, `fact.code_diagnostic_suggestion` and
+`fact.code_diagnostic_edit` for Rust's native hierarchy. Raw provider relations remain available.
+Native DataFusion joins bind messages to exact provider runs, compilation/module owners, captured
+source digests and generations. Application CBEF diagnostic IDs exclude provider-run and generation
+identities; identical content under the same effective context retains its ID.
+
+Diagnostic ownership and source locations are separate. A Rust span or edit gains canonical source
+coordinates only when its location file, digest, generation and byte bounds match captured source.
+Unmapped/invalidated locations keep native paths/ranges and an explicit state; they never borrow the
+compilation owner's location. Python's current checker API supplies rendered messages, so severity,
+code, locations and suggestions are not parsed or invented from text. Structured availability and
+provider authority stay visible.
+
+Requested processing includes separate `diagnostic-messages`, `diagnostic-locations` and
+`diagnostic-suggestions` partitions. Source-only epochs disclose pending messages. Python structured
+details are explicitly unsupported. A failed Cargo target retains accepted positive diagnostic rows
+and failed/incomplete target coverage; those rows cannot establish the absence of further diagnostics
+or completion of declarations/MIR. The processing snapshot's closed family validator accepts these
+new families on activation and reopen.
+
+Validation on 2026-09-10 includes a real failed Rust target plus a Python type error, independently
+expected `E0425` and source bytes 22–38, canonical/raw message equality, explicit coverage and exact
+Delta reopen of all five diagnostic relations (46.95 s). Synthetic Arrow inputs independently cover
+stale owner bytes/generations, a location in another file, invalidated and out-of-bounds locations,
+unchanged IDs under different run/generation identities, and empty-provider installation. Use the
+`canonical-diagnostics` product-golden selector for the real scenario. The final affected run passes
+12 canonical/processing and real-provider cases, including partial Rust target failure (94.11 s
+total; `/tmp/codefabric-p02-diagnostic-final-tests.log`). It uses `just root-test-incremental` with
+selectors `production_workspace_startup::canonical::tests::`, `processing_status::tests::`,
+`pragmatic_all_rust_targets_failed_retains_diagnostics_and_source` and
+`pragmatic_rust_target_failure_retains_other_targets`, under the P01 delegated user-systemd test
+scope and the existing sidecar/extractor binaries. The same native/reopen diagnostic case took
+62.15 s during that parallel run; timings are not performance comparisons.
+
+Tooling golden selection passes (1 case, 215 deselected); focused tooling lint/format, document
+navigation, spelling and `git diff --check` pass. Default and featureless `just root-check` pass
+(`/tmp/codefabric-p02-diagnostic-root-check.log`); all-target Clippy completes with the existing
+repository warning backlog and no warnings in the new diagnostic modules or modified processing
+paths (`/tmp/codefabric-p02-diagnostic-clippy-final.jsonl`). Strict repository lint is not claimed.
+Initial checks caught and corrected empty-plan
+dependency declarations, the closed processing-family validator and a test that incorrectly expected
+complete coverage for a failed Cargo target. No full-suite, doctest or all-family public-query
+completion is claimed.
+
+The DataFusion and code-facts reference skills guided typed logical joins and native diagnostic
+authority. P02 remains open for structural types, imports, semantic references, their complete
+coverage and public family selection. Pyrefly's current type-shape export collapses native
+distinctions; extend its typed query seam before using those observations as canonical type IDs.
+P03–P14 remain required in package order. No outcome is closed by this diagnostic slice.
 
 ## P01: captured dependency contexts and initial phase costs
 
@@ -93,7 +147,7 @@ This delivers P01's first external-input vertical using deliberately captured de
 inside the authorized workspace. Separate external filesystem-root registration/fetching, full
 package/distribution identity, generated `OUT_DIR` freezing, effective Cargo unit/config closure,
 byte-safe compiler argv, retained providers/caches and measured shared scheduling remain in their
-4A–4C/P04/P06/8E slices. Next is P02 canonical semantic normalization and scoped coverage.
+4A–4C/P04/P06/8E slices. P02 canonical semantic normalization and scoped coverage is in progress.
 
 ## Detailed plan expansion, 2026-09-09
 

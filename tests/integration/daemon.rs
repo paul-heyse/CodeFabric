@@ -3108,6 +3108,7 @@ fn pragmatic_all_rust_targets_failed_retains_diagnostics_and_source() {
         "pub fn unresolved() { missing_function(); }\n",
     )
     .unwrap();
+    fs::write(workspace.join("diagnostic.py"), "value: int = 'wrong'\n").unwrap();
     let supervisor = fixture.start_supervisor();
     let names = canonical_entity_names(&fixture);
     assert!(names.iter().all(|(language, _)| language == "python"));
@@ -3159,7 +3160,78 @@ fn pragmatic_all_rust_targets_failed_retains_diagnostics_and_source() {
             .iter()
             .all(|state| state == Some("unavailable"))
     }));
+    assert_canonical_diagnostics_and_reopen(&fixture, supervisor);
+}
+
+#[cfg(target_os = "linux")]
+fn assert_canonical_diagnostics_and_reopen(
+    fixture: &ProductionFixture,
+    supervisor: RunningSupervisor,
+) {
+    let messages = canonical_diagnostic_rows(fixture, "fact.code_diagnostic");
+    assert!(messages.iter().any(|row| row["language"] == "python"
+        && row["structured_fields_available"] == false
+        && row["code"].is_null()
+        && row["severity"].is_null()
+        && row["authority"] == "pyrefly-rendered-diagnostic"));
+    let spans = canonical_diagnostic_rows(fixture, "fact.code_diagnostic_span");
+    assert!(
+        spans
+            .iter()
+            .any(|row| row["location_state"] == "captured-source"
+                && row["is_primary"] == true
+                && row["start_byte"] == 22
+                && row["end_byte"] == 38)
+    );
+    let coverage = canonical_diagnostic_rows(fixture, "system.entity_processing_scope");
+    assert!(
+        coverage.iter().any(|row| row["language"] == "rust"
+            && row["family"] == "diagnostic-messages"
+            && row["processing_state"] == "failed"
+            && row["reason"] == "provider_failed"),
+        "closed positive diagnostic rows do not certify the entire failed target"
+    );
+    assert!(coverage.iter().any(|row| row["language"] == "python"
+        && row["family"] == "diagnostic-locations"
+        && row["processing_state"] == "unsupported"));
+    let selected = wait_for_semantic_activation(fixture);
+    let details = ["child", "span", "suggestion", "edit"].map(|kind| {
+        let relation = format!("fact.code_diagnostic_{kind}");
+        let rows = canonical_diagnostic_rows(fixture, &relation);
+        (relation, rows)
+    });
     supervisor.stop();
+    let supervisor = fixture.start_supervisor();
+    assert_eq!(
+        selected.table_versions(),
+        wait_for_semantic_activation(fixture).table_versions()
+    );
+    assert_eq!(
+        messages,
+        canonical_diagnostic_rows(fixture, "fact.code_diagnostic")
+    );
+    for (relation, rows) in details {
+        assert_eq!(rows, canonical_diagnostic_rows(fixture, &relation));
+    }
+    supervisor.stop();
+}
+
+#[cfg(target_os = "linux")]
+fn canonical_diagnostic_rows(
+    fixture: &ProductionFixture,
+    relation: &str,
+) -> Vec<serde_json::Value> {
+    let batches = fresh_activation_relation_batches(fixture, relation);
+    let mut writer = arrow::json::WriterBuilder::new()
+        .with_explicit_nulls(true)
+        .build::<_, arrow::json::writer::JsonArray>(Vec::new());
+    writer
+        .write_batches(&batches.iter().collect::<Vec<_>>())
+        .unwrap();
+    writer.finish().unwrap();
+    let mut rows: Vec<serde_json::Value> = serde_json::from_slice(&writer.into_inner()).unwrap();
+    rows.sort_by_cached_key(serde_json::Value::to_string);
+    rows
 }
 
 #[cfg(target_os = "linux")]
@@ -3424,14 +3496,49 @@ fn rust_semantics_publication(dependency: Option<RustFixtureDependency>, with_fa
 
 #[cfg(target_os = "linux")]
 fn assert_structured_rust_failure_diagnostics(fixture: &ProductionFixture) {
+    let canonical = canonical_rust_diagnostic_messages(fixture);
+    assert_eq!(canonical, rust_diagnostic_messages(fixture));
     assert!(
-        rust_diagnostic_messages(fixture)
+        canonical
             .iter()
             .any(|(code, severity, message)| code == "E0425"
                 && severity == "error"
                 && message.contains("missing_function")),
         "the broken target must retain its structured compiler diagnostic"
     );
+}
+
+#[cfg(target_os = "linux")]
+fn canonical_rust_diagnostic_messages(
+    fixture: &ProductionFixture,
+) -> Vec<(String, String, String)> {
+    let mut diagnostics = Vec::new();
+    for batch in fresh_activation_relation_batches(fixture, "fact.code_diagnostic") {
+        let strings = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap()
+        };
+        for row in 0..batch.num_rows() {
+            if strings("language").value(row) == "rust" {
+                diagnostics.push((
+                    strings("code").value(row).to_owned(),
+                    strings("severity").value(row).to_owned(),
+                    strings("message").value(row).to_owned(),
+                ));
+                assert_eq!(
+                    strings("authority").value(row),
+                    "rustc-structured-diagnostic"
+                );
+                assert!(!batch.column_by_name("diagnostic_id").unwrap().is_null(row));
+            }
+        }
+    }
+    diagnostics.sort();
+    diagnostics
 }
 
 #[cfg(target_os = "linux")]
