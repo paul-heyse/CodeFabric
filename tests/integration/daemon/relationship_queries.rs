@@ -192,6 +192,150 @@ fn relationships(fixture: &ProductionFixture, stack: &InstalledProductionStack, 
     );
 }
 
+#[allow(clippy::too_many_lines)]
+fn find_occurrences(fixture: &ProductionFixture, stack: &InstalledProductionStack, phase: &str) {
+    for (language, label) in [("python", "Python"), ("rust", "Rust")] {
+        let families = [
+            (
+                "calls",
+                "call",
+                "call occurrences",
+                "call targets",
+                "fact.code_call_site",
+                "call_site_id",
+                "call-targets",
+            ),
+            (
+                "references",
+                "reference",
+                "semantic reference occurrences",
+                "semantic references",
+                "fact.code_semantic_reference",
+                "reference_id",
+                "semantic-references",
+            ),
+            (
+                "imports",
+                "import-occurrence",
+                "import occurrences",
+                "imports",
+                "fact.code_import",
+                "import_id",
+                "imports",
+            ),
+        ];
+        let mut queries = vec![];
+        for (query, _, phrase, meaning, _, _, _) in families {
+            queries.push(json!({"request":"find code entities","query_id":query,"looking_for":format!("{label} {phrase}")}));
+            queries.push(json!({"request":"follow code relationships","query_id":format!("{query}-facts"),
+                "starting_from":[{"results_of":query,"select":"entities"}], "relationship":meaning,"direction":"outgoing","distance":"one step"}));
+        }
+        let mut request = semantic_request(
+            &fixture.workspace.public_id(),
+            &format!("request:occurrences-{language}-{phase}"),
+            "unused",
+        );
+        request["scope"]["languages"] = json!([language]);
+        request["queries"] = json!(queries);
+        let mut steps = vec![
+            json!({"id":"query","operation":"call_tool","name":"query_code_graph","arguments":{"request":request,"delivery":"resource"}}),
+            json!({"id":"manifest","operation":"read_resource","uri":{"$ref":"query.structured_content.manifest.uri"}}),
+        ];
+        for page in 0..6 {
+            steps.push(json!({"id":format!("page{page}"),"operation":"read_resource","uri":{"$ref":format!("query.structured_content.pages.{page}.uri")}}));
+        }
+        let scenario =
+            modern_client_scenario(fixture, stack, "policy-one", json!([]), json!(steps));
+        let path = write_modern_client_scenario(
+            fixture,
+            &format!("occurrences-{language}-{phase}"),
+            &scenario,
+        );
+        let report = modern_client_report(&run_modern_client(stack, &path));
+        let result = modern_structured(modern_step(&report, "query"));
+        assert_eq!(result["execution_state"], "SUCCEEDED");
+        let manifest: Value = serde_json::from_slice(&resource_bytes(&report, "manifest")).unwrap();
+        let rows = |query: &str| {
+            let binding = manifest["canonical_semantic_response"]["queries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|b| b["query_id"] == query)
+                .unwrap();
+            let entry = manifest["relations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["relation_id"] == binding["relation_id"])
+                .unwrap();
+            assert_eq!(entry["page_count"], 1);
+            block_rows(
+                &report,
+                usize::try_from(entry["page_start"].as_u64().unwrap()).unwrap(),
+            )
+        };
+        for (query, kind, _, _, relation, id, coverage) in families {
+            let expected = canonical_diagnostic_rows(fixture, relation)
+                .into_iter()
+                .filter(|row| row["language"] == language && !row[id].is_null())
+                .collect::<Vec<_>>();
+            assert!(!expected.is_empty(), "{language}/{query}");
+            let expected_ids = expected
+                .iter()
+                .map(|row| occurrence_id(row, id, kind))
+                .collect::<BTreeSet<_>>();
+            let entities = rows(query);
+            let observed_ids = entities
+                .iter()
+                .map(|row| row["public_entity_id"].as_str().unwrap().to_owned())
+                .collect::<BTreeSet<_>>();
+            assert_eq!(observed_ids, expected_ids);
+            assert_eq!(
+                entities.len(),
+                observed_ids.len(),
+                "target candidates cannot duplicate an occurrence entity"
+            );
+            assert!(entities.iter().all(|row| row["entity_kind"] == kind));
+            let status = result["processing"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["query_id"] == query)
+                .unwrap();
+            assert_eq!(status["family"], coverage);
+            let facts = rows(&format!("{query}-facts"));
+            assert_eq!(facts.len(), expected.len());
+            let source_fields = expected[0]
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let mut projected = facts
+                .into_iter()
+                .map(|row| {
+                    serde_json::to_string(
+                        &row.as_object()
+                            .unwrap()
+                            .iter()
+                            .filter(|(key, _)| source_fields.contains(*key))
+                            .map(|(key, value)| (key.clone(), value.clone()))
+                            .collect::<serde_json::Map<_, _>>(),
+                    )
+                    .unwrap()
+                })
+                .collect::<Vec<_>>();
+            let mut expected = expected
+                .iter()
+                .map(|row| serde_json::to_string(row).unwrap())
+                .collect::<Vec<_>>();
+            projected.sort();
+            expected.sort();
+            assert_eq!(projected, expected, "{language}/{query}");
+        }
+    }
+}
+
 #[test]
 fn pragmatic_semantic_relationships_through_installed_clients_and_reopen() {
     let fixture = ProductionFixture::with_source(b"from b import target as alias\nimport missing_package\ndef subject(value: int) -> int:\n    return alias(value)\n");
@@ -221,6 +365,7 @@ fn pragmatic_semantic_relationships_through_installed_clients_and_reopen() {
     let stack = InstalledProductionStack::build();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     relationships(&fixture, &stack, "initial");
+    find_occurrences(&fixture, &stack, "initial");
     let selected = wait_for_semantic_activation(&fixture);
     supervisor.stop();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
@@ -229,5 +374,6 @@ fn pragmatic_semantic_relationships_through_installed_clients_and_reopen() {
         wait_for_semantic_activation(&fixture).table_versions()
     );
     relationships(&fixture, &stack, "reopened");
+    find_occurrences(&fixture, &stack, "reopened");
     supervisor.stop();
 }

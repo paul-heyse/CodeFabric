@@ -8,7 +8,8 @@ imports, references and structural types with scoped public retrieval and exact 
 The Rust type and HIR reference slices are committed in `ba35b4c7` and `1b515b7b`.
 P02 public family selection is committed in `f7adca03`. P03 repeated-block output isolation is
 committed in `7eefd2ea`, and typed prior-entity result consumption in `bd7f3752`.
-Semantic-reference/import traversal now passes mixed native and regression validation.
+Semantic-reference/import traversal is committed in `2ca3d45b`. First-class occurrence
+selection and typed outgoing traversal now pass mixed native validation.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -45,7 +46,35 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
-The reference/import continuation adds four immutable native query templates over the existing
+The occurrence continuation adds calls, semantic references and imports to the existing canonical
+entity universe. Candidate/namespace multiplicity stays in the fact relations. Calls have an
+occurrence label independent of resolved target names. Six Python/Rust FindEntities meanings
+return reusable public IDs and use their actual family coverage. The `call targets` relationship
+meaning selects first-class call subjects through the same native target-kind templates. An
+explicit occurrence-capable selector role prevents older retained entity profiles from admitting
+meanings whose census they do not contain.
+
+The extended installed-client/reopen case passes in 107.67 s
+(`/tmp/codefabric-p03-occurrences-native-2.log`): both languages find all three occurrence kinds,
+then use the typed results for outgoing traversal. It compares the occurrence ID sets and every
+canonical witness column, while retaining the preceding guarded/bidirectional/unknown/truncation
+cases. The retained-profile test passes (0.31 s;
+`/tmp/codefabric-p03-occurrences-profile-test.log`). All 24 affected canonical/recipe/processing
+and public regressions pass in 104.39 s (`/tmp/codefabric-p03-occurrences-regression.log`), including
+all eleven fact families (104.38 s) and repeated first-four blocks/source reads (47.72 s).
+Default/featureless `just root-check` passes (`/tmp/codefabric-p03-occurrences-root-check.log`).
+The first native run's malformed test envelope placed `languages` outside `scope`; the service
+correctly rejected it (`/tmp/codefabric-p03-occurrences-tests-1.log`, with 11 unit cases passing).
+The corrected fixture uses the released scoped envelope. All-target Clippy completes with the
+existing backlog and no diagnostics on new modules/changed lines
+(`/tmp/codefabric-p03-occurrences-clippy-final.jsonl`). Document navigation, focused spelling
+and diff checks pass.
+
+Exact occurrence source retrieval and its processing/disclosure dependencies are next. This
+continuation does not yet make occurrence source reads or full source/syntax selection available.
+The remainder of P03 and P04–P14 remains open.
+
+The preceding reference/import continuation adds four immutable native query templates over the existing
 canonical relations, covering incoming denotations and outgoing source occurrences. Exact
 workspace/context joins establish target kinds; unresolved targets retain null public IDs and
 provider explanations. A shared Arrow scalar formats application-owned binary IDs. Typed

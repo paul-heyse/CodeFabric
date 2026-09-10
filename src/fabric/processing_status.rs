@@ -234,6 +234,13 @@ impl EntityQueryScope {
         Ok(Self {
             family: match selector {
                 "python:module" => "modules",
+                selected
+                    if crate::production_query_recipe::canonical_occurrence_family(selected)
+                        .is_some() =>
+                {
+                    crate::production_query_recipe::canonical_occurrence_family(selected)
+                        .expect("checked occurrence family")
+                }
                 selected if canonical_processing_family(selected).is_some() => {
                     canonical_processing_family(selected).expect("checked family")
                 }

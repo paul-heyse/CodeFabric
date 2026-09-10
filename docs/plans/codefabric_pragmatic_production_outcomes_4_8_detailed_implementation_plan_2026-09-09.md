@@ -548,6 +548,24 @@ scope. Owner/frontier narrowing, broader directions/distances/filters, source/oc
 type/member facts and remaining P03 first-four meanings are still required. This slice does not
 complete P03 or any outcome.
 
+**P03 first-class occurrence selection passes native validation, 2026-09-10.** The existing
+canonical entity universe now includes application-owned call, semantic-reference and import
+occurrences. Candidate/namespace multiplicity stays in the fact relations. Six Python/Rust
+FindEntities meanings return reusable public IDs and select their actual family coverage. A
+separate occurrence-capable selector role fences these meanings from older retained snapshots;
+a native catalog-extraction test checks both profiles. Typed entity-result slots feed outgoing
+reference/import relationships and the explicit `call targets` meaning for call subjects.
+
+The extended mixed-language installed-client/reopen case passes in 107.67 s, comparing full
+occurrence ID sets and canonical witness columns for all three families in both languages.
+All 24 affected regressions pass (104.39 s), including eleven public fact families and repeated
+first-four/source queries. Default/featureless checks pass. STATUS records logs and the initial
+fixture-envelope correction. This is still a P03 slice, not package/outcome completion.
+
+**Next:** exact occurrence source retrieval with matching processing/disclosure dependencies,
+then the remaining first-four scopes/meanings and block execution work. Occurrence source reads
+are not implemented by the entity/relationship continuation above.
+
 Evolve the existing schema descriptor/version checks and released wire deliberately. For each
 schema-changing slice, identify its raw producer, canonical consumers, persisted reader, public
 projection and update replacement. Add typed fields/relations only where these consumers need
@@ -812,7 +830,7 @@ Implement compositional typed plans for:
 | RetrieveFacts | Family-selected joins, properties, provenance and point/context filters; expanded family scope for broad requests | Parameter/return types, members, call resolution and unknown reasons from actual semantic providers |
 | RetrieveSourceContext | Exact snapshot source descriptors and independent disclosure authorization; byte/line bounds and syntax joins | Correct source span after current disk changes, Unicode positions and exact omitted bytes on truncation |
 
-FindEntities now uses canonical declaration semantics, including Python class/parameter/binding/import/type-alias/type-parameter and Rust constant/static queries. New results carry reusable public entity IDs; installed clients use them for declaration fact retrieval. Guard choices have readable labels without changing their submitted opaque identities. Retain that path and extend its remaining kinds/scopes. Reuse the existing form/request infrastructure but remove assumptions that a form can exist only when every producer is globally complete. Unsupported semantic meanings must yield a typed gap, never a syntax/name fallback.
+FindEntities now uses canonical declaration semantics, including Python class/parameter/binding/import/type-alias/type-parameter and Rust constant/static queries. P03 additionally exposes Python/Rust call, semantic-reference and import occurrences through an explicit occurrence-capable snapshot profile. New results carry reusable public entity IDs; installed clients use them for declaration fact retrieval. Guard choices have readable labels without changing their submitted opaque identities. Retain that path and extend its remaining kinds/scopes. Reuse the existing form/request infrastructure but remove assumptions that a form can exist only when every producer is globally complete. Unsupported semantic meanings must yield a typed gap, never a syntax/name fallback.
 
 Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/daemon.rs` and the modern client driver. Use the existing registered-supervisor fixture and installed provider binaries. Check at least one real Pyrefly and one real rustc semantic result through the public adapter, plus partial and empty cases. This closes the static mixed-language vertical, while the first useful release still awaits outcome 6.
 

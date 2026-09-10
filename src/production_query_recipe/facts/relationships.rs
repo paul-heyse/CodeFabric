@@ -18,6 +18,8 @@ pub(crate) fn known_meaning(value: &str) -> bool {
     matches!(
         value,
         "calls"
+            | "call targets"
+            | "call-targets"
             | "call relationships"
             | "lexical references"
             | "lexical-references"
@@ -53,6 +55,13 @@ pub(in crate::production_query_recipe) fn programs(
             "import_id",
             "import-occurrence",
             "imports",
+        ),
+        (
+            "call-targets",
+            "fact.code_call_site",
+            "call_site_id",
+            "call",
+            "call targets",
         ),
     ] {
         for direction in ["incoming", "outgoing"] {

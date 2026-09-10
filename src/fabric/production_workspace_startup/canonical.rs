@@ -38,6 +38,7 @@ mod calls;
 mod diagnostics;
 mod imports;
 mod modules;
+mod occurrences;
 mod processing;
 mod python_calls;
 mod relationship_selector;
@@ -307,11 +308,7 @@ impl Canonical {
                     vec![]
                 },
             ),
-            Kind::Entity => (
-                ENTITY,
-                entity_fields(),
-                vec![DECLARATION, modules::RELATION],
-            ),
+            Kind::Entity => (ENTITY, entity_fields(), occurrences::dependencies()),
             Kind::CallSelector => (
                 call_selector::RELATION,
                 call_selector::fields(),
@@ -387,7 +384,9 @@ impl Canonical {
             output = output.with_semantic_role("canonical.entity-source");
         }
         if matches!(kind, Kind::EntitySelector) {
-            output = output.with_semantic_role("canonical.entity-selector");
+            output = output.with_semantic_role(
+                crate::production_query_recipe::CANONICAL_OCCURRENCE_SELECTOR_ROLE,
+            );
         }
         if matches!(kind, Kind::Reference { .. }) {
             output = output.with_semantic_role("canonical.reference");
@@ -730,16 +729,7 @@ impl ProgrammaticTransformation for Canonical {
                 ]))?;
                 Ok(LogicalPlanBuilder::from(generic).union(language)?.build()?)
             }
-            Kind::Entity => Ok(LogicalPlanBuilder::from(plan(inputs, DECLARATION)?)
-                .filter(col("entity_id").is_not_null())?
-                .project(entity_projection())?
-                .union(
-                    LogicalPlanBuilder::from(plan(inputs, modules::RELATION)?)
-                        .project(entity_projection())?
-                        .build()?,
-                )?
-                .distinct()?
-                .build()?),
+            Kind::Entity => occurrences::entities(inputs),
             Kind::Declaration { python, rust } => {
                 let mut branches = Vec::new();
                 if python {

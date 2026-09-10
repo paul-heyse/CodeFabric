@@ -61,6 +61,18 @@ const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
 const RELEASE_FACTUAL_SEMANTIC_CLASS_ID: &str = "semantic.fact.v2";
 const RELEASE_SELECTION_MAXIMUM_VALUES: usize = 64;
 
+pub(crate) const CANONICAL_OCCURRENCE_SELECTOR_ROLE: &str =
+    "canonical.entity-selector.occurrences.v1";
+
+pub(crate) fn canonical_occurrence_family(selector: &str) -> Option<&'static str> {
+    match selector {
+        "python:call" | "rust:call" => Some("call-targets"),
+        "python:reference" | "rust:reference" => Some("semantic-references"),
+        "python:import-occurrence" | "rust:import-occurrence" => Some("imports"),
+        _ => None,
+    }
+}
+
 // Only kinds with an actual canonical producer are offered as controlled meanings.
 pub(crate) const CANONICAL_ENTITY_SELECTORS: &[(&str, &str)] = &[
     ("Python function declarations", "python:function"),
@@ -69,6 +81,12 @@ pub(crate) const CANONICAL_ENTITY_SELECTORS: &[(&str, &str)] = &[
     ("function", "function"),
     ("Python class declarations", "python:class"),
     ("Python modules", "python:module"),
+    ("Python call occurrences", "python:call"),
+    ("Rust call occurrences", "rust:call"),
+    ("Python semantic reference occurrences", "python:reference"),
+    ("Rust semantic reference occurrences", "rust:reference"),
+    ("Python import occurrences", "python:import-occurrence"),
+    ("Rust import occurrences", "rust:import-occurrence"),
     ("Python parameter declarations", "python:parameter"),
     ("Python binding declarations", "python:binding"),
     ("Python import declarations", "python:import"),
@@ -505,6 +523,7 @@ struct EpochSemanticRelation {
     entity_name: FieldId,
     selector: FieldId,
     canonical: bool,
+    occurrences: bool,
     scope_fields: Vec<(FieldId, &'static str)>,
 }
 
@@ -515,7 +534,9 @@ fn compiled_released_form_programs(
     BTreeMap<(ReleasedSemanticForm, Arc<str>), ProductionSemanticFormProgram>,
     ProductionQueryRecipeError,
 > {
-    if let Some(source) = epoch_semantic_relation(epoch, "canonical.entity-selector")? {
+    let canonical = epoch_semantic_relation(epoch, CANONICAL_OCCURRENCE_SELECTOR_ROLE)?
+        .or(epoch_semantic_relation(epoch, "canonical.entity-selector")?);
+    if let Some(source) = canonical {
         if epoch
             .relation(&ProgrammaticRelationId::new(
                 crate::fabric::processing_status::ENTITY_PROCESSING_RELATION,
@@ -719,19 +740,24 @@ fn epoch_semantic_relation(
                 })
                 .and_then(release_field_id)
         };
+        let canonical = matches!(
+            semantic_role,
+            "canonical.entity-selector" | CANONICAL_OCCURRENCE_SELECTOR_ROLE
+        );
         matched.push(EpochSemanticRelation {
             relation_id: release_relation_id(contract_relation)?,
             fields,
             entity_id: semantic_field(SEMANTIC_ENTITY_ID_ROLE)?,
             entity_kind: semantic_field(SEMANTIC_ENTITY_KIND_ROLE)?,
             entity_name: semantic_field(SEMANTIC_ENTITY_NAME_ROLE)?,
-            selector: semantic_field(if semantic_role == "canonical.entity-selector" {
+            selector: semantic_field(if canonical {
                 "semantic.entity.selector"
             } else {
                 SEMANTIC_ENTITY_KIND_ROLE
             })?,
-            canonical: semantic_role == "canonical.entity-selector",
-            scope_fields: if semantic_role == "canonical.entity-selector" {
+            canonical,
+            occurrences: semantic_role == CANONICAL_OCCURRENCE_SELECTOR_ROLE,
+            scope_fields: if canonical {
                 canonical_entity_scope_fields(
                     &semantic_field,
                     sealed
@@ -897,7 +923,13 @@ fn compiled_find_entities_program(
             },
             fold: EpochBoundSelectionFold::Any,
             resolutions: if canonical {
-                CANONICAL_ENTITY_SELECTORS.to_vec()
+                CANONICAL_ENTITY_SELECTORS
+                    .iter()
+                    .copied()
+                    .filter(|(_, selector)| {
+                        source.occurrences || canonical_occurrence_family(selector).is_none()
+                    })
+                    .collect()
             } else {
                 vec![
                     ("Python function declarations", "function"),
@@ -2670,6 +2702,121 @@ mod tests {
             ))
             .expect("provider registration");
         builder.seal_for_test().await.expect("sealed epoch")
+    }
+
+    // Both retained schema profiles exercise the same catalog extraction and public meanings.
+    #[allow(clippy::too_many_lines)]
+    #[tokio::test]
+    async fn retained_entity_profile_does_not_admit_missing_occurrence_census() {
+        use crate::schema_contract::{
+            FIELD_ID_METADATA_KEY, RELATION_ID_METADATA_KEY, RELATION_SEMANTIC_ROLE_METADATA_KEY,
+            SEMANTIC_ROLE_METADATA_KEY,
+        };
+        for role in [
+            "canonical.entity-selector",
+            CANONICAL_OCCURRENCE_SELECTOR_ROLE,
+        ] {
+            let relation_id = "fact.code_entity_selector";
+            let fields = [
+                (
+                    "entity_id",
+                    DataType::FixedSizeBinary(16),
+                    "semantic.entity.identity",
+                ),
+                ("entity_kind", DataType::Utf8, "semantic.entity.kind"),
+                ("name", DataType::Utf8, "semantic.entity.name"),
+                ("selector", DataType::Utf8, "semantic.entity.selector"),
+                ("language", DataType::Utf8, "semantic.entity.language"),
+                (
+                    "context_id",
+                    DataType::FixedSizeBinary(16),
+                    "semantic.provenance.analysis-context",
+                ),
+                (
+                    "file_id",
+                    DataType::FixedSizeBinary(16),
+                    "semantic.provenance.source-file",
+                ),
+                (
+                    "public_entity_id",
+                    DataType::Utf8,
+                    "semantic.entity.public-identity",
+                ),
+            ]
+            .into_iter()
+            .map(|(name, kind, role)| {
+                Field::new(name, kind, true).with_metadata(std::collections::HashMap::from([
+                    (
+                        FIELD_ID_METADATA_KEY.into(),
+                        format!("{relation_id}.{name}"),
+                    ),
+                    (SEMANTIC_ROLE_METADATA_KEY.into(), role.into()),
+                ]))
+            })
+            .collect::<Vec<_>>();
+            let schema = Arc::new(Schema::new_with_metadata(
+                fields,
+                std::collections::HashMap::from([
+                    (RELATION_ID_METADATA_KEY.into(), relation_id.into()),
+                    (RELATION_SEMANTIC_ROLE_METADATA_KEY.into(), role.into()),
+                ]),
+            ));
+            let table = TableReference::full(
+                FABRIC_CATALOG,
+                FabricSchemaRole::Fact.as_str(),
+                "entity_selector",
+            );
+            let contract = Arc::new(
+                SchemaContract::try_new(
+                    "test:retained-entity-profile",
+                    table.clone(),
+                    schema.clone(),
+                    schema.clone(),
+                    (0..schema.fields().len())
+                        .map(|i| FieldIndexMapping::direct(i, i))
+                        .collect(),
+                )
+                .unwrap(),
+            );
+            let provider = Arc::new(
+                MemTable::try_new(schema.clone(), vec![vec![RecordBatch::new_empty(schema)]])
+                    .unwrap(),
+            );
+            let mut builder = ProgrammaticFabricEpochBuilder::try_new(
+                FabricEpochId::from_bytes([0x67; 16]),
+                FabricEpochRuntimeConfig::default(),
+            )
+            .unwrap();
+            builder
+                .register_provider(ProviderInput::new(
+                    ProgrammaticRelationId::new(relation_id),
+                    table,
+                    contract,
+                    provider,
+                ))
+                .unwrap();
+            let epoch = builder.seal_for_test().await.unwrap();
+            let source = epoch_semantic_relation(&epoch, role).unwrap().unwrap();
+            let program = compiled_find_entities_program(source).unwrap();
+            let meanings = &program.selections[0].resolutions;
+            assert!(meanings.iter().any(|r| r.request_value
+                == SemanticClauseValue::Text(Arc::from("Python function declarations"))));
+            let occurrences = meanings.iter().filter(|r| matches!(&r.execution_value, SemanticClauseValue::Text(value) if canonical_occurrence_family(value).is_some())).count();
+            assert_eq!(
+                occurrences,
+                if role == CANONICAL_OCCURRENCE_SELECTOR_ROLE {
+                    6
+                } else {
+                    0
+                }
+            );
+            let other = if role == CANONICAL_OCCURRENCE_SELECTOR_ROLE {
+                "canonical.entity-selector"
+            } else {
+                CANONICAL_OCCURRENCE_SELECTOR_ROLE
+            };
+            assert!(epoch_semantic_relation(&epoch, other).unwrap().is_none());
+        }
     }
 
     fn limits() -> EpochBoundSemanticIngressLimits {

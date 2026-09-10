@@ -1416,6 +1416,10 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 if canonical_family.is_none()
                     && (declarations
                         || (!calls
+                            && crate::production_query_recipe::canonical_occurrence_family(
+                                selector,
+                            )
+                            .is_none()
                             && !matches!(
                                 selector,
                                 "function" | "python:function" | "rust:function" | "python:module"
