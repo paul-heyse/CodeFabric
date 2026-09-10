@@ -2170,7 +2170,35 @@ impl TypeInterner {
         context_id: [u8; 16],
         term: &TypeTerm,
     ) -> Result<[u8; 16], IdentityError> {
-        let shape = term.canonical_bytes()?;
+        self.intern_canonical(workspace_id, context_id, term.canonical_bytes()?)
+    }
+
+    /// Intern a normalized term and return its reversible key from the same canonical encoding.
+    ///
+    /// # Errors
+    /// Returns an encoding error or `ID_COLLISION` for unequal terms sharing an ID.
+    pub fn intern_type(
+        &mut self,
+        workspace_id: [u8; 16],
+        context_id: [u8; 16],
+        term: &TypeTerm,
+    ) -> Result<InternedType, IdentityError> {
+        let canonical = term.canonical_bytes()?;
+        let canonical_key = format!("cbef-type-v1:{}", URL_SAFE_NO_PAD.encode(&canonical));
+        let type_id = self.intern_canonical(workspace_id, context_id, canonical)?;
+        Ok(InternedType {
+            type_id,
+            type_kind_code: term.constructor.code(),
+            canonical_key,
+        })
+    }
+
+    fn intern_canonical(
+        &mut self,
+        workspace_id: [u8; 16],
+        context_id: [u8; 16],
+        shape: Vec<u8>,
+    ) -> Result<[u8; 16], IdentityError> {
         let identity = derive_identity(&CbefRecord {
             domain: IdentityDomain::Type,
             fields: vec![
@@ -2225,16 +2253,7 @@ impl TypeInterner {
         let term = adapter
             .normalize(observation)
             .map_err(TypeAdapterError::Adapter)?;
-        let canonical = term.canonical_bytes()?;
-        let type_id = self.intern(workspace_id, context_id, &term)?;
-        Ok(InternedType {
-            type_id,
-            type_kind_code: term.constructor.code(),
-            canonical_key: format!(
-                "cbef-type-v1:{}",
-                URL_SAFE_NO_PAD.encode(canonical.as_slice())
-            ),
-        })
+        Ok(self.intern_type(workspace_id, context_id, &term)?)
     }
 }
 

@@ -392,11 +392,32 @@ exact Delta reopen pass for aliases, class methods, modules and missing names/im
 featureless checks and strict sidecar checks pass; STATUS records commands, evidence and limits.
 Public family retrieval and broader native reference meanings remain open.
 
-Continue P02 with structural types, initial Rust imports/semantic references and public family
-selection for the canonical clusters. Pyrefly's existing deduplicated shape table erases some native type distinctions; extend
-the typed native query boundary and reuse the application's type interner, without promoting display
-strings or 64-bit provider hashes to canonical type identity. This does not defer or close any of
-P02's required semantic verticals. P03–P14 remain in the table's order.
+**P02 initial Python structural type slice implemented, 2026-09-10.** One native checker transaction
+and occurrence traversal now emits both the compatible presentation table and a bounded structural
+graph. Typed Arrow nodes/edges/observations retain native constructors, nominal/function anchors,
+builtin identities, literal values, tuple layouts and callable parameter semantics. DataFusion
+selects exact accepted source/run/context inputs, requires unique canonical nominal anchors and
+groups typed graph records. An application-owned normalizer uses iterative petgraph SCC traversal
+and the existing CBEF TypeInterner, encoding each term once. Provider indices, hashes and rendered
+type strings never become canonical identities.
+
+`fact.code_type`, `fact.code_type_observation` and `fact.code_type_component` now preserve type IDs,
+computed observation roles, component order and unknown semantics through exact Delta reopen.
+Basic structural constructors, Any/Error/Unknown and class/type objects stay distinct; cycles,
+unsupported advanced types and unresolved definitions retain gaps rather than guessed identities.
+Byte literals have explicit typed scalar metadata; opaque carrier rejection remains active.
+Requested `types` coverage combines the native per-file census with canonical graph/location gaps.
+Independent Arrow cases cover stale inputs, ambiguous anchors, context separation, missing graph
+nodes and run/generation stability. The real native case verifies an independently specified
+integer key/ID, callable parameters, unknowns and all new relations after exact reopen (25.07 s).
+`canonical-python-types` selects it; the affected 14-case run and final 21-case regression run pass.
+Default/featureless root checks, strict sidecar checks and all 39 sidecar tests pass. STATUS records
+commands, evidence and limits; strict root lint and full-suite completion are not claimed.
+
+Continue P02 with initial Rust structural types/imports/semantic references and public family
+selection for the canonical clusters. Complete recursive/binder/alias/overload/ParamSpec/TypedDict
+normalization, expanded type observation roles and members in P06. This does not defer or close any
+of P02's required semantic verticals. P03–P14 remain in the table's order.
 
 ### 3.4 Compatibility and removal rules
 

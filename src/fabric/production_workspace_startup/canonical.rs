@@ -42,6 +42,7 @@ mod python_calls;
 mod relationship_selector;
 mod semantic_references;
 mod source_context;
+mod types;
 
 /// Each canonical projection requires its own native input set. Diagnostic-only compilation and
 /// crates with no body are valid observations, but do not supply declaration/call/body tables.
@@ -109,6 +110,22 @@ pub(super) fn install(
         Kind::Module { pyrefly },
         Kind::SemanticReference { pyrefly },
         Kind::Import { python },
+        Kind::Type {
+            relation: types::Relation::Graph,
+            pyrefly,
+        },
+        Kind::Type {
+            relation: types::Relation::Type,
+            pyrefly,
+        },
+        Kind::Type {
+            relation: types::Relation::Observation,
+            pyrefly,
+        },
+        Kind::Type {
+            relation: types::Relation::Component,
+            pyrefly,
+        },
         Kind::Diagnostic {
             pyrefly,
             rust: rust.diagnostics.primary,
@@ -152,6 +169,10 @@ pub(super) fn install(
 
 #[derive(Clone, Copy)]
 enum Kind {
+    Type {
+        relation: types::Relation,
+        pyrefly: bool,
+    },
     Processing {
         pyrefly: bool,
         rust: bool,
@@ -212,6 +233,11 @@ impl Canonical {
     )]
     fn new(kind: Kind, inventory: &ProviderSourceInventory) -> Self {
         let (id, names, mut dependencies) = match kind {
+            Kind::Type { relation, pyrefly } => (
+                relation.name(),
+                relation.fields(),
+                relation.dependencies(pyrefly),
+            ),
             Kind::Processing { pyrefly, rust } => (
                 processing::OUTPUT,
                 processing::output_fields(),
@@ -616,6 +642,7 @@ impl ProgrammaticTransformation for Canonical {
     )]
     fn build(&self, inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
         match self.kind {
+            Kind::Type { relation, pyrefly } => relation.build(self.workspace, inputs, pyrefly),
             Kind::Processing { pyrefly, rust } => {
                 processing::build(inputs, pyrefly, rust, self.workspace)
             }
@@ -739,6 +766,12 @@ fn canonical_field_identity(id: &str, name: &str) -> TransformationFieldIdentity
         "entity_id" => field.with_semantic_role("semantic.entity.identity"),
         "public_entity_id" => field.with_semantic_role("semantic.entity.public-identity"),
         "entity_kind" => field.with_semantic_role("semantic.entity.kind"),
+        "type_id" => field.with_semantic_role("semantic.type.identity"),
+        "type_kind_code" => field.with_semantic_role("semantic.type.kind"),
+        "canonical_key" if id == types::TYPE || id == types::GRAPH => {
+            field.with_semantic_role("semantic.type.canonical-key")
+        }
+        "type_occurrence_id" => field.with_semantic_role("semantic.type.source-occurrence"),
         "name" => field.with_semantic_role("semantic.entity.name"),
         "language" => field.with_semantic_role("semantic.entity.language"),
         "selector" => field.with_semantic_role("semantic.entity.selector"),
@@ -1127,6 +1160,7 @@ fn source_occurrence_id(workspace: [u8; 16], name: &str, kind: u16, family: u16)
 mod tests {
     mod diagnostics;
     mod semantic_references;
+    mod types;
     use super::*;
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig};
     use crate::fabric::programmatic_schema::ProviderInput;
@@ -1496,6 +1530,10 @@ mod tests {
             "fact.code_module",
             "fact.code_semantic_reference",
             "fact.code_import",
+            "fact.code_type",
+            "fact.code_type_observation",
+            "fact.code_type_component",
+            "system.canonical_python_type_graph",
             "fact.code_call_site",
         ] {
             let batches = context.table(table).await.unwrap().collect().await.unwrap();

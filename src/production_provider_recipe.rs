@@ -981,6 +981,9 @@ fn pyrefly_coverage(
         | PyreflyRelation::LocatedType => "computed_types",
         PyreflyRelation::CallTarget => "call_targets",
         PyreflyRelation::Reference => "semantic_references",
+        PyreflyRelation::TypeNode
+        | PyreflyRelation::TypeEdge
+        | PyreflyRelation::TypeObservation => "structural_types",
         PyreflyRelation::Member => "members",
         PyreflyRelation::Diagnostic => "diagnostics",
         PyreflyRelation::AffectedModule => "affected_modules",
@@ -1073,6 +1076,18 @@ fn pyrefly_reason_map() -> BTreeMap<String, RemainderReason> {
         ),
         (
             "UNRESOLVED_OR_UNMAPPED_SEMANTIC_REFERENCE".to_owned(),
+            RemainderReason::Unknown,
+        ),
+        (
+            "NATIVE_TYPE_QUERY_UNAVAILABLE".to_owned(),
+            RemainderReason::ProviderUnavailable,
+        ),
+        (
+            "NATIVE_TYPE_GRAPH_LIMIT".to_owned(),
+            RemainderReason::ResourceLimit,
+        ),
+        (
+            "NATIVE_TYPE_SHAPE_INCOMPLETE".to_owned(),
             RemainderReason::Unknown,
         ),
         (
@@ -1191,6 +1206,9 @@ const fn pyrefly_authority(relation: PyreflyRelation) -> ProviderAuthorityRole {
         | PyreflyRelation::LocatedType
         | PyreflyRelation::CallTarget
         | PyreflyRelation::Reference
+        | PyreflyRelation::TypeNode
+        | PyreflyRelation::TypeEdge
+        | PyreflyRelation::TypeObservation
         | PyreflyRelation::Member
         | PyreflyRelation::Coverage => ProviderAuthorityRole::Primary,
     }
@@ -1239,7 +1257,10 @@ const fn pyrefly_upstream_symbol(relation: PyreflyRelation) -> &'static str {
         PyreflyRelation::TypeShape
         | PyreflyRelation::TypeComponent
         | PyreflyRelation::TypeTrait
-        | PyreflyRelation::LocatedType => "pyrefly::query::Query::get_type_table_in_file",
+        | PyreflyRelation::LocatedType
+        | PyreflyRelation::TypeNode
+        | PyreflyRelation::TypeEdge
+        | PyreflyRelation::TypeObservation => "pyrefly::query::Query::get_type_facts_in_file",
         PyreflyRelation::CallTarget => "pyrefly::query::Query::get_callees_with_location",
         PyreflyRelation::Reference => "pyrefly::query::Query::get_semantic_references_in_file",
         PyreflyRelation::Member => "pyrefly::query::Query::get_attributes",
@@ -1975,6 +1996,30 @@ fn compiled_provider_field_role(
             | "long_lived_context" => Some(PROVIDER_FACT_ROLE),
             _ => None,
         },
+        ProviderRelation::Pyrefly(
+            PyreflyRelation::TypeNode
+            | PyreflyRelation::TypeEdge
+            | PyreflyRelation::TypeObservation,
+        ) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" | "definition_file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" | "definition_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "local_type_index" | "owner_local_type_index" | "referenced_local_type_index" => {
+                Some(RESPONSE_LOCAL_INDEX_ROLE)
+            }
+            "start_byte" | "definition_start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" | "definition_end_byte" => Some(BYTE_END_ROLE),
+            "type_kind" | "native_kind" | "intrinsic" | "style" | "literal_kind"
+            | "parameter_kind" | "component_role" | "type_role" => Some(PROVIDER_KIND_ROLE),
+            "name" | "definition_mapping" | "literal_text" | "literal_bytes"
+            | "literal_boolean" | "component_ordinal" | "parameter_name" | "parameter_required"
+            | "occurrence_ordinal" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
         ProviderRelation::Pyrefly(PyreflyRelation::TypeShape) => match name {
             "provider_run_id"
             | "analysis_context_id"
@@ -2504,8 +2549,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(release.observation().provider_lanes, 5);
-        assert_eq!(release.observation().provider_relations, 67);
-        assert_eq!(release.observation().transformations, 67);
+        assert_eq!(release.observation().provider_relations, 70);
+        assert_eq!(release.observation().transformations, 70);
         assert_eq!(release.observation().query_forms, 8);
     }
 

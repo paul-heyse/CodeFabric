@@ -668,6 +668,7 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
                     | "diagnostic-suggestions"
                     | "modules"
                     | "semantic-references"
+                    | "types"
                     | "imports"
                     | "function-source-context"
             )

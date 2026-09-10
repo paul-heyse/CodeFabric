@@ -55,6 +55,8 @@ pub(super) fn dependencies(pyrefly: bool, rust: bool) -> Vec<&'static str> {
         super::REFERENCE,
         super::semantic_references::RELATION,
         super::imports::RELATION,
+        super::types::OBSERVATION,
+        super::types::GRAPH,
         super::DECLARATION,
         super::source_context::RELATION,
     ];
@@ -255,23 +257,39 @@ fn qualify_references(
             "canonical_import_targets_unknown",
         ),
     ] {
-        base = qualify_reference_targets(base, plan(inputs, relation)?, family, reason)?;
+        base = qualify_observation_gaps(
+            base,
+            plan(inputs, relation)?,
+            family,
+            reason,
+            col("resolution")
+                .not_eq(lit("resolved"))
+                .or(col("target_entity_id").is_null()),
+        )?;
+    }
+    for relation in [super::types::GRAPH, super::types::OBSERVATION] {
+        base = qualify_observation_gaps(
+            base,
+            plan(inputs, relation)?,
+            "types",
+            "canonical_types_unknown",
+            col("type_id")
+                .is_null()
+                .or(col("unknown_reason").is_not_null()),
+        )?;
     }
     Ok(base)
 }
 
-fn qualify_reference_targets(
+fn qualify_observation_gaps(
     base: LogicalPlan,
     references: LogicalPlan,
     family: &str,
     reason: &str,
+    condition: Expr,
 ) -> Result<LogicalPlan, TransformationPlanError> {
     let gaps = LogicalPlanBuilder::from(references)
-        .filter(
-            col("resolution")
-                .not_eq(lit("resolved"))
-                .or(col("target_entity_id").is_null()),
-        )?
+        .filter(condition)?
         .aggregate(
             vec![col("context_id"), col("file_id"), col("source_generation")],
             vec![count(lit(1_i64)).alias("gaps")],

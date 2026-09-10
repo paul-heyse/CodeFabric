@@ -28,6 +28,7 @@ pub(crate) use relation_schema::{PyreflyRelation, schema_bundle_digest, schema_d
 
 pub(crate) mod preparation;
 mod references;
+mod type_graph;
 use preparation::SelectedPyreflyPreparation;
 
 const MAX_RELATION_ROWS: usize = 1_000_000;
@@ -625,14 +626,15 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
         content_digest: parse_digest(&module.source_digest)?,
         semantic_environment_id: parse_digest(&run.semantic_environment_digest)?,
     };
-    let type_table = query.get_type_table_in_file(name, path.clone(), None);
+    let type_facts = query.get_type_facts_in_file(name, path.clone(), MAX_RELATION_ROWS);
+    let type_table = type_facts.as_ref().map(|facts| &facts.presentation);
     let callees = query.get_callees_with_location(name, path.clone(), None);
     let references = query.get_semantic_references_in_file(name, path.clone(), MAX_RELATION_ROWS);
 
     let (shape_rows, component_rows, trait_rows, located_rows) =
-        project_type_table(type_table.as_ref(), source)?;
+        project_type_table(type_table, source)?;
     let call_rows = project_callees(callees.as_deref(), source, definition_sources)?;
-    let member_rows = project_members(query, name, &path, type_table.as_ref());
+    let member_rows = project_members(query, name, &path, type_table);
     let module_diagnostics = diagnostics
         .iter()
         .filter(|(owner, _)| owner == &path)
@@ -649,6 +651,8 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
     );
     let reference_rows = references::project(references.as_ref(), source, definition_sources)?;
     references::qualify_coverage(&mut coverage_rows, references.as_ref(), &reference_rows);
+    let structural = type_facts.as_ref().map(|facts| &facts.structural);
+    type_graph::coverage(&mut coverage_rows, structural);
 
     let mut relations = vec![
         encode_relation(
@@ -697,6 +701,12 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
         )?,
     ];
     relations.sort_by_key(|relation| relation.relation);
+    relations.extend(type_graph::project(
+        &common,
+        structural,
+        source,
+        definition_sources,
+    )?);
     let module_digest = module_digest(module, &relations);
     Ok(ModuleAnalysis {
         module_id: module.module_id.clone(),
@@ -1000,7 +1010,7 @@ fn coverage_rows(
     vec![
         CoverageRow {
             family: "computed_types",
-            surface: "Query::get_type_table_in_file",
+            surface: "Query::get_type_facts_in_file / presentation table",
             requested: 1,
             completed: u64::from(types_available),
             emitted: as_u64(type_shapes.saturating_add(located_types)),
@@ -1522,6 +1532,7 @@ fn as_u64(value: usize) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    mod type_graph;
     use super::*;
     use arrow_array::{Array as _, FixedSizeBinaryArray};
     use arrow_ipc::reader::StreamReader;

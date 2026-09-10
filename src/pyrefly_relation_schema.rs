@@ -33,10 +33,13 @@ pub enum PyreflyRelation {
     AffectedModule = 119,
     Coverage = 120,
     Reference = 143,
+    TypeNode = 144,
+    TypeEdge = 145,
+    TypeObservation = 146,
 }
 
 impl PyreflyRelation {
-    pub(crate) const ALL: [Self; 11] = [
+    pub(crate) const ALL: [Self; 14] = [
         Self::ModuleContext,
         Self::TypeShape,
         Self::TypeComponent,
@@ -48,6 +51,9 @@ impl PyreflyRelation {
         Self::AffectedModule,
         Self::Coverage,
         Self::Reference,
+        Self::TypeNode,
+        Self::TypeEdge,
+        Self::TypeObservation,
     ];
 
     #[must_use]
@@ -69,6 +75,9 @@ impl PyreflyRelation {
             Self::AffectedModule => "provider.pyrefly.affected_module.v1",
             Self::Coverage => "provider.pyrefly.coverage.v1",
             Self::Reference => "provider.pyrefly.reference.v1",
+            Self::TypeNode => "provider.pyrefly.type_node.v1",
+            Self::TypeEdge => "provider.pyrefly.type_edge.v1",
+            Self::TypeObservation => "provider.pyrefly.type_observation.v1",
         }
     }
 
@@ -87,17 +96,22 @@ impl PyreflyRelation {
             .into_iter()
             .enumerate()
             .map(|(ordinal, spec)| {
-                Field::new(spec.name, spec.data_type, spec.nullable).with_metadata(
-                    [
-                        (
-                            "codefabric.field_id".to_owned(),
-                            format!("{}.{}", self.relation_id(), spec.name),
-                        ),
-                        ("codefabric.field_ordinal".to_owned(), ordinal.to_string()),
-                    ]
-                    .into_iter()
-                    .collect(),
-                )
+                let mut metadata: HashMap<_, _> = [
+                    (
+                        "codefabric.field_id".to_owned(),
+                        format!("{}.{}", self.relation_id(), spec.name),
+                    ),
+                    ("codefabric.field_ordinal".to_owned(), ordinal.to_string()),
+                ]
+                .into_iter()
+                .collect();
+                if spec.name == "literal_bytes" {
+                    metadata.insert(
+                        "codefabric.logical_type".to_owned(),
+                        "python-type-literal.bytes".to_owned(),
+                    );
+                }
+                Field::new(spec.name, spec.data_type, spec.nullable).with_metadata(metadata)
             })
             .collect::<Vec<_>>();
         let metadata = [
@@ -142,13 +156,18 @@ impl PyreflyRelation {
             .into_iter()
             .map(|field| {
                 format!(
-                    "{}:{}:{}",
+                    "{}:{}:{}{}",
                     field.name,
                     data_type_name(&field.data_type),
                     if field.nullable {
                         "nullable"
                     } else {
                         "required"
+                    },
+                    if field.name == "literal_bytes" {
+                        ":python-type-literal.bytes"
+                    } else {
+                        ""
                     }
                 )
             })
@@ -178,6 +197,15 @@ impl PyreflyRelation {
                 bool_field("long_lived_context", false),
             ],
             Self::Reference => reference_fields(),
+            Self::TypeNode => native_type_node_fields(),
+            Self::TypeEdge => native_type_edge_fields(),
+            Self::TypeObservation => vec![
+                u64_field("occurrence_ordinal", false),
+                u64_field("start_byte", false),
+                u64_field("end_byte", false),
+                u64_field("local_type_index", true),
+                utf8("type_role", false),
+            ],
             Self::TypeShape => vec![
                 u64_field("local_type_index", false),
                 u64_field("structural_hash", false),
@@ -291,6 +319,42 @@ struct FieldSpec {
     nullable: bool,
 }
 
+fn native_type_edge_fields() -> Vec<FieldSpec> {
+    vec![
+        u64_field("owner_local_type_index", false),
+        u64_field("referenced_local_type_index", true),
+        utf8("component_role", false),
+        u64_field("component_ordinal", false),
+        utf8("parameter_kind", true),
+        utf8("parameter_name", true),
+        bool_field("parameter_required", true),
+    ]
+}
+
+fn native_type_node_fields() -> Vec<FieldSpec> {
+    vec![
+        u64_field("local_type_index", false),
+        utf8("type_kind", false),
+        utf8("native_kind", false),
+        utf8("name", true),
+        utf8("intrinsic", true),
+        utf8("style", true),
+        utf8("definition_file_id", true),
+        fixed_binary("definition_content_digest", 32, true),
+        u64_field("definition_start_byte", true),
+        u64_field("definition_end_byte", true),
+        utf8("definition_mapping", false),
+        utf8("literal_kind", true),
+        utf8("literal_text", true),
+        FieldSpec {
+            name: "literal_bytes",
+            data_type: DataType::Binary,
+            nullable: true,
+        },
+        bool_field("literal_boolean", true),
+    ]
+}
+
 fn reference_fields() -> Vec<FieldSpec> {
     vec![
         u64_field("occurrence_ordinal", false),
@@ -359,6 +423,7 @@ fn data_type_name(data_type: &DataType) -> &'static str {
         DataType::Utf8 => "utf8",
         DataType::UInt64 => "uint64",
         DataType::Boolean => "boolean",
+        DataType::Binary => "binary",
         DataType::FixedSizeBinary(32) => "fixed_size_binary[32]",
         _ => unreachable!("the Pyrefly relation contract uses a closed Arrow type set"),
     }
@@ -394,6 +459,7 @@ mod tests {
             );
             assert!(schema.fields().iter().all(|field| {
                 !matches!(field.data_type(), DataType::Binary | DataType::LargeBinary)
+                    || (relation == PyreflyRelation::TypeNode && field.name() == "literal_bytes")
             }));
         }
         assert_eq!(codes.len(), PyreflyRelation::ALL.len());

@@ -1130,7 +1130,7 @@ fn validate_typed_field(field: &Field) -> Result<(), RelationIpcErrorKind> {
             ));
         }
     }
-    if is_compiler_source_path_field(field) {
+    if is_compiler_source_path_field(field) || is_type_literal_bytes_field(field) {
         return Ok(());
     }
     validate_typed_data_type(field.data_type(), field.name())
@@ -1145,6 +1145,17 @@ pub(crate) fn is_compiler_source_path_field(field: &Field) -> bool {
             .metadata()
             .get("codefabric.logical_type")
             .is_some_and(|value| value == "compiler-local-source-path.unix")
+}
+
+/// A byte literal is a typed scalar value, not a serialized type graph. The exact released
+/// schema and discriminator/value-column checks remain authoritative at its consumers.
+pub(crate) fn is_type_literal_bytes_field(field: &Field) -> bool {
+    field.name() == "literal_bytes"
+        && field.data_type() == &DataType::Binary
+        && field
+            .metadata()
+            .get("codefabric.logical_type")
+            .is_some_and(|value| value == "python-type-literal.bytes")
 }
 
 fn validate_typed_data_type(

@@ -4,7 +4,7 @@ Updated 2026-09-10 from the canonical `/home/paul/CodeFabric` working tree on `m
 Implementation has resumed from `b2a97b9c` in the detailed plan's P01–P14 package order, as requested.
 P01's initial captured dependency/context vertical and phase costs are committed in `a31e2a3a`.
 P02 is in progress; canonical diagnostics and the initial Python module/import/semantic-reference
-cluster are implemented with scoped coverage and exact reopen.
+cluster and initial Python structural types are implemented with scoped coverage and exact reopen.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -83,9 +83,59 @@ completes with the existing warning backlog; full-suite, doctest and public fami
 completion are not claimed by this slice. The code-facts and DataFusion reference skills and exact
 local sources guided the bulk resolver, typed Arrow boundary, joins, aggregates and alias metadata.
 
-Structural types, initial Rust import/reference normalization and public family selection remain
-P02 work. The current Pyrefly shape table erases native type distinctions; extend its typed query
-seam before interning canonical type identities. P03–P14 remain required in package order.
+Initial Rust type/import/reference normalization and public family selection remain P02 work.
+P03–P14 remain required in package order.
+
+### Initial Python structural types
+
+The native Pyrefly query now returns both the existing presentation type table and a bounded typed
+graph from one checker transaction and AST occurrence traversal. The graph preserves native
+constructors, captured class/function anchors, builtin identities, literal scalar values, tuple
+layout, and callable parameter kinds, call-significant names and requiredness. It retains every
+native type discriminant, including explicitly unsupported shapes. Local graph indices and native
+hashes are response-local; neither display strings nor provider hashes establish canonical type IDs.
+
+Three shared Arrow relations carry type nodes, components and source observations. Byte literals
+use an explicitly identified scalar Binary field; opaque semantic carriers remain rejected. The
+shared schema bundle and its logical-type metadata changed, and the current sidecar was rebuilt.
+DataFusion binds graphs to exact accepted runs, source digests/generations and unique canonical
+definition anchors, then groups their typed records for normalization. An owned graph normalizer
+uses petgraph's iterative SCC traversal and the application TypeInterner; it encodes each term once.
+
+`fact.code_type`, `fact.code_type_observation` and `fact.code_type_component` publish structural
+identity, occurrence roles and native component evidence. The internal canonical graph preserves
+local correspondence and normalization gaps. Primitive/nominal/generic, class/type objects,
+union/intersection, tuples, basic callables/functions, literals, Any, Error, Unknown, None and Never
+are distinct. Unresolved/ambiguous definitions, recursion and unsupported advanced constructors
+remain explicit unknowns; dependent shapes cannot silently become complete. Checker-computed
+observations retain the `checker-observed` role, without inventing declared/expected/narrowed roles.
+The `types` processing family combines native per-file coverage with canonical normalization and
+location gaps, including pending source-only publication.
+
+Validation on 2026-09-10: all 39 sidecar tests pass, including typed literals, parameter semantics,
+native anchors and a deliberately bounded graph (`/tmp/codefabric-p02-types-sidecar-tests-3.log`).
+Three graph-normalization tests and the existing interner adapter case pass. Independent Arrow plan
+cases verify stale bytes/generations, context separation, ambiguous nominal anchors, missing nodes,
+invalid locations and stable IDs across runs/generations. The real daemon case checks an independently
+specified integer type key/ID, native constructor distinctions and callable parameters, unknown
+coverage and exact Delta reopen of all type relations (25.07 s). The affected 14-case run passes,
+including provider schema admission and retained opaque-carrier rejection
+(`/tmp/codefabric-p02-types-integration-tests-2.log`). `canonical-python-types` selects this scenario.
+The final 21-case canonical/processing/interner/native regression run passes (27.33 s), including
+the preceding module/import/reference case and the type/reopen case with final field metadata
+(`/tmp/codefabric-p02-types-final-tests.log`). Default/featureless root checks and strict sidecar
+checks pass (`/tmp/codefabric-p02-types-root-check-final.log`,
+`/tmp/codefabric-p02-types-sidecar-check-2.log`); all 39 sidecar tests also pass after the final schema
+metadata change (`/tmp/codefabric-p02-types-sidecar-tests-final.log`). All-target root Clippy
+completes with the existing warning backlog; its one new test allocation warning was corrected
+(`/tmp/codefabric-p02-types-clippy-final.jsonl`). Tooling golden selection, focused lint/format,
+document navigation and diff checks pass. Focused spelling passes; whole-file spelling still flags
+six unchanged escaped `caf` byte fragments in existing encoding fixtures. Full-suite/doctest and
+strict repository-wide lint completion are not claimed.
+The code-facts, DataFusion and petgraph reference skills and exact resolved sources guided this slice.
+Full recursive/binder/alias/overload/ParamSpec/TypedDict normalization, expanded type observation
+roles and members remain P06; Rust's initial structural type vertical and public family selection
+remain P02. No full type-universe or public-query completion is claimed by this slice.
 
 ### Canonical diagnostics (`cf42d574`)
 
