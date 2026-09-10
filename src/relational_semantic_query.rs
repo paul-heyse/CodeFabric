@@ -577,8 +577,50 @@ pub struct ProgramClauseBindingRow {
 /// One catalog-declared projection field mapping.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramProjectionField {
+    /// Optional released output column label; field identity and source lineage remain explicit.
+    pub output_name: Option<Arc<str>>,
+    /// An explicit output contract for nullability introduced by a native outer join.
+    pub output_nullable: Option<bool>,
+    /// Encode the binary source identity with this application-owned entity kind.
+    pub public_entity_kind: Option<ProgramPublicEntityKind>,
     pub input_field_id: FieldId,
     pub output_field_id: FieldId,
+}
+
+/// Kind evidence used by the application public-ID scalar; never inferred from names.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProgramPublicEntityKind {
+    Literal(Arc<str>),
+    Field(FieldId),
+}
+
+impl ProgramProjectionField {
+    pub(crate) fn input_fields(&self) -> impl Iterator<Item = &FieldId> {
+        std::iter::once(&self.input_field_id).chain(match &self.public_entity_kind {
+            Some(ProgramPublicEntityKind::Field(field)) => Some(field),
+            _ => None,
+        })
+    }
+
+    fn expression(&self) -> ScalarExpression {
+        let id = ScalarExpression::Field(self.input_field_id.clone());
+        match &self.public_entity_kind {
+            None => id,
+            Some(kind) => ScalarExpression::PublicEntityId {
+                arguments: vec![
+                    id,
+                    match kind {
+                        ProgramPublicEntityKind::Literal(kind) => {
+                            ScalarExpression::Literal(ScalarValue::Utf8(Some(kind.to_string())))
+                        }
+                        ProgramPublicEntityKind::Field(field) => {
+                            ScalarExpression::Field(field.clone())
+                        }
+                    },
+                ],
+            },
+        }
+    }
 }
 
 /// One catalog-declared join predicate.
@@ -1994,9 +2036,11 @@ fn validate_node_fields(
                 .map(|field| field.output_field_id.clone())
                 .collect::<Vec<_>>();
             if outputs != row.output_fields
-                || fields
-                    .iter()
-                    .any(|field| !source.output_fields.contains(&field.input_field_id))
+                || fields.iter().any(|field| {
+                    field
+                        .input_fields()
+                        .any(|id| !source.output_fields.contains(id))
+                })
             {
                 return Err(invalid_node(
                     &row.node_id,
@@ -2836,10 +2880,11 @@ fn lower_block(
             ProgramRelationalOperator::Projection { fields } => {
                 selections.insert(SemanticCompilerOperator::Projection);
                 dependencies.extend(fields.iter().flat_map(|field| {
-                    [
-                        SemanticCompilerDependency::Field(field.input_field_id.clone()),
-                        SemanticCompilerDependency::Field(field.output_field_id.clone()),
-                    ]
+                    field
+                        .input_fields()
+                        .chain(std::iter::once(&field.output_field_id))
+                        .cloned()
+                        .map(SemanticCompilerDependency::Field)
                 }));
                 RelationalExpression::Projection {
                     input: Box::new(inputs[0].clone()),
@@ -2847,7 +2892,7 @@ fn lower_block(
                         .iter()
                         .map(|field| NamedExpression {
                             field_id: field.output_field_id.clone(),
-                            expression: ScalarExpression::Field(field.input_field_id.clone()),
+                            expression: field.expression(),
                         })
                         .collect(),
                 }
@@ -4220,9 +4265,11 @@ fn validate_epoch_execution_node_fields(
                 .map(|field| field.output_field_id.clone())
                 .collect::<Vec<_>>();
             if outputs != row.output_fields
-                || fields
-                    .iter()
-                    .any(|field| !source.output_fields.contains(&field.input_field_id))
+                || fields.iter().any(|field| {
+                    field
+                        .input_fields()
+                        .any(|id| !source.output_fields.contains(id))
+                })
             {
                 return Err(invalid(
                     "projection mapping disagrees with its field contracts",
@@ -5295,7 +5342,7 @@ fn lower_epoch_execution_program(
                         .iter()
                         .map(|field| NamedExpression {
                             field_id: field.output_field_id.clone(),
-                            expression: ScalarExpression::Field(field.input_field_id.clone()),
+                            expression: field.expression(),
                         })
                         .collect(),
                 }
@@ -6344,6 +6391,9 @@ mod tests {
                     input_node_ids: vec![Arc::from("producer-input")],
                     operator: ProgramRelationalOperator::Projection {
                         fields: vec![ProgramProjectionField {
+                            output_name: None,
+                            output_nullable: None,
+                            public_entity_kind: None,
                             input_field_id: source_field.clone(),
                             output_field_id: producer_field.clone(),
                         }],
@@ -6369,6 +6419,9 @@ mod tests {
                     input_node_ids: vec![Arc::from("consumer-input")],
                     operator: ProgramRelationalOperator::Projection {
                         fields: vec![ProgramProjectionField {
+                            output_name: None,
+                            output_nullable: None,
+                            public_entity_kind: None,
                             input_field_id: producer_field.clone(),
                             output_field_id: consumer_field.clone(),
                         }],
@@ -6986,6 +7039,9 @@ mod tests {
                     input_node_ids: vec![Arc::from("entities.filter")],
                     operator: ProgramRelationalOperator::Projection {
                         fields: vec![ProgramProjectionField {
+                            output_name: None,
+                            output_nullable: None,
+                            public_entity_kind: None,
                             input_field_id: within_entity.clone(),
                             output_field_id: entity_identity.clone(),
                         }],
@@ -7020,6 +7076,9 @@ mod tests {
                     input_node_ids: vec![Arc::from("facts.input")],
                     operator: ProgramRelationalOperator::Projection {
                         fields: vec![ProgramProjectionField {
+                            output_name: None,
+                            output_nullable: None,
+                            public_entity_kind: None,
                             input_field_id: entity_identity.clone(),
                             output_field_id: fact_identity.clone(),
                         }],

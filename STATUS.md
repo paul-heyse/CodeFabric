@@ -7,7 +7,8 @@ P02's initial canonical semantic vertical now publishes diagnostics, Python modu
 imports, references and structural types with scoped public retrieval and exact reopen.
 The Rust type and HIR reference slices are committed in `ba35b4c7` and `1b515b7b`.
 P02 public family selection is committed in `f7adca03`. P03 repeated-block output isolation is
-committed in `7eefd2ea`. Typed prior-entity result consumption now passes native and regression validation.
+committed in `7eefd2ea`, and typed prior-entity result consumption in `bd7f3752`.
+Semantic-reference/import traversal now passes mixed native and regression validation.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -44,7 +45,45 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
-The current continuation adds explicit materialized consumer slots and a shared-pool Arrow result
+The reference/import continuation adds four immutable native query templates over the existing
+canonical relations, covering incoming denotations and outgoing source occurrences. Exact
+workspace/context joins establish target kinds; unresolved targets retain null public IDs and
+provider explanations. A shared Arrow scalar formats application-owned binary IDs. Typed
+projections carry their explicit output labels, nullability and kind evidence in program identity.
+Target-kind grouping prevents name aliases from multiplying occurrence witnesses. Existing typed
+entity-result slots also feed incoming references/imports. Processing uses the selected family and
+conservative potential dependency scope; owner/frontier narrowing remains open.
+
+Guarded selection resolves family and direction together, deduplicates aliases by execution
+meaning and preserves valid directions across replay. Labels remain readable while submitted
+choices stay opaque and catalog-bound. A native thirteen-block installed-client case checks both
+languages/directions, aliases, repeated subjects, unresolved imports, empty results, truncation,
+prior-entity fan-out and guarded import selection, then checks exact reopen. All 56 affected
+compiler/ingress/runtime/ownership/cache and native cases pass (93.41 s;
+`/tmp/codefabric-p03-relationships-regression.log`): the new case takes 88.93 s, the eleven-family
+regression 93.38 s and the prior-entity regression 31.73 s. The earlier eleven-block native case
+passes in 69.96 s alongside all nine ingress tests
+(`/tmp/codefabric-p03-relationships-tests-2.log`).
+
+The first run passed 21 compiler cases but exposed a private capability mismatch: DataFusion's
+`ScalarUDF::call` allocates another outer Arc. The query compiler now constructs the native
+`ScalarFunction` with the exact registered Arc, preserving existing strict child authorization.
+The failed run is retained at `/tmp/codefabric-p03-relationships-tests-1.log`. Resolved DataFusion
+55 `ScalarUDF::call`/`ScalarFunction::new_udf` source, native projection/aggregate/join APIs, and
+Pyrefly reference §26 informed the implementation. Default/featureless `just root-check` passes
+(`/tmp/codefabric-p03-relationships-root-check.log`). Focused tooling lint, golden harness,
+document navigation and diff checks pass. Golden names for the recent P02/P03 submodule cases
+now include their actual Rust module paths; `semantic-relationships` selects the new case.
+All-target Clippy completes with the existing backlog; the new import/style diagnostics were
+corrected (`/tmp/codefabric-p03-relationships-clippy-final.jsonl`). Native nextest discovery finds
+exactly the expected test for all eight corrected/new selectors
+(`/tmp/codefabric-p03-relationships-test-list.json`).
+
+P03 is still open: complete literal/scope/representation meanings, first-class occurrence and
+source subjects, type/member facts, bounded distance/stop/filter directives and independent
+branch execution/failure remain. No outcome 4–8 closure is claimed.
+
+The preceding continuation adds explicit materialized consumer slots and a shared-pool Arrow result
 owner. Completed producer rows retain their exact schema and are reused across consumers; native
 semi joins preserve entity/context pairs. Explicit subject rows and prior dependencies are separate.
 Result-limit probes are excluded from downstream inputs, while the producer's published observation

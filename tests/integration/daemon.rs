@@ -32,6 +32,7 @@ const DEFAULT_PRODUCTION_SOURCE: &[u8] = b"def answer(value: int) -> int:\n    r
 mod semantic_references;
 mod fact_families;
 mod block_queries;
+mod relationship_queries;
 mod types;
 
 struct InstalledProductionStack {

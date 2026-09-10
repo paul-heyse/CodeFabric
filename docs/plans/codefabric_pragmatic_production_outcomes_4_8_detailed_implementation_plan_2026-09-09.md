@@ -524,6 +524,30 @@ the new modules/native tests; focused lint, golden selection, docs, spelling and
 STATUS records corrections and logs. Independent branch
 scheduling/failure, occurrence roles and remaining first-four meanings still belong to P03.
 
+**P03 reference/import query continuation passes native validation, 2026-09-10.** Four
+family/direction-specific templates query existing canonical relations. Native grouping establishes
+distinct target-kind evidence; exact workspace/context joins preserve resolved targets, candidates
+and unknowns. Typed projection aliases, nullability and public-ID kind evidence are part of the
+immutable program/schema identity. The shared Arrow scalar formats application-owned IDs at the
+query boundary, without persisted selector copies. Incoming selects denotations; outgoing selects
+reference/import occurrences. Unknown targets and unmapped source occurrences retain nullable
+endpoints and provider explanations. Prior entity results join their exact contexts.
+
+Guarded selection resolves family and direction, deduplicates equivalent aliases and retains both
+directions after a family answer. The native thirteen-block mixed-language installed-client case
+checks aliases, both directions, repeated subjects, unknown imports, empty rows, visible truncation,
+prior-entity fan-out, guarded selection and exact reopen (88.93 s). All 56 relevant regressions pass
+in 93.41 s, including the eleven-family and prior-entity cases. STATUS records commands, logs and
+limits. The first run exposed DataFusion's outer-Arc copy in `ScalarUDF::call`; constructing
+`ScalarFunction::new_udf` with the registered Arc preserves the strict private capability check.
+Default/featureless checks and focused tooling/document checks pass. The `semantic-relationships`
+golden selector and corrected P02/P03 submodule paths support real test discovery.
+
+Processing uses the selected semantic-reference/import family and conservative potential dependency
+scope. Owner/frontier narrowing, broader directions/distances/filters, source/occurrence roles,
+type/member facts and remaining P03 first-four meanings are still required. This slice does not
+complete P03 or any outcome.
+
 Evolve the existing schema descriptor/version checks and released wire deliberately. For each
 schema-changing slice, identify its raw producer, canonical consumers, persisted reader, public
 projection and update replacement. Add typed fields/relations only where these consumers need
@@ -775,7 +799,7 @@ now also publishes typed native denotations, scoped unknowns and exact reopen as
 
 ### 4E. First four production query forms and mixed-language demonstration
 
-**Current status — partial.** Installed clients exercise canonical function and selected additional declaration-kind FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. Installed FollowRelationships queries execute one-step Python/Rust calls and exact Python reopen. The continuation adds explicit Python lexical-reference traversal, preserving write/read/call/type/import kinds, reusable occurrence endpoints and unresolved/unsupported family scope; project-aware semantic references and full traversal remain open. SourceContext serves exact canonical declaration spans with live independent disclosure checks, lossless byte limits and coordinates. Function definitions/bodies now use exact syntax-owner joins and an independent incomplete-owner processing family; the mixed live/clean behavioral case passes with independent expected source, nested functions, CRLF/Unicode truncation, edits and restoration (206.25 s). `function-source-live` selects it. Explicit surrounding-line windows now preserve captured CRLF, Unicode, file edges and separate anchor/requested/delivered ranges. Installed clients and exact reopen pass (33.70 s), including a non-retryable source hard-limit failure versus explicit prefix truncation; `source-lines-live` selects the case. Broader syntax context and source subject selection remain open. All broader meanings, source/representation scopes, semantic reference resolution, stop/filter/distance behavior and composition remain required. The first-four acceptance below is open.
+**Current status — partial.** Installed clients exercise canonical function and selected additional declaration-kind FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. Installed FollowRelationships queries execute one-step Python/Rust calls and exact Python reopen. The continuation adds explicit Python lexical-reference traversal, preserving write/read/call/type/import kinds, reusable occurrence endpoints and unresolved/unsupported family scope; project-aware Python/Rust semantic references and imports now pass both one-step directions, guarded family selection, typed prior-entity inputs and exact reopen; full traversal remains open. SourceContext serves exact canonical declaration spans with live independent disclosure checks, lossless byte limits and coordinates. Function definitions/bodies now use exact syntax-owner joins and an independent incomplete-owner processing family; the mixed live/clean behavioral case passes with independent expected source, nested functions, CRLF/Unicode truncation, edits and restoration (206.25 s). `function-source-live` selects it. Explicit surrounding-line windows now preserve captured CRLF, Unicode, file edges and separate anchor/requested/delivered ranges. Installed clients and exact reopen pass (33.70 s), including a non-retryable source hard-limit failure versus explicit prefix truncation; `source-lines-live` selects the case. Broader syntax context and source subject selection remain open. Broader meanings, source/representation scopes, remaining semantic normalization, stop/filter/distance behavior and full composition remain required. The first-four acceptance below is open.
 
 **Prerequisites:** 4D and 5A–5B. **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, `src/semantic_query_contract.rs`, existing child catalog and adapter.
 
@@ -1317,7 +1341,7 @@ Complete resource acquisition/transfer/drop/escape, unwind paths, closure captur
 
 ### 7G. Remaining forms, complete composition and query semantics
 
-**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. Real prior-result resolution and repeated-form/multi-block DAG execution also remain; fixed per-form output relations must not collide or silently reuse another block's output.
+**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Broader prior roles, independent-branch execution/failure and the full mixed-form DAG remain.
 
 **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, query contracts and graph integration. Complete the first four forms from 4E and extend them to every relevant family in the coverage map as those families land.
 

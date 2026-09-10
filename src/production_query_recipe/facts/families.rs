@@ -169,6 +169,9 @@ fn program(
         .iter()
         .zip(&output_fields)
         .map(|(input, output)| ProgramProjectionField {
+            output_name: None,
+            output_nullable: None,
+            public_entity_kind: None,
             input_field_id: input.clone(),
             output_field_id: output.clone(),
         })
@@ -350,7 +353,7 @@ fn program(
     }))
 }
 
-fn definition(
+pub(super) fn definition(
     epoch: &ProgrammaticFabricEpoch,
     id: &str,
 ) -> Result<Option<ProductionRelationDefinition>, ProductionQueryRecipeError> {

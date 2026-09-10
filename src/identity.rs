@@ -1,5 +1,8 @@
 //! CBEF-v1 identities, public encodings, canonical type terms, and workspace paths.
 
+#[cfg(feature = "daemon")]
+pub(crate) mod arrow;
+
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs::OpenOptions;

@@ -298,6 +298,9 @@ pub enum ScalarExpression {
     Field(FieldId),
     /// A typed Arrow scalar value.
     Literal(ScalarValue),
+    /// Application public identity encoding over an already authorized canonical ID and kind.
+    #[cfg(feature = "daemon")]
+    PublicEntityId { arguments: Vec<ScalarExpression> },
     /// Exact source-span materialization with daemon-bound snapshot and disclosure authority.
     #[cfg(feature = "daemon")]
     SourceContext {
@@ -1350,6 +1353,38 @@ impl CompileState {
                 Ok(Expr::Column(field.column.clone()))
             }
             ScalarExpression::Literal(value) => Ok(Expr::Literal(value.clone(), None)),
+            #[cfg(feature = "daemon")]
+            ScalarExpression::PublicEntityId { arguments } => {
+                self.require_intrinsic(RelationalPrimitive::ScalarFunction)?;
+                if arguments.len() != 2 {
+                    return Err(RelationalProgramError::InvalidProgram(
+                        "public identity needs ID and kind".into(),
+                    ));
+                }
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.compile_scalar(argument, fields, schema))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let function = if let Some(function) = self
+                    .query_functions
+                    .iter()
+                    .find(|function| function.name() == "codefabric_public_entity_id_v1")
+                {
+                    Arc::clone(function)
+                } else {
+                    let function = crate::identity::arrow::public_entity_id();
+                    self.query_functions.push(Arc::clone(&function));
+                    function
+                };
+                // ScalarUDF::call allocates another outer Arc. The child validates the exact
+                // installed capability, so preserve that Arc as for source materialization.
+                let expression = Expr::ScalarFunction(
+                    datafusion::logical_expr::expr::ScalarFunction::new_udf(function, arguments),
+                );
+                expression.get_type(schema)?;
+                expression.nullable(schema)?;
+                Ok(expression)
+            }
             #[cfg(feature = "daemon")]
             ScalarExpression::SourceContext {
                 parameters,

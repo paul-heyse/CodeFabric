@@ -51,6 +51,9 @@ use crate::relational_semantic_query::EpochBoundSelectionTarget;
 pub(crate) use facts::families::{
     known_meaning as canonical_fact_meaning, result_family as canonical_result_family,
 };
+pub(crate) use facts::relationships::{
+    is_result as semantic_relationship_result, known_meaning as canonical_relationship_meaning,
+};
 pub(crate) use facts::validate_canonical_fact_references;
 
 const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
@@ -529,6 +532,7 @@ fn compiled_released_form_programs(
             programs.push(program);
         }
         programs.extend(facts::families::programs(epoch)?);
+        programs.extend(facts::relationships::programs(epoch)?);
         if let Some(program) = facts::calls(epoch)? {
             programs.push(program);
         }
@@ -786,20 +790,32 @@ fn compiled_find_entities_program(
     let output_name = release_field_id("query.result.semantic-entities.entity-name")?;
     let mut projections = vec![
         ProgramProjectionField {
+            output_name: None,
+            output_nullable: None,
+            public_entity_kind: None,
             input_field_id: source.entity_id,
             output_field_id: output_id,
         },
         ProgramProjectionField {
+            output_name: None,
+            output_nullable: None,
+            public_entity_kind: None,
             input_field_id: source.entity_kind,
             output_field_id: output_kind,
         },
         ProgramProjectionField {
+            output_name: None,
+            output_nullable: None,
+            public_entity_kind: None,
             input_field_id: source.entity_name,
             output_field_id: output_name,
         },
     ];
     for (input_field_id, name) in source.scope_fields {
         projections.push(ProgramProjectionField {
+            output_name: None,
+            output_nullable: None,
+            public_entity_kind: None,
             input_field_id,
             output_field_id: release_field_id(&format!("query.result.semantic-entities.{name}"))?,
         });
@@ -966,15 +982,12 @@ fn compiled_program_result_bindings(
 
     let mut bindings = BTreeMap::new();
     for (form, program) in programs {
-        let mut projection_sources = BTreeMap::<FieldId, FieldId>::new();
+        let mut projection_sources = BTreeMap::<FieldId, &ProgramProjectionField>::new();
         for operator in &program.operators {
             if let ProgramRelationalOperator::Projection { fields } = &operator.operator {
                 for projection in fields {
                     if projection_sources
-                        .insert(
-                            projection.output_field_id.clone(),
-                            projection.input_field_id.clone(),
-                        )
+                        .insert(projection.output_field_id.clone(), projection)
                         .is_some()
                     {
                         return invalid(program, "program-result projection field is repeated");
@@ -997,7 +1010,7 @@ fn compiled_program_result_bindings(
             .fields
             .iter()
             .map(|output_id| {
-                let source_id = projection_sources.get(output_id).ok_or_else(|| {
+                let projection = projection_sources.get(output_id).ok_or_else(|| {
                     ProductionQueryRecipeError::InvalidProgram {
                         program: program.program_binding_id.to_string(),
                         detail: format!(
@@ -1006,6 +1019,7 @@ fn compiled_program_result_bindings(
                         ),
                     }
                 })?;
+                let source_id = &projection.input_field_id;
                 let source = epoch_fields.get(source_id).ok_or_else(|| {
                     ProductionQueryRecipeError::InvalidProgram {
                         program: program.program_binding_id.to_string(),
@@ -1018,11 +1032,23 @@ fn compiled_program_result_bindings(
                 })?;
                 Ok(Arc::new(
                     Field::new(
-                        source.name(),
-                        source.data_type().clone(),
-                        source.is_nullable(),
+                        projection.output_name.as_deref().unwrap_or(source.name()),
+                        if projection.public_entity_kind.is_some() {
+                            arrow_schema::DataType::Utf8
+                        } else {
+                            source.data_type().clone()
+                        },
+                        projection.output_nullable.unwrap_or_else(|| {
+                            projection.public_entity_kind.is_some() || source.is_nullable()
+                        }),
                     )
-                    .with_metadata(source.metadata().clone()),
+                    .with_metadata(
+                        if projection.public_entity_kind.is_some() {
+                            std::collections::HashMap::new()
+                        } else {
+                            source.metadata().clone()
+                        },
+                    ),
                 ))
             })
             .collect::<Result<Vec<_>, ProductionQueryRecipeError>>()?;
@@ -1310,9 +1336,11 @@ fn validate_operator_node(
         }
         ProgramRelationalOperator::Projection { fields } => {
             if inputs.len() != 1
-                || fields
-                    .iter()
-                    .any(|field| !inputs[0].output_fields.contains(&field.input_field_id))
+                || fields.iter().any(|field| {
+                    field
+                        .input_fields()
+                        .any(|id| !inputs[0].output_fields.contains(id))
+                })
                 || fields
                     .iter()
                     .map(|field| &field.output_field_id)
@@ -2242,6 +2270,19 @@ fn encode_relational_operator(value: &ProgramRelationalOperator) -> CanonicalIde
                     let mut field_frame = CanonicalIdentityFrame::default();
                     field_frame.text(1, field.input_field_id.as_str());
                     field_frame.text(2, field.output_field_id.as_str());
+                    if let Some(name) = &field.output_name {
+                        field_frame.text(3, name);
+                    }
+                    if let Some(nullable) = field.output_nullable {
+                        field_frame.bool(4, nullable);
+                    }
+                    if let Some(kind) = &field.public_entity_kind {
+                        use crate::relational_semantic_query::ProgramPublicEntityKind;
+                        match kind {
+                            ProgramPublicEntityKind::Literal(kind) => field_frame.text(5, kind),
+                            ProgramPublicEntityKind::Field(id) => field_frame.text(6, id.as_str()),
+                        }
+                    }
                     field_frame
                 }),
             );

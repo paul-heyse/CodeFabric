@@ -3,6 +3,7 @@
 //! Source inventories and run scopes are join authorities. Raw provider observations remain
 //! available; this layer never treats missing observations as completed semantic coverage.
 
+use crate::identity::arrow::public_entity_id;
 use std::sync::Arc;
 
 use arrow_array::builder::FixedSizeBinaryBuilder;
@@ -1130,33 +1131,6 @@ fn file_id_udf() -> Arc<ScalarUDF> {
                 identity::decode_public_id(IdentityDomain::SourceFile, None, text(&a[0], r)?)
                     .map_err(|e| invalid(&e.to_string()))
             })
-        }),
-    ))
-}
-
-fn public_entity_id() -> Arc<ScalarUDF> {
-    Arc::new(create_udf(
-        "codefabric_public_entity_id_v1",
-        vec![DataType::FixedSizeBinary(16), DataType::Utf8],
-        DataType::Utf8,
-        Volatility::Immutable,
-        Arc::new(|values| {
-            let arrays = ColumnarValue::values_to_arrays(values)?;
-            let values = (0..arrays[0].len())
-                .map(|row| {
-                    if arrays[0].is_null(row) || arrays[1].is_null(row) {
-                        return Ok(None);
-                    }
-                    identity::encode_public_id(
-                        IdentityDomain::Entity,
-                        Some(text(&arrays[1], row)?),
-                        fixed(&arrays[0], row)?,
-                    )
-                    .map(Some)
-                    .map_err(|error| invalid(&error.to_string()))
-                })
-                .collect::<Result<Vec<_>, DataFusionError>>()?;
-            Ok(ColumnarValue::Array(Arc::new(StringArray::from(values))))
         }),
     ))
 }

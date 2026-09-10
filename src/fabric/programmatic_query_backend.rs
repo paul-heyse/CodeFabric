@@ -1315,7 +1315,10 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 let source_context = output.relation_id().as_str() == "query.result.source-context";
                 let declarations = source_context
                     || output.relation_id().as_str() == "query.result.declaration-facts";
-                let calls = output.relation_id().as_str() == "query.result.call-facts";
+                let calls = output.relation_id().as_str() == "query.result.call-facts"
+                    || crate::production_query_recipe::semantic_relationship_result(
+                        output.relation_id().as_str(),
+                    );
                 if canonical_family.is_none()
                     && !declarations
                     && !calls

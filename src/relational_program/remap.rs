@@ -25,7 +25,8 @@ fn scalar(expression: &mut ScalarExpression, mapping: &BTreeMap<FieldId, FieldId
             }
         }
         #[cfg(feature = "daemon")]
-        ScalarExpression::SourceContext { arguments, .. } => {
+        ScalarExpression::SourceContext { arguments, .. }
+        | ScalarExpression::PublicEntityId { arguments } => {
             for argument in arguments {
                 scalar(argument, mapping);
             }

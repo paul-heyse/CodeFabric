@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 pub(crate) mod families;
+pub(crate) mod relationships;
 
 use super::{
     EpochBoundRequestInputField, EpochBoundSelectionFold, EpochBoundSelectionValueResolution,
@@ -112,6 +113,9 @@ fn subject_facts(
         .filter(|(field, _)| !matches!(field.name().as_str(), "subject_kind" | "fact_family"))
         .map(|(field, id)| {
             Ok(ProgramProjectionField {
+                output_name: None,
+                output_nullable: None,
+                public_entity_kind: None,
                 input_field_id: id.clone(),
                 output_field_id: output_field(field.name())?,
             })
@@ -122,6 +126,9 @@ fn subject_facts(
             return Ok(None);
         };
         projections.push(ProgramProjectionField {
+            output_name: None,
+            output_nullable: None,
+            public_entity_kind: None,
             input_field_id: release_field_id("source.exact_source_bytes.source_bytes")?,
             output_field_id: output_field("source_bytes")?,
         });

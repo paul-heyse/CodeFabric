@@ -132,3 +132,144 @@ pub(super) fn select<'a>(
         }
     }
 }
+
+// Resolve dimensions in order: a guarded family answer must preserve every admitted direction.
+#[allow(clippy::too_many_lines)]
+pub(super) fn select_relationship<'a>(
+    catalog: &'a EpochBoundSemanticIngressCatalog,
+    candidates: &[&'a EpochBoundProgramBindingRow],
+    query: &str,
+    dimensions: &[(&str, &str)],
+    projection: &mut IngressProjection,
+) -> Result<Option<&'a EpochBoundProgramBindingRow>, ProgrammaticQueryPortError> {
+    let mut remaining = candidates.to_vec();
+    for (selection, original) in dimensions {
+        let value = SemanticClauseValue::Text(Arc::from(*original));
+        let bindings = catalog
+            .selections
+            .iter()
+            .filter(|binding| {
+                binding.selection_id.as_ref() == *selection
+                    && remaining
+                        .iter()
+                        .any(|program| program.program_binding_id == binding.program_binding_id)
+            })
+            .collect::<Vec<_>>();
+        let matches = |value: &SemanticClauseValue| {
+            bindings
+                .iter()
+                .filter(|binding| {
+                    binding
+                        .resolutions
+                        .iter()
+                        .any(|resolution| &resolution.request_value == value)
+                })
+                .map(|binding| binding.program_binding_id.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        let mut selected = matches(&value);
+        if selected.is_empty() {
+            let catalog_binding = format!(
+                "relationships.catalog.{}",
+                hex_bytes(&catalog.program_catalog_pin)
+            );
+            let field = guarded_selection_field_id(query, &catalog_binding, selection, 0);
+            let mut choices = std::collections::BTreeMap::new();
+            for binding in &bindings {
+                for resolution in &binding.resolutions {
+                    let choice_id = guarded_selection_choice_id(
+                        &catalog_binding,
+                        selection,
+                        &resolution.execution_value,
+                    );
+                    choices
+                        .entry(choice_id.clone())
+                        .or_insert(SemanticAuthorizedChoice {
+                            presentation_key: selection_presentation(
+                                &resolution.execution_value,
+                                choice_id.clone(),
+                            ),
+                            choice_id,
+                            value: semantic_input_value(&resolution.execution_value)?,
+                        });
+                }
+            }
+            if choices.is_empty() {
+                return Err(rejected(
+                    "relationship programs have no admitted selection meanings",
+                ));
+            }
+            match projection.answers.get(&field) {
+                Some(SemanticInputValue::Choice(id)) => {
+                    let choice = choices.get(id).ok_or_else(|| {
+                        rejected("guarded relationship choice is outside the installed catalog")
+                    })?;
+                    let chosen = bindings
+                        .iter()
+                        .flat_map(|binding| &binding.resolutions)
+                        .find(|resolution| {
+                            guarded_selection_choice_id(
+                                &catalog_binding,
+                                selection,
+                                &resolution.execution_value,
+                            ) == choice.choice_id
+                        })
+                        .expect("choice came from a catalog resolution");
+                    selected = bindings
+                        .iter()
+                        .filter(|binding| {
+                            binding.resolutions.iter().any(|resolution| {
+                                resolution.execution_value == chosen.execution_value
+                            })
+                        })
+                        .map(|binding| binding.program_binding_id.clone())
+                        .collect();
+                    for binding in &bindings {
+                        if let Some(resolution) = binding
+                            .resolutions
+                            .iter()
+                            .find(|resolution| resolution.execution_value == chosen.execution_value)
+                        {
+                            projection.selection_resolutions.insert(
+                                (
+                                    binding.program_binding_id.clone(),
+                                    Arc::from(*selection),
+                                    value.clone(),
+                                ),
+                                resolution.execution_value.clone(),
+                            );
+                        }
+                    }
+                    projection.consumed_answers.insert(field);
+                }
+                Some(_) => {
+                    return Err(rejected(
+                        "guarded relationship input is not an authorized enum choice",
+                    ));
+                }
+                None => {
+                    projection.requirements.push(SemanticInputRequirement {
+                        semantic_field_id: field,
+                        input_kind: SemanticInputKind::Enum,
+                        presentation_key: "input.selection-resolution".into(),
+                        description_key: Some("input.selection-resolution.description".into()),
+                        required: true,
+                        constraints: Some(SemanticInputConstraints::Enum {
+                            minimum_selections: 1,
+                            maximum_selections: 1,
+                        }),
+                        authorized_choices: choices.into_values().collect(),
+                    });
+                    return Ok(None);
+                }
+            }
+        }
+        remaining.retain(|program| selected.contains(&program.program_binding_id));
+    }
+    match remaining.as_slice() {
+        [program] => Ok(Some(program)),
+        _ => Err(rejected(
+            "admitted catalog has ambiguous programs for the requested relationship meanings",
+        )),
+    }
+}

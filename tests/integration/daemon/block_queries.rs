@@ -1,6 +1,6 @@
 use super::*;
 
-fn resource_bytes(report: &Value, step: &str) -> Vec<u8> {
+pub(super) fn resource_bytes(report: &Value, step: &str) -> Vec<u8> {
     let item = &modern_step(report, step)[0];
     if let Some(blob) = item["blob"].as_str() {
         STANDARD.decode(blob).unwrap()
@@ -9,7 +9,7 @@ fn resource_bytes(report: &Value, step: &str) -> Vec<u8> {
     }
 }
 
-fn block_rows(report: &Value, page: usize) -> Vec<Value> {
+pub(super) fn block_rows(report: &Value, page: usize) -> Vec<Value> {
     let bytes = resource_bytes(report, &format!("page{page}"));
     let batches = arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None)
         .unwrap()

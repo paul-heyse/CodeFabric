@@ -2197,6 +2197,32 @@ fn select_clause_program<'a>(
             projection,
         );
     }
+    if candidates.len() > 1
+        && let SemanticQueryClause::FollowRelationships {
+            relationship,
+            direction,
+            distance,
+            ..
+        } = clause
+    {
+        return family_selection::select_relationship(
+            catalog,
+            &candidates,
+            clause.query_id(),
+            &[
+                ("selection.relationship", relationship.as_str()),
+                (
+                    "selection.direction",
+                    direction.as_deref().unwrap_or("outgoing"),
+                ),
+                (
+                    "selection.distance",
+                    distance.as_deref().unwrap_or("one relationship step"),
+                ),
+            ],
+            projection,
+        );
+    }
     select_program_binding(catalog, form, output_role_id).map(Some)
 }
 
@@ -2545,7 +2571,8 @@ fn selection_presentation(value: &SemanticClauseValue, fallback: String) -> Stri
             if crate::production_query_recipe::CANONICAL_ENTITY_SELECTORS
                 .iter()
                 .any(|(phrase, _)| *phrase == text.as_ref())
-                || crate::production_query_recipe::canonical_fact_meaning(text) =>
+                || crate::production_query_recipe::canonical_fact_meaning(text)
+                || crate::production_query_recipe::canonical_relationship_meaning(text) =>
         {
             format!("selection.{}", text.to_ascii_lowercase().replace(' ', "-"))
         }
@@ -3940,6 +3967,152 @@ mod tests {
                 &candidates,
                 "q",
                 &["unclear".to_owned()],
+                &mut projection
+            )
+            .is_err()
+        );
+    }
+    // The same catalog and request cross both guarded rounds and the forged-answer check.
+    #[allow(clippy::too_many_lines)]
+    #[test]
+    fn relationship_guard_preserves_direction_candidates_and_binds_both_answers() {
+        let port = port();
+        let mut catalog = catalog(&port);
+        let base = catalog
+            .program_bindings
+            .iter()
+            .find(|p| p.compatibility_form == ReleasedSemanticForm::FollowCodeRelationships)
+            .unwrap()
+            .clone();
+        let template = catalog
+            .selections
+            .iter()
+            .find(|s| s.program_binding_id == base.program_binding_id)
+            .unwrap()
+            .clone();
+        catalog.program_bindings.clear();
+        catalog.selections.clear();
+        for (ordinal, direction) in ["incoming", "outgoing"].into_iter().enumerate() {
+            let mut program = base.clone();
+            program.program_binding_id = arc(format!("installed.relationship.{direction}"));
+            program.program_binding_pin = [u8::try_from(ordinal + 1).unwrap(); 32];
+            for (id, values) in [
+                ("selection.relationship", vec!["imports"]),
+                ("selection.direction", vec![direction]),
+            ] {
+                let mut selection = template.clone();
+                selection.program_binding_id = program.program_binding_id.clone();
+                selection.selection_id = arc(id);
+                selection.resolutions = values
+                    .into_iter()
+                    .map(|value| EpochBoundSelectionValueResolution {
+                        request_value: text(value).unwrap(),
+                        execution_value: text(value).unwrap(),
+                    })
+                    .collect();
+                catalog.selections.push(selection);
+            }
+            catalog.program_bindings.push(program);
+        }
+        let candidates = catalog.program_bindings.iter().collect::<Vec<_>>();
+        let dimensions = [
+            ("selection.relationship", "unclear family"),
+            ("selection.direction", "unclear direction"),
+        ];
+        let mut projection = IngressProjection::try_for_catalog(&catalog, &[]).unwrap();
+        assert!(
+            family_selection::select_relationship(
+                &catalog,
+                &candidates,
+                "q",
+                &dimensions,
+                &mut projection
+            )
+            .unwrap()
+            .is_none()
+        );
+        let requirement = &projection.requirements[0];
+        assert_eq!(
+            requirement.authorized_choices.len(),
+            1,
+            "family choices cannot duplicate per direction"
+        );
+        let family_answer = SemanticInputAnswer {
+            semantic_field_id: requirement.semantic_field_id.clone(),
+            value: SemanticInputValue::Choice(requirement.authorized_choices[0].choice_id.clone()),
+        };
+        let mut projection =
+            IngressProjection::try_for_catalog(&catalog, std::slice::from_ref(&family_answer))
+                .unwrap();
+        assert!(
+            family_selection::select_relationship(
+                &catalog,
+                &candidates,
+                "q",
+                &dimensions,
+                &mut projection
+            )
+            .unwrap()
+            .is_none()
+        );
+        let requirement = &projection.requirements[0];
+        assert_eq!(requirement.authorized_choices.len(), 2);
+        let direction_answer = SemanticInputAnswer {
+            semantic_field_id: requirement.semantic_field_id.clone(),
+            value: SemanticInputValue::Choice(
+                requirement
+                    .authorized_choices
+                    .iter()
+                    .find(|c| c.value == SemanticInputValue::String("incoming".into()))
+                    .unwrap()
+                    .choice_id
+                    .clone(),
+            ),
+        };
+        let mut projection = IngressProjection::try_for_catalog(
+            &catalog,
+            &[family_answer.clone(), direction_answer.clone()],
+        )
+        .unwrap();
+        let chosen = family_selection::select_relationship(
+            &catalog,
+            &candidates,
+            "q",
+            &dimensions,
+            &mut projection,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            chosen.program_binding_id.as_ref(),
+            "installed.relationship.incoming"
+        );
+        projection
+            .bind_query_program(&arc("q"), &chosen.program_binding_id)
+            .unwrap();
+        for (selection, value) in dimensions {
+            projection
+                .push_selection("q", &arc(selection), text(value).unwrap())
+                .unwrap();
+        }
+        assert_eq!(
+            projection
+                .selections
+                .iter()
+                .map(|s| s.value.clone())
+                .collect::<Vec<_>>(),
+            vec![text("imports").unwrap(), text("incoming").unwrap()]
+        );
+        projection.validate_answer_consumption().unwrap();
+        let mut forged = family_answer;
+        forged.value = direction_answer.value;
+        let mut projection = IngressProjection::try_for_catalog(&catalog, &[forged]).unwrap();
+        assert!(
+            family_selection::select_relationship(
+                &catalog,
+                &candidates,
+                "q",
+                &dimensions,
                 &mut projection
             )
             .is_err()
