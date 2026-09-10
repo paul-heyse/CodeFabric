@@ -293,6 +293,29 @@ pub(super) fn install_rust_target_progress(
                 )),
             ),
             (
+                "build_profile",
+                true,
+                Arc::new(StringArray::from_iter(progress.iter().map(|row| {
+                    row.rust_build.as_ref().map(|build| build.profile.as_str())
+                }))),
+            ),
+            (
+                "build_features",
+                true,
+                string_lists(progress.iter().map(|row| {
+                    row.rust_build
+                        .as_ref()
+                        .map(|build| build.features.as_slice())
+                })),
+            ),
+            (
+                "default_features",
+                true,
+                Arc::new(BooleanArray::from_iter(progress.iter().map(|row| {
+                    row.rust_build.as_ref().map(|build| build.default_features)
+                }))),
+            ),
+            (
                 "context_id",
                 true,
                 id16_array(progress.iter().map(|row| row.context_id.as_ref())),
@@ -313,6 +336,22 @@ pub(super) fn install_rust_target_progress(
             ),
         ],
     )
+}
+
+pub(super) fn string_lists<'a>(values: impl Iterator<Item = Option<&'a [String]>>) -> ArrayRef {
+    let mut builder =
+        arrow_array::builder::ListBuilder::new(arrow_array::builder::StringBuilder::new());
+    for values in values {
+        if let Some(values) = values {
+            for value in values {
+                builder.values().append_value(value);
+            }
+            builder.append(true);
+        } else {
+            builder.append(false);
+        }
+    }
+    Arc::new(builder.finish())
 }
 
 type Column = (&'static str, bool, ArrayRef);

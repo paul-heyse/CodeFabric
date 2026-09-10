@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:fb21793a49c02d5e5955faa854dadeffd5a451f04d37cace345bf3ea8d3fc396
+// canonical_digest: b3:4d8b357463c016bbf75e5fe3979b3499e3880a83265e54d65d0dc348fa5b0d30
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
@@ -590,6 +590,13 @@ enum ProcessingState {
   PROCESSING_STATE_CANCELLED = 11;
 }
 
+// One explicit Cargo build selection, including an intentionally empty feature set.
+message ProcessingRustBuildSelection {
+  string profile = 1;
+  repeated string features = 2;
+  bool default_features = 3;
+}
+
 message ProcessingRemainder {
   string language = 1;
   string scope_kind = 2;
@@ -605,6 +612,7 @@ message ProcessingRemainder {
   optional string entity_id = 10;
   // Selected Cargo platform; a custom target can be a captured target-specification path.
   optional string target_platform = 11;
+  optional ProcessingRustBuildSelection rust_build = 12;
 }
 
 message QueryProcessingSummary {

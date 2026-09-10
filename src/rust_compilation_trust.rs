@@ -672,11 +672,7 @@ impl SelectedRustCompilationPreparation {
         let settings = &product.settings;
         let manifest = PathBuf::from(std::ffi::OsString::from_vec(settings.manifest_path.clone()));
         let matches_path = |value: &serde_json::Value, relative: &Path| {
-            value.as_str().is_some_and(|value| {
-                let path = Path::new(value);
-                path == Path::new("/workspace").join(relative)
-                    || path == inputs.workspace_view.join(relative)
-            })
+            metadata_source_path_matches(inputs, value, relative)
         };
         let package = metadata
             .get("packages")
@@ -693,6 +689,12 @@ impl SelectedRustCompilationPreparation {
             settings.target.crate_root.clone(),
         ));
         if metadata["version"] != 1
+            || settings.cargo_workspace_root.as_ref().is_some_and(|root| {
+                !matches_path(
+                    &metadata["workspace_root"],
+                    &PathBuf::from(std::ffi::OsString::from_vec(root.clone())),
+                )
+            })
             || !package["targets"].as_array().is_some_and(|targets| {
                 targets.iter().any(|target| {
                     target["name"] == settings.target.name
@@ -881,6 +883,18 @@ impl SelectedRustCompilationPreparation {
 
 /// Cargo library metadata reports its crate types as target kinds. Other kinds identify
 /// the Cargo target role (an example can itself emit a library).
+fn metadata_source_path_matches(
+    inputs: &RustCompilationInputs,
+    value: &serde_json::Value,
+    relative: &Path,
+) -> bool {
+    value.as_str().is_some_and(|value| {
+        let path = Path::new(value);
+        path == Path::new("/workspace").join(relative)
+            || path == inputs.workspace_view.join(relative)
+    })
+}
+
 fn metadata_target_kind_matches(
     kind: RustTargetKind,
     expected_crate_types: &[String],
@@ -3988,6 +4002,7 @@ mod tests {
     fn actual_cargo_metadata_and_sysroot_mapping_allow_selected_compilation() {
         let mut harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
         let mut request = selected_context_request(&harness);
+        request.selection.cargo_workspace_root = Some(b".".to_vec());
         request.selection.dependency_inputs = Some(Vec::new());
         request.selection.build_inputs = Some(Vec::new());
         let product = discover_selected(&request);
@@ -4088,6 +4103,17 @@ mod tests {
             ),
             Err(RustCompilationTrustError::SelectedContextMismatch)
         ));
+        let mut wrong_workspace: Value = serde_json::from_slice(&metadata.stdout).unwrap();
+        wrong_workspace["workspace_root"] = Value::from("/workspace/another-workspace");
+        assert!(
+            SelectedRustCompilationPreparation::from_discovered(&product)
+                .unwrap()
+                .with_cargo_metadata(
+                    &harness.inputs,
+                    &serde_json::to_vec(&wrong_workspace).unwrap()
+                )
+                .is_err()
+        );
         let mut wrong: Value = serde_json::from_slice(&metadata.stdout).unwrap();
         wrong["packages"][0]["targets"][0]["src_path"] = Value::from("/workspace/not-selected.rs");
         assert!(

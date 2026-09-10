@@ -249,6 +249,9 @@ pub struct RustCompilationSettings {
     pub package_name: String,
     pub package_version: String,
     pub manifest_path: Vec<u8>,
+    /// Expected Cargo workspace when inheriting repository-owned analysis selections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cargo_workspace_root: Option<Vec<u8>>,
     pub edition: String,
     pub target: RustTargetSettings,
     /// Complete linkage selection discovered from the captured target manifest.

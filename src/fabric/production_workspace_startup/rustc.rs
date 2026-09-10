@@ -76,6 +76,7 @@ pub(super) struct RustTargetProgress {
     pub target: String,
     pub target_kind: String,
     pub target_platform: Option<String>,
+    pub rust_build: Option<crate::fabric::processing_status::ProcessingRustBuildSelection>,
     pub context_id: Option<[u8; 16]>,
     pub state: &'static str,
     pub detail: String,
@@ -83,11 +84,17 @@ pub(super) struct RustTargetProgress {
 
 impl RustTargetProgress {
     fn new(target: &targets::CargoTarget, state: &'static str, detail: &str) -> Self {
+        let (state, detail) = target
+            .build
+            .error
+            .as_deref()
+            .map_or((state, detail), |error| ("unavailable", error));
         Self {
             manifest: target.manifest.clone(),
             target: target.target.name.clone(),
             target_kind: target.target.kind.as_str().to_owned(),
             target_platform: target.target_triple.clone(),
+            rust_build: target.build.processing(),
             context_id: None,
             state,
             detail: detail.to_owned(),
@@ -244,6 +251,9 @@ fn prepare_and_run(
     ),
     ProductionWorkspaceStartupError,
 > {
+    if let Some(error) = &target.build.error {
+        return Err(step("rust-context-configuration", error));
+    }
     let capabilities = SandboxCapabilityMatrix::probe_current_host();
     if !capabilities
         .row(ProviderTrustProfile::UntrustedSandboxed)
@@ -988,12 +998,53 @@ fn initial_selection(
         })
         .collect();
     dependency_inputs.extend_from_slice(&toolchain.runtime_artifacts);
+    let cargo_workspace_root = if let Some(path) = &selected.build.inherited_workspace {
+        let manifest = files
+            .iter()
+            .find(|file| file.relative_path == *path)
+            .ok_or_else(|| {
+                step(
+                    "rust-context-configuration",
+                    "inherited workspace manifest is not captured",
+                )
+            })?;
+        if !dependency_inputs
+            .iter()
+            .any(|artifact| artifact.file_id == manifest.file_id)
+        {
+            dependency_inputs.push(ContextArtifactInput {
+                file_id: manifest.file_id.clone(),
+                digest: manifest.digest,
+            });
+        }
+        let root = path
+            .strip_suffix(b"Cargo.toml")
+            .expect("captured manifest path");
+        Some(if root.is_empty() {
+            b".".to_vec()
+        } else {
+            root.strip_suffix(b"/").unwrap_or(root).to_vec()
+        })
+    } else {
+        None
+    };
     let build_inputs = targets::build_inputs(files)?;
     Ok(RustContextSelection {
         manifest_path: Some(selected.manifest.clone()),
+        cargo_workspace_root,
         package_name: Some(selected.package.clone()),
         target: Some(selected.target.clone()),
-        default_features: true,
+        requested_features: selected
+            .build
+            .features
+            .clone()
+            .ok_or_else(|| step("rust-context-configuration", "features are unavailable"))?,
+        default_features: selected.build.default_features.ok_or_else(|| {
+            step(
+                "rust-context-configuration",
+                "default feature selection is unavailable",
+            )
+        })?,
         target_triple: Some(
             selected
                 .target_triple
@@ -1002,7 +1053,7 @@ fn initial_selection(
                 .unwrap_or(&toolchain.host)
                 .to_owned(),
         ),
-        profile: Some("dev".into()),
+        profile: selected.build.profile.clone(),
         toolchain: Some(RustToolchainSettings {
             release: toolchain_release(),
             commit_hash: identity["rustc_commit_hash"]

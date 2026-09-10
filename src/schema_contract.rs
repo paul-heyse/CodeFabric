@@ -44,13 +44,18 @@ pub(crate) fn delta_storage_data_type(logical: &DataType) -> DataType {
         DataType::UInt32 => DataType::Int64,
         DataType::UInt64 => DataType::Decimal128(20, 0),
         DataType::Float16 => DataType::Float32,
-        DataType::List(field) => DataType::List(Arc::new(delta_storage_field(field))),
-        DataType::LargeList(field) => DataType::LargeList(Arc::new(delta_storage_field(field))),
-        DataType::ListView(field) => DataType::List(Arc::new(delta_storage_field(field))),
-        DataType::LargeListView(field) => DataType::LargeList(Arc::new(delta_storage_field(field))),
-        DataType::FixedSizeList(field, size) => {
-            DataType::FixedSizeList(Arc::new(delta_storage_field(field)), *size)
-        }
+        // Delta arrays have a regular List representation and an anonymous element.
+        // The kernel restores that element as `element`, without container metadata.
+        // Keep the original name/width/metadata in the logical contract for restoration.
+        DataType::List(field)
+        | DataType::LargeList(field)
+        | DataType::ListView(field)
+        | DataType::LargeListView(field)
+        | DataType::FixedSizeList(field, _) => DataType::List(Arc::new(Field::new(
+            "element",
+            delta_storage_data_type(field.data_type()),
+            field.is_nullable(),
+        ))),
         DataType::Struct(fields) => DataType::Struct(
             fields
                 .iter()

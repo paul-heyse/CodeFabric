@@ -1,4 +1,4 @@
-# @generated from released Protobuf semantic identities b3:fb21793a49c02d5e5955faa854dadeffd5a451f04d37cace345bf3ea8d3fc396,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
+# @generated from released Protobuf semantic identities b3:4d8b357463c016bbf75e5fe3979b3499e3880a83265e54d65d0dc348fa5b0d30,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
 import datetime
 
 from google.protobuf import duration_pb2 as _duration_pb2
@@ -931,8 +931,18 @@ class ResultReadyEvent(_message.Message):
     processing: _containers.RepeatedCompositeFieldContainer[QueryProcessingSummary]
     def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., package_id: _Optional[str] = ..., manifest: _Optional[_Union[ResourceDescriptor, _Mapping]] = ..., total_rows: _Optional[int] = ..., total_pages: _Optional[int] = ..., total_bytes: _Optional[int] = ..., pages: _Optional[_Iterable[_Union[ResourceDescriptor, _Mapping]]] = ..., processing: _Optional[_Iterable[_Union[QueryProcessingSummary, _Mapping]]] = ...) -> None: ...
 
+class ProcessingRustBuildSelection(_message.Message):
+    __slots__ = ("profile", "features", "default_features")
+    PROFILE_FIELD_NUMBER: _ClassVar[int]
+    FEATURES_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_FEATURES_FIELD_NUMBER: _ClassVar[int]
+    profile: str
+    features: _containers.RepeatedScalarFieldContainer[str]
+    default_features: bool
+    def __init__(self, profile: _Optional[str] = ..., features: _Optional[_Iterable[str]] = ..., default_features: _Optional[bool] = ...) -> None: ...
+
 class ProcessingRemainder(_message.Message):
-    __slots__ = ("language", "scope_kind", "path_bytes", "path", "target", "state", "reason_code", "target_kind", "analysis_context_id", "entity_id", "target_platform")
+    __slots__ = ("language", "scope_kind", "path_bytes", "path", "target", "state", "reason_code", "target_kind", "analysis_context_id", "entity_id", "target_platform", "rust_build")
     LANGUAGE_FIELD_NUMBER: _ClassVar[int]
     SCOPE_KIND_FIELD_NUMBER: _ClassVar[int]
     PATH_BYTES_FIELD_NUMBER: _ClassVar[int]
@@ -944,6 +954,7 @@ class ProcessingRemainder(_message.Message):
     ANALYSIS_CONTEXT_ID_FIELD_NUMBER: _ClassVar[int]
     ENTITY_ID_FIELD_NUMBER: _ClassVar[int]
     TARGET_PLATFORM_FIELD_NUMBER: _ClassVar[int]
+    RUST_BUILD_FIELD_NUMBER: _ClassVar[int]
     language: str
     scope_kind: str
     path_bytes: bytes
@@ -955,7 +966,8 @@ class ProcessingRemainder(_message.Message):
     analysis_context_id: str
     entity_id: str
     target_platform: str
-    def __init__(self, language: _Optional[str] = ..., scope_kind: _Optional[str] = ..., path_bytes: _Optional[bytes] = ..., path: _Optional[str] = ..., target: _Optional[str] = ..., state: _Optional[_Union[ProcessingState, str]] = ..., reason_code: _Optional[str] = ..., target_kind: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., entity_id: _Optional[str] = ..., target_platform: _Optional[str] = ...) -> None: ...
+    rust_build: ProcessingRustBuildSelection
+    def __init__(self, language: _Optional[str] = ..., scope_kind: _Optional[str] = ..., path_bytes: _Optional[bytes] = ..., path: _Optional[str] = ..., target: _Optional[str] = ..., state: _Optional[_Union[ProcessingState, str]] = ..., reason_code: _Optional[str] = ..., target_kind: _Optional[str] = ..., analysis_context_id: _Optional[str] = ..., entity_id: _Optional[str] = ..., target_platform: _Optional[str] = ..., rust_build: _Optional[_Union[ProcessingRustBuildSelection, _Mapping]] = ...) -> None: ...
 
 class QueryProcessingSummary(_message.Message):
     __slots__ = ("query_id", "source_generation", "scope", "family", "languages", "requested_partitions", "completed_partitions", "remaining_partitions", "remainder", "next_offset", "maximum_rows", "additional_rows", "remainder_handle", "remainder_offset")

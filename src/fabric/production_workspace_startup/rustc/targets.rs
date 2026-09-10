@@ -5,12 +5,63 @@ use std::collections::BTreeMap;
 use super::{ProductionWorkspaceStartupError, step};
 use crate::analysis_context::{ContextFileInput, RustTargetKind, RustTargetSettings};
 
+mod selections;
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) struct BuildSelection {
+    pub features: Option<Vec<String>>,
+    pub default_features: Option<bool>,
+    pub profile: Option<String>,
+    pub platforms: Option<Vec<String>>,
+    pub inherited_workspace: Option<Vec<u8>>,
+    pub error: Option<String>,
+}
+
+impl Default for BuildSelection {
+    fn default() -> Self {
+        Self {
+            features: Some(Vec::new()),
+            default_features: Some(true),
+            profile: Some("dev".into()),
+            platforms: None,
+            inherited_workspace: None,
+            error: None,
+        }
+    }
+}
+
+impl BuildSelection {
+    pub(super) fn processing(
+        &self,
+    ) -> Option<crate::fabric::processing_status::ProcessingRustBuildSelection> {
+        Some(
+            crate::fabric::processing_status::ProcessingRustBuildSelection {
+                profile: self.profile.clone()?,
+                features: self.features.clone()?,
+                default_features: self.default_features?,
+            },
+        )
+    }
+
+    fn invalid(error: String) -> Self {
+        Self {
+            features: None,
+            default_features: None,
+            profile: None,
+            platforms: None,
+            inherited_workspace: None,
+            error: Some(error),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct CargoTarget {
     pub manifest: Vec<u8>,
     pub package: String,
     pub target: RustTargetSettings,
     pub target_triple: Option<String>,
+    pub build: BuildSelection,
 }
 
 #[allow(clippy::too_many_lines)] // Explicit targets override automatic discovery in one collector.
@@ -33,6 +84,7 @@ pub(super) fn discover(
             .get("name")
             .and_then(toml::Value::as_str)
             .ok_or_else(|| step("rust-target-package", "package name missing"))?;
+        let selections = selections::for_manifest(files, manifest, &document);
         let parent = manifest
             .relative_path
             .strip_suffix(b"Cargo.toml")
@@ -43,23 +95,27 @@ pub(super) fn discover(
          -> Result<(), ProductionWorkspaceStartupError> {
             let path = join(parent, relative)?;
             if files.iter().any(|file| file.relative_path == path) {
-                targets.insert(
-                    (
-                        manifest.relative_path.clone(),
-                        format!("{kind:?}"),
-                        name.clone(),
-                    ),
-                    CargoTarget {
-                        manifest: manifest.relative_path.clone(),
-                        package: package["name"].as_str().expect("package name").to_owned(),
-                        target_triple: None,
-                        target: RustTargetSettings {
-                            name,
-                            kind,
-                            crate_root: path,
+                for selection in &selections {
+                    targets.insert(
+                        (
+                            manifest.relative_path.clone(),
+                            format!("{kind:?}"),
+                            name.clone(),
+                            selection.clone(),
+                        ),
+                        CargoTarget {
+                            manifest: manifest.relative_path.clone(),
+                            package: package["name"].as_str().expect("package name").to_owned(),
+                            target_triple: None,
+                            build: selection.clone(),
+                            target: RustTargetSettings {
+                                name: name.clone(),
+                                kind,
+                                crate_root: path.clone(),
+                            },
                         },
-                    },
-                );
+                    );
+                }
             }
             Ok(())
         };
@@ -161,12 +217,16 @@ pub(super) fn discover(
             "no captured Cargo target source is available",
         ));
     }
-    let platforms = configured_platforms(files)?;
+    let default_platforms = configured_platforms(files)?;
     Ok(targets
         .into_values()
         .flat_map(|target| {
-            platforms.iter().map(move |platform| CargoTarget {
-                target_triple: platform.clone(),
+            let platforms = target.build.platforms.as_ref().map_or_else(
+                || default_platforms.clone(),
+                |platforms| platforms.iter().cloned().map(Some).collect(),
+            );
+            platforms.into_iter().map(move |platform| CargoTarget {
+                target_triple: platform,
                 ..target.clone()
             })
         })
@@ -252,6 +312,10 @@ pub(super) fn resolve_host(targets: Vec<CargoTarget>, host: &str) -> Vec<CargoTa
                 target.target.name.clone(),
                 format!("{:?}", target.target.kind),
                 target.target_triple.clone(),
+                target.build.features.clone(),
+                target.build.default_features,
+                target.build.profile.clone(),
+                target.build.error.clone(),
             ),
             target,
         );

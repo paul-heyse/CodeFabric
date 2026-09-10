@@ -24,6 +24,7 @@ from ..contracts.wire_models import (
     JSON_OBJECT_ADAPTER,
     JsonObject,
     ProcessingRemainder,
+    ProcessingRustBuildSelection,
     ProcessingState,
     QueryProcessingSummary,
     QueryToolInput,
@@ -1043,6 +1044,13 @@ def _processing_summary(value: query_pb.QueryProcessingSummary) -> QueryProcessi
                     if row.HasField("analysis_context_id")
                     else None,
                     entity_id=row.entity_id if row.HasField("entity_id") else None,
+                    rust_build=ProcessingRustBuildSelection(
+                        profile=row.rust_build.profile,
+                        features=tuple(row.rust_build.features),
+                        default_features=row.rust_build.default_features,
+                    )
+                    if row.HasField("rust_build")
+                    else None,
                     state=states[row.state],
                     reason_code=row.reason_code,
                 )

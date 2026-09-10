@@ -17,6 +17,7 @@ use super::{
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RustContextSelection {
     pub manifest_path: Option<Vec<u8>>,
+    pub cargo_workspace_root: Option<Vec<u8>>,
     pub package_name: Option<String>,
     pub target: Option<RustTargetSettings>,
     pub requested_features: Vec<String>,
@@ -406,7 +407,13 @@ fn prepare_settings(
         return Ok(None);
     }
     let target = selection.target.clone().expect("validated selected target");
-    if target.name.is_empty() || !valid_context_relative_path(&target.crate_root) {
+    if target.name.is_empty()
+        || !valid_context_relative_path(&target.crate_root)
+        || selection
+            .cargo_workspace_root
+            .as_deref()
+            .is_some_and(|root| !valid_context_relative_path(root))
+    {
         return Err(RustContextDiscoveryError::InvalidInput(
             "invalid selected target",
         ));
@@ -447,6 +454,7 @@ fn prepare_settings(
         package_name: name.expect("validated package name").to_owned(),
         package_version: version.expect("validated package version"),
         manifest_path: manifest.relative_path.clone(),
+        cargo_workspace_root: selection.cargo_workspace_root.clone(),
         edition: edition.expect("validated edition"),
         crate_types: selected_crate_types(document, &target)?,
         target,
@@ -539,6 +547,7 @@ fn configuration_inputs(
     for root in request.search_scope.ordered_roots.iter().rev() {
         for name in [
             b"Cargo.lock".as_slice(),
+            b"Cargo.toml",
             b"rust-toolchain",
             b"rust-toolchain.toml",
             b"build.rs",
@@ -550,7 +559,9 @@ fn configuration_inputs(
                 locks.push(artifact(file));
                 continue;
             }
-            configurations.push(artifact(file));
+            if file.file_id != manifest.file_id {
+                configurations.push(artifact(file));
+            }
         }
         // The extensionless name wins when both candidates exist. Both lookups are retained.
         let file = files

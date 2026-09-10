@@ -102,3 +102,8 @@ harness deadline is 600 seconds.
 `rlib`/`cdylib`/`staticlib` Cargo library targets through installed declaration, call and source
 queries, live manifest changes, independent clean comparison and exact reopen. Its default
 harness deadline is 600 seconds.
+
+`just golden --case cargo-selections-live` exercises captured package/workspace feature and
+build-profile selections, duplicate coalescing, independent valid and unavailable contexts, typed
+selection remainders, live override, clean reconstruction and exact reopen through installed clients.
+Its default harness deadline is 600 seconds.

@@ -910,3 +910,62 @@ pub enum ProgrammaticRelationDeltaError {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use arrow_array::{ArrayRef, RecordBatch};
+    use arrow_schema::{DataType, Field, Schema};
+    use datafusion::common::TableReference;
+
+    use crate::schema_contract::{FieldIndexMapping, SchemaContract, delta_storage_field};
+
+    #[test]
+    fn delta_list_storage_matches_kernel_and_restores_logical_values() {
+        use deltalake::kernel::engine::arrow_conversion::{TryIntoArrow, TryIntoKernel};
+
+        let child = Arc::new(
+            Field::new("selected_feature", DataType::Utf8, true)
+                .with_metadata(HashMap::from([("owner".into(), "logical-only".into())])),
+        );
+        let mut builder =
+            arrow_array::builder::ListBuilder::new(arrow_array::builder::StringBuilder::new());
+        builder.values().append_value("feature-a");
+        builder.append(true);
+        builder.append(false);
+        builder.values().append_null();
+        builder.append(true);
+        let source = Arc::new(builder.finish()) as ArrayRef;
+        for logical_type in [
+            DataType::List(Arc::clone(&child)),
+            DataType::LargeList(Arc::clone(&child)),
+            DataType::ListView(Arc::clone(&child)),
+            DataType::LargeListView(Arc::clone(&child)),
+            DataType::FixedSizeList(Arc::clone(&child), 1),
+        ] {
+            let logical = Arc::new(Schema::new(vec![Field::new(
+                "features",
+                logical_type.clone(),
+                true,
+            )]));
+            let storage = Arc::new(Schema::new(vec![delta_storage_field(logical.field(0))]));
+            let kernel: deltalake::kernel::StructType = storage.as_ref().try_into_kernel().unwrap();
+            let restored_schema: Schema = (&kernel).try_into_arrow().unwrap();
+            assert_eq!(restored_schema, *storage);
+            let contract = SchemaContract::try_new(
+                "list-round-trip",
+                TableReference::bare("features"),
+                Arc::clone(&logical),
+                storage,
+                vec![FieldIndexMapping::direct(0, 0)],
+            )
+            .unwrap();
+            let values = arrow_cast::cast(&source, &logical_type).unwrap();
+            let batch = RecordBatch::try_new(logical, vec![values]).unwrap();
+            let stored = contract.adapt_logical_batch_to_storage(&batch).unwrap();
+            assert_eq!(contract.restore_storage_batch(&stored).unwrap(), batch);
+        }
+    }
+}

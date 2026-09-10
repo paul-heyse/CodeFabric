@@ -94,6 +94,21 @@ def test_typed_processing_rejects_inconsistent_scope_and_preserves_unknown_exhau
             )
         ],
     )
+    assert _processing_summary(message).remainder[0].rust_build is None
+    message.remainder[0].rust_build.profile = "checking"
+    message.remainder[0].rust_build.features.extend(["chosen"])
+    message.remainder[0].rust_build.default_features = False
+    selected_build = _processing_summary(message).remainder[0].rust_build
+    assert selected_build is not None
+    assert selected_build.profile == "checking"
+    assert selected_build.features == ("chosen",)
+    assert selected_build.default_features is False
+    message.remainder[0].rust_build.ClearField("features")
+    empty_build = _processing_summary(message).remainder[0].rust_build
+    assert empty_build is not None
+    assert empty_build.features == ()
+    message.remainder[0].ClearField("rust_build")
+    assert _processing_summary(message).remainder[0].rust_build is None
     assert _processing_summary(message).remainder[0].target_platform is None
     message.remainder[0].target_platform = "aarch64-unknown-linux-gnu"
     assert _processing_summary(message).remainder[0].target_platform == "aarch64-unknown-linux-gnu"

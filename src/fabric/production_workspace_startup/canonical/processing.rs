@@ -24,6 +24,17 @@ pub(super) fn fields() -> Vec<FieldSpec> {
         ("context_id", DataType::FixedSizeBinary(16), true),
         ("target_kind", DataType::Utf8, true),
         ("target_platform", DataType::Utf8, true),
+        ("build_profile", DataType::Utf8, true),
+        (
+            "build_features",
+            DataType::List(std::sync::Arc::new(arrow_schema::Field::new(
+                "item",
+                DataType::Utf8,
+                true,
+            ))),
+            true,
+        ),
+        ("default_features", DataType::Boolean, true),
         ("file_id", DataType::FixedSizeBinary(16), true),
         ("family", DataType::Utf8, false),
         ("processing_state", DataType::Utf8, false),
@@ -474,6 +485,9 @@ mod tests {
                 ("context_id", &["py", "py", "rust-a", "rust-b", "py"]),
                 ("target_kind", &[""; 5]),
                 ("target_platform", &[""; 5]),
+                ("build_profile", &[""; 5]),
+                ("build_features", &[""; 5]),
+                ("default_features", &[""; 5]),
                 ("file_id", &["good", "bad", "lib", "lib", "pending"]),
                 ("family", &["function-declarations"; 5]),
                 (

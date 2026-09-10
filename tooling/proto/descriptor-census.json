@@ -2793,6 +2793,19 @@
               "proto3_optional": true,
               "type": "TYPE_STRING",
               "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "rustBuild",
+              "label": "LABEL_OPTIONAL",
+              "name": "rust_build",
+              "number": 12,
+              "oneof": "_rust_build",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_MESSAGE",
+              "type_name": ".codefabric.cpgd.v2.ProcessingRustBuildSelection"
             }
           ],
           "full_name": "codefabric.cpgd.v2.ProcessingRemainder",
@@ -2820,8 +2833,61 @@
             {
               "name": "_target_platform",
               "options": {}
+            },
+            {
+              "name": "_rust_build",
+              "options": {}
             }
           ],
+          "options": {},
+          "reserved_names": [],
+          "reserved_ranges": []
+        },
+        {
+          "extension_ranges": [],
+          "fields": [
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "profile",
+              "label": "LABEL_OPTIONAL",
+              "name": "profile",
+              "number": 1,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "features",
+              "label": "LABEL_REPEATED",
+              "name": "features",
+              "number": 2,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_STRING",
+              "type_name": ""
+            },
+            {
+              "default_value": null,
+              "has_presence": false,
+              "json_name": "defaultFeatures",
+              "label": "LABEL_OPTIONAL",
+              "name": "default_features",
+              "number": 3,
+              "oneof": null,
+              "options": {},
+              "proto3_optional": false,
+              "type": "TYPE_BOOL",
+              "type_name": ""
+            }
+          ],
+          "full_name": "codefabric.cpgd.v2.ProcessingRustBuildSelection",
+          "oneofs": [],
           "options": {},
           "reserved_names": [],
           "reserved_ranges": []

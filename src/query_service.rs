@@ -4122,7 +4122,7 @@ fn processing_page_summary(
     remainder_handle: Option<String>,
 ) -> Result<crate::rpc::generated::codefabric::cpgd::v2::QueryProcessingSummary, Status> {
     use crate::rpc::generated::codefabric::cpgd::v2::{
-        ProcessingRemainder, ProcessingState, QueryProcessingSummary,
+        ProcessingRemainder, ProcessingRustBuildSelection, ProcessingState, QueryProcessingSummary,
     };
     if !value.validate_page(offset) {
         return Err(public_status(Code::DataLoss, "RESULT_EVENT_BINDING"));
@@ -4153,6 +4153,11 @@ fn processing_page_summary(
                 target: row.target,
                 target_kind: row.target_kind,
                 target_platform: row.target_platform,
+                rust_build: row.rust_build.map(|build| ProcessingRustBuildSelection {
+                    profile: build.profile,
+                    features: build.features,
+                    default_features: build.default_features,
+                }),
                 analysis_context_id: row.analysis_context_id,
                 entity_id: row.entity_id,
                 state: state as i32,

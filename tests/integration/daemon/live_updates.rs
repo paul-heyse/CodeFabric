@@ -1961,6 +1961,217 @@ fn cargo_library_linkage_kinds_survive_live_queries_and_clean_reopen() {
     supervisor.stop();
 }
 
+fn assert_cargo_selection_failures(processing: &Value, failures: &[Value]) {
+    let mut actual_failures = processing["remainder"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            assert_eq!(row["state"], "unavailable");
+            assert_eq!(row["path"], "member/Cargo.toml");
+            row["rust_build"].clone()
+        })
+        .collect::<Vec<_>>();
+    actual_failures.sort_by_cached_key(Value::to_string);
+    let mut expected_failures = failures.to_vec();
+    expected_failures.sort_by_cached_key(Value::to_string);
+    assert_eq!(actual_failures, expected_failures);
+}
+
+fn cargo_build_selection_observation(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    leaves: &[&str],
+    failures: &[Value],
+) -> Vec<SemanticObservation> {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "Rust function declarations",
+    );
+    request["scope"]["languages"] = json!(["rust"]);
+    let entities = public_query(
+        fixture,
+        stack,
+        &format!("{phase}-entities"),
+        request.clone(),
+    );
+    if entities.rows.is_empty() {
+        print_cargo_failure(fixture);
+    }
+    assert_eq!(
+        entities.processing[0]["requested_partitions"],
+        (leaves.len() + failures.len()) as u64
+    );
+    assert_eq!(
+        entities.processing[0]["remaining_partitions"],
+        failures.len() as u64
+    );
+    let mut expected = leaves
+        .iter()
+        .copied()
+        .chain(std::iter::repeat_n("fixture::caller", leaves.len()))
+        .collect::<Vec<_>>();
+    expected.sort_unstable();
+    let mut actual = entities
+        .rows
+        .iter()
+        .map(|row| row["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    actual.sort_unstable();
+    assert_eq!(actual, expected);
+    assert_cargo_selection_failures(&entities.processing[0], failures);
+    let mut observations = Vec::new();
+    for (index, leaf) in entities
+        .rows
+        .iter()
+        .filter(|row| row["name"] != "fixture::caller")
+        .enumerate()
+    {
+        let callers = entities
+            .rows
+            .iter()
+            .filter(|row| {
+                row["name"] == "fixture::caller" && row["context_id"] == leaf["context_id"]
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(callers.len(), 1);
+        request["queries"] = json!([{
+            "request": "follow code relationships", "query_id": "calls",
+            "starting_from": [{"entity_id": callers[0]["public_entity_id"]}],
+            "relationship": "calls", "direction": "outgoing", "distance": "one relationship step"
+        }]);
+        let calls = public_query(
+            fixture,
+            stack,
+            &format!("{phase}-calls-{index}"),
+            request.clone(),
+        );
+        assert_eq!(calls.rows.len(), 1);
+        assert_eq!(
+            calls.rows[0]["public_target_entity_id"],
+            leaf["public_entity_id"]
+        );
+        assert_eq!(calls.processing[0]["requested_partitions"], 1);
+        assert_eq!(calls.processing[0]["remaining_partitions"], 0);
+        request["queries"] = json!([{
+            "request": "retrieve source and syntax context", "query_id": "source",
+            "about": [{"entity_id": leaf["public_entity_id"]}], "context": "function body"
+        }]);
+        let source = public_query(
+            fixture,
+            stack,
+            &format!("{phase}-source-{index}"),
+            request.clone(),
+        );
+        assert_eq!(source.rows.len(), 1);
+        assert_eq!(
+            source.rows[0]["source_context"]["text"],
+            if leaf["name"] == "fixture::selected" {
+                "{ 1 }"
+            } else {
+                "{ 2 }"
+            }
+        );
+        observations.extend([calls, source]);
+    }
+    observations.insert(0, entities);
+    observations
+}
+
+fn write_cargo_build_selection_fixture(root: &Path) -> (String, String) {
+    fs::create_dir_all(root.join("member/src")).unwrap();
+    let workspace = "[workspace]\nmembers=['member']\nresolver='3'\n[profile.checking]\ninherits='dev'\ndebug-assertions=false\n".to_owned();
+    let member = "[package]\nname='fixture'\nversion='0.1.0'\nedition='2024'\n[lib]\ntest=false\ndoctest=false\n[features]\ndefault=['selected']\nselected=[]\n".to_owned();
+    fs::write(root.join("Cargo.toml"), &workspace).unwrap();
+    fs::write(root.join("member/Cargo.toml"), &member).unwrap();
+    fs::write(
+        root.join("Cargo.lock"),
+        "version=4\n[[package]]\nname='fixture'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(root.join("member/src/lib.rs"), "#[cfg(all(feature=\"selected\", debug_assertions))]\npub fn selected() -> u32 { 1 }\n#[cfg(not(all(feature=\"selected\", debug_assertions)))]\npub fn alternate() -> u32 { 2 }\npub fn caller() -> u32 {\n    #[cfg(all(feature=\"selected\", debug_assertions))] { selected() }\n    #[cfg(not(all(feature=\"selected\", debug_assertions)))] { alternate() }\n}\n").unwrap();
+    (workspace, member)
+}
+
+#[test]
+fn cargo_feature_and_profile_selections_keep_partial_contexts_and_equal_clean_queries() {
+    let fixture = ProductionFixture::with_source(b"marker = 1\n");
+    let root = Path::new(&fixture.workspace.root_path_display);
+    let (workspace, member) = write_cargo_build_selection_fixture(root);
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+        store.backup_to(&registration).unwrap();
+    }
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    cargo_build_selection_observation(
+        &fixture,
+        &stack,
+        "cargo-selection-default",
+        &["fixture::selected"],
+        &[],
+    );
+    fs::write(root.join("Cargo.toml"), format!("{workspace}\n[workspace.metadata.codefabric]\nrust_contexts=[{{profile='checking'}},{{features=['selected'],default_features=false}},{{features=['selected','selected'],default_features=false,platforms=['host-tuple']}},{{profile='missing-profile'}},{{features=['missing-feature']}},{{profile=3}}]\n")).unwrap();
+    cargo_build_selection_observation(
+        &fixture,
+        &stack,
+        "cargo-selection-mixed",
+        &["fixture::selected", "fixture::alternate"],
+        &[
+            json!({"profile": "missing-profile", "features": [], "default_features": true}),
+            json!({"profile": "dev", "features": ["missing-feature"], "default_features": true}),
+            Value::Null,
+        ],
+    );
+    fs::write(
+        root.join("member/Cargo.toml"),
+        format!(
+            "{member}\n[package.metadata.codefabric]\nrust_contexts=[{{default_features=false}}]\n"
+        ),
+    )
+    .unwrap();
+    let final_live = cargo_build_selection_observation(
+        &fixture,
+        &stack,
+        "cargo-selection-override",
+        &["fixture::alternate"],
+        &[],
+    );
+    let clean = clean_fixture(&fixture, &registration, &stack);
+    let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        final_live,
+        cargo_build_selection_observation(
+            &clean,
+            &stack,
+            "cargo-selection-clean",
+            &["fixture::alternate"],
+            &[]
+        )
+    );
+    clean_supervisor.stop();
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        final_live,
+        cargo_build_selection_observation(
+            &fixture,
+            &stack,
+            "cargo-selection-reopen",
+            &["fixture::alternate"],
+            &[]
+        )
+    );
+    supervisor.stop();
+}
+
 fn encoded_sources(utf8: bool) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let python = if utf8 {
         "# coding: utf-8\r\n# é\r\nfrom helper import café\r\ndef caller():\r\n    return café()\r\n".as_bytes()

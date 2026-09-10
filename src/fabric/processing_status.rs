@@ -13,7 +13,10 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 mod continuation;
+mod rust_build;
 pub(crate) use continuation::{ProcessingPageReader, ProcessingSelection};
+pub(crate) use rust_build::ProcessingRustBuildSelection;
+use rust_build::RustBuildColumns;
 
 pub(crate) const ENTITY_PROCESSING_RELATION: &str = "system.entity_processing_scope";
 const MAX_PARTITIONS: usize = 4_000_000;
@@ -99,6 +102,10 @@ impl QueryProcessing {
                 value.languages.contains(&row.language)
                     && !row.scope_kind.is_empty()
                     && !row.reason.is_empty()
+                    && row
+                        .rust_build
+                        .as_ref()
+                        .is_none_or(ProcessingRustBuildSelection::valid)
                     && row.entity_id.as_ref().is_none_or(|id| {
                         row.scope_kind == "call_owner"
                             && crate::identity::decode_public_id(
@@ -285,6 +292,8 @@ pub struct ProcessingRemainder {
     pub target_kind: Option<String>,
     #[serde(default)]
     pub target_platform: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rust_build: Option<ProcessingRustBuildSelection>,
     #[serde(default)]
     pub analysis_context_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -456,6 +465,7 @@ impl EntityProcessingSnapshot {
             let targets = strings(batch, "target_name").expect("validated processing schema");
             let target_kinds = strings(batch, "target_kind").ok();
             let target_platforms = strings(batch, "target_platform").ok();
+            let builds = RustBuildColumns::read(batch).expect("validated build-selection schema");
             let paths = binary(batch, "relative_path").expect("validated processing schema");
             let contexts = batch
                 .column_by_name("context_id")
@@ -504,6 +514,7 @@ impl EntityProcessingSnapshot {
                     target: (!targets.is_null(row)).then(|| targets.value(row).to_owned()),
                     target_kind: optional_string(target_kinds, row),
                     target_platform: optional_string(target_platforms, row),
+                    rust_build: builds.as_ref().and_then(|columns| columns.at(row)),
                     analysis_context_id: (!contexts.is_null(row)).then(|| {
                         public_processing_id(
                             crate::identity::IdentityDomain::AnalysisContext,
@@ -605,6 +616,9 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
         .ok_or("invalid processing context")?;
     if workspace_ids.value_length() != 16 || contexts.value_length() != 16 {
         return Err("invalid processing identity width".to_owned());
+    }
+    if let Some(columns) = RustBuildColumns::read(batch)? {
+        columns.validate()?;
     }
     let family = strings(batch, "family")?;
     let language = strings(batch, "language")?;

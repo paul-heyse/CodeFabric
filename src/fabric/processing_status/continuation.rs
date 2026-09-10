@@ -122,6 +122,11 @@ pub(super) fn ordered(frame: DataFrame) -> Result<DataFrame, String> {
     {
         names.push("owner_entity_id");
     }
+    for name in ["build_profile", "build_features", "default_features"] {
+        if frame.schema().field_with_unqualified_name(name).is_ok() {
+            names.push(name);
+        }
+    }
     frame
         .sort(
             names

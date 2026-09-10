@@ -24,6 +24,7 @@ struct Partition<'a> {
     target: Option<&'a str>,
     target_kind: Option<&'a str>,
     target_platform: Option<&'a str>,
+    rust_build: Option<&'a crate::fabric::processing_status::ProcessingRustBuildSelection>,
     context: Option<[u8; 16]>,
     file: Option<[u8; 16]>,
     state: &'static str,
@@ -90,6 +91,7 @@ pub(super) fn install(
             target: None,
             target_kind: None,
             target_platform: None,
+            rust_build: None,
             context: run.map(|run| run.job().context().analysis_context_id()),
             file,
             state,
@@ -139,6 +141,7 @@ fn undiscovered_rust_partition(publication: super::PublicationStage) -> Partitio
         target: None,
         target_kind: None,
         target_platform: None,
+        rust_build: None,
         context: None,
         file: None,
         state: if publication == super::PublicationStage::Source {
@@ -222,6 +225,7 @@ fn append_rust_partitions<'a>(
             target: Some(&target.target),
             target_kind: Some(&target.target_kind),
             target_platform: target.target_platform.as_deref(),
+            rust_build: target.rust_build.as_ref(),
             context: target.context_id,
             file: None,
             state,
@@ -369,6 +373,30 @@ fn register(
                 true,
                 Arc::new(StringArray::from_iter(
                     rows.iter().map(|row| row.target_platform),
+                )),
+            ),
+            (
+                "build_profile",
+                true,
+                Arc::new(StringArray::from_iter(
+                    rows.iter()
+                        .map(|row| row.rust_build.map(|build| build.profile.as_str())),
+                )),
+            ),
+            (
+                "build_features",
+                true,
+                input_observations::string_lists(
+                    rows.iter()
+                        .map(|row| row.rust_build.map(|build| build.features.as_slice())),
+                ),
+            ),
+            (
+                "default_features",
+                true,
+                Arc::new(arrow_array::BooleanArray::from_iter(
+                    rows.iter()
+                        .map(|row| row.rust_build.map(|build| build.default_features)),
                 )),
             ),
             (

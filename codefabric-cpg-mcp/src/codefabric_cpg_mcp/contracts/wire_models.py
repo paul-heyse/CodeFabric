@@ -180,6 +180,24 @@ type ProcessingState = Literal[
 ]
 
 
+class ProcessingRustBuildSelection(StrictWireModel):
+    profile: Annotated[str, Field(min_length=1, max_length=16384)]
+    features: Annotated[
+        tuple[Annotated[str, Field(min_length=1, max_length=16384)], ...], Field(max_length=1024)
+    ]
+    default_features: bool
+
+    @model_validator(mode="after")
+    def bounded_selection(self) -> ProcessingRustBuildSelection:
+        if (
+            len(self.profile.encode("utf-8")) > 16384
+            or any(len(value.encode("utf-8")) > 16384 for value in self.features)
+            or sum(len(value.encode("utf-8")) for value in self.features) > 65536
+        ):
+            raise ValueError("processing build selection exceeds its byte bound")
+        return self
+
+
 class ProcessingRemainder(StrictWireModel):
     language: Literal["python", "rust"]
     scope_kind: NonEmptyString
@@ -188,6 +206,7 @@ class ProcessingRemainder(StrictWireModel):
     target: str | None = None
     target_kind: str | None = None
     target_platform: NonEmptyString | None = None
+    rust_build: ProcessingRustBuildSelection | None = None
     analysis_context_id: str | None = None
     entity_id: NonEmptyString | None = None
     state: ProcessingState

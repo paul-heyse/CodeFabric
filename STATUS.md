@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `7cc76a00` (`Share captured Rust toolchain inputs across target preparation`);
-Cargo library linkage and exact metadata admission are the current implementation slice.
+Last production commit: `46a7a412` (`Admit exact Cargo library linkage and preserve compiler crate types`);
+captured Cargo feature/profile selections are the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -341,6 +341,31 @@ removed one existing length warning. Full governance, changed-file formatting an
 navigation pass.
 Full feature/profile choices, host/target separation, dependency/generated/proc-macro closure,
 custom target specifications, caches and scheduling remain open.
+
+
+## Captured Cargo feature and profile selections
+
+Captured `package.metadata.codefabric.rust_contexts` now selects features, default features,
+profiles and optional platforms, with fallback to the owning workspace metadata. Package entries
+replace inherited entries. Effective duplicates coalesce; malformed entries, missing features and
+missing profiles retain unavailable scope alongside valid contexts. Contained Cargo metadata must
+confirm the inherited workspace. Its manifest and effective settings participate in context identity.
+Public processing remainders carry an optional typed `rust_build` selection; empty features and
+`default_features=false` remain distinct from an absent selection on old snapshots.
+
+The installed `cargo-selections-live` scenario passes on 2026-09-09 (192.07 s): default/explicit/
+disabled features, a custom profile's debug-assertion behavior, inheritance, overrides, duplicates,
+three independent preparation failures, exact calls/source, clean reconstruction and exact reopen.
+Six focused context/owner/paging cases pass (0.13 s), as do two storage/paging regressions (0.014 s).
+All 109 adapter tests with lint/types and all 216 tooling tests with lint pass. The native check found
+and fixed Delta list storage naming: the shared storage policy now uses the kernel's `element`
+representation and restores the logical list name, metadata and width. Kernel/Arrow round trips
+cover regular, large, view and fixed-size lists with null values. All 16 final schema/context/paging
+checks and full governance pass after locating the kernel integration test inside the fabric boundary.
+Default/featureless root checks pass; Clippy reports 952 library and 36 integration warnings, with
+no added findings over the preceding slice. Strict lint/global formatting retain their recorded
+unrelated backlog. This does not establish optimized
+release-profile source-call coverage, external/generated build closure or full context scheduling.
 
 ## Live source reconciliation and current query selection
 
