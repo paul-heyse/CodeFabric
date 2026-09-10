@@ -903,6 +903,36 @@ of relying on an obsolete default. Default/featureless checks, final affected Cl
 spelling and diff checks pass. Global request/catalog/authority failures remain request-wide;
 guard answers remain exact catalog choices. STATUS carries attributable logs and limits.
 
+**P03 semantic-reference FindEntities scopes pass native validation, 2026-09-10.**
+QRY v1.3 §13.3 defines semantic association through `within`, including references to a prior
+function. A separate catalog-selected FindEntities program binds canonical target/reference IDs,
+exact contexts and workspace identity through native DataFusion left semi joins. Null targets do
+not match; repeated subjects/candidates do not multiply occurrences. Existing properties, ordering
+and limits operate on that scope; an empty prior remains empty. Named canonical targets use the
+existing exact kind/name resolution. Ordinary census and captured-location scopes retain their
+existing programs; unsupported semantic meanings produce typed block outcomes.
+
+DataFusion reference §23 and the resolved 55.0.0 join implementation support the plan. Arrow's
+shared prior-result ownership supplies entity-role fan-out. Materialized consumers rebind distinct
+producer relation names only with identical ordered semantic fields and roles; runtime enforces
+exact Arrow names, types, nullability and metadata. Inline composition retains its relation constraint.
+Output-field renaming follows values produced by each subtree, preserving same-ID prior inputs
+while carrying nested projection/aggregate bindings into downstream expressions. Ingress also
+supplies the documented one-step relationship default. All 53 focused cases pass, including native
+null/filter/sort/sum and repeated-projection regressions. Default/featureless checks and affected
+Clippy pass. Existing installed fan-out/source/reopen and independent/all-unavailable branches
+pass in 74.788 s and 81.350 s. The final mixed Python/Rust scope/traversal/source and exact-version
+reopen case passes in 165.151 s. Its comparator excludes only validated fresh snapshot/disclosure-
+bound source handle IDs, following the existing source comparison convention; all other provenance,
+canonical fields and delivered source payloads remain equal. Final navigation, spelling and diff
+checks pass; STATUS records the commands, logs and validation limits.
+
+A measured 120-second semantic-preparation timeout preceded query execution (rustc 27.34 s,
+relational writes unfinished after 93.22 s). This mixed fixture now uses the existing separate
+180-second preparation helper. Startup within 120 seconds remains unqualified for P04/P14.
+Broader Find scopes, specialization subjects, owned parameter/return/member facts and full P03
+acceptance remain open.
+
 **Next:** remaining first-four scopes/meanings, reusable subject roles and precise dependency
 scope, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.
@@ -1700,7 +1730,7 @@ Complete resource acquisition/transfer/drop/escape, unwind paths, closure captur
 
 ### 7G. Remaining forms, complete composition and query semantics
 
-**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Compiler return-resolution/lowering and native computation failures preserve independent results with typed outcomes and failed-dependency states. Failed leaf streams reconcile owned partial-page cleanup before exact sealing/reopen. Ready blocks execute through bounded query-owned futures; native leaf execution is deferred until consumption. Canonical input/source authorization and unavailable ingress failures now remain local to their blocks. Broader prior roles/scopes and the full mixed-form DAG remain.
+**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Compiler return-resolution/lowering and native computation failures preserve independent results with typed outcomes and failed-dependency states. Failed leaf streams reconcile owned partial-page cleanup before exact sealing/reopen. Ready blocks execute through bounded query-owned futures; native leaf execution is deferred until consumption. Canonical input/source authorization and unavailable ingress failures now remain local to their blocks. FindEntities also binds prior/named semantic-reference targets and preserves downstream entity-role consumption. Broader prior roles/scopes and the full mixed-form DAG remain.
 
 **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, query contracts and graph integration. Complete the first four forms from 4E and extend them to every relevant family in the coverage map as those families land.
 

@@ -19,7 +19,7 @@ pub(super) fn bind_entity_subjects(
 ) -> Result<(), ProductionQueryRecipeError> {
     let Some(entities) = programs
         .values()
-        .find(|program| program.form == ReleasedSemanticForm::FindCodeEntities)
+        .find(|program| program.output_relation_id.as_str() == "query.result.semantic-entities")
         .cloned()
     else {
         return Ok(());
@@ -32,6 +32,7 @@ pub(super) fn bind_entity_subjects(
     }
     for program in programs.values_mut() {
         let slot = match program.form {
+            ReleasedSemanticForm::FindCodeEntities => "slot.within",
             ReleasedSemanticForm::RetrieveFactsAboutCode => "slot.about",
             ReleasedSemanticForm::FollowCodeRelationships => "slot.starting-from",
             ReleasedSemanticForm::RetrieveSourceAndSyntaxContext => "slot.for-inputs",

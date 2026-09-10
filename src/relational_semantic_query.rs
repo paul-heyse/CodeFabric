@@ -5288,7 +5288,15 @@ fn epoch_composition_inputs(
                     edge.producer_query_id.to_string(),
                 )
             })?;
-            if producer.relation_id != binding.input_relation_id || producer.fields != *expected {
+            // A retained block is rebound to the consumer's query-local relation. Its semantic
+            // role and ordered field identities must agree; its producer relation remains distinct.
+            // Runtime binding additionally checks the complete Arrow field contract (including
+            // types, nullability and metadata) before sharing any retained buffers.
+            let requires_same_relation =
+                binding.composition != EpochBoundConsumerComposition::MaterializedUnion;
+            if (requires_same_relation && producer.relation_id != binding.input_relation_id)
+                || producer.fields != *expected
+            {
                 return Err(EpochBoundSemanticCompileError::OutputSchema {
                     program_binding_id: block.program_binding_id.to_string(),
                     detail: format!(
@@ -7462,6 +7470,86 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["query-entities", "query-facts"]
         );
+    }
+
+    #[test]
+    fn epoch_materialized_composition_accepts_distinct_relations_with_exact_fields_and_roles() {
+        let mut catalog = epoch_execution_catalog();
+        let distinct = relation("result.scoped-entities");
+        catalog.programs[0].output_relation_id = distinct.clone();
+        catalog.relation_schemas.push(ProgramRelationSchemaRow {
+            relation_id: distinct,
+            fields: catalog.programs[0].output_fields.clone(),
+        });
+        assert!(
+            matches!(
+                compile_epoch_bound_semantic_request(
+                    &validated_epoch_ingress(),
+                    &catalog,
+                    &epoch_runtime_closure()
+                ),
+                Err(EpochBoundSemanticCompileError::OutputSchema { .. })
+            ),
+            "inlined composition retains its relation identity constraint"
+        );
+        catalog.consumer_slots[0].composition = EpochBoundConsumerComposition::MaterializedUnion;
+        let compiled = compile_epoch_bound_semantic_request(
+            &validated_epoch_ingress(),
+            &catalog,
+            &epoch_runtime_closure(),
+        )
+        .unwrap();
+        assert!(
+            compiled
+                .compiled()
+                .blocks()
+                .iter()
+                .all(|block| block.output().is_some())
+        );
+        let validated =
+            validate_epoch_execution_catalog(&validated_epoch_ingress(), &catalog).unwrap();
+        let request = epoch_ingress();
+        let blocks = request
+            .blocks
+            .iter()
+            .map(|row| (row.query_id.clone(), row))
+            .collect::<BTreeMap<_, _>>();
+        let mut roots = BTreeMap::from([(
+            Arc::from("query-entities"),
+            EpochCompiledRoot {
+                relation_id: relation("result.scoped-entities"),
+                fields: vec![field("incompatible.semantic-field")],
+                expression: RelationalExpression::Input(relation("result.scoped-entities")),
+            },
+        )]);
+        assert!(matches!(
+            epoch_composition_inputs(
+                blocks.get("query-facts").unwrap(),
+                &request,
+                &blocks,
+                &validated,
+                &roots,
+                &mut BTreeSet::new()
+            ),
+            Err(EpochBoundSemanticCompileError::OutputSchema { .. })
+        ));
+        roots.get_mut("query-entities").unwrap().fields = vec![field("result.entities.entity-id")];
+        let mut wrong_role = request.clone();
+        wrong_role.dependencies[0].producer_role_id = Arc::from("role.facts");
+        assert!(matches!(
+            epoch_composition_inputs(
+                blocks.get("query-facts").unwrap(),
+                &wrong_role,
+                &blocks,
+                &validated,
+                &roots,
+                &mut BTreeSet::new()
+            ),
+            Err(EpochBoundSemanticCompileError::MissingBinding {
+                family: "consumer slot role",
+                ..
+            })
+        ));
     }
 
     #[test]

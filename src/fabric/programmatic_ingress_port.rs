@@ -881,12 +881,14 @@ impl ApplicationOwnedSemanticIngressPort {
                     vec![text(direction.as_deref().unwrap_or("outgoing"))?],
                     projection,
                 )?;
-                project_optional_text_selection(
+                project_selection(
                     fields,
                     &mut consumed,
                     ProgrammaticFormIngressField::Distance,
                     query_id,
-                    distance.as_ref(),
+                    vec![text(
+                        distance.as_deref().unwrap_or("one relationship step"),
+                    )?],
                     projection,
                 )?;
                 project_selection_texts(
@@ -2319,6 +2321,15 @@ fn select_clause_program<'a>(
             binding.compatibility_form == form && binding.output_role_id == *output_role_id
         })
         .collect::<Vec<_>>();
+    if candidates.len() > 1
+        && let SemanticQueryClause::FindEntities {
+            within,
+            looking_for,
+            ..
+        } = clause
+    {
+        return family_selection::select_entity_scope(catalog, &candidates, within, looking_for);
+    }
     if candidates.len() > 1
         && let SemanticQueryClause::RetrieveFacts { facts, .. } = clause
     {

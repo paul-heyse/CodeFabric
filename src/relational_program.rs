@@ -2401,6 +2401,201 @@ mod tests {
         ));
     }
     #[tokio::test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one native input checks projection and aggregation binding boundaries with the same independently expected rows"
+    )]
+    async fn block_output_renaming_preserves_prior_input_fields_below_new_bindings() {
+        use arrow_array::{Int64Array, RecordBatch, StringArray};
+        use datafusion::prelude::SessionContext;
+        let context = SessionContext::new();
+        let batch = RecordBatch::try_from_iter([
+            (
+                "id",
+                Arc::new(Int64Array::from(vec![0, 1, 2, 3, 4])) as arrow_array::ArrayRef,
+            ),
+            (
+                "group_name",
+                Arc::new(StringArray::from(vec!["a", "a", "b", "a", "c"])),
+            ),
+            (
+                "value",
+                Arc::new(Int64Array::from(vec![
+                    Some(3),
+                    Some(-1),
+                    Some(5),
+                    Some(2),
+                    None,
+                ])),
+            ),
+        ])
+        .unwrap();
+        let plan = context.read_batch(batch).unwrap().into_unoptimized_plan();
+        for aggregate in [false, true] {
+            let input = Box::new(RelationalExpression::Filter {
+                input: Box::new(RelationalExpression::Input(relation_id(LEFT))),
+                predicate: ScalarExpression::Call {
+                    operator: ScalarOperator::GreaterThan,
+                    arguments: vec![
+                        field(LEFT_VALUE),
+                        ScalarExpression::Literal(ScalarValue::Int64(Some(0))),
+                    ],
+                },
+            });
+            let group = NamedExpression {
+                field_id: id(LEFT_GROUP),
+                expression: field(LEFT_GROUP),
+            };
+            let body = if aggregate {
+                RelationalExpression::Aggregate {
+                    input,
+                    group_by: vec![group],
+                    aggregates: vec![NamedAggregateExpression {
+                        field_id: id(LEFT_VALUE),
+                        expression: AggregateExpression {
+                            operator: AggregateOperator::Sum,
+                            argument: field(LEFT_VALUE),
+                        },
+                    }],
+                }
+            } else {
+                RelationalExpression::Projection {
+                    input,
+                    expressions: vec![
+                        group,
+                        NamedExpression {
+                            field_id: id(LEFT_VALUE),
+                            expression: field(LEFT_VALUE),
+                        },
+                    ],
+                }
+            };
+            let mut program = RelationalProgram {
+                root: RelationalExpression::Sort {
+                    input: Box::new(body),
+                    expressions: [LEFT_GROUP, LEFT_VALUE]
+                        .into_iter()
+                        .map(|name| SortExpression {
+                            expression: field(name),
+                            ascending: true,
+                            nulls_first: false,
+                        })
+                        .collect(),
+                },
+                output_fields: vec![id(LEFT_GROUP), id(LEFT_VALUE)],
+            };
+            program.remap_fields(&BTreeMap::from([
+                (id(LEFT_GROUP), id(SUMMARY_GROUP)),
+                (id(LEFT_VALUE), id(SUMMARY_TOTAL)),
+            ]));
+            let compiled = RelationalProgramCompiler::compile_with_bindings(
+                &program_bindings(),
+                vec![RelationInput {
+                    relation_id: relation_id(LEFT),
+                    plan: plan.clone(),
+                }],
+                &program,
+            )
+            .unwrap();
+            let batches = context
+                .execute_logical_plan(compiled.plan)
+                .await
+                .unwrap()
+                .collect()
+                .await
+                .unwrap();
+            let mut actual = Vec::new();
+            for batch in batches {
+                let names = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                let values = batch
+                    .column(1)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap();
+                actual.extend(
+                    (0..batch.num_rows())
+                        .map(|row| (names.value(row).to_owned(), values.value(row))),
+                );
+            }
+            let expected = if aggregate {
+                vec![("a".into(), 5), ("b".into(), 5)]
+            } else {
+                vec![("a".into(), 2), ("a".into(), 3), ("b".into(), 5)]
+            };
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn block_output_renaming_carries_values_across_repeated_projection_bindings() {
+        use arrow_array::{Int64Array, RecordBatch};
+        use datafusion::prelude::SessionContext;
+        let context = SessionContext::new();
+        let batch = RecordBatch::try_from_iter([(
+            "value",
+            Arc::new(Int64Array::from(vec![Some(5), None])) as arrow_array::ArrayRef,
+        )])
+        .unwrap();
+        let input = RelationInput {
+            relation_id: relation_id(LEFT),
+            plan: context.read_batch(batch).unwrap().into_unoptimized_plan(),
+        };
+        let bindings = ProgramBindings::try_new(
+            "test.rebound",
+            [program_contract(
+                LEFT,
+                "left",
+                vec![(LEFT_VALUE, "value", DataType::Int64, true)],
+            )],
+        )
+        .unwrap();
+        // The intermediate output identity has no retained schema binding after block isolation.
+        let mut program = RelationalProgram {
+            root: RelationalExpression::Projection {
+                input: Box::new(RelationalExpression::Projection {
+                    input: Box::new(RelationalExpression::Input(relation_id(LEFT))),
+                    expressions: vec![NamedExpression {
+                        field_id: id(SUMMARY_TOTAL),
+                        expression: field(LEFT_VALUE),
+                    }],
+                }),
+                expressions: vec![NamedExpression {
+                    field_id: id(SUMMARY_TOTAL),
+                    expression: field(SUMMARY_TOTAL),
+                }],
+            },
+            output_fields: vec![id(SUMMARY_TOTAL)],
+        };
+        program.remap_fields(&BTreeMap::from([(id(SUMMARY_TOTAL), id(LEFT_VALUE))]));
+        let compiled =
+            RelationalProgramCompiler::compile_with_bindings(&bindings, vec![input], &program)
+                .unwrap();
+        let batches = context
+            .execute_logical_plan(compiled.plan)
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let actual = batches
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap()
+                    .iter()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual, vec![Some(5), None]);
+    }
+
+    #[tokio::test]
     async fn literal_suffix_uses_native_like_without_wildcard_or_case_expansion() {
         use arrow_array::{Int64Array, RecordBatch, StringArray};
         use datafusion::prelude::SessionContext;

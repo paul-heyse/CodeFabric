@@ -274,3 +274,69 @@ pub(super) fn select_relationship<'a>(
         )),
     }
 }
+
+/// Distinguish an ordinary census from an explicitly supported semantic association scope.
+pub(super) fn select_entity_scope<'a>(
+    catalog: &'a EpochBoundSemanticIngressCatalog,
+    candidates: &[&'a EpochBoundProgramBindingRow],
+    within: &[super::SemanticReference],
+    looking_for: &str,
+) -> Result<Option<&'a EpochBoundProgramBindingRow>, ProgrammaticQueryPortError> {
+    use super::{SemanticReference, code_literals};
+    if candidates.iter().any(|program| {
+        !catalog.selections.iter().any(|selection| {
+            selection.program_binding_id == program.program_binding_id
+                && selection.selection_id.as_ref() == "selection.looking-for"
+        })
+    }) {
+        return Err(rejected(
+            "admitted catalog has ambiguous programs without entity selection contracts",
+        ));
+    }
+    let semantic_scope = within
+        .iter()
+        .any(|reference| !matches!(reference, SemanticReference::SourceLocation { .. }));
+    if semantic_scope
+        && within
+            .iter()
+            .any(|reference| matches!(reference, SemanticReference::SourceLocation { .. }))
+    {
+        return Err(unavailable(
+            "slot.within",
+            "mixed source-location and semantic target scopes are unavailable",
+        ));
+    }
+    let meaning = code_literals::entity_selection(looking_for)
+        .map_or_else(|| looking_for.to_owned(), |(meaning, _)| meaning);
+    let meaning = SemanticClauseValue::Text(Arc::from(meaning));
+    let selected = candidates
+        .iter()
+        .copied()
+        .filter(|program| {
+            let scoped = catalog.consumer_slots.iter().any(|slot| {
+                slot.program_binding_id == program.program_binding_id
+                    && slot.consumer_slot_id.as_ref() == "slot.within"
+            });
+            scoped == semantic_scope
+                && (!scoped
+                    || catalog.selections.iter().any(|selection| {
+                        selection.program_binding_id == program.program_binding_id
+                            && selection.selection_id.as_ref() == "selection.looking-for"
+                            && selection
+                                .resolutions
+                                .iter()
+                                .any(|resolution| resolution.request_value == meaning)
+                    }))
+        })
+        .collect::<Vec<_>>();
+    match selected.as_slice() {
+        [program] => Ok(Some(program)),
+        [] => Err(unavailable(
+            "slot.within",
+            "the requested entity meaning has no admitted semantic target scope",
+        )),
+        _ => Err(rejected(
+            "admitted catalog has ambiguous entity scope programs",
+        )),
+    }
+}

@@ -73,7 +73,8 @@ pub(super) fn install_selection(
     for program in programs {
         if !matches!(
             program.form,
-            ReleasedSemanticForm::RetrieveFactsAboutCode
+            ReleasedSemanticForm::FindCodeEntities
+                | ReleasedSemanticForm::RetrieveFactsAboutCode
                 | ReleasedSemanticForm::FollowCodeRelationships
                 | ReleasedSemanticForm::RetrieveSourceAndSyntaxContext
         ) {

@@ -48,6 +48,40 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The semantic-reference scope continuation after `1cba8112` adds a catalog-selected FindEntities
+program for references targeting prior or named canonical entities. DataFusion 55 left semi joins
+bind canonical target/reference IDs, exact analysis contexts and workspace identity before existing
+filters, ordering and limits. Repeated subjects/candidate rows do not multiply occurrences; empty
+prior results remain empty. Unsupported semantic scopes receive typed block failures. Ordinary
+census and captured-location queries keep their selected meanings.
+
+Scoped Find results retain the entity-role schema for downstream facts, relationships and source.
+Materialized consumers accept distinct producer relation names only with identical ordered semantic
+fields and roles; runtime still requires exact Arrow names, types, nullability and metadata. Inline
+composition retains its relation constraint. Field renaming now tracks bindings produced by each
+subtree, preserving same-ID prior inputs and carrying nested projection/aggregate values into their
+actual downstream uses. Ingress also supplies the documented one-step relationship default.
+
+All 53 focused ingress/recipe/compiler/native-program/retention cases pass in 1.907 s
+(`/tmp/codefabric-p03-find-scope-unit-verified.log`). Native binding cases cover null-bearing input,
+independent filtered/sorted values, sums and repeated intermediate projections. Default/featureless
+root checks and affected Clippy pass with zero affected diagnostics. Installed prior-result
+fan-out/source/reopen passes in 74.788 s; independent/all-unavailable branches/reopen passes in
+81.350 s (`/tmp/codefabric-p03-find-scope-native-final.log`). The final mixed Python/Rust scope,
+traversal, source and exact-version reopen case passes in 165.151 s
+(`/tmp/codefabric-p03-find-scope-native-reopen-final.log`). Its comparator validates fresh
+snapshot/disclosure-bound source handles and compares every canonical/provenance field and
+delivered source byte/range. Final affected Clippy, navigation, spelling, diff and tool-version
+contract checks pass. No full-suite or doctest result is implied.
+
+An earlier mixed run did not converge within its 120-second semantic preparation wait:
+Cargo/rustc took 27.34 s and relational writes were unfinished after 93.22 s; source publication
+wrote 84 relations in 24.83 s (`/tmp/codefabric-p03-find-scope-tests-6.log`). The fixture now uses
+the existing separate 180-second preparation helper before queries. Startup within 120 seconds
+remains unqualified for P04/P14. The workstation `uv` drift to 0.12.12 was reconciled to the pinned
+0.12.11 before the final rerun. Broader Find scopes, owned parameter/return/member facts and the
+remaining first-four meanings remain P03 work; no package or outcome exit is claimed.
+
 The ingress continuation after `d0c437b8` retains typed unavailable blocks without inventing a
 program or relation binding. Missing released-form programs, prior-input consumer slots and
 selection/return/input targets,

@@ -47,6 +47,7 @@ use crate::semantic_query_contract::{COMPILED_V2_0_SCOPE_DEFINITIONS, ResultRole
 use crate::semantic_release::{CompiledQueryProgram, SemanticQueryForm};
 
 mod facts;
+mod find_scope;
 mod locations;
 mod named;
 mod prior;
@@ -569,6 +570,9 @@ fn compiled_released_form_programs(
             });
         }
         let mut programs = vec![compiled_find_entities_program(source.clone())?];
+        if let Some(program) = find_scope::references(epoch, &source)? {
+            programs.push(program);
+        }
         // Older persisted epochs remain readable; a new form needs its actual field contract.
         if let Some(program) = facts::declarations(epoch)? {
             programs.push(program);

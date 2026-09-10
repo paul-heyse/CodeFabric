@@ -524,6 +524,7 @@ pub(crate) fn validate_canonical_fact_references(
     clause: &SemanticQueryClause,
 ) -> Result<(), String> {
     let references = match clause {
+        SemanticQueryClause::FindEntities { within, .. } => within,
         SemanticQueryClause::RetrieveFacts { about, .. } => about,
         SemanticQueryClause::FollowRelationships { starting_from, .. } => starting_from,
         SemanticQueryClause::RetrieveSourceContext { for_inputs, .. } => for_inputs,
