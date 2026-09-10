@@ -1309,11 +1309,15 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 );
             }
             for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
+                let canonical_family = crate::production_query_recipe::canonical_result_family(
+                    output.relation_id().as_str(),
+                );
                 let source_context = output.relation_id().as_str() == "query.result.source-context";
                 let declarations = source_context
                     || output.relation_id().as_str() == "query.result.declaration-facts";
                 let calls = output.relation_id().as_str() == "query.result.call-facts";
-                if !declarations
+                if canonical_family.is_none()
+                    && !declarations
                     && !calls
                     && !output.program().output_fields.iter().any(|field| {
                         field.as_str() == "query.result.semantic-entities.entity-language"
@@ -1325,7 +1329,9 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     selection.query_id == *query_id
                         && selection.selection_id.as_ref() == "selection.looking-for"
                 });
-                let selector = if calls {
+                let selector = if let Some(family) = canonical_family {
+                    family.coverage
+                } else if calls {
                     match validated
                         .ingress()
                         .selections
@@ -1395,7 +1401,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 {
                     return failed(&artifacts, "processing_scope", error);
                 }
-                let predicate = match if declarations || calls {
+                let predicate = match if declarations || calls || canonical_family.is_some() {
                     scope.predicate_for(output.relation_id().as_str(), "language", "context_id")
                 } else {
                     scope.predicate()
@@ -1404,9 +1410,13 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     Err(error) => return failed(&artifacts, "processing_scope", error),
                 };
                 let mut summary = processing.summarize(&scope, 0);
-                if declarations
-                    || (!calls
-                        && !matches!(selector, "function" | "python:function" | "rust:function"))
+                if canonical_family.is_none()
+                    && (declarations
+                        || (!calls
+                            && !matches!(
+                                selector,
+                                "function" | "python:function" | "rust:function" | "python:module"
+                            )))
                 {
                     // The same admitted Ruff Binding / rustc PublicItem partitions own all
                     // declarations. Keep this conservative context scope for unknown subjects.

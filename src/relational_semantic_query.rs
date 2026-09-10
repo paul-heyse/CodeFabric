@@ -1125,15 +1125,25 @@ pub enum EpochBoundSelectionFold {
     Any,
 }
 
-/// Data-carried lowering of one selection into a filter node.
+/// A selection either constrains rows or selects the already bound typed program.
+/// Program selection remains an ingress-validated dependency; it creates no artificial fact column.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EpochBoundSelectionTarget {
+    Predicate {
+        input_field_id: FieldId,
+        scalar_operator: ScalarOperator,
+    },
+    Program,
+}
+
+/// Data-carried lowering of one selection at its bound filter node.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EpochBoundExecutionSelectionRow {
     pub program_binding_id: Arc<str>,
     pub execution_program_pin: [u8; 32],
     pub selection_id: Arc<str>,
     pub operator_node_id: Arc<str>,
-    pub input_field_id: FieldId,
-    pub scalar_operator: ScalarOperator,
+    pub target: EpochBoundSelectionTarget,
     pub fold: EpochBoundSelectionFold,
 }
 
@@ -4579,7 +4589,11 @@ fn validate_epoch_execution_catalog<'a>(
                 },
             );
         }
-        if !is_binary_predicate(row.scalar_operator) {
+        if let EpochBoundSelectionTarget::Predicate {
+            scalar_operator, ..
+        } = row.target
+            && !is_binary_predicate(scalar_operator)
+        {
             return Err(EpochBoundSemanticCompileError::InvalidNode {
                 node: row.operator_node_id.to_string(),
                 detail: "selection lowering requires a binary scalar predicate".to_owned(),
@@ -4773,7 +4787,9 @@ fn validate_epoch_execution_catalog<'a>(
             Arc::clone(&selection.program_binding_id),
             Arc::clone(&node.input_node_ids[0]),
         )];
-        if !input.output_fields.contains(&selection.input_field_id) {
+        if let EpochBoundSelectionTarget::Predicate { input_field_id, .. } = &selection.target
+            && !input.output_fields.contains(input_field_id)
+        {
             return Err(EpochBoundSemanticCompileError::InvalidNode {
                 node: selection.operator_node_id.to_string(),
                 detail: "selection field is absent from filter input".to_owned(),
@@ -5268,13 +5284,19 @@ fn lower_epoch_execution_program(
                                 &(binding, value),
                             ),
                         });
-                        value_predicates.push_back(ScalarExpression::Call {
-                            operator: binding.scalar_operator,
-                            arguments: vec![
-                                ScalarExpression::Field(binding.input_field_id.clone()),
-                                ScalarExpression::Literal(value.value.scalar()),
-                            ],
-                        });
+                        if let EpochBoundSelectionTarget::Predicate {
+                            input_field_id,
+                            scalar_operator,
+                        } = &binding.target
+                        {
+                            value_predicates.push_back(ScalarExpression::Call {
+                                operator: *scalar_operator,
+                                arguments: vec![
+                                    ScalarExpression::Field(input_field_id.clone()),
+                                    ScalarExpression::Literal(value.value.scalar()),
+                                ],
+                            });
+                        }
                     }
                     let fold = match binding.fold {
                         EpochBoundSelectionFold::All => ScalarOperator::And,
@@ -6994,8 +7016,10 @@ mod tests {
                 execution_program_pin: [21; 32],
                 selection_id: Arc::from("selection.semantic-kind"),
                 operator_node_id: Arc::from("entities.filter"),
-                input_field_id: within_representation,
-                scalar_operator: ScalarOperator::Equal,
+                target: EpochBoundSelectionTarget::Predicate {
+                    input_field_id: within_representation,
+                    scalar_operator: ScalarOperator::Equal,
+                },
                 fold: EpochBoundSelectionFold::Any,
             }],
             returns: vec![
@@ -7239,7 +7263,10 @@ mod tests {
         ));
 
         let mut invalid_selection = epoch_execution_catalog();
-        invalid_selection.selections[0].input_field_id = field("selection.not-in-filter");
+        invalid_selection.selections[0].target = EpochBoundSelectionTarget::Predicate {
+            input_field_id: field("selection.not-in-filter"),
+            scalar_operator: ScalarOperator::Equal,
+        };
         assert!(matches!(
             compile_epoch_bound_semantic_request(
                 &validated,

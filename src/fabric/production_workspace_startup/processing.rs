@@ -137,6 +137,7 @@ pub(super) fn install(
         rows.push(unsupported_rust_references(partition));
         for family in [
             "diagnostic-messages",
+            "diagnostic-children",
             "diagnostic-locations",
             "diagnostic-suggestions",
             "types",
@@ -199,7 +200,11 @@ fn append_python_diagnostics<'a>(
         }
     }
     rows.push(message);
-    for family in ["diagnostic-locations", "diagnostic-suggestions"] {
+    for family in [
+        "diagnostic-children",
+        "diagnostic-locations",
+        "diagnostic-suggestions",
+    ] {
         rows.push(Partition {
             family,
             state: if message.file.is_some() {
@@ -316,6 +321,10 @@ fn append_rust_partitions<'a>(
                 &[RustcRelation::HirImport, RustcRelation::HirReference][..],
             ),
             ("diagnostic-messages", &[RustcRelation::Diagnostic][..]),
+            (
+                "diagnostic-children",
+                &[RustcRelation::Diagnostic, RustcRelation::DiagnosticChild][..],
+            ),
             (
                 "diagnostic-locations",
                 &[RustcRelation::Diagnostic, RustcRelation::DiagnosticSpan][..],

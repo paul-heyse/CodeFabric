@@ -60,13 +60,7 @@ impl ProcessingSelection {
         !self.table_root.is_empty()
             && self.workspace != [0; 16]
             && self.languages.iter().eq(summary.languages.iter())
-            && matches!(
-                self.family.as_str(),
-                "function-declarations"
-                    | "call-targets"
-                    | "lexical-references"
-                    | "function-source-context"
-            )
+            && super::canonical_processing_family(&self.family).is_some()
             && self.contexts.len() <= 4096
             && self.owners.as_ref().is_none_or(|owners| {
                 !owners.is_empty() && owners.len() <= 4096 && self.family == "call-targets"
@@ -74,13 +68,8 @@ impl ProcessingSelection {
     }
 
     fn scope(&self) -> Result<EntityQueryScope, String> {
-        let family = match self.family.as_str() {
-            "function-declarations" => "function-declarations",
-            "function-source-context" => "function-source-context",
-            "call-targets" => "call-targets",
-            "lexical-references" => "lexical-references",
-            _ => return Err("invalid retained processing family".to_owned()),
-        };
+        let family = super::canonical_processing_family(&self.family)
+            .ok_or("invalid retained processing family")?;
         Ok(EntityQueryScope {
             family,
             languages: self.languages.clone(),

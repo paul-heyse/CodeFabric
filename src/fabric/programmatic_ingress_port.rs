@@ -2,7 +2,7 @@
 //!
 //! Released form names are compatibility observations, not executor identities. This port uses
 //! explicit typed mappings for every wire field, resolves one installed program by the tuple of
-//! released form and semantic output role, and then validates the complete product against the
+//! released form, semantic output role and admitted family meanings, then validates against the
 //! already-admitted epoch catalog. No program binding ID or execution program pin is embedded in
 //! this module.
 
@@ -465,7 +465,11 @@ impl ApplicationOwnedSemanticIngressPort {
         for clause in &request.request.queries {
             let form = released_form(clause);
             let output_role_id = self.role_id(clause.output_role())?;
-            let binding = select_program_binding(catalog, form, output_role_id)?;
+            let Some(binding) =
+                select_clause_program(catalog, clause, output_role_id, &mut projection)?
+            else {
+                continue;
+            };
             let query_id: Arc<str> = Arc::from(clause.query_id());
             projection.bind_query_program(&query_id, &binding.program_binding_id)?;
             blocks.push(EpochBoundBlockBindingRow {
@@ -2166,6 +2170,36 @@ fn released_form(clause: &SemanticQueryClause) -> ReleasedSemanticForm {
     }
 }
 
+mod family_selection;
+
+fn select_clause_program<'a>(
+    catalog: &'a EpochBoundSemanticIngressCatalog,
+    clause: &SemanticQueryClause,
+    output_role_id: &Arc<str>,
+    projection: &mut IngressProjection,
+) -> Result<Option<&'a EpochBoundProgramBindingRow>, ProgrammaticQueryPortError> {
+    let form = released_form(clause);
+    let candidates = catalog
+        .program_bindings
+        .iter()
+        .filter(|binding| {
+            binding.compatibility_form == form && binding.output_role_id == *output_role_id
+        })
+        .collect::<Vec<_>>();
+    if candidates.len() > 1
+        && let SemanticQueryClause::RetrieveFacts { facts, .. } = clause
+    {
+        return family_selection::select(
+            catalog,
+            &candidates,
+            clause.query_id(),
+            facts,
+            projection,
+        );
+    }
+    select_program_binding(catalog, form, output_role_id).map(Some)
+}
+
 fn select_program_binding<'a>(
     catalog: &'a EpochBoundSemanticIngressCatalog,
     form: ReleasedSemanticForm,
@@ -2510,7 +2544,8 @@ fn selection_presentation(value: &SemanticClauseValue, fallback: String) -> Stri
         SemanticClauseValue::Text(text)
             if crate::production_query_recipe::CANONICAL_ENTITY_SELECTORS
                 .iter()
-                .any(|(phrase, _)| *phrase == text.as_ref()) =>
+                .any(|(phrase, _)| *phrase == text.as_ref())
+                || crate::production_query_recipe::canonical_fact_meaning(text) =>
         {
             format!("selection.{}", text.to_ascii_lowercase().replace(' ', "-"))
         }
@@ -3786,6 +3821,127 @@ mod tests {
             error
                 .to_string()
                 .contains("canonical request bytes and parsed request value disagree")
+        );
+    }
+    // One guarded round-trip also rejects cross-family requests and forged choices.
+    #[allow(clippy::too_many_lines)]
+    #[test]
+    fn fact_family_program_selection_and_guard_are_catalog_bound() {
+        let port = port();
+        let mut catalog = catalog(&port);
+        let base = catalog
+            .program_bindings
+            .iter()
+            .find(|b| b.compatibility_form == ReleasedSemanticForm::RetrieveFactsAboutCode)
+            .unwrap()
+            .clone();
+        let mut extra = base.clone();
+        extra.program_binding_id = arc("installed.program.types");
+        extra.program_binding_pin = [0x31; 32];
+        catalog.program_bindings.push(extra.clone());
+        let selection = catalog
+            .selections
+            .iter_mut()
+            .find(|b| {
+                b.program_binding_id == base.program_binding_id
+                    && b.selection_id.as_ref() == "selection.facts"
+            })
+            .unwrap();
+        selection.resolutions = vec![EpochBoundSelectionValueResolution {
+            request_value: text("declarations").unwrap(),
+            execution_value: text("declarations").unwrap(),
+        }];
+        let mut typed = selection.clone();
+        typed.program_binding_id = extra.program_binding_id.clone();
+        typed.resolutions = vec![EpochBoundSelectionValueResolution {
+            request_value: text("type observations").unwrap(),
+            execution_value: text("types").unwrap(),
+        }];
+        catalog.selections.push(typed);
+        let candidates = vec![
+            &catalog.program_bindings[catalog.program_bindings.len() - 1],
+            catalog
+                .program_bindings
+                .iter()
+                .find(|b| b.program_binding_id == base.program_binding_id)
+                .unwrap(),
+        ];
+        let mut projection = IngressProjection::try_for_catalog(&catalog, &[]).unwrap();
+        let chosen = family_selection::select(
+            &catalog,
+            &candidates,
+            "q",
+            &["type observations".to_owned()],
+            &mut projection,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(chosen.program_binding_id, extra.program_binding_id);
+        assert!(
+            family_selection::select(
+                &catalog,
+                &candidates,
+                "q",
+                &["declarations".to_owned(), "type observations".to_owned()],
+                &mut projection
+            )
+            .is_err()
+        );
+        assert!(
+            family_selection::select(
+                &catalog,
+                &candidates,
+                "q",
+                &["unclear".to_owned()],
+                &mut projection
+            )
+            .unwrap()
+            .is_none()
+        );
+        let requirement = &projection.requirements[0];
+        assert_eq!(requirement.authorized_choices.len(), 2);
+        let choice = requirement
+            .authorized_choices
+            .iter()
+            .find(|choice| {
+                choice.value == SemanticInputValue::String("type observations".to_owned())
+            })
+            .unwrap();
+        let answer = SemanticInputAnswer {
+            semantic_field_id: requirement.semantic_field_id.clone(),
+            value: SemanticInputValue::Choice(choice.choice_id.clone()),
+        };
+        let mut answered =
+            IngressProjection::try_for_catalog(&catalog, std::slice::from_ref(&answer)).unwrap();
+        let chosen = family_selection::select(
+            &catalog,
+            &candidates,
+            "q",
+            &["unclear".to_owned()],
+            &mut answered,
+        )
+        .unwrap()
+        .unwrap();
+        answered
+            .bind_query_program(&arc("q"), &chosen.program_binding_id)
+            .unwrap();
+        answered
+            .push_selection("q", &arc("selection.facts"), text("unclear").unwrap())
+            .unwrap();
+        assert_eq!(answered.selections[0].value, text("types").unwrap());
+        answered.validate_answer_consumption().unwrap();
+        let mut forged = answer;
+        forged.value = SemanticInputValue::Choice("choice:forged".to_owned());
+        let mut projection = IngressProjection::try_for_catalog(&catalog, &[forged]).unwrap();
+        assert!(
+            family_selection::select(
+                &catalog,
+                &candidates,
+                "q",
+                &["unclear".to_owned()],
+                &mut projection
+            )
+            .is_err()
         );
     }
 }

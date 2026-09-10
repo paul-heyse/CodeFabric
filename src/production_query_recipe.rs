@@ -46,6 +46,10 @@ use crate::semantic_query_contract::{COMPILED_V2_0_SCOPE_DEFINITIONS, ResultRole
 use crate::semantic_release::{CompiledQueryProgram, SemanticQueryForm};
 
 mod facts;
+use crate::relational_semantic_query::EpochBoundSelectionTarget;
+pub(crate) use facts::families::{
+    known_meaning as canonical_fact_meaning, result_family as canonical_result_family,
+};
 pub(crate) use facts::validate_canonical_fact_references;
 
 const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
@@ -60,6 +64,7 @@ pub(crate) const CANONICAL_ENTITY_SELECTORS: &[(&str, &str)] = &[
     ("function declarations", "function"),
     ("function", "function"),
     ("Python class declarations", "python:class"),
+    ("Python modules", "python:module"),
     ("Python parameter declarations", "python:parameter"),
     ("Python binding declarations", "python:binding"),
     ("Python import declarations", "python:import"),
@@ -111,8 +116,7 @@ struct ProductionSelectionDefinition {
     minimum_values: usize,
     maximum_values: usize,
     operator_node_id: Arc<str>,
-    input_field_id: FieldId,
-    scalar_operator: ScalarOperator,
+    target: EpochBoundSelectionTarget,
     fold: EpochBoundSelectionFold,
     resolutions: Vec<EpochBoundSelectionValueResolution>,
 }
@@ -278,7 +282,7 @@ impl ProductionSemanticQueryRecipe {
         let mut program_pins = BTreeMap::new();
         for (form, definition) in &forms {
             validate_program(epoch, definition, input.limits)?;
-            program_pins.insert(*form, program_identity_pin(definition));
+            program_pins.insert(form.clone(), program_identity_pin(definition));
         }
         let program_result_bindings =
             compiled_program_result_bindings(epoch, &forms, &program_pins)?;
@@ -349,7 +353,7 @@ impl ProductionSemanticQueryRecipe {
             ingress.program_bindings.push(EpochBoundProgramBindingRow {
                 program_binding_id: Arc::clone(&definition.program_binding_id),
                 program_binding_pin: binding_pin,
-                compatibility_form: form,
+                compatibility_form: form.0,
                 output_role_id: Arc::clone(&definition.output_role_id),
                 execution_program_pin,
             });
@@ -502,8 +506,10 @@ struct EpochSemanticRelation {
 fn compiled_released_form_programs(
     epoch: &ProgrammaticFabricEpoch,
     closure: &ProducerClosureProof,
-) -> Result<BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>, ProductionQueryRecipeError>
-{
+) -> Result<
+    BTreeMap<(ReleasedSemanticForm, Arc<str>), ProductionSemanticFormProgram>,
+    ProductionQueryRecipeError,
+> {
     if let Some(source) = epoch_semantic_relation(epoch, "canonical.entity-selector")? {
         if epoch
             .relation(&ProgrammaticRelationId::new(
@@ -520,6 +526,7 @@ fn compiled_released_form_programs(
         if let Some(program) = facts::declarations(epoch)? {
             programs.push(program);
         }
+        programs.extend(facts::families::programs(epoch)?);
         if let Some(program) = facts::calls(epoch)? {
             programs.push(program);
         }
@@ -866,8 +873,10 @@ fn compiled_find_entities_program(
             minimum_values: 1,
             maximum_values: RELEASE_SELECTION_MAXIMUM_VALUES,
             operator_node_id: Arc::clone(&filter_node_id),
-            input_field_id: source.selector,
-            scalar_operator: ScalarOperator::Equal,
+            target: EpochBoundSelectionTarget::Predicate {
+                input_field_id: source.selector,
+                scalar_operator: ScalarOperator::Equal,
+            },
             fold: EpochBoundSelectionFold::Any,
             resolutions: if canonical {
                 CANONICAL_ENTITY_SELECTORS.to_vec()
@@ -926,8 +935,8 @@ fn compiled_find_entities_program(
 
 fn compiled_program_result_bindings(
     epoch: &ProgrammaticFabricEpoch,
-    programs: &BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>,
-    program_pins: &BTreeMap<ReleasedSemanticForm, [u8; 32]>,
+    programs: &BTreeMap<(ReleasedSemanticForm, Arc<str>), ProductionSemanticFormProgram>,
+    program_pins: &BTreeMap<(ReleasedSemanticForm, Arc<str>), [u8; 32]>,
 ) -> Result<BTreeMap<RelationId, SupplementalProgramRelationBinding>, ProductionQueryRecipeError> {
     let mut epoch_fields = BTreeMap::<FieldId, Arc<Field>>::new();
     for relation_id in epoch.relation_ids() {
@@ -1127,13 +1136,24 @@ fn validate_identity(kind: &'static str, value: &str) -> Result<(), ProductionQu
 
 fn validate_form_coverage(
     forms: Vec<ProductionSemanticFormProgram>,
-) -> Result<BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>, ProductionQueryRecipeError>
-{
+) -> Result<
+    BTreeMap<(ReleasedSemanticForm, Arc<str>), ProductionSemanticFormProgram>,
+    ProductionQueryRecipeError,
+> {
     let mut indexed = BTreeMap::new();
+    let mut identities = BTreeSet::new();
     for form in forms {
-        if indexed.insert(form.form, form).is_some() {
+        if !identities.insert(Arc::clone(&form.program_binding_id)) {
             return Err(ProductionQueryRecipeError::ReleasedFormCoverage(
-                "duplicate form".to_owned(),
+                "duplicate program binding".to_owned(),
+            ));
+        }
+        if indexed
+            .insert((form.form, Arc::clone(&form.program_binding_id)), form)
+            .is_some()
+        {
+            return Err(ProductionQueryRecipeError::ReleasedFormCoverage(
+                "duplicate program binding".to_owned(),
             ));
         }
     }
@@ -1374,7 +1394,12 @@ fn validate_program_bindings(
             .and_then(|id| nodes.get(id.as_ref()))
             .copied();
         if !matches!(node.operator, ProgramRelationalOperator::Filter)
-            || input.is_none_or(|input| !input.output_fields.contains(&selection.input_field_id))
+            || input.is_none_or(|input| match &selection.target {
+                EpochBoundSelectionTarget::Predicate { input_field_id, .. } => {
+                    !input.output_fields.contains(input_field_id)
+                }
+                EpochBoundSelectionTarget::Program => selection.resolutions.is_empty(),
+            })
             || selection.maximum_values == 0
             || selection.minimum_values > selection.maximum_values
             || selection.maximum_values > limits.max_selection_rows()
@@ -1470,8 +1495,7 @@ fn append_selections(
             execution_program_pin,
             selection_id: Arc::clone(&selection.selection_id),
             operator_node_id: Arc::clone(&selection.operator_node_id),
-            input_field_id: selection.input_field_id.clone(),
-            scalar_operator: selection.scalar_operator,
+            target: selection.target.clone(),
             fold: selection.fold,
         });
     }
@@ -1608,7 +1632,7 @@ fn append_scopes(
 }
 
 fn validate_required_closure(
-    forms: &BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>,
+    forms: &BTreeMap<(ReleasedSemanticForm, Arc<str>), ProductionSemanticFormProgram>,
     closure: &ProducerClosureProof,
 ) -> Result<(), ProductionQueryRecipeError> {
     let available = closure
@@ -2053,7 +2077,7 @@ fn binding_identity_pin(
 }
 
 fn compiled_release_identity_pin(
-    forms: &BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>,
+    forms: &BTreeMap<(ReleasedSemanticForm, Arc<str>), ProductionSemanticFormProgram>,
     scopes: &[ProductionScopeDefinition],
 ) -> [u8; 32] {
     let mut frame = CanonicalIdentityFrame::default();
@@ -2070,7 +2094,7 @@ fn catalog_identity_pin(
     policy_pin: [u8; 32],
     release_pin: [u8; 32],
     producer_closure_pin: [u8; 32],
-    forms: &BTreeMap<ReleasedSemanticForm, ProductionSemanticFormProgram>,
+    forms: &BTreeMap<(ReleasedSemanticForm, Arc<str>), ProductionSemanticFormProgram>,
     scopes: &[ProductionScopeDefinition],
 ) -> [u8; 32] {
     let mut frame = CanonicalIdentityFrame::default();
@@ -2294,8 +2318,16 @@ fn encode_selection(value: &ProductionSelectionDefinition) -> CanonicalIdentityF
     frame.u64(3, usize_identity(value.minimum_values));
     frame.u64(4, usize_identity(value.maximum_values));
     frame.text(5, &value.operator_node_id);
-    frame.text(6, value.input_field_id.as_str());
-    frame.u64(7, scalar_operator_code(value.scalar_operator));
+    match &value.target {
+        EpochBoundSelectionTarget::Predicate {
+            input_field_id,
+            scalar_operator,
+        } => {
+            frame.text(6, input_field_id.as_str());
+            frame.u64(7, scalar_operator_code(*scalar_operator));
+        }
+        EpochBoundSelectionTarget::Program => frame.text(10, "program-selection"),
+    }
     frame.u64(8, selection_fold_code(value.fold));
     frame.frames(
         9,
@@ -2852,10 +2884,16 @@ mod tests {
         let epoch = epoch().await;
         let forms = compiled_released_form_programs(&epoch, &closure()).expect("compiled programs");
         let original = forms
-            .get(&ReleasedSemanticForm::FindCodeEntities)
+            .values()
+            .find(|program| program.form == ReleasedSemanticForm::FindCodeEntities)
             .expect("entity program");
         let mut changed_operand = original.clone();
-        changed_operand.selections[0].scalar_operator = ScalarOperator::NotEqual;
+        if let EpochBoundSelectionTarget::Predicate {
+            scalar_operator, ..
+        } = &mut changed_operand.selections[0].target
+        {
+            *scalar_operator = ScalarOperator::NotEqual;
+        }
         assert_ne!(
             program_identity_pin(original),
             program_identity_pin(&changed_operand)

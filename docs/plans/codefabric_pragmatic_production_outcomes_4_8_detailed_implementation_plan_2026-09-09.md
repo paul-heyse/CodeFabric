@@ -355,9 +355,9 @@ workspace. Physical external-root registration/fetching, complete ecosystem iden
 source freezing, full Cargo unit/effective-configuration closure, raw argv, retained caches/checkers/
 parsers and cost-aware concurrency remain in 4A–4C/P04/P06/8E. The existing immutable input and
 provider contracts carry the new roots; full retention and scheduling acceptance is still required.
-P02 is in progress. No outcome from 4 through 8 is complete.
+P02's initial vertical is delivered below. No outcome from 4 through 8 is complete.
 
-**P02 diagnostic slice implemented, 2026-09-10; package exit remains open.** Native DataFusion
+**P02 diagnostic slice implemented, 2026-09-10; package exit was open at this checkpoint.** Native DataFusion
 plans publish canonical primary messages for Python/Rust and Rust's child/span/suggestion/edit
 hierarchy. Exact provider-run, owner-file, digest and generation joins fence message validity;
 independent location joins additionally enforce captured byte bounds. Invalidated locations retain
@@ -461,7 +461,19 @@ All 22 extractor tests and strict extractor checks pass. The mixed native/reopen
 context/unit isolation, null locations, identity continuity and missing-observation coverage.
 `canonical-rust-references` selects the native case. STATUS records commands, final checks and limits.
 
-Continue P02 with public family selection for the canonical clusters.
+**P02 public family selection and the initial package exit are delivered, 2026-09-10.** Separate immutable family programs read canonical typed relations through native semi
+joins. Program identity distinguishes family schemas within RetrieveFacts; controlled selection and
+guarded replay choose the admitted program without a persisted wide fact selector. Module discovery
+and exact entity/file/context family meanings carry their actual processing family, including a
+separate diagnostic-child census. All eleven selected family schemas, guarded import selection,
+Python module discovery and exact reopen pass through installed clients (74.25 s). The final
+47-case canonical/compiler/ingress/processing/public-declaration regression run passes (27.72 s).
+Default/featureless checks pass; Clippy retains its existing warning backlog. STATUS records
+commands, fixture corrections and limits. `canonical-fact-families` selects the new native case.
+
+Continue with P03's full first-four meanings and block-local composition. Initial family retrieval
+uses explicit entity subjects and named entity/file/context scope; mixed family schemas currently
+use separate requests. Narrower ownership, broad directives and dependency scopes remain P03/P06.
 Complete recursive/binder/alias/overload/ParamSpec/TypedDict
 normalization, expanded type observation roles and members in P06. This does not defer or close any
 of P02's required semantic verticals. P03–P14 remain in the table's order.
@@ -678,7 +690,8 @@ The P02 diagnostic continuation adds canonical Python/Rust messages, Rust child/
 relations and separate requested diagnostic coverage. The Python module/import/semantic-reference
 cluster now has typed native observations, canonical joins, scoped coverage and exact reopen, as
 recorded in §3.3. Initial Python/Rust structural types, observations and components also publish
-with explicit unknown coverage and exact reopen. Public family selection, full type normalization,
+with explicit unknown coverage and exact reopen. Initial public family selection now passes; broader
+family directives, full type normalization,
 and the broader semantic families below remain open. The initial Rust import/reference cluster
 now also publishes typed native denotations, scoped unknowns and exact reopen as recorded in §3.3.
 
@@ -1779,15 +1792,16 @@ Implementation resumed from `b2a97b9c` under the user's instruction to execute �
 package across outcomes 4–8. P01's initial dependency/context vertical and phase costs are now
 implemented and exercised, with the limits recorded in §3.3 and STATUS. P02's canonical diagnostics
 and initial Python module/import/reference cluster, Python/Rust structural types and initial Rust
-imports/references are implemented with scoped coverage and exact reopen. Public family selection
-remains before the P02 package exit.
+imports/references are implemented with scoped coverage and exact reopen. Initial typed public
+family selection now passes installed-client and regression checks; P02's initial package exit is
+delivered. P03's first-four completion and typed block composition are next.
 
 Continue using §3.3 as the integrated order:
 
 1. Preserve **P01**'s captured dependency roots, native configuration/marker installation, exact
    input bindings and phase measurements. Extend the full context/cache variants in their owning
    slices; initial dependency-root acceptance does not establish retained native operation.
-2. Complete **P02–P05** canonical types/imports/references and coverage, first-four public meanings,
+2. Complete **P03–P05** first-four public meanings, remaining query coverage,
    typed block bindings, target freshness, retained live providers/version reuse and the broader
    clean/incremental corpus. This delivers the first useful release, not the full product.
 3. Extend **P06–P11** across the complete §7.1 ontology map: language normalization, explicit native

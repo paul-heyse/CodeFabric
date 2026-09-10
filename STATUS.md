@@ -3,9 +3,10 @@
 Updated 2026-09-10 from the canonical `/home/paul/CodeFabric` working tree on `master`.
 Implementation has resumed from `b2a97b9c` in the detailed plan's P01–P14 package order, as requested.
 P01's initial captured dependency/context vertical and phase costs are committed in `a31e2a3a`.
-P02 is in progress; canonical diagnostics, initial Python modules, Python/Rust imports and semantic
-references, and initial Python/Rust structural types publish with scoped coverage and exact reopen.
-The initial Rust type slice is committed in `ba35b4c7`; public family selection is next.
+P02's initial canonical semantic vertical now publishes diagnostics, Python modules, Python/Rust
+imports, references and structural types with scoped public retrieval and exact reopen.
+The Rust type and HIR reference slices are committed in `ba35b4c7` and `1b515b7b`.
+P02 public family selection passes native installed-client and regression checks. P03 is next.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -40,7 +41,7 @@ The call-query continuation present at session start was preserved, exercised an
 originally stopped at the diagnostic checkpoint. The subsequent user instruction resumes execution
 of the cross-cutting packages in §3.3 of the detailed plan.
 
-## P02 in progress: canonical semantic families
+## P02: initial canonical semantic vertical delivered
 
 The Python continuation publishes `fact.code_module`, `fact.code_semantic_reference` and
 `fact.code_import`. Checker-selected modules are application-owned semantic entities without
@@ -86,6 +87,50 @@ local sources guided the bulk resolver, typed Arrow boundary, joins, aggregates 
 
 Public family selection remains P02 work.
 P03–P14 remain required in package order.
+
+### Public canonical family selection
+
+Family-specific immutable query templates now consume the canonical module/import/reference,
+type/observation/component and diagnostic hierarchy relations directly. Native DataFusion semi
+joins select exact workspace/context and explicitly named entity/file scopes without multiplying
+facts for repeated subjects. All canonical fields retain their schema lineage; no new persisted
+wide selector relation or serialized fact payload is introduced.
+
+The production catalog is indexed by program identity within each form. An explicit program-selection
+binding chooses the typed plan without inventing a fact column. Catalog-bound guarded choices span
+installed family meanings and retain opaque submitted IDs with readable labels. Python module
+selection joins the existing canonical entity universe. Query and retained processing selections
+use the actual selected family; compiler diagnostic children have their own requested census, and
+structured detail rows carry language for scope filtering. Missing Python structured diagnostics
+remain unsupported. Older retained detail schemas lacking the new public scope field are not
+advertised as executable templates.
+
+The available meanings state their scope: module metadata; imports and type observations/components
+in declaring files; semantic references to entities; structural types and diagnostics in analysis
+contexts. These do not assert Python declaration-owned type roles or diagnostic ownership by an
+arbitrary function. Narrower ownership, broad mixed-family requests and full block-local composition
+continue in P03/P06. A request spanning different family schemas currently uses separate requests;
+block-local execution remains P03 and is not claimed by this slice.
+
+On 2026-09-10 the 16 focused dispatcher/compiler/processing checks pass
+(`/tmp/codefabric-p02-family-programs-tests.log`). The real mixed native installed-client case passes
+all eleven family queries, guarded import selection, module discovery, typed field comparison and
+exact Delta reopen in 74.25 s (`/tmp/codefabric-p02-family-programs-native-2.log`). The initial run's
+guard fixture omitted its answer; the corrected fixture consumes the readable authorized choice.
+The final 47-case canonical/compiler/ingress/processing regression run passes, including the
+preceding public Python declaration scenario (27.72 s;
+`/tmp/codefabric-p02-family-regression-tests.log`). `canonical-fact-families` selects the new case.
+
+`just root-check` passes default and featureless all-target checks
+(`/tmp/codefabric-p02-family-root-check.log`). Root Clippy completes with the existing warning
+backlog (`/tmp/codefabric-p02-family-clippy.jsonl`); the new wildcard imports, guard/test length
+annotations and needless clone were addressed, followed by the passing regression compile/run.
+Golden harness selection, focused Python lint, documentation navigation, spelling and diff checks
+pass. No full-suite, doctest, first-four completion or outcome 4–8 closure is claimed.
+DataFusion planning §52 (join planning), exact DataFusion 55 builder sources, FastMCP 4 §7.5–7.6
+(binary resources) and §38 (guarded replay), and Pydantic §21 (reused typed validation) informed this
+path. The existing adapter owns presentation and binary resource delivery; Rust owns family meaning,
+execution and coverage.
 
 ### Initial Rust imports and semantic references
 
@@ -181,7 +226,7 @@ six unchanged escaped byte fragments in existing encoding fixtures. Full-suite/d
 strict repository-wide lint completion are not claimed.
 The code-facts, DataFusion and petgraph reference skills and exact resolved sources guided this slice.
 Full recursive/binder/alias/overload/ParamSpec/TypedDict normalization, expanded type observation
-roles and members remain P06; public family selection remains P02. No full type-universe or
+roles and members remain P06; narrower public type ownership/directives remain P03/P06. No full type-universe or
 public-query completion is claimed by this slice.
 
 ### Initial Rust structural types
@@ -348,7 +393,7 @@ This delivers P01's first external-input vertical using deliberately captured de
 inside the authorized workspace. Separate external filesystem-root registration/fetching, full
 package/distribution identity, generated `OUT_DIR` freezing, effective Cargo unit/config closure,
 byte-safe compiler argv, retained providers/caches and measured shared scheduling remain in their
-4A–4C/P04/P06/8E slices. P02 canonical semantic normalization and scoped coverage is in progress.
+4A–4C/P04/P06/8E slices. P02's initial canonical semantic vertical and scoped public retrieval are now delivered.
 
 ## Detailed plan expansion, 2026-09-09
 
@@ -1290,7 +1335,7 @@ Continue in this order:
 
 1. Preserve P01's captured dependency roots and phase instrumentation, extending its full context,
    cache and source-fidelity variants in the owning later slices.
-2. P02–P05: canonical semantics/coverage, completed first-four meanings and typed block bindings,
+2. P03–P05: completed first-four meanings, remaining query coverage and typed block bindings,
    target freshness, retained live providers/version reuse and broader clean/incremental comparison.
 3. P06–P11: every remaining language/analysis family, explicit native CFG/MIR/private inputs,
    common graphs/summaries, all eight forms/full DAG semantics and modern delivery.

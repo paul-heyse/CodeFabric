@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+pub(crate) mod families;
+
 use super::{
     EpochBoundRequestInputField, EpochBoundSelectionFold, EpochBoundSelectionValueResolution,
     FieldId, JoinKind, ProductionOperatorDefinition, ProductionQueryRecipeError,
@@ -233,8 +235,10 @@ fn subject_facts(
                     RELEASE_SELECTION_MAXIMUM_VALUES
                 },
                 operator_node_id: node("families"),
-                input_field_id: source_field(field)?,
-                scalar_operator: ScalarOperator::Equal,
+                target: super::EpochBoundSelectionTarget::Predicate {
+                    input_field_id: source_field(field)?,
+                    scalar_operator: ScalarOperator::Equal,
+                },
                 fold: EpochBoundSelectionFold::Any,
                 resolutions: values
                     .iter()

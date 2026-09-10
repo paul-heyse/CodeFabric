@@ -76,6 +76,7 @@ impl Detail {
     pub fn fields(self) -> Vec<FieldSpec> {
         let mut fields = vec![
             ("diagnostic_id", DataType::FixedSizeBinary(16), false),
+            ("language", DataType::Utf8, false),
             ("context_id", DataType::FixedSizeBinary(16), false),
             ("workspace_id", DataType::FixedSizeBinary(16), false),
             ("source_generation", DataType::UInt64, false),
@@ -156,6 +157,7 @@ impl Detail {
             )?;
         let mut projection = [
             "diagnostic_id",
+            "language",
             "context_id",
             "workspace_id",
             "source_generation",

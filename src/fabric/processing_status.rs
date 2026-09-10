@@ -19,6 +19,25 @@ pub(crate) use rust_build::ProcessingRustBuildSelection;
 use rust_build::RustBuildColumns;
 
 pub(crate) const ENTITY_PROCESSING_RELATION: &str = "system.entity_processing_scope";
+// One closed family vocabulary is shared by live and retained processing selections.
+pub(crate) fn canonical_processing_family(value: &str) -> Option<&'static str> {
+    match value {
+        "function-declarations" => Some("function-declarations"),
+        "function-source-context" => Some("function-source-context"),
+        "call-targets" => Some("call-targets"),
+        "lexical-references" => Some("lexical-references"),
+        "semantic-references" => Some("semantic-references"),
+        "modules" => Some("modules"),
+        "imports" => Some("imports"),
+        "types" => Some("types"),
+        "diagnostic-messages" => Some("diagnostic-messages"),
+        "diagnostic-children" => Some("diagnostic-children"),
+        "diagnostic-locations" => Some("diagnostic-locations"),
+        "diagnostic-suggestions" => Some("diagnostic-suggestions"),
+        _ => None,
+    }
+}
+
 const MAX_PARTITIONS: usize = 4_000_000;
 const REMAINDER_PAGE_SIZE: usize = 64;
 
@@ -181,6 +200,7 @@ impl EntityQueryScope {
             return Err("unsupported entity language".to_owned());
         }
         match selector {
+            selected if canonical_processing_family(selected).is_some() => {}
             "function"
             | "declarations"
             | "calls"
@@ -213,6 +233,10 @@ impl EntityQueryScope {
             .collect::<Result<_, _>>()?;
         Ok(Self {
             family: match selector {
+                "python:module" => "modules",
+                selected if canonical_processing_family(selected).is_some() => {
+                    canonical_processing_family(selected).expect("checked family")
+                }
                 "function-source-context" => "function-source-context",
                 "calls" => "call-targets",
                 "lexical-references" => "lexical-references",
@@ -658,20 +682,7 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
             || workspace_ids.value(row) != workspace
             || generations.is_null(row)
             || generations.value(row) != generation
-            || !matches!(
-                family.value(row),
-                "function-declarations"
-                    | "call-targets"
-                    | "lexical-references"
-                    | "diagnostic-messages"
-                    | "diagnostic-locations"
-                    | "diagnostic-suggestions"
-                    | "modules"
-                    | "semantic-references"
-                    | "types"
-                    | "imports"
-                    | "function-source-context"
-            )
+            || canonical_processing_family(family.value(row)).is_none()
             || !matches!(language.value(row), "python" | "rust")
             || !matches!(
                 state.value(row),
