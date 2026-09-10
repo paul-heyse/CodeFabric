@@ -89,7 +89,7 @@ pub(super) fn without_literal_values(value: &mut serde_json::Value) {
                     }
                 }
             }
-            for key in ["about", "starting_from", "for"] {
+            for key in ["about", "starting_from", "for", "stop_when"] {
                 if let Some(subjects) = fields.get_mut(key) {
                     mask_subjects(subjects);
                 }
@@ -167,7 +167,8 @@ mod tests {
         ));
         assert!(!check(serde_json::json!({"queries":[
             {"about":[{"semantic_reference":"Python function `safe_to_refactor`"}]},
-            {"starting_from":["Rust function `should_change`"]}
+            {"starting_from":["Rust function `should_change`"]},
+            {"stop_when":["Python function `high_risk`"]}
         ]})));
         assert!(check(
             serde_json::json!({"queries":[{"about":["high risk functions"]}]})

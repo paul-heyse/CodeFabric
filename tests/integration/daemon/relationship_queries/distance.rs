@@ -67,6 +67,9 @@ fn queries(fixture: &ProductionFixture, language: &str) -> Vec<Value> {
         .unwrap()["target_name"]
         .clone();
     queries.push(json!({"request":"follow code relationships","query_id":"filtered","starting_from":[format!("{label} function `start`")],"relationship":"calls","distance":"up to two relationship steps","where":[{"property":"target name","operator":"does not equal","value":left}]}));
+    queries.extend(stopping_queries(label));
+    queries.push(json!({"request":"follow code relationships","query_id":"stop-unavailable","starting_from":[format!("{label} function `start`")],"relationship":"calls","distance":"up to two steps","stop_when":["do not traverse bodies of unindexed external entities"]}));
+    queries.push(json!({"request":"retrieve facts about code","query_id":"stop-dependent","about":[{"results_of":"stop-unavailable","select":"facts"}],"facts":["declarations"]}));
     for query in &mut queries {
         if query["request"] == "follow code relationships" {
             query.as_object_mut().unwrap().entry("where").or_insert_with(|| json!([]))
@@ -74,6 +77,23 @@ fn queries(fixture: &ProductionFixture, language: &str) -> Vec<Value> {
         }
     }
     queries
+}
+
+fn stopping_queries(language: &str) -> Vec<Value> {
+    [
+        ("stop-through", "start", "outgoing", "up to five steps", vec!["left", "left"]),
+        ("stop-exact", "start", "outgoing", "two steps", vec!["left"]),
+        ("stop-start", "start", "outgoing", "one step", vec!["start"]),
+        ("stop-incoming", "leaf", "incoming", "two steps", vec!["left"]),
+        ("stop-both", "start", "outgoing", "up to three steps", vec!["left", "right"]),
+        ("stop-cycle", "cycle_a", "outgoing", "up to eight steps", vec!["cycle_b"]),
+        ("stop-absent", "start", "outgoing", "up to five steps", vec!["absent"]),
+    ].into_iter().map(|(query, start, direction, distance, stops)| {
+        json!({"request":"follow code relationships", "query_id":query,
+            "starting_from":[format!("{language} function `{start}`")],
+            "relationship":"calls", "direction":direction, "distance":distance,
+            "stop_when":stops.into_iter().map(|name| format!("{language} function `{name}`")).collect::<Vec<_>>()})
+    }).collect()
 }
 
 fn run(
@@ -110,8 +130,25 @@ fn run(
     let report = modern_client_report(&run_modern_client(stack, &path));
     let result = modern_structured(modern_step(&report, "query"));
     assert_eq!(result["execution_state"], "SUCCEEDED", "{result}");
+    if !bounded {
+        let outcomes = result["query_results"].as_array().unwrap();
+        let outcome = |id: &str| outcomes.iter().find(|row| row["query_id"] == id).unwrap();
+        assert_eq!(outcome("stop-unavailable")["execution_state"], "FAILED");
+        assert_eq!(
+            outcome("stop-unavailable")["errors"][0]["code"],
+            "SEMANTIC_REFERENCE_UNAVAILABLE"
+        );
+        assert_eq!(
+            outcome("stop-unavailable")["errors"][0]["subject_id"],
+            "stop_when"
+        );
+        assert_eq!(
+            outcome("stop-dependent")["execution_state"],
+            "NOT_EXECUTED_DEPENDENCY"
+        );
+    }
     for status in result["processing"].as_array().unwrap() {
-        if status["query_id"] != "one" {
+        if status["query_id"] != "one" && status["query_id"] != "stop-start" {
             assert_ne!(
                 status["scope"], "selected_rust_call_owners",
                 "multi-step coverage must include later owners"
@@ -215,6 +252,19 @@ fn assert_walks(rows: &BTreeMap<String, Vec<Value>>) {
         pairs("filtered"),
         expected(&[("right", "leaf"), ("start", "right")])
     );
+    assert_eq!(
+        pairs("stop-through"),
+        expected(&[("right", "leaf"), ("start", "left"), ("start", "right")])
+    );
+    assert_eq!(pairs("stop-exact"), expected(&[("right", "leaf")]));
+    assert!(rows["stop-start"].is_empty());
+    assert_eq!(
+        pairs("stop-incoming"),
+        expected(&[("bridge_middle", "boundary_end"), ("start", "right")])
+    );
+    assert_eq!(pairs("stop-both"), pairs("one"));
+    assert_eq!(pairs("stop-cycle"), expected(&[("cycle_a", "cycle_b")]));
+    assert_eq!(rows["stop-absent"], rows["through"]);
     let sites = rows["two"]
         .iter()
         .map(|row| row["public_call_site_id"].as_str().unwrap())

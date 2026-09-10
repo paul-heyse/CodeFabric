@@ -53,6 +53,7 @@ mod named;
 mod prior;
 mod properties;
 mod returns;
+mod stopping;
 use crate::relational_semantic_query::EpochBoundSelectionTarget;
 pub(crate) use facts::families::{
     known_meaning as canonical_fact_meaning, result_family as canonical_result_family,

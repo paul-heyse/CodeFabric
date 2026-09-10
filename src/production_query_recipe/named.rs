@@ -33,21 +33,20 @@ pub(super) fn install(
     if let Some(qualified) = entity_field("qualified-name") {
         names.insert(Arc::from("qualified name"), qualified);
     }
-    install_selection(
-        &SubjectSelection {
-            source: ProductionRelationDefinition {
-                relation_id: entities.relation_id.clone(),
-                fields: entities.fields.clone(),
-                authority: ProductionRelationAuthority::Epoch,
-            },
-            public_id,
-            context_id,
-            name: "named",
-            selection_id: "selection.named-subject",
-            target: EpochBoundSelectionTarget::NamedEntities { fields: names },
+    let selection = SubjectSelection {
+        source: ProductionRelationDefinition {
+            relation_id: entities.relation_id.clone(),
+            fields: entities.fields.clone(),
+            authority: ProductionRelationAuthority::Epoch,
         },
-        programs,
-    );
+        public_id,
+        context_id,
+        name: "named",
+        selection_id: "selection.named-subject",
+        target: EpochBoundSelectionTarget::NamedEntities { fields: names },
+    };
+    super::stopping::install(&selection, programs);
+    install_selection(&selection, programs);
 }
 
 pub(super) struct SubjectSelection {

@@ -14,6 +14,7 @@ pub(super) fn install(
             matches!(node.operator, ProgramRelationalOperator::Filter)
                 && !node.node_id.ends_with(".named-filter")
                 && !node.node_id.ends_with(".location-filter")
+                && !node.node_id.ends_with(".stop-filter")
         }) else {
             continue;
         };

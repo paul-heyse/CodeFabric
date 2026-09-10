@@ -891,12 +891,15 @@ impl ApplicationOwnedSemanticIngressPort {
                     )?],
                     projection,
                 )?;
-                project_selection_texts(
+                project_selection(
                     fields,
                     &mut consumed,
                     ProgrammaticFormIngressField::StopWhen,
                     query_id,
-                    stop_when,
+                    stop_when
+                        .iter()
+                        .map(|value| stopping_value(value, binding, catalog))
+                        .collect::<Result<Vec<_>, _>>()?,
                     projection,
                 )?;
                 project_selection_texts(
@@ -2458,6 +2461,31 @@ fn project_selection(
     Ok(())
 }
 
+fn stopping_value(
+    value: &str,
+    binding: &EpochBoundProgramBindingRow,
+    catalog: &EpochBoundSemanticIngressCatalog,
+) -> Result<SemanticClauseValue, ProgrammaticQueryPortError> {
+    if let Some(named) = code_literals::named_subject(value) {
+        return text(&serde_json::to_string(&named).map_err(|error| rejected(error.to_string()))?);
+    }
+    let value = text(value)?;
+    if catalog.selections.iter().any(|selection| {
+        selection.program_binding_id == binding.program_binding_id
+            && selection.selection_id.as_ref() == "selection.stop-when"
+            && selection
+                .resolutions
+                .iter()
+                .any(|resolution| resolution.request_value == value)
+    }) {
+        return Ok(value);
+    }
+    Err(unavailable(
+        "stop_when",
+        "stopping conditions require a supported backtick-quoted entity name or an installed stopping meaning",
+    ))
+}
+
 fn project_selection_texts(
     fields: &BTreeMap<ProgrammaticFormIngressField, ProgrammaticFormIngressTarget>,
     consumed: &mut BTreeSet<ProgrammaticFormIngressField>,
@@ -3431,7 +3459,19 @@ mod tests {
                             value_kind: value_kind(*field),
                             minimum_values: 0,
                             maximum_values: 64,
-                            resolutions: Vec::new(),
+                            resolutions: if *field == ProgrammaticFormIngressField::StopWhen {
+                                ["boundary", "unknown"]
+                                    .into_iter()
+                                    .map(|value| {
+                                        crate::relational_semantic_query::EpochBoundSelectionValueResolution {
+                                            request_value: text(value).unwrap(),
+                                            execution_value: text(value).unwrap(),
+                                        }
+                                    })
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            },
                         });
                     }
                     ProgrammaticFormIngressTarget::Return { return_id } => {

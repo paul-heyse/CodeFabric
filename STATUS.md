@@ -48,6 +48,31 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The bounded-call slice is committed in `69beaec3`. The next P03 slice adds named stopping
+conditions through the existing canonical name selector and native DataFusion left anti joins.
+An arriving witness remains visible; expansion from a stop entity is excluded, including an
+initial subject that is itself a stop. Joins bind public entity, context and workspace IDs.
+Repeated/multiple names form a stop set; an absent name excludes nothing. Literal names remain
+separate from evaluative request wording. No application path enumeration or new native dependency
+is introduced (DataFusion reference §52, join planning decision model, and resolved 55.0.0 sources).
+
+The installed Python/Rust stopping scenarios passed in 211.809 s, including prior bounded walks,
+filters, source boundaries, cycles and exact reopen (`/tmp/codefabric-p03-stopping-native.log`).
+Two literal-name checks also passed. Default/featureless checks and affected Clippy pass.
+The correction reports unsupported stopping phrases as block-level semantic-unavailable
+results and blocks their dependents while preserving independent work; explicitly installed
+controlled stopping meanings remain supported by their catalog resolutions. All 12 ingress checks
+pass in `/tmp/codefabric-p03-stopping-native-final.log`. Its installed case exposed a fixture dependency-role error (`entities` from a `facts` producer); after correcting
+the test operand, final installed Python/Rust traversal, unsupported-stop branch isolation, all
+advertised pages and exact reopen pass in 206.443 s
+(`/tmp/codefabric-p03-stopping-native-roles.log`). Default/featureless checks pass in
+`/tmp/codefabric-p03-stopping-root-check-final.log`; final affected Clippy reports zero diagnostics
+in `/tmp/codefabric-p03-stopping-guard-clippy.jsonl`. Docs/navigation, spelling and diff checks pass.
+Validation uses the existing installed providers and delegated user-systemd scope; no full CI or
+doctest claim is made.
+Other stopping meanings, transitive closure, precise visited-owner processing, source outlines/
+related contexts, remaining first-four scopes/directives and P04–P14 remain open.
+
 The P03 bounded-call continuation after `04b48f22` passes installed public validation. Exact
 walks of two through eight steps return the final-hop witnesses; cumulative walks return distinct
 witnesses from every included hop. Incoming and outgoing programs use DataFusion frontier
