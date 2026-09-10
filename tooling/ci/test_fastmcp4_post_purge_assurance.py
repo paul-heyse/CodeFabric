@@ -169,6 +169,23 @@ def test_beh_extra_binary_is_rejected(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    "call", ["tracing_subscriber::registry()", "SemanticRegistry::new()"]
+)
+def test_binary_diagnostics_remain_distinct_from_semantic_registry(
+    tmp_path: Path, call: str
+) -> None:
+    root = _minimal_root(tmp_path)
+    daemon = root / "src/bin/codefabricd.rs"
+    daemon.write_text(daemon.read_text() + f"\n{call};\n")
+    if call == "tracing_subscriber::registry()":
+        assert validate_package_contract(root)["operational_binaries"] == 2
+    else:
+        with pytest.raises(PostPurgeAssuranceError) as failure:
+            validate_package_contract(root)
+        assert failure.value.code == "CFV7_PURGE_BINARY_SURFACE"
+
+
+@pytest.mark.parametrize(
     ("relative", "contents"),
     (
         ("contracts/rpc/retired_service.proto", 'syntax = "proto3";\n'),

@@ -510,9 +510,13 @@ def validate_package_contract(root: Path = ROOT) -> Mapping[str, object]:
         "CFV7_PURGE_BINARY_SURFACE",
         "operational binaries do not delegate to typed library settings",
     )
+    # This native tracing subscriber is process diagnostics, not a semantic registry.
+    semantic_surface = (supervisor + daemon).replace(
+        "tracing_subscriber::registry()", ""
+    )
     _require(
         not re.search(
-            r"(?i)schema|registry|ontology|datafusion|deltalake", supervisor + daemon
+            r"(?i)schema|registry|ontology|datafusion|deltalake", semantic_surface
         ),
         "CFV7_PURGE_BINARY_SURFACE",
         "semantic generation/execution leaked into thin binaries",
