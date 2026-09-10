@@ -55,9 +55,12 @@ fn query_literals(fixture: &ProductionFixture, stack: &InstalledProductionStack,
     let result = modern_structured(modern_step(&report, "query"));
     assert_eq!(result["execution_state"], "SUCCEEDED");
     let unavailable = modern_structured(modern_step(&report, "unavailable"));
-    assert_eq!(unavailable["execution_state"], "FAILED");
-    assert_eq!(unavailable["error"]["code"], "VALIDATION_REJECTED");
-    assert_eq!(unavailable["error"]["retryable"], false);
+    assert_eq!(unavailable["execution_state"], "SUCCEEDED");
+    assert_eq!(unavailable["query_results"][0]["execution_state"], "FAILED");
+    assert_eq!(
+        unavailable["query_results"][0]["errors"][0]["code"],
+        "SEMANTIC_REFERENCE_UNAVAILABLE"
+    );
     assert!(unavailable["pages"].as_array().unwrap().is_empty());
     assert!(
         report["guard_observations"].as_array().unwrap().is_empty(),

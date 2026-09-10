@@ -19,13 +19,18 @@ fn branch_queries(
         "unused",
     );
     // Request order intentionally differs from dependency order. Two independent branches
-    // fail during return resolution/lowering; only their own dependents must be skipped.
+    // fail during return resolution/lowering; later subject/property/source checks also isolate
+    // their own branches. Source disclosure remains disabled for this entire fixture.
     request["queries"] = json!([
         {"request":"retrieve facts about code","query_id":"blocked","about":[{"results_of":"unavailable","select":"entities"}],"facts":["declarations"]},
         {"request":"retrieve facts about code","query_id":"facts","about":[{"results_of":"good","select":"entities"}],"facts":["declarations"]},
         {"request":"find code entities","query_id":"unavailable","looking_for":"Python function declarations","return":{"order_by":["unsupported ordering"]}},
         {"request":"find code entities","query_id":"good","looking_for":"Python function declarations","return":{"order_by":["name descending"]}},
-        {"request":"find code entities","query_id":"duplicate","looking_for":"Python function declarations","return":{"order_by":["kind","semantic kind"]}}
+        {"request":"find code entities","query_id":"duplicate","looking_for":"Python function declarations","return":{"order_by":["kind","semantic kind"]}},
+        {"request":"retrieve facts about code","query_id":"property-dependent","about":[{"results_of":"property","select":"entities"}],"facts":["declarations"]},
+        {"request":"retrieve facts about code","query_id":"subject","about":["the unattested target"],"facts":["declarations"]},
+        {"request":"retrieve source and syntax context","query_id":"denied","about":[{"results_of":"good","select":"entities"}],"context":"exact source span"},
+        {"request":"find code entities","query_id":"property","looking_for":"Python function declarations","where":[{"property":"qualified name","operator":"equals","value":"alpha"}]}
     ]);
     let scenario = modern_client_scenario(
         fixture,
@@ -60,7 +65,11 @@ fn branch_queries(
             ("facts", "COMPLETE"),
             ("unavailable", "FAILED"),
             ("good", "COMPLETE"),
-            ("duplicate", "FAILED")
+            ("duplicate", "FAILED"),
+            ("property-dependent", "NOT_EXECUTED_DEPENDENCY"),
+            ("subject", "FAILED"),
+            ("denied", "FAILED"),
+            ("property", "FAILED")
         ]
     );
     assert_eq!(outcomes[0]["errors"][0]["related_id"], "unavailable");
@@ -69,6 +78,23 @@ fn branch_queries(
         "SEMANTIC_REFERENCE_UNAVAILABLE"
     );
     assert_eq!(outcomes[4]["errors"][0]["code"], "INVALID_RETURN_DIRECTIVE");
+    assert_eq!(outcomes[5]["errors"][0]["related_id"], "property");
+    assert_eq!(
+        outcomes[6]["errors"][0]["code"],
+        "SEMANTIC_REFERENCE_UNAVAILABLE"
+    );
+    assert_eq!(outcomes[7]["errors"][0]["code"], "SOURCE_ACCESS_DENIED");
+    assert_eq!(
+        outcomes[8]["errors"][0]["code"],
+        "SEMANTIC_REFERENCE_UNAVAILABLE"
+    );
+    assert!(
+        result["processing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| { ["good", "facts"].contains(&row["query_id"].as_str().unwrap()) })
+    );
     let manifest: Value = serde_json::from_slice(&resource_bytes(&report, "manifest")).unwrap();
     assert_eq!(
         manifest["canonical_semantic_response"]["query_results"],
@@ -156,7 +182,9 @@ fn outcomes_only_queries(
     );
     request["queries"] = json!([
         {"request":"retrieve facts about code","query_id":"blocked","about":[{"results_of":"failed","select":"entities"}],"facts":["declarations"]},
-        {"request":"find code entities","query_id":"failed","looking_for":"Python function declarations","return":{"order_by":["unknown key"]}}
+        {"request":"find code entities","query_id":"failed","looking_for":"Python function declarations","return":{"order_by":["unknown key"]}},
+        {"request":"retrieve source and syntax context","query_id":"denied","about":["the Python function `alpha`"],"context":"exact source span"},
+        {"request":"retrieve facts about code","query_id":"subject","about":["the unattested target"],"facts":["declarations"]}
     ]);
     let scenario = modern_client_scenario(
         fixture,
@@ -177,6 +205,14 @@ fn outcomes_only_queries(
         "NOT_EXECUTED_DEPENDENCY"
     );
     assert_eq!(result["query_results"][1]["execution_state"], "FAILED");
+    assert_eq!(
+        result["query_results"][2]["errors"][0]["code"],
+        "SOURCE_ACCESS_DENIED"
+    );
+    assert_eq!(
+        result["query_results"][3]["errors"][0]["code"],
+        "SEMANTIC_REFERENCE_UNAVAILABLE"
+    );
     for key in ["total_rows", "total_pages", "total_bytes"] {
         assert_eq!(result[key], 0);
     }

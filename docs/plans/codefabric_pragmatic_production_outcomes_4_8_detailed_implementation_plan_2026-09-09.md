@@ -860,6 +860,29 @@ checks, navigation and affected spelling/diff checks pass. Final affected Clippy
 diagnostics; the final 13-case runtime/deferred-stream selection passes in 2.52 s. STATUS carries logs. Broader P03 semantics and package
 exit remain open. These observations do not establish comparative performance improvement.
 
+**P03 application preparation continuation passes native validation, 2026-09-10.**
+Canonical subject/property validation, unsupported captured-location scope and source disclosure
+denial now produce typed failures for the affected query block. Descendant failures follow the
+already validated compiler dependency order before processing summaries, request-owned Arrow inputs
+or native planning are created. Independent rows keep their existing exact binding and ordering;
+an entirely failed request uses the existing manifest-only result envelope. Successful source
+execution and retained source reads still require source disclosure authorization.
+
+Twenty focused ingress/backend/outcome cases pass in 0.11 s. Installed mixed-success/all-failed
+reopen passes in 81.01 s and mixed Python/Rust literal/property reopen in 153.84 s. Source
+grant/revocation/reopen/edit reaches its pinned-read edit barrier before its old 120-second outer
+test bound expires during generation 2 relational publication. That case now shares the five-minute
+outer bound of the other native reopen scenarios. A rerun then reaches its 60-second freshness
+deadline during semantic publication (24.32 s source writes, semantic writes still running after
+32.80 s). The positive convergence request now allows 90 seconds; its 30-second barrier deadlines
+and source authorization assertions remain unchanged. The focused rerun passes in 152.46 s,
+including revocation, restart and an exact old source read after an edit. Convergence within
+60 seconds remains unqualified. Default/featureless checks, affected Clippy, all 218 tooling cases,
+navigation, affected spelling and diff checks pass. No wire or adapter
+schema change is required: existing typed block outcomes carry these preparation errors. Catalog,
+form and consumer-slot projection gaps still require further block-local ingress work; malformed
+request structure, invalid DAGs and inconsistent authority remain request-wide errors.
+
 **Next:** remaining first-four scopes/meanings, precise dependency scope and early block-local
 input/authorization failures, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.

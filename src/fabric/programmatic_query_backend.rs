@@ -6,6 +6,8 @@
 //! reduced child authorization from normalized scope rows, and publishes Arrow resources into the
 //! daemon-wide registry. No bootstrap catalog or form-selected executor participates.
 
+mod block_preparation;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
@@ -957,31 +959,6 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         let workspace_lease = self.workspace_lease(&request.request.workspace_id)?;
         let workspace = workspace_lease.workspace().runtime();
         let authority = workspace.query_authority();
-        if request.request.queries.iter().any(|clause| {
-            matches!(
-                clause,
-                crate::semantic_query_contract::SemanticQueryClause::RetrieveSourceContext { .. }
-            )
-        }) {
-            authority
-                .source_disclosure()
-                .and_then(|authority| authority.authorize())
-                .map_err(|message| SemanticQueryError::Phase {
-                    code: "SOURCE_ACCESS_DENIED",
-                    phase: "source_authorization",
-                    pointer: "queries.about".to_owned(),
-                    message,
-                })?;
-        }
-        if authority.entity_processing().is_some() {
-            crate::production_query_recipe::validate_canonical_fact_references(&request.request)
-                .map_err(|message| SemanticQueryError::Phase {
-                    code: "SEMANTIC_REFERENCE_UNAVAILABLE",
-                    phase: "reference_resolution",
-                    pointer: "queries.about".to_owned(),
-                    message,
-                })?;
-        }
         let requirements = workspace_lease
             .workspace()
             .query_ports()
@@ -1175,13 +1152,6 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         }
 
         artifacts.set_phase("semantic_binding");
-        if authority.entity_processing().is_some()
-            && let Err(error) = crate::production_query_recipe::validate_canonical_fact_references(
-                &request.parsed().request,
-            )
-        {
-            return failed(&artifacts, "reference_resolution_unavailable", error);
-        }
         let ingress = match ports
             .ingress
             .project_resolved(&request, workspace.as_ref(), authority)
@@ -1240,12 +1210,43 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         );
 
         let (compiled, handoff) = compiled.into_parts();
+        let mut block_outcomes = block_preparation::PreparedBlocks::new(query_block_outcomes(
+            &request.parsed().request,
+            compiled.blocks(),
+        ));
         let mut outputs = Vec::with_capacity(compiled.blocks().len());
         let mut output_queries = Vec::with_capacity(compiled.blocks().len());
         let mut output_by_query = BTreeMap::new();
         for block in compiled.blocks() {
             if block.disposition() != SemanticBlockDisposition::Compiled {
                 continue;
+            }
+            let clause = request
+                .parsed()
+                .request
+                .queries
+                .iter()
+                .find(|clause| clause.query_id() == block.query_id().as_ref())
+                .expect("validated block belongs to its original request");
+            if authority.entity_processing().is_some() {
+                let checked =
+                    crate::production_query_recipe::validate_canonical_fact_references(clause)
+                        .and_then(|()| {
+                            crate::production_query_recipe::validate_property_inputs(
+                                &request.parsed().request,
+                                block.query_id(),
+                                &validated.ingress().selections,
+                            )
+                        });
+                if let Err(message) = checked {
+                    tracing::debug!(query_id = %block.query_id(), %message, "query block subject is unavailable");
+                    block_outcomes.fail(
+                        block.query_id(),
+                        "SEMANTIC_REFERENCE_UNAVAILABLE",
+                        block.query_id(),
+                    );
+                    continue;
+                }
             }
             let Some(mut output) = block.output().cloned() else {
                 return failed(
@@ -1380,21 +1381,94 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     *output = match result {
                         Ok(output) => output,
                         Err(message) => {
-                            return failed_error(
-                                &artifacts,
-                                "source_location_scope",
-                                SemanticQueryError::Phase {
-                                    code: "SEMANTIC_REFERENCE_UNAVAILABLE",
-                                    phase: "scope_resolution",
-                                    pointer: format!("queries.{query_id}.within"),
-                                    message,
-                                },
+                            tracing::debug!(%query_id, %message, "query block location scope is unavailable");
+                            block_outcomes.fail(
+                                query_id,
+                                "SEMANTIC_REFERENCE_UNAVAILABLE",
+                                "within",
                             );
+                            continue;
                         }
                     };
                 }
             }
         }
+        for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
+            if output.relation_id().as_str() != "query.result.source-context" {
+                continue;
+            }
+            let source_authority = match authority.source_disclosure() {
+                Ok(authority) => Arc::clone(authority),
+                Err(message) => {
+                    tracing::debug!(%query_id, %message, "query block source access denied");
+                    block_outcomes.fail(query_id, "SOURCE_ACCESS_DENIED", query_id);
+                    continue;
+                }
+            };
+            let grant = match source_authority.authorize() {
+                Ok(grant) => grant,
+                Err(message) => {
+                    tracing::debug!(%query_id, %message, "query block source access denied");
+                    block_outcomes.fail(query_id, "SOURCE_ACCESS_DENIED", query_id);
+                    continue;
+                }
+            };
+            let source_return = request.parsed().request.queries.iter().find_map(|clause| {
+                if clause.query_id() != query_id.as_ref() { return None; }
+                match clause {
+                    crate::semantic_query_contract::SemanticQueryClause::RetrieveSourceContext { return_spec, .. } => return_spec.as_ref(),
+                    _ => None,
+                }
+            });
+            let maximum_source_bytes = source_return.and_then(|spec| spec.maximum_source_bytes);
+            let line_window = source_return
+                .and_then(crate::semantic_query_contract::ReturnSpec::source_line_window);
+            let access_scope = match encode_public_id(
+                IdentityDomain::AccessScope,
+                None,
+                authorization.access_scope()[..16]
+                    .try_into()
+                    .expect("access scope width"),
+            ) {
+                Ok(scope) => scope,
+                Err(error) => return failed(&artifacts, "source_authorization", error.to_string()),
+            };
+            let parameters = super::source_context_query::SourceContextParameters {
+                authority: source_authority,
+                policy_identity: format!(
+                    "b3:{}",
+                    blake3::Hash::from_bytes(grant.authorization_fingerprint).to_hex()
+                ),
+                grant,
+                workspace_id: snapshot.workspace_id.clone(),
+                snapshot_id: snapshot.snapshot_id.clone(),
+                authorization_scope: access_scope,
+                maximum_source_bytes,
+                line_window,
+            };
+            *output = match output.clone().with_source_context(parameters) {
+                Ok(output) => output,
+                Err(error) => {
+                    return failed(&artifacts, "source_materialization", error.to_string());
+                }
+            };
+        }
+        block_outcomes.propagate(
+            &validated.ingress().dependency_order,
+            &validated.ingress().dependencies,
+        );
+        let mut selected_queries = output_queries.into_iter();
+        let retained_outputs = outputs
+            .into_iter()
+            .filter_map(|output| {
+                let query = selected_queries
+                    .next()
+                    .expect("output and query counts agree");
+                block_outcomes.complete(&query).then_some((output, query))
+            })
+            .collect::<Vec<_>>();
+        (outputs, output_queries) = retained_outputs.into_iter().unzip();
+        output_by_query.retain(|query, _| block_outcomes.complete(query));
         if let Some(processing) = authority.entity_processing() {
             use super::processing_status::{ENTITY_PROCESSING_RELATION, EntityQueryScope};
             if !authorization
@@ -1408,22 +1482,6 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 );
             }
             for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
-                if let Err(message) = crate::production_query_recipe::validate_property_inputs(
-                    &request.parsed().request,
-                    query_id,
-                    &validated.ingress().selections,
-                ) {
-                    return failed_error(
-                        &artifacts,
-                        "property_scope",
-                        SemanticQueryError::Phase {
-                            code: "SEMANTIC_REFERENCE_UNAVAILABLE",
-                            phase: "property_resolution",
-                            pointer: format!("queries.{query_id}.where"),
-                            message,
-                        },
-                    );
-                }
                 let canonical_family = crate::production_query_recipe::canonical_result_family(
                     output.relation_id().as_str(),
                 );
@@ -1640,58 +1698,6 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             }
         }
         for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
-            if output.relation_id().as_str() != "query.result.source-context" {
-                continue;
-            }
-            let source_authority = match authority.source_disclosure() {
-                Ok(authority) => Arc::clone(authority),
-                Err(error) => return failed(&artifacts, "source_authorization", error),
-            };
-            let grant = match source_authority.authorize() {
-                Ok(grant) => grant,
-                Err(error) => return failed(&artifacts, "source_authorization", error),
-            };
-            let source_return = request.parsed().request.queries.iter().find_map(|clause| {
-                if clause.query_id() != query_id.as_ref() { return None; }
-                match clause {
-                    crate::semantic_query_contract::SemanticQueryClause::RetrieveSourceContext { return_spec, .. } => return_spec.as_ref(),
-                    _ => None,
-                }
-            });
-            let maximum_source_bytes = source_return.and_then(|spec| spec.maximum_source_bytes);
-            let line_window = source_return
-                .and_then(crate::semantic_query_contract::ReturnSpec::source_line_window);
-            let access_scope = match encode_public_id(
-                IdentityDomain::AccessScope,
-                None,
-                authorization.access_scope()[..16]
-                    .try_into()
-                    .expect("access scope width"),
-            ) {
-                Ok(scope) => scope,
-                Err(error) => return failed(&artifacts, "source_authorization", error.to_string()),
-            };
-            let parameters = super::source_context_query::SourceContextParameters {
-                authority: source_authority,
-                policy_identity: format!(
-                    "b3:{}",
-                    blake3::Hash::from_bytes(grant.authorization_fingerprint).to_hex()
-                ),
-                grant,
-                workspace_id: snapshot.workspace_id.clone(),
-                snapshot_id: snapshot.snapshot_id.clone(),
-                authorization_scope: access_scope,
-                maximum_source_bytes,
-                line_window,
-            };
-            *output = match output.clone().with_source_context(parameters) {
-                Ok(output) => output,
-                Err(error) => {
-                    return failed(&artifacts, "source_materialization", error.to_string());
-                }
-            };
-        }
-        for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
             *output = match output.clone().bind_block_output(
                 validated.ingress().request_content_pin,
                 validated.ingress().program_catalog_pin,
@@ -1790,7 +1796,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             "semantic_request_id": request.parsed().request.semantic_request_id,
             "snapshot": &snapshot,
             "resolved_scope": {"source_boundaries": source_boundaries.resolved()},
-            "query_results": query_block_outcomes(&request.parsed().request, compiled.blocks()),
+            "query_results": block_outcomes.into_outcomes(),
             "queries": output_queries.iter().map(|query_id| serde_json::json!({
                 "query_id": query_id,
                 "relation_id": output_by_query[query_id].as_str(),

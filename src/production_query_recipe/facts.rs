@@ -16,9 +16,7 @@ use super::{
     released_program_binding_id,
 };
 use crate::relational_semantic_query::{ProgramJoinPredicate, ProgramSortField};
-use crate::semantic_query_contract::{
-    SemanticQueryClause, SemanticQueryRequest, SemanticReference,
-};
+use crate::semantic_query_contract::{SemanticQueryClause, SemanticReference};
 
 pub(super) fn declarations(
     epoch: &ProgrammaticFabricEpoch,
@@ -523,45 +521,43 @@ fn source_bytes_definition(
 /// Until semantic phrase/prior-result resolution is installed, reject those meanings explicitly.
 /// The typed request join also checks the kind slug, so a different entity kind never aliases.
 pub(crate) fn validate_canonical_fact_references(
-    request: &SemanticQueryRequest,
+    clause: &SemanticQueryClause,
 ) -> Result<(), String> {
-    for clause in &request.queries {
-        let references = match clause {
-            SemanticQueryClause::RetrieveFacts { about, .. } => about,
-            SemanticQueryClause::FollowRelationships { starting_from, .. } => starting_from,
-            SemanticQueryClause::RetrieveSourceContext { for_inputs, .. } => for_inputs,
-            _ => continue,
-        };
-        for reference in references {
-            if let SemanticReference::SourceLocation { source_location } = reference {
-                source_location.validate()?;
-                continue;
-            }
-            if let SemanticReference::Phrase(value) = reference
-                && crate::fabric::programmatic_ingress_port::code_literals::named_subject(value)
-                    .is_some()
-            {
-                continue;
-            }
-            if let SemanticReference::PriorResult(prior) = reference
-                && prior.select == ResultRole::Entities
-            {
-                continue;
-            }
-            let SemanticReference::Entity { entity_id } = reference else {
-                return Err("subject-bound facts require canonical entity IDs, typed entity results or supported backtick-quoted names; other phrase and fact subject resolution is unavailable".to_owned());
-            };
-            let slug = entity_id
-                .split(':')
-                .nth(1)
-                .ok_or("invalid canonical entity ID")?;
-            crate::identity::decode_public_id(
-                crate::identity::IdentityDomain::Entity,
-                Some(slug),
-                entity_id,
-            )
-            .map_err(|error| error.to_string())?;
+    let references = match clause {
+        SemanticQueryClause::RetrieveFacts { about, .. } => about,
+        SemanticQueryClause::FollowRelationships { starting_from, .. } => starting_from,
+        SemanticQueryClause::RetrieveSourceContext { for_inputs, .. } => for_inputs,
+        _ => return Ok(()),
+    };
+    for reference in references {
+        if let SemanticReference::SourceLocation { source_location } = reference {
+            source_location.validate()?;
+            continue;
         }
+        if let SemanticReference::Phrase(value) = reference
+            && crate::fabric::programmatic_ingress_port::code_literals::named_subject(value)
+                .is_some()
+        {
+            continue;
+        }
+        if let SemanticReference::PriorResult(prior) = reference
+            && prior.select == ResultRole::Entities
+        {
+            continue;
+        }
+        let SemanticReference::Entity { entity_id } = reference else {
+            return Err("subject-bound facts require canonical entity IDs, typed entity results or supported backtick-quoted names; other phrase and fact subject resolution is unavailable".to_owned());
+        };
+        let slug = entity_id
+            .split(':')
+            .nth(1)
+            .ok_or("invalid canonical entity ID")?;
+        crate::identity::decode_public_id(
+            crate::identity::IdentityDomain::Entity,
+            Some(slug),
+            entity_id,
+        )
+        .map_err(|error| error.to_string())?;
     }
     Ok(())
 }

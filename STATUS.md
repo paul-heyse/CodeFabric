@@ -48,6 +48,30 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The preparation continuation after `f5311963` changes canonical subject/property checks and source
+disclosure denial from request-wide errors to typed block failures. Unsupported captured-location
+scope also stays local to its block. Failed branches are removed before query-relevant processing,
+request-input materialization and native planning. The compiler's validated dependency order carries
+failure to descendants while preserving independent results and original public outcome order.
+Source grants are still required for admitted source execution and retained source reads.
+
+Twenty focused ingress/backend/outcome tests pass in 0.11 s
+(`/tmp/codefabric-p03-preparation-tests-1.log`). Installed mixed-success/all-failed/reopen passes
+in 81.01 s and mixed Python/Rust literal/property reopen in 153.84 s. The source grant/revocation/
+reopen/edit case reaches the pinned-read edit barrier, then hits its old 120-second outer test bound
+during generation 2 publication (`/tmp/codefabric-p03-preparation-native-1.log`). The source stage
+writes 78 relations in 23.99 s; semantic relational writes are still running after 13.01 s at
+termination. The case now uses the same five-minute outer nextest bound as the other native
+reopen scenarios. A focused rerun then reaches `FRESHNESS_DEADLINE`: generation 2 source writes
+take 24.32 s and semantic writes are still running after 32.80 s
+(`/tmp/codefabric-p03-preparation-source-final.log`). Its positive convergence request now allows
+90 seconds; 30-second barrier deadlines and source authorization assertions remain unchanged.
+The focused rerun passes in 152.46 s (`/tmp/codefabric-p03-preparation-source-90s.log`), including
+revocation, restart and the pinned old source read after an edit. This does not qualify convergence
+within 60 seconds. Default/featureless checks, final affected Clippy (zero diagnostics), all 218
+tooling cases (3.19 s), navigation and affected spelling/diff checks pass. This remains a P03 slice;
+unavailable catalog/form/consumer-slot projection and other early ingress errors remain request-wide.
+
 The scheduling continuation after `12b95a1b` uses a native petgraph dependency graph and a
 deterministically ordered ready set. Completed producers unlock their consumers immediately;
 unrelated running roots do not create a wave barrier. Query-owned `FuturesUnordered` work is bounded
@@ -107,15 +131,16 @@ deadline remains unqualified; preparation performance stays in P04/P14.
 Default/featureless root checks and final affected Clippy pass. All
 218 tooling cases pass in 6.58 s. The workstation uv mismatch
 was reconciled from 0.12.12 to the required 0.12.11; `just tool-version-contract-check` passes.
-Early phrase/input/authorization errors, prior FindEntities scopes and
+Catalog/form/consumer-slot projection gaps, prior FindEntities scopes and
 broader first-four semantics remain P03 work. No package or outcome exit is claimed.
 
 The continuation after `82bda01b` now retains an all-failed compiler request as a typed result
 manifest with zero relations, pages and data rows. The request operation finishes successfully;
 each failed/skipped block keeps its actual execution outcome. No empty fact relation is fabricated.
 Ordinary empty query results retain their typed Arrow schema, and the existing generic transaction
-constructor still rejects undeclared empty output sets. This does not change early request/input
-or authorization errors into successful result packages.
+constructor still rejects undeclared empty output sets. That checkpoint left early request/input
+and authorization errors request-wide; the preparation continuation above isolates the supported
+canonical subject/property, captured-location scope and source-disclosure cases.
 
 The durable publication checkpoint can own the manifest alone. Exact registration/reissue and
 restart cleanup accept that shape while preserving checksums, paths, owner/lease checks and zero

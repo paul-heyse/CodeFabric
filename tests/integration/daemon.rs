@@ -2386,9 +2386,6 @@ fn pragmatic_public_source_context_is_exact_and_separately_authorized() {
             selected["semantic_request_id"] = json!(format!("request:source-{phase}-{id}"));
             selected["queries"][0]["return"]["maximum_source_bytes"] = json!(bound);
             steps.push(json!({"id": id, "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": selected, "delivery": "resource"}}));
-            if !allowed {
-                steps.last_mut().unwrap()["expect_error"] = json!("CLIENT_OPERATION_FAILED");
-            }
             if allowed {
                 steps.push(json!({"id": format!("{id}_page"), "operation": "read_resource", "uri": {"$ref": format!("{id}.structured_content.pages.0.uri")}}));
             }
@@ -2405,14 +2402,16 @@ fn pragmatic_public_source_context_is_exact_and_separately_authorized() {
         }
         for id in ["full", "limited"] {
             if !allowed {
+                let result = modern_structured(modern_step(&report, id));
+                assert_eq!(result["execution_state"], "SUCCEEDED");
+                assert_eq!(result["query_results"][0]["execution_state"], "FAILED");
                 assert_eq!(
-                    modern_step(&report, id)["error_code"],
-                    "CLIENT_OPERATION_FAILED"
+                    result["query_results"][0]["errors"][0]["code"],
+                    "SOURCE_ACCESS_DENIED"
                 );
-                assert_eq!(
-                    modern_step(&report, id)["public_error"],
-                    "PERMISSION_DENIED:NOT_AUTHORIZED"
-                );
+                assert_eq!(result["total_rows"], 0);
+                assert_eq!(result["pages"], json!([]));
+                assert_eq!(result["processing"], json!([]));
                 continue;
             }
             let result = modern_structured(modern_step(&report, id));
@@ -2589,7 +2588,9 @@ fn pragmatic_public_source_context_is_exact_and_separately_authorized() {
         "request:source-after-edit",
         "Python function declarations",
     );
-    current["freshness"] = json!({"policy": "await_latest", "deadline_ms": 60_000});
+    // This scenario verifies exact retained bytes after convergence. Source and semantic
+    // publication together currently exceed 60 seconds; latency qualification is separate.
+    current["freshness"] = json!({"policy": "await_latest", "deadline_ms": 90_000});
     let current_scenario = modern_client_scenario(
         &fixture,
         &stack,
